@@ -6,10 +6,11 @@ Owner/agent-readable dispatch artifact without calling the API. With
 ``--execute-preflight`` it may call the official action-time FinalGate preflight
 GET endpoint, or the official fresh-submit-authorization binding endpoint when
 the resume pack is parked at that non-executing checkpoint. With
-``--execute-operation-layer-submit`` it may call the official Operation Layer
-submit endpoint after the same-run FinalGate and evidence checks pass. With
-``--execute-post-submit-finalize`` it may then call the official post-submit
-finalize endpoint to record reconciliation and budget settlement evidence.
+``--execute-operation-layer-submit`` it may call only the ticket-bound protected
+submit endpoint after the same-run ticket FinalGate and handoff checks pass.
+The legacy authorization Operation Layer submit branch is retired and blocks
+fail-closed. With ``--execute-post-submit-finalize`` it may then call the
+official post-submit finalize endpoint after ticket-bound submit succeeds.
 """
 
 from __future__ import annotations
@@ -757,67 +758,6 @@ def _operation_layer_handoff_blockers(body: Any) -> list[str]:
         for key in ("places_order", "exchange_write_called", "order_lifecycle_called"):
             if command_plan.get(key) is not False:
                 blockers.append(f"operation_layer_handoff_command_effect:{key}")
-    return _dedupe_text(blockers)
-
-
-def _operation_layer_submit_url(
-    *,
-    command_plan: dict[str, Any],
-    readiness: dict[str, Any],
-    submit_mode: str,
-) -> str:
-    ids = _dict(readiness.get("available_evidence_ids"))
-    params = {
-        "owner_confirmed_for_first_real_submit_action": (
-            "true" if submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL else "false"
-        ),
-    }
-    for name in OPERATION_LAYER_REQUIRED_EVIDENCE_IDS:
-        params[name] = str(ids.get(name) or "")
-    query = urllib.parse.urlencode(params)
-    return (
-        str(command_plan.get("api_base") or DEFAULT_API_BASE).rstrip("/")
-        + str(command_plan.get("official_endpoint_path") or "")
-        + "?"
-        + query
-    )
-
-
-def _operation_layer_submit_precondition_blockers(artifact: dict[str, Any]) -> list[str]:
-    readiness = _dict(artifact.get("operation_layer_readiness"))
-    command_plan = _dict(artifact.get("operation_layer_command_plan"))
-    finalgate_result = _dict(artifact.get("finalgate_preflight_result"))
-    blockers: list[str] = []
-    if artifact.get("status") != "operation_layer_ready":
-        blockers.append(f"operation_layer_not_ready:{artifact.get('status')}")
-    if readiness.get("ready_for_official_operation_layer_submit") is not True:
-        blockers.append("operation_layer_readiness_not_ready")
-    if command_plan.get("official_endpoint_method") != "POST":
-        blockers.append("operation_layer_submit_endpoint_method_not_post")
-    if "runtime-execution-first-real-submit-actions/authorizations/" not in str(
-        command_plan.get("official_endpoint_path") or ""
-    ):
-        blockers.append("operation_layer_submit_endpoint_not_official_action")
-    if command_plan.get("owner_confirmed_for_first_real_submit_action") is not True:
-        blockers.append("standing_authorized_submit_action_not_confirmed")
-    if command_plan.get("standing_authorized_first_real_submit") is not True:
-        blockers.append("standing_authorization_not_bound_for_first_real_submit")
-    if command_plan.get("owner_chat_confirmation_required_for_real_submit") is not False:
-        blockers.append("owner_chat_confirmation_still_required_for_first_real_submit")
-    if command_plan.get("legacy_owner_confirmation_env_required") is not False:
-        blockers.append("legacy_owner_confirmation_env_still_required")
-    if finalgate_result.get("called") is not True:
-        blockers.append("action_time_finalgate_preflight_not_called")
-    if finalgate_result.get("error") is True:
-        blockers.append("action_time_finalgate_preflight_error")
-    if finalgate_result and not _preflight_passed(finalgate_result.get("body")):
-        blockers.append("action_time_finalgate_preflight_not_passed")
-    missing = [
-        name
-        for name in OPERATION_LAYER_REQUIRED_EVIDENCE_IDS
-        if not _nonempty(_dict(readiness.get("available_evidence_ids")).get(name))
-    ]
-    blockers.extend(f"missing_evidence_id:{name}" for name in missing)
     return _dedupe_text(blockers)
 
 
@@ -4047,311 +3987,39 @@ def _maybe_execute_operation_layer_submit(
                 "error": "invalid_operation_layer_submit_mode",
             },
         )
-    blockers = _operation_layer_submit_precondition_blockers(artifact)
-    if blockers:
-        return _dispatch_artifact_from_operation_layer_submit(
-            artifact=artifact,
-            status="operation_layer_submit_blocked",
-            blocker_class=_operation_layer_blocker_class(blockers, []),
-            dispatch_status="blocked_before_official_operation_layer_submit",
-            blockers=blockers,
-            submit_result={
-                "called": False,
-                "http_status": None,
-                "body": None,
-                "error": "operation_layer_submit_precondition_failed",
-            },
-        )
-    return _execute_operation_layer_submit(
+    return _block_legacy_operation_layer_submit(
         artifact=artifact,
-        timeout_seconds=timeout_seconds,
         operation_layer_submit_mode=operation_layer_submit_mode,
-        execute_post_submit_finalize=execute_post_submit_finalize,
     )
 
 
-def _execute_operation_layer_submit(
+def _block_legacy_operation_layer_submit(
     *,
     artifact: dict[str, Any],
-    timeout_seconds: int,
     operation_layer_submit_mode: str,
-    execute_post_submit_finalize: bool,
 ) -> dict[str, Any]:
-    cookie, cookie_error = _session_cookie()
-    if not cookie:
-        return _dispatch_artifact_from_operation_layer_submit(
-            artifact=artifact,
-            status="operation_layer_submit_blocked",
-            blocker_class="deployment_issue",
-            dispatch_status="blocked_by_operator_session_unavailable",
-            blockers=[cookie_error or "operator_session_unavailable"],
-            submit_result={
-                "called": False,
-                "http_status": None,
-                "body": None,
-                "error": cookie_error or "operator_session_unavailable",
-            },
-        )
-
-    command_plan = _dict(artifact.get("operation_layer_command_plan"))
-    readiness = _dict(artifact.get("operation_layer_readiness"))
-    url = _operation_layer_submit_url(
-        command_plan=command_plan,
-        readiness=readiness,
-        submit_mode=operation_layer_submit_mode,
-    )
-    response = _request_json(
-        method="POST",
-        url=url,
-        cookie=cookie,
-        timeout_seconds=timeout_seconds,
-    )
-    body = _dict(response.get("body"))
-    submit_result = {
-        "called": True,
-        "method": "POST",
-        "path": command_plan.get("official_endpoint_path"),
-        "http_status": response.get("http_status"),
-        "body": response.get("body"),
-        "error": bool(response.get("error")),
-        "error_type": response.get("error_type"),
-        "error_message": response.get("error_message"),
-        "owner_confirmed_for_first_real_submit_action": (
-            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
-        ),
-        "standing_authorized_first_real_submit": bool(
-            command_plan.get("standing_authorized_first_real_submit")
-        ),
-        "standing_authorization_scope": command_plan.get(
-            "standing_authorization_scope"
-        ),
-        "owner_chat_confirmation_required_for_real_submit": bool(
-            command_plan.get("owner_chat_confirmation_required_for_real_submit")
-        ),
-        "legacy_owner_confirmation_env_required": bool(
-            command_plan.get("legacy_owner_confirmation_env_required")
-        ),
-        "standing_authorization_consumed_for_real_submit": (
-            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
-        ),
-        "operation_layer_submit_mode": operation_layer_submit_mode,
-        "official_operation_layer_submit_called": True,
-        "official_operation_layer_endpoint": True,
-    }
-
-    http_status = response.get("http_status")
-    if http_status in {401, 403}:
-        return _dispatch_artifact_from_operation_layer_submit(
-            artifact=artifact,
-            status="operation_layer_submit_blocked",
-            blocker_class="deployment_issue",
-            dispatch_status="blocked_by_operator_session_http_error",
-            blockers=[f"operator_session_http_status:{http_status}"],
-            submit_result=submit_result,
-        )
-    if response.get("error"):
-        return _dispatch_artifact_from_operation_layer_submit(
-            artifact=artifact,
-            status="operation_layer_submit_blocked",
-            blocker_class="deployment_issue",
-            dispatch_status="blocked_by_operation_layer_submit_http_error",
-            blockers=[
-                f"operation_layer_submit_http_status:{http_status or 'unavailable'}"
-            ],
-            submit_result=submit_result,
-        )
-
-    forbidden_effects = _operation_layer_submit_forbidden_effects(body)
-    if forbidden_effects:
-        return _dispatch_artifact_from_operation_layer_submit(
-            artifact=artifact,
-            status="operation_layer_submit_blocked",
-            blocker_class="hard_safety_stop",
-            dispatch_status="blocked_by_operation_layer_submit_forbidden_effect",
-            blockers=forbidden_effects,
-            submit_result=submit_result,
-        )
-
-    body_status = str(body.get("status") or "")
-    body_blockers = _dedupe_text(body.get("blockers") or [])
-    if operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE:
-        if body_status != "exchange_submit_execution_disabled":
-            return _dispatch_artifact_from_operation_layer_submit(
-                artifact=artifact,
-                status="operation_layer_submit_blocked",
-                blocker_class="hard_safety_stop",
-                dispatch_status="blocked_by_disabled_smoke_submit_result",
-                blockers=[
-                    "disabled_smoke_expected_exchange_submit_execution_disabled:"
-                    f"{body_status or 'missing'}"
-                ],
-                submit_result=submit_result,
-            )
-        if (
-            body.get("exchange_called") is True
-            or body.get("exchange_order_submitted") is True
-            or body.get("order_lifecycle_submit_called") is True
-        ):
-            return _dispatch_artifact_from_operation_layer_submit(
-                artifact=artifact,
-                status="operation_layer_submit_blocked",
-                blocker_class="hard_safety_stop",
-                dispatch_status="blocked_by_disabled_smoke_forbidden_effect",
-                blockers=["disabled_smoke_reported_submit_side_effect"],
-                submit_result=submit_result,
-            )
-        return _dispatch_artifact_from_operation_layer_submit(
-            artifact=artifact,
-            status="operation_layer_disabled_smoke_passed",
-            blocker_class="none",
-            dispatch_status="official_operation_layer_disabled_smoke_passed",
-            blockers=[],
-            submit_result=submit_result,
-        )
-    if operation_layer_submit_mode != OPERATION_LAYER_SUBMIT_MODE_REAL:
-        return _dispatch_artifact_from_operation_layer_submit(
-            artifact=artifact,
-            status="operation_layer_submit_blocked",
-            blocker_class="hard_safety_stop",
-            dispatch_status="blocked_by_invalid_operation_layer_submit_mode",
-            blockers=[
-                f"invalid_operation_layer_submit_mode:{operation_layer_submit_mode}"
-            ],
-            submit_result=submit_result,
-        )
-    if body_status == "exchange_submit_orders_submitted":
-        identity_blockers = _operation_layer_submit_result_identity_blockers(
-            artifact=artifact,
-            body=body,
-        )
-        if identity_blockers:
-            return _dispatch_artifact_from_operation_layer_submit(
-                artifact=artifact,
-                status="operation_layer_submit_failed",
-                blocker_class=_operation_layer_blocker_class(identity_blockers, []),
-                dispatch_status=(
-                    "official_operation_layer_submit_result_identity_mismatch"
-                ),
-                blockers=identity_blockers,
-                submit_result=submit_result,
-            )
-        submit_artifact = _dispatch_artifact_from_operation_layer_submit(
-            artifact=artifact,
-            status="submitted",
-            blocker_class="none",
-            dispatch_status="official_operation_layer_submit_completed",
-            blockers=[],
-            submit_result=submit_result,
-        )
-        if not execute_post_submit_finalize:
-            return submit_artifact
-        return _execute_post_submit_finalize(
-            artifact=submit_artifact,
-            cookie=cookie,
-            timeout_seconds=timeout_seconds,
-        )
-    if body_status in {"entry_submit_failed", "protection_submit_failed"}:
-        return _dispatch_artifact_from_operation_layer_submit(
-            artifact=artifact,
-            status="operation_layer_submit_failed",
-            blocker_class=(
-                "active_position_resolution"
-                if body_status == "protection_submit_failed"
-                else "hard_safety_stop"
-            ),
-            dispatch_status=f"official_operation_layer_{body_status}",
-            blockers=body_blockers or [body_status],
-            submit_result=submit_result,
-        )
-
     return _dispatch_artifact_from_operation_layer_submit(
         artifact=artifact,
         status="operation_layer_submit_blocked",
-        blocker_class=_operation_layer_blocker_class(body_blockers, []),
-        dispatch_status="blocked_by_operation_layer_submit_result",
-        blockers=body_blockers or [f"operation_layer_submit_status:{body_status}"],
-        submit_result=submit_result,
+        blocker_class="hard_safety_stop",
+        dispatch_status="blocked_by_legacy_authorization_operation_layer_submit",
+        blockers=[
+            "legacy_authorization_operation_layer_submit_retired",
+            "ticket_bound_action_time_submit_required",
+        ],
+        submit_result={
+            "called": False,
+            "http_status": None,
+            "body": None,
+            "error": "legacy_authorization_operation_layer_submit_retired",
+            "operation_layer_submit_mode": operation_layer_submit_mode,
+            "official_operation_layer_submit_called": False,
+            "official_operation_layer_endpoint": False,
+            "owner_chat_confirmation_required_for_real_submit": False,
+            "legacy_owner_confirmation_env_required": False,
+            "standing_authorization_consumed_for_real_submit": False,
+        },
     )
-
-
-def _operation_layer_submit_forbidden_effects(body: dict[str, Any]) -> list[str]:
-    effects: list[str] = []
-    checks = {
-        "withdrawal_or_transfer_created": False,
-        "owner_bounded_execution_called": False,
-        "execution_intent_status_changed": False,
-    }
-    for name, expected in checks.items():
-        if body.get(name) not in {expected, None, "", 0}:
-            effects.append(f"operation_layer_submit_effect:{name}")
-    if body.get("status") == "exchange_submit_orders_submitted":
-        if body.get("execution_mode") != "real_gateway_action":
-            effects.append("operation_layer_submit_not_real_gateway_action")
-        if body.get("exchange_order_submitted") is not True:
-            effects.append("operation_layer_submit_missing_exchange_order_submitted")
-        if body.get("order_lifecycle_submit_called") is not True:
-            effects.append("operation_layer_submit_missing_order_lifecycle_submit")
-    return effects
-
-
-def _operation_layer_submit_result_identity_blockers(
-    *,
-    artifact: dict[str, Any],
-    body: dict[str, Any],
-) -> list[str]:
-    command_plan = _dict(artifact.get("operation_layer_command_plan"))
-    readiness = _dict(artifact.get("operation_layer_readiness"))
-    ids = _dict(readiness.get("available_evidence_ids"))
-    selected_runtime_ids = [
-        str(item)
-        for item in _list(artifact.get("selected_runtime_instance_ids"))
-        if str(item or "").strip()
-    ]
-    expected_authorization_id = _first_text(
-        command_plan.get("authorization_id"),
-        ids.get("authorization_id"),
-    )
-    actual_authorization_id = _first_text(body.get("authorization_id"))
-    expected_runtime_instance_id = _first_text(
-        ids.get("runtime_instance_id"),
-        selected_runtime_ids[0] if len(selected_runtime_ids) == 1 else None,
-    )
-    actual_runtime_instance_id = _first_text(body.get("runtime_instance_id"))
-    expected_reservation_id = _first_text(
-        ids.get("reservation_id"),
-        ids.get("attempt_reservation_id"),
-        ids.get("attempt_reservation"),
-    )
-    actual_reservation_id = _first_text(
-        body.get("reservation_id"),
-        body.get("attempt_reservation_id"),
-        body.get("attempt_reservation"),
-    )
-    blockers: list[str] = []
-    if not actual_authorization_id:
-        blockers.append("operation_layer_submit_authorization_id_missing")
-    elif expected_authorization_id and actual_authorization_id != expected_authorization_id:
-        blockers.append(
-            "operation_layer_submit_authorization_id_mismatch:"
-            f"expected={expected_authorization_id}:actual={actual_authorization_id}"
-        )
-    if not actual_runtime_instance_id:
-        blockers.append("operation_layer_submit_runtime_instance_id_missing")
-    elif expected_runtime_instance_id and actual_runtime_instance_id != expected_runtime_instance_id:
-        blockers.append(
-            "operation_layer_submit_runtime_instance_id_mismatch:"
-            f"expected={expected_runtime_instance_id}:actual={actual_runtime_instance_id}"
-        )
-    if (
-        actual_reservation_id
-        and expected_reservation_id
-        and actual_reservation_id != expected_reservation_id
-    ):
-        blockers.append(
-            "operation_layer_submit_reservation_id_mismatch:"
-            f"expected={expected_reservation_id}:actual={actual_reservation_id}"
-        )
-    return _dedupe_text(blockers)
 
 
 def _dispatch_artifact_from_operation_layer_submit(
@@ -4873,6 +4541,21 @@ def _owner_state_for_operation_layer_submit(
             "downgrade_mode": "halt_new_entries_until_reconciled",
             "exchange_submit_execution_status": body.get("status"),
         }
+    if dispatch_status == "blocked_by_legacy_authorization_operation_layer_submit":
+        return {
+            "status": status,
+            "blocker_class": blocker_class,
+            "blocked_at": "OperationLayerSubmit",
+            "blocked_reason": blockers[0] if blockers else dispatch_status,
+            "next_recover_condition": (
+                "ticket_bound_action_time_ticket_and_protected_submit_available"
+            ),
+            "non_authority_checkpoint": (
+                "materialize_action_time_ticket_and_ticket_bound_operation_layer_handoff"
+            ),
+            "downgrade_mode": "continue_watcher_observation_no_submit",
+            "exchange_submit_execution_status": body.get("status"),
+        }
     return {
         "status": status,
         "blocker_class": blocker_class,
@@ -5108,10 +4791,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--execute-operation-layer-submit",
         action="store_true",
         help=(
-            "After official FinalGate preflight passes and Operation Layer "
-            "evidence is ready, call the official first-real-submit action "
-            "endpoint using standing authorization. This is the only mode in "
-            "this dispatcher that can place a real order."
+            "After ticket-bound FinalGate preflight and Operation Layer "
+            "handoff pass, call the ticket-bound protected submit endpoint. "
+            "Legacy authorization Operation Layer submit is retired and "
+            "blocks fail-closed."
         ),
     )
     parser.add_argument(
@@ -5121,18 +4804,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Operation Layer submit mode used with "
             "--execute-operation-layer-submit. real_gateway_action keeps the "
-            "existing real-order boundary; disabled_smoke calls the same "
-            "official endpoint with owner confirmation forced false and "
-            "requires exchange_submit_execution_disabled."
+            "existing real-order boundary for ticket-bound protected submit; "
+            "disabled_smoke calls the protected submit endpoint in no-exchange "
+            "mode and requires disabled_smoke_passed."
         ),
     )
     parser.add_argument(
         "--execute-post-submit-finalize",
         action="store_true",
         help=(
-            "After official Operation Layer submit succeeds, call the official "
-            "post-submit finalize endpoint to record reconciliation and budget "
-            "settlement evidence."
+            "After ticket-bound protected submit succeeds, call the official "
+            "post-submit finalize endpoint to record reconciliation and "
+            "budget settlement evidence."
         ),
     )
     parser.add_argument(

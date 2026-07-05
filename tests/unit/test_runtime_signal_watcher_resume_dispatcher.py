@@ -8,6 +8,28 @@ import scripts.runtime_signal_watcher_resume_dispatcher as dispatcher
 from scripts.runtime_signal_watcher_resume_dispatcher import build_dispatch_artifact, main
 
 
+def _assert_legacy_operation_layer_submit_blocked(artifact: dict) -> None:
+    assert artifact["status"] == "operation_layer_submit_blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == (
+        "blocked_by_legacy_authorization_operation_layer_submit"
+    )
+    assert "legacy_authorization_operation_layer_submit_retired" in artifact["blockers"]
+    assert "ticket_bound_action_time_submit_required" in artifact["blockers"]
+    assert artifact["operation_layer_submit_result"]["called"] is False
+    assert artifact["operation_layer_submit_result"]["official_operation_layer_submit_called"] is False
+    assert artifact["owner_state"]["next_recover_condition"] == (
+        "ticket_bound_action_time_ticket_and_protected_submit_available"
+    )
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
+        "materialize_action_time_ticket_and_ticket_bound_operation_layer_handoff"
+    )
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["calls_order_lifecycle"] is False
+
+
 def _resume_pack(status: str = "waiting_for_market") -> dict:
     action = {
         "status": status,
@@ -1761,19 +1783,7 @@ def test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regre
         execute_operation_layer_submit=True,
     )
 
-    assert artifact["status"] == "operation_layer_submit_blocked"
-    assert artifact["dispatch_status"] == "blocked_before_official_operation_layer_submit"
-    assert "standing_authorization_not_bound_for_first_real_submit" in (
-        artifact["blockers"]
-    )
-    assert "owner_chat_confirmation_still_required_for_first_real_submit" in (
-        artifact["blockers"]
-    )
-    assert "legacy_owner_confirmation_env_still_required" in artifact["blockers"]
-    assert artifact["operation_layer_submit_result"]["called"] is False
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    _assert_legacy_operation_layer_submit_blocked(artifact)
 
 
 def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypatch):
@@ -1821,68 +1831,8 @@ def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypa
         execute_operation_layer_submit=True,
     )
 
-    assert artifact["status"] == "submitted"
-    assert artifact["blocker_class"] == "none"
-    assert artifact["dispatch_status"] == "official_operation_layer_submit_completed"
-    assert artifact["dispatch_action"] == (
-        "post_submit_finalize_reconciliation_budget_settlement"
-    )
-    assert artifact["owner_state"]["status"] == "submitted"
-    assert artifact["operation_layer_submit_result"]["called"] is True
-    assert (
-        artifact["operation_layer_submit_result"]["standing_authorized_first_real_submit"]
-        is True
-    )
-    assert (
-        artifact["operation_layer_submit_result"][
-            "owner_chat_confirmation_required_for_real_submit"
-        ]
-        is False
-    )
-    assert (
-        artifact["operation_layer_submit_result"]["legacy_owner_confirmation_env_required"]
-        is False
-    )
-    assert (
-        artifact["operation_layer_submit_result"][
-            "standing_authorization_consumed_for_real_submit"
-        ]
-        is True
-    )
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
-    assert (
-        artifact["safety_invariants"]["standing_authorized_first_real_submit"] is True
-    )
-    assert (
-        artifact["safety_invariants"][
-            "owner_chat_confirmation_required_for_real_submit"
-        ]
-        is False
-    )
-    assert (
-        artifact["safety_invariants"]["legacy_owner_confirmation_env_required"] is False
-    )
-    assert (
-        artifact["safety_invariants"][
-            "standing_authorization_consumed_for_real_submit"
-        ]
-        is True
-    )
-    assert artifact["safety_invariants"]["places_order"] is True
-    assert artifact["safety_invariants"]["exchange_write_called"] is True
-    assert artifact["safety_invariants"]["calls_order_lifecycle"] is True
-    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
-    assert len(calls) == 1
-    call = calls[0]
-    assert call["method"] == "POST"
-    parsed = urlparse(call["url"])
-    assert parsed.path.endswith(
-        "/runtime-execution-first-real-submit-actions/authorizations/auth-ready-1"
-    )
-    query = parse_qs(parsed.query)
-    assert query["owner_confirmed_for_first_real_submit_action"] == ["true"]
-    for name in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS:
-        assert query[name] == [f"{name}-value"]
+    _assert_legacy_operation_layer_submit_blocked(artifact)
+    assert calls == []
 
 
 def test_dispatcher_executes_operation_layer_disabled_smoke_when_requested(
@@ -1926,42 +1876,8 @@ def test_dispatcher_executes_operation_layer_disabled_smoke_when_requested(
         operation_layer_submit_mode="disabled_smoke",
     )
 
-    assert artifact["status"] == "operation_layer_disabled_smoke_passed"
-    assert artifact["blocker_class"] == "none"
-    assert artifact["dispatch_status"] == "official_operation_layer_disabled_smoke_passed"
-    assert artifact["dispatch_action"] == "continue_watcher_observation"
-    assert artifact["owner_state"]["status"] == "operation_layer_disabled_smoke_passed"
-    assert artifact["operation_layer_submit_result"]["called"] is True
-    assert artifact["operation_layer_submit_result"][
-        "owner_confirmed_for_first_real_submit_action"
-    ] is False
-    assert (
-        artifact["operation_layer_submit_result"]["standing_authorized_first_real_submit"]
-        is True
-    )
-    assert (
-        artifact["operation_layer_submit_result"][
-            "standing_authorization_consumed_for_real_submit"
-        ]
-        is False
-    )
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
-    assert (
-        artifact["safety_invariants"][
-            "standing_authorization_consumed_for_real_submit"
-        ]
-        is False
-    )
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
-    assert artifact["safety_invariants"]["calls_order_lifecycle"] is False
-    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
-    assert len(calls) == 1
-    parsed = urlparse(calls[0]["url"])
-    query = parse_qs(parsed.query)
-    assert query["owner_confirmed_for_first_real_submit_action"] == ["false"]
-    for name in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS:
-        assert query[name] == [f"{name}-value"]
+    _assert_legacy_operation_layer_submit_blocked(artifact)
+    assert calls == []
 
 
 def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
@@ -2043,46 +1959,9 @@ def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
         execute_post_submit_finalize=True,
     )
 
-    assert artifact["status"] == "settled"
-    assert artifact["blocker_class"] == "none"
-    assert artifact["dispatch_status"] == (
-        "post_submit_finalize_completed_next_attempt_ready"
-    )
-    assert artifact["dispatch_action"] == "continue_watcher_observation"
-    assert artifact["owner_state"]["status"] == "settled"
-    assert "automatic_recovery_action" not in artifact["owner_state"]
-    assert artifact["owner_state"]["non_authority_checkpoint"] == (
-        "continue_watcher_observation"
-    )
-    assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
-    assert artifact["post_submit_finalize_result"]["called"] is True
-    assert artifact["post_submit_finalize_result"]["authorization_id"] == "auth-ready-1"
-    assert artifact["post_submit_finalize_result"]["runtime_instance_id"] == (
-        "runtime-mpg-1"
-    )
-    assert artifact["post_submit_finalize_result"]["reservation_id"] == (
-        "runtime-attempt-reservation-auth-ready-1"
-    )
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
-    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is True
-    assert artifact["safety_invariants"]["post_submit_budget_settlement_called"] is True
-    assert artifact["safety_invariants"]["runtime_budget_mutated"] is True
-    assert artifact["safety_invariants"]["places_order"] is True
-    assert artifact["safety_invariants"]["exchange_write_called"] is True
-    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
-    assert len(calls) == 2
-    submit_call, finalize_call = calls
-    assert submit_call["method"] == "POST"
-    assert finalize_call["method"] == "POST"
-    assert finalize_call["url"].endswith(
-        "/api/trading-console/strategy-runtimes/runtime-mpg-1/"
-        "post-submit-finalize-payloads"
-    )
-    assert finalize_call["body"]["authorization_id"] == "auth-ready-1"
-    assert finalize_call["body"]["reservation_id"] == (
-        "runtime-attempt-reservation-auth-ready-1"
-    )
-    assert finalize_call["body"]["non_executing"] is True
+    _assert_legacy_operation_layer_submit_blocked(artifact)
+    assert "post_submit_finalize_result" not in artifact
+    assert calls == []
 
 
 def test_dispatcher_blocks_incomplete_post_submit_closed_loop(monkeypatch):
@@ -2155,30 +2034,9 @@ def test_dispatcher_blocks_incomplete_post_submit_closed_loop(monkeypatch):
         execute_post_submit_finalize=True,
     )
 
-    assert artifact["status"] == "post_submit_finalize_blocked"
-    assert artifact["blocker_class"] == "missing_fact"
-    assert artifact["dispatch_status"] == (
-        "blocked_by_post_submit_finalize_incomplete_closed_loop"
-    )
-    assert "post_submit_finalize_budget_settlement_id_missing" in artifact["blockers"]
-    assert "post_submit_finalize_review_id_missing" in artifact["blockers"]
-    assert "post_submit_finalize_reconciliation_evidence_id_missing" in (
-        artifact["blockers"]
-    )
-    assert "post_submit_finalize_not_complete" in artifact["blockers"]
-    assert "post_submit_reconciliation_not_matched" in artifact["blockers"]
-    assert "post_submit_budget_not_settled" in artifact["blockers"]
-    assert "submit_outcome_review_not_recorded" in artifact["blockers"]
-    assert artifact["dispatch_action"] is None
-    assert artifact["owner_state"]["status"] == "post_submit_finalize_blocked"
-    assert artifact["owner_state"]["downgrade_mode"] == (
-        "halt_new_entries_until_post_submit_settled"
-    )
-    assert artifact["post_submit_finalize_result"]["called"] is True
-    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is True
-    assert artifact["safety_invariants"]["post_submit_budget_settlement_called"] is False
-    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
-    assert len(calls) == 2
+    _assert_legacy_operation_layer_submit_blocked(artifact)
+    assert "post_submit_finalize_result" not in artifact
+    assert calls == []
 
 
 def test_dispatcher_blocks_submit_result_identity_mismatch_before_finalize(monkeypatch):
@@ -2227,24 +2085,11 @@ def test_dispatcher_blocks_submit_result_identity_mismatch_before_finalize(monke
         execute_post_submit_finalize=True,
     )
 
-    assert artifact["status"] == "operation_layer_submit_failed"
-    assert artifact["blocker_class"] == "hard_safety_stop"
-    assert artifact["dispatch_status"] == (
-        "official_operation_layer_submit_result_identity_mismatch"
-    )
-    assert (
-        "operation_layer_submit_authorization_id_mismatch:"
-        "expected=auth-ready-1:actual=other-auth"
-    ) in artifact["blockers"]
-    assert artifact["dispatch_action"] is None
-    assert artifact["owner_state"]["downgrade_mode"] == (
-        "halt_new_entries_until_reconciled"
-    )
+    _assert_legacy_operation_layer_submit_blocked(artifact)
     assert "post_submit_finalize_result" not in artifact
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is True
     assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
     assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
-    assert len(calls) == 1
+    assert calls == []
 
 
 def test_dispatcher_blocks_post_submit_finalize_runtime_mismatch(monkeypatch):
@@ -2313,15 +2158,9 @@ def test_dispatcher_blocks_post_submit_finalize_runtime_mismatch(monkeypatch):
         execute_post_submit_finalize=True,
     )
 
-    assert artifact["status"] == "post_submit_finalize_blocked"
-    assert artifact["blocker_class"] == "hard_safety_stop"
-    assert artifact["dispatch_status"] == "post_submit_finalize_result_identity_mismatch"
-    assert any(
-        blocker.startswith("post_submit_finalize_runtime_instance_id_mismatch:")
-        for blocker in artifact["blockers"]
-    )
-    assert artifact["post_submit_finalize_result"]["called"] is True
-    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is True
+    _assert_legacy_operation_layer_submit_blocked(artifact)
+    assert "post_submit_finalize_result" not in artifact
+    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
 
 
 def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(
@@ -2352,12 +2191,8 @@ def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(
         execute_operation_layer_submit=True,
     )
 
-    assert artifact["status"] == "operation_layer_submit_blocked"
-    assert artifact["dispatch_status"] == "blocked_before_official_operation_layer_submit"
-    assert "action_time_finalgate_preflight_not_called" in artifact["blockers"]
+    _assert_legacy_operation_layer_submit_blocked(artifact)
     assert called["request"] is False
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_blocks_stale_operation_layer_authorization_evidence():

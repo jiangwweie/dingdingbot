@@ -64,7 +64,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "required_facts_readiness_checked": True,
         "execution_attempt_rehearsal_prepare_checked": True,
         "legacy_local_registration_probe_tolerance_checked": True,
-        "mock_operation_layer_closed_loop_checked": True,
+        "legacy_authorization_submit_retirement_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
         "operation_layer_hard_safety_blocker_matrix_checked": True,
         "expanded_watcher_scope_execution_guard_checked": True,
@@ -112,7 +112,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "mock_fresh_signal_dry_run_pass",
         "scoped_pipeline_operation_layer_submit_projection",
         "execution_attempt_rehearsal_prepare",
-        "mock_operation_layer_submit_finalize_pass",
+        "legacy_authorization_submit_retired",
         "required_facts_missing",
         "active_position_or_open_order_conflict",
         "operation_layer_blocker_review_matrix",
@@ -199,27 +199,27 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert closed_loop["reconciliation_result"]["status"] == "clean"
     assert closed_loop["budget_settlement_result"]["status"] == "settled"
     assert closed_loop["review_record_result"]["status"] == "recorded"
-    operation_closed_loop = scenarios["mock_operation_layer_submit_finalize_pass"][
+    operation_closed_loop = scenarios["legacy_authorization_submit_retired"][
         "artifacts"
-    ]["mock_operation_layer_closed_loop"]
+    ]["legacy_authorization_submit_retirement"]
     assert operation_closed_loop["status"] == "passed"
-    assert operation_closed_loop["simulated_exchange_effects"] is True
+    assert operation_closed_loop["simulated_exchange_effects"] is False
     assert operation_closed_loop["actual_exchange_write_called"] is False
     assert operation_closed_loop["actual_order_created"] is False
     assert operation_closed_loop["actual_order_lifecycle_called"] is False
     assert operation_closed_loop["actual_withdrawal_or_transfer_created"] is False
     assert operation_closed_loop["checks"] == {
-        "dispatcher_reached_settled_status": True,
-        "submit_endpoint_called_once": True,
-        "finalize_endpoint_called_once": True,
-        "next_attempt_gate_ready": True,
-        "budget_settlement_recorded": True,
-        "review_recorded": True,
+        "legacy_authorization_submit_retired": True,
+        "submit_endpoint_not_called": True,
+        "finalize_endpoint_not_called": True,
+        "post_submit_finalize_not_materialized": True,
         "no_withdrawal_or_transfer": True,
     }
-    assert operation_closed_loop["dispatcher_artifact"]["status"] == "settled"
+    assert operation_closed_loop["dispatcher_artifact"]["status"] == (
+        "operation_layer_submit_blocked"
+    )
     assert operation_closed_loop["dispatcher_artifact"]["dispatch_status"] == (
-        "post_submit_finalize_completed_next_attempt_ready"
+        "blocked_by_legacy_authorization_operation_layer_submit"
     )
     assert scenarios["required_facts_missing"]["artifacts"]["readiness_evidence"][
         "status"
@@ -322,7 +322,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert artifact["checks"][
         "legacy_local_registration_probe_tolerance_checked"
     ] is True
-    assert artifact["checks"]["mock_operation_layer_closed_loop_checked"] is True
+    assert artifact["checks"]["legacy_authorization_submit_retirement_checked"] is True
     assert artifact["checks"]["operation_layer_blocker_review_policy_checked"] is True
     assert (
         artifact["checks"]["operation_layer_hard_safety_blocker_matrix_checked"]
@@ -364,7 +364,7 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "operation_layer_readiness_has_no_missing_ids": True,
         "operation_layer_submit_not_called": True,
         "pipeline_does_not_exchange_write": True,
-        "scoped_pipeline_disabled_submit_smoke_passed": True,
+        "scoped_pipeline_disabled_smoke_and_legacy_dispatcher_checked": True,
     }
     assert scoped_handoff["scoped_disabled_submit_checks"] == {
         "submit_projection_query_uses_pipeline_evidence_ids": True,
@@ -373,9 +373,9 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "disabled_smoke_does_not_exchange_write": True,
         "disabled_smoke_does_not_create_order": True,
         "disabled_smoke_does_not_call_order_lifecycle": True,
-        "dispatcher_disabled_smoke_mode_passed": True,
-        "dispatcher_disabled_smoke_keeps_real_confirm_false": True,
-        "dispatcher_disabled_smoke_does_not_exchange_write": True,
+        "dispatcher_legacy_submit_retired": True,
+        "dispatcher_legacy_submit_http_not_called": True,
+        "dispatcher_legacy_submit_does_not_exchange_write": True,
     }
     assert scoped_handoff["scoped_disabled_submit_smoke"]["status"] == (
         "disabled_smoke_passed"
@@ -383,10 +383,10 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     assert scoped_handoff["scoped_disabled_submit_smoke"]["safety_invariants"][
         "exchange_write_called"
     ] is False
-    assert scoped_handoff["dispatcher_disabled_submit_smoke"]["status"] == (
-        "operation_layer_disabled_smoke_passed"
+    assert scoped_handoff["dispatcher_legacy_submit_block"]["status"] == (
+        "operation_layer_submit_blocked"
     )
-    assert scoped_handoff["dispatcher_disabled_submit_smoke"]["safety_invariants"][
+    assert scoped_handoff["dispatcher_legacy_submit_block"]["safety_invariants"][
         "exchange_write_called"
     ] is False
     assert scoped_handoff["pipeline_report"]["status"] == (
@@ -485,8 +485,8 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "artifacts"
     ]
     assert authorization_guard["checks"] == {
-        "stale_authorization_evidence_blocked": True,
-        "missing_authorization_evidence_blocked": True,
+        "stale_authorization_evidence_retained_as_diagnostic": True,
+        "missing_authorization_evidence_retained_as_diagnostic": True,
         "stale_evidence_does_not_call_operation_layer": True,
         "missing_auth_does_not_call_operation_layer": True,
         "no_dangerous_effects": True,
@@ -532,26 +532,16 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
         "review_not_recorded",
     }
     for result in closed_loop_guard["cases"].values():
-        assert result["dispatcher_artifact"]["status"] == "post_submit_finalize_blocked"
-        assert result["dispatcher_artifact"]["dispatch_action"] is None
-        assert result["dispatcher_artifact"]["owner_state"]["downgrade_mode"] == (
-            "halt_new_entries_until_post_submit_settled"
+        assert result["dispatcher_artifact"]["status"] == (
+            "operation_layer_submit_blocked"
         )
-    assert "post_submit_finalize_reconciliation_evidence_id_missing" in (
-        closed_loop_guard["cases"]["missing_reconciliation_evidence"]["blockers"]
-    )
-    assert "post_submit_finalize_not_complete" in (
-        closed_loop_guard["cases"]["finalize_not_complete"]["blockers"]
-    )
-    assert "post_submit_reconciliation_not_matched" in (
-        closed_loop_guard["cases"]["reconciliation_not_matched"]["blockers"]
-    )
-    assert "post_submit_budget_not_settled" in (
-        closed_loop_guard["cases"]["budget_not_settled"]["blockers"]
-    )
-    assert "submit_outcome_review_not_recorded" in (
-        closed_loop_guard["cases"]["review_not_recorded"]["blockers"]
-    )
+        assert result["dispatcher_artifact"]["dispatch_status"] == (
+            "blocked_by_legacy_authorization_operation_layer_submit"
+        )
+        assert result["dispatcher_artifact"]["dispatch_action"] is None
+        assert "legacy_authorization_operation_layer_submit_retired" in (
+            result["dispatcher_artifact"]["blockers"]
+        )
     exit_outcome_matrix = closed_loop_guard["exit_outcome_matrix"]
     assert exit_outcome_matrix["status"] == "passed"
     assert exit_outcome_matrix["actual_exchange_write_called"] is False
@@ -647,23 +637,20 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     for result in submit_identity_guard["cases"].values():
         assert (
             result["dispatcher_artifact"]["status"]
-            == "operation_layer_submit_failed"
+            == "operation_layer_submit_blocked"
         )
         assert result["dispatcher_artifact"]["dispatch_status"] == (
-            "official_operation_layer_submit_result_identity_mismatch"
+            "blocked_by_legacy_authorization_operation_layer_submit"
         )
         assert result["dispatcher_artifact"]["dispatch_action"] is None
         assert "post_submit_finalize_result" not in result["dispatcher_artifact"]
-        assert result["dispatcher_artifact"]["owner_state"]["downgrade_mode"] == (
-            "halt_new_entries_until_reconciled"
-        )
         assert len(
             [
                 call
                 for call in result["api_calls"]
                 if call["url_kind"] == "operation_layer_submit"
             ]
-        ) == 1
+        ) == 0
         assert not [
             call
             for call in result["api_calls"]
@@ -691,29 +678,26 @@ def test_runtime_dry_run_audit_chain_covers_required_scenarios(tmp_path):
     }
     for result in finalize_identity_guard["cases"].values():
         assert result["dispatcher_artifact"]["status"] == (
-            "post_submit_finalize_blocked"
+            "operation_layer_submit_blocked"
         )
         assert result["dispatcher_artifact"]["dispatch_status"] == (
-            "post_submit_finalize_result_identity_mismatch"
+            "blocked_by_legacy_authorization_operation_layer_submit"
         )
         assert result["dispatcher_artifact"]["dispatch_action"] is None
-        assert result["dispatcher_artifact"]["owner_state"]["downgrade_mode"] == (
-            "halt_new_entries_until_post_submit_settled"
-        )
         assert len(
             [
                 call
                 for call in result["api_calls"]
                 if call["url_kind"] == "operation_layer_submit"
             ]
-        ) == 1
+        ) == 0
         assert len(
             [
                 call
                 for call in result["api_calls"]
                 if call["url_kind"] == "post_submit_finalize"
             ]
-        ) == 1
+        ) == 0
     shared = artifact["shared_runtime_pipeline_validation"]
     assert shared["status"] == "passed"
     assert shared["judgment"] == {

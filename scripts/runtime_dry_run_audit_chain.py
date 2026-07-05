@@ -1952,19 +1952,19 @@ def _scenario_scoped_pipeline_operation_layer_submit_projection(
             )
             is False
         ),
-        "dispatcher_disabled_smoke_mode_passed": (
+        "dispatcher_legacy_submit_retired": (
             dispatcher_disabled_smoke.get("status")
-            == "operation_layer_disabled_smoke_passed"
+            == "operation_layer_submit_blocked"
             and dispatcher_disabled_smoke.get("dispatch_status")
-            == "official_operation_layer_disabled_smoke_passed"
+            == "blocked_by_legacy_authorization_operation_layer_submit"
         ),
-        "dispatcher_disabled_smoke_keeps_real_confirm_false": (
-            dispatcher_disabled_smoke.get("operation_layer_submit_result", {}).get(
-                "owner_confirmed_for_first_real_submit_action"
-            )
+        "dispatcher_legacy_submit_http_not_called": (
+            dispatcher_disabled_smoke.get("operation_layer_submit_result", {}).get("called")
             is False
+            and dispatcher_disabled_smoke.get("dry_run_dispatcher_disabled_smoke_calls")
+            == []
         ),
-        "dispatcher_disabled_smoke_does_not_exchange_write": (
+        "dispatcher_legacy_submit_does_not_exchange_write": (
             dispatcher_disabled_smoke.get("safety_invariants", {}).get(
                 "exchange_write_called"
             )
@@ -1994,7 +1994,7 @@ def _scenario_scoped_pipeline_operation_layer_submit_projection(
             pipeline_report.get("safety_invariants", {}).get("exchange_write_called")
             is False
         ),
-        "scoped_pipeline_disabled_submit_smoke_passed": all(
+        "scoped_pipeline_disabled_smoke_and_legacy_dispatcher_checked": all(
             scoped_disabled_submit_checks.values()
         ),
     }
@@ -2014,7 +2014,7 @@ def _scenario_scoped_pipeline_operation_layer_submit_projection(
             "checks": checks,
             "scoped_disabled_submit_checks": scoped_disabled_submit_checks,
             "scoped_disabled_submit_smoke": scoped_disabled_smoke,
-            "dispatcher_disabled_submit_smoke": dispatcher_disabled_smoke,
+            "dispatcher_legacy_submit_block": dispatcher_disabled_smoke,
             "pipeline_report": pipeline_report,
             "resume_dispatch": dispatch,
             "pipeline_client_calls": pipeline_client.calls,
@@ -2634,10 +2634,10 @@ def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dic
     )
 
     checks = {
-        "stale_authorization_evidence_blocked": (
+        "stale_authorization_evidence_retained_as_diagnostic": (
             stale_operation_layer.get("status") == "operation_layer_submit_blocked"
             and stale_operation_layer.get("dispatch_status")
-            == "blocked_before_official_operation_layer_submit"
+            == "blocked_by_legacy_authorization_operation_layer_submit"
             and stale_operation_layer.get("operation_layer_readiness", {}).get(
                 "blocker_class"
             )
@@ -2651,11 +2651,11 @@ def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dic
                 ).get("blockers", [])
             )
         ),
-        "missing_authorization_evidence_blocked": (
+        "missing_authorization_evidence_retained_as_diagnostic": (
             missing_auth_operation_layer.get("status")
             == "operation_layer_submit_blocked"
             and missing_auth_operation_layer.get("dispatch_status")
-            == "blocked_before_official_operation_layer_submit"
+            == "blocked_by_legacy_authorization_operation_layer_submit"
             and "operation_layer_authorization_id_missing"
             in missing_auth_operation_layer.get("operation_layer_readiness", {}).get(
                 "blockers", []
@@ -2699,7 +2699,7 @@ def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dic
     )
 
 
-def _mock_operation_layer_closed_loop() -> dict[str, Any]:
+def _legacy_authorization_submit_retirement() -> dict[str, Any]:
     calls: list[dict[str, Any]] = []
     original_session_cookie = dispatcher._session_cookie
     original_request_json = dispatcher._request_json
@@ -2795,9 +2795,14 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
         dispatcher._request_json = original_request_json
 
     checks = {
-        "dispatcher_reached_settled_status": dispatcher_artifact.get("status")
-        == "settled",
-        "submit_endpoint_called_once": (
+        "legacy_authorization_submit_retired": (
+            dispatcher_artifact.get("status") == "operation_layer_submit_blocked"
+            and dispatcher_artifact.get("dispatch_status")
+            == "blocked_by_legacy_authorization_operation_layer_submit"
+            and "legacy_authorization_operation_layer_submit_retired"
+            in dispatcher_artifact.get("blockers", [])
+        ),
+        "submit_endpoint_not_called": (
             len(
                 [
                     call
@@ -2805,28 +2810,14 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
                     if call["url_kind"] == "operation_layer_submit"
                 ]
             )
-            == 1
+            == 0
         ),
-        "finalize_endpoint_called_once": (
+        "finalize_endpoint_not_called": (
             len([call for call in calls if call["url_kind"] == "post_submit_finalize"])
-            == 1
+            == 0
         ),
-        "next_attempt_gate_ready": (
-            dispatcher_artifact.get("post_submit_finalize_result", {})
-            .get("body", {})
-            .get("next_attempt_gate", {})
-            .get("status")
-            == "ready_for_fresh_signal"
-        ),
-        "budget_settlement_recorded": bool(
-            dispatcher_artifact.get("post_submit_finalize_result", {})
-            .get("body", {})
-            .get("post_submit_budget_settlement_id")
-        ),
-        "review_recorded": bool(
-            dispatcher_artifact.get("post_submit_finalize_result", {})
-            .get("body", {})
-            .get("submit_outcome_review_id")
+        "post_submit_finalize_not_materialized": (
+            "post_submit_finalize_result" not in dispatcher_artifact
         ),
         "no_withdrawal_or_transfer": (
             dispatcher_artifact.get("safety_invariants", {}).get(
@@ -2836,9 +2827,9 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
         ),
     }
     return {
-        "scope": "runtime_dry_run_mock_operation_layer_closed_loop",
+        "scope": "runtime_dry_run_legacy_authorization_submit_retirement",
         "status": "passed" if all(checks.values()) else "failed",
-        "simulated_exchange_effects": True,
+        "simulated_exchange_effects": False,
         "actual_exchange_write_called": False,
         "actual_order_created": False,
         "actual_order_lifecycle_called": False,
@@ -2849,8 +2840,8 @@ def _mock_operation_layer_closed_loop() -> dict[str, Any]:
     }
 
 
-def _scenario_mock_operation_layer_closed_loop(output_dir: Path) -> dict[str, Any]:
-    closed_loop = _mock_operation_layer_closed_loop()
+def _scenario_legacy_authorization_submit_retirement(output_dir: Path) -> dict[str, Any]:
+    closed_loop = _legacy_authorization_submit_retirement()
     passed = (
         closed_loop["status"] == "passed"
         and closed_loop["actual_exchange_write_called"] is False
@@ -2859,13 +2850,12 @@ def _scenario_mock_operation_layer_closed_loop(output_dir: Path) -> dict[str, An
         and closed_loop["actual_withdrawal_or_transfer_created"] is False
     )
     return _scenario_report(
-        name="mock_operation_layer_submit_finalize_pass",
+        name="legacy_authorization_submit_retired",
         expected=(
-            "dispatcher submit and post-submit finalize path reaches settled "
-            "with mock responses only; simulated exchange effects are not real "
-            "execution proof"
+            "legacy authorization submit/finalize mock path is retired; "
+            "ticket-bound protected submit is the only production submit path"
         ),
-        artifacts={"mock_operation_layer_closed_loop": closed_loop},
+        artifacts={"legacy_authorization_submit_retirement": closed_loop},
         passed=passed,
         blockers=[
             *closed_loop.get("dispatcher_artifact", {}).get("blockers", []),
@@ -3013,22 +3003,13 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
                 execute_post_submit_finalize=True,
             )
             checks = {
-                "blocked_before_next_attempt": (
+                "legacy_submit_retired_before_finalize_guard": (
                     dispatcher_artifact.get("status")
-                    == "post_submit_finalize_blocked"
+                    == "operation_layer_submit_blocked"
                     and dispatcher_artifact.get("dispatch_status")
-                    == "blocked_by_post_submit_finalize_incomplete_closed_loop"
-                    and dispatcher_artifact.get("dispatch_action") is None
-                ),
-                "owner_state_halts_new_entries": (
-                    dispatcher_artifact.get("owner_state", {}).get("downgrade_mode")
-                    == "halt_new_entries_until_post_submit_settled"
-                ),
-                "finalize_endpoint_called": (
-                    dispatcher_artifact.get("safety_invariants", {}).get(
-                        "official_post_submit_finalize_called"
-                    )
-                    is True
+                    == "blocked_by_legacy_authorization_operation_layer_submit"
+                    and "legacy_authorization_operation_layer_submit_retired"
+                    in dispatcher_artifact.get("blockers", [])
                 ),
                 "no_withdrawal_or_transfer": (
                     dispatcher_artifact.get("safety_invariants", {}).get(
@@ -3036,7 +3017,7 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
                     )
                     is False
                 ),
-                "no_extra_operation_layer_call": (
+                "submit_endpoint_not_called": (
                     len(
                         [
                             call
@@ -3044,7 +3025,17 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
                             if call["url_kind"] == "operation_layer_submit"
                         ]
                     )
-                    == 1
+                    == 0
+                ),
+                "finalize_endpoint_not_called": (
+                    len(
+                        [
+                            call
+                            for call in calls
+                            if call["url_kind"] == "post_submit_finalize"
+                        ]
+                    )
+                    == 0
                 ),
             }
             results[name] = {
@@ -3350,19 +3341,15 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
                 execute_post_submit_finalize=True,
             )
             checks = {
-                "blocked_before_finalize": (
+                "legacy_submit_retired_before_submit_result_guard": (
                     dispatcher_artifact.get("status")
-                    == "operation_layer_submit_failed"
+                    == "operation_layer_submit_blocked"
                     and dispatcher_artifact.get("dispatch_status")
-                    == "official_operation_layer_submit_result_identity_mismatch"
-                    and dispatcher_artifact.get("dispatch_action") is None
-                    and "post_submit_finalize_result" not in dispatcher_artifact
+                    == "blocked_by_legacy_authorization_operation_layer_submit"
+                    and "legacy_authorization_operation_layer_submit_retired"
+                    in dispatcher_artifact.get("blockers", [])
                 ),
-                "owner_state_halts_new_entries": (
-                    dispatcher_artifact.get("owner_state", {}).get("downgrade_mode")
-                    == "halt_new_entries_until_reconciled"
-                ),
-                "operation_layer_called_once": (
+                "operation_layer_not_called": (
                     len(
                         [
                             call
@@ -3370,7 +3357,7 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
                             if call["url_kind"] == "operation_layer_submit"
                         ]
                     )
-                    == 1
+                    == 0
                 ),
                 "post_submit_finalize_not_called": (
                     len(
@@ -3546,18 +3533,15 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
                 execute_post_submit_finalize=True,
             )
             checks = {
-                "blocked_after_finalize_response": (
+                "legacy_submit_retired_before_finalize_result_guard": (
                     dispatcher_artifact.get("status")
-                    == "post_submit_finalize_blocked"
+                    == "operation_layer_submit_blocked"
                     and dispatcher_artifact.get("dispatch_status")
-                    == "post_submit_finalize_result_identity_mismatch"
-                    and dispatcher_artifact.get("dispatch_action") is None
+                    == "blocked_by_legacy_authorization_operation_layer_submit"
+                    and "legacy_authorization_operation_layer_submit_retired"
+                    in dispatcher_artifact.get("blockers", [])
                 ),
-                "owner_state_halts_new_entries": (
-                    dispatcher_artifact.get("owner_state", {}).get("downgrade_mode")
-                    == "halt_new_entries_until_post_submit_settled"
-                ),
-                "operation_layer_called_once": (
+                "operation_layer_not_called": (
                     len(
                         [
                             call
@@ -3565,9 +3549,9 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
                             if call["url_kind"] == "operation_layer_submit"
                         ]
                     )
-                    == 1
+                    == 0
                 ),
-                "post_submit_finalize_called_once": (
+                "post_submit_finalize_not_called": (
                     len(
                         [
                             call
@@ -3575,7 +3559,7 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
                             if call["url_kind"] == "post_submit_finalize"
                         ]
                     )
-                    == 1
+                    == 0
                 ),
                 "did_not_settle": dispatcher_artifact.get("status") != "settled",
                 "no_withdrawal_or_transfer": (
@@ -3718,7 +3702,7 @@ def build_audit_artifact(output_dir: Path) -> dict[str, Any]:
         _scenario_mock_pass(output_dir),
         _scenario_scoped_pipeline_operation_layer_submit_projection(output_dir),
         _scenario_execution_attempt_rehearsal_prepare(output_dir),
-        _scenario_mock_operation_layer_closed_loop(output_dir),
+        _scenario_legacy_authorization_submit_retirement(output_dir),
         _scenario_required_facts_missing(output_dir),
         _scenario_active_conflict(output_dir),
         _scenario_operation_layer_blocker_review_matrix(output_dir),
@@ -3832,11 +3816,11 @@ def build_audit_artifact(output_dir: Path) -> dict[str, Any]:
             ).get("status")
             == "operation_layer_ready"
         ),
-        "mock_operation_layer_closed_loop_checked": (
+        "legacy_authorization_submit_retirement_checked": (
             _scenario_artifact(
                 scenarios,
-                "mock_operation_layer_submit_finalize_pass",
-                "mock_operation_layer_closed_loop",
+                "legacy_authorization_submit_retired",
+                "legacy_authorization_submit_retirement",
             ).get("status")
             == "passed"
         ),

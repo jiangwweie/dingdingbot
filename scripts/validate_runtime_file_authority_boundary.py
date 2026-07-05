@@ -144,6 +144,15 @@ FORBIDDEN_PRODUCTION_TEXT_BY_PATH: dict[str, tuple[str, ...]] = {
         "--operation-layer-json",
         "FileBackedRuntimeControlStateRepository",
     ),
+    "scripts/runtime_signal_watcher_resume_dispatcher.py": (
+        "def _execute_operation_layer_submit(",
+        "_operation_layer_submit_url(",
+        "_operation_layer_submit_precondition_blockers(",
+        "_operation_layer_submit_forbidden_effects(",
+        "_operation_layer_submit_result_identity_blockers(",
+        "official_operation_layer_submit_completed",
+        "official_operation_layer_disabled_smoke_passed",
+    ),
 }
 
 

@@ -24,7 +24,7 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "disabled_smoke_not_real_execution_proof": True,
         "operation_layer_evidence_relay_checked": True,
         "scoped_pipeline_operation_layer_submit_projection_checked": True,
-        "mock_operation_layer_closed_loop_checked": True,
+        "legacy_authorization_submit_retirement_checked": True,
         "operation_layer_hard_safety_blocker_matrix_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
@@ -81,7 +81,7 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
     ]["scenario_statuses"] == {
         "mock_fresh_signal_dry_run_pass": "passed",
         "scoped_pipeline_operation_layer_submit_projection": "passed",
-        "mock_operation_layer_submit_finalize_pass": "passed",
+        "legacy_authorization_submit_retired": "passed",
     }
     assert artifact["dry_run_chain"]["goal_chain_segment_evidence"][
         "post_submit_exit_outcome_matrix"

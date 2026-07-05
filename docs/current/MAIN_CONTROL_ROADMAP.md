@@ -1521,7 +1521,7 @@ healthy:
 | `operation_layer_evidence_relay_checked` | Confirms evidence IDs connect through the Operation Layer handoff shape. |
 | `fresh_signal_fast_auto_chain_checked` | Confirms mock fresh signal reaches candidate/authorization readiness, FinalGate dispatch, and Operation Layer evidence readiness without calling real submit. |
 | `legacy_local_registration_probe_tolerance_checked` | Confirms old local-registration probe semantics are tolerated only when the new evidence path is present. |
-| `mock_operation_layer_closed_loop_checked` | Confirms fake submit/finalize/reconcile/budget/review shape remains covered without exchange write. |
+| `legacy_authorization_submit_retirement_checked` | Confirms the legacy authorization submit/finalize path is blocked before HTTP submit or finalize; ticket-bound protected submit is the only production submit path. |
 | `operation_layer_blocker_review_policy_checked` | Confirms active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked evidence rather than project-stopping chat confirmations, while real submit remains forbidden. |
 | `common_execution_chain_reuse_checked` | Confirms MPG / TEQ / FBS / PMR / SOR reuse the shared execution chain and remain input-only StrategyGroup adapters. |
 | `strategygroup_adapter_boundary_checked` | Confirms each StrategyGroup handoff only supplies symbols, sides, signal rule, RequiredFacts, allocated risk/profile defaults, and hard stops, while candidate/auth, FinalGate, Operation Layer, finalize, reconciliation, settlement, and Owner readmodel remain in the shared runtime pipe. |
@@ -1762,7 +1762,7 @@ the segment.
 | `candidate_authorization_evidence` | `execution_attempt_rehearsal_prepare_checked`, `execution_attempt_rehearsal_prepare` |
 | `action_time_finalgate` | `all_selected_strategygroups_reach_finalgate_dispatch_checked`, `execution_attempt_rehearsal_prepare` |
 | `official_operation_layer_evidence_relay_projection` | `operation_layer_evidence_relay_checked`, `scoped_pipeline_operation_layer_submit_projection` |
-| `disabled_dry_run_proof` | `disabled_smoke_not_real_execution_proof`, `mock_operation_layer_submit_finalize_pass` |
+| `disabled_dry_run_proof` | `disabled_smoke_not_real_execution_proof`, `legacy_authorization_submit_retired` |
 
 This makes the non-market closure proof auditable from one artifact without
 re-reading all raw dry-run artifacts. It remains non-executing and does not

@@ -88,7 +88,7 @@ CHECK_GROUP_CHECKS: dict[str, list[str]] = {
         "post_submit_closed_loop_evidence_guard_checked",
         "operation_layer_submit_result_identity_guard_checked",
         "post_submit_finalize_result_identity_guard_checked",
-        "mock_operation_layer_closed_loop_checked",
+        "legacy_authorization_submit_retirement_checked",
     ],
     "legacy_confirmation_regression": [
         "disabled_smoke_not_real_execution_proof",

@@ -36,7 +36,7 @@ PROJECTED_DRY_RUN_CHECKS = [
     "disabled_smoke_not_real_execution_proof",
     "operation_layer_evidence_relay_checked",
     "scoped_pipeline_operation_layer_submit_projection_checked",
-    "mock_operation_layer_closed_loop_checked",
+    "legacy_authorization_submit_retirement_checked",
     "operation_layer_hard_safety_blocker_matrix_checked",
     "operation_layer_blocker_review_policy_checked",
     "operation_layer_authorization_chain_guard_checked",
@@ -77,7 +77,7 @@ GOAL_CHAIN_SEGMENTS = {
     ],
     "disabled_dry_run_proof": [
         "disabled_smoke_not_real_execution_proof",
-        "mock_operation_layer_closed_loop_checked",
+        "legacy_authorization_submit_retirement_checked",
     ],
     "post_submit_exit_outcome_matrix": [
         "post_submit_closed_loop_evidence_guard_checked",
@@ -108,7 +108,7 @@ GOAL_CHAIN_SEGMENT_SCENARIOS = {
     "disabled_dry_run_proof": [
         "mock_fresh_signal_dry_run_pass",
         "scoped_pipeline_operation_layer_submit_projection",
-        "mock_operation_layer_submit_finalize_pass",
+        "legacy_authorization_submit_retired",
     ],
     "post_submit_exit_outcome_matrix": [
         "post_submit_closed_loop_evidence_guard",

@@ -124,7 +124,7 @@ OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
     "scoped_pipeline_operation_layer_submit_projection_checked",
     "fresh_signal_fast_auto_chain_checked",
     "legacy_local_registration_probe_tolerance_checked",
-    "mock_operation_layer_closed_loop_checked",
+    "legacy_authorization_submit_retirement_checked",
     "operation_layer_blocker_review_policy_checked",
     "operation_layer_hard_safety_blocker_matrix_checked",
     "expanded_watcher_scope_execution_guard_checked",

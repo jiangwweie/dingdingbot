@@ -214,3 +214,28 @@ def test_runtime_file_authority_validator_accepts_ticket_only_inputs(
         )
         == []
     )
+
+
+def test_runtime_file_authority_validator_rejects_legacy_dispatcher_submit_body(
+    tmp_path: Path,
+):
+    module = _load_module()
+    source = tmp_path / "dispatcher.py"
+    source.write_text("def _execute_operation_layer_submit():\n    pass\n")
+
+    errors = module.validate_forbidden_production_text(
+        repo_root=tmp_path,
+        forbidden_by_path={
+            "dispatcher.py": (
+                "def _execute_operation_layer_submit(",
+                "official_operation_layer_submit_completed",
+            )
+        },
+    )
+
+    assert errors == [
+        (
+            "dispatcher.py contains retired production file-authority text: "
+            "def _execute_operation_layer_submit("
+        )
+    ]
