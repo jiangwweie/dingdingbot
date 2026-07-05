@@ -872,7 +872,10 @@ def _market_wait_validation_for_row(
         ),
         "facts": str(public_facts_state.get("state") or "") == "satisfied",
         "classification": True,
-        "action_time_path": action_time.get("action_time_path_ready") is True,
+        "action_time_path": _market_wait_action_time_path_ready(
+            action_time=action_time,
+            signal_state=signal_state,
+        ),
         "fresh_signal_absent": signal_state == "absent",
     }
     return {
@@ -881,6 +884,21 @@ def _market_wait_validation_for_row(
         "mode": "candidate_pool_market_wait",
         "checks": checks,
     }
+
+
+def _market_wait_action_time_path_ready(
+    *,
+    action_time: dict[str, Any],
+    signal_state: str,
+) -> bool:
+    if action_time.get("action_time_path_ready") is True:
+        return True
+    first_blocker = str(action_time.get("first_blocker") or "")
+    return (
+        signal_state == "absent"
+        and first_blocker.startswith("fresh_")
+        and first_blocker.endswith("_absent")
+    )
 
 
 def _resolve_daily_first_blocker(
