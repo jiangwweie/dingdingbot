@@ -1,19 +1,30 @@
 #!/usr/bin/env python3
-"""Build an operator live-fact projection from read-only runtime reports.
+"""Build an operator live-fact projection from read-only runtime facts.
 
-The builder only reads JSON files that were produced by other read-only probes.
-It does not connect to PG, call exchange, create orders, call OrderLifecycle,
-mutate runtime state, or create withdrawal / transfer instructions.
+The CLI reads account/action-time safety facts from PG and may read remaining
+legacy diagnostic reports as non-authority evidence. It does not call exchange,
+create orders, call OrderLifecycle, mutate runtime state, or create withdrawal /
+transfer instructions.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import time
 from typing import Any
+
+import sqlalchemy as sa
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from runtime_pg_fact_snapshots import read_latest_account_safe_facts_artifact  # noqa: E402
 
 
 FORBIDDEN_TRUE_KEYS = {
@@ -130,6 +141,18 @@ def _list_values(*values: Any) -> list[str]:
     return result
 
 
+def _account_facts_ready(account_facts: dict[str, Any]) -> bool:
+    if not account_facts:
+        return False
+    checks = account_facts.get("checks")
+    if isinstance(checks, dict):
+        return (
+            checks.get("account_safe_facts_ready") is True
+            and checks.get("private_action_time_facts_ready") is True
+        )
+    return True
+
+
 def _fact_coverage(
     *,
     runtime_instance_id: str,
@@ -174,9 +197,13 @@ def _fact_coverage(
             "runtime_instance_id": runtime_instance_id,
         },
         "account": {
-            "status": "present" if account_facts else "missing",
+            "status": "present" if _account_facts_ready(account_facts) else "missing",
             "source": account_facts.get("source") or account_facts.get("scope"),
-            "as_of": account_facts.get("as_of") or account_facts.get("timestamp_ms"),
+            "as_of": (
+                account_facts.get("as_of")
+                or account_facts.get("timestamp_ms")
+                or account_facts.get("generated_at_utc")
+            ),
         },
         "position": {
             "status": "present" if monitor_payload else "missing",
@@ -280,6 +307,7 @@ def build_operator_live_fact_evidence(
     *,
     runtime_instance_id: str,
     account_facts: dict[str, Any] | None = None,
+    account_facts_source_mode: str = "provided",
     live_position_monitor: dict[str, Any] | None = None,
     post_submit_finalize: dict[str, Any] | None = None,
     active_position_resolution: dict[str, Any] | None = None,
@@ -324,6 +352,7 @@ def build_operator_live_fact_evidence(
         blockers.extend(f"{item}_facts_missing" for item in missing)
     blockers.extend(
         _list_values(
+            account_payload.get("blockers"),
             live_position_monitor.get("blockers") if live_position_monitor else [],
             post_submit_finalize.get("blockers") if post_submit_finalize else [],
             active_position_resolution.get("blockers") if active_position_resolution else [],
@@ -409,8 +438,9 @@ def build_operator_live_fact_evidence(
         },
         "safety_invariants": {
             "operator_live_fact_projection_only": True,
-            "reads_json_reports_only": True,
-            "pg_called_by_builder": False,
+            "account_facts_source_mode": account_facts_source_mode,
+            "reads_json_reports_only": False,
+            "pg_called_by_builder": account_facts_source_mode == "db_backed",
             "exchange_called_by_builder": False,
             "exchange_write_called_by_builder": False,
             "order_lifecycle_called_by_builder": False,
@@ -441,7 +471,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         description="Build a P0-A read-only runtime operator live-fact evidence.",
     )
     parser.add_argument("--runtime-instance-id", required=True)
-    parser.add_argument("--account-facts-json")
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
     parser.add_argument("--live-position-monitor-json")
     parser.add_argument("--post-submit-finalize-json")
     parser.add_argument("--active-position-resolution-json")
@@ -456,11 +487,43 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _account_facts_from_pg(
+    database_url: str,
+    *,
+    allow_non_postgres_for_test: bool = False,
+) -> dict[str, Any]:
+    if not database_url:
+        raise RuntimeError(
+            "PG_DATABASE_URL is required for DB-backed operator live fact evidence"
+        )
+    if not database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not allow_non_postgres_for_test:
+        raise RuntimeError(
+            "DB-backed operator live fact evidence requires PostgreSQL DSN"
+        )
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            return read_latest_account_safe_facts_artifact(conn)
+    finally:
+        engine.dispose()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        account_facts = _account_facts_from_pg(
+            args.database_url,
+            allow_non_postgres_for_test=args.allow_non_postgres_for_test,
+        )
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     evidence = build_operator_live_fact_evidence(
         runtime_instance_id=args.runtime_instance_id,
-        account_facts=_read_json(args.account_facts_json),
+        account_facts=account_facts,
+        account_facts_source_mode="db_backed",
         live_position_monitor=_read_json(args.live_position_monitor_json),
         post_submit_finalize=_read_json(args.post_submit_finalize_json),
         active_position_resolution=_read_json(args.active_position_resolution_json),

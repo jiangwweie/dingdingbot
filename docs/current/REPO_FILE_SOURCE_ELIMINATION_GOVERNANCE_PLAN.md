@@ -516,7 +516,7 @@ Disallowed MD/JSON in git:
 | --- | --- |
 | Current runtime state | `latest-runtime-active-observation-status.json` |
 | Generated control read models | `latest-daily-live-enablement-table.json` |
-| Public/account fact snapshots | `latest-binance-usdm-public-facts.json` is export-only after the public-fact PG cutover; account-safe facts remain queued for the account/action-time fact cutover |
+| Public/account fact snapshots | `latest-binance-usdm-public-facts.json` and `latest-account-safe-facts.json` are export-only after the public/account fact PG cutover |
 | Owner current policy snapshots | `owner-pretrade-runtime-authorization-v0.json` after DB migration |
 | Strategy packs | `strategy-group-handoffs/*/handoff.json` after DB migration |
 | Large replay corpora | `strategy-group-handoffs/*/replay/*.json` |

@@ -1,8 +1,92 @@
 from __future__ import annotations
 
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import pytest
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine
+
+from scripts import build_runtime_operator_live_fact_evidence as module
 from scripts.build_runtime_operator_live_fact_evidence import (
     build_operator_live_fact_evidence,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+PG_FACT_HELPER_PATH = REPO_ROOT / "scripts/runtime_pg_fact_snapshots.py"
+
+
+def _load_file_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    loaded = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = loaded
+    spec.loader.exec_module(loaded)
+    return loaded
+
+
+def _seed_runtime_control_state_db(tmp_path: Path) -> str:
+    migration = _load_file_module(MIGRATION_PATH, "migration_086_operator_fact")
+    seed = _load_file_module(SEED_PATH, "seed_operator_fact")
+    database_url = f"sqlite:///{tmp_path / 'runtime-control-state.db'}"
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+    engine.dispose()
+    return database_url
+
+
+def _write_account_facts_to_pg(database_url: str) -> None:
+    helper = _load_file_module(PG_FACT_HELPER_PATH, "operator_fact_pg_helper")
+    artifact = {
+        "generated_at_utc": "2026-07-05T00:00:00+00:00",
+        "status": "runtime_account_safe_facts_ready",
+        "source_status": "ready",
+        "checks": {
+            "account_safe_facts_ready": True,
+            "account_safe": True,
+            "private_action_time_facts_ready": True,
+            "active_position_or_open_order_clear": True,
+            "action_time_available_balance": True,
+            "open_orders_clear": True,
+            "account_trade_permission": True,
+            "source_signed_get_only": True,
+            "source_exchange_write_called": False,
+            "source_order_created": False,
+        },
+        "facts": {
+            "active_position_or_open_order_clear": True,
+            "action_time_available_balance": True,
+        },
+        "blockers": [],
+    }
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            helper.write_account_safe_fact_snapshots(
+                conn,
+                artifact=artifact,
+                source_ref="unit:operator-live-facts",
+                source_kind="unit_test",
+            )
+    finally:
+        engine.dispose()
 
 
 def _complete_account() -> dict:
@@ -197,3 +281,65 @@ def test_operator_live_fact_evidence_blocks_forbidden_effects() -> None:
     assert "live_position_monitor.safety_invariants.order_created" in packet[
         "safety_invariants"
     ]["forbidden_effects"]
+
+
+def test_cli_rejects_removed_account_facts_file_arg(tmp_path: Path):
+    with pytest.raises(SystemExit):
+        module.main(
+            [
+                "--runtime-instance-id",
+                "runtime-1",
+                "--account-facts-json",
+                str(tmp_path / "latest-account-safe-facts.json"),
+            ]
+        )
+
+
+def test_cli_reads_account_facts_from_pg(tmp_path: Path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    _write_account_facts_to_pg(database_url)
+    output_path = tmp_path / "operator-live-fact-evidence.json"
+
+    result = module.main(
+        [
+            "--runtime-instance-id",
+            "runtime-1",
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--output-json",
+            str(output_path),
+        ]
+    )
+
+    assert result == 0
+    packet = json.loads(output_path.read_text(encoding="utf-8"))
+    assert packet["fact_coverage"]["account"]["status"] == "present"
+    assert packet["safety_invariants"]["account_facts_source_mode"] == "db_backed"
+    assert packet["safety_invariants"]["pg_called_by_builder"] is True
+    assert packet["safety_invariants"]["reads_json_reports_only"] is False
+    assert "account_facts_missing" not in packet["blockers"]
+    assert capsys.readouterr().err == ""
+
+
+def test_cli_blocks_when_pg_account_facts_missing(tmp_path: Path):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    output_path = tmp_path / "operator-live-fact-evidence.json"
+
+    result = module.main(
+        [
+            "--runtime-instance-id",
+            "runtime-1",
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--output-json",
+            str(output_path),
+        ]
+    )
+
+    assert result == 0
+    packet = json.loads(output_path.read_text(encoding="utf-8"))
+    assert packet["fact_coverage"]["account"]["status"] == "missing"
+    assert "account_facts_missing" in packet["blockers"]
+    assert "account_safe_fact_snapshot_missing" in packet["blockers"]
