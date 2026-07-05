@@ -18,7 +18,7 @@ deployment.
 | **Use existing auth API** | Accepted | Backend already supports username, password, and TOTP |
 | **Use page-level read models first** | Accepted | `/api/trading-console/*` already wraps runtime data and no-action guarantees |
 | **Use mock only for gaps** | Accepted | Preserves development speed while keeping gaps explicit |
-| **Deploy as static frontend behind Nginx by default** | Pending server verification | Matches requested preferred deployment mode |
+| **Deploy as static frontend behind Nginx by default** | Accepted and verified | Deployed at `https://jiaoyingpan.cloud/trading-console/` with `/api/` proxied to backend |
 
 ## Backend Contracts To Verify During Integration
 
@@ -47,9 +47,9 @@ deployment.
 
 | Item | Current Handling | Final Resolution Needed Before Deployment |
 | --- | --- | --- |
-| **Server domain** | Placeholder in deployment docs | Confirm actual domain from deployment environment |
-| **SSH/deploy target** | Use existing Tokyo deployment conventions if available | Verify host, path, Nginx site, and rollback tag |
-| **Production auth env** | Backend expects env vars | Verify `BRC_OPERATOR_USERNAME`, `BRC_OPERATOR_PASSWORD_HASH`, `BRC_OPERATOR_TOTP_SECRET`, `BRC_OPERATOR_SESSION_SECRET` |
+| **Server domain** | `https://jiaoyingpan.cloud/trading-console/` | Verified by curl and Playwright domain load |
+| **SSH/deploy target** | `tokyo` | Static frontend release copied to `/var/www/trading-console` |
+| **Production auth env** | Backend expects env vars | Login boundary verified by `/api/auth/session` 401 and invalid login failure; valid credential acceptance still requires a test operator credential |
 | **Chart history density** | Use existing runtime data where available | Mock only missing sparkline/equity history with registry entry |
 | **Light-mode target** | Derived from semantic tokens | Verify screenshots after implementation |
 
@@ -61,4 +61,3 @@ Development may start only after:
 2. Interface contract exists.
 3. Missing-field registry exists.
 4. Frontend/backend alignment ledger records current accepted assumptions.
-

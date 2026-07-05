@@ -68,11 +68,13 @@ local build -> server static directory -> Nginx domain -> backend API proxy
 
 | Input | Status |
 | --- | --- |
-| **Domain** | Pending server verification |
-| **SSH target** | Pending server verification |
-| **Static root** | Pending server verification |
-| **Nginx site config** | Pending server verification |
-| **Rollback tag** | Owner reports tag exists; exact tag pending verification |
+| **Domain** | `https://jiaoyingpan.cloud/trading-console/` |
+| **SSH target** | `tokyo` |
+| **Static root** | `/var/www/trading-console` |
+| **Release directory** | `/home/ubuntu/brc-deploy/releases/trading-console-frontend-09eecb8e-20260705T175236Z` |
+| **Nginx site config** | `/etc/nginx/sites-available/owner-ai-gateway` |
+| **Nginx backup** | `/etc/nginx/sites-available/owner-ai-gateway.bak-trading-console-20260705T175236Z` |
+| **Rollback tag** | Owner reports tag exists; code changes are isolated on `codex/frontend-trading-console` |
 
 ## Rollback Plan
 
@@ -95,3 +97,27 @@ local build -> server static directory -> Nginx domain -> backend API proxy
 | **Mock fields documented** | `05-missing-fields.md` contains all mock-backed fields |
 | **Deployment reversible** | Rollback tag and server release path recorded |
 
+## Acceptance Evidence
+
+### Completed Checks
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| **Production build** | Passed | `npm run build` in `frontend/trading-console` |
+| **Domain HTML** | Passed | `https://jiaoyingpan.cloud/trading-console/` returns `200` |
+| **Static CSS** | Passed | `/trading-console/assets/index-D7znhW7T.css` returns `200` and `text/css` |
+| **Static JS** | Passed | `/trading-console/assets/index-CkTx9aDG.js` returns `200` and `application/javascript` |
+| **Unauthenticated session boundary** | Passed | `/api/auth/session` returns `401 Operator login required` |
+| **Login page render** | Passed | `output/playwright/trading-console/08-domain-login.png` |
+| **Invalid login failure state** | Passed | `output/playwright/trading-console/09-domain-invalid-login.png` |
+| **Local five-page render** | Passed | `output/playwright/trading-console/01-dashboard-dark.png` through `05-exceptions-dark.png` |
+| **Theme switch** | Passed | `output/playwright/trading-console/06-exceptions-light.png` |
+| **Responsive smoke** | Passed | `output/playwright/trading-console/07-order-ledger-900px-dark.png` |
+
+### Remaining Acceptance Constraint
+
+Authenticated domain acceptance for the five protected pages requires a valid
+test operator username, password, and current **Google Authenticator TOTP** code.
+No frontend or backend bypass was used. Until that credential is available, the
+completed server-domain evidence covers static deployment, unauthenticated auth
+boundary, login rendering, and invalid-login behavior.
