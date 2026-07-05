@@ -459,6 +459,8 @@ def _plan_phases(
         f"> {q(backup_path)}; "
         "fi; "
         f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        f"test ! -f requirements.txt || {q(venv_python)} -m pip install "
+        "--disable-pip-version-check -r requirements.txt; "
         f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
         f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
         f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head"

@@ -14,6 +14,7 @@ transfers, credential mutation, live profile changes, or order sizing changes.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -25,6 +26,11 @@ from typing import Any, Callable
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
+
 DEFAULT_PYTHON = "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
@@ -88,7 +94,8 @@ def run_server_product_state_refresh_sequence(
     output_json: Path = DEFAULT_OUTPUT_JSON,
     runner: Runner | None = None,
 ) -> dict[str, Any]:
-    command_runner = runner or _run_command
+    command_env = _command_env_with_sync_pg_dsn(os.environ)
+    command_runner = runner or (lambda command: _run_command(command, env=command_env))
     started = datetime.now(timezone.utc).isoformat()
     steps = _refresh_steps(
         python=python,
@@ -535,10 +542,23 @@ def _refresh_steps(
     ]
 
 
-def _run_command(command: tuple[str, ...]) -> CommandResult:
+def _command_env_with_sync_pg_dsn(base_env: Mapping[str, str]) -> dict[str, str]:
+    env = dict(base_env)
+    for key in ("PG_DATABASE_URL", "DATABASE_URL"):
+        if env.get(key):
+            env[key] = normalize_sync_postgres_dsn(env[key])
+    return env
+
+
+def _run_command(
+    command: tuple[str, ...],
+    *,
+    env: dict[str, str] | None = None,
+) -> CommandResult:
     completed = subprocess.run(
         command,
         check=False,
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

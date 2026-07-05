@@ -463,6 +463,7 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert "tokyo-deploy-channel-status.json" in all_commands
     assert "tokyo_runtime_governance_deploy_channel_status" in all_commands
     assert '"status": "postdeploy_accepted"' in all_commands
+    assert "pip install --disable-pip-version-check -r requirements.txt" in all_commands
     assert "alembic upgrade head" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
     assert "--expected-min-migrations 89" in all_commands
@@ -488,7 +489,9 @@ def test_git_deploy_plan_batches_tokyo_ssh_commands_to_reduce_server_interaction
         for command in ssh_commands
     )
     assert any(
-        "pg_dump" in command and "alembic upgrade head" in command
+        "pg_dump" in command
+        and "pip install --disable-pip-version-check -r requirements.txt" in command
+        and "alembic upgrade head" in command
         for command in ssh_commands
     )
     assert any(

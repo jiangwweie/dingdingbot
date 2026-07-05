@@ -198,7 +198,7 @@ def test_supervisor_passes_pg_candidate_universe_flags_to_loop(tmp_path):
     )
 
     assert "--database-url" in calls[0]
-    assert "postgresql://unit/runtime" in calls[0]
+    assert "postgresql+psycopg://unit/runtime" in calls[0]
     assert "--require-database-url" in calls[0]
     assert "--candidate-universe-json" not in calls[0]
     assert "--allow-local-file-diagnostic" not in calls[0]

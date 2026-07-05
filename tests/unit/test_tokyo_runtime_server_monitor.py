@@ -327,6 +327,51 @@ def test_non_postgres_dsn_is_rejected_outside_test_mode(tmp_path: Path) -> None:
         module.build_server_monitor_artifact(args)
 
 
+def test_server_monitor_normalizes_asyncpg_dsn_for_sync_engine(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    args = module._parse_args(
+        [
+            "--output-json",
+            str(tmp_path / "monitor.json"),
+            "--skip-systemd",
+            "--database-url",
+            "postgresql+asyncpg://user:pass@localhost:5432/brc",
+        ]
+    )
+    seen_urls: list[str] = []
+
+    class FakeBegin:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_exc):
+            return False
+
+    class FakeEngine:
+        def begin(self):
+            return FakeBegin()
+
+        def dispose(self):
+            pass
+
+    def fake_create_engine(database_url: str):
+        seen_urls.append(database_url)
+        return FakeEngine()
+
+    monkeypatch.setattr(module.sa, "create_engine", fake_create_engine)
+    monkeypatch.setattr(
+        module,
+        "build_server_monitor_artifact_from_pg",
+        lambda *_args, **_kwargs: {"status": "ok"},
+    )
+
+    assert module.build_server_monitor_artifact(args) == {"status": "ok"}
+    assert seen_urls == ["postgresql+psycopg://user:pass@localhost:5432/brc"]
+
+
 def test_pg_healthy_waiting_is_quiet_and_uses_pg_dedupe(
     tmp_path: Path,
 ) -> None:

@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
@@ -650,9 +651,12 @@ def build_server_monitor_artifact(
             notifier=notifier,
             systemd_runner=systemd_runner,
         )
-    if not database_url.startswith(
-        ("postgresql://", "postgresql+psycopg://")
-    ) and not getattr(args, "allow_non_postgres_for_test", False):
+    database_url = normalize_sync_postgres_dsn(database_url)
+    if not is_sync_postgres_dsn(database_url) and not getattr(
+        args,
+        "allow_non_postgres_for_test",
+        False,
+    ):
         raise ValueError("DB-backed server monitor requires PostgreSQL DSN")
     engine = sa.create_engine(database_url)
     try:

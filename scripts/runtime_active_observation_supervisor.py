@@ -19,6 +19,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.runtime_active_observation_status import build_status_artifact  # noqa: E402
+from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 
@@ -88,7 +89,7 @@ def _loop_command(
     for strategy_family_id in args.strategy_family_id or []:
         command.extend(["--strategy-family-id", strategy_family_id])
     if getattr(args, "database_url", None):
-        command.extend(["--database-url", args.database_url])
+        command.extend(["--database-url", normalize_sync_postgres_dsn(args.database_url)])
     if getattr(args, "require_database_url", False):
         command.append("--require-database-url")
     if getattr(args, "allow_non_postgres_for_test", False):

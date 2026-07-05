@@ -28,6 +28,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
@@ -174,9 +175,8 @@ def _read_candidate_universe_from_pg(
     database_url: str,
     allow_non_postgres_for_test: bool,
 ) -> tuple[dict[str, list[str]], dict[str, Any]]:
-    if not database_url.startswith(
-        ("postgresql://", "postgresql+psycopg://")
-    ) and not allow_non_postgres_for_test:
+    database_url = normalize_sync_postgres_dsn(database_url)
+    if not is_sync_postgres_dsn(database_url) and not allow_non_postgres_for_test:
         raise RuntimeError("DB-backed active observation monitor requires PostgreSQL DSN")
     engine = sa.create_engine(database_url)
     try:

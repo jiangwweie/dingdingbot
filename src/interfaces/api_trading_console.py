@@ -34,6 +34,10 @@ from src.domain.signal_evaluation import (
     SignalEvaluation,
     SignalEvaluationStatus,
 )
+from src.infrastructure.sync_pg_dsn import (
+    is_sync_postgres_dsn,
+    normalize_sync_postgres_dsn,
+)
 from src.domain.runtime_execution_intent_adapter import (
     RuntimeExecutionIntentCreationPreview,
     RuntimeExecutionSubmitReadiness,
@@ -2296,10 +2300,10 @@ async def runtime_ticket_bound_post_submit_closure_for_attempt(
 
 
 def _run_ticket_bound_action_time_finalgate_preflight(ticket_id: str) -> dict[str, Any]:
-    database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
     if not database_url:
         raise RuntimeError("PG_DATABASE_URL is required for ticket-bound FinalGate")
-    if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+    if not is_sync_postgres_dsn(database_url):
         raise RuntimeError("ticket-bound FinalGate requires PostgreSQL DSN")
 
     from scripts.materialize_action_time_finalgate_preflight import (
@@ -2322,10 +2326,10 @@ def _run_ticket_bound_operation_layer_handoff(
     ticket_id: str,
     finalgate_pass_id: str,
 ) -> dict[str, Any]:
-    database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
     if not database_url:
         raise RuntimeError("PG_DATABASE_URL is required for ticket-bound Operation Layer handoff")
-    if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+    if not is_sync_postgres_dsn(database_url):
         raise RuntimeError("ticket-bound Operation Layer handoff requires PostgreSQL DSN")
 
     from scripts.materialize_action_time_operation_layer_handoff import (
@@ -2350,10 +2354,10 @@ async def _run_ticket_bound_protected_submit(
     operation_submit_command_id: str,
     submit_mode: str,
 ) -> dict[str, Any]:
-    database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
     if not database_url:
         raise RuntimeError("PG_DATABASE_URL is required for ticket-bound protected submit")
-    if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+    if not is_sync_postgres_dsn(database_url):
         raise RuntimeError("ticket-bound protected submit requires PostgreSQL DSN")
 
     from scripts.materialize_ticket_bound_protected_submit_attempt import (
@@ -2393,10 +2397,10 @@ def _run_ticket_bound_post_submit_closure(
     *,
     protected_submit_attempt_id: str,
 ) -> dict[str, Any]:
-    database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
     if not database_url:
         raise RuntimeError("PG_DATABASE_URL is required for ticket-bound post-submit closure")
-    if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+    if not is_sync_postgres_dsn(database_url):
         raise RuntimeError("ticket-bound post-submit closure requires PostgreSQL DSN")
 
     from scripts.materialize_ticket_bound_post_submit_closure import (

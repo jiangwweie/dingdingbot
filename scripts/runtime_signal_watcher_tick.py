@@ -34,6 +34,7 @@ from scripts.build_runtime_observation_operator_evidence import (  # noqa: E402
 from scripts.build_runtime_observation_wakeup_evidence import (  # noqa: E402
     build_wakeup_evidence,
 )
+from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 from scripts.runtime_active_observation_status import build_status_artifact  # noqa: E402
 
 
@@ -467,7 +468,7 @@ def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Nam
         source=args.source,
         runtime_instance_id=list(args.runtime_instance_id or []),
         strategy_family_id=list(args.strategy_family_id or []),
-        database_url=getattr(args, "database_url", ""),
+        database_url=normalize_sync_postgres_dsn(getattr(args, "database_url", "")),
         require_database_url=getattr(args, "require_database_url", False),
         allow_non_postgres_for_test=getattr(args, "allow_non_postgres_for_test", False),
         max_iterations=args.max_iterations,

@@ -122,6 +122,24 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
     )
 
 
+def test_server_product_state_refresh_sequence_normalizes_child_pg_dsn():
+    module = _load_module()
+
+    env = module._command_env_with_sync_pg_dsn(
+        {
+            "PG_DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/brc",
+            "DATABASE_URL": "postgresql://user:pass@localhost:5432/brc",
+        }
+    )
+
+    assert env["PG_DATABASE_URL"] == (
+        "postgresql+psycopg://user:pass@localhost:5432/brc"
+    )
+    assert env["DATABASE_URL"] == (
+        "postgresql+psycopg://user:pass@localhost:5432/brc"
+    )
+
+
 def test_server_product_state_refresh_sequence_fails_on_required_step_but_continues(
     tmp_path: Path,
 ):

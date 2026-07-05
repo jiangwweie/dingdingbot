@@ -384,7 +384,7 @@ def test_watcher_tick_passes_pg_candidate_scope_flags_to_supervisor(
     )
 
     assert captured == {
-        "database_url": "postgresql://unit/runtime",
+        "database_url": "postgresql+psycopg://unit/runtime",
         "require_database_url": True,
         "has_candidate_universe_json": False,
         "has_allow_local_file_diagnostic": False,
