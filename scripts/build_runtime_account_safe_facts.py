@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Build read-only account-safe facts from StrategyGroup live facts input."""
+"""Build read-only account-safe facts from PG scope and signed GET facts."""
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 import json
 import os
 from pathlib import Path
 import sys
 from typing import Any
+import urllib.request
 
 import sqlalchemy as sa
 
@@ -20,22 +22,34 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from runtime_pg_fact_snapshots import write_account_safe_fact_snapshots  # noqa: E402
-
-
-DEFAULT_LIVE_FACTS_JSON = Path(
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-input.json"
+from collect_strategy_group_live_facts_readonly import (  # noqa: E402
+    DEFAULT_BASE_URL,
+    READ_ONLY_ENDPOINTS,
+    UrlOpen,
+    _account_summary,
+    _budget_state,
+    _env_value,
+    _exchange_rules,
+    _next_attempt_gate_state,
+    _open_order_summary,
+    _position_summary,
+    _protection_state,
+    _request_json,
 )
 DEFAULT_OUTPUT_JSON = Path(
     "/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json"
 )
+DEFAULT_ENV_FILE = Path("/home/ubuntu/brc-deploy/env/live-readonly.env")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--live-facts-json", default=str(DEFAULT_LIVE_FACTS_JSON))
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--allow-non-postgres-for-test", action="store_true")
+    parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE))
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument("--timeout-seconds", type=float, default=12)
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     args = parser.parse_args(argv)
 
@@ -54,21 +68,26 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    artifact = build_runtime_account_safe_facts(
-        live_facts=_read_json(Path(args.live_facts_json)),
-    )
     engine = sa.create_engine(args.database_url)
     try:
         with engine.begin() as conn:
+            live_facts = collect_account_safe_live_facts_from_pg_scope(
+                conn,
+                env_file=Path(args.env_file).expanduser() if args.env_file else None,
+                base_url=args.base_url,
+                timeout_seconds=args.timeout_seconds,
+            )
+            artifact = build_runtime_account_safe_facts(live_facts=live_facts)
             fact_snapshot_ids = write_account_safe_fact_snapshots(
                 conn,
                 artifact=artifact,
-                source_ref="runtime_live_facts_readonly",
+                source_ref="runtime_account_safe_pg_scope_readonly",
             )
     finally:
         engine.dispose()
     artifact["source_mode"] = "db_backed"
     artifact["projection_target"] = "production_current"
+    artifact["collector_source_mode"] = "pg_scope_direct_readonly_exchange"
     artifact["pg_fact_snapshot_ids"] = fact_snapshot_ids
     output_json = Path(args.output_json)
     _write_json(output_json, artifact)
@@ -86,6 +105,144 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     return 0 if artifact["checks"]["account_safe_facts_ready"] is True else 2
+
+
+def collect_account_safe_live_facts_from_pg_scope(
+    conn: sa.engine.Connection,
+    *,
+    env_file: Path | None,
+    base_url: str = DEFAULT_BASE_URL,
+    timeout_seconds: float = 12,
+    urlopen: UrlOpen | None = None,
+) -> dict[str, Any]:
+    scope = _pg_account_safe_scope_summary(conn)
+    symbols = list(scope["symbols"])
+    api_key = _env_value(
+        ("EXCHANGE_API_KEY", "BINANCE_API_KEY", "binance_exchange_key"),
+        env_file=env_file,
+    )
+    api_secret = _env_value(
+        ("EXCHANGE_API_SECRET", "BINANCE_SECRET_KEY", "binance_exchange_secret"),
+        env_file=env_file,
+    )
+    payloads: dict[str, dict[str, Any]] = {}
+    errors: dict[str, str] = {}
+    opener = urlopen if urlopen is not None else urllib.request.urlopen
+    for name, (_method, path, signed) in READ_ONLY_ENDPOINTS.items():
+        try:
+            payloads[name] = _request_json(
+                base_url=base_url,
+                path=path,
+                api_key=api_key,
+                api_secret=api_secret,
+                signed=signed,
+                timeout_seconds=timeout_seconds,
+                urlopen=opener,
+            )
+        except Exception as exc:
+            errors[name] = f"{type(exc).__name__}:{str(exc)[:220]}"
+            payloads[name] = {}
+
+    exchange_rules = _exchange_rules(payloads["exchange_info"], symbols)
+    position = _position_summary(payloads["position_risk"], symbols)
+    open_orders = _open_order_summary(payloads["open_orders"], symbols)
+    account = _account_summary(payloads["account"])
+    budget = _budget_state(account_payload=payloads["account"], handoff_summary=scope)
+    protection = _protection_state(scope)
+    next_attempt_gate = _next_attempt_gate_state(
+        position=position,
+        open_orders=open_orders,
+    )
+    return {
+        "scope": "strategy_group_live_facts_input",
+        "status": "ready" if not errors and symbols else "partial",
+        "source": "pg_scope_binance_usdm_futures_readonly_get_endpoints",
+        "source_mode": "pg_scope_direct_readonly_exchange",
+        "supported_symbol_count": len(symbols),
+        "exchange_rules": exchange_rules,
+        "account": account,
+        "active_position": position,
+        "open_orders": open_orders,
+        "protection": protection,
+        "budget": budget,
+        "next_attempt_gate": next_attempt_gate,
+        "collector_errors": errors,
+        "safety_invariants": {
+            "signed_get_only": True,
+            "post_delete_put_used": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "execution_intent_created": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "secrets_printed": False,
+        },
+    }
+
+
+def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]:
+    scope_rows = [
+        dict(row)
+        for row in conn.execute(
+            sa.text(
+                """
+                SELECT DISTINCT
+                  candidate.strategy_group_id,
+                  candidate.symbol,
+                  policy.max_notional
+                FROM brc_strategy_group_candidate_scope AS candidate
+                LEFT JOIN brc_owner_policy_current AS policy
+                  ON policy.policy_current_id = candidate.policy_current_id
+                WHERE candidate.status = 'active'
+                  AND candidate.scope_state = 'live_submit_allowed'
+                  AND (
+                    policy.policy_current_id IS NULL
+                    OR (
+                      policy.enabled_state = 'enabled'
+                      AND policy.pretrade_candidate_allowed = true
+                    )
+                  )
+                ORDER BY candidate.strategy_group_id, candidate.symbol
+                """
+            )
+        ).mappings()
+    ]
+    symbols = sorted({str(row.get("symbol") or "").upper() for row in scope_rows if row.get("symbol")})
+    max_notional_values = [
+        value
+        for value in (_decimal_or_none(row.get("max_notional")) for row in scope_rows)
+        if value is not None
+    ]
+    max_notional = max(max_notional_values, default=None)
+    protection_count = conn.execute(
+        sa.text(
+            """
+            SELECT COUNT(*)
+            FROM brc_candidate_scope_event_bindings AS binding
+            JOIN brc_strategy_event_required_facts AS facts
+              ON facts.event_spec_id = binding.event_spec_id
+            WHERE binding.status = 'active'
+              AND facts.status = 'active'
+              AND facts.fact_group = 'protection'
+            """
+        )
+    ).scalar_one()
+    return {
+        "symbols": symbols,
+        "strategy_group_count": len({str(row.get("strategy_group_id")) for row in scope_rows}),
+        "max_notional_requirement_usdt": str(max_notional) if max_notional is not None else None,
+        "has_candidate_specific_protection_template": int(protection_count or 0) > 0,
+    }
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def build_runtime_account_safe_facts(
@@ -199,13 +356,6 @@ def build_runtime_account_safe_facts(
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload if isinstance(payload, dict) else {}
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

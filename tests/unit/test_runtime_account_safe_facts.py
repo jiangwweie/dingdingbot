@@ -4,6 +4,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from scripts import build_runtime_account_safe_facts as module
 
 
@@ -61,12 +63,14 @@ def test_runtime_account_safe_facts_blocks_open_position():
     assert "active_position_clear" in artifact["blockers"]
 
 
-def test_runtime_account_safe_facts_cli_writes_pg_snapshots(tmp_path: Path):
-    live_facts = tmp_path / "live-facts.json"
+def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     output_json = tmp_path / "account-safe.json"
     db_path = tmp_path / "runtime.db"
-    live_facts.write_text(json.dumps(_live_facts()), encoding="utf-8")
     with sqlite3.connect(db_path) as conn:
+        _create_pg_scope_tables(conn)
         conn.execute(
             """
             CREATE TABLE brc_runtime_fact_snapshots (
@@ -91,10 +95,43 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(tmp_path: Path):
             """
         )
 
+    def fake_request_json(**kwargs):
+        path = kwargs["path"]
+        if path.endswith("/exchangeInfo"):
+            return {
+                "payload": {
+                    "symbols": [
+                        {
+                            "symbol": "ETHUSDT",
+                            "status": "TRADING",
+                            "filters": [
+                                {"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                                {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+                                {"filterType": "MIN_NOTIONAL", "notional": "5"},
+                            ],
+                        }
+                    ]
+                }
+            }
+        if path.endswith("/account"):
+            return {
+                "payload": {
+                    "canTrade": True,
+                    "availableBalance": "100",
+                    "totalWalletBalance": "100",
+                    "assets": [],
+                }
+            }
+        if path.endswith("/positionRisk"):
+            return {"payload": [{"symbol": "ETHUSDT", "positionAmt": "0"}]}
+        if path.endswith("/openOrders"):
+            return {"payload": []}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(module, "_request_json", fake_request_json)
+
     exit_code = module.main(
         [
-            "--live-facts-json",
-            str(live_facts),
             "--database-url",
             f"sqlite:///{db_path}",
             "--allow-non-postgres-for-test",
@@ -106,6 +143,7 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(tmp_path: Path):
     assert exit_code == 0
     artifact = json.loads(output_json.read_text(encoding="utf-8"))
     assert artifact["source_mode"] == "db_backed"
+    assert artifact["collector_source_mode"] == "pg_scope_direct_readonly_exchange"
     assert len(artifact["pg_fact_snapshot_ids"]) == 2
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
@@ -120,3 +158,74 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(tmp_path: Path):
     assert all(row[1] is None and row[2] is None and row[3] is None for row in rows)
     assert all(row[4] == 1 for row in rows)
     assert all(row[5] == "fresh" for row in rows)
+
+
+def test_runtime_account_safe_facts_cli_rejects_live_facts_json(tmp_path: Path):
+    with pytest.raises(SystemExit) as exc:
+        module.main(
+            [
+                "--live-facts-json",
+                str(tmp_path / "live-facts.json"),
+                "--database-url",
+                "sqlite:///:memory:",
+                "--allow-non-postgres-for-test",
+            ]
+        )
+
+    assert exc.value.code == 2
+
+
+def _create_pg_scope_tables(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE brc_strategy_group_candidate_scope (
+          candidate_scope_id TEXT PRIMARY KEY,
+          strategy_group_id TEXT,
+          symbol TEXT,
+          scope_state TEXT,
+          policy_current_id TEXT,
+          status TEXT
+        );
+        CREATE TABLE brc_owner_policy_current (
+          policy_current_id TEXT PRIMARY KEY,
+          enabled_state TEXT,
+          pretrade_candidate_allowed BOOLEAN,
+          max_notional NUMERIC
+        );
+        CREATE TABLE brc_candidate_scope_event_bindings (
+          binding_id TEXT PRIMARY KEY,
+          candidate_scope_id TEXT,
+          event_spec_id TEXT,
+          status TEXT
+        );
+        CREATE TABLE brc_strategy_event_required_facts (
+          event_required_fact_id TEXT PRIMARY KEY,
+          event_spec_id TEXT,
+          fact_group TEXT,
+          status TEXT
+        );
+        INSERT INTO brc_owner_policy_current (
+          policy_current_id, enabled_state, pretrade_candidate_allowed, max_notional
+        ) VALUES (
+          'policy:CPM-RO-001:ETHUSDT:long', 'enabled', 1, 20
+        );
+        INSERT INTO brc_strategy_group_candidate_scope (
+          candidate_scope_id, strategy_group_id, symbol, scope_state,
+          policy_current_id, status
+        ) VALUES (
+          'scope:CPM-RO-001:ETHUSDT:long', 'CPM-RO-001', 'ETHUSDT',
+          'live_submit_allowed', 'policy:CPM-RO-001:ETHUSDT:long', 'active'
+        );
+        INSERT INTO brc_candidate_scope_event_bindings (
+          binding_id, candidate_scope_id, event_spec_id, status
+        ) VALUES (
+          'binding:scope:CPM-RO-001:ETHUSDT:long:CPM-LONG',
+          'scope:CPM-RO-001:ETHUSDT:long', 'event:CPM-LONG', 'active'
+        );
+        INSERT INTO brc_strategy_event_required_facts (
+          event_required_fact_id, event_spec_id, fact_group, status
+        ) VALUES (
+          'fact:event:CPM-LONG:protection', 'event:CPM-LONG', 'protection', 'active'
+        );
+        """
+    )

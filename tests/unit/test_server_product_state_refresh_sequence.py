@@ -109,8 +109,12 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
         assert "--daily-table-json" not in command
         assert "--candidate-pool-json" not in command
         assert "--runtime-active-monitor-json" not in command
+        assert "--live-facts-json" not in command
         if command[1] == "scripts/materialize_ticket_bound_post_submit_closure.py":
             assert "--latest-submitted" in command
+    for command in calls:
+        assert "--collect-live-facts-before-refresh" not in command
+        assert "--live-facts-output" not in command
     assert all(
         "output/runtime-monitor/latest-" not in item
         for command in calls

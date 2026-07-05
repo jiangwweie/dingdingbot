@@ -206,7 +206,6 @@ def _refresh_steps(
     status = report_dir / "latest-status.json"
     public = runtime_monitor_dir / "latest-binance-usdm-public-facts.json"
     public_md = runtime_monitor_dir / "latest-binance-usdm-public-facts.md"
-    live = report_dir / "strategy-group-live-facts-input.json"
     account = runtime_monitor_dir / "latest-account-safe-facts.json"
     goal = report_dir / "strategygroup-runtime-goal-status.json"
     candidate_pool = runtime_monitor_dir / "latest-strategy-live-candidate-pool.json"
@@ -234,7 +233,6 @@ def _refresh_steps(
     brf2_facts = runtime_monitor_dir / "latest-brf2-runtime-signal-facts.json"
     brf2_facts_md = runtime_monitor_dir / "latest-brf2-runtime-signal-facts.md"
     release_manifest = Path("/home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json")
-    handoff_dir = Path("/home/ubuntu/brc-deploy/app/current/docs/current/strategy-group-handoffs")
 
     pg_required = ("--require-database-url",)
     action_time_boundary_inputs = (
@@ -376,13 +374,6 @@ def _refresh_steps(
                 str(report_dir),
                 "--output-json",
                 str(report_dir / "product-state-refresh-packet.json"),
-                "--collect-live-facts-before-refresh",
-                "--handoff-dir",
-                str(handoff_dir),
-                "--env-file",
-                str(env_file),
-                "--live-facts-output",
-                str(live),
                 "--refresh-chain-closure-status",
                 "--chain-closure-output-json",
                 str(report_dir / "runtime-execution-chain-closure-status.json"),
@@ -400,7 +391,18 @@ def _refresh_steps(
             ),
             required=False,
         ),
-        RefreshStep("build_account_safe_facts", (python, "scripts/build_runtime_account_safe_facts.py", "--live-facts-json", str(live), *pg_required, "--output-json", str(account))),
+        RefreshStep(
+            "build_account_safe_facts",
+            (
+                python,
+                "scripts/build_runtime_account_safe_facts.py",
+                *pg_required,
+                "--env-file",
+                str(env_file),
+                "--output-json",
+                str(account),
+            ),
+        ),
         RefreshStep(
             "build_action_time_boundary_account",
             (
