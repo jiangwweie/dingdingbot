@@ -78,7 +78,7 @@ Current direct runtime-like file dependencies include:
 | `main-control-runtime-tier-policy.json` | Tradeability, tier review, goal progress, policy package | Tier/scope policy is file-sourced |
 | `owner-pretrade-runtime-authorization-v0.json` | Candidate Pool | Owner authorization is file-sourced |
 | `RUNTIME_MONITOR_BASELINE.json` | Daily check, goal progress | Monitor baseline is file-sourced |
-| `output/runtime-monitor/latest-*.json` | Candidate Pool, Daily Table, server monitor, daily checks | Generated outputs become inputs to later decisions |
+| `output/runtime-monitor/latest-*.json` | remaining diagnostics and daily checks; Candidate Pool, Daily Table, Tradeability, Goal Status, Single Lane Packet, and server monitor production CLIs are PG-only | Generated outputs must not become inputs to later decisions |
 | replay corpora under `strategy-group-handoffs/*/replay` | Review and policy scripts | Replay assets are stored in current docs tree |
 
 ## Mainline MD/JSON Read/Write Map
@@ -98,7 +98,7 @@ live-enablement chain.
 | Daily Table | PG control state through `PgBackedRuntimeControlStateRepository`; generated outputs are export/diagnostic only | `latest-daily-live-enablement-table.json/md` | Reintroducing file-backed inputs would let the management view inherit stale generated inputs | Export from current projections |
 | Single Lane Packet | PG control state through `PgBackedRuntimeControlStateRepository`; Daily Table is an in-memory projection, not JSON input | `latest-single-lane-task-packet.json/md` | Reintroducing file-backed Daily Table input can turn stale market waits into fake closure work | Export task packet only when blocker is non-market |
 | Goal Status | PG control state through `PgBackedRuntimeControlStateRepository`; report-dir path is export location only | `strategygroup-runtime-goal-status.json` | Reintroducing file-backed inputs would let legacy scope diagnostics override current control facts | One `brc_goal_status_current` projector |
-| Server monitor | Candidate Pool, Daily Table, public/account facts, systemd/deploy reports, dedupe JSON | monitor latest JSON and Feishu dedupe JSON | Production monitor becomes a file aggregator | Server monitor runs and notification dedupe tables |
+| Server monitor | PG current projections plus readonly systemd status | monitor latest JSON export and PG Feishu dedupe rows | Reintroducing JSON arguments would make production monitor a file aggregator again | Server monitor runs and notification dedupe tables |
 
 ## Conflict Points To Eliminate
 
@@ -211,7 +211,7 @@ Every repo MD/JSON should be classified into one of these dispositions.
 | Runtime Safety State | `export_only` | `brc_runtime_safety_state_snapshots` |
 | Public/account facts | `move_to_db_runtime_state` | `brc_runtime_fact_snapshots` |
 | Watcher/runtime active monitor | `move_to_db_runtime_state` | `brc_watcher_runtime_coverage` |
-| Server monitor latest/dedupe | `move_to_db_runtime_state` | server monitor run/notification tables |
+| Server monitor latest/dedupe | latest monitor is `export_only`; dedupe is `move_to_db_runtime_state`; legacy dedupe JSON is retired | server monitor run/notification tables |
 | Review-only/historical reports | `move_to_archive` | archive metadata only if needed |
 | Local monitor artifacts | `delete_noise` or local-only | No production source role |
 
@@ -236,7 +236,7 @@ Minimum required rows:
 | `output/runtime-monitor/latest-single-lane-task-packet.json` | `export_only` | task/export projection over DB blockers | No runtime process reads packet as authority |
 | `output/runtime-monitor/latest-*-facts.json` | `move_to_db_runtime_state` | `brc_runtime_fact_snapshots` | Fact collectors write DB snapshots and generated files become optional exports |
 | server `strategygroup-runtime-goal-status.json` | `export_only` | `brc_goal_status_current` | One DB owner projector writes current status and JSON is generated view |
-| server monitor dedupe JSON | `move_to_db_runtime_state` | `brc_server_monitor_notifications` | Notifier dedupe reads/writes PG state |
+| server monitor dedupe JSON | `delete_noise` / retired legacy state | `brc_server_monitor_notifications` | Current notifier dedupe reads/writes PG state and rejects file-state arguments |
 | `DEFAULT_SIDE_SCOPE` and broad side constants | `delete_noise` / replace with DB scope | `brc_strategy_group_candidate_scope`, `brc_candidate_scope_event_bindings` | Production candidate/scope builders fail if constant fallback is used |
 
 Any old source with reusable semantics must be converted into code schema, DB

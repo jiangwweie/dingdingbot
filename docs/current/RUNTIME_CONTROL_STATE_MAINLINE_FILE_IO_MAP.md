@@ -80,7 +80,7 @@ historical research script.
 
 | File | Current writers | Current readers | Current role | PG target | Key issue |
 | --- | --- | --- | --- | --- | --- |
-| `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/latest-status.json` | watcher service | Candidate Pool, coverage validator, server monitor, systemd shell | Runtime active monitor / watcher scope | `brc_watcher_runtime_coverage` | File shape and freshness decide whether server-backed coverage exists |
+| `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/latest-status.json` | watcher service | Candidate Pool, coverage validator, systemd shell | Runtime active monitor / watcher scope export | `brc_watcher_runtime_coverage` | File shape and freshness must not decide production monitor notifications |
 | `output/runtime-monitor/latest-binance-usdm-public-facts.json` and `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-binance-usdm-public-facts.json` | `fetch_binance_usdm_public_facts.py` | SOR detector, MI admission, BRF2 facts, legacy diagnostics | Public market fact snapshot export | `brc_runtime_fact_snapshots` | Must not be read by production server monitor |
 | `output/runtime-monitor/latest-binance-usdm-public-facts.md` and server report MD counterpart | `fetch_binance_usdm_public_facts.py` | Owner/agent readability | Human export | Export only | Must not be read for runtime |
 | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategy-group-live-facts-input.json` | product-state refresh | account-safe facts builder, product-state refresh | live/private fact input | `brc_runtime_fact_snapshots` | Currently both report input and downstream fact source |
@@ -107,7 +107,7 @@ historical research script.
 | `output/runtime-monitor/latest-single-lane-task-packet.json/md` | `build_single_lane_task_packet.py` | agents and human review exports | One-lane task packet | task export only | Builder CLI is PG-only; should never reclassify market waits into engineering closure |
 | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-goal-status.json` | `build_strategygroup_runtime_goal_status.py` | product-state refresh, server monitor/Owner surfaces | Current goal summary | `brc_goal_status_current` plus export | Goal Status builder is PG-only; Candidate Pool is derived from PG control state, not JSON input |
 | `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json` | `run_tokyo_runtime_server_monitor.py` | Owner/ops diagnostics | Server monitor run summary | `brc_server_monitor_runs` plus export | Monitor should read DB current projections, not output files |
-| `/home/ubuntu/brc-deploy/reports/runtime-monitor/server-monitor-dedupe-state.json` | `run_tokyo_runtime_server_monitor.py` | same script | Notification dedupe state | `brc_server_monitor_notifications` | Dedupe is runtime state, not file state |
+| `/home/ubuntu/brc-deploy/reports/runtime-monitor/server-monitor-dedupe-state.json` | retired legacy monitor versions | none in current monitor path | Retired notification dedupe file | `brc_server_monitor_notifications` | Current monitor rejects file dedupe state and reads/writes PG notification rows |
 
 ### Policy, Registry, And Handoff Files
 
@@ -157,7 +157,7 @@ historical research script.
 | Same fact family in multiple directories | Public facts can exist under both `output/runtime-monitor` and server report dirs | Different consumers can read different snapshots | Fact snapshots are DB rows; file paths are exports |
 | Candidate universe duplicated | systemd symbol list, `DEFAULT_CANDIDATE_UNIVERSE`, Owner auth JSON, runtime watcher scope | Different layers can disagree on which symbols are active | `brc_strategy_group_candidate_scope` and `brc_runtime_scope_bindings` become source |
 | Governance output mixed with runtime output | MI admission and strategy handoff data live beside runtime facts | Admission state can be confused with live readiness | Strategy governance tables feed registry/policy/scope projections |
-| Server monitor as file aggregator | monitor reads Daily Table, Candidate Pool, facts, watcher status, deploy health, dedupe JSON | Production notification depends on latest files | Monitor reads DB projections and writes monitor/notification tables |
+| Server monitor as file aggregator | legacy monitor versions read Daily Table, Candidate Pool, facts, watcher status, deploy health, and dedupe JSON | Reintroducing those arguments would make production notification depend on stale files | Current monitor rejects legacy JSON arguments, reads DB projections, and writes monitor/notification tables |
 | Action-time evidence as loose files | resume pack, dispatch artifact, operation evidence, dry-run audit are separate JSONs | Hard to prove a single candidate intent | action-time lane, candidate/auth, execution evidence share lane/input refs |
 
 ## PG Route By Mainline Domain
@@ -180,7 +180,7 @@ historical research script.
 | Protected submit attempt | submit API response JSON / dispatcher artifact | `brc_ticket_bound_protected_submit_attempts` | submit attempt export |
 | Post-submit closure | dispatcher artifact / old authorization finalize output | `brc_ticket_bound_post_submit_closures` | post-submit closure export |
 | Goal Status | report-dir goal-status JSON plus legacy artifacts | `brc_goal_status_current` | goal-status export |
-| Server monitor and notification | server monitor latest JSON, dedupe JSON | `brc_server_monitor_runs`, `brc_server_monitor_notifications` | monitor export |
+| Server monitor and notification | PG current projections plus readonly systemd status | `brc_server_monitor_runs`, `brc_server_monitor_notifications` | monitor export |
 | Strategy governance/admission | handoff JSON, MI admission JSON, review snapshots | `brc_strategy_governance_decisions`, admission tables, registry/version tables | governance export |
 | Legacy diagnostics | pilot status, deploy/probe reports, dry-run audit files | `brc_legacy_diagnostics` and evidence refs | diagnostic export |
 
@@ -246,13 +246,13 @@ Every generated JSON export should carry:
 | Batch | Goal | Main files retired as sources | DB/projection target |
 | --- | --- | --- | --- |
 | P0-A | freeze direct file-source expansion | new direct `docs/current` / `output` reads | source-ban validator |
-| P0-B | introduce repository boundary | direct file reads inside watcher tick, Tradeability, replay/live parity, Candidate Pool, Daily Table, Goal Status, server monitor | `RuntimeControlStateRepository` |
+| P0-B | introduce repository boundary | direct file reads inside watcher tick, Tradeability, replay/live parity, Candidate Pool, Daily Table, Goal Status, server monitor | `RuntimeControlStateRepository`; server monitor production path is PG-only |
 | P0-C | close projection ownership | goal-status and latest output feedback loops | `brc_projection_runs`, `brc_current_projection_ownership`, `brc_goal_status_current` |
 | P0-D | migrate policy/scope | Owner auth JSON, tier policy JSON, candidate constants | owner policy, candidate scope, runtime bindings |
 | P0-E | migrate coverage/facts | watcher status JSON, public/account fact JSON | watcher coverage and fact snapshots |
 | P1-A | migrate readiness/promotion/action-time/ticket | Candidate Pool, action-time boundary, resume pack, loose prepare identity | readiness, promotion, action-time lane, Action-Time Ticket tables |
 | P1-B | migrate strategy governance | handoff packs, MI admission, review snapshots | strategy governance, admission, registry/version tables |
-| P1-C | convert monitor and output to exports | server monitor JSON, dedupe JSON, output snapshots | monitor runs/notifications and export snapshots |
+| P1-C | convert monitor and output to exports | server monitor JSON and output snapshots; legacy dedupe JSON retired | monitor runs/notifications and export snapshots |
 
 ## Completion Criteria
 

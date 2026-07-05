@@ -101,7 +101,7 @@ output artifacts, local cache, or code constants.
 
 ## Known Current Facts
 
-These are current repo facts as of 2026-07-03.
+These are current repo facts as of 2026-07-05.
 
 | Fact | Current evidence |
 | --- | --- |
@@ -110,7 +110,7 @@ These are current repo facts as of 2026-07-03.
 | `output` contains many generated or volatile JSON/MD files | 68 JSON/MD files under `output` |
 | Candidate Pool production CLI is PG-only | `scripts/build_strategy_live_candidate_pool.py` derives per-symbol readiness, promotion, runtime coverage, and action-time lane inputs from PG control state |
 | Daily Table production CLI is PG-only | `scripts/build_daily_live_enablement_table.py` derives Tradeability, Replay/Live Parity, Action-Time Boundary, MI admission, runtime safety, and Candidate Pool/current readiness from PG control state |
-| Server monitor still reads generated JSON snapshots as primary inputs | `scripts/run_tokyo_runtime_server_monitor.py` reads Daily Table, Candidate Pool, public facts, account-safe facts, watcher status, and deploy health JSON |
+| Server monitor production CLI is PG-only | `scripts/run_tokyo_runtime_server_monitor.py` reads PG current projections plus readonly systemd status; legacy Daily Table, Candidate Pool, facts, watcher-status, deploy-health, and dedupe JSON inputs are rejected |
 | Strategy semantics already have PG-style tables | `src/infrastructure/pg_models.py` includes `brc_strategy_families`, `brc_strategy_family_versions`, `brc_strategy_family_registry`, and `brc_strategy_family_playbooks` |
 | Runtime lifecycle already has PG-style tables | `strategy_runtime_instances`, `strategy_runtime_events`, `signal_evaluations`, `order_candidates`, and many `runtime_execution_*` tables exist |
 | Owner/policy records already partially exist | `brc_owner_risk_acknowledgements`, `brc_owner_risk_acceptances`, bounded trial authorization tables, and budget authorization tables exist |
@@ -161,7 +161,7 @@ JSON/MD only for compatibility.
 | Daily Table | PG control state via `PgBackedRuntimeControlStateRepository`; generated fact/readiness outputs are export/diagnostic only | `latest-daily-live-enablement-table.json/md` | Reintroducing file-backed inputs would let the management table inherit stale generated inputs | DB-backed read-model export from current projections |
 | Single Lane Packet | PG control state through `PgBackedRuntimeControlStateRepository`; Daily Table is an in-memory projection, not JSON input | `latest-single-lane-task-packet.json/md` | Reintroducing file-backed Daily Table input can accidentally wrap stale market waits as closure tasks | Task export only, not runtime authority |
 | Goal Status | PG control state via `PgBackedRuntimeControlStateRepository`; report-dir path is export location only | `strategygroup-runtime-goal-status.json` | Reintroducing file-backed Goal Status inputs would let legacy scope mismatch overrule new control state | `brc_goal_status_current` single-owner projection |
-| Server monitor | Daily Table, Candidate Pool, public/account facts, watcher/systemd/deploy health JSON, dedupe JSON | server monitor JSON and Feishu dedupe state | Production monitor can become a file aggregator instead of the runtime fact owner | `brc_server_monitor_runs`, `brc_server_monitor_notifications`, current projections |
+| Server monitor | PG current projections plus readonly systemd status | server monitor JSON export; Feishu dedupe rows in PG | Reintroducing file inputs would make production notification depend on stale generated artifacts | `brc_server_monitor_runs`, `brc_server_monitor_notifications`, current projections |
 
 ## Current Conflict Cases
 
@@ -377,7 +377,7 @@ files are read-model snapshots, not the authority source.
 | Runtime safety state | DB safety snapshot table | runtime safety JSON | Runtime Safety State JSON/MD |
 | Goal Status current | DB goal-status current projection | report-dir goal-status JSON | goal-status JSON export |
 | Daily table | DB-backed generated read model | Daily Table JSON | Daily Table JSON/MD |
-| Server monitor notification | DB monitor run and notification tables | dedupe JSON and server monitor JSON | server monitor JSON |
+| Server monitor notification | DB monitor run and notification tables | retired legacy dedupe JSON and server monitor export | server monitor JSON |
 | Deploy evidence | deploy reports and archive path | same | not a runtime source |
 | Replay corpus and fixtures | repo fixture files | same | replay read model only |
 
