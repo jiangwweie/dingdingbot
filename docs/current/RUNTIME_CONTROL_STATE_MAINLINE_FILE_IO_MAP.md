@@ -147,6 +147,7 @@ historical research script.
 | Retired bridge | Previous role | Replacement | Enforcement |
 | --- | --- | --- | --- |
 | `build_runtime_fresh_attempt_readiness_projection.py` / `runtime_fresh_attempt_readiness_projection` | Built a fresh-attempt readiness decision by aggregating operator evidence, fresh-signal loop, readiness evidence, authorization binding, handoff, and FinalGate JSON reports | PG chain: `brc_live_signal_events` -> `brc_promotion_candidates` -> `brc_action_time_lane_inputs` -> `brc_action_time_tickets` -> ticket-bound FinalGate preflight -> Runtime Safety State | Script and tests are removed; resume dispatcher rejects this retired scope with `blocked_by_retired_file_authority_projection` |
+| `build_runtime_strategy_required_facts_readiness_artifact.py` / `runtime_strategy_required_facts_readiness_artifact` | Built RequiredFacts readiness by combining local strategy semantics catalog rows with optional JSON fact-source reports | PG contracts and facts: `brc_required_fact_contracts`, `brc_strategy_event_required_facts`, `brc_runtime_fact_snapshots`, Candidate Pool RequiredFacts readiness fields | Script and tests are removed; production RequiredFacts readiness must come from PG current projections or typed domain services that feed PG |
 
 ## Critical Conflict Points
 
@@ -166,6 +167,7 @@ historical research script.
 | Server monitor as file aggregator | legacy monitor versions read Daily Table, Candidate Pool, facts, watcher status, deploy health, and dedupe JSON | Reintroducing those arguments would make production notification depend on stale files | Current monitor rejects legacy JSON arguments, reads DB projections, and writes monitor/notification tables |
 | Action-time evidence as loose files | resume pack, dispatch artifact, operation evidence, dry-run audit are separate JSONs | Hard to prove a single candidate intent | action-time lane, candidate/auth, execution evidence share lane/input refs |
 | Fresh-attempt readiness projection as file bridge | old `runtime_fresh_attempt_readiness_projection` aggregated several JSON reports and could dispatch fresh authorization from the aggregate | It could recreate a second authority path between fresh signal and FinalGate | Retired; use PG action-time lane, Action-Time Ticket, ticket-bound FinalGate preflight, and Runtime Safety State |
+| RequiredFacts readiness as local projection | old `runtime_strategy_required_facts_readiness_artifact` read local semantics plus optional JSON fact-source reports | It could disagree with PG RequiredFacts contracts and fact snapshots | Retired; use PG RequiredFacts contracts, strategy-event RequiredFacts rows, and runtime fact snapshots |
 
 ## PG Route By Mainline Domain
 
