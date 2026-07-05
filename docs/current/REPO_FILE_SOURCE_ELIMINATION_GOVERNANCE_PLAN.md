@@ -95,9 +95,9 @@ live-enablement chain.
 | Tradeability Decision | PG current projections for strategy, policy, scope, facts, signals, and safety; explicit local JSON only under `--allow-local-file-diagnostic` | `latest-strategygroup-tradeability-decision.json/md` | Export can still be mistaken for an upstream source by later builders | Keep production Tradeability DB-backed and treat JSON/MD as export only |
 | Replay/Live Parity Audit | replay JSON, CPM/MPG/SOR detector or watcher outputs | `latest-replay-live-parity-audit.json/md` | Historical parity diagnostics can be confused with current live coverage | Store diagnostic/read-model rows separate from watcher coverage |
 | Candidate Pool | authorization JSON, Daily Table, Tradeability, detector outputs, active monitor, replay/live and action-time artifacts | `latest-strategy-live-candidate-pool.json/md` | One generated view recomputes many source priorities | Project readiness, promotion, and action-time lane rows |
-| Daily Table | Candidate Pool and other generated outputs | `latest-daily-live-enablement-table.json/md` | Management view can lag or inherit stale generated inputs | Export from current projections |
+| Daily Table | PG control state through `PgBackedRuntimeControlStateRepository`; generated outputs are export/diagnostic only | `latest-daily-live-enablement-table.json/md` | Reintroducing file-backed inputs would let the management view inherit stale generated inputs | Export from current projections |
 | Single Lane Packet | Daily Table JSON | `latest-single-lane-task-packet.json/md` | Market waits can become fake closure work | Export task packet only when blocker is non-market |
-| Goal Status | report-dir artifacts, optional Candidate Pool JSON, release manifest, legacy pilot status | `strategygroup-runtime-goal-status.json` | Multiple writers and legacy scope diagnostics can override current control facts | One `brc_goal_status_current` projector |
+| Goal Status | PG control state through `PgBackedRuntimeControlStateRepository`; report-dir path is export location only | `strategygroup-runtime-goal-status.json` | Reintroducing file-backed inputs would let legacy scope diagnostics override current control facts | One `brc_goal_status_current` projector |
 | Server monitor | Candidate Pool, Daily Table, public/account facts, systemd/deploy reports, dedupe JSON | monitor latest JSON and Feishu dedupe JSON | Production monitor becomes a file aggregator | Server monitor runs and notification dedupe tables |
 
 ## Conflict Points To Eliminate
@@ -105,7 +105,7 @@ live-enablement chain.
 | Conflict point | Current symptom | Required closure |
 | --- | --- | --- |
 | Multiple writers for current state | One status JSON can be rewritten by different post-step paths | A current projection has one owner projector |
-| Optional core input | Goal Status can run with or without Candidate Pool | Required current projections must be mandatory inputs |
+| Retired optional core inputs | Goal Status and Daily Table no longer accept file-backed Candidate Pool/current-readiness inputs | Required current projections must be derived from PG control state |
 | Legacy artifact precedence | `pilot_status.watcher_scope_alignment` can still produce scope mismatch | Legacy artifacts become diagnostics only |
 | Watcher candidate-universe source | Watcher production path reads DB candidate scope/runtime bindings; Candidate Pool export requires `--allow-local-file-diagnostic` | Watcher reads DB candidate scope/runtime bindings |
 | Broad read-model source | Tradeability reads many files and then feeds Candidate Pool / Daily Table | Tradeability becomes a DB-backed read model over current projections |

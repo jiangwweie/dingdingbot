@@ -3119,10 +3119,9 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     bootstrap_daily_command = daily_table_commands[0]
     server_backed_daily_command = daily_table_commands[1]
     assert "--candidate-pool-json" not in bootstrap_daily_command
-    assert "--candidate-pool-json" in server_backed_daily_command
-    assert server_backed_daily_command[
-        server_backed_daily_command.index("--candidate-pool-json") + 1
-    ] == str(tmp_path / "latest-strategy-live-candidate-pool.json")
+    assert "--candidate-pool-json" not in server_backed_daily_command
+    assert "--require-database-url" in bootstrap_daily_command
+    assert "--require-database-url" in server_backed_daily_command
     single_lane_command = single_lane_task_packet_commands[-1]
     assert "--daily-table-json" in single_lane_command
     assert single_lane_command[
@@ -3414,24 +3413,18 @@ def test_local_monitor_sequence_runs_cache_checks_in_order(tmp_path: Path) -> No
     bootstrap_daily_table_command = daily_table_commands[0]
     server_backed_daily_table_command = daily_table_commands[1]
     assert "--candidate-pool-json" not in bootstrap_daily_table_command
-    assert server_backed_daily_table_command[
-        server_backed_daily_table_command.index("--candidate-pool-json") + 1
-    ] == str(tmp_path / "latest-strategy-live-candidate-pool.json")
-    assert bootstrap_daily_table_command[
-        bootstrap_daily_table_command.index("--tradeability-json") + 1
-    ] == str(tmp_path / "tradeability.json")
-    assert bootstrap_daily_table_command[
-        bootstrap_daily_table_command.index("--replay-live-parity-json") + 1
-    ] == str(tmp_path / "replay-live-parity.json")
-    assert bootstrap_daily_table_command[
-        bootstrap_daily_table_command.index("--action-time-boundary-json") + 1
-    ] == str(tmp_path / "fresh-signal-action-time-boundary.json")
-    assert bootstrap_daily_table_command[
-        bootstrap_daily_table_command.index("--mi-trial-admission-json") + 1
-    ] == str(tmp_path / "mi-trial-admission.json")
-    assert bootstrap_daily_table_command[
-        bootstrap_daily_table_command.index("--runtime-safety-json") + 1
-    ] == str(tmp_path / "runtime-safety-state.json")
+    assert "--candidate-pool-json" not in server_backed_daily_table_command
+    assert "--require-database-url" in bootstrap_daily_table_command
+    assert "--require-database-url" in server_backed_daily_table_command
+    for legacy_arg in (
+        "--tradeability-json",
+        "--replay-live-parity-json",
+        "--action-time-boundary-json",
+        "--mi-trial-admission-json",
+        "--runtime-safety-json",
+    ):
+        assert legacy_arg not in bootstrap_daily_table_command
+        assert legacy_arg not in server_backed_daily_table_command
     assert bootstrap_daily_table_command[
         bootstrap_daily_table_command.index("--output-json") + 1
     ] == str(tmp_path / "daily-live-table.json")

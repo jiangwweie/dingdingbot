@@ -12,7 +12,7 @@
     {
       "path": "output/runtime-monitor/latest-daily-live-enablement-table.json",
       "paired_path": "output/runtime-monitor/latest-daily-live-enablement-table.md",
-      "source_command": "python3 scripts/build_daily_live_enablement_table.py",
+      "source_command": "python3 scripts/build_daily_live_enablement_table.py --require-database-url",
       "validator": "python3 scripts/validate_daily_live_enablement_table.py output/runtime-monitor/latest-daily-live-enablement-table.json",
       "consumed_by": "daily_live_enablement_status"
     },

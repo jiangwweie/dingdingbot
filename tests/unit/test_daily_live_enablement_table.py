@@ -381,7 +381,7 @@ def test_daily_table_pg_cli_requires_database_url_when_requested(
     assert not output_md.exists()
 
 
-def test_daily_table_cli_requires_pg_or_explicit_local_diagnostic(
+def test_daily_table_cli_requires_pg(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -404,7 +404,7 @@ def test_daily_table_cli_requires_pg_or_explicit_local_diagnostic(
     )
 
     assert build.returncode == 2
-    assert "allow-local-file-diagnostic" in build.stderr
+    assert "PG_DATABASE_URL is required for PG-only Daily Table" in build.stderr
     assert not output_json.exists()
     assert not output_md.exists()
 
@@ -874,36 +874,16 @@ def test_daily_table_builder_marks_missing_sources_invalid():
     assert any("source_validation.valid" in error for error in _errors(table))
 
 
-def test_daily_table_cli_and_validator_cli_round_trip(tmp_path: Path, monkeypatch):
+def test_daily_table_cli_rejects_local_file_diagnostic_flag(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    tradeability = tmp_path / "tradeability.json"
-    parity = tmp_path / "parity.json"
-    action_time = tmp_path / "action-time.json"
-    mi = tmp_path / "mi.json"
-    runtime_safety = tmp_path / "runtime-safety.json"
     output_json = tmp_path / "daily.json"
     output_md = tmp_path / "daily.md"
-    tradeability.write_text(json.dumps(_tradeability()), encoding="utf-8")
-    parity.write_text(json.dumps(_parity()), encoding="utf-8")
-    action_time.write_text(json.dumps(_action_time()), encoding="utf-8")
-    mi.write_text(json.dumps(_mi()), encoding="utf-8")
-    runtime_safety.write_text(json.dumps(_runtime_safety()), encoding="utf-8")
 
     result = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
             "--allow-local-file-diagnostic",
-            "--tradeability-json",
-            str(tradeability),
-            "--replay-live-parity-json",
-            str(parity),
-            "--action-time-boundary-json",
-            str(action_time),
-            "--mi-trial-admission-json",
-            str(mi),
-            "--runtime-safety-json",
-            str(runtime_safety),
             "--output-json",
             str(output_json),
             "--output-owner-progress",
@@ -913,20 +893,13 @@ def test_daily_table_cli_and_validator_cli_round_trip(tmp_path: Path, monkeypatc
         capture_output=True,
         check=False,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert output_json.exists()
-    assert output_md.exists()
-
-    validate = subprocess.run(
-        [sys.executable, str(VALIDATOR_PATH), str(output_json)],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert validate.returncode == 0, validate.stdout + validate.stderr
+    assert result.returncode == 2
+    assert "unrecognized arguments: --allow-local-file-diagnostic" in result.stderr
+    assert not output_json.exists()
+    assert not output_md.exists()
 
 
-def test_daily_table_cli_missing_inputs_do_not_validate(tmp_path: Path, monkeypatch):
+def test_daily_table_cli_rejects_legacy_json_inputs(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
     output_json = tmp_path / "daily.json"
     output_md = tmp_path / "daily.md"
@@ -935,7 +908,6 @@ def test_daily_table_cli_missing_inputs_do_not_validate(tmp_path: Path, monkeypa
         [
             sys.executable,
             str(BUILDER_PATH),
-            "--allow-local-file-diagnostic",
             "--tradeability-json",
             str(tmp_path / "missing-tradeability.json"),
             "--replay-live-parity-json",
@@ -955,15 +927,7 @@ def test_daily_table_cli_missing_inputs_do_not_validate(tmp_path: Path, monkeypa
         capture_output=True,
         check=False,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    table = json.loads(output_json.read_text(encoding="utf-8"))
-    assert table["status"] == "daily_live_enablement_table_source_invalid"
-
-    validate = subprocess.run(
-        [sys.executable, str(VALIDATOR_PATH), str(output_json)],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert validate.returncode == 1
-    assert "source_validation.valid" in validate.stderr
+    assert result.returncode == 2
+    assert "unrecognized arguments: --tradeability-json" in result.stderr
+    assert not output_json.exists()
+    assert not output_md.exists()

@@ -23,7 +23,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
-    FileBackedRuntimeControlStateRepository,
     PgBackedRuntimeControlStateRepository,
 )
 
@@ -111,39 +110,17 @@ BLOCKER_STAGE_TIER = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tradeability-json")
-    parser.add_argument("--replay-live-parity-json")
-    parser.add_argument("--action-time-boundary-json")
-    parser.add_argument("--mi-trial-admission-json")
-    parser.add_argument("--runtime-safety-json")
-    parser.add_argument(
-        "--candidate-pool-json",
-        default="",
-        help="Optional second-pass server-backed candidate pool JSON.",
-    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
         "--database-url",
         default=os.getenv("PG_DATABASE_URL", ""),
-        help=(
-            "PostgreSQL DSN for the DB-backed production current source. "
-            "When omitted, the legacy file path is used only for local migration "
-            "comparison."
-        ),
+        help="PostgreSQL DSN for the DB-backed Daily Table current source.",
     )
     parser.add_argument(
         "--require-database-url",
         action="store_true",
-        help="Fail instead of falling back to legacy JSON inputs when PG_DATABASE_URL is absent.",
-    )
-    parser.add_argument(
-        "--allow-local-file-diagnostic",
-        action="store_true",
-        help=(
-            "Allow explicit local JSON inputs for migration diagnostics only. "
-            "Production current Daily Table must use PG."
-        ),
+        help="Accepted for deploy compatibility; Daily Table is always PG-only.",
     )
     parser.add_argument(
         "--allow-non-postgres-for-test",
@@ -152,75 +129,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.require_database_url and not args.database_url:
+    if not args.database_url:
         print(
-            "ERROR: PG_DATABASE_URL is required for DB-backed Daily Table",
+            "ERROR: PG_DATABASE_URL is required for PG-only Daily Table",
             file=sys.stderr,
         )
         return 2
 
-    if args.database_url:
-        if not args.database_url.startswith(
-            ("postgresql://", "postgresql+psycopg://")
-        ) and not args.allow_non_postgres_for_test:
-            print(
-                "ERROR: DB-backed Daily Table requires PostgreSQL DSN",
-                file=sys.stderr,
-            )
-            return 2
-        engine = sa.create_engine(args.database_url)
-        try:
-            with engine.connect() as conn:
-                repository = PgBackedRuntimeControlStateRepository(conn)
-                artifact = build_daily_live_enablement_table_from_control_state(
-                    repository.read_control_state(),
-                )
-        finally:
-            engine.dispose()
-    else:
-        if not args.allow_local_file_diagnostic:
-            print(
-                "ERROR: PG_DATABASE_URL is required for DB-backed Daily Table; "
-                "use --allow-local-file-diagnostic only for explicit local diagnostics",
-                file=sys.stderr,
-            )
-            return 2
-        required_local_inputs = {
-            "--tradeability-json": args.tradeability_json,
-            "--replay-live-parity-json": args.replay_live_parity_json,
-            "--action-time-boundary-json": args.action_time_boundary_json,
-            "--mi-trial-admission-json": args.mi_trial_admission_json,
-            "--runtime-safety-json": args.runtime_safety_json,
-        }
-        missing_local_inputs = [
-            flag for flag, value in required_local_inputs.items() if not value
-        ]
-        if missing_local_inputs:
-            print(
-                "ERROR: explicit local diagnostic inputs required: "
-                + ", ".join(missing_local_inputs),
-                file=sys.stderr,
-            )
-            return 2
-        repository = FileBackedRuntimeControlStateRepository()
-        inputs = repository.daily_table_inputs(
-            tradeability_json=Path(args.tradeability_json),
-            replay_live_parity_json=Path(args.replay_live_parity_json),
-            action_time_boundary_json=Path(args.action_time_boundary_json),
-            mi_trial_admission_json=Path(args.mi_trial_admission_json),
-            runtime_safety_json=Path(args.runtime_safety_json),
-            candidate_pool_json=Path(args.candidate_pool_json)
-            if args.candidate_pool_json
-            else None,
+    if not args.database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not args.allow_non_postgres_for_test:
+        print(
+            "ERROR: PG-only Daily Table requires PostgreSQL DSN",
+            file=sys.stderr,
         )
-        artifact = build_daily_live_enablement_table(
-            tradeability=inputs["tradeability"],
-            replay_live_parity=inputs["replay_live_parity"],
-            action_time_boundary=inputs["action_time_boundary"],
-            mi_trial_admission=inputs["mi_trial_admission"],
-            runtime_safety=inputs["runtime_safety"],
-            candidate_pool=inputs["candidate_pool"],
-        )
+        return 2
+    engine = sa.create_engine(args.database_url)
+    try:
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn)
+            artifact = build_daily_live_enablement_table_from_control_state(
+                repository.read_control_state(),
+            )
+    finally:
+        engine.dispose()
     output_json = Path(args.output_json)
     output_md = Path(args.output_owner_progress)
     _write_json(output_json, artifact)
