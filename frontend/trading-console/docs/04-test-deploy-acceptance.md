@@ -42,6 +42,30 @@ All browser artifacts should be stored under:
 output/playwright/trading-console/
 ```
 
+### Authenticated Domain Acceptance Command
+
+Authenticated server-domain acceptance must be run with ephemeral test
+credentials supplied by environment variables. The command stores screenshots
+only; it does not store the username, password, **TOTP secret**, or current
+**TOTP code**.
+
+```bash
+cd frontend/trading-console
+npx playwright install chromium
+TRADING_CONSOLE_OPERATOR_USERNAME='...' \
+TRADING_CONSOLE_OPERATOR_PASSWORD='...' \
+TRADING_CONSOLE_OPERATOR_TOTP_CODE='123456' \
+npm run acceptance:domain-auth
+```
+
+Optional variables:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| **`TRADING_CONSOLE_BASE_URL`** | `https://jiaoyingpan.cloud/trading-console/` | Domain under acceptance |
+| **`TRADING_CONSOLE_SCREENSHOT_DIR`** | `output/playwright/trading-console/` | Screenshot output directory |
+| **`PW_HEADED`** | unset | Set to `1` for headed browser debugging |
+
 ## Review Checklist
 
 | Area | Review Requirement |
@@ -113,6 +137,8 @@ local build -> server static directory -> Nginx domain -> backend API proxy
 | **Domain login audit rerun** | Passed | `output/playwright/trading-console/10-domain-login-audit.png` |
 | **Domain invalid-login audit rerun** | Passed | `output/playwright/trading-console/11-domain-invalid-login-audit.png` |
 | **Domain login theme toggle** | Passed | `output/playwright/trading-console/12-domain-login-theme-toggle-audit.png` |
+| **Domain auth script missing-credential guard** | Passed | `npm run acceptance:domain-auth` exits `2` and names required env vars |
+| **Domain auth script invalid-login guard** | Passed | Invalid credentials exit non-zero after capturing `14-domain-auth-login-failed.png` |
 | **Local five-page render** | Passed | `output/playwright/trading-console/01-dashboard-dark.png` through `05-exceptions-dark.png` |
 | **Theme switch** | Passed | `output/playwright/trading-console/06-exceptions-light.png` |
 | **Responsive smoke** | Passed | `output/playwright/trading-console/07-order-ledger-900px-dark.png` |
@@ -124,4 +150,5 @@ test operator username, password, and current **Google Authenticator TOTP** code
 No frontend or backend bypass was used. Until that credential is available, the
 completed server-domain evidence covers static deployment, unauthenticated auth
 boundary, login rendering, invalid-login behavior, and login-page theme
-switching.
+switching. The repeatable command for the remaining authenticated check is
+`npm run acceptance:domain-auth`.
