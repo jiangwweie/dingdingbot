@@ -433,10 +433,6 @@ def test_refresh_product_state_artifacts_retires_default_goal_status_writer(
     tmp_path,
     monkeypatch,
 ):
-    from scripts.build_strategygroup_runtime_goal_status import (
-        REQUIRED_DRY_RUN_CHECKS,
-    )
-
     output_dir = tmp_path / "reports"
     external_dry_run_json = tmp_path / "external" / "runtime-dry-run-audit-chain.json"
     external_goal_status_json = tmp_path / "external" / "strategygroup-runtime-goal-status.json"
@@ -449,7 +445,7 @@ def test_refresh_product_state_artifacts_retires_default_goal_status_writer(
             "scope": "runtime_dry_run_audit_chain",
             "status": "passed",
             "scenario_count": 14,
-            "checks": {name: True for name in REQUIRED_DRY_RUN_CHECKS},
+            "checks": {"dangerous_effects_absent": True},
             "safety_invariants": {
                 "exchange_write_called": False,
                 "order_created": False,

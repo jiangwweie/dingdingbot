@@ -160,7 +160,7 @@ JSON/MD only for compatibility.
 | Candidate Pool | Daily Table, Tradeability, replay/live parity, action-time boundary, detector facts, runtime active monitor, Owner auth JSON | `latest-strategy-live-candidate-pool.json/md` | Generated view recomputes source priority and may become authority | `brc_pretrade_readiness_rows`, `brc_promotion_candidates`, `brc_action_time_lane_inputs` |
 | Daily Table | Candidate Pool plus generated fact/readiness outputs | `latest-daily-live-enablement-table.json/md` | Management table can inherit stale generated inputs | DB-backed read-model export from current projections |
 | Single Lane Packet | Daily Table JSON | `latest-single-lane-task-packet.json/md` | Market waits can be accidentally wrapped as closure tasks | Task export only, not runtime authority |
-| Goal Status | report-dir artifacts, optional Candidate Pool JSON, release manifest, legacy pilot status | `strategygroup-runtime-goal-status.json` | Multiple writers and optional Candidate Pool can let legacy scope mismatch overrule new control state | `brc_goal_status_current` single-owner projection |
+| Goal Status | PG control state via `PgBackedRuntimeControlStateRepository`; report-dir path is export location only | `strategygroup-runtime-goal-status.json` | Reintroducing file-backed Goal Status inputs would let legacy scope mismatch overrule new control state | `brc_goal_status_current` single-owner projection |
 | Server monitor | Daily Table, Candidate Pool, public/account facts, watcher/systemd/deploy health JSON, dedupe JSON | server monitor JSON and Feishu dedupe state | Production monitor can become a file aggregator instead of the runtime fact owner | `brc_server_monitor_runs`, `brc_server_monitor_notifications`, current projections |
 
 ## Current Conflict Cases
@@ -171,7 +171,7 @@ ownership, not just a DB table for every existing artifact.
 | Conflict | Concrete shape | Why it matters | Target rule |
 | --- | --- | --- | --- |
 | Multiple writers for one current file | `strategygroup-runtime-goal-status.json` can be written by more than one post-step path | Last writer wins even if it used older inputs | One current projection has exactly one owner projector |
-| Optional control source | Goal Status can run with or without `--candidate-pool-json` | Same command can produce different authority conclusions | Candidate Pool/current projection is required once it becomes the control-plane source |
+| Retired optional control source | Goal Status no longer accepts `--candidate-pool-json` or local file diagnostic fallback | Reintroducing the option would let the same command produce different authority conclusions | Goal Status derives Candidate Pool/current projection from PG control state only |
 | Legacy diagnostic promoted to blocker | `pilot_status.watcher_scope_alignment` can still emit scope mismatch after Candidate Pool proves coverage | Old status can hide real waiting/fresh-signal state | Legacy artifacts may write diagnostics only |
 | Watcher universe from generated view | production watcher tick reads PG candidate scope/runtime bindings; `--candidate-universe-json` is guarded by `--allow-local-file-diagnostic` | A previous-cycle read model must not define the current observation universe | Watcher reads DB candidate scope/runtime bindings; Candidate Pool export is diagnostic/export only |
 | Runtime bootstrap from files | `bootstrap_strategygroup_runtime_pilot.py` can historically read handoff/intake/Candidate Pool files | Runtime records could be admitted from stale file scope | Production bootstrap requires PG current state; local files are plan-only diagnostics |
@@ -198,7 +198,7 @@ The unsafe transitional shape is:
 
 ```text
 legacy pilot/status artifacts
-plus optional Candidate Pool JSON
+plus retired Candidate Pool JSON input
 plus multiple systemd post-step writers
 -> strategygroup-runtime-goal-status.json
 ```
@@ -207,7 +207,7 @@ This can report `runtime_scope_mismatch` or
 `selected_strategygroup_scope_mismatch` even after Candidate Pool has proven
 server-backed 5x18 coverage. The fix is not to add another packet. The fix is
 to make Goal Status Current a single-owner projection that depends on the
-Candidate Pool/current readiness projection when that projection is available.
+Candidate Pool/current readiness projection derived from PG control state.
 Legacy scope alignment can remain as `legacy_diagnostics`, but it must not set
 the main current blocker.
 
