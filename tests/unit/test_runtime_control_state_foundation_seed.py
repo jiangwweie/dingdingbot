@@ -111,6 +111,57 @@ def test_seed_is_idempotent(connection, seed_module):
     assert _count(connection, "brc_runtime_scope_bindings") == 22
 
 
+def test_seed_cli_normalizes_asyncpg_dsn_for_sync_engine(
+    seed_module,
+    monkeypatch,
+    capsys,
+):
+    seen_urls: list[str] = []
+
+    class FakeBegin:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_exc):
+            return False
+
+    class FakeEngine:
+        def begin(self):
+            return FakeBegin()
+
+    def fake_create_engine(database_url: str):
+        seen_urls.append(database_url)
+        return FakeEngine()
+
+    monkeypatch.setattr(seed_module.sa, "create_engine", fake_create_engine)
+    monkeypatch.setattr(
+        seed_module,
+        "seed_runtime_control_state_foundation",
+        lambda *_args, **_kwargs: {
+            "status": "applied",
+            "forbidden_effects": {
+                "exchange_write": False,
+                "order_created": False,
+            },
+        },
+    )
+
+    assert (
+        seed_module.main(
+            [
+                "--apply",
+                "--json",
+                "--database-url",
+                "postgresql+asyncpg://user:pass@localhost:5432/brc",
+            ]
+        )
+        == 0
+    )
+
+    assert seen_urls == ["postgresql+psycopg://user:pass@localhost:5432/brc"]
+    assert '"status": "applied"' in capsys.readouterr().out
+
+
 def test_seed_preserves_strategy_specific_side_support(connection, seed_module):
     with connection.begin():
         seed_module.seed_runtime_control_state_foundation(connection)

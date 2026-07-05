@@ -465,6 +465,8 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert '"status": "postdeploy_accepted"' in all_commands
     assert "pip install --disable-pip-version-check -r requirements.txt" in all_commands
     assert "alembic upgrade head" in all_commands
+    assert "seed_runtime_control_state_foundation.py --apply --json" in all_commands
+    assert "validate_runtime_control_state_repository.py --json" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
     assert "--expected-min-migrations 89" in all_commands
     assert "--base-revision 081 --head-revision 089 --expected-revision-count 13" in all_commands
@@ -492,6 +494,8 @@ def test_git_deploy_plan_batches_tokyo_ssh_commands_to_reduce_server_interaction
         "pg_dump" in command
         and "pip install --disable-pip-version-check -r requirements.txt" in command
         and "alembic upgrade head" in command
+        and "seed_runtime_control_state_foundation.py --apply --json" in command
+        and "validate_runtime_control_state_repository.py --json" in command
         for command in ssh_commands
     )
     assert any(
@@ -736,6 +740,8 @@ def test_git_deploy_executor_apply_runs_commands_with_fake_runner():
     assert len(calls) == report["checks"]["commands_planned"]
     assert any("git fetch --prune origin" in command for command in calls)
     assert any("alembic upgrade head" in command for command in calls)
+    assert any("seed_runtime_control_state_foundation.py --apply --json" in command for command in calls)
+    assert any("validate_runtime_control_state_repository.py --json" in command for command in calls)
     assert report["effects"]["remote_files_modified"] is True
     assert report["effects"]["migrations_run"] is True
     assert report["effects"]["order_created"] is False

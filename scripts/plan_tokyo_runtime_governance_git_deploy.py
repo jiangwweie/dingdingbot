@@ -463,7 +463,11 @@ def _plan_phases(
         "--disable-pip-version-check -r requirements.txt; "
         f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
         f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
-        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head"
+        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/seed_runtime_control_state_foundation.py --apply --json; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/validate_runtime_control_state_repository.py --json"
     )
     switch_start_and_smoke_command = (
         f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}; "

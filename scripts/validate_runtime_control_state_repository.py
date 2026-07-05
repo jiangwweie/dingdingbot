@@ -17,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -37,9 +38,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args.database_url:
         print("ERROR: PG_DATABASE_URL or --database-url is required", file=sys.stderr)
         return 2
+    args.database_url = normalize_sync_postgres_dsn(args.database_url)
     if (
         not args.allow_non_postgres_for_test
-        and not args.database_url.startswith(("postgresql://", "postgresql+psycopg://"))
+        and not is_sync_postgres_dsn(args.database_url)
     ):
         print("ERROR: repository validation requires PostgreSQL DSN", file=sys.stderr)
         return 2

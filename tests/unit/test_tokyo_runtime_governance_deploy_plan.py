@@ -153,6 +153,8 @@ def test_deploy_plan_builds_owner_gated_remote_mutation_commands(tmp_path: Path)
     assert "docker exec brc_prelive_pg_20260601" in all_commands
     assert "pip install --disable-pip-version-check -r requirements.txt" in all_commands
     assert "alembic upgrade head" in all_commands
+    assert "seed_runtime_control_state_foundation.py --apply --json" in all_commands
+    assert "validate_runtime_control_state_repository.py --json" in all_commands
     assert "ln -sfn" in all_commands
     assert "systemctl stop brc-owner-console-backend.service" in all_commands
     assert "systemctl start brc-owner-console-backend.service" in all_commands
