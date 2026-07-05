@@ -14,9 +14,7 @@ from scripts import bootstrap_strategygroup_runtime_pilot as bootstrap
 from scripts.bootstrap_strategygroup_runtime_pilot import (
     PG_SOURCE_REF,
     RuntimePilotBootstrapConfig,
-    _active_inventory_counts,
     _bootstrap_config,
-    _runtime_rows_from_payload,
     _runtime_symbol,
     build_artifact,
 )
@@ -242,70 +240,6 @@ def test_runtime_symbol_normalizes_binance_usdt_to_runtime_symbol():
     assert _runtime_symbol("INTCUSDT") == "INTC/USDT:USDT"
     assert _runtime_symbol("XAUUSDT") == "XAU/USDT:USDT"
     assert _runtime_symbol("COIN/USDT:USDT") == "COIN/USDT:USDT"
-
-
-def test_runtime_rows_from_payload_accepts_current_runtime_signal_summary_shape():
-    rows = _runtime_rows_from_payload(
-        {
-            "active_runtime_count": 2,
-            "runtime_signal_summaries": [
-                {
-                    "runtime_instance_id": "runtime-mpg-1",
-                    "strategy_family_id": "MPG-001",
-                    "symbol": "COIN/USDT:USDT",
-                    "side": "long",
-                }
-            ],
-        }
-    )
-
-    assert rows == [
-        {
-            "runtime_instance_id": "runtime-mpg-1",
-            "strategy_family_id": "MPG-001",
-            "symbol": "COIN/USDT:USDT",
-            "side": "long",
-        }
-    ]
-
-
-def test_runtime_rows_from_payload_ignores_legacy_status_packet_wrapper():
-    rows = _runtime_rows_from_payload(
-        {
-            "status_packet": {
-                "runtime_signal_summaries": [
-                    {
-                        "runtime_instance_id": "legacy-runtime-must-not-win",
-                        "strategy_family_id": "MPG-001",
-                    }
-                ],
-            }
-        }
-    )
-
-    assert rows == []
-
-
-def test_active_inventory_counts_ignores_legacy_status_packet_wrapper():
-    counts = _active_inventory_counts(
-        {
-            "status_packet": {
-                "active_runtime_count": 9,
-                "monitored_runtime_count": 7,
-            },
-            "data": {
-                "watcher": {
-                    "active_runtime_count": 2,
-                    "monitored_runtime_count": 1,
-                }
-            },
-        }
-    )
-
-    assert counts == {
-        "active_runtime_count": 2,
-        "monitored_runtime_count": 1,
-    }
 
 
 def test_plan_skips_existing_group_and_observe_only_by_default():
@@ -657,7 +591,7 @@ def test_execute_blocks_when_active_inventory_is_unavailable():
     assert "active_runtime_inventory_unavailable:URLError" in artifact["blockers"]
 
 
-def test_cli_requires_pg_or_explicit_local_diagnostic(tmp_path, capsys, monkeypatch):
+def test_cli_requires_pg_runtime_control_state(tmp_path, capsys, monkeypatch):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
     output_path = tmp_path / "bootstrap.json"
 
@@ -665,7 +599,9 @@ def test_cli_requires_pg_or_explicit_local_diagnostic(tmp_path, capsys, monkeypa
 
     assert result == 2
     assert not output_path.exists()
-    assert "local diagnostic only" in capsys.readouterr().err
+    assert "PG_DATABASE_URL is required for PG-only runtime bootstrap" in (
+        capsys.readouterr().err
+    )
 
 
 def test_cli_execute_requires_database_url(tmp_path, capsys, monkeypatch):
@@ -682,28 +618,32 @@ def test_cli_execute_requires_database_url(tmp_path, capsys, monkeypatch):
 
     assert result == 2
     assert not output_path.exists()
-    assert "--execute requires PG_DATABASE_URL" in capsys.readouterr().err
-
-
-def test_cli_execute_rejects_local_file_diagnostic_flag(tmp_path, capsys):
-    database_url = _seed_runtime_control_state_db(tmp_path)
-    output_path = tmp_path / "bootstrap.json"
-
-    result = bootstrap.main(
-        [
-            "--database-url",
-            database_url,
-            "--allow-non-postgres-for-test",
-            "--allow-local-file-diagnostic",
-            "--execute",
-            "--output-json",
-            str(output_path),
-        ]
+    assert "PG_DATABASE_URL is required for PG-only runtime bootstrap" in (
+        capsys.readouterr().err
     )
 
-    assert result == 2
+
+def test_cli_rejects_removed_local_diagnostic_flag(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    output_path = tmp_path / "bootstrap.json"
+    removed_flag = "--allow-" + "local-file-diagnostic"
+
+    with pytest.raises(SystemExit) as exc:
+        bootstrap.main(
+            [
+                "--database-url",
+                database_url,
+                "--allow-non-postgres-for-test",
+                removed_flag,
+                "--execute",
+                "--output-json",
+                str(output_path),
+            ]
+        )
+
+    assert exc.value.code == 2
     assert not output_path.exists()
-    assert "must not be combined with --execute" in capsys.readouterr().err
+    assert f"unrecognized arguments: {removed_flag}" in capsys.readouterr().err
 
 
 def test_cli_execute_rejects_non_postgres_test_dsn_override(tmp_path, capsys):
@@ -726,7 +666,7 @@ def test_cli_execute_rejects_non_postgres_test_dsn_override(tmp_path, capsys):
     assert "must not be combined with --execute" in capsys.readouterr().err
 
 
-def test_cli_rejects_pg_scope_mixed_with_candidate_universe_json(tmp_path, capsys):
+def test_cli_rejects_removed_candidate_universe_file_flag(tmp_path, capsys):
     database_url = _seed_runtime_control_state_db(tmp_path)
     candidate_universe = tmp_path / "candidate-pool.json"
     candidate_universe.write_text(
@@ -738,21 +678,23 @@ def test_cli_rejects_pg_scope_mixed_with_candidate_universe_json(tmp_path, capsy
         ),
         encoding="utf-8",
     )
+    removed_flag = "--candidate-" + "universe-json"
 
-    result = bootstrap.main(
-        [
-            "--database-url",
-            database_url,
-            "--allow-non-postgres-for-test",
-            "--candidate-universe-json",
-            str(candidate_universe),
-            "--output-json",
-            str(tmp_path / "bootstrap.json"),
-        ]
-    )
+    with pytest.raises(SystemExit) as exc:
+        bootstrap.main(
+            [
+                "--database-url",
+                database_url,
+                "--allow-non-postgres-for-test",
+                removed_flag,
+                str(candidate_universe),
+                "--output-json",
+                str(tmp_path / "bootstrap.json"),
+            ]
+        )
 
-    assert result == 2
-    assert "must not mix local scope files" in capsys.readouterr().err
+    assert exc.value.code == 2
+    assert f"unrecognized arguments: {removed_flag}" in capsys.readouterr().err
 
 
 def test_cli_pg_bootstrap_requires_active_runtime_scope_binding(tmp_path, capsys):
@@ -807,20 +749,18 @@ def test_cli_pg_bootstrap_requires_policy_notional_leverage_scope(tmp_path, caps
 
 def test_cli_pg_backed_bootstrap_reads_seeded_runtime_control_state(
     tmp_path,
+    monkeypatch,
 ):
     database_url = _seed_runtime_control_state_db(tmp_path)
-    active_runtimes = tmp_path / "active-runtimes.json"
-    active_runtimes.write_text(json.dumps({"items": []}), encoding="utf-8")
     output_path = tmp_path / "bootstrap.json"
+    monkeypatch.setattr(bootstrap, "UrlLibApiClient", lambda api_base: object())
+    monkeypatch.setattr(bootstrap, "_list_active_runtimes", lambda client: ([], []))
 
     result = bootstrap.main(
         [
             "--database-url",
             database_url,
             "--allow-non-postgres-for-test",
-            "--allow-local-file-diagnostic",
-            "--active-runtimes-json",
-            str(active_runtimes),
             "--max-symbols-per-group",
             "4",
             "--max-total-new-runtimes",

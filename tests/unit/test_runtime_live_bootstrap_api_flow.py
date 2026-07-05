@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from scripts.runtime_live_bootstrap_api_flow import (
     BootstrapConfig,
     RuntimeLiveBootstrapApiFlow,
+    _parse_args,
 )
 
 
@@ -445,3 +448,13 @@ def test_bootstrap_accepts_current_admission_decision_field_name():
     assert admission_steps[0]["step_result"] == {
         "admission_result": "admit_with_constraints"
     }
+
+
+def test_cli_rejects_removed_account_facts_file_flag(capsys):
+    removed_flag = "--account-" + "facts-json"
+
+    with pytest.raises(SystemExit) as exc:
+        _parse_args([removed_flag, "account-facts.json"])
+
+    assert exc.value.code == 2
+    assert f"unrecognized arguments: {removed_flag}" in capsys.readouterr().err

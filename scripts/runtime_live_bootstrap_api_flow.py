@@ -66,7 +66,6 @@ class BootstrapConfig:
     min_liquidation_stop_buffer: Decimal | None = None
     playbook_id: str = "PB-BRC-LIVE-RUNTIME-V1"
     account_facts_source: str = "binance_readonly"
-    account_facts_json: str | None = None
     owner_operator_id: str = "owner"
     runtime_carrier_id: str = "strategygroup-runtime-bootstrap"
     reason: str = "Owner standing-authorized StrategyGroup runtime bootstrap"
@@ -499,9 +498,6 @@ class RuntimeLiveBootstrapApiFlow:
         )
 
     def _account_facts_snapshot(self) -> dict[str, Any]:
-        if self._config.account_facts_json:
-            with open(self._config.account_facts_json, "r", encoding="utf-8") as handle:
-                return json.load(handle)
         if self._config.account_facts_source == "static":
             return _static_account_facts(self._config)
         if self._config.account_facts_source == "binance_readonly":
@@ -869,7 +865,6 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
         choices=["binance_readonly", "static"],
         default="binance_readonly",
     )
-    parser.add_argument("--account-facts-json")
     parser.add_argument("--owner-operator-id", default="owner")
     parser.add_argument(
         "--runtime-carrier-id",
@@ -899,7 +894,6 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
         min_liquidation_stop_buffer=args.min_liquidation_stop_buffer,
         playbook_id=args.playbook_id,
         account_facts_source=args.account_facts_source,
-        account_facts_json=args.account_facts_json,
         owner_operator_id=args.owner_operator_id,
         runtime_carrier_id=args.runtime_carrier_id,
         reason=args.reason,

@@ -31,10 +31,6 @@ if str(ROOT_DIR) not in sys.path:
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
-from scripts.build_strategy_group_handoff_intake_artifact import (  # noqa: E402
-    DEFAULT_HANDOFF_DIR,
-    build_artifact as build_handoff_intake_artifact,
-)
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     DEFAULT_API_BASE,
     UrlLibApiClient,
@@ -78,22 +74,12 @@ class RuntimePilotBootstrapConfig:
     max_symbols_per_group: int = DEFAULT_MAX_SYMBOLS_PER_GROUP
     max_total_new_runtimes: int = DEFAULT_MAX_TOTAL_NEW_RUNTIMES
     account_facts_source: str = "binance_readonly"
-    account_facts_json: str | None = None
     owner_operator_id: str = "owner-standing-authorization"
     playbook_id: str = DEFAULT_PLAYBOOK_ID
     output_json: str | None = None
     renew_exhausted_runtimes: bool = False
     renewal_batch_id: str | None = None
     candidate_universe_source: str | None = None
-
-
-def _read_json(path: str | Path | None) -> dict[str, Any]:
-    if not path:
-        return {}
-    payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return payload
 
 
 def _is_postgres_dsn(database_url: str) -> bool:
@@ -394,28 +380,10 @@ def _bootstrap_inputs_from_control_state(
     )
 
 
-def _local_scope_source_args(args: argparse.Namespace) -> list[str]:
-    candidates = {
-        "--handoff-dir": getattr(args, "handoff_dir", None),
-        "--intake-json": getattr(args, "intake_json", None),
-        "--live-facts-readiness-json": getattr(args, "live_facts_readiness_json", None),
-        "--candidate-universe-json": getattr(args, "candidate_universe_json", None),
-        "--account-facts-json": getattr(args, "account_facts_json", None),
-    }
-    return [name for name, value in candidates.items() if value]
-
-
 def _load_bootstrap_inputs(
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str | None]:
     database_url = str(getattr(args, "database_url", "") or "")
-    allow_local_file_diagnostic = bool(
-        getattr(args, "allow_local_file_diagnostic", False)
-    )
-    if getattr(args, "execute", False) and allow_local_file_diagnostic:
-        raise RuntimeError(
-            "--allow-local-file-diagnostic must not be combined with --execute"
-        )
     if getattr(args, "execute", False) and getattr(
         args,
         "allow_non_postgres_for_test",
@@ -427,12 +395,6 @@ def _load_bootstrap_inputs(
     if getattr(args, "require_database_url", False) and not database_url:
         raise RuntimeError("PG_DATABASE_URL is required for runtime bootstrap")
     if database_url:
-        local_scope_args = _local_scope_source_args(args)
-        if local_scope_args:
-            raise RuntimeError(
-                "DB-backed runtime bootstrap must not mix local scope files: "
-                + ", ".join(local_scope_args)
-            )
         control_state = _read_control_state_from_pg(
             database_url=database_url,
             allow_non_postgres_for_test=bool(
@@ -441,29 +403,7 @@ def _load_bootstrap_inputs(
         )
         return _bootstrap_inputs_from_control_state(control_state)
 
-    if getattr(args, "execute", False):
-        raise RuntimeError(
-            "--execute requires PG_DATABASE_URL; local file diagnostic bootstrap "
-            "must not create runtime records"
-        )
-    if not allow_local_file_diagnostic:
-        raise RuntimeError(
-            "runtime bootstrap without PG_DATABASE_URL is local diagnostic only; "
-            "pass --allow-local-file-diagnostic for plan-only file inputs"
-        )
-    intake = (
-        _read_json(args.intake_json)
-        if args.intake_json
-        else build_handoff_intake_artifact(
-            handoff_dir=Path(args.handoff_dir or DEFAULT_HANDOFF_DIR)
-        )
-    )
-    live_facts_readiness = _read_json(args.live_facts_readiness_json)
-    candidate_pool = _read_json(args.candidate_universe_json)
-    candidate_pool_readiness = _candidate_pool_readiness(candidate_pool)
-    if candidate_pool_readiness:
-        live_facts_readiness = candidate_pool_readiness
-    return intake, live_facts_readiness, candidate_pool, args.candidate_universe_json
+    raise RuntimeError("PG_DATABASE_URL is required for PG-only runtime bootstrap")
 
 
 def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
@@ -517,30 +457,6 @@ def _list_active_runtimes(client: Any) -> tuple[list[dict[str, Any]], list[str]]
         and str(item.get("status") or "").lower() == "active"
     ]
     return active, []
-
-
-def _runtime_rows_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    candidates: list[Any] = [
-        payload.get("items"),
-        payload.get("runtimes"),
-        payload.get("runtime_summaries"),
-        payload.get("runtime_signal_summaries"),
-    ]
-    data = payload.get("data")
-    if isinstance(data, dict):
-        candidates.extend(
-            [
-                data.get("runtime_summaries"),
-                data.get("runtime_signal_summaries"),
-            ]
-        )
-        watcher = data.get("watcher")
-        if isinstance(watcher, dict):
-            candidates.append(watcher.get("runtime_signal_summaries"))
-    for candidate in candidates:
-        if isinstance(candidate, list):
-            return [item for item in candidate if isinstance(item, dict)]
-    return []
 
 
 def _exchange_symbol(symbol: Any) -> str:
@@ -776,28 +692,6 @@ def _groups_from_candidate_pool(
     return groups
 
 
-def _candidate_pool_readiness(candidate_pool: dict[str, Any]) -> dict[str, Any]:
-    symbols_by_group = _candidate_pool_symbols(candidate_pool)
-    if not symbols_by_group:
-        return {}
-    return {
-        "readiness": [
-            {
-                "strategy_group_id": strategy_group_id,
-                "readiness_status": "candidate_universe_runtime_scope_ready",
-                "observe_ready": True,
-                "armed_candidate_prepare_ready": False,
-                "exchange_rules": {
-                    "ready_symbols": symbols,
-                    "blocked_symbols": [],
-                },
-                "blockers": [],
-            }
-            for strategy_group_id, symbols in symbols_by_group.items()
-        ]
-    }
-
-
 def _active_key(runtime: dict[str, Any]) -> tuple[str, str, str]:
     return (
         str(runtime.get("strategy_family_id") or runtime.get("family") or ""),
@@ -999,7 +893,6 @@ def _bootstrap_config(
         max_attempts=3,
         playbook_id=config.playbook_id,
         account_facts_source=config.account_facts_source,
-        account_facts_json=config.account_facts_json,
         owner_operator_id=config.owner_operator_id,
         runtime_carrier_id=runtime_carrier_id,
         reason=reason,
@@ -1361,25 +1254,6 @@ def _next_step(status: str, new_runtime_created: bool) -> str:
     return "resolve_strategygroup_runtime_bootstrap_blockers"
 
 
-def _active_inventory_counts(payload: dict[str, Any]) -> dict[str, Any]:
-    counts = {
-        "active_runtime_count": payload.get("active_runtime_count"),
-        "monitored_runtime_count": payload.get("monitored_runtime_count"),
-    }
-    data = payload.get("data")
-    if isinstance(data, dict):
-        watcher = data.get("watcher")
-        if isinstance(watcher, dict):
-            counts["active_runtime_count"] = (
-                counts["active_runtime_count"] or watcher.get("active_runtime_count")
-            )
-            counts["monitored_runtime_count"] = (
-                counts["monitored_runtime_count"]
-                or watcher.get("monitored_runtime_count")
-            )
-    return {key: value for key, value in counts.items() if value is not None}
-
-
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-base", default=os.environ.get("RUNTIME_LIVE_BOOTSTRAP_API_BASE", DEFAULT_API_BASE))
@@ -1391,31 +1265,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--allow-non-postgres-for-test", action="store_true")
-    parser.add_argument(
-        "--allow-local-file-diagnostic",
-        action="store_true",
-        help=(
-            "Allow plan-only local file bootstrap diagnostics. This must not be "
-            "combined with --execute."
-        ),
-    )
-    parser.add_argument(
-        "--handoff-dir",
-        help=(
-            "Local diagnostic-only StrategyGroup handoff directory. Production "
-            "bootstrap reads PG runtime control state."
-        ),
-    )
-    parser.add_argument("--intake-json")
-    parser.add_argument("--live-facts-readiness-json")
-    parser.add_argument("--active-runtimes-json")
-    parser.add_argument(
-        "--candidate-universe-json",
-        help=(
-            "Local diagnostic-only Candidate Pool export. Production bootstrap "
-            "reads PG candidate scope/runtime bindings."
-        ),
-    )
     parser.add_argument("--strategy-group-id", action="append", default=[])
     parser.add_argument("--include-observe-only", action="store_true")
     parser.add_argument("--max-symbols-per-group", type=int, default=DEFAULT_MAX_SYMBOLS_PER_GROUP)
@@ -1425,7 +1274,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["binance_readonly", "static"],
         default="binance_readonly",
     )
-    parser.add_argument("--account-facts-json")
     parser.add_argument("--owner-operator-id", default="owner-standing-authorization")
     parser.add_argument("--playbook-id", default=DEFAULT_PLAYBOOK_ID)
     parser.add_argument("--renew-exhausted-runtimes", action="store_true")
@@ -1445,26 +1293,12 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    if args.execute and args.active_runtimes_json:
-        print(
-            "--active-runtimes-json is local diagnostic only; execute must inspect "
-            "the runtime API",
-            file=sys.stderr,
-        )
-        return 2
-    if args.active_runtimes_json:
-        active_payload = _read_json(args.active_runtimes_json)
-        active_runtimes = _runtime_rows_from_payload(active_payload)
-        active_counts = _active_inventory_counts(active_payload)
-        active_blockers: list[str] = []
-        client = UrlLibApiClient(api_base=args.api_base) if args.execute else None
-    else:
-        client = UrlLibApiClient(api_base=args.api_base)
-        active_runtimes, active_blockers = _list_active_runtimes(client)
-        active_counts = {
-            "active_runtime_count": len(active_runtimes),
-            "monitored_runtime_count": None,
-        }
+    client = UrlLibApiClient(api_base=args.api_base)
+    active_runtimes, active_blockers = _list_active_runtimes(client)
+    active_counts = {
+        "active_runtime_count": len(active_runtimes),
+        "monitored_runtime_count": None,
+    }
     artifact = build_artifact(
         config=RuntimePilotBootstrapConfig(
             api_base=args.api_base,
@@ -1474,7 +1308,6 @@ def main(argv: list[str] | None = None) -> int:
             max_symbols_per_group=args.max_symbols_per_group,
             max_total_new_runtimes=args.max_total_new_runtimes,
             account_facts_source=args.account_facts_source,
-            account_facts_json=args.account_facts_json,
             owner_operator_id=args.owner_operator_id,
             playbook_id=args.playbook_id,
             output_json=args.output_json,
