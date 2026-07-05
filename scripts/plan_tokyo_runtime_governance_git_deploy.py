@@ -46,7 +46,7 @@ from src.domain.standing_authorization import (
 
 DEFAULT_GIT_REF = "program/live-safe-v1"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-05-089_create_ticket_bound_post_submit_closures.py"
+    "2026-07-05-090_create_runtime_retention_runs.py"
 )
 
 

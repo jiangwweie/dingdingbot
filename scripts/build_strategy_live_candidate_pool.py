@@ -1046,7 +1046,7 @@ def _pg_next_action(first_blocker: str) -> str:
         "watcher_tick_missing": "refresh_readonly_watcher_for_candidate_symbol",
         "artifact_missing": "produce_per_symbol_readiness_evidence",
         "computed_not_satisfied": "continue_observation_with_failed_fact_matrix",
-        "market_wait_validated": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        "market_wait_validated": "continue_watcher_observation_until_fresh_signal",
         "runtime_profile_scope_missing": "bind_or_start_pretrade_runtime_for_candidate_symbol",
         "action_time_boundary_not_reproduced": "repair_non_executing_action_time_rehearsal_path",
         "action_time_preflight_ready": "prepare_non_executing_finalgate_preflight_input",
@@ -1525,7 +1525,7 @@ def _mi_trial_admission_symbol_facts(
             "next_action": (
                 "continue_observation_with_failed_fact_matrix"
                 if failed
-                else "wait_for_fresh_signal_or_refresh_action_time_facts"
+                else "continue_watcher_observation_until_fresh_signal"
             ),
             "evidence_source": "mi_trial_admission_decision:symbol_evidence",
         }
@@ -1611,7 +1611,7 @@ def _brf2_runtime_signal_symbol_facts(
                 "next_action": (
                     "continue_observation_with_failed_fact_matrix"
                     if failed
-                    else "wait_for_fresh_signal_or_refresh_action_time_facts"
+                    else "continue_watcher_observation_until_fresh_signal"
                 ),
                 "evidence_source": "brf2_runtime_signal_facts:per_symbol_facts",
             }
@@ -1666,7 +1666,7 @@ def _brf2_runtime_signal_symbol_facts(
             "next_action": (
                 "continue_observation_with_failed_fact_matrix"
                 if failed
-                else "wait_for_fresh_signal_or_refresh_action_time_facts"
+                else "continue_watcher_observation_until_fresh_signal"
             ),
             "evidence_source": "brf2_runtime_signal_facts:facts",
         }
@@ -2412,7 +2412,7 @@ def _symbol_next_action(
         "action_time_preflight_ready": (
             "prepare_non_executing_finalgate_preflight_input"
         ),
-        "market_wait_validated": "wait_for_fresh_signal_or_refresh_action_time_facts",
+        "market_wait_validated": "continue_watcher_observation_until_fresh_signal",
         "hard_safety_stop": "resolve_hard_safety_stop",
     }.get(first_blocker, str(candidate.get("next_engineering_action") or "reclassify_symbol_blocker"))
 

@@ -945,7 +945,7 @@ def _valid_replay_live_parity_audit(*rows: dict) -> dict:
             "watcher_tick_present": True,
             "computed": True,
             "failed_facts": [],
-            "next_action": "continue_armed_observation_until_fresh_signal",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
         {
             "strategy_group_id": "SOR-001",
@@ -955,7 +955,7 @@ def _valid_replay_live_parity_audit(*rows: dict) -> dict:
             "watcher_tick_present": True,
             "computed": True,
             "failed_facts": [],
-            "next_action": "continue_armed_observation_until_fresh_signal",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
     ] + list(rows)
     deduped: dict[tuple[str, str], dict] = {}

@@ -428,13 +428,13 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert report["checks"]["blockers"] == []
     assert report["checks"]["remote_mutation_confirmation_phrase_required"] is False
     assert report["checks"]["remote_mutation_authorization"]
-    assert report["inputs"]["target_migration_count"] == 89
+    assert report["inputs"]["target_migration_count"] == 90
     assert report["inputs"]["local_latest_migration"] == (
-        "2026-07-05-089_create_ticket_bound_post_submit_closures.py"
+        "2026-07-05-090_create_runtime_retention_runs.py"
     )
     assert report["inputs"]["remote_migration_revision"] == "081"
-    assert report["inputs"]["target_migration_revision"] == "089"
-    assert report["inputs"]["migration_gap_revision_count"] == 13
+    assert report["inputs"]["target_migration_revision"] == "090"
+    assert report["inputs"]["migration_gap_revision_count"] == 14
     phases = {phase["phase"]: phase for phase in report["plan_phases"]}
     assert phases["2_owner_authorized_git_fetch_and_export"]["remote_mutation"] is True
     assert all(
@@ -468,9 +468,9 @@ def test_git_deploy_plan_uses_remote_fetch_export_without_scp():
     assert "seed_runtime_control_state_foundation.py --apply --json" in all_commands
     assert "validate_runtime_control_state_repository.py --json" in all_commands
     assert "verify_tokyo_runtime_governance_postdeploy.py" in all_commands
-    assert "--expected-min-migrations 89" in all_commands
-    assert "--base-revision 081 --head-revision 089 --expected-revision-count 13" in all_commands
-    assert "--expected-migration-count 89" in all_commands
+    assert "--expected-min-migrations 90" in all_commands
+    assert "--base-revision 081 --head-revision 090 --expected-revision-count 14" in all_commands
+    assert "--expected-migration-count 90" in all_commands
     assert "--expected-migration-count 70" not in all_commands
     assert "--base-revision 064 --head-revision 070" not in all_commands
 

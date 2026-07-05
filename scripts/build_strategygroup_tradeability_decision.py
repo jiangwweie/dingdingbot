@@ -2027,7 +2027,7 @@ def _first_blocker(
             "fresh_executable_signal_absent",
             "MPG is the admitted live lane, but no fresh executable signal exists",
             "market",
-            "continue_armed_observation_until_fresh_signal",
+            "continue_watcher_observation_until_fresh_signal",
             "live_submit_ready",
         )
 
@@ -2094,7 +2094,7 @@ def _first_blocker(
             "fresh_executable_signal_absent",
             "admission and facts are closed; only fresh signal is missing",
             "market",
-            "continue_armed_observation_until_fresh_signal",
+            "continue_watcher_observation_until_fresh_signal",
             "live_submit_ready",
         )
     return _classifier(
@@ -3130,7 +3130,7 @@ def _next_action_for_contract(blocker_class: str) -> str:
         "action_time_boundary_not_reproduced": "repair_non_executing_action_time_rehearsal_path",
         "policy_scope_missing": "record_scoped_owner_policy",
         "runtime_profile_scope_missing": "bind_runtime_profile_scope",
-        "market_wait_validated": "continue_armed_observation_until_fresh_signal",
+        "market_wait_validated": "continue_watcher_observation_until_fresh_signal",
         "active_position_resolution": "resolve_active_position_or_open_order",
         "hard_safety_stop": "remove_hard_safety_violation",
         "review_only_warning": "record_strategy_review_decision",

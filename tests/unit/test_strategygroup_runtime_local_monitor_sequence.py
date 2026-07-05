@@ -1374,7 +1374,7 @@ def _write_ready_tradeability_decision(command: list[str]) -> None:
                     "decision": "not_tradable_market_wait",
                     "first_blocker_class": "fresh_executable_signal_absent",
                     "blocker_owner": "market",
-                    "next_action": "continue_armed_observation_until_fresh_signal",
+                    "next_action": "continue_watcher_observation_until_fresh_signal",
                     "after_next_state": "live_submit_ready",
                     "actionable_now": False,
                     "real_order_authority": False,
@@ -1463,7 +1463,7 @@ def _write_ready_three_strategy_live_trial_portfolio(command: list[str]) -> None
                         "decision": "not_tradable_market_wait",
                         "first_blocker_class": "fresh_executable_signal_absent",
                         "blocker_owner": "market",
-                        "next_action": "continue_armed_observation_until_fresh_signal",
+                        "next_action": "continue_watcher_observation_until_fresh_signal",
                     },
                 },
                 "BRF2-001": {

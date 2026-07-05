@@ -1531,7 +1531,7 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
             "event_time_utc": "2026-07-03T12:00:00+00:00",
             "failed_facts": [],
             "mismatch_count": 13,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
         {
             "strategy_group_id": "MPG-001",
@@ -1544,7 +1544,7 @@ def test_candidate_pool_selects_one_action_time_input_and_defers_the_rest():
             "event_time_utc": "2026-07-03T12:01:00+00:00",
             "failed_facts": [],
             "mismatch_count": 10,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
     ]
     sor_detector = {
@@ -1717,7 +1717,7 @@ def test_candidate_pool_does_not_expand_unsupported_side_from_runtime_coverage()
             "event_time_utc": "2026-07-03T12:00:00+00:00",
             "failed_facts": [],
             "mismatch_count": 13,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
     ]
     runtime_active_monitor = {
@@ -1800,7 +1800,7 @@ def test_candidate_pool_rejects_artifact_generated_at_as_fresh_signal_identity()
             "fresh_signal_present": False,
             "failed_facts": [],
             "mismatch_count": 10,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
     ]
     runtime_active_monitor = {
@@ -1877,7 +1877,7 @@ def test_candidate_pool_allows_brf2_conditional_action_time_rehearsal_only():
             "computed": True,
             "failed_facts": [],
             "mismatch_count": 3,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         }
     ]
     runtime_active_monitor = {
@@ -1961,7 +1961,7 @@ def test_candidate_pool_validator_rejects_brf2_scoped_live_submit_spoof():
             "computed": True,
             "failed_facts": [],
             "mismatch_count": 3,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         }
     ]
     runtime_active_monitor = {
@@ -2038,7 +2038,7 @@ def test_candidate_pool_validator_rejects_action_time_input_with_unresolved_bloc
             "computed": True,
             "failed_facts": [],
             "mismatch_count": 10,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         }
     ]
     runtime_active_monitor = {
@@ -2147,7 +2147,7 @@ def test_candidate_pool_blocks_action_time_when_active_position_resolution_neede
             "computed": True,
             "failed_facts": [],
             "mismatch_count": 10,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         }
     ]
     runtime_active_monitor = {
@@ -2230,7 +2230,7 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_scope_missing():
             "computed": True,
             "failed_facts": [],
             "mismatch_count": 10,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
     ]
     runtime_active_monitor = {
@@ -2305,7 +2305,7 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_coverage_absent()
             "computed": True,
             "failed_facts": [],
             "mismatch_count": 10,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
     ]
 
@@ -2365,7 +2365,7 @@ def test_candidate_pool_blocks_action_time_when_runtime_not_selected():
             "computed": True,
             "failed_facts": [],
             "mismatch_count": 10,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
     ]
     runtime_active_monitor = {
@@ -2436,7 +2436,7 @@ def test_candidate_pool_blocks_action_time_when_server_runtime_side_mismatches()
             "computed": True,
             "failed_facts": [],
             "mismatch_count": 10,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
     ]
     sor_detector = {
@@ -2530,7 +2530,7 @@ def test_candidate_pool_validator_rejects_action_time_without_server_runtime_sco
             "computed": True,
             "failed_facts": [],
             "mismatch_count": 10,
-            "next_action": "wait_for_fresh_signal_or_refresh_action_time_facts",
+            "next_action": "continue_watcher_observation_until_fresh_signal",
         },
     ]
     runtime_active_monitor = {

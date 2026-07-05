@@ -46,7 +46,7 @@ DEFAULT_EXPECTED_REMOTE_LATEST_MIGRATION = (
     "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
 )
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-05-089_create_ticket_bound_post_submit_closures.py"
+    "2026-07-05-090_create_runtime_retention_runs.py"
 )
 DEFAULT_PG_CONTAINER_NAME = "brc_prelive_pg_20260601"
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
@@ -54,6 +54,8 @@ DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.servic
 DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME = "brc-runtime-signal-watcher.timer"
 DEFAULT_RUNTIME_MONITOR_SERVICE_NAME = "brc-runtime-monitor.service"
 DEFAULT_RUNTIME_MONITOR_TIMER_NAME = "brc-runtime-monitor.timer"
+DEFAULT_RUNTIME_DB_RETENTION_SERVICE_NAME = "brc-runtime-db-retention.service"
+DEFAULT_RUNTIME_DB_RETENTION_TIMER_NAME = "brc-runtime-db-retention.timer"
 RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service"
 )
@@ -62,14 +64,17 @@ RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH = (
 )
 RUNTIME_MONITOR_SERVICE_REPO_PATH = "deploy/systemd/brc-runtime-monitor.service"
 RUNTIME_MONITOR_TIMER_REPO_PATH = "deploy/systemd/brc-runtime-monitor.timer"
+RUNTIME_DB_RETENTION_SERVICE_REPO_PATH = (
+    "deploy/systemd/brc-runtime-db-retention.service"
+)
+RUNTIME_DB_RETENTION_TIMER_REPO_PATH = (
+    "deploy/systemd/brc-runtime-db-retention.timer"
+)
 RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf"
 )
 RUNTIME_SIGNAL_WATCHER_DRY_RUN_AUDIT_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/60-dry-run-audit-chain.conf"
-)
-RUNTIME_SIGNAL_WATCHER_GOAL_STATUS_DROPIN_REPO_PATH = (
-    "deploy/systemd/brc-runtime-signal-watcher.service.d/70-goal-status.conf"
 )
 RUNTIME_SIGNAL_WATCHER_PRODUCT_STATE_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf"
@@ -558,6 +563,12 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_SERVICE_NAME}"
     )
     runtime_monitor_timer_path = f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_TIMER_NAME}"
+    runtime_db_retention_service_path = (
+        f"{service_dir}/{DEFAULT_RUNTIME_DB_RETENTION_SERVICE_NAME}"
+    )
+    runtime_db_retention_timer_path = (
+        f"{service_dir}/{DEFAULT_RUNTIME_DB_RETENTION_TIMER_NAME}"
+    )
     runtime_monitor_reports_dir = f"{deploy_root}/reports/runtime-monitor"
     service_dropin_dir = (
         f"/etc/systemd/system/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}.d"
@@ -592,6 +603,12 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
     release_runtime_monitor_timer_path = (
         f"{remote_release_path.rstrip('/')}/{RUNTIME_MONITOR_TIMER_REPO_PATH}"
     )
+    release_runtime_db_retention_service_path = (
+        f"{remote_release_path.rstrip('/')}/{RUNTIME_DB_RETENTION_SERVICE_REPO_PATH}"
+    )
+    release_runtime_db_retention_timer_path = (
+        f"{remote_release_path.rstrip('/')}/{RUNTIME_DB_RETENTION_TIMER_REPO_PATH}"
+    )
     release_dropin_path = (
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
@@ -599,10 +616,6 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
     release_dry_run_audit_dropin_path = (
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_DRY_RUN_AUDIT_DROPIN_REPO_PATH}"
-    )
-    release_goal_status_dropin_path = (
-        f"{remote_release_path.rstrip('/')}/"
-        f"{RUNTIME_SIGNAL_WATCHER_GOAL_STATUS_DROPIN_REPO_PATH}"
     )
     release_product_state_dropin_path = (
         f"{remote_release_path.rstrip('/')}/"
@@ -614,23 +627,26 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"test -f {q(release_timer_path)}; "
         f"test -f {q(release_runtime_monitor_service_path)}; "
         f"test -f {q(release_runtime_monitor_timer_path)}; "
+        f"test -f {q(release_runtime_db_retention_service_path)}; "
+        f"test -f {q(release_runtime_db_retention_timer_path)}; "
         f"test -f {q(release_dropin_path)}; "
         f"test -f {q(release_dry_run_audit_dropin_path)}; "
-        f"test -f {q(release_goal_status_dropin_path)}; "
         f"test -f {q(release_product_state_dropin_path)}; "
         f"sudo -n cp {q(release_service_path)} {q(service_path)}; "
         f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
         f"sudo -n cp {q(release_runtime_monitor_service_path)} {q(runtime_monitor_service_path)}; "
         f"sudo -n cp {q(release_runtime_monitor_timer_path)} {q(runtime_monitor_timer_path)}; "
-        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)} {q(runtime_monitor_service_path)} {q(runtime_monitor_timer_path)}; "
+        f"sudo -n cp {q(release_runtime_db_retention_service_path)} {q(runtime_db_retention_service_path)}; "
+        f"sudo -n cp {q(release_runtime_db_retention_timer_path)} {q(runtime_db_retention_timer_path)}; "
+        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)} {q(runtime_monitor_service_path)} {q(runtime_monitor_timer_path)} {q(runtime_db_retention_service_path)} {q(runtime_db_retention_timer_path)}; "
         f"sudo -n mkdir -p {q(runtime_monitor_reports_dir)}; "
         f"sudo -n chown ubuntu:ubuntu {q(runtime_monitor_reports_dir)}; "
         f"sudo -n mkdir -p {q(service_dropin_dir)}; "
         f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
         f"sudo -n cp {q(release_dry_run_audit_dropin_path)} {q(dry_run_audit_dropin_path)}; "
-        f"sudo -n cp {q(release_goal_status_dropin_path)} {q(goal_status_dropin_path)}; "
         f"sudo -n cp {q(release_product_state_dropin_path)} {q(product_state_dropin_path)}; "
-        f"sudo -n chmod 0644 {q(service_dropin_path)} {q(dry_run_audit_dropin_path)} {q(goal_status_dropin_path)} {q(product_state_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(service_dropin_path)} {q(dry_run_audit_dropin_path)} {q(product_state_dropin_path)}; "
+        f"sudo -n rm -f {q(goal_status_dropin_path)}; "
         f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
         f"sudo -n rm -f {q(stale_operation_layer_flags_dropin_path)}; "
         f"sudo -n rm -f {q(stale_product_state_refresh_dropin_path)}; "
@@ -638,13 +654,17 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         "sudo -n systemctl daemon-reload; "
         f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_DB_RETENTION_TIMER_NAME)}; "
         f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_DB_RETENTION_TIMER_NAME)}; "
         f"sudo -n systemctl start {q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)}; "
         f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
-        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}"
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_DB_RETENTION_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_DB_RETENTION_TIMER_NAME)}"
     )
 
 

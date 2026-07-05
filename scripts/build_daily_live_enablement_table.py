@@ -796,7 +796,7 @@ def _next_action_for_blocker(first_blocker: str) -> str:
         "action_time_preflight_ready": "prepare_non_executing_finalgate_preflight_input",
         "policy_scope_missing": "record_scoped_owner_policy",
         "runtime_profile_scope_missing": "bind_runtime_profile_scope",
-        "market_wait_validated": "continue_armed_observation_until_fresh_signal",
+        "market_wait_validated": "continue_watcher_observation_until_fresh_signal",
         "active_position_resolution": "resolve_active_position_or_open_order",
         "hard_safety_stop": "remove_hard_safety_violation",
         "review_only_warning": "record_strategy_review_decision",
