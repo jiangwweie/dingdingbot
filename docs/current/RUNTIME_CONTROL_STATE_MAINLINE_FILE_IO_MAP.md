@@ -48,7 +48,7 @@ inspection of:
 | runtime fact builders | `scripts/fetch_binance_usdm_public_facts.py`, `scripts/build_runtime_account_safe_facts.py` |
 | detector/fresh-signal builders | `scripts/build_sor_session_scope_detector.py`, `scripts/build_strategy_fresh_signal_action_time_boundary.py`, `scripts/build_mi_trial_admission_decision.py`, `scripts/build_brf2_runtime_signal_facts.py` |
 | monitor/product refresh | `scripts/run_tokyo_runtime_server_monitor.py`, `scripts/refresh_strategygroup_runtime_product_state_artifacts.py` |
-| watcher/action-time adjacent scripts | `scripts/runtime_signal_watcher_tick.py`, `scripts/build_runtime_signal_watcher_readiness_pack.py`, `scripts/runtime_signal_watcher_resume_dispatcher.py`, `scripts/runtime_dry_run_audit_chain.py`, `scripts/materialize_candidate_pool_action_time_lane.py`, `scripts/materialize_action_time_ticket.py`, `scripts/materialize_ticket_bound_post_submit_closure.py` |
+| watcher/action-time adjacent scripts | `scripts/runtime_signal_watcher_tick.py`, `scripts/build_runtime_signal_watcher_readiness_pack.py`, `scripts/runtime_signal_watcher_resume_dispatcher.py`, `scripts/runtime_dry_run_audit_chain.py`, `scripts/materialize_pg_promotion_action_time_lane.py`, `scripts/materialize_action_time_ticket.py`, `scripts/materialize_ticket_bound_post_submit_closure.py` |
 
 This document focuses on the **Tokyo watcher post-step / pre-trade runtime /
 server monitor mainline**. It does not inventory every local diagnostic or
@@ -174,9 +174,9 @@ historical research script.
 | Strategy signals | detector output JSONs | `brc_live_signal_events` | detector export |
 | Tradeability and first blocker | Tradeability JSON | DB-backed Tradeability read model over registry, policy, facts, readiness, safety | Tradeability export |
 | Replay/live parity | replay parity JSON | diagnostic/read-model rows with source replay/live detector refs | parity export |
-| Readiness and promotion | Candidate Pool JSON | `brc_pretrade_readiness_rows`, `brc_promotion_candidates` | Candidate Pool export |
-| Action-time lane | action-time boundary JSON, resume pack | `brc_action_time_lane_inputs` | action-time export |
-| Action-Time Ticket | loose prepare files / missing ticket identity | `brc_action_time_tickets`, `brc_action_time_ticket_events` | ticket materialization export |
+| Readiness and promotion | PG current projection; Candidate Pool JSON is export only | `brc_pretrade_readiness_rows`, `brc_promotion_candidates` | Candidate Pool export |
+| Action-time lane | PG promotion/action-time materializer over current control state | `brc_action_time_lane_inputs` | action-time export |
+| Action-Time Ticket | PG action-time lane identity | `brc_action_time_tickets`, `brc_action_time_ticket_events` | ticket materialization export |
 | Protected submit attempt | submit API response JSON / dispatcher artifact | `brc_ticket_bound_protected_submit_attempts` | submit attempt export |
 | Post-submit closure | dispatcher artifact / old authorization finalize output | `brc_ticket_bound_post_submit_closures` | post-submit closure export |
 | Goal Status | report-dir goal-status JSON plus legacy artifacts | `brc_goal_status_current` | goal-status export |
