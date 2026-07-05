@@ -27,14 +27,12 @@ license: MIT
 2. docs/ops/live-safe-v1-program.md - 当前 program 目标和禁令
 3. docs/ops/agent-working-rules.md - Codex/Claude 协作规则
 4. .claude/team/backend-dev/SKILL.md - 后端执行边界
-5. .claude/team/frontend-dev/SKILL.md - 前端规范
 ```
 
 ### 阶段 2: 需求分析
 
 **识别任务类型**:
 - [ ] 后端开发任务 → 添加 Decimal、asyncio、Clean Architecture 约束
-- [ ] 前端开发任务 → 添加 React、TypeScript、TailwindCSS 约束
 - [ ] 测试任务 → 添加覆盖率、边界条件要求
 - [ ] 架构设计任务 → 添加技术选型、trade-off 分析要求
 
@@ -148,52 +146,6 @@ PUA 输出:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-### 场景 2: 用户输入模糊需求
-
-```
-用户输入: "前端页面报错了，修一下"
-
-PUA 输出:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-作为前端开发专家，请诊断并修复前端页面报错：
-
-## 问题诊断
-1. **错误信息收集**:
-   - 请提供浏览器控制台的完整错误堆栈
-   - 截图或复制错误信息
-
-2. **问题定位**:
-   - 哪个页面报错？（路径：`/strategies`、`/orders` 等）
-   - 什么操作触发？（点击按钮、提交表单等）
-   - 报错时机？（加载时、提交时、交互时）
-
-## 技术约束
-1. **类型安全**:
-   - TypeScript 类型定义完整
-   - 禁止使用 `any` 类型
-
-2. **React 规范**:
-   - 使用函数式组件 + Hooks
-   - 遵循 TailwindCSS 样式规范
-
-3. **错误处理**:
-   - 添加错误边界（Error Boundary）
-   - 用户友好的错误提示
-
-## 验收标准
-- [ ] 错误已修复，页面正常工作
-- [ ] 添加错误边界防止白屏
-- [ ] 通过 `npm run build` 构建
-- [ ] 通过 `npm run type-check` 类型检查
-
-## 输出要求
-- 修改文件：`gemimi-web-front/src/pages/xxx.tsx`
-- 测试文件：`gemimi-web-front/src/__tests__/xxx.test.ts`（如需要）
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
----
-
 ## 智能补充规则
 
 ### 根据任务类型自动补充约束
@@ -201,7 +153,6 @@ PUA 输出:
 | 任务类型 | 自动补充的约束 |
 |---------|--------------|
 | **后端开发** | Decimal 精度、asyncio 异步、Clean Architecture 分层、Pydantic 验证 |
-| **前端开发** | TypeScript 类型、React Hooks、TailwindCSS 样式、响应式布局 |
 | **测试任务** | 覆盖率要求、边界条件、Mock 策略、回归测试 |
 | **架构设计** | 技术选型 trade-off、影响范围评估、迁移路径、回滚方案 |
 | **Bug 修复** | 根因分析、复现步骤、影响范围、预防措施 |

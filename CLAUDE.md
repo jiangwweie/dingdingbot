@@ -89,10 +89,10 @@ maintain active StrategyGroup candidate symbol sets
 -> review
 ```
 
-Do not turn the Owner Console into a passive dashboard or a packet browser. It
-is the Owner operating surface for state, blockers, candidate readiness,
-FinalGate state, active position/protection, pause/revoke controls, and review
-outcomes.
+Do not turn Owner supervision into packet browsing. Runtime summaries and
+notifications should explain state, blockers, candidate readiness, protection,
+pause/revoke needs, and review outcomes without making the Owner interpret raw
+execution evidence.
 
 The project posture is bounded-aggressive. The Owner-provided subaccount
 allocation is already the risk-control result and may be treated as

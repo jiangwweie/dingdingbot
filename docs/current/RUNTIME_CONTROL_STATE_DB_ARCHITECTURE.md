@@ -510,7 +510,7 @@ Facts need source, observed timestamp, freshness window, and expiry.
 ### Read Model Boundary
 
 Tradeability Decision, Candidate Pool, Daily Table, Runtime Safety State, and
-Owner Console state are read models.
+Owner runtime status are read models.
 
 They may be stored in DB for audit and exported to JSON/MD for agent
 compatibility. They must not become hand-edited authority.

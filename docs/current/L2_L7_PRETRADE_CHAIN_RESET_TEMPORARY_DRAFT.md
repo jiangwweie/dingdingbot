@@ -1656,7 +1656,7 @@ Daily Table
 Candidate Pool
 Goal Status
 Server Monitor
-Owner Console projections
+runtime status readmodel projections
 ```
 
 must not decide:
@@ -1707,7 +1707,7 @@ Candidate Pool creates a side because DEFAULT_SIDE_SCOPE says long/short.
 Goal Status reports scope mismatch from old pilot JSON after PG coverage is current.
 Daily Table reads stale latest-* files and changes first blocker.
 Server Monitor treats file refresh time as signal freshness.
-Owner Console infers tradeability from generated JSON instead of PG current projection.
+runtime status readmodel infers tradeability from generated JSON instead of PG current projection.
 ```
 
 ### Current Projection Ownership Rule
@@ -2143,7 +2143,7 @@ as runtime scope authority.
 
 ### Projection Boundary
 
-Candidate Pool, Daily Table, Goal Status, Server Monitor, and Owner Console may
+Candidate Pool, Daily Table, Goal Status, Server Monitor, and runtime status readmodel may
 display runtime coverage state, but they must not create coverage authority.
 
 Correct flow:
@@ -2431,7 +2431,7 @@ rehearsal lane being consumed as real-submit identity
 
 ### Projection Boundary
 
-Candidate Pool, Daily Table, Goal Status, Server Monitor, and Owner Console may
+Candidate Pool, Daily Table, Goal Status, Server Monitor, and runtime status readmodel may
 display:
 
 ```text

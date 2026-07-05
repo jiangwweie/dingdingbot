@@ -354,7 +354,7 @@ StrategyGroup selection
 -> notification and review
 ```
 
-## Owner Interface
+## Owner Supervision Boundary
 
 The normal Owner-facing states are product states:
 
@@ -373,22 +373,8 @@ Evidence packets are audit artifacts. Do not ask the Owner to read raw watcher
 packets, manually judge signal freshness, manually assemble RequiredFacts, or
 hand-approve every in-boundary candidate after a bounded runtime is selected.
 
-Main Owner UI must use terse Owner language:
-
-```text
-运行中
-等待机会
-处理中
-暂不可用
-需要介入
-无需操作
-资金正常
-订单正常
-保护正常
-```
-
-The main Owner UI must not expose these as primary labels, menus, cards, or
-actions:
+Runtime status summaries and notifications must not turn these internal names
+into Owner decision requirements:
 
 ```text
 FinalGate
@@ -404,10 +390,10 @@ blocker code
 runtime grant
 ```
 
-Those names may appear only in audit/detail/developer surfaces. If the system is
-healthy, the UI should say the StrategyGroup is running or waiting and that no
-Owner action is required. Only abnormal states should create Owner actions such
-as pause, adjust risk, or review recovery.
+Those names may appear only in audit or developer diagnostics. If the system is
+healthy, status output should say the StrategyGroup is running or waiting and
+that no Owner action is required. Only abnormal states should create Owner
+actions such as pause, adjust risk, or review recovery.
 
 ## Strategy Research Boundary
 

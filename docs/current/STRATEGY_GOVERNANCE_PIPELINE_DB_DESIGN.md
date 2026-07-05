@@ -117,7 +117,7 @@ This design does not implement:
 - Alembic migrations;
 - SQLAlchemy models;
 - import CLI commands;
-- Owner UI;
+- Owner runtime status output;
 - detector code;
 - FinalGate or Operation Layer changes;
 - exchange writes;
@@ -135,7 +135,7 @@ it.
 | Runtime coverage and facts DB | P0 | Replace latest output files as runtime facts | Required before readiness/promotion can be computed reliably |
 | Read-model export-only outputs | P0/P1 | Keep JSON/MD exports without making them authority | Required for agent compatibility during migration |
 | Strategy Governance Pipeline DB | P1 | Convert strategy research/intake into DB admission state | Depends on registry, policy, facts, and candidate scope DB |
-| Owner pipeline UI and automation | P2 | Make strategy intake easier to operate | Depends on stable DB pipeline state |
+| Owner pipeline automation | P2 | Make strategy intake easier to operate | Depends on stable DB pipeline state |
 
 The right ordering is:
 
@@ -378,7 +378,7 @@ exports from DB state.
 | Tradeability Decision | registry, policy, facts, scope, runtime safety refs | Answer can-trade and first blocker |
 | Candidate Pool | candidate scope, runtime coverage, fact snapshots, signals, readiness rows | Answer per-symbol readiness and promotion state |
 | Daily Live Enablement Table | strategy pipeline current, Candidate Pool, Tradeability, Runtime Safety | Pick current management focus without suppressing fresh-signal promotion |
-| Owner Console state | policy, Tradeability, Runtime Safety, pipeline summary | Show Owner-readable running/waiting/needs-intervention state |
+| Owner runtime status | policy, Tradeability, Runtime Safety, pipeline summary | Show running/waiting/needs-intervention state |
 
 ## Authority Model
 

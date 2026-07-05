@@ -24,7 +24,7 @@ Owner enables a StrategyGroup
 ```
 
 The Owner should not need to read raw evidence artifacts to operate the system.
-Evidence artifacts are audit outputs under the Owner-facing control board.
+Evidence artifacts are audit outputs behind runtime supervision summaries.
 
 The global business objective is profitability through a small-capital
 right-tail StrategyGroup experimentation system. During the current stage,
@@ -350,7 +350,7 @@ action-time FinalGate, and official Operation Layer all passing.
 
 The Owner is a supervisor, not an execution operator.
 
-Owner-facing product surfaces must answer:
+Runtime supervision summaries must answer:
 
 - which StrategyGroups are enabled;
 - which are running, waiting, processing, paused, or unavailable;
@@ -358,9 +358,8 @@ Owner-facing product surfaces must answer:
 - whether the Owner needs to intervene;
 - what one-line reason explains an unavailable or intervention state.
 
-Owner-facing product surfaces must not make the Owner drive internal execution steps.
-Do not turn these internal names into primary Owner labels, navigation, table columns,
-primary summaries, or action commands:
+Runtime supervision summaries must not make the Owner drive internal execution
+steps. Do not turn these internal names into Owner action requirements:
 
 ```text
 FinalGate
@@ -376,7 +375,7 @@ blocker code
 runtime grant
 ```
 
-Allowed main Owner language is deliberately small:
+Allowed Owner status language is deliberately small:
 
 ```text
 未启用
@@ -394,8 +393,8 @@ Allowed main Owner language is deliberately small:
 保护正常
 ```
 
-Internal gate names and evidence details may appear only in audit, detail, or
-developer surfaces after the Owner asks to expand them.
+Internal gate names and evidence details may appear only in audit or developer
+diagnostics.
 
 ## Standing Authorization
 
@@ -481,8 +480,8 @@ When a detector artifact exists, watcher input is present, and facts were
 computed but false, classify the lane as `computed_not_satisfied`. Do not report
 it as missing detector or missing artifact.
 
-Gate classes are internal safety classifications. The main Owner surface should map
-them to one terse product sentence, for example:
+Gate classes are internal safety classifications. Runtime supervision output
+should map them to one terse status sentence, for example:
 
 | Internal condition | Owner-facing sentence |
 | --- | --- |

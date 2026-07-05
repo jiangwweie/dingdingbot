@@ -27,7 +27,6 @@ Archived historical docs are not active instructions.
 | architect | Options, trade-offs, ADR support | Owning final architecture decisions |
 | project-manager | Task board and task-card coordination | Automatic broad parallel dispatch |
 | backend-dev | Scoped backend implementation | Expanding architecture or scope |
-| frontend-dev | Scoped bounded-live console work | Inventing backend semantics |
 | qa-tester | Scoped tests and verification | Running long suites without approval |
 | code-reviewer | Review and risk reports | Direct implementation |
 | diagnostic-analyst | Root-cause analysis | Production code edits |

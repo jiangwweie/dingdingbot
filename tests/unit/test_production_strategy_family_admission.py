@@ -147,9 +147,8 @@ def test_production_strategy_family_admission_state_structures_three_families():
         "reported_flat_requires_fresh_pg_exchange_validation_before_new_action"
     )
     assert "cannot authorize new Trend" in baseline.reuse_policy
-    assert "docs/ops/trading-console-backend-dependency-sync-v0.2.md#TC-BE-DEP-002-06" in (
-        baseline.evidence_refs
-    )
+    assert "historical_bnb_one_shot_context_retired" in baseline.evidence_refs
+    assert "fresh_pg_exchange_validation_required_before_new_action" in baseline.evidence_refs
     assert baseline.reusable_for_strategy_family_authorization is False
     assert baseline.grants_execution_permission is False
     assert baseline.grants_order_permission is False

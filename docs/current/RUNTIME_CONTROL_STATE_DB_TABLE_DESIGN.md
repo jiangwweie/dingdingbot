@@ -765,7 +765,8 @@ Checks and indexes:
 
 Writer: registry import, Owner policy/admin flow.
 
-Readers: Tradeability Decision, Candidate Pool, Daily Table, Owner Console.
+Readers: Tradeability Decision, Candidate Pool, Daily Table, runtime status
+projectors.
 
 ### `brc_strategy_group_versions`
 
@@ -847,7 +848,7 @@ Purpose: append-only event ledger for Owner and system policy changes.
 | `runtime_profile_id` | `String(128)` nullable | Runtime profile |
 | `tier` | `String(16)` nullable | `L0` to `L4` |
 | `policy_payload` | `JSONB` | Scope details |
-| `source` | `String(64)` | `owner_console`, `owner_explicit_authorization`, `system_migration`, `codex_seed` |
+| `source` | `String(64)` | `owner_explicit_authorization`, `system_migration`, `codex_seed` |
 | `actor` | `String(128)` | Owner/system/agent |
 | `effective_at_ms` | `BIGINT` | Effective time |
 | `expires_at_ms` | `BIGINT` nullable | Expiry |
@@ -864,7 +865,7 @@ Checks and indexes:
 | `idx_brc_owner_policy_events_scope_time` | `(strategy_group_id, symbol, side, effective_at_ms)` |
 | `idx_brc_owner_policy_events_type_time` | `(event_type, created_at_ms)` |
 
-Writer: Owner console, migration seed, scoped policy tools.
+Writer: runtime status readmodel, migration seed, scoped policy tools.
 
 Readers: policy projection, Candidate Pool, Tradeability Decision.
 
@@ -1146,7 +1147,7 @@ Checks and indexes:
 
 Writer: Candidate Pool builder or readiness projector.
 
-Readers: Daily Table, server monitor, Owner Console.
+Readers: Daily Table, server monitor, runtime status projectors.
 
 ### `brc_promotion_candidates`
 
@@ -1367,7 +1368,8 @@ Checks and indexes:
 
 Writer: Runtime Safety State builder.
 
-Readers: Daily Table, Candidate Pool, FinalGate preflight, Owner Console.
+Readers: Daily Table, Candidate Pool, FinalGate preflight, runtime status
+projectors.
 
 ### `brc_ticket_bound_protected_submit_attempts`
 
@@ -1424,7 +1426,7 @@ Checks and indexes:
 Writer: ticket-bound protected submit adapter only.
 
 Readers: dispatcher, post-submit reconciliation, budget settlement, Review
-Ledger, server monitor, Owner Console detail surfaces.
+Ledger, server monitor, runtime diagnostics.
 
 ### `brc_ticket_bound_post_submit_closures`
 
@@ -1484,7 +1486,7 @@ Checks and indexes:
 Writer: ticket-bound post-submit closure materializer only.
 
 Readers: post-submit reconciliation, budget settlement, Review Ledger, server
-monitor, Owner Console detail surfaces.
+monitor, runtime diagnostics.
 
 ### `brc_goal_status_current`
 
@@ -1523,7 +1525,8 @@ Checks and indexes:
 
 Writer: Goal Status projector only.
 
-Readers: server monitor, Owner Console, diagnostics, goal-status export.
+Readers: server monitor, runtime status projectors, diagnostics,
+goal-status export.
 
 ### `brc_control_read_model_snapshots`
 
@@ -1534,7 +1537,7 @@ snapshots.
 | --- | --- | --- |
 | `read_model_snapshot_id` | `String(192)` PK | Stable snapshot ID |
 | `projection_run_id` | `String(192)` nullable | Projection lineage ref |
-| `model_type` | `String(96)` | `tradeability_decision`, `candidate_pool`, `daily_live_enablement_table`, `runtime_safety_state`, `goal_status`, `owner_console_state` |
+| `model_type` | `String(96)` | `tradeability_decision`, `candidate_pool`, `daily_live_enablement_table`, `runtime_safety_state`, `goal_status`, `owner_runtime_status` |
 | `schema_version` | `String(128)` | Payload schema |
 | `status` | `String(96)` | Model-specific status |
 | `payload` | `JSONB` | Generated payload |
@@ -1555,7 +1558,7 @@ Checks and indexes:
 
 Writer: read-model builders.
 
-Readers: exporters, diagnostics, Owner Console.
+Readers: exporters, diagnostics, runtime status projectors.
 
 ## Server Monitor Tables
 
@@ -1589,7 +1592,7 @@ Checks and indexes:
 
 Writer: Tokyo server-side monitor.
 
-Readers: Owner Console, notification service, deploy acceptance.
+Readers: runtime status projectors, notification service, deploy acceptance.
 
 ### `brc_server_monitor_notifications`
 
@@ -1624,7 +1627,7 @@ Checks and indexes:
 
 Writer: server monitor notifier.
 
-Readers: notifier retry loop, Owner Console audit.
+Readers: notifier retry loop, runtime audit.
 
 ## Migration Mapping From Current Files
 

@@ -940,9 +940,8 @@ class ProductionBaselineContext(ProductionAdmissionModel):
     )
     evidence_refs: list[str] = Field(
         default_factory=lambda: [
-            "docs/ops/trading-console-backend-dependency-sync-v0.2.md#TC-BE-DEP-002-06",
-            "reports/trading-console-bnb-close-2026-06-04/post-close-trading-console-snapshot.json",
-            "reports/trading-console-server-deploy-acceptance-2026-06-04/completion-audit.md",
+            "historical_bnb_one_shot_context_retired",
+            "fresh_pg_exchange_validation_required_before_new_action",
         ]
     )
     reusable_for_strategy_family_authorization: Literal[False] = False
