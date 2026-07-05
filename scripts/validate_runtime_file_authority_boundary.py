@@ -45,6 +45,23 @@ AUTHORITY_FALSE_KEYS = (
 )
 
 FORBIDDEN_PRODUCTION_TEXT_BY_PATH: dict[str, tuple[str, ...]] = {
+    "scripts/build_strategy_fresh_signal_action_time_boundary.py": (
+        "--cpm-capture-json",
+        "--cpm-facts-json",
+        "--cpm-rehearsal-json",
+        "--mpg-readiness-json",
+        "--mpg-evidence-json",
+        "--sor-evidence-json",
+        "--sor-detector-json",
+        "DEFAULT_CPM_CAPTURE_JSON",
+        "DEFAULT_CPM_FACTS_JSON",
+        "DEFAULT_CPM_REHEARSAL_JSON",
+        "DEFAULT_MPG_READINESS_JSON",
+        "DEFAULT_MPG_EVIDENCE_JSON",
+        "DEFAULT_SOR_EVIDENCE_JSON",
+        "DEFAULT_SOR_DETECTOR_JSON",
+        "_read_optional_json",
+    ),
     "scripts/refresh_strategygroup_runtime_product_state_artifacts.py": (
         "--collect-live-facts-before-refresh",
         "--live-facts-output",
@@ -57,6 +74,13 @@ FORBIDDEN_PRODUCTION_TEXT_BY_PATH: dict[str, tuple[str, ...]] = {
         "--collect-live-facts-before-refresh",
         "--live-facts-output",
         "--live-facts-json",
+        "--cpm-capture-json",
+        "--cpm-facts-json",
+        "--cpm-rehearsal-json",
+        "--mpg-readiness-json",
+        "--mpg-evidence-json",
+        "--sor-evidence-json",
+        "--sor-detector-json",
         "strategy-group-live-facts-input.json",
     ),
     "scripts/build_strategy_group_live_facts_readiness_artifact.py": (

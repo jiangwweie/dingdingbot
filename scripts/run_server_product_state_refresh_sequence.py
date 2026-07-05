@@ -221,13 +221,6 @@ def _refresh_steps(
         runtime_monitor_dir / "latest-strategy-fresh-signal-action-time-boundary.md"
     )
     sor_detector_dir = runtime_monitor_dir
-    sor_detector = runtime_monitor_dir / "latest-sor-session-detector-facts.json"
-    cpm_capture = runtime_monitor_dir / "latest-cpm-runtime-signal-capture.json"
-    cpm_facts = runtime_monitor_dir / "latest-cpm-runtime-signal-facts.json"
-    cpm_rehearsal = runtime_monitor_dir / "latest-cpm-dry-run-submit-rehearsal.json"
-    mpg_readiness = runtime_monitor_dir / "latest-mpg-action-time-facts-readiness.json"
-    mpg_evidence = runtime_monitor_dir / "latest-mpg-runtime-activation-evidence.json"
-    sor_evidence = runtime_monitor_dir / "latest-sor-runtime-activation-evidence.json"
     mi_trial = runtime_monitor_dir / "latest-mi-trial-admission-decision.json"
     mi_trial_md = runtime_monitor_dir / "latest-mi-trial-admission-decision.md"
     brf2_facts = runtime_monitor_dir / "latest-brf2-runtime-signal-facts.json"
@@ -236,20 +229,6 @@ def _refresh_steps(
 
     pg_required = ("--require-database-url",)
     action_time_boundary_inputs = (
-        "--cpm-capture-json",
-        str(cpm_capture),
-        "--cpm-facts-json",
-        str(cpm_facts),
-        "--cpm-rehearsal-json",
-        str(cpm_rehearsal),
-        "--mpg-readiness-json",
-        str(mpg_readiness),
-        "--mpg-evidence-json",
-        str(mpg_evidence),
-        "--sor-evidence-json",
-        str(sor_evidence),
-        "--sor-detector-json",
-        str(sor_detector),
         *pg_required,
         "--output-json",
         str(action_time_boundary),

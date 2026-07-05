@@ -12,6 +12,7 @@ SCRIPT_PATH = (
     / "scripts"
     / "build_strategy_fresh_signal_action_time_boundary.py"
 )
+NOW_MS = 1_800_000
 
 
 def _load_module():
@@ -27,358 +28,333 @@ def _load_module():
     return module
 
 
-def _cpm_capture(*, fresh: bool) -> dict:
-    return {
-        "status": "cpm_runtime_signal_capture_ready",
-        "signal_detector_preview": {
-            "fresh_signal_present": fresh,
-            "current_signal_state": (
-                "fresh_signal_present" if fresh else "fresh_signal_absent"
-            ),
-            "first_blocker_class": (
-                "cpm_candidate_authorization_evidence_not_created"
-                if fresh
-                else "fresh_cpm_long_signal_absent"
-            ),
-            "first_blocker_owner": "runtime" if fresh else "market",
-        },
-        "shadow_candidate_shape": {"shadow_candidate_ready": fresh},
-    }
-
-
-def _cpm_rehearsal() -> dict:
-    return {"submit_rehearsal_shape_ready": True}
-
-
-def _cpm_facts() -> dict:
-    return {
-        "status": "cpm_runtime_signal_facts_ready",
-        "watcher_tick_present": True,
-        "live_detector": {
-            "per_symbol_signal_facts": [
-                {
-                    "symbol": "ETHUSDT",
-                    "fresh_signal_present": True,
-                    "candle_input_missing": False,
-                    "first_blocker_class": "private_action_time_facts_required",
-                    "first_blocker_owner": "runtime",
-                },
-                {
-                    "symbol": "AVAXUSDT",
-                    "fresh_signal_present": True,
-                    "candle_input_missing": False,
-                    "first_blocker_class": "private_action_time_facts_required",
-                    "first_blocker_owner": "runtime",
-                },
-                {
-                    "symbol": "SOLUSDT",
-                    "fresh_signal_present": False,
-                    "candle_input_missing": False,
-                    "first_blocker_class": "fresh_cpm_long_signal_absent",
-                    "first_blocker_owner": "market",
-                },
-            ]
-        },
-    }
-
-
-def _mpg_readiness() -> dict:
-    return {
-        "checks": {"public_facts_ready_for_readonly_symbols": True},
-        "first_blocker": "fresh_mpg_signal_or_private_action_time_facts",
-        "blocker_owner": "market",
-    }
-
-
-def _mpg_readiness_public_gap() -> dict:
-    return {
-        "checks": {"public_facts_ready_for_readonly_symbols": False},
-        "first_blocker": "mpg_high_beta_public_facts_gap",
-        "blocker_owner": "runtime",
-    }
-
-
-def _evidence(strategy_group_id: str) -> dict:
-    return {
-        "strategy_group_id": strategy_group_id,
-        "runtime_artifact_ready": True,
-        "candidate_evidence_shape_ready": True,
-        "fresh_signal_rehearsal_ready": True,
-        "next_blocker": "fresh_signal_or_private_action_time_facts",
-    }
-
-
-def _account_safe_facts() -> dict:
-    return {
-        "status": "runtime_account_safe_facts_ready",
-        "checks": {
-            "private_action_time_facts_ready": True,
-            "active_position_or_open_order_clear": True,
-            "action_time_available_balance": True,
-        },
-    }
-
-
-def _sor_detector(
+def _control_state(
     *,
-    fresh: bool = False,
-    latest_candle: bool = True,
-    missing_required_trigger_facts: list[str] | None = None,
+    readiness: list[dict] | None = None,
+    signals: list[dict] | None = None,
+    promotions: list[dict] | None = None,
+    lanes: list[dict] | None = None,
+    facts: list[dict] | None = None,
 ) -> dict:
-    missing_required_trigger_facts = (
-        missing_required_trigger_facts
-        if missing_required_trigger_facts is not None
-        else ["breakout_level_crossed"]
-    )
+    rows = {
+        "pretrade_readiness_rows": readiness or [],
+        "live_signal_events": signals or [],
+        "promotion_candidates": promotions or [],
+        "action_time_lane_inputs": lanes or [],
+        "action_time_tickets": [],
+        "runtime_fact_snapshots": facts or [],
+    }
     return {
-        "status": "sor_session_detector_facts_ready",
-        "summary": {
-            "fresh_session_signal_count": 1 if fresh else 0,
-            "first_blocker": (
-                "private_action_time_facts_required"
-                if fresh
-                else "fresh_sor_session_range_signal_absent"
-            ),
-        },
-        "symbol_detector_rows": [
-            {
-                "symbol": "SOLUSDT",
-                "fresh_session_range_signal": fresh,
-                "public_facts_ready": True,
-                "latest_candle_close_time_utc": (
-                    "2026-06-30T01:59:59+00:00" if latest_candle else None
-                ),
-                "missing_required_trigger_facts": missing_required_trigger_facts,
-            },
-            {
-                "symbol": "AVAXUSDT",
-                "fresh_session_range_signal": False,
-                "public_facts_ready": True,
-                "latest_candle_close_time_utc": "2026-06-30T01:59:59+00:00",
-                "missing_required_trigger_facts": ["breakout_level_crossed"],
-            },
-        ],
+        "schema": "brc.runtime_control_state_repository.v1",
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "table_counts": {key: len(value) for key, value in rows.items()},
+        **rows,
     }
 
 
-def test_fresh_signal_boundary_stops_before_finalgate_and_orders():
-    module = _load_module()
-
-    artifact = module.build_strategy_fresh_signal_action_time_boundary(
-        cpm_capture=_cpm_capture(fresh=True),
-        cpm_rehearsal=_cpm_rehearsal(),
-        mpg_readiness=_mpg_readiness(),
-        mpg_evidence=_evidence("MPG-001"),
-        sor_evidence=_evidence("SOR-001"),
-        sor_detector=_sor_detector(),
-        generated_at_utc="2026-06-30T00:00:00+00:00",
-    )
-
-    cpm = artifact["strategy_rows"][0]
-    assert cpm["symbol"] == "ETHUSDT"
-    assert cpm["fresh_signal_present"] is True
-    assert cpm["first_blocker"] == "private_action_time_facts_required"
-    assert cpm["action_time_path_ready"] is True
-    assert cpm["would_enter_finalgate_if_private_facts_ready"] is True
-    assert cpm["post_action_expected_state"] == "action_time_finalgate_boundary_ready"
-    checks = artifact["checks"]
-    assert checks["calls_finalgate"] is False
-    assert checks["calls_operation_layer"] is False
-    assert checks["calls_exchange_write"] is False
-    assert checks["places_order"] is False
-    assert checks["order_created"] is False
-    for row in artifact["strategy_rows"]:
-        assert row["calls_finalgate"] is False
-        assert row["calls_operation_layer"] is False
-        assert row["calls_exchange_write"] is False
-        assert row["order_created"] is False
-        assert row["live_submit_allowed"] is False
+def _readiness(
+    *,
+    strategy_group_id: str = "SOR-001",
+    symbol: str = "ETHUSDT",
+    side: str = "long",
+    state: str = "action_time_lane",
+    blocker: str = "action_time_preflight_ready",
+) -> dict:
+    return {
+        "readiness_row_id": f"ready:{strategy_group_id}:{symbol}:{side}",
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "side": side,
+        "readiness_state": state,
+        "public_facts_state": "satisfied",
+        "signal_lifecycle_status": "facts_validated"
+        if state == "action_time_lane"
+        else "absent",
+        "signal_freshness_state": "fresh" if state == "action_time_lane" else "missing",
+        "first_blocker_class": blocker,
+        "computed_at_ms": NOW_MS - 200,
+        "valid_until_ms": NOW_MS + 60_000,
+    }
 
 
-def test_absent_signal_keeps_exact_first_blocker():
-    module = _load_module()
+def _signal(
+    *,
+    strategy_group_id: str = "SOR-001",
+    symbol: str = "ETHUSDT",
+    side: str = "long",
+    fact_snapshot_id: str = "fact:public",
+    source_kind: str = "live_market",
+    status: str = "facts_validated",
+    freshness_state: str = "fresh",
+) -> dict:
+    return {
+        "signal_event_id": f"signal:{strategy_group_id}:{symbol}:{side}",
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "side": side,
+        "detector_key": "sor_session_detector",
+        "source_kind": source_kind,
+        "status": status,
+        "freshness_state": freshness_state,
+        "fact_snapshot_id": fact_snapshot_id,
+        "event_time_ms": NOW_MS - 500,
+        "trigger_candle_close_time_ms": NOW_MS - 500,
+        "observed_at_ms": NOW_MS - 100,
+        "expires_at_ms": NOW_MS + 60_000,
+    }
 
-    artifact = module.build_strategy_fresh_signal_action_time_boundary(
-        cpm_capture=_cpm_capture(fresh=False),
-        cpm_rehearsal=_cpm_rehearsal(),
-        mpg_readiness=_mpg_readiness(),
-        mpg_evidence=_evidence("MPG-001"),
-        sor_evidence=_evidence("SOR-001"),
-        sor_detector=_sor_detector(),
-        generated_at_utc="2026-06-30T00:00:00+00:00",
-    )
 
-    cpm = artifact["strategy_rows"][0]
-    assert cpm["fresh_signal_present"] is False
-    assert cpm["first_blocker"] == "fresh_cpm_long_signal_absent"
-    assert cpm["blocker_owner"] == "market"
-    assert cpm["next_action"] == "wait_for_fresh_signal_then_refresh_private_action_time_facts"
+def _promotion(
+    *,
+    strategy_group_id: str = "SOR-001",
+    symbol: str = "ETHUSDT",
+    side: str = "long",
+    status: str = "arbitration_won",
+    blockers: list[str] | None = None,
+) -> dict:
+    return {
+        "promotion_candidate_id": f"promotion:{strategy_group_id}:{symbol}:{side}",
+        "signal_event_id": f"signal:{strategy_group_id}:{symbol}:{side}",
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "side": side,
+        "status": status,
+        "blockers": blockers or [],
+        "created_at_ms": NOW_MS - 80,
+        "expires_at_ms": NOW_MS + 60_000,
+    }
 
 
-def test_cpm_boundary_emits_per_symbol_action_time_rows_from_detector_facts():
-    module = _load_module()
+def _lane(
+    *,
+    strategy_group_id: str = "SOR-001",
+    symbol: str = "ETHUSDT",
+    side: str = "long",
+    first_blocker: str = "action_time_preflight_ready",
+) -> dict:
+    return {
+        "action_time_lane_input_id": f"lane:{strategy_group_id}:{symbol}:{side}",
+        "promotion_candidate_id": f"promotion:{strategy_group_id}:{symbol}:{side}",
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "side": side,
+        "runtime_profile_id": "runtime:tiny-live",
+        "lane_scope": "real_submit_candidate",
+        "status": "ticket_pending",
+        "signal_event_id": f"signal:{strategy_group_id}:{symbol}:{side}",
+        "public_fact_snapshot_id": "fact:public",
+        "action_time_fact_snapshot_id": "fact:action",
+        "first_blocker_class": first_blocker,
+        "created_at_ms": NOW_MS - 50,
+        "expires_at_ms": NOW_MS + 60_000,
+    }
 
-    artifact = module.build_strategy_fresh_signal_action_time_boundary(
-        cpm_capture=_cpm_capture(fresh=True),
-        cpm_facts=_cpm_facts(),
-        cpm_rehearsal=_cpm_rehearsal(),
-        mpg_readiness=_mpg_readiness(),
-        mpg_evidence=_evidence("MPG-001"),
-        sor_evidence=_evidence("SOR-001"),
-        sor_detector=_sor_detector(),
-        generated_at_utc="2026-06-30T00:00:00+00:00",
-    )
 
-    cpm_rows = [
-        row
-        for row in artifact["strategy_rows"]
-        if row["strategy_group_id"] == "CPM-RO-001"
+def _fact(
+    fact_snapshot_id: str,
+    *,
+    surface: str,
+    strategy_group_id: str | None = "SOR-001",
+    symbol: str | None = "ETHUSDT",
+    side: str | None = "long",
+    satisfied: bool = True,
+    fact_values: dict | None = None,
+) -> dict:
+    return {
+        "fact_snapshot_id": fact_snapshot_id,
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "side": side,
+        "fact_surface": surface,
+        "computed": True,
+        "satisfied": satisfied,
+        "freshness_state": "fresh",
+        "fact_values": fact_values or {},
+        "observed_at_ms": NOW_MS - 75,
+        "valid_until_ms": NOW_MS + 60_000,
+    }
+
+
+def _ready_facts() -> list[dict]:
+    return [
+        _fact("fact:public", surface="public_pretrade"),
+        _fact("fact:action", surface="action_time"),
+        _fact(
+            "fact:account-safe",
+            surface="account_safe",
+            strategy_group_id=None,
+            symbol=None,
+            side=None,
+            fact_values={
+                "account_safe": True,
+                "active_position_or_open_order_clear": True,
+                "action_time_available_balance": True,
+            },
+        ),
+        _fact(
+            "fact:account-mode",
+            surface="account_mode",
+            strategy_group_id=None,
+            symbol=None,
+            side=None,
+        ),
     ]
-    rows = {row["symbol"]: row for row in cpm_rows}
-    assert set(rows) == {"ETHUSDT", "AVAXUSDT", "SOLUSDT"}
-    assert rows["AVAXUSDT"]["fresh_signal_present"] is True
-    assert rows["AVAXUSDT"]["first_blocker"] == "private_action_time_facts_required"
-    assert rows["AVAXUSDT"]["action_time_path_ready"] is True
-    assert rows["SOLUSDT"]["fresh_signal_present"] is False
-    assert rows["SOLUSDT"]["first_blocker"] == "fresh_cpm_long_signal_absent"
 
 
-def test_sor_boundary_uses_session_detector_first_blocker():
+def test_pg_action_time_lane_projects_trade_identity_without_authority():
     module = _load_module()
 
     artifact = module.build_strategy_fresh_signal_action_time_boundary(
-        cpm_capture=_cpm_capture(fresh=False),
-        cpm_rehearsal=_cpm_rehearsal(),
-        mpg_readiness=_mpg_readiness(),
-        mpg_evidence=_evidence("MPG-001"),
-        sor_evidence=_evidence("SOR-001"),
-        sor_detector=_sor_detector(),
-        generated_at_utc="2026-06-30T00:00:00+00:00",
+        control_state=_control_state(
+            readiness=[_readiness()],
+            signals=[_signal()],
+            promotions=[_promotion()],
+            lanes=[_lane()],
+            facts=_ready_facts(),
+        ),
+        generated_at_utc="2026-07-05T00:00:00+00:00",
+        now_ms=NOW_MS,
     )
 
-    sor = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "SOR-001")
-    assert sor["symbol"] == "SOLUSDT"
-    assert sor["fresh_signal_present"] is False
-    assert sor["first_blocker"] == "fresh_sor_session_range_signal_absent"
-    assert sor["blocker_owner"] == "market"
-    assert sor["action_time_path_ready"] is True
+    row = artifact["strategy_rows"][0]
+    assert artifact["source_mode"] == "db_backed"
+    assert artifact["checks"]["legacy_strategy_json_inputs_allowed"] is False
+    assert row["strategy_group_id"] == "SOR-001"
+    assert row["symbol"] == "ETHUSDT"
+    assert row["side"] == "long"
+    assert row["signal_event_id"] == "signal:SOR-001:ETHUSDT:long"
+    assert row["promotion_candidate_id"] == "promotion:SOR-001:ETHUSDT:long"
+    assert row["action_time_lane_input_id"] == "lane:SOR-001:ETHUSDT:long"
+    assert row["fresh_signal_present"] is True
+    assert row["first_blocker"] == "action_time_preflight_ready"
+    assert row["required_facts_readiness"]["private_action_time_facts_ready"] is True
+    assert row["action_time_path_ready"] is True
+    assert row["would_enter_finalgate_if_private_facts_ready"] is True
+    assert row["calls_finalgate"] is False
+    assert row["calls_operation_layer"] is False
+    assert row["calls_exchange_write"] is False
+    assert row["order_created"] is False
+    assert row["live_submit_allowed"] is False
 
 
-def test_sor_boundary_builds_nonexecuting_shape_from_fresh_detector_without_activation_evidence():
+def test_pg_market_wait_row_does_not_pretend_to_have_fresh_signal():
     module = _load_module()
 
     artifact = module.build_strategy_fresh_signal_action_time_boundary(
-        cpm_capture=_cpm_capture(fresh=False),
-        cpm_rehearsal=_cpm_rehearsal(),
-        mpg_readiness=_mpg_readiness(),
-        mpg_evidence=_evidence("MPG-001"),
-        sor_evidence={},
-        sor_detector=_sor_detector(fresh=True, missing_required_trigger_facts=[]),
-        generated_at_utc="2026-06-30T00:00:00+00:00",
-    )
-
-    sor = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "SOR-001")
-    assert sor["symbol"] == "SOLUSDT"
-    assert sor["fresh_signal_present"] is True
-    assert sor["required_facts_readiness"]["public_facts_ready"] is True
-    assert sor["candidate_evidence_shape_ready"] is True
-    assert sor["dry_run_submit_rehearsal_ready"] is True
-    assert sor["action_time_path_ready"] is True
-    assert sor["first_blocker"] == "private_action_time_facts_required"
-    assert sor["calls_finalgate"] is False
-    assert sor["calls_operation_layer"] is False
-    assert sor["calls_exchange_write"] is False
-    assert sor["order_created"] is False
-
-
-def test_sor_boundary_marks_private_facts_ready_from_account_safe_facts():
-    module = _load_module()
-
-    artifact = module.build_strategy_fresh_signal_action_time_boundary(
-        cpm_capture=_cpm_capture(fresh=False),
-        cpm_rehearsal=_cpm_rehearsal(),
-        mpg_readiness=_mpg_readiness(),
-        mpg_evidence=_evidence("MPG-001"),
-        sor_evidence={},
-        sor_detector=_sor_detector(fresh=True, missing_required_trigger_facts=[]),
-        account_safe_facts=_account_safe_facts(),
-        generated_at_utc="2026-06-30T00:00:00+00:00",
-    )
-
-    sor = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "SOR-001")
-    readiness = sor["required_facts_readiness"]
-    assert readiness["private_action_time_facts_ready"] is True
-    assert readiness["active_position_or_open_order_clear"] is True
-    assert readiness["action_time_available_balance"] is True
-    assert sor["action_time_path_ready"] is True
-    assert sor["calls_finalgate"] is False
-    assert sor["calls_operation_layer"] is False
-    assert sor["calls_exchange_write"] is False
-
-
-def test_sor_boundary_requires_selected_detector_public_facts_and_candle_tick():
-    module = _load_module()
-
-    artifact = module.build_strategy_fresh_signal_action_time_boundary(
-        cpm_capture=_cpm_capture(fresh=False),
-        cpm_rehearsal=_cpm_rehearsal(),
-        mpg_readiness=_mpg_readiness(),
-        mpg_evidence=_evidence("MPG-001"),
-        sor_evidence=_evidence("SOR-001"),
-        sor_detector=_sor_detector(
-            latest_candle=False,
-            missing_required_trigger_facts=[
-                "opening_range_available",
-                "breakout_level_crossed",
+        control_state=_control_state(
+            readiness=[
+                _readiness(
+                    strategy_group_id="CPM-RO-001",
+                    symbol="SOLUSDT",
+                    side="long",
+                    state="market_wait_validated",
+                    blocker="market_wait_validated",
+                )
+            ],
+            facts=[
+                _fact(
+                    "fact:cpm-public",
+                    surface="public_pretrade",
+                    strategy_group_id="CPM-RO-001",
+                    symbol="SOLUSDT",
+                    side="long",
+                )
             ],
         ),
-        generated_at_utc="2026-06-30T00:00:00+00:00",
+        generated_at_utc="2026-07-05T00:00:00+00:00",
+        now_ms=NOW_MS,
     )
 
-    sor = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "SOR-001")
-    assert sor["symbol"] == "SOLUSDT"
-    assert sor["required_facts_readiness"]["public_facts_ready"] is False
-    assert sor["action_time_path_ready"] is False
-    assert sor["would_enter_finalgate_if_private_facts_ready"] is False
-    assert sor["first_blocker"] == "watcher_tick_missing"
-    assert sor["blocker_owner"] == "runtime"
-    assert sor["next_action"] == "refresh_or_repair_watcher_public_fact_input"
+    row = artifact["strategy_rows"][0]
+    assert row["strategy_group_id"] == "CPM-RO-001"
+    assert row["symbol"] == "SOLUSDT"
+    assert row["fresh_signal_present"] is False
+    assert row["first_blocker"] == "market_wait_validated"
+    assert row["blocker_owner"] == "market"
+    assert row["would_enter_finalgate_if_private_facts_ready"] is False
+    assert row["next_action"] == "continue_watcher_observation_until_fresh_signal"
 
 
-def test_mpg_boundary_maps_public_facts_gap_to_watcher_tick_missing():
+def test_pg_projection_fails_closed_to_watcher_tick_missing_when_public_fact_is_absent():
     module = _load_module()
 
     artifact = module.build_strategy_fresh_signal_action_time_boundary(
-        cpm_capture=_cpm_capture(fresh=False),
-        cpm_rehearsal=_cpm_rehearsal(),
-        mpg_readiness=_mpg_readiness_public_gap(),
-        mpg_evidence={
-            **_evidence("MPG-001"),
-            "runtime_artifact_ready": False,
-            "candidate_evidence_shape_ready": False,
-            "fresh_signal_rehearsal_ready": False,
-        },
-        sor_evidence=_evidence("SOR-001"),
-        sor_detector=_sor_detector(),
-        generated_at_utc="2026-06-30T00:00:00+00:00",
+        control_state=_control_state(
+            readiness=[_readiness()],
+            signals=[_signal()],
+            promotions=[_promotion()],
+            lanes=[_lane()],
+            facts=[
+                fact for fact in _ready_facts() if fact["fact_surface"] != "public_pretrade"
+            ],
+        ),
+        generated_at_utc="2026-07-05T00:00:00+00:00",
+        now_ms=NOW_MS,
     )
 
-    mpg = next(row for row in artifact["strategy_rows"] if row["strategy_group_id"] == "MPG-001")
-    assert mpg["symbol"] == "SOLUSDT"
-    assert mpg["required_facts_readiness"]["public_facts_ready"] is False
-    assert mpg["action_time_path_ready"] is False
-    assert mpg["first_blocker"] == "watcher_tick_missing"
-    assert mpg["blocker_owner"] == "runtime"
-    assert mpg["next_action"] == "refresh_or_repair_watcher_public_fact_input"
+    row = artifact["strategy_rows"][0]
+    assert row["required_facts_readiness"]["public_facts_ready"] is False
+    assert row["first_blocker"] == "watcher_tick_missing"
+    assert row["blocker_owner"] == "runtime"
+    assert row["action_time_path_ready"] is False
+    assert row["would_enter_finalgate_if_private_facts_ready"] is False
 
 
-def test_action_time_boundary_rejects_legacy_account_safe_facts_json_arg(tmp_path: Path):
+def test_pg_projection_fails_closed_when_readiness_projection_is_expired():
+    module = _load_module()
+    expired_readiness = _readiness(
+        strategy_group_id="MPG-001",
+        symbol="OPUSDT",
+        side="long",
+        state="market_wait_validated",
+        blocker="market_wait_validated",
+    )
+    expired_readiness["valid_until_ms"] = NOW_MS - 1
+
+    artifact = module.build_strategy_fresh_signal_action_time_boundary(
+        control_state=_control_state(readiness=[expired_readiness]),
+        generated_at_utc="2026-07-05T00:00:00+00:00",
+        now_ms=NOW_MS,
+    )
+
+    row = artifact["strategy_rows"][0]
+    assert row["required_facts_readiness"]["public_facts_ready"] is False
+    assert row["first_blocker"] == "watcher_tick_missing"
+    assert row["blocker_owner"] == "runtime"
+    assert row["next_action"] == "refresh_or_repair_watcher_public_fact_input"
+
+
+def test_pg_projection_ignores_non_live_or_stale_signal_rows():
+    module = _load_module()
+
+    artifact = module.build_strategy_fresh_signal_action_time_boundary(
+        control_state=_control_state(
+            readiness=[_readiness(state="market_wait_validated", blocker="market_wait_validated")],
+            signals=[
+                _signal(source_kind="synthetic"),
+                _signal(status="detected"),
+                _signal(freshness_state="stale"),
+            ],
+            facts=_ready_facts(),
+        ),
+        generated_at_utc="2026-07-05T00:00:00+00:00",
+        now_ms=NOW_MS,
+    )
+
+    row = artifact["strategy_rows"][0]
+    assert row["fresh_signal_present"] is False
+    assert row["signal_event_id"] == ""
+    assert row["first_blocker"] == "market_wait_validated"
+
+
+def test_action_time_boundary_rejects_retired_strategy_json_arg(tmp_path: Path):
     module = _load_module()
 
     with pytest.raises(SystemExit):
         module.main(
             [
-                "--account-safe-facts-json",
-                str(tmp_path / "latest-account-safe-facts.json"),
+                "--cpm-capture-json",
+                str(tmp_path / "latest-cpm-runtime-signal-capture.json"),
             ]
         )

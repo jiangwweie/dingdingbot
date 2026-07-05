@@ -33,7 +33,7 @@
     {
       "path": "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json",
       "paired_path": "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.md",
-      "source_command": "python3 scripts/build_strategy_fresh_signal_action_time_boundary.py",
+      "source_command": "python3 scripts/build_strategy_fresh_signal_action_time_boundary.py --require-database-url",
       "validator": "python3 -m py_compile scripts/build_strategy_fresh_signal_action_time_boundary.py",
       "consumed_by": "daily_live_enablement_table"
     },
