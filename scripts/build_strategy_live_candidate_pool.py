@@ -2115,8 +2115,7 @@ def _symbol_readiness_row(
     risk_state = _risk_state(parity_row)
     runtime_profile_ready = _runtime_profile_ready(runtime_coverage_row)
     action_time_scope_missing = (
-        signal_state == "fresh"
-        and scope_state in ACTION_TIME_SCOPE_STATES
+        scope_state in ACTION_TIME_SCOPE_STATES
         and public_facts_state["state"] == "satisfied"
         and not runtime_active
     )

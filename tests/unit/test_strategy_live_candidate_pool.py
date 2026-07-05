@@ -429,6 +429,9 @@ def test_candidate_pool_builds_from_pg_control_state_seed(pg_control_connection)
         row["server_runtime_coverage"]["state"] == "runtime_profile_scope_missing"
         for row in artifact["symbol_readiness_rows"]
     )
+    assert "market_wait_validated" not in {
+        row["first_blocker"] for row in artifact["symbol_readiness_rows"]
+    }
     assert all(
         row["promotion_state"] == "idle"
         for row in artifact["symbol_readiness_rows"]
