@@ -110,6 +110,9 @@ local build -> server static directory -> Nginx domain -> backend API proxy
 | **Unauthenticated session boundary** | Passed | `/api/auth/session` returns `401 Operator login required` |
 | **Login page render** | Passed | `output/playwright/trading-console/08-domain-login.png` |
 | **Invalid login failure state** | Passed | `output/playwright/trading-console/09-domain-invalid-login.png` |
+| **Domain login audit rerun** | Passed | `output/playwright/trading-console/10-domain-login-audit.png` |
+| **Domain invalid-login audit rerun** | Passed | `output/playwright/trading-console/11-domain-invalid-login-audit.png` |
+| **Domain login theme toggle** | Passed | `output/playwright/trading-console/12-domain-login-theme-toggle-audit.png` |
 | **Local five-page render** | Passed | `output/playwright/trading-console/01-dashboard-dark.png` through `05-exceptions-dark.png` |
 | **Theme switch** | Passed | `output/playwright/trading-console/06-exceptions-light.png` |
 | **Responsive smoke** | Passed | `output/playwright/trading-console/07-order-ledger-900px-dark.png` |
@@ -120,4 +123,5 @@ Authenticated domain acceptance for the five protected pages requires a valid
 test operator username, password, and current **Google Authenticator TOTP** code.
 No frontend or backend bypass was used. Until that credential is available, the
 completed server-domain evidence covers static deployment, unauthenticated auth
-boundary, login rendering, and invalid-login behavior.
+boundary, login rendering, invalid-login behavior, and login-page theme
+switching.
