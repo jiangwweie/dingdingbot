@@ -104,7 +104,7 @@ def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
         encoding="utf-8",
     )
     return {
-        "scope": "runtime_fresh_attempt_readiness_projection",
+        "scope": "runtime_signal_watcher_post_signal_resume_pack",
         "status": "ready_for_fresh_submit_authorization",
         "ticket_id": "ticket-ready-1",
         "runtime_instance_id": "runtime-mpg-1",
@@ -1127,10 +1127,11 @@ def test_dispatcher_fresh_authorization_emits_binding_plan(tmp_path):
     assert command["exchange_write_called"] is False
 
 
-def test_dispatcher_accepts_fresh_attempt_readiness_alias_with_explicit_allowed_action(
+def test_dispatcher_blocks_retired_fresh_attempt_readiness_projection_alias(
     tmp_path,
 ):
     resume = _fresh_authorization_resume_pack(tmp_path)
+    resume["scope"] = "runtime_fresh_attempt_readiness_projection"
     resume.pop("action_time_resume")
     resume["status"] = "waiting_for_fresh_authorization"
     resume["allowed_auto_actions"] = ["bind_or_resolve_fresh_authorization"]
@@ -1144,12 +1145,19 @@ def test_dispatcher_accepts_fresh_attempt_readiness_alias_with_explicit_allowed_
         api_base="http://127.0.0.1:18080",
     )
 
-    assert artifact["status"] == "waiting_for_fresh_authorization"
-    assert artifact["dispatch_action"] == (
-        "run_official_fresh_submit_authorization_binding"
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == "blocked_by_retired_file_authority_projection"
+    assert artifact["dispatch_action"] is None
+    assert artifact["command_plan"] is None
+    assert artifact["blockers"] == [
+        "retired_file_authority_scope:runtime_fresh_attempt_readiness_projection"
+    ]
+    assert artifact["owner_state"]["blocked_at"] == "file_authority_retired"
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
+        "materialize_pg_action_time_ticket"
     )
-    assert artifact["command_plan"]["method"] == "POST"
-    assert artifact["command_plan"]["places_order"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkpoint(

@@ -142,6 +142,12 @@ historical research script.
 | `runtime-dry-run-audit-chain.json` | dry-run audit chain | Goal Status, product-state refresh | non-executing rehearsal audit | rehearsal evidence refs, `brc_legacy_diagnostics` | Useful for diagnostics, not production submit authority |
 | `action-time-ticket-materialization.json` | `materialize_action_time_ticket.py` | ops/diagnostics, test validators | PG Action-Time Ticket issuer export | `brc_action_time_tickets`, `brc_action_time_ticket_events` | Export only; FinalGate must consume `ticket_id` from PG, not this JSON |
 
+### Retired File-Authority Bridges
+
+| Retired bridge | Previous role | Replacement | Enforcement |
+| --- | --- | --- | --- |
+| `build_runtime_fresh_attempt_readiness_projection.py` / `runtime_fresh_attempt_readiness_projection` | Built a fresh-attempt readiness decision by aggregating operator evidence, fresh-signal loop, readiness evidence, authorization binding, handoff, and FinalGate JSON reports | PG chain: `brc_live_signal_events` -> `brc_promotion_candidates` -> `brc_action_time_lane_inputs` -> `brc_action_time_tickets` -> ticket-bound FinalGate preflight -> Runtime Safety State | Script and tests are removed; resume dispatcher rejects this retired scope with `blocked_by_retired_file_authority_projection` |
+
 ## Critical Conflict Points
 
 | Conflict | Current shape | Impact | Required PG closure |
@@ -159,6 +165,7 @@ historical research script.
 | Governance output mixed with runtime output | MI admission and strategy handoff data live beside runtime facts | Admission state can be confused with live readiness | Strategy governance tables feed registry/policy/scope projections |
 | Server monitor as file aggregator | legacy monitor versions read Daily Table, Candidate Pool, facts, watcher status, deploy health, and dedupe JSON | Reintroducing those arguments would make production notification depend on stale files | Current monitor rejects legacy JSON arguments, reads DB projections, and writes monitor/notification tables |
 | Action-time evidence as loose files | resume pack, dispatch artifact, operation evidence, dry-run audit are separate JSONs | Hard to prove a single candidate intent | action-time lane, candidate/auth, execution evidence share lane/input refs |
+| Fresh-attempt readiness projection as file bridge | old `runtime_fresh_attempt_readiness_projection` aggregated several JSON reports and could dispatch fresh authorization from the aggregate | It could recreate a second authority path between fresh signal and FinalGate | Retired; use PG action-time lane, Action-Time Ticket, ticket-bound FinalGate preflight, and Runtime Safety State |
 
 ## PG Route By Mainline Domain
 

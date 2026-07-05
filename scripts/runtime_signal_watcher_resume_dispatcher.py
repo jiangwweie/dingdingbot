@@ -77,6 +77,9 @@ FRESH_AUTHORIZATION_ALLOWED_ACTIONS = {
     "bind_or_resolve_fresh_authorization",
     FRESH_AUTHORIZATION_BINDING_ACTION,
 }
+RETIRED_FILE_AUTHORITY_SCOPES = {
+    "runtime_fresh_attempt_readiness_projection",
+}
 SESSION_COOKIE_ENV = "BRC_OPERATOR_SESSION_COOKIE"
 SESSION_COOKIE_FALLBACK_ENV = "OWNER_BOUNDED_SESSION_COOKIE"
 UNSAFE_TRUE_FLAGS = {
@@ -1530,6 +1533,32 @@ def build_dispatch_artifact(
         for item in _list(resume_pack.get("blockers"))
         if str(item).strip()
     ]
+    retired_scope = str(resume_pack.get("scope") or "").strip()
+
+    if retired_scope in RETIRED_FILE_AUTHORITY_SCOPES:
+        return _dispatch_artifact(
+            label=label,
+            source_path=source_path,
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+            owner_state={
+                "status": "needs_intervention",
+                "blocker_class": "hard_safety_stop",
+                "blocked_at": "file_authority_retired",
+                "blocked_reason": f"retired_file_authority_scope:{retired_scope}",
+                "non_authority_checkpoint": "materialize_pg_action_time_ticket",
+                "downgrade_mode": "continue_watcher_observation_no_submit",
+            },
+            status="blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_action=None,
+            dispatch_status="blocked_by_retired_file_authority_projection",
+            blockers=base_blockers + [
+                f"retired_file_authority_scope:{retired_scope}",
+            ],
+            command_plan=None,
+            selected_strategy_group_id=selected_strategy_group_id,
+        )
 
     if unsafe_flags:
         return _dispatch_artifact(
