@@ -219,12 +219,25 @@ def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]
         sa.text(
             """
             SELECT COUNT(*)
-            FROM brc_candidate_scope_event_bindings AS binding
-            JOIN brc_strategy_event_required_facts AS facts
-              ON facts.event_spec_id = binding.event_spec_id
-            WHERE binding.status = 'active'
-              AND facts.status = 'active'
-              AND facts.fact_group = 'protection'
+            FROM brc_strategy_group_candidate_scope AS candidate
+            JOIN brc_candidate_scope_event_bindings AS binding
+              ON binding.candidate_scope_id = candidate.candidate_scope_id
+            JOIN brc_strategy_side_event_specs AS spec
+              ON spec.event_spec_id = binding.event_spec_id
+            LEFT JOIN brc_owner_policy_current AS policy
+              ON policy.policy_current_id = candidate.policy_current_id
+            WHERE candidate.status = 'active'
+              AND candidate.scope_state = 'live_submit_allowed'
+              AND binding.status = 'active'
+              AND spec.status = 'current'
+              AND COALESCE(spec.protection_ref_type, '') <> ''
+              AND (
+                policy.policy_current_id IS NULL
+                OR (
+                  policy.enabled_state = 'enabled'
+                  AND policy.pretrade_candidate_allowed = true
+                )
+              )
             """
         )
     ).scalar_one()

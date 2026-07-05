@@ -144,6 +144,7 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
     artifact = json.loads(output_json.read_text(encoding="utf-8"))
     assert artifact["source_mode"] == "db_backed"
     assert artifact["collector_source_mode"] == "pg_scope_direct_readonly_exchange"
+    assert artifact["facts"]["protection_template_ready"] is True
     assert len(artifact["pg_fact_snapshot_ids"]) == 2
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
@@ -198,10 +199,9 @@ def _create_pg_scope_tables(conn: sqlite3.Connection) -> None:
           event_spec_id TEXT,
           status TEXT
         );
-        CREATE TABLE brc_strategy_event_required_facts (
-          event_required_fact_id TEXT PRIMARY KEY,
+        CREATE TABLE brc_strategy_side_event_specs (
           event_spec_id TEXT,
-          fact_group TEXT,
+          protection_ref_type TEXT,
           status TEXT
         );
         INSERT INTO brc_owner_policy_current (
@@ -222,10 +222,10 @@ def _create_pg_scope_tables(conn: sqlite3.Connection) -> None:
           'binding:scope:CPM-RO-001:ETHUSDT:long:CPM-LONG',
           'scope:CPM-RO-001:ETHUSDT:long', 'event:CPM-LONG', 'active'
         );
-        INSERT INTO brc_strategy_event_required_facts (
-          event_required_fact_id, event_spec_id, fact_group, status
+        INSERT INTO brc_strategy_side_event_specs (
+          event_spec_id, protection_ref_type, status
         ) VALUES (
-          'fact:event:CPM-LONG:protection', 'event:CPM-LONG', 'protection', 'active'
+          'event:CPM-LONG', 'pullback_low_reference', 'current'
         );
         """
     )
