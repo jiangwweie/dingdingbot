@@ -91,10 +91,10 @@ def _snapshot(**overrides):
                         "execution_attempt_rehearsal_prepare_checked",
                         "selected_strategygroup_dispatch_guard_checked",
                         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
-                        "operation_layer_evidence_relay_checked",
+                        "ticket_bound_operation_layer_handoff_checked",
                         "scoped_pipeline_operation_layer_submit_projection_checked",
                         "operation_layer_authorization_chain_guard_checked",
-                        "operation_layer_standing_authorization_relay_checked",
+                        "ticket_bound_protected_submit_boundary_checked",
                         "operation_layer_blocker_review_policy_checked",
                         "post_submit_exit_outcome_matrix_checked",
                         "reduce_only_recovery_standing_authorization_checked",
@@ -115,7 +115,7 @@ def _snapshot(**overrides):
                         "required_facts_readiness",
                         "candidate_authorization_evidence",
                         "action_time_finalgate",
-                        "official_operation_layer_evidence_relay_projection",
+                        "ticket_bound_operation_layer_handoff_projection",
                         "disabled_dry_run_proof",
                         "post_submit_exit_outcome_matrix",
                     ],
@@ -930,11 +930,11 @@ def test_daily_check_owner_progress_text_surfaces_missing_chain_segments():
                     "status": "non_market_execution_chain_ready",
                     "ready_segments": ["fresh_signal_fast_auto_chain_checked"],
                     "missing_or_failed_segments": [
-                        "operation_layer_evidence_relay_checked"
+                        "ticket_bound_operation_layer_handoff_checked"
                     ],
                     "ready_goal_chain_segments": ["fresh_or_mock_signal"],
                     "missing_or_failed_goal_chain_segments": [
-                        "official_operation_layer_evidence_relay_projection"
+                        "ticket_bound_operation_layer_handoff_projection"
                     ],
                 },
             },
@@ -947,9 +947,9 @@ def test_daily_check_owner_progress_text_surfaces_missing_chain_segments():
     assert "- 链路段: 1 ready / 1 missing" in text
     assert "- 目标链路段: 1 ready / 1 missing" in text
     assert "## Missing Chain Segments" in text
-    assert "- operation_layer_evidence_relay_checked" in text
+    assert "- ticket_bound_operation_layer_handoff_checked" in text
     assert "## Missing Goal Chain Segments" in text
-    assert "- official_operation_layer_evidence_relay_projection" in text
+    assert "- ticket_bound_operation_layer_handoff_projection" in text
 
 
 def test_daily_check_owner_progress_text_marks_chain_segments_unknown_when_absent():

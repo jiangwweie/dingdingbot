@@ -76,10 +76,10 @@ ENTRY_FAST_CHAIN_REQUIRED_SEGMENTS = (
     "required_facts_readiness_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
-    "operation_layer_evidence_relay_checked",
+    "ticket_bound_operation_layer_handoff_checked",
     "scoped_pipeline_operation_layer_submit_projection_checked",
     "operation_layer_authorization_chain_guard_checked",
-    "operation_layer_standing_authorization_relay_checked",
+    "ticket_bound_protected_submit_boundary_checked",
 )
 EXIT_HARDENING_REQUIRED_SEGMENTS = (
     "post_submit_exit_outcome_matrix_checked",

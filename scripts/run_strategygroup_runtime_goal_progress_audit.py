@@ -142,8 +142,8 @@ P0_COMPLETION_AUDIT_REQUIRED_CHECKS = (
     "only_mpg_tiny_real_order_eligible_checked",
     "operation_layer_authorization_chain_guard_checked",
     "operation_layer_blocker_review_policy_checked",
-    "operation_layer_evidence_relay_checked",
-    "operation_layer_standing_authorization_relay_checked",
+    "ticket_bound_operation_layer_handoff_checked",
+    "ticket_bound_protected_submit_boundary_checked",
     "operation_layer_hard_safety_blocker_matrix_checked",
     "post_submit_closed_loop_evidence_guard_checked",
     "post_submit_exit_outcome_matrix_checked",
@@ -622,9 +622,9 @@ def _entry_fast_chain_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
                 "all_selected_strategygroups_reach_finalgate_dispatch_checked",
             )
         ),
-        "operation_layer_evidence_relay_checked": _dry_run_required_check_present(
+        "ticket_bound_operation_layer_handoff_checked": _dry_run_required_check_present(
             checks,
-            "operation_layer_evidence_relay_checked",
+            "ticket_bound_operation_layer_handoff_checked",
         ),
         "scoped_pipeline_operation_layer_submit_projection_checked": (
             _dry_run_required_check_present(
@@ -638,10 +638,10 @@ def _entry_fast_chain_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
                 "operation_layer_authorization_chain_guard_checked",
             )
         ),
-        "operation_layer_standing_authorization_relay_checked": (
+        "ticket_bound_protected_submit_boundary_checked": (
             _dry_run_required_check_present(
                 checks,
-                "operation_layer_standing_authorization_relay_checked",
+                "ticket_bound_protected_submit_boundary_checked",
             )
         ),
         "operation_layer_blocker_review_policy_checked": (
@@ -667,14 +667,14 @@ def _entry_fast_chain_boundary(*, checks: dict[str, Any]) -> dict[str, Any]:
             ]
             and fast_chain_checks["selected_strategygroup_dispatch_guard_checked"]
         ),
-        "finalgate_to_operation_layer_evidence_covered": (
-            fast_chain_checks["operation_layer_evidence_relay_checked"]
+        "finalgate_to_ticket_bound_operation_layer_handoff_covered": (
+            fast_chain_checks["ticket_bound_operation_layer_handoff_checked"]
             and fast_chain_checks["scoped_pipeline_operation_layer_submit_projection_checked"]
         ),
         "operation_layer_authorization_guard_covered": fast_chain_checks[
             "operation_layer_authorization_chain_guard_checked"
         ]
-        and fast_chain_checks["operation_layer_standing_authorization_relay_checked"],
+        and fast_chain_checks["ticket_bound_protected_submit_boundary_checked"],
         "operation_layer_blocker_review_policy_covered": fast_chain_checks[
             "operation_layer_blocker_review_policy_checked"
         ],
@@ -2205,9 +2205,13 @@ def _owner_progress_text(report: dict[str, Any]) -> str:
         + _yes_no(
             bool(entry_fast_chain["candidate_authorization_to_finalgate_covered"])
         ),
-        "- FinalGate to Operation Layer evidence covered: "
+        "- FinalGate to ticket-bound Operation Layer handoff covered: "
         + _yes_no(
-            bool(entry_fast_chain["finalgate_to_operation_layer_evidence_covered"])
+            bool(
+                entry_fast_chain[
+                    "finalgate_to_ticket_bound_operation_layer_handoff_covered"
+                ]
+            )
         ),
         "- Operation Layer authorization guard covered: "
         + _yes_no(

@@ -109,9 +109,9 @@ SHARED_RUNTIME_PIPELINE_STAGES = [
     "fresh_signal_to_candidate_authorization",
     "required_facts_readiness",
     "action_time_finalgate",
-    "operation_layer_evidence_relay",
+    "ticket_bound_operation_layer_handoff",
     "account_position_order_protection_budget_idempotency_checks",
-    "official_operation_layer_submit",
+    "ticket_bound_protected_submit",
     "post_submit_finalize_reconciliation_budget_settlement_review",
     "owner_console_source_readmodel",
 ]
@@ -459,7 +459,7 @@ def _legacy_local_registration_probe_report() -> dict[str, Any]:
     return report
 
 
-def _operation_layer_relay_checks(
+def _ticket_bound_operation_layer_handoff_checks(
     *,
     operation_layer: dict[str, Any],
     closed_loop_shape: dict[str, Any],
@@ -467,15 +467,12 @@ def _operation_layer_relay_checks(
     readiness = operation_layer.get("operation_layer_readiness")
     if not isinstance(readiness, dict):
         readiness = {}
-    available_ids = readiness.get("available_evidence_ids")
-    if not isinstance(available_ids, dict):
-        available_ids = {}
-    required_ids = readiness.get("required_evidence_ids")
-    if not isinstance(required_ids, list):
-        required_ids = []
     command_plan = operation_layer.get("operation_layer_command_plan")
     if not isinstance(command_plan, dict):
         command_plan = {}
+    handoff_plan = operation_layer.get("operation_layer_handoff_plan")
+    if not isinstance(handoff_plan, dict):
+        handoff_plan = {}
     finalgate = operation_layer.get("finalgate_preflight_result")
     if not isinstance(finalgate, dict):
         finalgate = {}
@@ -483,11 +480,6 @@ def _operation_layer_relay_checks(
     if not isinstance(finalgate_body, dict):
         finalgate_body = {}
 
-    same_authorization = (
-        str(command_plan.get("authorization_id") or "")
-        == str(available_ids.get("authorization_id") or "")
-        == FRESH_AUTHORIZATION_ID
-    )
     closed_loop_authorizations = [
         closed_loop_shape.get("post_submit_finalize_result", {}).get(
             "authorization_id"
@@ -499,29 +491,43 @@ def _operation_layer_relay_checks(
         closed_loop_shape.get("review_record_result", {}).get("authorization_id"),
     ]
     return {
-        "required_evidence_ids_present": all(
-            str(available_ids.get(str(name)) or "").strip() for name in required_ids
+        "ticket_id_bound": (
+            operation_layer.get("ticket_id") == ACTION_TIME_TICKET_ID
+            and readiness.get("ticket_id") == ACTION_TIME_TICKET_ID
+            and command_plan.get("ticket_id") == ACTION_TIME_TICKET_ID
         ),
-        "no_missing_evidence_ids": readiness.get("missing_evidence_ids") == [],
-        "operation_layer_ready_flag_true": (
-            readiness.get("ready_for_official_operation_layer_submit") is True
+        "finalgate_pass_id_bound": (
+            operation_layer.get("finalgate_pass_id") == FINALGATE_PASS_ID
+            and readiness.get("finalgate_pass_id") == FINALGATE_PASS_ID
+            and command_plan.get("finalgate_pass_id") == FINALGATE_PASS_ID
         ),
-        "operation_layer_official_endpoint_selected": (
-            command_plan.get("official_endpoint_method") == "POST"
-            and "runtime-execution-first-real-submit-actions/authorizations/"
-            in str(command_plan.get("official_endpoint_path") or "")
+        "operation_layer_handoff_id_present": bool(
+            operation_layer.get("operation_layer_handoff_id")
         ),
-        "standing_authorization_bound_for_first_real_submit": (
-            command_plan.get("standing_authorized_first_real_submit") is True
+        "operation_submit_command_id_present": (
+            operation_layer.get("operation_submit_command_id")
+            == "dry-run-operation-submit-1"
+            and readiness.get("operation_submit_command_id")
+            == "dry-run-operation-submit-1"
+            and command_plan.get("operation_submit_command_id")
+            == "dry-run-operation-submit-1"
         ),
-        "owner_chat_confirmation_not_required_for_first_real_submit": (
-            command_plan.get("owner_chat_confirmation_required_for_real_submit")
-            is False
+        "ticket_bound_handoff_ready_flag_true": (
+            readiness.get("ready_for_ticket_bound_protected_submit") is True
         ),
-        "legacy_owner_confirmation_env_not_required": (
-            command_plan.get("legacy_owner_confirmation_env_required") is False
+        "operation_layer_handoff_command_ticket_bound": (
+            command_plan.get("kind") == "ticket_bound_operation_layer_handoff"
+            and command_plan.get("requires_ticket_bound_protected_submit") is True
         ),
-        "same_authorization_chain": same_authorization,
+        "operation_layer_handoff_endpoint_selected": (
+            handoff_plan.get("method") == "POST"
+            and "runtime-operation-layer-handoffs/tickets/"
+            in str(handoff_plan.get("path") or "")
+        ),
+        "protected_submit_checkpoint_selected": (
+            operation_layer.get("dispatch_action")
+            == "prepare_ticket_bound_protected_submit"
+        ),
         "action_time_finalgate_called": finalgate.get("called") is True,
         "action_time_finalgate_passed": (
             finalgate_body.get("status") == "ready_for_controlled_submit_adapter"
@@ -529,7 +535,7 @@ def _operation_layer_relay_checks(
             == "pass"
             and not finalgate_body.get("blockers")
         ),
-        "closed_loop_uses_same_authorization": all(
+        "legacy_closed_loop_shape_still_non_authority": all(
             item == FRESH_AUTHORIZATION_ID for item in closed_loop_authorizations
         ),
     }
@@ -960,11 +966,47 @@ def _resume_pack_finalgate_ready() -> dict[str, Any]:
         **_resume_pack_ready_for_finalgate(),
         "status": "finalgate_ready",
         "dispatch_status": "official_finalgate_preflight_passed",
+        "command_plan": dispatcher._preflight_command_plan(  # noqa: SLF001
+            api_base="http://dry-run.local",
+            ticket_id=ACTION_TIME_TICKET_ID,
+        ),
+        "finalgate_preflight_result": {
+            "called": True,
+            "method": "GET",
+            "http_status": 200,
+            "body": {
+                "status": "ready_for_controlled_submit_adapter",
+                "final_gate_verdict": "PASS",
+                "ticket_id": ACTION_TIME_TICKET_ID,
+                "finalgate_pass_id": FINALGATE_PASS_ID,
+                "blockers": [],
+                "submit_executed": False,
+                "order_created": False,
+                "exchange_called": False,
+                "owner_bounded_execution_called": False,
+                "order_lifecycle_called": False,
+            },
+            "error": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+        },
+    }
+
+
+def _resume_pack_legacy_authorization_finalgate_ready() -> dict[str, Any]:
+    return {
+        **_resume_pack_ready_for_finalgate(),
+        "status": "finalgate_ready",
+        "dispatch_status": "official_finalgate_preflight_passed",
         "command_plan": {
             "prepared_authorization_id": FRESH_AUTHORIZATION_ID,
             "ticket_id": ACTION_TIME_TICKET_ID,
             "api_base": "http://dry-run.local",
         },
+        "operation_layer_command_plan": dispatcher._operation_layer_command_plan(  # noqa: SLF001
+            authorization_id=FRESH_AUTHORIZATION_ID,
+        ),
         "finalgate_preflight_result": {
             "called": True,
             "method": "GET",
@@ -1150,7 +1192,7 @@ def _dispatcher_disabled_smoke_artifact(
         dispatcher._session_cookie = fake_session_cookie
         dispatcher._request_json = fake_request_json
         dispatcher_artifact = dispatcher.build_dispatch_artifact(
-            resume_pack=_resume_pack_finalgate_ready(),
+            resume_pack=_resume_pack_legacy_authorization_finalgate_ready(),
             source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
             api_base="http://dry-run.local",
             operation_layer_evidence_report=operation_layer_evidence,
@@ -1165,6 +1207,144 @@ def _dispatcher_disabled_smoke_artifact(
         dispatcher._request_json = original_request_json
     dispatcher_artifact["dry_run_dispatcher_disabled_smoke_calls"] = calls
     return dispatcher_artifact
+
+
+def _ticket_bound_operation_layer_handoff_body() -> dict[str, Any]:
+    return {
+        "status": "operation_layer_handoff_ready",
+        "operation_layer_verdict": "ready",
+        "ticket_id": ACTION_TIME_TICKET_ID,
+        "finalgate_pass_id": FINALGATE_PASS_ID,
+        "operation_layer_handoff_id": "dry-run-operation-handoff-1",
+        "operation_submit_command_id": "dry-run-operation-submit-1",
+        "strategy_group_id": "MPG-001",
+        "symbol": "MSTR/USDT:USDT",
+        "side": "long",
+        "blockers": [],
+        "warnings": [],
+        "command_plan": {
+            "kind": "ticket_bound_operation_layer_handoff",
+            "ticket_id": ACTION_TIME_TICKET_ID,
+            "finalgate_pass_id": FINALGATE_PASS_ID,
+            "operation_submit_command_id": "dry-run-operation-submit-1",
+            "requires_ticket_bound_protected_submit": True,
+            "places_order": False,
+            "exchange_write_called": False,
+            "order_lifecycle_called": False,
+        },
+        "submit_executed": False,
+        "operation_layer_submit_called": False,
+        "order_created": False,
+        "exchange_called": False,
+        "exchange_write_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _ticket_bound_disabled_smoke_submit_body() -> dict[str, Any]:
+    return {
+        "status": "disabled_smoke_passed",
+        "ticket_id": ACTION_TIME_TICKET_ID,
+        "operation_submit_command_id": "dry-run-operation-submit-1",
+        "strategy_group_id": "MPG-001",
+        "symbol": "MSTR/USDT:USDT",
+        "side": "long",
+        "submit_allowed": False,
+        "exchange_write_called": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "exchange_called": False,
+        "exchange_order_submitted": False,
+        "order_lifecycle_submit_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _ticket_bound_blocked_submit_body(blockers: list[str]) -> dict[str, Any]:
+    return {
+        "status": "blocked",
+        "ticket_id": ACTION_TIME_TICKET_ID,
+        "operation_submit_command_id": "dry-run-operation-submit-1",
+        "strategy_group_id": "MPG-001",
+        "symbol": "MSTR/USDT:USDT",
+        "side": "long",
+        "submit_allowed": False,
+        "blockers": blockers,
+        "exchange_write_called": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "exchange_called": False,
+        "exchange_order_submitted": False,
+        "order_lifecycle_submit_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _ticket_bound_operation_layer_handoff_dispatch(
+    *,
+    execute_operation_layer_submit: bool = False,
+    operation_layer_submit_mode: str = dispatcher.OPERATION_LAYER_SUBMIT_MODE_REAL,
+    protected_submit_body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    calls: list[dict[str, Any]] = []
+
+    def session_cookie() -> tuple[str, str | None]:
+        return ("brc_operator_session=dry-run-session", None)
+
+    def request_json(**kwargs: Any) -> dict[str, Any]:
+        url = str(kwargs.get("url") or "")
+        calls.append(
+            {
+                "method": kwargs.get("method"),
+                "url_kind": (
+                    "ticket_bound_protected_submit"
+                    if "runtime-protected-submits" in url
+                    else "ticket_bound_operation_layer_handoff"
+                ),
+            }
+        )
+        if "runtime-protected-submits" in url:
+            return {
+                "http_status": 200,
+                "error": False,
+                "body": (
+                    protected_submit_body
+                    if protected_submit_body is not None
+                    else _ticket_bound_disabled_smoke_submit_body()
+                ),
+            }
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": _ticket_bound_operation_layer_handoff_body(),
+        }
+
+    original_session_cookie = dispatcher._session_cookie
+    original_request_json = dispatcher._request_json
+    try:
+        dispatcher._session_cookie = session_cookie
+        dispatcher._request_json = request_json
+        artifact = dispatcher.build_dispatch_artifact(
+            resume_pack=_resume_pack_finalgate_ready(),
+            source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+            api_base="http://dry-run.local",
+            execute_preflight=True,
+            execute_operation_layer_submit=execute_operation_layer_submit,
+            operation_layer_submit_mode=operation_layer_submit_mode,
+        )
+    finally:
+        dispatcher._session_cookie = original_session_cookie
+        dispatcher._request_json = original_request_json
+    artifact["dry_run_ticket_bound_handoff_calls"] = calls
+    return artifact
 
 
 def _fake_closed_loop_shape() -> dict[str, Any]:
@@ -1724,12 +1904,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
     )
-    operation_layer = dispatcher.build_dispatch_artifact(
-        resume_pack=_resume_pack_finalgate_ready(),
-        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
-        api_base="http://dry-run.local",
-        operation_layer_evidence_report=_operation_evidence_report(),
-        operation_layer_evidence_report_path="/tmp/dry-run-operation-layer-evidence.json",
+    operation_layer = _ticket_bound_operation_layer_handoff_dispatch(
         execute_operation_layer_submit=False,
     )
     handoff_path = _disabled_handoff_path(output_dir)
@@ -1738,7 +1913,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         client=_DisabledSmokeClient(),
     )
     closed_loop_shape = _fake_closed_loop_shape()
-    relay_checks = _operation_layer_relay_checks(
+    relay_checks = _ticket_bound_operation_layer_handoff_checks(
         operation_layer=operation_layer,
         closed_loop_shape=closed_loop_shape,
     )
@@ -1761,17 +1936,17 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
             and finalgate_plan["dispatch_action"]
             == "run_official_action_time_final_gate_preflight"
         ),
-        "finalgate_to_operation_layer_evidence_ready": (
+        "finalgate_to_ticket_bound_operation_layer_handoff_ready": (
             operation_layer["status"] == "operation_layer_ready"
             and operation_layer["dispatch_action"]
-            == "prepare_official_operation_layer_submit"
+            == "prepare_ticket_bound_protected_submit"
         ),
         "operation_layer_real_submit_still_not_called": (
             _operation_layer_submit_called(operation_layer) is False
         ),
     }
     legacy_probe = dispatcher.build_dispatch_artifact(
-        resume_pack=_resume_pack_finalgate_ready(),
+        resume_pack=_resume_pack_legacy_authorization_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
         operation_layer_evidence_report=_legacy_local_registration_probe_report(),
@@ -1780,14 +1955,12 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         ),
         execute_operation_layer_submit=False,
     )
-    legacy_probe_passed = (
-        legacy_probe["status"] == "operation_layer_ready"
-        and legacy_probe["blockers"] == []
-        and (
-            "legacy_prepare_machine_evidence_probe_blocker_satisfied_by_"
-            "local_registration_adapter_result"
-        )
-        in legacy_probe.get("warnings", [])
+    legacy_probe_blocked = (
+        legacy_probe["status"] == "blocked"
+        and legacy_probe["dispatch_status"]
+        == "blocked_by_legacy_finalgate_authorization_without_ticket"
+        and "legacy_authorization_finalgate_ready_retired"
+        in legacy_probe.get("blockers", [])
     )
     passed = (
         readiness["status"] == "ready_for_fresh_submit_authorization"
@@ -1797,7 +1970,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
         and operation_layer["status"] == "operation_layer_ready"
         and all(relay_checks.values())
         and freshness_checks["status"] == "passed"
-        and legacy_probe_passed
+        and legacy_probe_blocked
         and disabled_report["status"] == "disabled_smoke_passed"
         and closed_loop_shape["status"] == "shape_checked"
         and all(closed_loop_shape["closed_loop_checks"].values())
@@ -1813,19 +1986,19 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
     return _scenario_report(
         name="mock_fresh_signal_dry_run_pass",
         expected=(
-            "evidence IDs connect through the official Operation Layer handoff, "
-            "legacy local-registration probe blockers are satisfied by adapter "
-            "evidence, disabled submit stays non-executing, and "
+            "fresh signal reaches a ticket-bound Operation Layer handoff, "
+            "legacy authorization FinalGate readiness is blocked before submit, "
+            "disabled submit stays non-executing, and "
             "finalize/reconciliation/budget/review shapes are present"
         ),
         artifacts={
             "readiness_evidence": readiness,
             "fast_auto_chain_checks": fast_auto_chain_checks,
             "finalgate_dispatch_plan": finalgate_plan,
-            "operation_layer_evidence_prep": operation_layer,
-            "operation_layer_relay_checks": relay_checks,
+            "ticket_bound_operation_layer_handoff": operation_layer,
+            "ticket_bound_operation_layer_handoff_checks": relay_checks,
             "fresh_signal_freshness_checks": freshness_checks,
-            "legacy_local_registration_probe_tolerance": legacy_probe,
+            "legacy_authorization_finalgate_ready_block": legacy_probe,
             "disabled_submit_smoke": disabled_report,
             "closed_loop_shape": closed_loop_shape,
         },
@@ -1840,7 +2013,7 @@ def _scenario_mock_pass(output_dir: Path) -> dict[str, Any]:
                 if not value
             ],
             *freshness_checks.get("blockers", []),
-            *(legacy_probe.get("blockers", []) if not legacy_probe_passed else []),
+            *(legacy_probe.get("blockers", []) if not legacy_probe_blocked else []),
             *[
                 f"relay_check_failed:{name}"
                 for name, value in relay_checks.items()
@@ -1870,15 +2043,7 @@ def _scenario_scoped_pipeline_operation_layer_submit_projection(
     )
     if not isinstance(operation_layer_evidence, dict):
         operation_layer_evidence = {}
-    dispatch = dispatcher.build_dispatch_artifact(
-        resume_pack=_resume_pack_finalgate_ready(),
-        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
-        api_base="http://dry-run.local",
-        operation_layer_evidence_report=operation_layer_evidence,
-        operation_layer_evidence_report_path=str(
-            pipeline_report.get("operation_layer_evidence_after_local_registration_path")
-            or "/tmp/scoped-pipeline-operation-layer-evidence.json"
-        ),
+    dispatch = _ticket_bound_operation_layer_handoff_dispatch(
         execute_operation_layer_submit=False,
     )
     progress = pipeline_report.get("execution_chain_progress")
@@ -1898,12 +2063,20 @@ def _scenario_scoped_pipeline_operation_layer_submit_projection(
         _disabled_smoke_args(scoped_disabled_handoff_path),
         client=_DisabledSmokeClient(),
     )
-    dispatcher_disabled_smoke = _dispatcher_disabled_smoke_artifact(
-        operation_layer_evidence=operation_layer_evidence,
-        operation_layer_evidence_path=str(
+    dispatcher_disabled_smoke = _ticket_bound_operation_layer_handoff_dispatch(
+        execute_operation_layer_submit=True,
+        operation_layer_submit_mode=dispatcher.OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE,
+    )
+    legacy_dispatcher_block = dispatcher.build_dispatch_artifact(
+        resume_pack=_resume_pack_legacy_authorization_finalgate_ready(),
+        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
+        api_base="http://dry-run.local",
+        operation_layer_evidence_report=operation_layer_evidence,
+        operation_layer_evidence_report_path=str(
             pipeline_report.get("operation_layer_evidence_after_local_registration_path")
             or "/tmp/scoped-pipeline-operation-layer-evidence.json"
         ),
+        execute_operation_layer_submit=True,
     )
     ids = operation_layer_evidence.get("ids")
     if not isinstance(ids, dict):
@@ -1952,23 +2125,30 @@ def _scenario_scoped_pipeline_operation_layer_submit_projection(
             )
             is False
         ),
-        "dispatcher_legacy_submit_retired": (
+        "dispatcher_ticket_bound_disabled_smoke_passed": (
             dispatcher_disabled_smoke.get("status")
-            == "operation_layer_submit_blocked"
+            == "operation_layer_disabled_smoke_passed"
             and dispatcher_disabled_smoke.get("dispatch_status")
-            == "blocked_by_legacy_authorization_operation_layer_submit"
+            == "ticket_bound_protected_submit_disabled_smoke_passed"
         ),
-        "dispatcher_legacy_submit_http_not_called": (
-            dispatcher_disabled_smoke.get("operation_layer_submit_result", {}).get("called")
-            is False
-            and dispatcher_disabled_smoke.get("dry_run_dispatcher_disabled_smoke_calls")
-            == []
+        "dispatcher_ticket_bound_disabled_smoke_calls_protected_submit": (
+            any(
+                call.get("url_kind") == "ticket_bound_protected_submit"
+                for call in dispatcher_disabled_smoke.get(
+                    "dry_run_ticket_bound_handoff_calls", []
+                )
+            )
         ),
-        "dispatcher_legacy_submit_does_not_exchange_write": (
+        "dispatcher_ticket_bound_disabled_smoke_does_not_exchange_write": (
             dispatcher_disabled_smoke.get("safety_invariants", {}).get(
                 "exchange_write_called"
             )
             is False
+        ),
+        "legacy_authorization_dispatcher_blocked_before_submit": (
+            legacy_dispatcher_block.get("status") == "blocked"
+            and legacy_dispatcher_block.get("dispatch_status")
+            == "blocked_by_legacy_finalgate_authorization_without_ticket"
         ),
     }
     checks = {
@@ -1979,13 +2159,15 @@ def _scenario_scoped_pipeline_operation_layer_submit_projection(
             post_gate.get("operation_layer_evidence_ready") is True
             and post_gate.get("operation_layer_evidence_missing_ids") == []
         ),
-        "dispatcher_accepts_pipeline_evidence": (
+        "dispatcher_reaches_ticket_bound_operation_layer_handoff": (
             dispatch.get("status") == "operation_layer_ready"
             and dispatch.get("dispatch_status")
-            == "official_operation_layer_evidence_ready"
+            == "ticket_bound_operation_layer_handoff_ready"
         ),
-        "operation_layer_readiness_has_no_missing_ids": (
-            readiness.get("missing_evidence_ids") == []
+        "operation_layer_readiness_has_submit_command": (
+            readiness.get("ready_for_ticket_bound_protected_submit") is True
+            and readiness.get("operation_submit_command_id")
+            == "dry-run-operation-submit-1"
         ),
         "operation_layer_submit_not_called": (
             _operation_layer_submit_called(dispatch) is False
@@ -2008,13 +2190,15 @@ def _scenario_scoped_pipeline_operation_layer_submit_projection(
         name="scoped_pipeline_operation_layer_submit_projection",
         expected=(
             "real pipeline-shaped scoped local registration proof emits "
-            "Operation Layer evidence consumed by dispatcher without submit"
+            "diagnostic evidence while dispatcher advances only through "
+            "ticket-bound Operation Layer handoff"
         ),
         artifacts={
             "checks": checks,
             "scoped_disabled_submit_checks": scoped_disabled_submit_checks,
             "scoped_disabled_submit_smoke": scoped_disabled_smoke,
-            "dispatcher_legacy_submit_block": dispatcher_disabled_smoke,
+            "dispatcher_ticket_bound_disabled_smoke": dispatcher_disabled_smoke,
+            "legacy_authorization_dispatcher_block": legacy_dispatcher_block,
             "pipeline_report": pipeline_report,
             "resume_dispatch": dispatch,
             "pipeline_client_calls": pipeline_client.calls,
@@ -2212,25 +2396,23 @@ def _scenario_required_facts_missing(output_dir: Path) -> dict[str, Any]:
 
 
 def _scenario_active_conflict(output_dir: Path) -> dict[str, Any]:
-    conflict = dispatcher.build_dispatch_artifact(
-        resume_pack=_resume_pack_finalgate_ready(),
-        source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
-        api_base="http://dry-run.local",
-        operation_layer_evidence_report=_operation_evidence_report(
-            blockers=["active_position_conflict:dry-run-runtime-mpg-001"]
+    conflict = _ticket_bound_operation_layer_handoff_dispatch(
+        execute_operation_layer_submit=True,
+        operation_layer_submit_mode=dispatcher.OPERATION_LAYER_SUBMIT_MODE_REAL,
+        protected_submit_body=_ticket_bound_blocked_submit_body(
+            ["active_position_conflict:dry-run-runtime-mpg-001"]
         ),
-        operation_layer_evidence_report_path="/tmp/dry-run-operation-layer-evidence.json",
-        execute_operation_layer_submit=False,
     )
     passed = (
-        conflict["status"] == "operation_layer_blocked"
+        conflict["status"] == "operation_layer_submit_blocked"
         and conflict["blocker_class"] == "active_position_resolution"
-        and _operation_layer_submit_called(conflict) is False
+        and _operation_layer_submit_called(conflict) is True
+        and conflict.get("safety_invariants", {}).get("exchange_write_called") is False
         and not _dangerous_effects(conflict)
     )
     return _scenario_report(
         name="active_position_or_open_order_conflict",
-        expected="conflict blocks before Operation Layer action",
+        expected="conflict blocks inside ticket-bound protected submit before exchange write",
         artifacts={"resume_dispatch": conflict},
         passed=passed,
         blockers=conflict.get("blockers", []),
@@ -2288,22 +2470,21 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
     results: dict[str, Any] = {}
     blockers: list[str] = []
     for name, spec in blocker_cases.items():
-        dispatcher_artifact = dispatcher.build_dispatch_artifact(
-            resume_pack=_resume_pack_finalgate_ready(),
-            source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
-            api_base="http://dry-run.local",
-            operation_layer_evidence_report=_operation_evidence_report(
-                blockers=[spec["blocker"]]
+        dispatcher_artifact = _ticket_bound_operation_layer_handoff_dispatch(
+            execute_operation_layer_submit=True,
+            operation_layer_submit_mode=dispatcher.OPERATION_LAYER_SUBMIT_MODE_REAL,
+            protected_submit_body=_ticket_bound_blocked_submit_body(
+                [spec["blocker"]]
             ),
-            operation_layer_evidence_report_path=(
-                f"/tmp/dry-run-operation-layer-{name}.json"
-            ),
-            execute_operation_layer_submit=False,
         )
-        review = dispatcher_artifact.get("operation_layer_blocker_review") or {}
+        review = dispatcher._operation_layer_blocker_review_policy(  # noqa: SLF001
+            blocker_class=dispatcher_artifact.get("blocker_class") or "missing_fact",
+            blockers=dispatcher_artifact.get("blockers", []),
+            missing_ids=[],
+        )
         checks = {
             "submit_blocked": dispatcher_artifact.get("status")
-            == "operation_layer_blocked",
+            == "operation_layer_submit_blocked",
             "class_matches": dispatcher_artifact.get("blocker_class")
             == spec["expected_class"],
             "review_artifact_ready": (
@@ -2319,10 +2500,16 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
             "owner_state_matches": (
                 review.get("owner_console_state") == spec["expected_owner_state"]
             ),
-            "operation_layer_not_called": _operation_layer_submit_called(
+            "protected_submit_checked_before_exchange": _operation_layer_submit_called(
                 dispatcher_artifact
             )
-            is False,
+            is True,
+            "exchange_write_not_called": (
+                dispatcher_artifact.get("safety_invariants", {}).get(
+                    "exchange_write_called"
+                )
+                is False
+            ),
             "no_dangerous_effects": not _dangerous_effects(dispatcher_artifact),
         }
         results[name] = {
@@ -2332,6 +2519,7 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
             "blocker_class": dispatcher_artifact.get("blocker_class"),
             "owner_console_state": review.get("owner_console_state"),
             "owner_sentence": review.get("owner_sentence"),
+            "review": review,
             "checks": checks,
             "dispatcher_artifact": dispatcher_artifact,
         }
@@ -2348,8 +2536,10 @@ def _scenario_operation_layer_blocker_review_matrix(output_dir: Path) -> dict[st
             case.get("checks", {}).get("real_submit_forbidden") is True
             for case in results.values()
         ),
-        "all_cases_avoid_operation_layer_submit": all(
-            case.get("checks", {}).get("operation_layer_not_called") is True
+        "all_cases_check_protected_submit_before_exchange": all(
+            case.get("checks", {}).get("protected_submit_checked_before_exchange")
+            is True
+            and case.get("checks", {}).get("exchange_write_not_called") is True
             for case in results.values()
         ),
         "all_cases_have_owner_review_state": all(
@@ -2609,7 +2799,7 @@ def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dic
         "dry-run-stale-auth-previous-attempt"
     )
     stale_operation_layer = dispatcher.build_dispatch_artifact(
-        resume_pack=_resume_pack_finalgate_ready(),
+        resume_pack=_resume_pack_legacy_authorization_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
         operation_layer_evidence_report=stale_report,
@@ -2623,7 +2813,7 @@ def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dic
     missing_auth_report["ids"].pop("authorization_id", None)
     missing_auth_report["steps"][0]["id_summary"].pop("authorization_id", None)
     missing_auth_operation_layer = dispatcher.build_dispatch_artifact(
-        resume_pack=_resume_pack_finalgate_ready(),
+        resume_pack=_resume_pack_legacy_authorization_finalgate_ready(),
         source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
         api_base="http://dry-run.local",
         operation_layer_evidence_report=missing_auth_report,
@@ -2634,32 +2824,20 @@ def _scenario_operation_layer_authorization_chain_guard(output_dir: Path) -> dic
     )
 
     checks = {
-        "stale_authorization_evidence_retained_as_diagnostic": (
-            stale_operation_layer.get("status") == "operation_layer_submit_blocked"
+        "stale_authorization_evidence_ignored_by_legacy_finalgate_retirement": (
+            stale_operation_layer.get("status") == "blocked"
             and stale_operation_layer.get("dispatch_status")
-            == "blocked_by_legacy_authorization_operation_layer_submit"
-            and stale_operation_layer.get("operation_layer_readiness", {}).get(
-                "blocker_class"
-            )
-            == "hard_safety_stop"
-            and any(
-                str(blocker).startswith(
-                    "operation_layer_authorization_id_mismatch:"
-                )
-                for blocker in stale_operation_layer.get(
-                    "operation_layer_readiness", {}
-                ).get("blockers", [])
-            )
+            == "blocked_by_legacy_finalgate_authorization_without_ticket"
+            and "legacy_authorization_finalgate_ready_retired"
+            in stale_operation_layer.get("blockers", [])
         ),
-        "missing_authorization_evidence_retained_as_diagnostic": (
+        "missing_authorization_evidence_ignored_by_legacy_finalgate_retirement": (
             missing_auth_operation_layer.get("status")
-            == "operation_layer_submit_blocked"
+            == "blocked"
             and missing_auth_operation_layer.get("dispatch_status")
-            == "blocked_by_legacy_authorization_operation_layer_submit"
-            and "operation_layer_authorization_id_missing"
-            in missing_auth_operation_layer.get("operation_layer_readiness", {}).get(
-                "blockers", []
-            )
+            == "blocked_by_legacy_finalgate_authorization_without_ticket"
+            and "legacy_authorization_finalgate_ready_retired"
+            in missing_auth_operation_layer.get("blockers", [])
         ),
         "stale_evidence_does_not_call_operation_layer": (
             stale_operation_layer.get("safety_invariants", {}).get(
@@ -2780,7 +2958,7 @@ def _legacy_authorization_submit_retirement() -> dict[str, Any]:
     dispatcher._request_json = request_json
     try:
         dispatcher_artifact = dispatcher.build_dispatch_artifact(
-            resume_pack=_resume_pack_finalgate_ready(),
+            resume_pack=_resume_pack_legacy_authorization_finalgate_ready(),
             source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
             api_base="http://dry-run.local",
             operation_layer_evidence_report=_operation_evidence_report(),
@@ -2795,11 +2973,11 @@ def _legacy_authorization_submit_retirement() -> dict[str, Any]:
         dispatcher._request_json = original_request_json
 
     checks = {
-        "legacy_authorization_submit_retired": (
-            dispatcher_artifact.get("status") == "operation_layer_submit_blocked"
+        "legacy_authorization_finalgate_ready_retired": (
+            dispatcher_artifact.get("status") == "blocked"
             and dispatcher_artifact.get("dispatch_status")
-            == "blocked_by_legacy_authorization_operation_layer_submit"
-            and "legacy_authorization_operation_layer_submit_retired"
+            == "blocked_by_legacy_finalgate_authorization_without_ticket"
+            and "legacy_authorization_finalgate_ready_retired"
             in dispatcher_artifact.get("blockers", [])
         ),
         "submit_endpoint_not_called": (
@@ -2992,7 +3170,7 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
             dispatcher._session_cookie = session_cookie
             dispatcher._request_json = request_json
             dispatcher_artifact = dispatcher.build_dispatch_artifact(
-                resume_pack=_resume_pack_finalgate_ready(),
+                resume_pack=_resume_pack_legacy_authorization_finalgate_ready(),
                 source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
                 api_base="http://dry-run.local",
                 operation_layer_evidence_report=_operation_evidence_report(),
@@ -3003,12 +3181,12 @@ def _mock_post_submit_closed_loop_evidence_guard() -> dict[str, Any]:
                 execute_post_submit_finalize=True,
             )
             checks = {
-                "legacy_submit_retired_before_finalize_guard": (
+                "legacy_finalgate_ready_retired_before_finalize_guard": (
                     dispatcher_artifact.get("status")
-                    == "operation_layer_submit_blocked"
+                    == "blocked"
                     and dispatcher_artifact.get("dispatch_status")
-                    == "blocked_by_legacy_authorization_operation_layer_submit"
-                    and "legacy_authorization_operation_layer_submit_retired"
+                    == "blocked_by_legacy_finalgate_authorization_without_ticket"
+                    and "legacy_authorization_finalgate_ready_retired"
                     in dispatcher_artifact.get("blockers", [])
                 ),
                 "no_withdrawal_or_transfer": (
@@ -3330,7 +3508,7 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
             dispatcher._session_cookie = session_cookie
             dispatcher._request_json = request_json
             dispatcher_artifact = dispatcher.build_dispatch_artifact(
-                resume_pack=_resume_pack_finalgate_ready(),
+                resume_pack=_resume_pack_legacy_authorization_finalgate_ready(),
                 source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
                 api_base="http://dry-run.local",
                 operation_layer_evidence_report=_operation_evidence_report(),
@@ -3341,12 +3519,12 @@ def _mock_operation_layer_submit_result_identity_guard() -> dict[str, Any]:
                 execute_post_submit_finalize=True,
             )
             checks = {
-                "legacy_submit_retired_before_submit_result_guard": (
+                "legacy_finalgate_ready_retired_before_submit_result_guard": (
                     dispatcher_artifact.get("status")
-                    == "operation_layer_submit_blocked"
+                    == "blocked"
                     and dispatcher_artifact.get("dispatch_status")
-                    == "blocked_by_legacy_authorization_operation_layer_submit"
-                    and "legacy_authorization_operation_layer_submit_retired"
+                    == "blocked_by_legacy_finalgate_authorization_without_ticket"
+                    and "legacy_authorization_finalgate_ready_retired"
                     in dispatcher_artifact.get("blockers", [])
                 ),
                 "operation_layer_not_called": (
@@ -3522,7 +3700,7 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
             dispatcher._session_cookie = session_cookie
             dispatcher._request_json = request_json
             dispatcher_artifact = dispatcher.build_dispatch_artifact(
-                resume_pack=_resume_pack_finalgate_ready(),
+                resume_pack=_resume_pack_legacy_authorization_finalgate_ready(),
                 source_path=Path("/tmp/dry-run-post-signal-resume-pack.json"),
                 api_base="http://dry-run.local",
                 operation_layer_evidence_report=_operation_evidence_report(),
@@ -3533,12 +3711,12 @@ def _mock_post_submit_finalize_result_identity_guard() -> dict[str, Any]:
                 execute_post_submit_finalize=True,
             )
             checks = {
-                "legacy_submit_retired_before_finalize_result_guard": (
+                "legacy_finalgate_ready_retired_before_finalize_result_guard": (
                     dispatcher_artifact.get("status")
-                    == "operation_layer_submit_blocked"
+                    == "blocked"
                     and dispatcher_artifact.get("dispatch_status")
-                    == "blocked_by_legacy_authorization_operation_layer_submit"
-                    and "legacy_authorization_operation_layer_submit_retired"
+                    == "blocked_by_legacy_finalgate_authorization_without_ticket"
+                    and "legacy_authorization_finalgate_ready_retired"
                     in dispatcher_artifact.get("blockers", [])
                 ),
                 "operation_layer_not_called": (
@@ -3743,24 +3921,25 @@ def build_audit_artifact(output_dir: Path) -> dict[str, Any]:
         "all_scenarios_passed": all(item["status"] == "passed" for item in scenarios),
         "dangerous_effects_absent": not dangerous_effects,
         "disabled_smoke_not_real_execution_proof": True,
-        "operation_layer_evidence_relay_checked": all(
+        "ticket_bound_operation_layer_handoff_checked": all(
             _scenario_artifact(
                 scenarios,
                 "mock_fresh_signal_dry_run_pass",
-                "operation_layer_relay_checks",
+                "ticket_bound_operation_layer_handoff_checks",
             ).values()
         ),
-        "operation_layer_standing_authorization_relay_checked": all(
+        "ticket_bound_protected_submit_boundary_checked": all(
             _scenario_artifact(
                 scenarios,
                 "mock_fresh_signal_dry_run_pass",
-                "operation_layer_relay_checks",
+                "ticket_bound_operation_layer_handoff_checks",
             ).get(name)
             is True
             for name in (
-                "standing_authorization_bound_for_first_real_submit",
-                "owner_chat_confirmation_not_required_for_first_real_submit",
-                "legacy_owner_confirmation_env_not_required",
+                "ticket_id_bound",
+                "finalgate_pass_id_bound",
+                "operation_submit_command_id_present",
+                "protected_submit_checkpoint_selected",
             )
         ),
         "fresh_signal_fast_auto_chain_checked": all(
@@ -3808,13 +3987,13 @@ def build_audit_artifact(output_dir: Path) -> dict[str, Any]:
                 ).values()
             )
         ),
-        "legacy_local_registration_probe_tolerance_checked": (
+        "legacy_authorization_finalgate_ready_retirement_checked": (
             _scenario_artifact(
                 scenarios,
                 "mock_fresh_signal_dry_run_pass",
-                "legacy_local_registration_probe_tolerance",
+                "legacy_authorization_finalgate_ready_block",
             ).get("status")
-            == "operation_layer_ready"
+            == "blocked"
         ),
         "legacy_authorization_submit_retirement_checked": (
             _scenario_artifact(
@@ -4250,8 +4429,11 @@ def build_audit_artifact(output_dir: Path) -> dict[str, Any]:
         "operation_layer_authorization_chain_guard_checked": checks[
             "operation_layer_authorization_chain_guard_checked"
         ],
-        "operation_layer_standing_authorization_relay_checked": checks[
-            "operation_layer_standing_authorization_relay_checked"
+        "ticket_bound_operation_layer_handoff_checked": checks[
+            "ticket_bound_operation_layer_handoff_checked"
+        ],
+        "ticket_bound_protected_submit_boundary_checked": checks[
+            "ticket_bound_protected_submit_boundary_checked"
         ],
         "post_submit_closed_loop_evidence_guard_checked": checks[
             "post_submit_closed_loop_evidence_guard_checked"

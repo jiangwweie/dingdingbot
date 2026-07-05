@@ -731,13 +731,13 @@ L1 read-only snapshot
 | Dry-run coverage visibility | Owner progress output includes the runtime dry-run audit scenario count, so a healthy rehearsal loop reads as `审计演练正常` plus `演练场景: 14` instead of a vague green label |
 | Execution-chain closure visibility | L1 snapshot and daily-check read `runtime-execution-chain-closure-status.json`, so healthy non-market closure appears as `非市场链路已收口` without rereading raw audit artifacts |
 | Closure segment projection | `runtime-execution-chain-closure-status.json` now projects key dry-run segments such as fresh-signal fast auto-chain, scoped Operation Layer handoff, submit-blocker matrix, shared runtime pipe, and post-submit guards into `projected_checks`, `ready_segments`, and `missing_or_failed_segments` |
-| Goal-chain segment projection | Closure status now also maps lower-level checks into six objective-aligned segments: `fresh_or_mock_signal`, `required_facts_readiness`, `candidate_authorization_evidence`, `action_time_finalgate`, `official_operation_layer_evidence_relay_projection`, and `disabled_dry_run_proof` |
+| Goal-chain segment projection | Closure status now also maps lower-level checks into six objective-aligned segments: `fresh_or_mock_signal`, `required_facts_readiness`, `candidate_authorization_evidence`, `action_time_finalgate`, `ticket_bound_operation_layer_handoff_projection`, and `disabled_dry_run_proof` |
 | Closure segment Owner progress | L1 snapshot and daily-check can carry closure segment counts into Owner progress; older deployed artifacts without segment fields render `链路段: unknown` instead of falsely reporting `0 ready / 0 missing` |
 | Server monitor SSOT | `docs/current/RUNTIME_MONITOR_BASELINE.json` records `server_side_runtime_monitor_check`, `brc-runtime-monitor.service`, and `brc-runtime-monitor.timer` as the production monitor path |
 | Goal progress audit | `scripts/run_strategygroup_runtime_goal_progress_audit.py --owner-progress` remains a development diagnostic and now checks for the server-side monitor baseline |
 | Goal progress evidence table | Goal progress output now includes a compact Evidence table, including dry-run scenario count, closure segment readiness count, missing closure segment count, interaction source, notification state, and forbidden-effect count |
 | Deploy-session check mode | `scripts/run_tokyo_runtime_deploy_session.py --run-daily-check --daily-check-mode fresh --json` remains the postdeploy verification path |
-| Engineering rehearsal check | L1 snapshot now requires the dry-run audit artifact to include required checks such as `fresh_signal_fast_auto_chain_checked`, `dangerous_effects_absent`, `disabled_smoke_not_real_execution_proof`, Operation Layer evidence relay, shared runtime pipeline, and StrategyGroup adapter-boundary coverage |
+| Engineering rehearsal check | L1 snapshot now requires the dry-run audit artifact to include required checks such as `fresh_signal_fast_auto_chain_checked`, `dangerous_effects_absent`, `disabled_smoke_not_real_execution_proof`, ticket-bound Operation Layer handoff, shared runtime pipeline, and StrategyGroup adapter-boundary coverage |
 | Owner visibility classification | The daily check emits `owner_summary.visibility.category` as `等待市场机会`, `系统处理中`, `工程状态暂不可用`, `安全边界阻断`, or `需要介入` without exposing raw gate names as the primary Owner state |
 | Owner language guard | Owner readmodels map internal `fresh signal` and evidence-instruction wording to Owner language such as `等待市场机会`, `真实订单路径保持关闭`, and `无需操作`; smoke checks prevent those internal terms from returning to the primary Owner state |
 | Monitor Owner language guard | Healthy waiting notifications say `当前没有可用市场机会`; internal signal terms remain audit/detail concepts instead of the default Owner heartbeat text |
@@ -873,7 +873,7 @@ fresh signal
 | RequiredFacts readiness reading | Common facts/readiness layer | No |
 | Attempt renewal / admission | Common runtime admission | No |
 | FinalGate call order | Common execution-safety layer | No |
-| Operation Layer evidence relay | Common execution layer | No |
+| ticket-bound Operation Layer handoff | Common execution layer | No |
 | Active position / open order checks | Common account-safety layer | No |
 | Protection / budget / duplicate-submit checks | Common protection, budget, idempotency layer | No |
 | Post-submit finalize / reconciliation / settlement | Common closed-loop layer | No |
@@ -1146,7 +1146,7 @@ own a separate candidate/auth/FinalGate/Operation Layer/finalize path.
 | RequiredFacts readiness read | Runtime facts layer | No |
 | Attempt renewal and admission | Runtime admission | No |
 | FinalGate call order | Execution safety | No |
-| Operation Layer evidence relay | Execution layer | No |
+| ticket-bound Operation Layer handoff | Execution layer | No |
 | Active position / open order / protection / budget / duplicate-submit checks | Account, protection, budget, idempotency layers | No |
 | Post-submit finalize / reconciliation / settlement | Closed-loop layer | No |
 | Owner Console source state | Product readmodel | No |
@@ -1172,7 +1172,7 @@ own a separate candidate/auth/FinalGate/Operation Layer/finalize path.
 | --- | --- |
 | Dry-run audit artifact | `runtime-dry-run-audit-chain.json` now includes `shared_runtime_pipeline_validation` and `selected_strategygroup_dispatch_guard_checked` |
 | StrategyGroups covered | MPG / TEQ / FBS / PMR / SOR |
-| Common-chain proof | All five StrategyGroups share the same runtime stages: admission, candidate/auth, RequiredFacts, FinalGate, Operation Layer evidence relay, account/protection/budget/idempotency checks, submit, finalize/reconcile/settle/review, and Owner readmodel |
+| Common-chain proof | All five StrategyGroups share the same runtime stages: admission, candidate/auth, RequiredFacts, FinalGate, ticket-bound Operation Layer handoff, account/protection/budget/idempotency checks, submit, finalize/reconcile/settle/review, and Owner readmodel |
 | Strategy-specific proof | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, risk defaults, hard stops, and sample artifacts |
 | Execution authority proof | Each handoff keeps `candidate_creation_authorized=false`, `final_gate_input=false`, `operation_layer_input=false`, and `real_submit_authorized=false` |
 | Goal status guard | `strategygroup-runtime-goal-status` now requires `shared_runtime_pipeline_checked=true`, `common_execution_chain_reuse_checked=true`, `strategygroup_adapter_boundary_checked=true`, and `selected_strategygroup_dispatch_guard_checked=true` before treating dry-run audit as healthy |
@@ -1183,7 +1183,7 @@ The current architecture judgment is verified as a runtime audit invariant:
 
 | Share | Scope | Verification result |
 | --- | --- | --- |
-| 80% | Common runtime pipe | `runtime-dry-run-audit-chain.json` proves MPG / TEQ / FBS / PMR / SOR share the same admission, candidate/auth, RequiredFacts, FinalGate, Operation Layer evidence relay, submit, finalize, reconciliation, settlement, review, and Owner readmodel stages |
+| 80% | Common runtime pipe | `runtime-dry-run-audit-chain.json` proves MPG / TEQ / FBS / PMR / SOR share the same admission, candidate/auth, RequiredFacts, FinalGate, ticket-bound Operation Layer handoff, submit, finalize, reconciliation, settlement, review, and Owner readmodel stages |
 | 20% | StrategyGroup adapter | Each handoff only supplies symbols, sides, signal rule, RequiredFacts, allocated risk/profile defaults, hard stops, and sample artifacts |
 
 Current local validation:
@@ -1518,9 +1518,9 @@ healthy:
 | `all_scenarios_passed` | Confirms every dry-run scenario passed. |
 | `dangerous_effects_absent` | Confirms no forbidden effect flag escaped the dry-run artifact. |
 | `disabled_smoke_not_real_execution_proof` | Prevents disabled smoke from being mistaken for real execution evidence. |
-| `operation_layer_evidence_relay_checked` | Confirms evidence IDs connect through the Operation Layer handoff shape. |
+| `ticket_bound_operation_layer_handoff_checked` | Confirms evidence IDs connect through the Operation Layer handoff shape. |
 | `fresh_signal_fast_auto_chain_checked` | Confirms mock fresh signal reaches candidate/authorization readiness, FinalGate dispatch, and Operation Layer evidence readiness without calling real submit. |
-| `legacy_local_registration_probe_tolerance_checked` | Confirms old local-registration probe semantics are tolerated only when the new evidence path is present. |
+| `legacy_authorization_finalgate_ready_retirement_checked` | Confirms old local-registration probe semantics are tolerated only when the new evidence path is present. |
 | `legacy_authorization_submit_retirement_checked` | Confirms the legacy authorization submit/finalize path is blocked before HTTP submit or finalize; ticket-bound protected submit is the only production submit path. |
 | `operation_layer_blocker_review_policy_checked` | Confirms active position, open order, protection, budget, duplicate-submit, and scope mismatches become reviewable blocked evidence rather than project-stopping chat confirmations, while real submit remains forbidden. |
 | `common_execution_chain_reuse_checked` | Confirms MPG / TEQ / FBS / PMR / SOR reuse the shared execution chain and remain input-only StrategyGroup adapters. |
@@ -1761,7 +1761,7 @@ the segment.
 | `required_facts_readiness` | `required_facts_readiness_checked`, `required_facts_missing` |
 | `candidate_authorization_evidence` | `execution_attempt_rehearsal_prepare_checked`, `execution_attempt_rehearsal_prepare` |
 | `action_time_finalgate` | `all_selected_strategygroups_reach_finalgate_dispatch_checked`, `execution_attempt_rehearsal_prepare` |
-| `official_operation_layer_evidence_relay_projection` | `operation_layer_evidence_relay_checked`, `scoped_pipeline_operation_layer_submit_projection` |
+| `ticket_bound_operation_layer_handoff_projection` | `ticket_bound_operation_layer_handoff_checked`, `scoped_pipeline_operation_layer_submit_projection` |
 | `disabled_dry_run_proof` | `disabled_smoke_not_real_execution_proof`, `legacy_authorization_submit_retired` |
 
 This makes the non-market closure proof auditable from one artifact without
@@ -2064,11 +2064,11 @@ or the legacy `OWNER_APPROVED_RUNTIME_FIRST_REAL_SUBMIT` env gate again.
 
 | Item | Result |
 | --- | --- |
-| New required check | `operation_layer_standing_authorization_relay_checked=true` |
-| Relay details | `operation_layer_relay_checks` proves standing authorization is bound, chat confirmation is not required, and the legacy env gate is not required |
+| New required check | `ticket_bound_protected_submit_boundary_checked=true` |
+| Relay details | `ticket_bound_operation_layer_handoff_checks` proves ticket_id, finalgate_pass_id, and operation_submit_command_id are bound before protected submit |
 | Monitor integration | Daily check and goal-progress entry fast-chain readiness include the new required check |
 | Local validation | `py_compile` passed; dry-run, goal-progress, and daily-check tests: `67 passed` |
-| Local artifact refresh | `output/runtime-monitor/latest-runtime-dry-run-audit-chain.json` now reports `operation_layer_standing_authorization_relay_checked=true` |
+| Local artifact refresh | `output/runtime-monitor/latest-runtime-dry-run-audit-chain.json` now reports `ticket_bound_protected_submit_boundary_checked=true` |
 | Local monitor sequence | `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
 | Deployment | Not deployed; this is local audit/monitor hardening |
 | Safety proof | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |

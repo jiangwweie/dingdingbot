@@ -484,18 +484,18 @@ def _audit_items(
         {
             "requirement": (
                 "candidate/auth -> action-time FinalGate -> official Operation "
-                "Layer evidence relay"
+                "Layer ticket-bound handoff"
             ),
             "evidence_source": "runtime_dry_run_audit_chain + runtime_live_cutover_readiness",
             "status": "ready_non_market_waiting_live_finalgate_and_operation_layer",
             "proof": {
-                "operation_layer_relay_check_group": _check_group_status(
+                "ticket_bound_operation_layer_check_group": _check_group_status(
                     live_cutover,
-                    "operation_layer_relay",
+                    "ticket_bound_operation_layer",
                 ),
-                "operation_layer_evidence_relay_checked": _prefer_current_boundary(
+                "ticket_bound_operation_layer_handoff_checked": _prefer_current_boundary(
                     entry_fast_boundary_ready,
-                    _flag(dry_run_audit, "operation_layer_evidence_relay_checked"),
+                    _flag(dry_run_audit, "ticket_bound_operation_layer_handoff_checked"),
                 ),
                 "scoped_pipeline_operation_layer_submit_projection_checked": (
                     _prefer_current_boundary(
@@ -512,6 +512,15 @@ def _audit_items(
                         _flag(
                             dry_run_audit,
                             "operation_layer_authorization_chain_guard_checked",
+                        ),
+                    )
+                ),
+                "ticket_bound_protected_submit_boundary_checked": (
+                    _prefer_current_boundary(
+                        entry_fast_boundary_ready,
+                        _flag(
+                            dry_run_audit,
+                            "ticket_bound_protected_submit_boundary_checked",
                         ),
                     )
                 ),

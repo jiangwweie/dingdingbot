@@ -70,10 +70,11 @@ CHECK_GROUP_CHECKS: dict[str, list[str]] = {
         "selected_strategygroup_dispatch_guard_checked",
         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
     ],
-    "operation_layer_relay": [
-        "operation_layer_evidence_relay_checked",
+    "ticket_bound_operation_layer": [
+        "ticket_bound_operation_layer_handoff_checked",
         "scoped_pipeline_operation_layer_submit_projection_checked",
         "operation_layer_authorization_chain_guard_checked",
+        "ticket_bound_protected_submit_boundary_checked",
     ],
     "hard_blocker_policy": [
         "operation_layer_hard_safety_blocker_matrix_checked",
@@ -88,11 +89,12 @@ CHECK_GROUP_CHECKS: dict[str, list[str]] = {
         "post_submit_closed_loop_evidence_guard_checked",
         "operation_layer_submit_result_identity_guard_checked",
         "post_submit_finalize_result_identity_guard_checked",
+        "legacy_authorization_finalgate_ready_retirement_checked",
         "legacy_authorization_submit_retirement_checked",
     ],
     "legacy_confirmation_regression": [
         "disabled_smoke_not_real_execution_proof",
-        "legacy_local_registration_probe_tolerated_without_blocking_cutover",
+        "legacy_authorization_finalgate_ready_retired_before_cutover",
         "post_submit_outcomes_do_not_require_owner_chat_confirmation",
         "standing_reduce_only_recovery_does_not_require_owner_chat_confirmation",
     ],
@@ -387,8 +389,9 @@ def _legacy_confirmation_regression_checks(
             "disabled_smoke_not_real_execution_proof"
         )
         is True,
-        "legacy_local_registration_probe_tolerated_without_blocking_cutover": (
-            checks.get("legacy_local_registration_probe_tolerance_checked") is True
+        "legacy_authorization_finalgate_ready_retired_before_cutover": (
+            checks.get("legacy_authorization_finalgate_ready_retirement_checked")
+            is True
         ),
         "post_submit_outcomes_do_not_require_owner_chat_confirmation": (
             exit_checks.get("no_post_submit_case_requires_owner_chat_confirmation")

@@ -537,13 +537,13 @@ def test_goal_progress_waiting_for_market_with_signal_observation_ready():
             "fresh_signal_fast_auto_chain_checked": True,
             "operation_layer_authorization_chain_guard_checked": True,
             "operation_layer_blocker_review_policy_checked": True,
-            "operation_layer_evidence_relay_checked": True,
-            "operation_layer_standing_authorization_relay_checked": True,
+            "ticket_bound_operation_layer_handoff_checked": True,
+            "ticket_bound_protected_submit_boundary_checked": True,
             "required_facts_readiness_checked": True,
             "scoped_pipeline_operation_layer_submit_projection_checked": True,
             "selected_strategygroup_dispatch_guard_checked": True,
         },
-        "finalgate_to_operation_layer_evidence_covered": True,
+        "finalgate_to_ticket_bound_operation_layer_handoff_covered": True,
         "fresh_signal_to_candidate_authorization_covered": True,
         "operation_layer_authorization_guard_covered": True,
         "operation_layer_blocker_review_policy_covered": True,
@@ -1519,7 +1519,7 @@ def test_goal_progress_owner_progress_text_has_track_table(tmp_path):
         "- Market-dependent remaining items: "
         "fresh signal -> RequiredFacts -> candidate/auth fast chain, "
         "candidate/auth -> action-time FinalGate -> official Operation Layer "
-        "evidence relay, real submit must happen only through official "
+        "ticket-bound handoff, real submit must happen only through official "
         "Operation Layer, entry accepted -> exchange-native hard "
         "stop/protection/recovery, post-submit finalize / reconciliation / "
         "budget settlement / review closure"
@@ -1528,7 +1528,7 @@ def test_goal_progress_owner_progress_text_has_track_table(tmp_path):
     assert "- Fresh signal to candidate/auth covered: 是" in text
     assert "- RequiredFacts gate covered: 是" in text
     assert "- Candidate/auth to FinalGate covered: 是" in text
-    assert "- FinalGate to Operation Layer evidence covered: 是" in text
+    assert "- FinalGate to ticket-bound Operation Layer handoff covered: 是" in text
     assert "- Operation Layer authorization guard covered: 是" in text
     assert "- Real action-time FinalGate proven: 否" in text
     assert "- Real Operation Layer submit proven: 否" in text
@@ -1632,7 +1632,7 @@ def test_goal_progress_embeds_p0_completion_audit_boundary(tmp_path):
             "fresh signal -> RequiredFacts -> candidate/auth fast chain",
             (
                 "candidate/auth -> action-time FinalGate -> official Operation "
-                "Layer evidence relay"
+                "Layer ticket-bound handoff"
             ),
             "real submit must happen only through official Operation Layer",
             "entry accepted -> exchange-native hard stop/protection/recovery",
@@ -1685,7 +1685,7 @@ def test_goal_progress_degrades_on_live_cutover_non_market_gap():
             owner_state="需要介入",
             next_fresh_signal_cutover_ready=False,
             non_market_blockers=[
-                "operation_layer_relay:operation_layer_evidence_relay_checked"
+                "ticket_bound_operation_layer:ticket_bound_operation_layer_handoff_checked"
             ],
         ),
     )
@@ -1694,8 +1694,8 @@ def test_goal_progress_degrades_on_live_cutover_non_market_gap():
     assert report["live_cutover_readiness_boundary"]["status"] == "blocked"
     assert report["completion_boundary"]["status"] == "not_complete_product_gap"
     assert (
-        "live_cutover_readiness:operation_layer_relay:"
-        "operation_layer_evidence_relay_checked"
+        "live_cutover_readiness:ticket_bound_operation_layer:"
+        "ticket_bound_operation_layer_handoff_checked"
     ) in report["owner_runtime_issues"]["product_gaps"]
 
 
@@ -1870,7 +1870,7 @@ def test_goal_progress_marks_missing_chain_segment_as_degraded():
     checks = dict(_daily_check()["checks"])
     checks["runtime_execution_chain_ready_segment_count"] = 1
     checks["runtime_execution_chain_missing_or_failed_segments"] = [
-        "operation_layer_evidence_relay_checked"
+        "ticket_bound_operation_layer_handoff_checked"
     ]
     report = module.build_goal_progress_report(
         daily_check=_daily_check(checks=checks),
@@ -1880,7 +1880,7 @@ def test_goal_progress_marks_missing_chain_segment_as_degraded():
 
     assert report["status"] == "degraded"
     assert (
-        "missing_chain_segment:operation_layer_evidence_relay_checked"
+        "missing_chain_segment:ticket_bound_operation_layer_handoff_checked"
         in report["owner_runtime_issues"]["product_gaps"]
     )
     tracks = {track["id"]: track for track in report["tracks"]}
@@ -1895,7 +1895,7 @@ def test_goal_progress_marks_missing_goal_chain_segment_as_degraded():
     checks = dict(_daily_check()["checks"])
     checks["runtime_execution_goal_chain_ready_segment_count"] = 5
     checks["runtime_execution_goal_chain_missing_or_failed_segments"] = [
-        "official_operation_layer_evidence_relay_projection"
+        "ticket_bound_operation_layer_handoff_projection"
     ]
     report = module.build_goal_progress_report(
         daily_check=_daily_check(checks=checks),
@@ -1905,7 +1905,7 @@ def test_goal_progress_marks_missing_goal_chain_segment_as_degraded():
 
     assert report["status"] == "degraded"
     assert (
-        "missing_goal_chain_segment:official_operation_layer_evidence_relay_projection"
+        "missing_goal_chain_segment:ticket_bound_operation_layer_handoff_projection"
         in report["owner_runtime_issues"]["product_gaps"]
     )
     tracks = {track["id"]: track for track in report["tracks"]}

@@ -53,7 +53,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
     }
     assert artifact["legacy_confirmation_regression_checks"] == {
         "disabled_smoke_not_real_execution_proof": True,
-        "legacy_local_registration_probe_tolerated_without_blocking_cutover": True,
+        "legacy_authorization_finalgate_ready_retired_before_cutover": True,
         "post_submit_outcomes_do_not_require_owner_chat_confirmation": True,
         "standing_reduce_only_recovery_does_not_require_owner_chat_confirmation": True,
     }
@@ -126,7 +126,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
     assert set(check_groups) == {
         "strategy_scope",
         "entry_fast_chain",
-        "operation_layer_relay",
+        "ticket_bound_operation_layer",
         "hard_blocker_policy",
         "exit_protection_recovery",
         "post_submit_close_loop",
@@ -142,7 +142,7 @@ def test_live_cutover_readiness_waits_for_fresh_signal_with_no_non_market_blocke
 
 def test_live_cutover_readiness_blocks_non_market_gap(tmp_path) -> None:
     audit_artifact = dry_run_audit.build_audit_artifact(tmp_path / "audit")
-    audit_artifact["checks"]["operation_layer_evidence_relay_checked"] = False
+    audit_artifact["checks"]["ticket_bound_operation_layer_handoff_checked"] = False
 
     artifact = script.build_cutover_readiness_artifact(
         output_dir=tmp_path,
@@ -155,15 +155,17 @@ def test_live_cutover_readiness_blocks_non_market_gap(tmp_path) -> None:
     assert artifact["next_fresh_signal_cutover_ready"] is False
     assert artifact["current_real_submit_allowed"] is False
     assert artifact["non_market_blockers"] == [
-        "operation_layer_relay:operation_layer_evidence_relay_checked"
+        "ticket_bound_operation_layer:ticket_bound_operation_layer_handoff_checked"
     ]
     check_group = next(
         item
         for item in artifact["check_groups"]
-        if item["name"] == "operation_layer_relay"
+        if item["name"] == "ticket_bound_operation_layer"
     )
     assert check_group["status"] == "blocked"
-    assert check_group["missing_checks"] == ["operation_layer_evidence_relay_checked"]
+    assert check_group["missing_checks"] == [
+        "ticket_bound_operation_layer_handoff_checked"
+    ]
 
 
 def test_live_cutover_cli_writes_owner_summary(tmp_path) -> None:

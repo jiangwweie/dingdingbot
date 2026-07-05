@@ -72,7 +72,7 @@ checks.blockers = []
 | fresh signal -> candidate/auth automatic chain | `runtime-dry-run-audit-chain-current.json` has `fresh_signal_fast_auto_chain_checked=true` and `execution_attempt_rehearsal_prepare_checked=true` | Proven by dry-run |
 | RequiredFacts readiness | Dry-run audit has `required_facts_readiness_checked=true`; daily check has `runtime_dry_run_missing_required_checks=[]` | Proven by dry-run |
 | action-time FinalGate sequence | Dry-run audit has `all_selected_strategygroups_reach_finalgate_dispatch_checked=true` and `selected_strategygroup_dispatch_guard_checked=true` | Proven by dry-run |
-| official Operation Layer evidence relay | Dry-run audit has `operation_layer_evidence_relay_checked=true`, `operation_layer_authorization_chain_guard_checked=true`, and `scoped_pipeline_operation_layer_submit_projection_checked=true` | Proven by dry-run |
+| ticket-bound Operation Layer handoff | Dry-run audit has `ticket_bound_operation_layer_handoff_checked=true`, `operation_layer_authorization_chain_guard_checked=true`, and `scoped_pipeline_operation_layer_submit_projection_checked=true` | Proven by dry-run |
 | hard submit blocker matrix | Dry-run audit has `operation_layer_hard_safety_blocker_matrix_checked=true` and `operation_layer_blocker_review_policy_checked=true` | Proven by dry-run |
 | real exchange submit | Not proven because no fresh market signal currently exists; daily check reports `waiting_for_market=true` | Market-dependent |
 
@@ -368,7 +368,7 @@ signal?
 | Cutover artifact | `scripts/runtime_live_cutover_readiness.py` builds `runtime-live-cutover-readiness.json` and Owner-readable Markdown |
 | Current cutover state | `status=live_cutover_waiting_for_fresh_signal`, `owner_state=等待机会`, `next_fresh_signal_cutover_ready=true`, `current_real_submit_allowed=false` |
 | Non-market blockers | `non_market_blockers=[]`; strategy scope, entry fast chain, Operation Layer relay, hard blocker policy, exit/protection recovery, post-submit close loop, and dry-run safety check groups are all `ready` |
-| Legacy confirmation regression guard | Cutover artifact checks `disabled_smoke_not_real_execution_proof`, `legacy_local_registration_probe_tolerated_without_blocking_cutover`, `post_submit_outcomes_do_not_require_owner_chat_confirmation`, and `standing_reduce_only_recovery_does_not_require_owner_chat_confirmation` |
+| Legacy confirmation regression guard | Cutover artifact checks `disabled_smoke_not_real_execution_proof`, `legacy_authorization_finalgate_ready_retired_before_cutover`, `post_submit_outcomes_do_not_require_owner_chat_confirmation`, and `standing_reduce_only_recovery_does_not_require_owner_chat_confirmation` |
 | Goal progress integration | `run_strategygroup_runtime_goal_progress_audit.py` reads or locally auto-generates the artifact and exposes `live_cutover_readiness_boundary.status=ready` with `product_gaps=[]` |
 | Boundary | This is cutover readiness, not real submit authority. Current real submit remains blocked by absence of a live fresh selected StrategyGroup signal |
 | Safety | Local artifact/test work only; no Tokyo API call, server mutation, live FinalGate call, live Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secrets mutation, live profile mutation, sizing mutation, or real order |
@@ -1435,11 +1435,11 @@ per-order chat confirmation or legacy env confirmation semantics.
 
 | Item | Evidence |
 | --- | --- |
-| Dry-run relay check | `runtime_dry_run_audit_chain.py` adds `standing_authorization_bound_for_first_real_submit`, `owner_chat_confirmation_not_required_for_first_real_submit`, and `legacy_owner_confirmation_env_not_required` to `operation_layer_relay_checks` |
-| Required check | `operation_layer_standing_authorization_relay_checked` is now emitted in `checks`, `required_checks`, and `summary` |
+| Dry-run relay check | `runtime_dry_run_audit_chain.py` adds `standing_authorization_bound_for_first_real_submit`, `owner_chat_confirmation_not_required_for_first_real_submit`, and `legacy_owner_confirmation_env_not_required` to `ticket_bound_operation_layer_handoff_checks` |
+| Required check | `ticket_bound_protected_submit_boundary_checked` is now emitted in `checks`, `required_checks`, and `summary` |
 | Monitor integration | `run_strategygroup_runtime_daily_check.py` and `run_strategygroup_runtime_goal_progress_audit.py` include the new check in the entry fast-chain readiness boundary |
 | Local validation | `py_compile` passed; dry-run, goal-progress, and daily-check tests: `67 passed` |
-| Generated artifact | `runtime_dry_run_audit_chain.py --output-json output/runtime-monitor/latest-runtime-dry-run-audit-chain.json`: `status=passed`, `scenario_count=14`, `operation_layer_standing_authorization_relay_checked=true` |
+| Generated artifact | `runtime_dry_run_audit_chain.py --output-json output/runtime-monitor/latest-runtime-dry-run-audit-chain.json`: `status=passed`, `scenario_count=14`, `ticket_bound_protected_submit_boundary_checked=true` |
 | Local monitor sequence | `run_strategygroup_runtime_local_monitor_sequence.py --daily-check-mode cache --owner-progress`: `status=waiting_for_market`, blockers empty, non-market gaps empty, remote interactions `0` |
 | Deployment | Not deployed; this is local audit/monitor hardening |
 | Safety | Local code/tests/cache reads only. No server file mutation, FinalGate call, Operation Layer call, exchange write, OrderLifecycle call, withdrawal, transfer, secret mutation, live profile mutation, order-sizing mutation, or real order |

@@ -22,13 +22,14 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "required_facts_readiness_checked": True,
         "execution_attempt_rehearsal_prepare_checked": True,
         "disabled_smoke_not_real_execution_proof": True,
-        "operation_layer_evidence_relay_checked": True,
+        "ticket_bound_operation_layer_handoff_checked": True,
         "scoped_pipeline_operation_layer_submit_projection_checked": True,
+        "legacy_authorization_finalgate_ready_retirement_checked": True,
         "legacy_authorization_submit_retirement_checked": True,
         "operation_layer_hard_safety_blocker_matrix_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
-        "operation_layer_standing_authorization_relay_checked": True,
+        "ticket_bound_protected_submit_boundary_checked": True,
         "selected_strategygroup_dispatch_guard_checked": True,
         "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
         "shared_runtime_pipeline_checked": True,
@@ -50,7 +51,7 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "required_facts_readiness": True,
         "candidate_authorization_evidence": True,
         "action_time_finalgate": True,
-        "official_operation_layer_evidence_relay_projection": True,
+        "ticket_bound_operation_layer_handoff_projection": True,
         "disabled_dry_run_proof": True,
         "post_submit_exit_outcome_matrix": True,
     }
@@ -71,7 +72,7 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "required_facts_missing": "passed",
     }
     assert artifact["dry_run_chain"]["goal_chain_segment_evidence"][
-        "official_operation_layer_evidence_relay_projection"
+        "ticket_bound_operation_layer_handoff_projection"
     ]["scenario_statuses"] == {
         "mock_fresh_signal_dry_run_pass": "passed",
         "scoped_pipeline_operation_layer_submit_projection": "passed",
@@ -93,14 +94,14 @@ def test_closure_status_marks_non_market_chain_ready_but_not_real_submit_ready(t
         "required_facts_readiness",
         "candidate_authorization_evidence",
         "action_time_finalgate",
-        "official_operation_layer_evidence_relay_projection",
+        "ticket_bound_operation_layer_handoff_projection",
         "disabled_dry_run_proof",
         "post_submit_exit_outcome_matrix",
     ]
     assert artifact["dry_run_chain"]["missing_or_failed_goal_chain_segments"] == []
     assert {
         "fresh_signal_fast_auto_chain_checked",
-        "operation_layer_evidence_relay_checked",
+        "ticket_bound_operation_layer_handoff_checked",
         "scoped_pipeline_operation_layer_submit_projection_checked",
         "post_submit_closed_loop_evidence_guard_checked",
     }.issubset(set(artifact["dry_run_chain"]["ready_segments"]))

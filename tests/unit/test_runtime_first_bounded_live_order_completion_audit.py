@@ -58,7 +58,9 @@ def _dry_run_audit(**overrides):
         "allocated_subaccount_profile_boundary_checked": True,
         "operation_layer_authorization_chain_guard_checked": True,
         "operation_layer_blocker_review_policy_checked": True,
-        "operation_layer_evidence_relay_checked": True,
+        "ticket_bound_operation_layer_handoff_checked": True,
+        "ticket_bound_protected_submit_boundary_checked": True,
+        "legacy_authorization_finalgate_ready_retirement_checked": True,
         "operation_layer_hard_safety_blocker_matrix_checked": True,
         "post_submit_closed_loop_evidence_guard_checked": True,
         "post_submit_exit_outcome_matrix_checked": True,
@@ -91,7 +93,7 @@ def _live_cutover(**overrides):
         "check_groups": [
             {"name": "strategy_scope", "status": "ready"},
             {"name": "entry_fast_chain", "status": "ready"},
-            {"name": "operation_layer_relay", "status": "ready"},
+            {"name": "ticket_bound_operation_layer", "status": "ready"},
             {"name": "hard_blocker_policy", "status": "ready"},
             {"name": "exit_protection_recovery", "status": "ready"},
             {"name": "post_submit_close_loop", "status": "ready"},
@@ -184,7 +186,7 @@ def test_completion_audit_waits_for_market_with_no_non_market_gaps():
     assert report["input_source_gaps"] == []
     assert report["market_dependent_remaining"] == [
         "fresh signal -> RequiredFacts -> candidate/auth fast chain",
-        "candidate/auth -> action-time FinalGate -> official Operation Layer evidence relay",
+        "candidate/auth -> action-time FinalGate -> official Operation Layer ticket-bound handoff",
         "real submit must happen only through official Operation Layer",
         "entry accepted -> exchange-native hard stop/protection/recovery",
         "post-submit finalize / reconciliation / budget settlement / review closure",
@@ -265,8 +267,8 @@ def test_completion_audit_default_daily_check_uses_current_schema_artifact():
 
 def test_completion_audit_reports_non_market_gap():
     dry_run = _dry_run_audit()
-    dry_run["checks"]["operation_layer_evidence_relay_checked"] = False
-    dry_run["summary"]["operation_layer_evidence_relay_checked"] = False
+    dry_run["checks"]["ticket_bound_operation_layer_handoff_checked"] = False
+    dry_run["summary"]["ticket_bound_operation_layer_handoff_checked"] = False
 
     report = script.build_completion_audit_report(
         daily_check=_daily_check(),
@@ -282,9 +284,9 @@ def test_completion_audit_reports_non_market_gap():
         {
             "requirement": (
                 "candidate/auth -> action-time FinalGate -> official Operation "
-                "Layer evidence relay"
+                "Layer ticket-bound handoff"
             ),
-            "missing_or_false": ["operation_layer_evidence_relay_checked"],
+            "missing_or_false": ["ticket_bound_operation_layer_handoff_checked"],
         }
     ]
 
@@ -299,7 +301,7 @@ def test_completion_audit_prefers_current_boundaries_over_legacy_dry_run_keys():
         "required_facts_readiness_checked",
         "execution_attempt_rehearsal_prepare_checked",
         "selected_strategygroup_dispatch_guard_checked",
-        "operation_layer_evidence_relay_checked",
+        "ticket_bound_operation_layer_handoff_checked",
         "scoped_pipeline_operation_layer_submit_projection_checked",
         "operation_layer_authorization_chain_guard_checked",
         "operation_layer_hard_safety_blocker_matrix_checked",

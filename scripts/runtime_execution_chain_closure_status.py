@@ -34,13 +34,14 @@ PROJECTED_DRY_RUN_CHECKS = [
     "required_facts_readiness_checked",
     "execution_attempt_rehearsal_prepare_checked",
     "disabled_smoke_not_real_execution_proof",
-    "operation_layer_evidence_relay_checked",
+    "ticket_bound_operation_layer_handoff_checked",
     "scoped_pipeline_operation_layer_submit_projection_checked",
+    "legacy_authorization_finalgate_ready_retirement_checked",
     "legacy_authorization_submit_retirement_checked",
     "operation_layer_hard_safety_blocker_matrix_checked",
     "operation_layer_blocker_review_policy_checked",
     "operation_layer_authorization_chain_guard_checked",
-    "operation_layer_standing_authorization_relay_checked",
+    "ticket_bound_protected_submit_boundary_checked",
     "selected_strategygroup_dispatch_guard_checked",
     "all_selected_strategygroups_reach_finalgate_dispatch_checked",
     "shared_runtime_pipeline_checked",
@@ -71,12 +72,14 @@ GOAL_CHAIN_SEGMENTS = {
         "fresh_signal_fast_auto_chain_checked",
         "all_selected_strategygroups_reach_finalgate_dispatch_checked",
     ],
-    "official_operation_layer_evidence_relay_projection": [
-        "operation_layer_evidence_relay_checked",
+    "ticket_bound_operation_layer_handoff_projection": [
+        "ticket_bound_operation_layer_handoff_checked",
         "scoped_pipeline_operation_layer_submit_projection_checked",
+        "ticket_bound_protected_submit_boundary_checked",
     ],
     "disabled_dry_run_proof": [
         "disabled_smoke_not_real_execution_proof",
+        "legacy_authorization_finalgate_ready_retirement_checked",
         "legacy_authorization_submit_retirement_checked",
     ],
     "post_submit_exit_outcome_matrix": [
@@ -101,7 +104,7 @@ GOAL_CHAIN_SEGMENT_SCENARIOS = {
         "mock_fresh_signal_dry_run_pass",
         "execution_attempt_rehearsal_prepare",
     ],
-    "official_operation_layer_evidence_relay_projection": [
+    "ticket_bound_operation_layer_handoff_projection": [
         "mock_fresh_signal_dry_run_pass",
         "scoped_pipeline_operation_layer_submit_projection",
     ],

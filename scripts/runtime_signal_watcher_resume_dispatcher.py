@@ -62,6 +62,9 @@ FINALGATE_ACTION = "run_official_action_time_final_gate_preflight"
 CONTINUE_ACTION = "continue_watcher_observation"
 NON_EXECUTING_PREPARE_ACTION = "prepare_fresh_candidate_authorization_evidence"
 OPERATION_LAYER_ACTION = "prepare_official_operation_layer_submit"
+TICKET_BOUND_OPERATION_LAYER_HANDOFF_ACTION = (
+    "prepare_ticket_bound_operation_layer_handoff"
+)
 OPERATION_LAYER_SUBMIT_ACTION = "call_official_operation_layer_submit"
 OPERATION_LAYER_SUBMIT_MODE_REAL = "real_gateway_action"
 OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE = "disabled_smoke"
@@ -724,6 +727,8 @@ def _operation_layer_handoff_passed(body: Any) -> bool:
     return (
         payload.get("status") == "operation_layer_handoff_ready"
         and payload.get("operation_layer_verdict") == "ready"
+        and bool(payload.get("ticket_id"))
+        and bool(payload.get("finalgate_pass_id"))
         and bool(payload.get("operation_submit_command_id"))
         and command_plan.get("kind") == "ticket_bound_operation_layer_handoff"
         and bool(command_plan.get("ticket_id"))
@@ -744,6 +749,9 @@ def _operation_layer_handoff_blockers(body: Any) -> list[str]:
         blockers.append(f"operation_layer_handoff_status:{payload.get('status')}")
     if payload.get("operation_layer_verdict") not in {"ready", None}:
         blockers.append(f"operation_layer_verdict:{payload.get('operation_layer_verdict')}")
+    for key in ("ticket_id", "finalgate_pass_id"):
+        if not payload.get(key):
+            blockers.append(f"operation_layer_handoff_body_missing:{key}")
     if not payload.get("operation_submit_command_id"):
         blockers.append("operation_submit_command_id_missing")
     command_plan = _dict(payload.get("command_plan"))
@@ -758,6 +766,47 @@ def _operation_layer_handoff_blockers(body: Any) -> list[str]:
         for key in ("places_order", "exchange_write_called", "order_lifecycle_called"):
             if command_plan.get(key) is not False:
                 blockers.append(f"operation_layer_handoff_command_effect:{key}")
+    return _dedupe_text(blockers)
+
+
+def _operation_layer_handoff_identity_blockers(
+    *,
+    expected_ticket_id: str,
+    expected_finalgate_pass_id: str,
+    body: Any,
+) -> list[str]:
+    payload = _dict(body)
+    command_plan = _dict(payload.get("command_plan"))
+    blockers: list[str] = []
+    for key, expected_value in (
+        ("ticket_id", expected_ticket_id),
+        ("finalgate_pass_id", expected_finalgate_pass_id),
+    ):
+        for source_name, source in (
+            ("body", payload),
+            ("command", command_plan),
+        ):
+            actual = str(source.get(key) or "").strip()
+            if not actual:
+                blockers.append(f"operation_layer_handoff_{source_name}_missing:{key}")
+            elif actual != expected_value:
+                blockers.append(
+                    f"operation_layer_handoff_{source_name}_mismatch:{key}:"
+                    f"expected={expected_value}:actual={actual}"
+                )
+    body_submit_id = str(payload.get("operation_submit_command_id") or "").strip()
+    command_submit_id = str(
+        command_plan.get("operation_submit_command_id") or ""
+    ).strip()
+    if not body_submit_id:
+        blockers.append("operation_submit_command_id_missing")
+    if not command_submit_id:
+        blockers.append("operation_layer_handoff_command_missing:operation_submit_command_id")
+    if body_submit_id and command_submit_id and body_submit_id != command_submit_id:
+        blockers.append(
+            "operation_layer_handoff_command_mismatch:operation_submit_command_id:"
+            f"expected={body_submit_id}:actual={command_submit_id}"
+        )
     return _dedupe_text(blockers)
 
 
@@ -928,6 +977,10 @@ def _operation_layer_blocker_class(
     if "authorization_id_mismatch" in combined:
         return "hard_safety_stop"
     if "ticket_bound_submit_result_mismatch" in combined:
+        return "hard_safety_stop"
+    if "operation_layer_handoff_body_mismatch" in combined:
+        return "hard_safety_stop"
+    if "operation_layer_handoff_command_mismatch" in combined:
         return "hard_safety_stop"
     if "submit_result_order_id_not_in_ticket_request" in combined:
         return "hard_safety_stop"
@@ -1331,6 +1384,7 @@ def _dispatch_artifact_from_non_executing_prepare(
             "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
             "official_operation_layer_submit_called": False,
+            "official_post_submit_finalize_called": False,
         },
     }
 
@@ -1830,44 +1884,8 @@ def build_dispatch_artifact(
         )
 
     if status == FINALGATE_READY_STATUS:
-        operation_layer_command_plan = _dict(
-            resume_pack.get("operation_layer_command_plan")
-        )
-        if not operation_layer_command_plan:
-            authorization_id = _first_text(
-                action_time_resume.get("prepared_authorization_id"),
-                resume_pack.get("prepared_authorization_id"),
-                _dict(resume_pack.get("command_plan")).get("prepared_authorization_id"),
-                _dict(resume_pack.get("command_plan")).get("authorization_id"),
-            )
-            if not authorization_id:
-                return _dispatch_artifact(
-                    label=label,
-                    source_path=source_path,
-                    resume_pack=resume_pack,
-                    action_time_resume=action_time_resume,
-                    owner_state=_owner_state_for_operation_layer_blocked(
-                        blocker_class="missing_fact",
-                        blockers=[],
-                        missing_ids=["prepared_authorization_id"],
-                    ),
-                    status="operation_layer_blocked",
-                    blocker_class="missing_fact",
-                    dispatch_action=None,
-                    dispatch_status="blocked_by_missing_operation_layer_plan",
-                    blockers=base_blockers + [
-                        "missing_fact:operation_layer_command_plan"
-                    ],
-                    command_plan=_dict(resume_pack.get("command_plan")) or None,
-                    finalgate_preflight_result=_dict(
-                        resume_pack.get("finalgate_preflight_result")
-                    ) or None,
-                    operation_layer_command_plan=None,
-                    selected_strategy_group_id=selected_strategy_group_id,
-                )
-            operation_layer_command_plan = _operation_layer_command_plan(
-                authorization_id=authorization_id,
-            )
+        command_plan = _dict(resume_pack.get("command_plan"))
+        preflight_result = _dict(resume_pack.get("finalgate_preflight_result"))
         artifact = _dispatch_artifact(
             label=label,
             source_path=source_path,
@@ -1881,27 +1899,61 @@ def build_dispatch_artifact(
             ),
             status=FINALGATE_READY_STATUS,
             blocker_class="none",
-            dispatch_action=OPERATION_LAYER_ACTION,
+            dispatch_action=TICKET_BOUND_OPERATION_LAYER_HANDOFF_ACTION,
             dispatch_status="official_finalgate_preflight_passed",
             blockers=[],
-            command_plan=_dict(resume_pack.get("command_plan")) or None,
-            finalgate_preflight_result=_dict(
-                resume_pack.get("finalgate_preflight_result")
-            ) or None,
-            operation_layer_command_plan=operation_layer_command_plan,
+            command_plan=command_plan or None,
+            finalgate_preflight_result=preflight_result or None,
+            operation_layer_command_plan=None,
             selected_strategy_group_id=selected_strategy_group_id,
         )
-        artifact = _dispatch_artifact_with_operation_layer_readiness(
+        if (
+            command_plan
+            and _ticket_bound_finalgate_command_plan(command_plan)
+            and preflight_result
+            and _preflight_passed(preflight_result.get("body"))
+        ):
+            if not execute_preflight:
+                return _dispatch_artifact_from_preflight(
+                    artifact=artifact,
+                    status=FINALGATE_READY_STATUS,
+                    blocker_class="none",
+                    dispatch_status="official_finalgate_preflight_passed",
+                    blockers=[],
+                    preflight_result=preflight_result,
+                    operation_layer_command_plan=None,
+                )
+            return _execute_ticket_bound_operation_layer_handoff(
+                artifact=artifact,
+                preflight_result=preflight_result,
+                timeout_seconds=preflight_timeout_seconds,
+                execute_operation_layer_submit=execute_operation_layer_submit,
+                operation_layer_submit_mode=operation_layer_submit_mode,
+                execute_post_submit_finalize=execute_post_submit_finalize,
+            )
+
+        blockers = [
+            "legacy_authorization_finalgate_ready_retired",
+            "ticket_bound_action_time_ticket_required",
+        ]
+        if not _action_time_ticket_id(
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+            command_plan=command_plan,
+        ):
+            blockers.append("missing_fact:ticket_id")
+        if command_plan and not _ticket_bound_finalgate_command_plan(command_plan):
+            blockers.append("ticket_bound_finalgate_command_plan_required")
+        if _dict(resume_pack.get("operation_layer_command_plan")):
+            blockers.append("legacy_operation_layer_command_plan_ignored")
+        return _dispatch_artifact_from_preflight(
             artifact=artifact,
-            evidence_report=operation_layer_evidence_report,
-            evidence_report_path=operation_layer_evidence_report_path,
-        )
-        return _maybe_execute_operation_layer_submit(
-            artifact=artifact,
-            execute_operation_layer_submit=execute_operation_layer_submit,
-            operation_layer_submit_mode=operation_layer_submit_mode,
-            execute_post_submit_finalize=execute_post_submit_finalize,
-            timeout_seconds=preflight_timeout_seconds,
+            status="blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_status="blocked_by_legacy_finalgate_authorization_without_ticket",
+            blockers=base_blockers + blockers,
+            preflight_result=preflight_result or None,
+            operation_layer_command_plan=None,
         )
 
     if status == READY_STATUS:
@@ -2042,6 +2094,7 @@ def _dispatch_artifact(
             "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
             "official_operation_layer_submit_called": False,
+            "official_post_submit_finalize_called": False,
         },
     }
 
@@ -2610,59 +2663,17 @@ def _execute_finalgate_preflight(
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
-    operation_layer_command_plan = _operation_layer_command_plan(
-        authorization_id=artifact["command_plan"]["prepared_authorization_id"],
-    )
-    operation_layer_evidence_report = _maybe_prepare_operation_layer_evidence(
-        authorization_id=artifact["command_plan"]["prepared_authorization_id"],
-        command_plan=operation_layer_command_plan,
-        current_report=operation_layer_evidence_report,
-        current_report_path=operation_layer_evidence_report_path,
-        execute_operation_layer_submit=execute_operation_layer_submit,
-        evidence_preparer=operation_layer_evidence_preparer,
-    )
-    runtime_live_enablement_result = _maybe_apply_runtime_live_enablement(
+    return _dispatch_artifact_from_preflight(
         artifact=artifact,
-        command_plan=operation_layer_command_plan,
-        evidence_report=operation_layer_evidence_report,
-        execute_operation_layer_submit=execute_operation_layer_submit,
-        timeout_seconds=timeout_seconds,
-        live_enabler=runtime_live_enabler,
-    )
-    if _dict(runtime_live_enablement_result).get("mutation_applied") is True:
-        operation_layer_evidence_report = _maybe_prepare_operation_layer_evidence(
-            authorization_id=artifact["command_plan"]["prepared_authorization_id"],
-            command_plan=operation_layer_command_plan,
-            current_report=operation_layer_evidence_report,
-            current_report_path=operation_layer_evidence_report_path,
-            execute_operation_layer_submit=execute_operation_layer_submit,
-            evidence_preparer=operation_layer_evidence_preparer,
-        )
-    result_artifact = _dispatch_artifact_from_preflight(
-        artifact=artifact,
-        status="finalgate_ready",
-        blocker_class="none",
-        dispatch_status="official_finalgate_preflight_passed",
-        blockers=[],
+        status="blocked",
+        blocker_class="hard_safety_stop",
+        dispatch_status="blocked_by_legacy_finalgate_authorization_without_ticket",
+        blockers=[
+            "legacy_authorization_finalgate_ready_retired",
+            "ticket_bound_action_time_ticket_required",
+        ],
         preflight_result=preflight_result,
-        operation_layer_command_plan=operation_layer_command_plan,
-    )
-    if runtime_live_enablement_result is not None:
-        result_artifact = _dispatch_artifact_with_runtime_live_enablement_result(
-            artifact=result_artifact,
-            runtime_live_enablement_result=runtime_live_enablement_result,
-        )
-    result_artifact = _dispatch_artifact_with_operation_layer_readiness(
-        artifact=result_artifact,
-        evidence_report=operation_layer_evidence_report,
-        evidence_report_path=operation_layer_evidence_report_path,
-    )
-    return _maybe_execute_operation_layer_submit(
-        artifact=result_artifact,
-        execute_operation_layer_submit=execute_operation_layer_submit,
-        operation_layer_submit_mode=operation_layer_submit_mode,
-        execute_post_submit_finalize=execute_post_submit_finalize,
-        timeout_seconds=timeout_seconds,
+        operation_layer_command_plan=None,
     )
 
 
@@ -2782,6 +2793,22 @@ def _execute_ticket_bound_operation_layer_handoff(
             blocker_class="hard_safety_stop",
             dispatch_status="blocked_by_operation_layer_handoff_forbidden_effect",
             blockers=forbidden_effects,
+            preflight_result=preflight_result,
+            handoff_plan=handoff_plan,
+            handoff_result=handoff_result,
+        )
+    identity_blockers = _operation_layer_handoff_identity_blockers(
+        expected_ticket_id=ticket_id,
+        expected_finalgate_pass_id=finalgate_pass_id,
+        body=response.get("body"),
+    )
+    if identity_blockers:
+        return _dispatch_artifact_from_operation_layer_handoff(
+            artifact=artifact,
+            status="blocked",
+            blocker_class=_operation_layer_blocker_class(identity_blockers, []),
+            dispatch_status="blocked_by_ticket_bound_operation_layer_handoff_identity",
+            blockers=identity_blockers,
             preflight_result=preflight_result,
             handoff_plan=handoff_plan,
             handoff_result=handoff_result,
@@ -3130,7 +3157,9 @@ def _dispatch_artifact_from_preflight(
         "blocker_class": blocker_class,
         "dispatch_status": dispatch_status,
         "dispatch_action": (
-            OPERATION_LAYER_ACTION if status == "finalgate_ready" else None
+            TICKET_BOUND_OPERATION_LAYER_HANDOFF_ACTION
+            if status == "finalgate_ready"
+            else None
         ),
         "owner_state": _owner_state_projection(owner_state),
         "finalgate_preflight_result": preflight_result,
@@ -3155,6 +3184,7 @@ def _dispatch_artifact_from_preflight(
             "runtime_budget_mutated": False,
             "withdrawal_or_transfer_created": False,
             "official_operation_layer_submit_called": False,
+            "official_post_submit_finalize_called": False,
         },
     }
 
@@ -4632,9 +4662,9 @@ def _owner_state_for_preflight(
             "blocker_class": "none",
             "blocked_at": "none",
             "blocked_reason": "none",
-            "next_recover_condition": "official_operation_layer_submit_evidence_is_prepared",
+            "next_recover_condition": "ticket_bound_operation_layer_handoff_ready",
             "non_authority_checkpoint": (
-                "prepare_official_operation_layer_submit_evidence_from_passed_preflight"
+                TICKET_BOUND_OPERATION_LAYER_HANDOFF_ACTION
             ),
             "downgrade_mode": "none",
         }
@@ -4673,6 +4703,18 @@ def _owner_state_for_preflight(
             "non_authority_checkpoint": (
                 "implement_ticket_bound_operation_layer_handoff"
             ),
+            "downgrade_mode": "continue_watcher_observation_no_submit",
+        }
+    if dispatch_status == "blocked_by_legacy_finalgate_authorization_without_ticket":
+        return {
+            "status": "blocked",
+            "blocker_class": blocker_class,
+            "blocked_at": "FinalGate",
+            "blocked_reason": blockers[0] if blockers else dispatch_status,
+            "next_recover_condition": (
+                "pg_action_time_ticket_and_ticket_bound_finalgate_materialized"
+            ),
+            "non_authority_checkpoint": "materialize_pg_action_time_ticket",
             "downgrade_mode": "continue_watcher_observation_no_submit",
         }
     return {

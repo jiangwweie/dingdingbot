@@ -13,8 +13,10 @@ REQUIRED_DRY_RUN_CHECKS = (
     "all_scenarios_passed",
     "dangerous_effects_absent",
     "disabled_smoke_not_real_execution_proof",
-    "operation_layer_evidence_relay_checked",
+    "ticket_bound_operation_layer_handoff_checked",
+    "ticket_bound_protected_submit_boundary_checked",
     "scoped_pipeline_operation_layer_submit_projection_checked",
+    "legacy_authorization_finalgate_ready_retirement_checked",
     "fresh_signal_fast_auto_chain_checked",
     "required_facts_readiness_checked",
     "legacy_authorization_submit_retirement_checked",
@@ -126,11 +128,11 @@ def _healthy_remote_payload() -> dict:
                         "scenario_count": 14,
                         "projected_checks": {
                             "fresh_signal_fast_auto_chain_checked": True,
-                            "operation_layer_evidence_relay_checked": True,
+                            "ticket_bound_operation_layer_handoff_checked": True,
                         },
                         "ready_segments": [
                             "fresh_signal_fast_auto_chain_checked",
-                            "operation_layer_evidence_relay_checked",
+                            "ticket_bound_operation_layer_handoff_checked",
                         ],
                         "missing_or_failed_segments": [],
                         "goal_chain_segments": {
@@ -390,11 +392,11 @@ def test_tokyo_runtime_snapshot_local_host_does_not_self_ssh():
     closure = report["facts"]["reports"]["runtime_execution_chain_closure_status"]
     assert closure["projected_checks"] == {
         "fresh_signal_fast_auto_chain_checked": True,
-        "operation_layer_evidence_relay_checked": True,
+        "ticket_bound_operation_layer_handoff_checked": True,
     }
     assert closure["ready_segments"] == [
         "fresh_signal_fast_auto_chain_checked",
-        "operation_layer_evidence_relay_checked",
+        "ticket_bound_operation_layer_handoff_checked",
     ]
     assert closure["missing_or_failed_segments"] == []
     assert closure["goal_chain_segments"] == {

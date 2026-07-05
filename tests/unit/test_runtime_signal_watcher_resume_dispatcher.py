@@ -25,6 +25,33 @@ def _assert_legacy_operation_layer_submit_blocked(artifact: dict) -> None:
         "materialize_action_time_ticket_and_ticket_bound_operation_layer_handoff"
     )
     assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
+    assert artifact["safety_invariants"]["places_order"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert artifact["safety_invariants"]["calls_order_lifecycle"] is False
+
+
+def _assert_legacy_finalgate_ready_blocked(artifact: dict) -> None:
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == (
+        "blocked_by_legacy_finalgate_authorization_without_ticket"
+    )
+    assert artifact["dispatch_action"] is None
+    assert "legacy_authorization_finalgate_ready_retired" in artifact["blockers"]
+    assert "ticket_bound_action_time_ticket_required" in artifact["blockers"]
+    assert "ticket_bound_finalgate_command_plan_required" in artifact["blockers"]
+    assert "legacy_operation_layer_command_plan_ignored" in artifact["blockers"]
+    assert artifact.get("operation_layer_command_plan") is None
+    assert "operation_layer_readiness" not in artifact
+    assert artifact["owner_state"]["blocked_at"] == "FinalGate"
+    assert artifact["owner_state"]["next_recover_condition"] == (
+        "pg_action_time_ticket_and_ticket_bound_finalgate_materialized"
+    )
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
+        "materialize_pg_action_time_ticket"
+    )
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
     assert artifact["safety_invariants"]["places_order"] is False
     assert artifact["safety_invariants"]["exchange_write_called"] is False
     assert artifact["safety_invariants"]["calls_order_lifecycle"] is False
@@ -1701,7 +1728,7 @@ def test_runtime_live_enablement_query_omits_missing_optional_evidence_ids(
     assert calls[1]["body"]["owner_real_submit_authorization_id"] == "auth-ready-1"
 
 
-def test_dispatcher_translates_operation_layer_evidence_blocker():
+def test_dispatcher_blocks_legacy_finalgate_ready_before_operation_layer_evidence_blocker():
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
         source_path=Path("/tmp/resume-dispatch-artifact.json"),
@@ -1711,28 +1738,11 @@ def test_dispatcher_translates_operation_layer_evidence_blocker():
         ),
     )
 
-    assert artifact["status"] == "operation_layer_blocked"
-    assert artifact["blocker_class"] == "hard_safety_stop"
-    assert artifact["dispatch_status"] == "blocked_by_operation_layer_evidence"
-    assert artifact["dispatch_action"] is None
-    assert artifact["owner_state"]["blocked_at"] == "OperationLayerEvidence"
-    assert artifact["owner_state"]["downgrade_mode"] == (
-        "continue_watcher_observation_no_submit"
-    )
-    readiness = artifact["operation_layer_readiness"]
-    assert readiness["status"] == "blocked"
-    assert readiness["ready_for_official_operation_layer_submit"] is False
-    assert "exchange_submit_action_authorization_id" in (
-        readiness["missing_evidence_ids"]
-    )
-    assert "deployment_readiness_evidence_id" in readiness["missing_evidence_ids"]
-    assert "persistent_duplicate_submit_lock_required" in artifact["blockers"]
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    _assert_legacy_finalgate_ready_blocked(artifact)
+    assert "persistent_duplicate_submit_lock_required" not in artifact["blockers"]
 
 
-def test_dispatcher_translates_operation_layer_evidence_ready():
+def test_dispatcher_blocks_legacy_finalgate_ready_before_operation_layer_evidence_ready():
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
         source_path=Path("/tmp/resume-dispatch-artifact.json"),
@@ -1742,19 +1752,7 @@ def test_dispatcher_translates_operation_layer_evidence_ready():
         ),
     )
 
-    assert artifact["status"] == "operation_layer_ready"
-    assert artifact["blocker_class"] == "none"
-    assert artifact["dispatch_status"] == "official_operation_layer_evidence_ready"
-    assert artifact["dispatch_action"] == "prepare_official_operation_layer_submit"
-    assert artifact["blockers"] == []
-    assert artifact["owner_state"]["status"] == "operation_layer_ready"
-    assert artifact["operation_layer_readiness"]["missing_evidence_ids"] == []
-    assert artifact["operation_layer_readiness"][
-        "ready_for_official_operation_layer_submit"
-    ] is True
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
+    _assert_legacy_finalgate_ready_blocked(artifact)
 
 
 def test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regress(
@@ -1783,7 +1781,7 @@ def test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regre
         execute_operation_layer_submit=True,
     )
 
-    _assert_legacy_operation_layer_submit_blocked(artifact)
+    _assert_legacy_finalgate_ready_blocked(artifact)
 
 
 def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypatch):
@@ -1831,7 +1829,7 @@ def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypa
         execute_operation_layer_submit=True,
     )
 
-    _assert_legacy_operation_layer_submit_blocked(artifact)
+    _assert_legacy_finalgate_ready_blocked(artifact)
     assert calls == []
 
 
@@ -1876,7 +1874,7 @@ def test_dispatcher_executes_operation_layer_disabled_smoke_when_requested(
         operation_layer_submit_mode="disabled_smoke",
     )
 
-    _assert_legacy_operation_layer_submit_blocked(artifact)
+    _assert_legacy_finalgate_ready_blocked(artifact)
     assert calls == []
 
 
@@ -1959,7 +1957,7 @@ def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
         execute_post_submit_finalize=True,
     )
 
-    _assert_legacy_operation_layer_submit_blocked(artifact)
+    _assert_legacy_finalgate_ready_blocked(artifact)
     assert "post_submit_finalize_result" not in artifact
     assert calls == []
 
@@ -2034,7 +2032,7 @@ def test_dispatcher_blocks_incomplete_post_submit_closed_loop(monkeypatch):
         execute_post_submit_finalize=True,
     )
 
-    _assert_legacy_operation_layer_submit_blocked(artifact)
+    _assert_legacy_finalgate_ready_blocked(artifact)
     assert "post_submit_finalize_result" not in artifact
     assert calls == []
 
@@ -2085,7 +2083,7 @@ def test_dispatcher_blocks_submit_result_identity_mismatch_before_finalize(monke
         execute_post_submit_finalize=True,
     )
 
-    _assert_legacy_operation_layer_submit_blocked(artifact)
+    _assert_legacy_finalgate_ready_blocked(artifact)
     assert "post_submit_finalize_result" not in artifact
     assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
     assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
@@ -2158,7 +2156,7 @@ def test_dispatcher_blocks_post_submit_finalize_runtime_mismatch(monkeypatch):
         execute_post_submit_finalize=True,
     )
 
-    _assert_legacy_operation_layer_submit_blocked(artifact)
+    _assert_legacy_finalgate_ready_blocked(artifact)
     assert "post_submit_finalize_result" not in artifact
     assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
 
@@ -2191,11 +2189,11 @@ def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(
         execute_operation_layer_submit=True,
     )
 
-    _assert_legacy_operation_layer_submit_blocked(artifact)
+    _assert_legacy_finalgate_ready_blocked(artifact)
     assert called["request"] is False
 
 
-def test_dispatcher_blocks_stale_operation_layer_authorization_evidence():
+def test_dispatcher_blocks_legacy_finalgate_ready_before_stale_authorization_evidence():
     report = _operation_layer_ready_report()
     report["ids"]["authorization_id"] = "old-auth-1"
 
@@ -2208,17 +2206,14 @@ def test_dispatcher_blocks_stale_operation_layer_authorization_evidence():
         ),
     )
 
-    assert artifact["status"] == "operation_layer_blocked"
-    assert artifact["blocker_class"] == "hard_safety_stop"
-    assert artifact["dispatch_status"] == "blocked_by_operation_layer_evidence"
-    assert any(
+    _assert_legacy_finalgate_ready_blocked(artifact)
+    assert not any(
         blocker.startswith("operation_layer_authorization_id_mismatch:")
         for blocker in artifact["blockers"]
     )
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
 
 
-def test_dispatcher_tolerates_legacy_local_registration_probe_when_result_exists():
+def test_dispatcher_blocks_legacy_finalgate_ready_before_local_registration_probe():
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
         source_path=Path("/tmp/resume-dispatch-artifact.json"),
@@ -2230,16 +2225,11 @@ def test_dispatcher_tolerates_legacy_local_registration_probe_when_result_exists
         ),
     )
 
-    assert artifact["status"] == "operation_layer_ready"
-    assert artifact["blockers"] == []
-    assert artifact["operation_layer_readiness"]["blockers"] == []
-    assert (
-        "legacy_prepare_machine_evidence_probe_blocker_satisfied_by_"
-        "local_registration_adapter_result"
-    ) in artifact["warnings"]
+    _assert_legacy_finalgate_ready_blocked(artifact)
+    assert "operation_layer_readiness" not in artifact
 
 
-def test_dispatcher_keeps_legacy_local_registration_probe_without_result():
+def test_dispatcher_blocks_legacy_finalgate_ready_before_unsatisfied_local_registration_probe():
     report = _operation_layer_report_with_satisfied_legacy_probe_blocker()
     report["ids"].pop("local_registration_adapter_result_id")
 
@@ -2252,9 +2242,8 @@ def test_dispatcher_keeps_legacy_local_registration_probe_without_result():
         ),
     )
 
-    assert artifact["status"] == "operation_layer_blocked"
-    assert artifact["blocker_class"] == "missing_fact"
-    assert any(
+    _assert_legacy_finalgate_ready_blocked(artifact)
+    assert not any(
         "runtimeexecutionorderlifecycleadapterresult_not_found" in blocker
         for blocker in artifact["blockers"]
     )
@@ -2468,6 +2457,52 @@ def test_dispatcher_blocks_ticket_bound_handoff_forbidden_effects(monkeypatch):
         in artifact["blockers"]
     )
     assert artifact["operation_layer_command_plan"] is None
+    assert [call["method"] for call in calls] == ["GET", "POST"]
+
+
+def test_dispatcher_blocks_ticket_bound_handoff_identity_mismatch(monkeypatch):
+    calls = []
+    handoff_body = _operation_layer_handoff_ready_body()
+    handoff_body["ticket_id"] = "ticket-other"
+    handoff_body["command_plan"]["finalgate_pass_id"] = "finalgate-pass-other"
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": handoff_body if kwargs["method"] == "POST" else _finalgate_ready_body(),
+        }
+
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    artifact = build_dispatch_artifact(
+        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        execute_preflight=True,
+    )
+
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_status"] == (
+        "blocked_by_ticket_bound_operation_layer_handoff_identity"
+    )
+    assert (
+        "operation_layer_handoff_body_mismatch:ticket_id:"
+        "expected=ticket-ready-1:actual=ticket-other"
+    ) in artifact["blockers"]
+    assert (
+        "operation_layer_handoff_command_mismatch:finalgate_pass_id:"
+        "expected=finalgate-pass-1:actual=finalgate-pass-other"
+    ) in artifact["blockers"]
+    assert artifact["operation_layer_command_plan"] is None
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
     assert [call["method"] for call in calls] == ["GET", "POST"]
 
 

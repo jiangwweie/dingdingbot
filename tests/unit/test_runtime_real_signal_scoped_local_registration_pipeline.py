@@ -440,14 +440,14 @@ def test_pipeline_outputs_dispatcher_ready_operation_layer_evidence_after_regist
         execute_preflight=False,
     )
 
-    assert dispatch_packet["status"] == "operation_layer_ready"
+    assert dispatch_packet["status"] == "blocked"
     assert dispatch_packet["dispatch_status"] == (
-        "official_operation_layer_evidence_ready"
+        "blocked_by_legacy_finalgate_authorization_without_ticket"
     )
-    assert dispatch_packet["operation_layer_readiness"][
-        "ready_for_official_operation_layer_submit"
-    ] is True
-    assert dispatch_packet["operation_layer_readiness"]["missing_evidence_ids"] == []
+    assert "legacy_authorization_finalgate_ready_retired" in dispatch_packet["blockers"]
+    assert "ticket_bound_action_time_ticket_required" in dispatch_packet["blockers"]
+    assert "legacy_operation_layer_command_plan_ignored" in dispatch_packet["blockers"]
+    assert dispatch_packet.get("operation_layer_readiness") is None
     assert dispatch_packet["safety_invariants"][
         "official_operation_layer_submit_called"
     ] is False
