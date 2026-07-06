@@ -1329,6 +1329,17 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
             conn.execute(
                 sa.text(
                     """
+                    INSERT INTO brc_strategy_side_event_specs (
+                      event_spec_id, status, freshness_window_ms
+                    ) VALUES (
+                      'event-mpg-long', 'current', 1000
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
                     INSERT INTO brc_runtime_fact_snapshots (
                       fact_snapshot_id, strategy_group_id, symbol, side,
                       fact_surface, source_kind, computed, satisfied,
@@ -1428,6 +1439,17 @@ def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_pat
                     """
                 )
             )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_side_event_specs (
+                      event_spec_id, status, freshness_window_ms
+                    ) VALUES (
+                      'event-mpg-long', 'current', 1000
+                    )
+                    """
+                )
+            )
     finally:
         engine.dispose()
 
@@ -1458,6 +1480,178 @@ def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_pat
     assert result["skipped"][0]["blocker"] == "fresh_public_fact_snapshot_missing"
 
 
+def test_write_runtime_signal_summaries_to_pg_uses_event_spec_freshness_window(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_group_candidate_scope (
+                      candidate_scope_id, strategy_group_id, symbol, side,
+                      status, observation_scope, priority_rank
+                    ) VALUES (
+                      'scope-mpg-op-long', 'MPG-001', 'OPUSDT', 'long',
+                      'active', 'active_wip', 1
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_candidate_scope_event_bindings (
+                      candidate_scope_id, event_spec_id, status, created_at_ms
+                    ) VALUES (
+                      'scope-mpg-op-long', 'event-mpg-long', 'active', 900
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_side_event_specs (
+                      event_spec_id, status, freshness_window_ms
+                    ) VALUES (
+                      'event-mpg-long', 'current', 3600000
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_runtime_fact_snapshots (
+                      fact_snapshot_id, strategy_group_id, symbol, side,
+                      fact_surface, source_kind, computed, satisfied,
+                      freshness_state, valid_until_ms, observed_at_ms, created_at_ms
+                    ) VALUES (
+                      'fact-mpg-op-public', 'MPG-001', 'OPUSDT', 'long',
+                      'pretrade_public', 'live_market', 1, 1,
+                      'fresh', 3601000, 900, 900
+                    )
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-op",
+                    "strategy_family_id": "MPG-001",
+                    "strategy_family_version_id": "MPG-001:v1",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "status": "ready_for_prepare",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": "long",
+                        "timestamp_ms": 1000,
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=300000,
+    )
+
+    assert result["status"] == "pg_live_signal_events_written"
+    assert result["written_count"] == 1
+
+
+def test_write_runtime_signal_summaries_to_pg_blocks_expired_event_spec_window(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_group_candidate_scope (
+                      candidate_scope_id, strategy_group_id, symbol, side,
+                      status, observation_scope, priority_rank
+                    ) VALUES (
+                      'scope-mpg-op-long', 'MPG-001', 'OPUSDT', 'long',
+                      'active', 'active_wip', 1
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_candidate_scope_event_bindings (
+                      candidate_scope_id, event_spec_id, status, created_at_ms
+                    ) VALUES (
+                      'scope-mpg-op-long', 'event-mpg-long', 'active', 900
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_side_event_specs (
+                      event_spec_id, status, freshness_window_ms
+                    ) VALUES (
+                      'event-mpg-long', 'current', 1000
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_runtime_fact_snapshots (
+                      fact_snapshot_id, strategy_group_id, symbol, side,
+                      fact_surface, source_kind, computed, satisfied,
+                      freshness_state, valid_until_ms, observed_at_ms, created_at_ms
+                    ) VALUES (
+                      'fact-mpg-op-public', 'MPG-001', 'OPUSDT', 'long',
+                      'pretrade_public', 'live_market', 1, 1,
+                      'fresh', 10000, 900, 900
+                    )
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-op",
+                    "strategy_family_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "status": "ready_for_prepare",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": "long",
+                        "timestamp_ms": 1000,
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=3000,
+    )
+
+    assert result["status"] == "pg_live_signal_events_blocked"
+    assert result["skipped"][0]["blocker"] == "signal_event_expired"
+    assert result["skipped"][0]["freshness_window_ms"] == 1000
+
+
 def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
     conn.execute(
         sa.text(
@@ -1482,6 +1676,17 @@ def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
               event_spec_id TEXT,
               status TEXT,
               created_at_ms INTEGER
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_strategy_side_event_specs (
+              event_spec_id TEXT PRIMARY KEY,
+              status TEXT,
+              freshness_window_ms INTEGER
             )
             """
         )

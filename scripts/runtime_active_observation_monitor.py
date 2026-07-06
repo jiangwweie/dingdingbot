@@ -50,7 +50,6 @@ WAITING_FOR_SIGNAL_BLOCKERS = {
     "strategy_signal_not_ready_for_shadow_candidate_prepare",
 }
 WATCHER_COVERAGE_DETECTOR_KEY = "runtime_active_observation_monitor"
-LIVE_SIGNAL_VALID_FOR_MS = 300_000
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -559,17 +558,6 @@ def _write_live_signal_candidate(
     observed_ms: int,
 ) -> dict[str, Any]:
     event_time_ms = int(candidate["event_time_ms"])
-    expires_at_ms = event_time_ms + LIVE_SIGNAL_VALID_FOR_MS
-    if expires_at_ms <= observed_ms:
-        return {
-            "written": False,
-            "blocker": "signal_event_expired",
-            "strategy_group_id": candidate["strategy_group_id"],
-            "symbol": candidate["symbol"],
-            "side": candidate["side"],
-            "event_time_ms": event_time_ms,
-        }
-
     scope = _active_candidate_scope_event(conn, candidate=candidate)
     if not scope:
         return {
@@ -578,6 +566,28 @@ def _write_live_signal_candidate(
             "strategy_group_id": candidate["strategy_group_id"],
             "symbol": candidate["symbol"],
             "side": candidate["side"],
+        }
+    freshness_window_ms = _int_or_zero(scope.get("freshness_window_ms"))
+    if freshness_window_ms <= 0:
+        return {
+            "written": False,
+            "blocker": "event_spec_freshness_window_missing",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "event_spec_id": scope.get("event_spec_id"),
+        }
+
+    expires_at_ms = event_time_ms + freshness_window_ms
+    if expires_at_ms <= observed_ms:
+        return {
+            "written": False,
+            "blocker": "signal_event_expired",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "event_time_ms": event_time_ms,
+            "freshness_window_ms": freshness_window_ms,
         }
 
     fact = _latest_fresh_public_fact(conn, candidate=candidate, now_ms=observed_ms)
@@ -660,11 +670,14 @@ def _active_candidate_scope_event(
     row = conn.execute(
         sa.text(
             """
-            SELECT c.candidate_scope_id, b.event_spec_id
+            SELECT c.candidate_scope_id, b.event_spec_id, e.freshness_window_ms
             FROM brc_strategy_group_candidate_scope AS c
             JOIN brc_candidate_scope_event_bindings AS b
               ON b.candidate_scope_id = c.candidate_scope_id
              AND b.status = 'active'
+            LEFT JOIN brc_strategy_side_event_specs AS e
+              ON e.event_spec_id = b.event_spec_id
+             AND e.status = 'current'
             WHERE c.strategy_group_id = :strategy_group_id
               AND c.symbol = :symbol
               AND c.side = :side
@@ -1635,6 +1648,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--one-hour-limit", type=int, default=25)
     parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
+    parser.add_argument("--include-runtime-artifacts", action="store_true", default=False)
     parser.add_argument("--playbook-id")
     parser.add_argument("--owner-operator-id", default="owner")
     parser.add_argument(
@@ -1654,6 +1668,13 @@ def main(argv: list[str] | None = None) -> int:
         artifact = _build_monitor_artifact(args)
         artifact["pg_watcher_runtime_coverage"] = (
             write_candidate_universe_coverage_to_pg(
+                artifact,
+                database_url=str(args.database_url or ""),
+                allow_non_postgres_for_test=bool(args.allow_non_postgres_for_test),
+            )
+        )
+        artifact["pg_live_signal_events"] = (
+            write_runtime_signal_summaries_to_pg(
                 artifact,
                 database_url=str(args.database_url or ""),
                 allow_non_postgres_for_test=bool(args.allow_non_postgres_for_test),

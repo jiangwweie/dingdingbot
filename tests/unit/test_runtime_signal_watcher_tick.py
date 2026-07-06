@@ -688,6 +688,33 @@ def test_watcher_tick_blocks_legacy_ready_without_pg_live_signal_event(tmp_path)
     assert artifact["watcher_tick_plan"]["can_continue_without_owner_chat"] is False
 
 
+def test_watcher_tick_treats_only_expired_pg_signals_as_market_wait(tmp_path):
+    latest = _summary("ready_for_prepare", ready=False)
+    latest["pg_live_signal_events"] = {
+        "status": "pg_live_signal_events_blocked",
+        "written_count": 0,
+        "skipped": [
+            {"blocker": "signal_event_expired", "strategy_group_id": "MPG-001"},
+            {"blocker": "signal_event_expired", "strategy_group_id": "CPM-RO-001"},
+        ],
+    }
+
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
+        _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
+        supervisor_builder=_fake_supervisor_from_latest(latest),
+        notifier=lambda *items: {"sent": True, "status_code": 200},
+    )
+
+    assert artifact["post_signal_auto_resume"]["status"] == "waiting_for_market"
+    assert artifact["post_signal_auto_resume"]["blocked_reason"] == (
+        "detected_strategy_signals_expired"
+    )
+    assert artifact["notification"]["required"] is False
+    assert artifact["notification"]["sent"] is False
+    assert artifact["status"] == "watching_no_signal"
+    assert artifact["watcher_tick_plan"]["can_continue_without_owner_chat"] is True
+
+
 def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
     tmp_path,
     monkeypatch,

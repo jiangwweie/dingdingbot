@@ -269,6 +269,16 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _pg_live_signal_events_only_expired(value: dict[str, Any]) -> bool:
+    if str(value.get("status") or "") != "pg_live_signal_events_blocked":
+        return False
+    skipped = [item for item in value.get("skipped") or [] if isinstance(item, dict)]
+    return bool(skipped) and all(
+        str(item.get("blocker") or "") == "signal_event_expired"
+        for item in skipped
+    )
+
+
 def _nested_get(value: dict[str, Any], path: tuple[str, ...]) -> Any:
     current: Any = value
     for key in path:
@@ -554,6 +564,20 @@ def _post_signal_auto_resume_plan(
     pg_live_signal_events = _as_dict(status_artifact.get("pg_live_signal_events"))
     pg_live_signal_written = int(pg_live_signal_events.get("written_count") or 0) > 0
     if legacy_ready_for_prepare and not pg_live_signal_written:
+        if _pg_live_signal_events_only_expired(pg_live_signal_events):
+            return {
+                **base,
+                "status": "waiting_for_market",
+                "blocked_at": "watcher_signal",
+                "blocked_reason": "detected_strategy_signals_expired",
+                "next_recover_condition": "fresh_strategy_signal_event_within_event_spec_window",
+                "non_authority_checkpoint": "continue_watcher_observation",
+                "checkpoint_source": "runtime_signal_watcher_tick",
+                "downgrade_mode": "observe_only",
+                "can_continue_without_owner_chat": True,
+                "creates_shadow_candidate": False,
+                "creates_execution_intent": False,
+            }
         return {
             **base,
             "status": "blocked_observation_evidence",
@@ -1154,7 +1178,12 @@ def build_watcher_tick_artifact(
 
     artifact = {
         "scope": "runtime_signal_watcher_tick",
-        "status": _tick_status(notification, wakeup_evidence, status_artifact),
+        "status": _tick_status(
+            notification,
+            wakeup_evidence,
+            status_artifact,
+            auto_resume=auto_resume,
+        ),
         "output_dir": str(output_dir),
         "paths": paths,
         "event_key": event_key,
@@ -1229,7 +1258,11 @@ def _tick_status(
     notification: dict[str, Any],
     wakeup_evidence: dict[str, Any],
     status_artifact: dict[str, Any],
+    *,
+    auto_resume: dict[str, Any] | None = None,
 ) -> str:
+    if str((auto_resume or {}).get("status") or "") == "waiting_for_market":
+        return "watching_no_signal"
     if wakeup_evidence.get("status") == "blocked_forbidden_effect":
         return "blocked_forbidden_effect"
     if status_artifact.get("status") in {"blocked", "blocked_forbidden_effect", "stale"}:
