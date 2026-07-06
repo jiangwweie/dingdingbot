@@ -34,6 +34,7 @@ from strategygroup_non_executing_projection import (  # noqa: E402
 from runtime_pg_fact_snapshots import (  # noqa: E402
     write_pretrade_public_fact_snapshots,
 )
+from pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
 
 
 SCHEMA = "brc.binance_usdm_public_facts.v1"
@@ -53,7 +54,15 @@ PUBLIC_FACT_MAX_AGE_SECONDS = 300
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--symbols", nargs="*", default=list(DEFAULT_SYMBOLS))
+    parser.add_argument(
+        "--symbols",
+        nargs="*",
+        default=None,
+        help=(
+            "Symbols to fetch. When omitted in DB-backed production mode, "
+            "active StrategyGroup candidate symbols are read from PG."
+        ),
+    )
     parser.add_argument("--ssh-host", help="Run the public fetch on this SSH host.")
     parser.add_argument(
         "--database-url",
@@ -78,22 +87,33 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    if not args.database_url.startswith(
-        ("postgresql://", "postgresql+psycopg://")
-    ) and not args.allow_non_postgres_for_test:
+    database_url = normalize_sync_postgres_dsn(args.database_url)
+    if not is_sync_postgres_dsn(database_url) and not args.allow_non_postgres_for_test:
         print(
             "ERROR: DB-backed public facts require PostgreSQL DSN",
             file=sys.stderr,
         )
         return 2
 
-    symbols = [str(symbol).upper() for symbol in args.symbols]
-    if args.ssh_host:
-        artifact = _fetch_via_ssh(args.ssh_host, symbols)
-    else:
-        artifact = build_public_facts(symbols=symbols)
-    engine = sa.create_engine(args.database_url)
+    engine = sa.create_engine(database_url)
     try:
+        with engine.connect() as conn:
+            symbols = (
+                _normalize_symbols(args.symbols)
+                if args.symbols is not None
+                else _active_candidate_symbols(conn)
+            )
+        if not symbols:
+            print(
+                "ERROR: active candidate symbols are required for DB-backed public facts",
+                file=sys.stderr,
+            )
+            return 2
+        symbols = sorted(set(symbols))
+        if args.ssh_host:
+            artifact = _fetch_via_ssh(args.ssh_host, symbols)
+        else:
+            artifact = build_public_facts(symbols=symbols)
         with engine.begin() as conn:
             fact_snapshot_ids = write_pretrade_public_fact_snapshots(
                 conn,
@@ -192,6 +212,40 @@ def build_public_facts(
             include_authority_mirrors=False,
         ),
     }
+
+
+def _active_candidate_symbols(conn: sa.engine.Connection) -> list[str]:
+    rows = conn.execute(
+        sa.text(
+            """
+            SELECT DISTINCT symbol
+            FROM brc_strategy_group_candidate_scope
+            WHERE status = 'active'
+              AND observation_scope = 'active_wip'
+            ORDER BY symbol
+            """
+        )
+    ).mappings()
+    return _normalize_symbols([row["symbol"] for row in rows])
+
+
+def _normalize_symbols(symbols: list[str] | tuple[str, ...] | None) -> list[str]:
+    return [
+        symbol
+        for symbol in (_compact_symbol(raw) for raw in (symbols or []))
+        if symbol and symbol != "STRATEGY_SCOPE"
+    ]
+
+
+def _compact_symbol(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    if not text:
+        return ""
+    if "/" in text:
+        base = text.split("/", 1)[0]
+        quote = text.split("/", 1)[1].split(":", 1)[0]
+        return f"{base}{quote}".replace("-", "")
+    return text.replace("-", "").replace(":", "")
 
 
 def _symbol_row(

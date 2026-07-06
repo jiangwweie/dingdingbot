@@ -65,6 +65,11 @@ def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin
     assert "CPUQuota=60%" in text
     assert "Nice=10" in text
     assert "IOAccounting=true" in text
+    assert "ExecStartPre=" in text
+    assert "fetch_binance_usdm_public_facts.py" in text
+    assert text.index("fetch_binance_usdm_public_facts.py") < text.index(
+        "runtime_signal_watcher_tick.py"
+    )
     assert "--require-database-url" in text
     assert "--candidate-universe-json" not in text
     assert "latest-strategy-live-candidate-pool.json" not in text

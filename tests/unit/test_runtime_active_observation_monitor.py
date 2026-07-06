@@ -5,6 +5,7 @@ import sqlite3
 import sys
 
 import pytest
+import sqlalchemy as sa
 
 from scripts import runtime_active_observation_monitor
 
@@ -1293,3 +1294,244 @@ def test_active_monitor_cli_prints_stdout_only(monkeypatch, capsys):
 
     stdout_payload = json.loads(capsys.readouterr().out)
     assert stdout_payload["status"] == "waiting_for_signal"
+
+
+def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_group_candidate_scope (
+                      candidate_scope_id, strategy_group_id, symbol, side,
+                      status, observation_scope, priority_rank
+                    ) VALUES (
+                      'scope-mpg-op-long', 'MPG-001', 'OPUSDT', 'long',
+                      'active', 'active_wip', 1
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_candidate_scope_event_bindings (
+                      candidate_scope_id, event_spec_id, status, created_at_ms
+                    ) VALUES (
+                      'scope-mpg-op-long', 'event-mpg-long', 'active', 900
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_runtime_fact_snapshots (
+                      fact_snapshot_id, strategy_group_id, symbol, side,
+                      fact_surface, source_kind, computed, satisfied,
+                      freshness_state, valid_until_ms, observed_at_ms, created_at_ms
+                    ) VALUES (
+                      'fact-mpg-op-public', 'MPG-001', 'OPUSDT', 'long',
+                      'pretrade_public', 'live_market', 1, 1,
+                      'fresh', 301000, 900, 900
+                    )
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-op",
+                    "strategy_family_id": "MPG-001",
+                    "strategy_family_version_id": "MPG-001:v1",
+                    "symbol": "OP/USDT:USDT",
+                    "side": "long",
+                    "status": "ready_for_prepare",
+                    "signal_input_json": "pg://signal-input",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": "long",
+                        "timestamp_ms": 1000,
+                        "confidence": "0.72",
+                        "reason_codes": ["unit_ready"],
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+
+    assert result["status"] == "pg_live_signal_events_written"
+    assert result["written_count"] == 1
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.text(
+                    """
+                    SELECT strategy_group_id, symbol, side, status, freshness_state,
+                           fact_snapshot_id
+                    FROM brc_live_signal_events
+                    """
+                )
+            ).mappings().one()
+    finally:
+        engine.dispose()
+
+    assert dict(row) == {
+        "strategy_group_id": "MPG-001",
+        "symbol": "OPUSDT",
+        "side": "long",
+        "status": "facts_validated",
+        "freshness_state": "fresh",
+        "fact_snapshot_id": "fact-mpg-op-public",
+    }
+
+
+def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_group_candidate_scope (
+                      candidate_scope_id, strategy_group_id, symbol, side,
+                      status, observation_scope, priority_rank
+                    ) VALUES (
+                      'scope-mpg-op-long', 'MPG-001', 'OPUSDT', 'long',
+                      'active', 'active_wip', 1
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_candidate_scope_event_bindings (
+                      candidate_scope_id, event_spec_id, status, created_at_ms
+                    ) VALUES (
+                      'scope-mpg-op-long', 'event-mpg-long', 'active', 900
+                    )
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-op",
+                    "strategy_family_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "status": "ready_for_prepare",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": "long",
+                        "timestamp_ms": 1000,
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+
+    assert result["status"] == "pg_live_signal_events_blocked"
+    assert result["written_count"] == 0
+    assert result["skipped"][0]["blocker"] == "fresh_public_fact_snapshot_missing"
+
+
+def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_strategy_group_candidate_scope (
+              candidate_scope_id TEXT PRIMARY KEY,
+              strategy_group_id TEXT,
+              symbol TEXT,
+              side TEXT,
+              status TEXT,
+              observation_scope TEXT,
+              priority_rank INTEGER
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_candidate_scope_event_bindings (
+              candidate_scope_id TEXT,
+              event_spec_id TEXT,
+              status TEXT,
+              created_at_ms INTEGER
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_runtime_fact_snapshots (
+              fact_snapshot_id TEXT PRIMARY KEY,
+              strategy_group_id TEXT,
+              symbol TEXT,
+              side TEXT,
+              fact_surface TEXT,
+              source_kind TEXT,
+              computed BOOLEAN,
+              satisfied BOOLEAN,
+              freshness_state TEXT,
+              valid_until_ms INTEGER,
+              observed_at_ms INTEGER,
+              created_at_ms INTEGER
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_live_signal_events (
+              signal_event_id TEXT PRIMARY KEY,
+              candidate_scope_id TEXT,
+              event_spec_id TEXT,
+              strategy_group_id TEXT,
+              symbol TEXT,
+              side TEXT,
+              detector_key TEXT,
+              signal_type TEXT,
+              source_kind TEXT,
+              status TEXT,
+              freshness_state TEXT,
+              confidence NUMERIC,
+              fact_snapshot_id TEXT,
+              reason_codes TEXT,
+              signal_payload TEXT,
+              event_time_ms INTEGER,
+              trigger_candle_close_time_ms INTEGER,
+              observed_at_ms INTEGER,
+              expires_at_ms INTEGER,
+              invalidated_at_ms INTEGER,
+              created_at_ms INTEGER
+            )
+            """
+        )
+    )

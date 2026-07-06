@@ -379,6 +379,50 @@ def test_daily_table_cli_requires_pg(
     assert "PG_DATABASE_URL is required for PG-only Daily Table" in build.stderr
 
 
+def test_daily_table_cli_normalizes_asyncpg_dsn(monkeypatch, capsys):
+    builder = _builder()
+    captured: dict[str, str] = {}
+
+    class FakeEngine:
+        def connect(self):
+            return self
+
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def dispose(self):
+            return None
+
+    def fake_create_engine(database_url: str):
+        captured["database_url"] = database_url
+        return FakeEngine()
+
+    monkeypatch.setattr(builder.sa, "create_engine", fake_create_engine)
+    monkeypatch.setattr(
+        builder,
+        "PgBackedRuntimeControlStateRepository",
+        lambda conn: type("Repo", (), {"read_control_state": lambda self: {}})(),
+    )
+    monkeypatch.setattr(
+        builder,
+        "build_daily_live_enablement_table_from_control_state",
+        lambda control_state: {
+            "status": "daily_live_enablement_table_ready",
+            "summary": {"row_count": 5, "rank_1_lane": "CPM-RO-001"},
+        },
+    )
+
+    assert (
+        builder.main(["--database-url", "postgresql+asyncpg://user:pass@localhost/db"])
+        == 0
+    )
+    assert captured["database_url"].startswith("postgresql+psycopg://")
+    assert json.loads(capsys.readouterr().out)["status"] == "daily_live_enablement_table_ready"
+
+
 def test_daily_table_pg_cli_round_trip(tmp_path: Path):
     migration = _load_module(MIGRATION_PATH, "migration_086_daily_table_cli")
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_daily_table_cli")

@@ -15,6 +15,8 @@ EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env
 Environment=BRC_STRATEGYGROUP_MAX_SYMBOLS=3
 Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env
+ExecStartPre=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/fetch_binance_usdm_public_facts.py \
+  --require-database-url
 ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/runtime_signal_watcher_tick.py \
   --env-file /home/ubuntu/brc-deploy/env/live-readonly.env \
   --api-base http://127.0.0.1:18080 \

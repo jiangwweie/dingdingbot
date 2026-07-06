@@ -90,6 +90,19 @@ def _summary(status: str = "waiting_for_signal", *, ready: bool = False) -> dict
                 },
             }
         ],
+        "pg_live_signal_events": (
+            {
+                "status": "pg_live_signal_events_written",
+                "written_count": 1,
+                "signal_event_ids": ["signal-unit-ready"],
+            }
+            if ready
+            else {
+                "status": "pg_live_signal_events_noop",
+                "written_count": 0,
+                "reason": "would_enter_signal_summary_missing",
+            }
+        ),
     }
 
 
@@ -134,6 +147,55 @@ def _fake_supervisor(output_status: str, *, ready: bool = False):
                 "order_lifecycle_called": False,
                 "attempt_counter_mutated": False,
                 "runtime_budget_mutated": False,
+                "withdrawal_or_transfer_created": False,
+            },
+        }
+        artifact = {
+            "scope": "runtime_signal_watcher_in_memory_supervisor",
+            "status": "supervisor_completed",
+            "blockers": [],
+            "warnings": [],
+            "loop_artifact": loop,
+            "latest_summary": latest,
+            "safety_invariants": {"forbidden_effects": []},
+        }
+        artifact["status_artifact"] = runtime_signal_watcher_tick._status_from_loop_artifact(
+            output_dir=output_dir,
+            supervisor_artifact=artifact,
+            loop_artifact=loop,
+            latest_summary=latest,
+            stale_after_seconds=float(args.status_stale_after_seconds),
+        )
+        return artifact
+
+    return builder
+
+
+def _fake_supervisor_from_latest(latest: dict):
+    def builder(args):
+        output_dir = Path(args.output_dir)
+        output_status = str(latest.get("status") or "waiting_for_signal")
+        loop = {
+            "scope": "runtime_signal_watcher_in_memory_observation",
+            "status": output_status,
+            "stop_reason": f"status_changed:{output_status}",
+            "iterations_requested": 1,
+            "iterations_completed": 1,
+            "latest_summary": latest,
+            "cycle_summaries": [latest],
+            "blockers": latest.get("blockers") or [],
+            "warnings": [],
+            "operator_review_plan": {
+                "not_executed": True,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": {
+                "monitor_loop_only": True,
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
                 "withdrawal_or_transfer_created": False,
             },
         }
@@ -566,9 +628,21 @@ def test_watcher_tick_reuses_feishu_webhook_from_env_file(tmp_path, monkeypatch)
 
 
 def test_watcher_tick_auto_resume_can_stop_at_non_executing_prepare_checkpoint(tmp_path):
+    latest = _summary("ready_for_prepare", ready=False)
+    latest.update(
+        {
+            "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-unit-ready",
+            "pg_live_signal_events": {
+                "status": "pg_live_signal_events_written",
+                "written_count": 1,
+                "signal_event_ids": ["signal-unit-ready"],
+            },
+        }
+    )
+
     artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
-        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=False),
+        supervisor_builder=_fake_supervisor_from_latest(latest),
         notifier=lambda *items: {"sent": True, "status_code": 200},
     )
 
@@ -588,6 +662,32 @@ def test_watcher_tick_auto_resume_can_stop_at_non_executing_prepare_checkpoint(t
     assert artifact["watcher_tick_plan"]["calls_order_lifecycle"] is False
 
 
+def test_watcher_tick_blocks_legacy_ready_without_pg_live_signal_event(tmp_path):
+    latest = _summary("ready_for_prepare", ready=True)
+    latest["prepared_authorization_id"] = None
+    latest["shadow_candidate_id"] = None
+    latest["pg_live_signal_events"] = {
+        "status": "pg_live_signal_events_blocked",
+        "written_count": 0,
+        "skipped": [{"blocker": "fresh_public_fact_snapshot_missing"}],
+    }
+
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
+        _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
+        supervisor_builder=_fake_supervisor_from_latest(latest),
+        notifier=lambda *items: {"sent": True, "status_code": 200},
+    )
+
+    assert artifact["post_signal_auto_resume"]["status"] == (
+        "blocked_observation_evidence"
+    )
+    assert artifact["post_signal_auto_resume"]["blocked_at"] == "pg_live_signal_event"
+    assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
+        "materialize_pg_live_signal_event"
+    )
+    assert artifact["watcher_tick_plan"]["can_continue_without_owner_chat"] is False
+
+
 def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
     tmp_path,
     monkeypatch,
@@ -598,6 +698,11 @@ def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
         latest.update(
             {
                 "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-sor-btc",
+                "pg_live_signal_events": {
+                    "status": "pg_live_signal_events_written",
+                    "written_count": 1,
+                    "signal_event_ids": ["signal-sor-btc"],
+                },
                 "blockers": [
                     "runtime-old:{'id': 'NEXT-ATTEMPT-POSITION-ORDER-CONFLICT', 'evidence': 'pg_open_order_count=1'}"
                 ],

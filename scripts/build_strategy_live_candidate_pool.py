@@ -24,6 +24,8 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
 
+from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
+
 from scripts.build_daily_live_enablement_table import (  # noqa: E402
     AUTHORITY_BOUNDARY as DAILY_AUTHORITY_BOUNDARY,
     CONTRACT_BLOCKER_CLASSES,
@@ -139,15 +141,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    if not args.database_url.startswith(
-        ("postgresql://", "postgresql+psycopg://")
-    ) and not args.allow_non_postgres_for_test:
+    database_url = normalize_sync_postgres_dsn(args.database_url)
+    if not is_sync_postgres_dsn(database_url) and not args.allow_non_postgres_for_test:
         print(
             "ERROR: DB-backed candidate pool requires PostgreSQL DSN",
             file=sys.stderr,
         )
         return 2
-    engine = sa.create_engine(args.database_url)
+    engine = sa.create_engine(database_url)
     try:
         with engine.connect() as conn:
             repository = PgBackedRuntimeControlStateRepository(conn)

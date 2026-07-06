@@ -706,6 +706,59 @@ def test_goal_status_pg_cli_round_trip(
     assert artifact["evidence"]["legacy_candidate_pool_json_read"] is False
 
 
+def test_goal_status_pg_cli_normalizes_asyncpg_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, str] = {}
+
+    class FakeEngine:
+        def connect(self):
+            return self
+
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def dispose(self):
+            return None
+
+    def fake_create_engine(database_url: str):
+        captured["database_url"] = database_url
+        return FakeEngine()
+
+    monkeypatch.setattr(goal_status.sa, "create_engine", fake_create_engine)
+    monkeypatch.setattr(
+        goal_status,
+        "PgBackedRuntimeControlStateRepository",
+        lambda conn: type("Repo", (), {"read_control_state": lambda self: {}})(),
+    )
+    monkeypatch.setattr(
+        goal_status,
+        "build_goal_status_artifact_from_control_state",
+        lambda control_state: {
+            "status": "waiting_for_opportunity",
+            "ready_for_real_order_action": False,
+            "non_authority_checkpoint": "continue_observation",
+        },
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategygroup_runtime_goal_status.py",
+            "--database-url",
+            "postgresql+asyncpg://user:pass@localhost/db",
+        ],
+    )
+
+    assert goal_status.main() == 0
+    assert captured["database_url"].startswith("postgresql+psycopg://")
+    assert json.loads(capsys.readouterr().out)["status"] == "waiting_for_opportunity"
+
+
 def test_goal_status_pg_cli_requires_database_url_when_requested(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

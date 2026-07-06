@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import redirect_stdout
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -49,6 +50,7 @@ WAITING_FOR_SIGNAL_BLOCKERS = {
     "strategy_signal_not_ready_for_shadow_candidate_prepare",
 }
 WATCHER_COVERAGE_DETECTOR_KEY = "runtime_active_observation_monitor"
+LIVE_SIGNAL_VALID_FOR_MS = 300_000
 
 
 def _api_base(args: argparse.Namespace) -> str:
@@ -450,6 +452,357 @@ def write_candidate_universe_coverage_to_pg(
             "no_finalgate_no_operation_layer_no_exchange_write"
         ),
     }
+
+
+def write_runtime_signal_summaries_to_pg(
+    artifact: dict[str, Any],
+    *,
+    database_url: str,
+    allow_non_postgres_for_test: bool = False,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    if not database_url:
+        return {
+            "status": "pg_live_signal_events_skipped",
+            "reason": "database_url_missing",
+            "written_count": 0,
+        }
+    summaries = [row for row in artifact.get("runtime_summaries") or [] if isinstance(row, dict)]
+    candidates = _live_signal_candidates_from_summaries(summaries)
+    if not candidates:
+        return {
+            "status": "pg_live_signal_events_noop",
+            "reason": "would_enter_signal_summary_missing",
+            "written_count": 0,
+        }
+
+    normalized_url = normalize_sync_postgres_dsn(database_url)
+    if not is_sync_postgres_dsn(normalized_url) and not allow_non_postgres_for_test:
+        raise RuntimeError("PG live signal event write requires PostgreSQL DSN")
+    observed_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    written: list[str] = []
+    skipped: list[dict[str, Any]] = []
+    engine = sa.create_engine(normalized_url)
+    try:
+        with engine.begin() as conn:
+            for candidate in candidates:
+                result = _write_live_signal_candidate(
+                    conn,
+                    candidate=candidate,
+                    observed_ms=observed_ms,
+                )
+                if result.get("written") is True:
+                    written.append(str(result["signal_event_id"]))
+                else:
+                    skipped.append(result)
+    finally:
+        engine.dispose()
+    return {
+        "status": (
+            "pg_live_signal_events_written"
+            if written
+            else "pg_live_signal_events_blocked"
+        ),
+        "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
+        "written_count": len(written),
+        "signal_event_ids": written,
+        "skipped": skipped,
+        "authority_boundary": (
+            "live_signal_event_projection_only; "
+            "no_finalgate_no_operation_layer_no_exchange_write"
+        ),
+    }
+
+
+def _live_signal_candidates_from_summaries(
+    summaries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for row in summaries:
+        signal = row.get("signal_summary")
+        if not isinstance(signal, dict):
+            signal = {}
+        if str(signal.get("signal_type") or "") != "would_enter":
+            continue
+        strategy_group_id = str(row.get("strategy_family_id") or "").strip()
+        symbol = _compact_symbol(row.get("symbol"))
+        side = _normalize_side(signal.get("side") or row.get("side"))
+        event_time_ms = _int_or_zero(signal.get("timestamp_ms"))
+        if not strategy_group_id or not symbol or side not in {"long", "short"}:
+            continue
+        if event_time_ms <= 0:
+            continue
+        candidates.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "symbol": symbol,
+                "side": side,
+                "signal_type": "would_enter",
+                "confidence": signal.get("confidence"),
+                "reason_codes": list(signal.get("reason_codes") or []),
+                "event_time_ms": event_time_ms,
+                "runtime_instance_id": row.get("runtime_instance_id"),
+                "strategy_family_version_id": row.get("strategy_family_version_id"),
+                "runtime_status": row.get("status"),
+                "signal_summary": signal,
+                "signal_input_ref": row.get("signal_input_json"),
+                "prepared_authorization_id": row.get("prepared_authorization_id"),
+            }
+        )
+    return candidates
+
+
+def _write_live_signal_candidate(
+    conn: sa.engine.Connection,
+    *,
+    candidate: dict[str, Any],
+    observed_ms: int,
+) -> dict[str, Any]:
+    event_time_ms = int(candidate["event_time_ms"])
+    expires_at_ms = event_time_ms + LIVE_SIGNAL_VALID_FOR_MS
+    if expires_at_ms <= observed_ms:
+        return {
+            "written": False,
+            "blocker": "signal_event_expired",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "event_time_ms": event_time_ms,
+        }
+
+    scope = _active_candidate_scope_event(conn, candidate=candidate)
+    if not scope:
+        return {
+            "written": False,
+            "blocker": "candidate_scope_event_binding_missing",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+        }
+
+    fact = _latest_fresh_public_fact(conn, candidate=candidate, now_ms=observed_ms)
+    if not fact:
+        return {
+            "written": False,
+            "blocker": "fresh_public_fact_snapshot_missing",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+        }
+    expires_at_ms = min(expires_at_ms, int(fact.get("valid_until_ms") or expires_at_ms))
+    if expires_at_ms <= observed_ms:
+        return {
+            "written": False,
+            "blocker": "fresh_public_fact_snapshot_expired",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+        }
+
+    signal_event_id = _stable_signal_event_id(
+        strategy_group_id=str(candidate["strategy_group_id"]),
+        symbol=str(candidate["symbol"]),
+        side=str(candidate["side"]),
+        event_spec_id=str(scope["event_spec_id"]),
+        signal_type=str(candidate["signal_type"]),
+        event_time_ms=event_time_ms,
+    )
+    created_at_ms = max(observed_ms, event_time_ms + 1)
+    row = {
+        "signal_event_id": signal_event_id,
+        "candidate_scope_id": scope["candidate_scope_id"],
+        "event_spec_id": scope["event_spec_id"],
+        "strategy_group_id": candidate["strategy_group_id"],
+        "symbol": candidate["symbol"],
+        "side": candidate["side"],
+        "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
+        "signal_type": candidate["signal_type"],
+        "source_kind": "live_market",
+        "status": "facts_validated",
+        "freshness_state": "fresh",
+        "confidence": candidate.get("confidence"),
+        "fact_snapshot_id": fact["fact_snapshot_id"],
+        "reason_codes": json.dumps(candidate.get("reason_codes") or []),
+        "signal_payload": json.dumps(
+            {
+                "runtime_instance_id": candidate.get("runtime_instance_id"),
+                "strategy_family_version_id": candidate.get("strategy_family_version_id"),
+                "runtime_status": candidate.get("runtime_status"),
+                "signal_summary": candidate.get("signal_summary") or {},
+                "signal_input_ref": candidate.get("signal_input_ref"),
+                "prepared_authorization_id": candidate.get("prepared_authorization_id"),
+                "source": "runtime_active_observation_monitor",
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        "event_time_ms": event_time_ms,
+        "trigger_candle_close_time_ms": event_time_ms,
+        "observed_at_ms": observed_ms,
+        "expires_at_ms": expires_at_ms,
+        "created_at_ms": created_at_ms,
+    }
+    _upsert_live_signal_event(conn, row)
+    return {
+        "written": True,
+        "signal_event_id": signal_event_id,
+        "strategy_group_id": candidate["strategy_group_id"],
+        "symbol": candidate["symbol"],
+        "side": candidate["side"],
+    }
+
+
+def _active_candidate_scope_event(
+    conn: sa.engine.Connection,
+    *,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    row = conn.execute(
+        sa.text(
+            """
+            SELECT c.candidate_scope_id, b.event_spec_id
+            FROM brc_strategy_group_candidate_scope AS c
+            JOIN brc_candidate_scope_event_bindings AS b
+              ON b.candidate_scope_id = c.candidate_scope_id
+             AND b.status = 'active'
+            WHERE c.strategy_group_id = :strategy_group_id
+              AND c.symbol = :symbol
+              AND c.side = :side
+              AND c.status = 'active'
+            ORDER BY c.priority_rank ASC, b.created_at_ms DESC
+            LIMIT 1
+            """
+        ),
+        {
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+        },
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _latest_fresh_public_fact(
+    conn: sa.engine.Connection,
+    *,
+    candidate: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    row = conn.execute(
+        sa.text(
+            """
+            SELECT fact_snapshot_id, valid_until_ms
+            FROM brc_runtime_fact_snapshots
+            WHERE strategy_group_id = :strategy_group_id
+              AND symbol = :symbol
+              AND side = :side
+              AND fact_surface = 'pretrade_public'
+              AND source_kind = 'live_market'
+              AND computed = true
+              AND satisfied = true
+              AND freshness_state = 'fresh'
+              AND valid_until_ms > :now_ms
+            ORDER BY observed_at_ms DESC, created_at_ms DESC, fact_snapshot_id DESC
+            LIMIT 1
+            """
+        ),
+        {
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "now_ms": now_ms,
+        },
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _upsert_live_signal_event(conn: sa.engine.Connection, row: dict[str, Any]) -> None:
+    statement = sa.text(
+        """
+        INSERT INTO brc_live_signal_events (
+          signal_event_id,
+          candidate_scope_id,
+          event_spec_id,
+          strategy_group_id,
+          symbol,
+          side,
+          detector_key,
+          signal_type,
+          source_kind,
+          status,
+          freshness_state,
+          confidence,
+          fact_snapshot_id,
+          reason_codes,
+          signal_payload,
+          event_time_ms,
+          trigger_candle_close_time_ms,
+          observed_at_ms,
+          expires_at_ms,
+          invalidated_at_ms,
+          created_at_ms
+        ) VALUES (
+          :signal_event_id,
+          :candidate_scope_id,
+          :event_spec_id,
+          :strategy_group_id,
+          :symbol,
+          :side,
+          :detector_key,
+          :signal_type,
+          :source_kind,
+          :status,
+          :freshness_state,
+          :confidence,
+          :fact_snapshot_id,
+          :reason_codes,
+          :signal_payload,
+          :event_time_ms,
+          :trigger_candle_close_time_ms,
+          :observed_at_ms,
+          :expires_at_ms,
+          NULL,
+          :created_at_ms
+        )
+        """
+    )
+    if conn.dialect.name == "postgresql":
+        statement = sa.text(
+            statement.text
+            + """
+            ON CONFLICT ON CONSTRAINT uq_brc_live_signal_identity
+            DO UPDATE SET
+              observed_at_ms = EXCLUDED.observed_at_ms,
+              expires_at_ms = EXCLUDED.expires_at_ms,
+              fact_snapshot_id = EXCLUDED.fact_snapshot_id,
+              reason_codes = EXCLUDED.reason_codes,
+              signal_payload = EXCLUDED.signal_payload
+            """
+        )
+    conn.execute(statement, row)
+
+
+def _stable_signal_event_id(
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    event_spec_id: str,
+    signal_type: str,
+    event_time_ms: int,
+) -> str:
+    payload = "|".join(
+        (strategy_group_id, symbol, side, event_spec_id, signal_type, str(event_time_ms))
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+    return f"signal:{digest}"
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _replace_current_watcher_runtime_coverage(

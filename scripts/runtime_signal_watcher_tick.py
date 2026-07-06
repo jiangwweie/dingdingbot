@@ -447,6 +447,7 @@ def _active_observation_summary(
         ),
         "candidate_universe_coverage": artifact.get("candidate_universe_coverage")
         or {},
+        "pg_live_signal_events": artifact.get("pg_live_signal_events") or {},
     }
 
 
@@ -545,10 +546,33 @@ def _post_signal_auto_resume_plan(
         "runtime_signal_ready_for_non_executing_prepare",
         "prepared_shadow_evidence_ready_for_owner_review",
     }
-    if (
+    legacy_ready_for_prepare = (
         latest_status in ready_prepare_statuses
         or wakeup_status in ready_prepare_statuses
         or bool(signal_input_json)
+    )
+    pg_live_signal_events = _as_dict(status_artifact.get("pg_live_signal_events"))
+    pg_live_signal_written = int(pg_live_signal_events.get("written_count") or 0) > 0
+    if legacy_ready_for_prepare and not pg_live_signal_written:
+        return {
+            **base,
+            "status": "blocked_observation_evidence",
+            "blocked_at": "pg_live_signal_event",
+            "blocked_reason": (
+                pg_live_signal_events.get("status")
+                or pg_live_signal_events.get("reason")
+                or "pg_live_signal_event_not_materialized"
+            ),
+            "next_recover_condition": "fresh_strategy_signal_is_materialized_in_pg_live_signal_events",
+            "non_authority_checkpoint": "materialize_pg_live_signal_event",
+            "checkpoint_source": "runtime_signal_watcher_tick",
+            "downgrade_mode": "observe_only_no_candidate_prepare",
+            "can_continue_without_owner_chat": False,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+        }
+    if (
+        legacy_ready_for_prepare
     ):
         non_authority_checkpoint = (
             "wait_for_prepare_records_then_rebuild_final_gate_status"
@@ -803,6 +827,7 @@ def _status_from_loop_artifact(
         ),
         "candidate_universe_coverage": latest_summary.get("candidate_universe_coverage")
         or {},
+        "pg_live_signal_events": latest_summary.get("pg_live_signal_events") or {},
         "blockers": blockers,
         "warnings": list(loop_artifact.get("warnings") or []),
         "forbidden_effects": forbidden_effects,
@@ -890,6 +915,15 @@ def _build_in_memory_supervisor_artifact(args: argparse.Namespace) -> dict[str, 
     monitor_artifact = active_monitor._build_monitor_artifact(monitor_args)
     monitor_artifact["pg_watcher_runtime_coverage"] = (
         active_monitor.write_candidate_universe_coverage_to_pg(
+            monitor_artifact,
+            database_url=str(getattr(monitor_args, "database_url", "") or ""),
+            allow_non_postgres_for_test=bool(
+                getattr(monitor_args, "allow_non_postgres_for_test", False)
+            ),
+        )
+    )
+    monitor_artifact["pg_live_signal_events"] = (
+        active_monitor.write_runtime_signal_summaries_to_pg(
             monitor_artifact,
             database_url=str(getattr(monitor_args, "database_url", "") or ""),
             allow_non_postgres_for_test=bool(
