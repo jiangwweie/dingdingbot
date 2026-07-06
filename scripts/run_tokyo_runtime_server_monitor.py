@@ -420,11 +420,28 @@ def _dedupe_identity(decision: dict[str, Any]) -> str:
     return "|".join(parts)
 
 
+def _notification_title(decision: dict[str, Any]) -> str:
+    blocker_class = str(decision.get("blocker_class") or "")
+    if blocker_class == "runtime_data_gap":
+        return "BRC 生产监控：系统运行数据异常"
+    if blocker_class in {
+        "hard_safety_stop",
+        "policy_scope_missing",
+        "budget_gap",
+        "recovery_review",
+        "strategy_review",
+    }:
+        return "BRC 生产监控：需要 Owner 介入"
+    if blocker_class == "watcher_or_service_failure":
+        return "BRC 生产监控：服务器观察链路异常"
+    return "BRC 生产监控：系统运行状态提醒"
+
+
 def _notification_text(decision: dict[str, Any], artifact_path: Path) -> str:
     reasons = ", ".join(str(item) for item in decision.get("reasons") or [])
     return "\n".join(
         [
-            "BRC 生产监控：需要介入",
+            _notification_title(decision),
             f"策略组: {decision.get('strategy_group_id')}",
             f"标的: {decision.get('symbol')}",
             f"阻断: {decision.get('blocker_class')}",

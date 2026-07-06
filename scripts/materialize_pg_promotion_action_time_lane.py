@@ -821,7 +821,7 @@ def _required_fact_blockers(
         fact_key = str(row.get("fact_key") or "")
         satisfied = _fact_condition_satisfied(row, fact_values)
         if row.get("disable_on_match") is True:
-            if fact_key not in fact_values:
+            if _disable_fact_unknown(fact_key, fact_values):
                 blockers.append(f"disable_fact_missing:{fact_key}")
                 continue
             if satisfied:
@@ -830,6 +830,17 @@ def _required_fact_blockers(
         if not satisfied:
             blockers.append(f"required_fact_not_satisfied:{fact_key}")
     return blockers
+
+
+def _disable_fact_unknown(fact_key: str, fact_values: dict[str, Any]) -> bool:
+    if fact_key not in fact_values:
+        return True
+    observed = fact_values.get(fact_key)
+    if observed is None:
+        return True
+    if isinstance(observed, str) and observed.strip().lower() in {"", "unknown", "missing"}:
+        return True
+    return False
 
 
 def _fact_condition_satisfied(row: dict[str, Any], fact_values: dict[str, Any]) -> bool:

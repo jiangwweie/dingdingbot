@@ -478,6 +478,10 @@ def test_pg_action_time_lane_notifies_once_with_pg_dedupe(
             assert "pg_current_state_repository" in first["source_errors"]
             assert first["notification"]["attempted"] is True
             assert first["notification"]["sent"] is True
+            assert calls[0]["args"][2]["text"].startswith(
+                "BRC 生产监控：系统运行数据异常"
+            )
+            assert not calls[0]["args"][2]["text"].startswith("BRC 生产监控：需要介入")
             assert second["notification"]["duplicate_suppressed"] is True
             assert second["notification"]["attempted"] is False
             assert len(calls) == 1

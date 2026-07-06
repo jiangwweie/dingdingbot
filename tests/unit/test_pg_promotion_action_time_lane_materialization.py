@@ -224,6 +224,38 @@ def test_blocks_brf2_promotion_when_disable_fact_is_missing(pg_control_connectio
     assert _count(pg_control_connection, "brc_protection_references") == 0
 
 
+@pytest.mark.parametrize("disable_value", [None, "unknown", "missing", ""])
+def test_blocks_brf2_promotion_when_disable_fact_is_unknown(
+    pg_control_connection,
+    disable_value,
+):
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        "BRF2-001",
+        "BTCUSDT",
+        "short",
+        fact_values={
+            "rally_failure_confirmed": True,
+            "short_side_not_disabled": True,
+            "rally_high_reference": "1800",
+            "strong_uptrend_disable": disable_value,
+        },
+    )
+
+    payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "promotion_candidates_blocked"
+    assert "disable_fact_missing:strong_uptrend_disable" in payload["blockers"]
+    assert "disable_fact_active:strong_uptrend_disable" not in payload["blockers"]
+    assert _count(pg_control_connection, "brc_promotion_candidates") == 1
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+    assert _count(pg_control_connection, "brc_budget_reservations") == 0
+    assert _count(pg_control_connection, "brc_protection_references") == 0
+
+
 def test_conditional_rehearsal_scope_does_not_create_real_submit_lane(pg_control_connection):
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
     pg_control_connection.execute(
