@@ -18,19 +18,25 @@ BACKUP_SUFFIXES = (".pgdump", ".dump", ".backup", ".sql.gz")
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     root = Path(args.root).expanduser().resolve()
-    manifest = build_manifest(root=root, apply=args.apply)
+    manifest = build_manifest(
+        root=root,
+        apply=args.apply,
+        max_delete_count=args.max_delete_count,
+    )
     if args.apply:
-        apply_prune(manifest, root=root)
+        apply_prune(manifest, root=root, max_delete_count=args.max_delete_count)
     if args.manifest_json:
         _write_json(Path(args.manifest_json), manifest)
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0 if not manifest["checks"]["blockers"] else 2
 
 
-def build_manifest(*, root: Path, apply: bool) -> dict[str, Any]:
+def build_manifest(*, root: Path, apply: bool, max_delete_count: int = 100) -> dict[str, Any]:
     blockers: list[str] = []
     if not root.exists() or not root.is_dir():
         blockers.append("backup_root_missing")
+    if max_delete_count < 1:
+        blockers.append("max_delete_count_must_be_positive")
     backups: list[Path] = []
     if not blockers:
         backups = [
@@ -47,6 +53,7 @@ def build_manifest(*, root: Path, apply: bool) -> dict[str, Any]:
         "mode": "apply" if apply else "dry_run",
         "run_id": f"backup-prune:{uuid4().hex[:12]}",
         "root": str(root),
+        "max_delete_count": max_delete_count,
         "protected_entries": [_entry(path, root, "protected_latest_backup") for path in protected],
         "delete_candidates": [_entry(path, root, "delete_candidate") for path in delete_candidates],
         "candidate_count": len(delete_candidates),
@@ -59,15 +66,24 @@ def build_manifest(*, root: Path, apply: bool) -> dict[str, Any]:
     }
 
 
-def apply_prune(manifest: dict[str, Any], *, root: Path) -> None:
+def apply_prune(
+    manifest: dict[str, Any],
+    *,
+    root: Path,
+    max_delete_count: int | None = None,
+) -> None:
     if manifest.get("checks", {}).get("blockers"):
         return
     deleted: list[str] = []
-    for row in manifest.get("delete_candidates") or []:
+    candidates = manifest.get("delete_candidates") or []
+    delete_budget = max_delete_count if max_delete_count is not None else len(candidates)
+    for row in candidates[:delete_budget]:
         path = (root / row["relative_path"]).resolve()
         if path.exists() and path.is_file() and not path.is_symlink() and _is_within(root, path):
             path.unlink()
             deleted.append(row["relative_path"])
+    if len(candidates) > delete_budget:
+        manifest["checks"].setdefault("warnings", []).append("delete_budget_exhausted")
     manifest["deleted_count"] = len(deleted)
     manifest["deleted_relative_paths"] = deleted
     manifest["status"] = "applied"
@@ -104,6 +120,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     mode.add_argument("--dry-run", action="store_true", default=False)
     mode.add_argument("--apply", action="store_true")
     parser.add_argument("--root", default="/home/ubuntu/brc-deploy/backups")
+    parser.add_argument("--max-delete-count", type=int, default=100)
     parser.add_argument("--manifest-json")
     return parser.parse_args(argv)
 

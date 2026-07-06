@@ -16,11 +16,23 @@ from typing import Any
 
 
 SCHEMA = "brc.ops.tokyo_runtime_ops_health_once.v1"
+LOW_PRIORITY_PREFIX = ("timeout", "3s", "ionice", "-c3", "nice", "-n", "19")
+
 COMMANDS = (
     ("disk_df", ("df", "-h")),
-    ("reports_du", ("du", "-sh", "/home/ubuntu/brc-deploy/reports")),
-    ("releases_du", ("du", "-sh", "/home/ubuntu/brc-deploy/releases")),
-    ("backups_du", ("du", "-sh", "/home/ubuntu/brc-deploy/backups")),
+    ("inode_df", ("df", "-ih", "/")),
+    (
+        "reports_du",
+        LOW_PRIORITY_PREFIX + ("du", "-sh", "/home/ubuntu/brc-deploy/reports"),
+    ),
+    (
+        "releases_du",
+        LOW_PRIORITY_PREFIX + ("du", "-sh", "/home/ubuntu/brc-deploy/releases"),
+    ),
+    (
+        "backups_du",
+        LOW_PRIORITY_PREFIX + ("du", "-sh", "/home/ubuntu/brc-deploy/backups"),
+    ),
     ("journald_usage", ("journalctl", "--disk-usage")),
     ("backend_status", ("systemctl", "is-active", "brc-owner-console-backend.service")),
     ("watcher_timer_status", ("systemctl", "is-active", "brc-runtime-signal-watcher.timer")),
@@ -55,6 +67,7 @@ def build_payload(*, execute_local: bool) -> dict[str, Any]:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
+            timeout=8,
         )
         results.append(
             {

@@ -155,3 +155,60 @@ def test_ops_health_defaults_to_plan_only():
     assert payload["mode"] == "plan_only"
     assert all(row["status"] == "planned" for row in payload["results"])
     assert payload["checks"]["readonly_commands_only"] is True
+
+
+def test_ops_health_wraps_du_with_timeout_and_low_priority():
+    module = _load(
+        REPO_ROOT / "scripts" / "ops" / "check_tokyo_runtime_ops_health_once.py",
+        "check_tokyo_runtime_ops_health_once_priority",
+    )
+
+    payload = module.build_payload(execute_local=False)
+    du_rows = [
+        row
+        for row in payload["results"]
+        if row["name"] in {"reports_du", "releases_du", "backups_du"}
+    ]
+
+    assert du_rows
+    for row in du_rows:
+        command = row["command"]
+        assert command[:7] == ["timeout", "3s", "ionice", "-c3", "nice", "-n", "19"]
+        assert "du" in command
+
+
+def test_report_cleanup_apply_honors_delete_budget(tmp_path: Path):
+    module = _load(
+        REPO_ROOT / "scripts" / "ops" / "cleanup_tokyo_runtime_reports_once.py",
+        "cleanup_tokyo_runtime_reports_once_budget",
+    )
+    root = tmp_path / "reports"
+    target = root / "runtime-signal-watcher"
+    now = 1_800_000_000
+    old_files = [
+        target / "dry-run-audit-chain" / f"old-{idx}.json"
+        for idx in range(3)
+    ]
+    for path in old_files:
+        _touch(path, mtime=now - 80 * 3600)
+
+    manifest = module.build_manifest(
+        root=root,
+        target=target,
+        keep_hours=72,
+        now=now,
+        archive_recent=False,
+        apply=True,
+        max_delete_count=2,
+    )
+    module.apply_cleanup(
+        manifest,
+        root=root,
+        archive_recent=False,
+        max_delete_count=2,
+    )
+
+    assert manifest["status"] == "applied"
+    assert manifest["deleted_count"] == 2
+    assert "delete_budget_exhausted" in manifest["checks"]["warnings"]
+    assert sum(path.exists() for path in old_files) == 1

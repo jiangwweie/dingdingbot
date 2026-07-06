@@ -11,8 +11,8 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import shutil
 import tarfile
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -44,9 +44,17 @@ def main(argv: list[str] | None = None) -> int:
         now=now,
         archive_recent=args.archive_recent,
         apply=args.apply,
+        max_scan_seconds=args.max_scan_seconds,
+        max_candidates=args.max_candidates,
+        max_delete_count=args.max_delete_count,
     )
     if args.apply:
-        apply_cleanup(manifest, root=root, archive_recent=args.archive_recent)
+        apply_cleanup(
+            manifest,
+            root=root,
+            archive_recent=args.archive_recent,
+            max_delete_count=args.max_delete_count,
+        )
     if args.manifest_json:
         _write_json(Path(args.manifest_json), manifest)
     print(json.dumps(manifest, indent=2, sort_keys=True))
@@ -61,11 +69,20 @@ def build_manifest(
     now: float,
     archive_recent: bool,
     apply: bool,
+    max_scan_seconds: float = 10.0,
+    max_candidates: int = 2000,
+    max_delete_count: int = 1000,
 ) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
     if keep_hours < 1:
         blockers.append("keep_hours_must_be_positive")
+    if max_scan_seconds <= 0:
+        blockers.append("max_scan_seconds_must_be_positive")
+    if max_candidates < 1:
+        blockers.append("max_candidates_must_be_positive")
+    if max_delete_count < 1:
+        blockers.append("max_delete_count_must_be_positive")
     if not _is_within(root, target):
         blockers.append("target_not_under_root")
     if not target.exists():
@@ -77,7 +94,14 @@ def build_manifest(
     protected: list[dict[str, Any]] = []
     if not blockers:
         cutoff = now - keep_hours * 3600
-        for path in sorted(target.rglob("*")):
+        scan_started = time.monotonic()
+        for path in target.rglob("*"):
+            if time.monotonic() - scan_started > max_scan_seconds:
+                warnings.append("scan_budget_exhausted")
+                break
+            if len(candidates) >= max_candidates:
+                warnings.append("candidate_budget_exhausted")
+                break
             if path.is_symlink():
                 protected.append(_entry(path, root, "protected_symlink"))
                 continue
@@ -109,6 +133,9 @@ def build_manifest(
         "target": str(target),
         "keep_hours": keep_hours,
         "archive_recent": archive_recent,
+        "max_scan_seconds": max_scan_seconds,
+        "max_candidates": max_candidates,
+        "max_delete_count": max_delete_count,
         "archive_path": archive_path,
         "candidate_count": len(candidates),
         "protected_count": len(protected),
@@ -123,7 +150,13 @@ def build_manifest(
     }
 
 
-def apply_cleanup(manifest: dict[str, Any], *, root: Path, archive_recent: bool) -> None:
+def apply_cleanup(
+    manifest: dict[str, Any],
+    *,
+    root: Path,
+    archive_recent: bool,
+    max_delete_count: int | None = None,
+) -> None:
     blockers = manifest.get("checks", {}).get("blockers") or []
     if blockers:
         return
@@ -141,11 +174,14 @@ def apply_cleanup(manifest: dict[str, Any], *, root: Path, archive_recent: bool)
                 if path.exists() and _is_within(root, path):
                     tar.add(path, arcname=row["relative_path"])
     deleted: list[str] = []
-    for row in candidates:
+    delete_budget = max_delete_count if max_delete_count is not None else len(candidates)
+    for row in candidates[:delete_budget]:
         path = (root / row["relative_path"]).resolve()
         if path.exists() and _is_within(root, path) and not path.is_symlink():
             path.unlink()
             deleted.append(row["relative_path"])
+    if len(candidates) > delete_budget:
+        manifest["checks"]["warnings"].append("delete_budget_exhausted")
     _remove_empty_dirs((root / DEFAULT_RUNTIME_REPORT_DIR).resolve(), root=root)
     manifest["deleted_count"] = len(deleted)
     manifest["deleted_relative_paths"] = deleted
@@ -208,6 +244,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--archive-recent", action="store_true")
     parser.add_argument("--manifest-json")
     parser.add_argument("--now", type=float)
+    parser.add_argument("--max-scan-seconds", type=float, default=10.0)
+    parser.add_argument("--max-candidates", type=int, default=2000)
+    parser.add_argument("--max-delete-count", type=int, default=1000)
     return parser.parse_args(argv)
 
 
