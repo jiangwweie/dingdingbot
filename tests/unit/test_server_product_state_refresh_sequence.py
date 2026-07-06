@@ -199,6 +199,112 @@ def test_server_product_state_refresh_sequence_action_time_mode_skips_closure(
     assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
 
 
+def test_server_product_state_refresh_sequence_action_time_if_needed_skips_without_pg_trigger(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        mode="action_time_if_needed",
+        action_time_trigger_state={
+            "status": "not_triggered",
+            "triggered": False,
+            "blocker": "",
+            "counts": {
+                "fresh_live_signal_events": 0,
+                "open_promotion_candidates": 0,
+                "open_action_time_lane_inputs": 0,
+                "open_action_time_tickets": 0,
+            },
+        },
+        runner=runner,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_ready"
+    assert report["mode"] == "action_time_if_needed"
+    assert report["effective_mode"] == "none"
+    assert report["summary"]["step_count"] == 0
+    assert calls == []
+    assert report["safety_invariants"]["calls_ticket_bound_finalgate_preflight"] is False
+
+
+def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_trigger(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        mode="action_time_if_needed",
+        action_time_trigger_state={
+            "status": "triggered",
+            "triggered": True,
+            "blocker": "",
+            "counts": {
+                "fresh_live_signal_events": 1,
+                "open_promotion_candidates": 0,
+                "open_action_time_lane_inputs": 0,
+                "open_action_time_tickets": 0,
+            },
+        },
+        runner=runner,
+    )
+
+    command_names = [command[1] for command in calls]
+    assert report["status"] == "server_product_state_refresh_sequence_ready"
+    assert report["mode"] == "action_time_if_needed"
+    assert report["effective_mode"] == "action_time"
+    assert "scripts/materialize_action_time_ticket.py" in command_names
+    assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
+    assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
+
+
+def test_server_product_state_refresh_sequence_action_time_if_needed_fails_closed_on_pg_gap(
+    tmp_path: Path,
+):
+    module = _load_module()
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        mode="action_time_if_needed",
+        action_time_trigger_state={
+            "status": "blocked",
+            "triggered": False,
+            "blocker": "missing_fact:PG_DATABASE_URL",
+            "counts": {},
+        },
+        runner=lambda command: module.CommandResult(returncode=0, stdout="ok", stderr=""),
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_failed"
+    assert report["summary"]["failed_required_step_count"] == 1
+    assert report["summary"]["blocked_by_required_step"] == "pg_action_time_trigger_state"
+    assert report["step_results"][0]["name"] == "pg_action_time_trigger_state"
+
+
 def test_server_product_state_refresh_sequence_closure_mode_skips_control_rebuild(
     tmp_path: Path,
 ):

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Dispatch the Runtime Signal Watcher resume artifact to the next safe step.
+"""Dispatch the Runtime Signal Watcher PG ticket identity to the next safe step.
 
-The default mode consumes post-signal-resume-pack.json and writes an
-Owner/agent-readable dispatch artifact without calling the API. With
+The default mode consumes PG Action-Time Ticket identity and writes an
+Owner/agent-readable dispatch artifact without calling the API. The legacy
+post-signal-resume-pack JSON path is diagnostic-only and must be explicitly
+requested with ``--diagnostic-only --identity-source resume_pack_json``. With
 ``--execute-preflight`` it may call the official action-time FinalGate preflight
 GET endpoint, or the official fresh-submit-authorization binding endpoint when
 the resume pack is parked at that non-executing checkpoint. With
@@ -5041,10 +5043,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--identity-source",
         choices=("pg_ticket", "resume_pack_json"),
-        default="resume_pack_json",
+        default="pg_ticket",
         help=(
             "Trade identity source. Production submit-adjacent dispatch must use "
             "pg_ticket; resume_pack_json is retained for diagnostics and legacy tests."
+        ),
+    )
+    parser.add_argument(
+        "--diagnostic-only",
+        action="store_true",
+        help=(
+            "Required when --identity-source=resume_pack_json. The JSON resume "
+            "pack path is diagnostic only and must not be used as production "
+            "trade identity authority."
         ),
     )
     parser.add_argument(
@@ -5132,6 +5143,13 @@ def main(argv: list[str] | None = None) -> int:
             api_base=args.api_base,
         )
     else:
+        if not args.diagnostic_only:
+            print(
+                "ERROR: resume_pack_json identity is diagnostic-only; pass "
+                "--diagnostic-only explicitly",
+                file=sys.stderr,
+            )
+            return 2
         source_path = Path(args.resume_pack_json).expanduser()
         resume_pack = _read_json(source_path)
     operation_layer_evidence_report, operation_layer_evidence_report_path = (

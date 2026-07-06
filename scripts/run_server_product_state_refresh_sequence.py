@@ -24,6 +24,8 @@ import subprocess
 import sys
 from typing import Any, Callable
 
+import sqlalchemy as sa
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -39,6 +41,7 @@ DEFAULT_ENV_FILE = Path("/home/ubuntu/brc-deploy/env/live-readonly.env")
 DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "server-product-state-refresh-sequence.json"
 REFRESH_MODES = {
     "watcher_tick_summary",
+    "action_time_if_needed",
     "control_refresh",
     "action_time",
     "closure",
@@ -102,19 +105,49 @@ def run_server_product_state_refresh_sequence(
     output_json: Path = DEFAULT_OUTPUT_JSON,
     mode: str = "diagnostic_full",
     runner: Runner | None = None,
+    action_time_trigger_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if mode not in REFRESH_MODES:
         raise ValueError(f"unsupported refresh mode: {mode}")
     command_env = _command_env_with_sync_pg_dsn(os.environ)
     command_runner = runner or (lambda command: _run_command(command, env=command_env))
     started = datetime.now(timezone.utc).isoformat()
+    effective_mode = mode
+    trigger_state: dict[str, Any] | None = None
+    if mode == "action_time_if_needed":
+        trigger_state = (
+            action_time_trigger_state
+            if action_time_trigger_state is not None
+            else _action_time_trigger_state(command_env)
+        )
+        if trigger_state.get("status") == "blocked":
+            report = _empty_refresh_report(
+                mode=mode,
+                effective_mode="none",
+                started_at_utc=started,
+                status="server_product_state_refresh_sequence_failed",
+                action_time_trigger=trigger_state,
+            )
+            _write_json(output_json, report)
+            return report
+        if trigger_state.get("triggered") is not True:
+            report = _empty_refresh_report(
+                mode=mode,
+                effective_mode="none",
+                started_at_utc=started,
+                status="server_product_state_refresh_sequence_ready",
+                action_time_trigger=trigger_state,
+            )
+            _write_json(output_json, report)
+            return report
+        effective_mode = "action_time"
     steps = _refresh_steps(
         python=python,
         api_base=api_base,
         report_dir=report_dir,
         runtime_monitor_dir=runtime_monitor_dir,
         env_file=env_file,
-        mode=mode,
+        mode=effective_mode,
     )
     step_results: list[dict[str, Any]] = []
     blocked_by_required_failure = ""
@@ -185,6 +218,8 @@ def run_server_product_state_refresh_sequence(
             else "server_product_state_refresh_sequence_failed"
         ),
         "mode": mode,
+        "effective_mode": effective_mode,
+        "action_time_trigger": trigger_state,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "started_at_utc": started,
         "summary": {
@@ -230,6 +265,178 @@ def run_server_product_state_refresh_sequence(
     }
     _write_json(output_json, report)
     return report
+
+
+def _empty_refresh_report(
+    *,
+    mode: str,
+    effective_mode: str,
+    started_at_utc: str,
+    status: str,
+    action_time_trigger: dict[str, Any],
+) -> dict[str, Any]:
+    failed = not status.endswith("_ready")
+    step_results = (
+        [
+            {
+                "name": "pg_action_time_trigger_state",
+                "required": True,
+                "returncode": 1,
+                "status": "failed",
+                "command": [],
+                "stdout_tail": "",
+                "stderr_tail": str(action_time_trigger.get("blocker") or ""),
+            }
+        ]
+        if failed
+        else []
+    )
+    return {
+        "schema": "brc.server_product_state_refresh_sequence.v1",
+        "scope": "server_product_state_refresh_sequence_non_authority",
+        "status": status,
+        "mode": mode,
+        "effective_mode": effective_mode,
+        "action_time_trigger": action_time_trigger,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "started_at_utc": started_at_utc,
+        "summary": {
+            "step_count": len(step_results),
+            "required_step_count": len(step_results),
+            "optional_step_count": 0,
+            "failed_required_step_count": len(step_results),
+            "failed_optional_step_count": 0,
+            "skipped_after_required_failure_count": 0,
+            "final_goal_status_attempted": False,
+            "final_goal_status_suppressed": True,
+            "blocked_by_required_step": (
+                "pg_action_time_trigger_state"
+                if failed
+                else ""
+            ),
+        },
+        "step_results": step_results,
+        "safety_invariants": _empty_safety_invariants(),
+    }
+
+
+def _empty_safety_invariants() -> dict[str, bool]:
+    return {
+        "calls_finalgate": False,
+        "calls_ticket_bound_finalgate_preflight": False,
+        "calls_ticket_bound_operation_layer_handoff": False,
+        "calls_ticket_bound_runtime_safety_state": False,
+        "calls_ticket_bound_post_submit_closure": False,
+        "calls_operation_layer_submit": False,
+        "calls_exchange_write": False,
+        "places_order": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "credential_or_secret_mutation": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
+    database_url = normalize_sync_postgres_dsn(
+        env.get("PG_DATABASE_URL") or env.get("DATABASE_URL") or ""
+    )
+    if not database_url:
+        return {
+            "status": "blocked",
+            "triggered": False,
+            "blocker": "missing_fact:PG_DATABASE_URL",
+            "counts": {},
+        }
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            counts = _action_time_trigger_counts(conn)
+    except Exception as exc:  # noqa: BLE001 - fail closed on PG current read errors.
+        return {
+            "status": "blocked",
+            "triggered": False,
+            "blocker": f"pg_action_time_trigger_read_failed:{type(exc).__name__}",
+            "counts": {},
+        }
+    finally:
+        engine.dispose()
+    triggered = any(count > 0 for count in counts.values())
+    return {
+        "status": "triggered" if triggered else "not_triggered",
+        "triggered": triggered,
+        "blocker": "",
+        "counts": counts,
+    }
+
+
+def _action_time_trigger_counts(conn: sa.engine.Connection) -> dict[str, int]:
+    metadata = sa.MetaData()
+    live_signals = sa.Table("brc_live_signal_events", metadata, autoload_with=conn)
+    promotions = sa.Table("brc_promotion_candidates", metadata, autoload_with=conn)
+    lanes = sa.Table("brc_action_time_lane_inputs", metadata, autoload_with=conn)
+    tickets = sa.Table("brc_action_time_tickets", metadata, autoload_with=conn)
+    return {
+        "fresh_live_signal_events": _count_where(
+            conn,
+            live_signals,
+            sa.and_(
+                live_signals.c.freshness_state == "fresh",
+                live_signals.c.status == "facts_validated",
+            ),
+        ),
+        "open_promotion_candidates": _count_where(
+            conn,
+            promotions,
+            promotions.c.status.in_(
+                [
+                    "eligible",
+                    "arbitration_pending",
+                    "arbitration_won",
+                ]
+            ),
+        ),
+        "open_action_time_lane_inputs": _count_where(
+            conn,
+            lanes,
+            sa.and_(
+                lanes.c.lane_scope == "real_submit_candidate",
+                lanes.c.status.in_(
+                    [
+                        "opened",
+                        "facts_refreshing",
+                        "ticket_pending",
+                        "ticket_created",
+                    ]
+                ),
+            ),
+        ),
+        "open_action_time_tickets": _count_where(
+            conn,
+            tickets,
+            tickets.c.status.in_(
+                [
+                    "created",
+                    "preflight_pending",
+                    "finalgate_ready",
+                ]
+            ),
+        ),
+    }
+
+
+def _count_where(
+    conn: sa.engine.Connection,
+    table: sa.Table,
+    predicate: Any,
+) -> int:
+    return int(
+        conn.execute(sa.select(sa.func.count()).select_from(table).where(predicate))
+        .scalar_one()
+        or 0
+    )
 
 
 def _refresh_steps(

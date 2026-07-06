@@ -21,33 +21,52 @@ PRODUCT_STATE_DROPIN = (
     / "deploy/systemd/brc-runtime-signal-watcher.service.d/"
     "80-product-state-refresh.conf"
 )
+ACTION_TIME_DROPIN = (
+    REPO_ROOT
+    / "deploy/systemd/brc-runtime-signal-watcher.service.d/"
+    "85-action-time-refresh-if-needed.conf"
+)
+WATCHER_DROPIN_DIR = REPO_ROOT / "deploy/systemd/brc-runtime-signal-watcher.service.d"
 
 
 def validate_no_runtime_file_authority(*, repo_root: Path = REPO_ROOT) -> list[str]:
     errors: list[str] = []
-    dispatcher = (repo_root / DISPATCHER_DROPIN.relative_to(REPO_ROOT)).read_text(
-        encoding="utf-8"
-    )
-    product_state = (
-        repo_root / PRODUCT_STATE_DROPIN.relative_to(REPO_ROOT)
-    ).read_text(encoding="utf-8")
+    dropin_dir = repo_root / WATCHER_DROPIN_DIR.relative_to(REPO_ROOT)
+    dropins = {
+        path.relative_to(repo_root).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(dropin_dir.glob("*.conf"))
+    }
+    dispatcher = _required_text(dropins, DISPATCHER_DROPIN.relative_to(REPO_ROOT))
+    product_state = _required_text(dropins, PRODUCT_STATE_DROPIN.relative_to(REPO_ROOT))
+    action_time = _required_text(dropins, ACTION_TIME_DROPIN.relative_to(REPO_ROOT))
     if "--identity-source pg_ticket" not in dispatcher:
         errors.append("runtime dispatcher production drop-in must use pg_ticket identity")
+    if "--resume-pack-json" in dispatcher:
+        errors.append("runtime dispatcher production drop-in must not pass --resume-pack-json")
     if "--mode watcher_tick_summary" not in product_state:
         errors.append("watcher product-state post-step must use watcher_tick_summary")
+    if "--mode action_time_if_needed" not in action_time:
+        errors.append("watcher action-time post-step must use action_time_if_needed")
     forbidden_production_inputs = (
         "--candidate-pool-json",
         "--daily-table-json",
         "--goal-status-json",
         "--live-facts-json",
         "--runtime-active-monitor-json",
+        "--resume-pack-json",
+        "runtime_dry_run_audit_chain.py",
+        "runtime-dry-run-audit-chain.json",
+        "--mode diagnostic_full",
     )
     for token in forbidden_production_inputs:
-        if token in dispatcher:
-            errors.append(f"dispatcher drop-in contains file authority input: {token}")
-        if token in product_state:
-            errors.append(f"product-state drop-in contains file authority input: {token}")
+        for rel_path, text in dropins.items():
+            if token in text:
+                errors.append(f"{rel_path} contains forbidden production runtime token: {token}")
     return errors
+
+
+def _required_text(dropins: dict[str, str], rel_path: Path) -> str:
+    return dropins.get(rel_path.as_posix(), "")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -61,8 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         "status": "no_runtime_file_authority_valid" if not errors else "blocked",
         "errors": errors,
         "checked_files": [
-            str(DISPATCHER_DROPIN.relative_to(REPO_ROOT)),
-            str(PRODUCT_STATE_DROPIN.relative_to(REPO_ROOT)),
+            str(path)
+            for path in sorted(
+                path.relative_to(REPO_ROOT)
+                for path in WATCHER_DROPIN_DIR.glob("*.conf")
+            )
         ],
     }
     if args.json:

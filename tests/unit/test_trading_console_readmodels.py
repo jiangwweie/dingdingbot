@@ -5614,7 +5614,7 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
 
 
-def test_runtime_signal_watcher_status_prefers_allowed_action_over_legacy_recovery_text(
+def test_runtime_signal_watcher_status_ignores_resume_pack_legacy_action_text(
     monkeypatch, tmp_path
 ):
     _configure_auth(monkeypatch)
@@ -5724,7 +5724,7 @@ def test_runtime_signal_watcher_status_prefers_allowed_action_over_legacy_recove
 
     assert "automatic_recovery_action" not in payload["data"]["post_signal_auto_resume"]
     assert payload["data"]["action_time_resume"]["next_step"] == (
-        "legacy_next_step_must_not_drive_action"
+        "run_official_action_time_final_gate_preflight"
     )
     assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == [
         "run_official_action_time_final_gate_preflight"
@@ -6006,8 +6006,9 @@ def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
     )
     assert "next_chain" not in payload["data"]["post_signal_resume"]
     assert payload["data"]["post_signal_resume"]["raw_resume_pack_status"] == (
-        "waiting_for_market"
+        None
     )
+    assert payload["data"]["post_signal_resume"]["resume_pack_present"] is False
     assert payload["data"]["action_time_resume"]["status"] == "waiting_for_market"
     assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == [
         "continue_watcher_observation"

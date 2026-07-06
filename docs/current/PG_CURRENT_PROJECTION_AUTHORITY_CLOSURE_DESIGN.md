@@ -217,6 +217,7 @@ It must become a mode-based orchestrator:
 | --- | --- | --- | --- |
 | `watcher_tick_summary` | Every watcher tick | Minimal watcher/current health export and fresh-signal presence check | Ticket materialization, closure evidence, Daily Table heavy rebuild |
 | `control_refresh` | Low-frequency control refresh or explicit Owner Console refresh | Candidate readiness, Daily Table, Goal Status, current projection publish | FinalGate, Operation Layer, post-submit closure |
+| `action_time_if_needed` | Every watcher tick after summary | Read PG trigger counts and run `action_time` only when fresh signal, promotion, lane, or ticket state exists | Heavy action-time materialization on no-signal ticks |
 | `action_time` | Open fresh signal, promotion candidate, action-time lane, or ticket | Account/action-time facts, Action-Time Ticket, ticket-bound preflight/handoff/safety, readiness pack export | Broad diagnostic closure and old dry-run chains |
 | `closure` | Protected submit, order, position, reconciliation, or settlement event | Ticket-bound post-submit closure and review refs | Candidate universe rebuild when unrelated |
 | `diagnostic_full` | Manual ops/developer diagnostic only | Full export and legacy diagnostics for investigation | Runtime authority mutation |
@@ -460,7 +461,7 @@ Target:
 brc-runtime-signal-watcher.service
   ExecStart: watcher tick writes PG coverage/facts/signals and latest minimal export
   ExecStartPost: product-state refresh --mode watcher_tick_summary
-  ExecStartPost: action-time mode only if PG open lane/ticket exists
+  ExecStartPost: product-state refresh --mode action_time_if_needed
   ExecStartPost: dispatcher only with PG ticket identity
 ```
 

@@ -65,11 +65,11 @@ RUNTIME_MONITOR_TIMER_REPO_PATH = "deploy/systemd/brc-runtime-monitor.timer"
 RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf"
 )
-RUNTIME_SIGNAL_WATCHER_DRY_RUN_AUDIT_DROPIN_REPO_PATH = (
-    "deploy/systemd/brc-runtime-signal-watcher.service.d/60-dry-run-audit-chain.conf"
-)
 RUNTIME_SIGNAL_WATCHER_PRODUCT_STATE_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf"
+)
+RUNTIME_SIGNAL_WATCHER_ACTION_TIME_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/85-action-time-refresh-if-needed.conf"
 )
 ARCHIVE_UPLOAD_DEPLOY_BLOCKER = "archive_upload_deploy_forbidden_use_git_deploy"
 
@@ -569,6 +569,7 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
     dry_run_audit_dropin_path = f"{service_dropin_dir}/60-dry-run-audit-chain.conf"
     goal_status_dropin_path = f"{service_dropin_dir}/70-goal-status.conf"
     product_state_dropin_path = f"{service_dropin_dir}/80-product-state-refresh.conf"
+    action_time_dropin_path = f"{service_dropin_dir}/85-action-time-refresh-if-needed.conf"
     stale_scope_dropin_path = (
         f"{service_dropin_dir}/30-strategygroup-runtime-pilot-scope.conf"
     )
@@ -599,13 +600,13 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
     )
-    release_dry_run_audit_dropin_path = (
-        f"{remote_release_path.rstrip('/')}/"
-        f"{RUNTIME_SIGNAL_WATCHER_DRY_RUN_AUDIT_DROPIN_REPO_PATH}"
-    )
     release_product_state_dropin_path = (
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_PRODUCT_STATE_DROPIN_REPO_PATH}"
+    )
+    release_action_time_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_ACTION_TIME_DROPIN_REPO_PATH}"
     )
     return (
         f"set -eu; "
@@ -614,8 +615,8 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"test -f {q(release_runtime_monitor_service_path)}; "
         f"test -f {q(release_runtime_monitor_timer_path)}; "
         f"test -f {q(release_dropin_path)}; "
-        f"test -f {q(release_dry_run_audit_dropin_path)}; "
         f"test -f {q(release_product_state_dropin_path)}; "
+        f"test -f {q(release_action_time_dropin_path)}; "
         f"sudo -n cp {q(release_service_path)} {q(service_path)}; "
         f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
         f"sudo -n cp {q(release_runtime_monitor_service_path)} {q(runtime_monitor_service_path)}; "
@@ -625,9 +626,10 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"sudo -n chown ubuntu:ubuntu {q(runtime_monitor_reports_dir)}; "
         f"sudo -n mkdir -p {q(service_dropin_dir)}; "
         f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
-        f"sudo -n cp {q(release_dry_run_audit_dropin_path)} {q(dry_run_audit_dropin_path)}; "
         f"sudo -n cp {q(release_product_state_dropin_path)} {q(product_state_dropin_path)}; "
-        f"sudo -n chmod 0644 {q(service_dropin_path)} {q(dry_run_audit_dropin_path)} {q(product_state_dropin_path)}; "
+        f"sudo -n cp {q(release_action_time_dropin_path)} {q(action_time_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(service_dropin_path)} {q(product_state_dropin_path)} {q(action_time_dropin_path)}; "
+        f"sudo -n rm -f {q(dry_run_audit_dropin_path)}; "
         f"sudo -n rm -f {q(goal_status_dropin_path)}; "
         f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
         f"sudo -n rm -f {q(stale_operation_layer_flags_dropin_path)}; "

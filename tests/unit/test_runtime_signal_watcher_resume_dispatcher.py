@@ -2753,6 +2753,26 @@ def test_dispatcher_cli_pg_ticket_identity_writes_ticket_bound_artifact(tmp_path
     assert artifact["command_plan"]["ticket_id"] == "ticket-1"
 
 
+def test_dispatcher_cli_resume_pack_json_requires_diagnostic_only(tmp_path):
+    resume_path = tmp_path / "post-signal-resume-pack.json"
+    output_path = tmp_path / "resume-dispatch-artifact.json"
+    resume_path.write_text(json.dumps(_resume_pack()), encoding="utf-8")
+
+    exit_code = main(
+        [
+            "--identity-source",
+            "resume_pack_json",
+            "--resume-pack-json",
+            str(resume_path),
+            "--output-json",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 2
+    assert not output_path.exists()
+
+
 def test_dispatcher_cli_writes_artifact(tmp_path):
     resume_path = tmp_path / "post-signal-resume-pack.json"
     output_path = tmp_path / "resume-dispatch-artifact.json"
@@ -2760,6 +2780,9 @@ def test_dispatcher_cli_writes_artifact(tmp_path):
 
     exit_code = main(
         [
+            "--diagnostic-only",
+            "--identity-source",
+            "resume_pack_json",
             "--resume-pack-json",
             str(resume_path),
             "--output-json",
@@ -2794,6 +2817,9 @@ def test_dispatcher_cli_finalgate_ready_is_success_exit(tmp_path, monkeypatch):
 
     exit_code = main(
         [
+            "--diagnostic-only",
+            "--identity-source",
+            "resume_pack_json",
             "--resume-pack-json",
             str(resume_path),
             "--output-json",

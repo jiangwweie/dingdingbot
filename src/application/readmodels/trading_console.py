@@ -1708,7 +1708,7 @@ class TradingConsoleReadModelService:
         }
         payloads = {name: _read_json_file(path) for name, path in files.items()}
         resume_pack_path = report_dir / "post-signal-resume-pack.json"
-        resume_pack = _read_json_file(resume_pack_path)
+        resume_pack: dict[str, Any] = {}
         watcher_tick = payloads["watcher_tick"]
         wakeup_evidence = payloads["wakeup_evidence"]
         operator_evidence = payloads["operator_evidence"]
@@ -1736,9 +1736,7 @@ class TradingConsoleReadModelService:
         safety = watcher_tick.get("safety_invariants") if isinstance(watcher_tick, dict) else {}
         safety = safety if isinstance(safety, dict) else {}
         post_signal_auto_resume = (
-            resume_pack.get("post_signal_auto_resume")
-            if isinstance(resume_pack.get("post_signal_auto_resume"), dict)
-            else watcher_tick.get("post_signal_auto_resume")
+            watcher_tick.get("post_signal_auto_resume")
             if isinstance(watcher_tick.get("post_signal_auto_resume"), dict)
             else {}
         )
@@ -1896,8 +1894,8 @@ class TradingConsoleReadModelService:
                     can_resume_steps_5_8=can_resume_steps_5_8,
                     post_signal_auto_resume=post_signal_auto_resume,
                     resume_pack_path=resume_pack_path,
-                    resume_pack_present=resume_pack_path.exists(),
-                    raw_resume_pack_status=resume_pack.get("status"),
+                    resume_pack_present=False,
+                    raw_resume_pack_status=None,
                 ).to_dict(),
                 "action_time_resume": action_time_resume,
                 "post_signal_auto_resume": post_signal_auto_resume,
