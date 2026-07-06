@@ -140,10 +140,13 @@ def _pg_ticket_resume_pack(
     try:
         with engine.connect() as conn:
             rows = _open_pg_ticket_identity_rows(conn)
+            lane_rows = _open_pg_lane_identity_rows(conn)
     finally:
         engine.dispose()
     source_path = Path("pg://runtime-control-state/action-time-ticket")
     if not rows:
+        if not lane_rows:
+            return _waiting_pg_ticket_resume_pack(), source_path
         return _blocked_pg_ticket_resume_pack(
             "blocked_by_missing_pg_ticket_identity",
             ["missing_fact:open_pg_action_time_ticket"],
@@ -282,6 +285,27 @@ def _open_pg_ticket_identity_rows(conn: sa.engine.Connection) -> list[dict[str, 
     return rows
 
 
+def _open_pg_lane_identity_rows(conn: sa.engine.Connection) -> list[dict[str, Any]]:
+    metadata = sa.MetaData()
+    lanes = sa.Table("brc_action_time_lane_inputs", metadata, autoload_with=conn)
+    statement = (
+        sa.select(
+            lanes.c.action_time_lane_input_id,
+            lanes.c.promotion_candidate_id,
+            lanes.c.signal_event_id,
+            lanes.c.strategy_group_id,
+            lanes.c.symbol,
+            lanes.c.side,
+            lanes.c.runtime_profile_id,
+            lanes.c.status.label("lane_status"),
+        )
+        .where(lanes.c.lane_scope == "real_submit_candidate")
+        .where(lanes.c.status.in_(sorted(OPEN_PG_LANE_STATUSES)))
+        .order_by(lanes.c.created_at_ms.asc(), lanes.c.action_time_lane_input_id.asc())
+    )
+    return [dict(row) for row in conn.execute(statement).mappings()]
+
+
 def _pg_ticket_identity_mismatch_fields(row: dict[str, Any]) -> list[str]:
     pairs = (
         ("promotion_candidate_id", "lane_promotion_candidate_id"),
@@ -296,6 +320,43 @@ def _pg_ticket_identity_mismatch_fields(row: dict[str, Any]) -> list[str]:
         for left, right in pairs
         if str(row.get(left) or "") != str(row.get(right) or "")
     ]
+
+
+def _waiting_pg_ticket_resume_pack() -> dict[str, Any]:
+    return {
+        "scope": "pg_ticket_bound_resume_identity",
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "status": WAITING_STATUS,
+        "action_time_resume": {
+            "status": WAITING_STATUS,
+            "allowed_auto_actions": [],
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "withdrawal_or_transfer_requested": False,
+        },
+        "owner_state": {
+            "status": "waiting_for_opportunity",
+            "blocker_class": "waiting_for_market",
+            "blocked_at": "pg_action_time_ticket_identity",
+            "blocked_reason": "no_open_pg_action_time_lane_or_ticket",
+            "non_authority_checkpoint": CONTINUE_ACTION,
+            "owner_action_required": False,
+        },
+        "safety_invariants": {
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "mutates_pg": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "forbidden_effect_flags": [],
+        },
+        "blockers": [],
+        "warnings": [],
+        "pg_ticket_identity_dispatch_status": "waiting_for_pg_action_time_ticket",
+    }
 
 
 def _blocked_pg_ticket_resume_pack(

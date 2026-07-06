@@ -2139,8 +2139,28 @@ def test_dispatcher_blocks_unsafe_resume_flags():
     assert artifact["command_plan"] is None
 
 
-def test_dispatcher_pg_ticket_identity_missing_fails_closed(tmp_path):
+def test_dispatcher_pg_ticket_identity_missing_waits_when_no_open_lane(tmp_path):
     database_url = _pg_ticket_identity_db(tmp_path, lane_count=0, ticket_count=0)
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["status"] == "waiting_for_market"
+    assert resume_pack["pg_ticket_identity_dispatch_status"] == (
+        "waiting_for_pg_action_time_ticket"
+    )
+    assert resume_pack["owner_state"]["blocker_class"] == "waiting_for_market"
+    assert resume_pack["blockers"] == []
+    assert resume_pack["owner_state"]["owner_action_required"] is False
+    assert resume_pack["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_pg_ticket_identity_missing_ticket_for_open_lane_fails_closed(
+    tmp_path,
+):
+    database_url = _pg_ticket_identity_db(tmp_path, lane_count=1, ticket_count=0)
 
     resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
         database_url=database_url,
@@ -2152,7 +2172,7 @@ def test_dispatcher_pg_ticket_identity_missing_fails_closed(tmp_path):
         "blocked_by_missing_pg_ticket_identity"
     )
     assert resume_pack["owner_state"]["blocker_class"] == "runtime_data_gap"
-    assert resume_pack["owner_state"]["owner_action_required"] is False
+    assert resume_pack["blockers"] == ["missing_fact:open_pg_action_time_ticket"]
     assert resume_pack["safety_invariants"]["exchange_write_called"] is False
 
 
