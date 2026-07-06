@@ -369,6 +369,31 @@ def test_multiple_fresh_candidates_select_one_by_strategy_priority(pg_control_co
     assert statuses == {"MPG-001": "arbitration_won", "SOR-001": "arbitration_lost"}
 
 
+def test_stale_high_priority_candidate_loses_to_fresh_lower_priority(pg_control_connection):
+    _insert_ready_fresh_signal(pg_control_connection, "MPG-001", "OPUSDT", "long")
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_live_signal_events
+            SET freshness_state = 'stale'
+            WHERE signal_event_id = 'signal:MPG-001:OPUSDT:long:unit'
+            """
+        )
+    )
+
+    payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "promotion_action_time_lane_created"
+    assert payload["strategy_group_id"] == "SOR-001"
+    assert payload["symbol"] == "ETHUSDT"
+    assert _count(pg_control_connection, "brc_promotion_candidates") == 1
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 1
+
+
 def test_same_session_opposite_side_conflict_blocks_real_submit_lane(pg_control_connection):
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "short")
@@ -388,6 +413,40 @@ def test_same_session_opposite_side_conflict_blocks_real_submit_lane(pg_control_
     for row in rows:
         assert row["status"] == "blocked"
         assert "same_session_opposite_side_conflict" in json.loads(row["blockers"])
+
+
+def test_brf2_short_with_active_position_conflict_does_not_open_real_submit_lane(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(pg_control_connection, "BRF2-001", "BTCUSDT", "short")
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_runtime_fact_snapshots
+            SET fact_values = :fact_values
+            WHERE fact_snapshot_id = 'fact:BRF2-001:BTCUSDT:short:unit:account-safe'
+            """
+        ),
+        {
+            "fact_values": _json(
+                {
+                    "account_safe": True,
+                    "open_orders_clear": True,
+                    "active_position_or_open_order_clear": False,
+                }
+            )
+        },
+    )
+
+    payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "promotion_candidates_blocked"
+    assert "active_position_or_open_order_conflict" in payload["blockers"]
+    assert _count(pg_control_connection, "brc_promotion_candidates") == 1
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
 
 
 def test_db_rejects_replay_as_fresh_live_signal(pg_control_connection):
