@@ -80,7 +80,7 @@ function routePath(route: { path: string }): string {
 function currentTheme(): ThemeMode {
   const stored = localStorage.getItem("brc-theme");
   if (stored === "dark" || stored === "light") return stored;
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  return "dark";
 }
 
 export function App() {
@@ -236,7 +236,7 @@ function LoginPage({
     try {
       const next = await login(username, password, totpCode);
       onLoggedIn(next);
-      window.history.replaceState({}, "", "/dashboard");
+      window.history.replaceState({}, "", routePath(routes[0]));
     } catch {
       setError("登录失败：用户名、密码或认证器验证码无效。");
     } finally {
