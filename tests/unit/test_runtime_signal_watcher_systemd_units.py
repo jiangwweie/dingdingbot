@@ -45,19 +45,6 @@ RUNTIME_MONITOR_SERVICE_PATH = (
     / "systemd"
     / "brc-runtime-monitor.service"
 )
-RUNTIME_DB_RETENTION_SERVICE_PATH = (
-    REPO_ROOT
-    / "deploy"
-    / "systemd"
-    / "brc-runtime-db-retention.service"
-)
-RUNTIME_DB_RETENTION_TIMER_PATH = (
-    REPO_ROOT
-    / "deploy"
-    / "systemd"
-    / "brc-runtime-db-retention.timer"
-)
-
 
 def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin():
     text = SERVICE_PATH.read_text(encoding="utf-8")
@@ -164,22 +151,9 @@ def test_runtime_monitor_service_uses_pg_control_state_not_json_sources():
     assert "transfer" not in text
 
 
-def test_runtime_db_retention_systemd_units_are_daily_pg_cleanup_only():
-    service_text = RUNTIME_DB_RETENTION_SERVICE_PATH.read_text(encoding="utf-8")
-    timer_text = RUNTIME_DB_RETENTION_TIMER_PATH.read_text(encoding="utf-8")
-
-    assert "run_runtime_control_state_retention.py" in service_text
-    assert "--apply" in service_text
-    assert "--json" in service_text
-    assert "EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env" in service_text
-    assert "FinalGate" not in service_text
-    assert "Operation Layer" not in service_text
-    assert "exchange write" not in service_text
-    assert "withdrawal" not in service_text
-    assert "transfer" not in service_text
-    assert "OnCalendar=*-*-* 03:20:00 Asia/Shanghai" in timer_text
-    assert "RandomizedDelaySec=10min" in timer_text
-    assert "Persistent=true" in timer_text
+def test_runtime_db_retention_systemd_units_are_not_shipped():
+    assert not (REPO_ROOT / "deploy" / "systemd" / "brc-runtime-db-retention.service").exists()
+    assert not (REPO_ROOT / "deploy" / "systemd" / "brc-runtime-db-retention.timer").exists()
 
 
 def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
@@ -237,8 +211,6 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "brc-runtime-monitor.service" in commands
     assert "brc-runtime-monitor.timer" in commands
-    assert "brc-runtime-db-retention.service" in commands
-    assert "brc-runtime-db-retention.timer" in commands
     assert "90-resume-dispatcher-after-refresh.conf" in commands
     assert "40-resume-dispatcher.conf" in commands
     assert "60-dry-run-audit-chain.conf" in commands
@@ -252,6 +224,7 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "systemctl enable --now" in commands
     assert "systemctl start brc-runtime-monitor.service" in commands
-    assert "systemctl enable --now brc-runtime-db-retention.timer" in commands
+    assert "systemctl disable --now brc-runtime-db-retention.timer" in commands
+    assert "systemctl enable --now brc-runtime-db-retention.timer" not in commands
     assert "tokyo-deploy-channel-status.json" in commands
     assert "latest-deploy-health.json" in commands

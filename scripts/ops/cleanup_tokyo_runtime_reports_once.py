@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""One-shot Tokyo runtime report cleanup helper.
+
+This is an ops tool, not a runtime authority path. It only scans an allowlisted
+reports tree, defaults to dry-run, and never reads or writes PG runtime truth.
+"""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import shutil
+import tarfile
+from typing import Any
+from uuid import uuid4
+
+
+SCHEMA = "brc.ops.runtime_reports_cleanup_once.v1"
+DEFAULT_RUNTIME_REPORT_DIR = "runtime-signal-watcher"
+DELETE_TOKENS = ("dry-run", "dry_run", "replay", "debug", "history")
+PROTECT_TOKENS = ("latest", "current")
+PROTECTED_NAMES = {
+    "strategygroup-runtime-goal-status.json",
+    "post-signal-resume-pack.json",
+    "server-product-state-refresh-sequence.json",
+    "runtime-dry-run-audit-chain.json",
+    "resume-dispatch-artifact.json",
+}
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    if args.apply and args.dry_run:
+        raise SystemExit("--apply and --dry-run are mutually exclusive")
+    root = Path(args.root).expanduser().resolve()
+    target = (root / DEFAULT_RUNTIME_REPORT_DIR).resolve()
+    now = args.now or datetime.now(timezone.utc).timestamp()
+    manifest = build_manifest(
+        root=root,
+        target=target,
+        keep_hours=args.keep_hours,
+        now=now,
+        archive_recent=args.archive_recent,
+        apply=args.apply,
+    )
+    if args.apply:
+        apply_cleanup(manifest, root=root, archive_recent=args.archive_recent)
+    if args.manifest_json:
+        _write_json(Path(args.manifest_json), manifest)
+    print(json.dumps(manifest, indent=2, sort_keys=True))
+    return 0 if not manifest["checks"]["blockers"] else 2
+
+
+def build_manifest(
+    *,
+    root: Path,
+    target: Path,
+    keep_hours: int,
+    now: float,
+    archive_recent: bool,
+    apply: bool,
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if keep_hours < 1:
+        blockers.append("keep_hours_must_be_positive")
+    if not _is_within(root, target):
+        blockers.append("target_not_under_root")
+    if not target.exists():
+        blockers.append("runtime_signal_watcher_reports_dir_missing")
+    if target.is_symlink():
+        blockers.append("target_must_not_be_symlink")
+
+    candidates: list[dict[str, Any]] = []
+    protected: list[dict[str, Any]] = []
+    if not blockers:
+        cutoff = now - keep_hours * 3600
+        for path in sorted(target.rglob("*")):
+            if path.is_symlink():
+                protected.append(_entry(path, root, "protected_symlink"))
+                continue
+            if path.is_dir():
+                continue
+            if _is_protected_runtime_export(path):
+                protected.append(_entry(path, root, "protected_latest_or_current"))
+                continue
+            if not _is_cleanup_candidate(path.relative_to(target)):
+                continue
+            mtime = path.stat().st_mtime
+            if mtime >= cutoff:
+                protected.append(_entry(path, root, "protected_recent"))
+                continue
+            candidates.append(_entry(path, root, "delete_candidate"))
+
+    run_id = f"runtime-report-cleanup:{uuid4().hex[:12]}"
+    archive_path = None
+    if archive_recent and candidates:
+        archive_path = str(
+            root / "archives" / f"{run_id.replace(':', '-')}.tar.gz"
+        )
+    return {
+        "schema": SCHEMA,
+        "status": "blocked" if blockers else ("apply_ready" if apply else "dry_run"),
+        "mode": "apply" if apply else "dry_run",
+        "run_id": run_id,
+        "root": str(root),
+        "target": str(target),
+        "keep_hours": keep_hours,
+        "archive_recent": archive_recent,
+        "archive_path": archive_path,
+        "candidate_count": len(candidates),
+        "protected_count": len(protected),
+        "delete_candidates": candidates,
+        "protected_entries": protected,
+        "checks": {
+            "blockers": blockers,
+            "warnings": warnings,
+            "no_pg_runtime_truth_write": True,
+            "no_trade_runtime_mutation": True,
+        },
+    }
+
+
+def apply_cleanup(manifest: dict[str, Any], *, root: Path, archive_recent: bool) -> None:
+    blockers = manifest.get("checks", {}).get("blockers") or []
+    if blockers:
+        return
+    candidates = manifest.get("delete_candidates") or []
+    if archive_recent and candidates and manifest.get("archive_path"):
+        archive_path = Path(str(manifest["archive_path"])).resolve()
+        if not _is_within(root, archive_path):
+            manifest["checks"]["blockers"].append("archive_path_not_under_root")
+            manifest["status"] = "blocked"
+            return
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(archive_path, "w:gz") as tar:
+            for row in candidates:
+                path = (root / row["relative_path"]).resolve()
+                if path.exists() and _is_within(root, path):
+                    tar.add(path, arcname=row["relative_path"])
+    deleted: list[str] = []
+    for row in candidates:
+        path = (root / row["relative_path"]).resolve()
+        if path.exists() and _is_within(root, path) and not path.is_symlink():
+            path.unlink()
+            deleted.append(row["relative_path"])
+    _remove_empty_dirs((root / DEFAULT_RUNTIME_REPORT_DIR).resolve(), root=root)
+    manifest["deleted_count"] = len(deleted)
+    manifest["deleted_relative_paths"] = deleted
+    manifest["status"] = "applied"
+
+
+def _is_cleanup_candidate(path: Path) -> bool:
+    rel = path.as_posix().lower()
+    return any(token in rel for token in DELETE_TOKENS)
+
+
+def _is_protected_runtime_export(path: Path) -> bool:
+    name = path.name.lower()
+    if name in PROTECTED_NAMES:
+        return True
+    return any(token in name for token in PROTECT_TOKENS)
+
+
+def _entry(path: Path, root: Path, status: str) -> dict[str, Any]:
+    stat = path.stat()
+    return {
+        "relative_path": str(path.resolve().relative_to(root)),
+        "bytes": stat.st_size,
+        "mtime_utc": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "status": status,
+    }
+
+
+def _remove_empty_dirs(path: Path, *, root: Path) -> None:
+    for child in sorted(path.rglob("*"), reverse=True):
+        if child.is_dir() and _is_within(root, child):
+            try:
+                child.rmdir()
+            except OSError:
+                pass
+
+
+def _is_within(root: Path, path: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true", default=False)
+    mode.add_argument("--apply", action="store_true")
+    parser.add_argument("--root", default="/home/ubuntu/brc-deploy/reports")
+    parser.add_argument("--keep-hours", type=int, default=72)
+    parser.add_argument("--archive-recent", action="store_true")
+    parser.add_argument("--manifest-json")
+    parser.add_argument("--now", type=float)
+    return parser.parse_args(argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
