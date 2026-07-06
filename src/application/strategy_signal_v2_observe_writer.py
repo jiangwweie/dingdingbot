@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Protocol, Sequence
 
 from src.application.pattern_strategy_signal_adapter import (
     PatternResultToStrategySignalV2Adapter,
 )
 from src.domain.models import KlineData, SignalAttempt
 from src.infrastructure.logger import logger
-from src.infrastructure.strategy_signal_v2_observe_sink import StrategySignalV2ObserveSink
+
+
+class StrategySignalObserveSink(Protocol):
+    def write(self, snapshot: dict[str, Any]) -> None:
+        """Persist or capture one StrategySignalV2 observation."""
+
+
+class NullStrategySignalObserveSink:
+    def write(self, snapshot: dict[str, Any]) -> None:
+        return None
 
 
 class PatternStrategySignalObserveWriter:
@@ -20,11 +29,11 @@ class PatternStrategySignalObserveWriter:
         self,
         *,
         adapter: Optional[PatternResultToStrategySignalV2Adapter] = None,
-        sink: Optional[StrategySignalV2ObserveSink] = None,
+        sink: Optional[StrategySignalObserveSink] = None,
         schema_version: str = "v1",
     ) -> None:
         self._adapter = adapter or PatternResultToStrategySignalV2Adapter()
-        self._sink = sink or StrategySignalV2ObserveSink()
+        self._sink = sink or NullStrategySignalObserveSink()
         self._schema_version = schema_version
 
     def write_observations(

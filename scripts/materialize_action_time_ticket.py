@@ -39,8 +39,6 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 )
 
 
-DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
-DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "action-time-ticket-materialization.json"
 OPEN_REAL_LANE_STATUSES = {
     "opened",
     "facts_refreshing",
@@ -170,7 +168,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Allow SQLite or other SQLAlchemy URLs only for local unit tests.",
     )
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--now-ms", type=int, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -198,7 +195,6 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.dispose()
 
-    _write_json(Path(args.output_json), report)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True, default=str))
     else:
@@ -1069,15 +1065,6 @@ def _result(
         "forbidden_effects": FORBIDDEN_EFFECTS,
         "created_at_ms": now_ms,
     }
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 if __name__ == "__main__":

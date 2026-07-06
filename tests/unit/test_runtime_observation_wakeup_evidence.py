@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 
@@ -145,25 +144,3 @@ def test_wakeup_evidence_blocks_forbidden_source_effects():
     assert "operator_review_plan.places_order" in artifact["safety_invariants"][
         "source_forbidden_effects"
     ]
-
-
-def test_wakeup_evidence_cli_reads_and_writes_json(tmp_path, capsys):
-    module = _load_module()
-    input_path = tmp_path / "operator.json"
-    output_path = tmp_path / "wakeup.json"
-    input_path.write_text(json.dumps(_operator_evidence()), encoding="utf-8")
-
-    exit_code = module.main(
-        [
-            "--operator-evidence-json",
-            str(input_path),
-            "--output-json",
-            str(output_path),
-        ]
-    )
-
-    assert exit_code == 0
-    stdout_payload = json.loads(capsys.readouterr().out)
-    file_payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert stdout_payload == file_payload
-    assert file_payload["scope"] == "runtime_observation_wakeup_evidence"

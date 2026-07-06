@@ -69,9 +69,9 @@ class ObservationCaseQueueResponse(BaseModel):
     non_permissions: dict[str, bool] = Field(default_factory=lambda: _non_permissions())
     source_refs: list[str] = Field(
         default_factory=lambda: [
-            "src/application/strategy_group_observation_case_queue.py",
-            "src/application/strategy_group_live_readonly_observation.py",
-            "src/application/strategy_group_forward_review.py",
+            "pg_strategy_group_observation_case_queue_readmodel",
+            "pg_strategy_group_live_readonly_observations",
+            "pg_strategy_group_forward_reviews",
         ]
     )
 
@@ -284,18 +284,18 @@ def _negative(value: str | None) -> bool:
 
 def _source_refs(observation: StrategyGroupObservationRecord) -> list[str]:
     refs = [
-        "src/application/strategy_group_observation_case_queue.py",
-        "src/application/strategy_group_live_readonly_observation.py",
+        "pg_strategy_group_observation_case_queue_readmodel",
+        "pg_strategy_group_live_readonly_observations",
     ]
     if observation.candidate_id == "MI-001-BNB-LONG":
         refs.extend(
             [
-                "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_live_case_001.md",
-                "reports/directional-opportunity-broad-smoke-20260529/bnb_live_case_forward_review_continuation.md",
+                "pg_strategy_group_observation_case_mi001_bnb",
+                "pg_strategy_group_forward_review_mi001_bnb",
             ]
         )
     if observation.candidate_id == "CPM-RO-001":
-        refs.append("docs/ops/crypto-pullback-module-v1-oos-failure-classification.md")
+        refs.append("pg_strategy_review_cpm_oos_classification")
     return refs
 
 

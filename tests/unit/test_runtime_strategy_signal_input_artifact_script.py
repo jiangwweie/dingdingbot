@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from decimal import Decimal
-import os
 import sys
 from types import SimpleNamespace
 
@@ -87,16 +86,6 @@ def _runtime() -> StrategyRuntimeInstance:
     )
 
 
-def test_signal_input_artifact_env_loader_fills_empty_existing_env(monkeypatch, tmp_path):
-    env_file = tmp_path / "runtime.env"
-    env_file.write_text("PG_DATABASE_URL=postgresql+asyncpg://signal")
-    monkeypatch.setenv("PG_DATABASE_URL", "")
-
-    build_runtime_strategy_signal_input_artifact._load_env_file(str(env_file))
-
-    assert os.environ["PG_DATABASE_URL"] == "postgresql+asyncpg://signal"
-
-
 def test_build_btpc_signal_input_uses_runtime_boundary_and_placeholder_account():
     signal_input = build_runtime_strategy_signal_input_artifact._build_signal_input(
         runtime=_runtime(),
@@ -160,7 +149,6 @@ def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypa
                 one_hour_limit=25,
                 four_hour_limit=12,
                 timeout_seconds=10.0,
-                output_signal_input_json=str(output_path),
             )
         )
     )
@@ -176,7 +164,7 @@ def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypa
     assert "packet_only" not in payload["safety_invariants"]
     assert payload["safety_invariants"]["execution_intent_created"] is False
     assert payload["safety_invariants"]["order_candidate_created"] is False
-    assert output_path.exists()
+    assert not output_path.exists()
 
 
 def test_signal_input_artifact_cli_stdout_is_json_only(monkeypatch, capsys):

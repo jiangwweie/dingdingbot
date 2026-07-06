@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
@@ -26,50 +27,23 @@ def _load_module():
     return module
 
 
-def test_server_product_state_refresh_sequence_records_optional_failure(tmp_path: Path):
+def test_server_product_state_refresh_sequence_rejects_removed_file_export_modes(
+    tmp_path: Path,
+):
     module = _load_module()
-    calls: list[tuple[str, ...]] = []
 
-    def runner(command: tuple[str, ...]):
-        calls.append(command)
-        if any(
-            item.endswith("refresh_strategygroup_runtime_product_state_artifacts.py")
-            for item in command
-        ):
-            return module.CommandResult(
-                returncode=1,
-                stdout="",
-                stderr="optional refresh failed",
+    for mode in ("diagnostic_full", "control_refresh"):
+        with pytest.raises(ValueError, match=f"unsupported refresh mode: {mode}"):
+            module.run_server_product_state_refresh_sequence(
+                python=sys.executable,
+                env_file=tmp_path / "live-readonly.env",
+                mode=mode,
+                runner=lambda command: module.CommandResult(
+                    returncode=0,
+                    stdout="ok",
+                    stderr="",
+                ),
             )
-        return module.CommandResult(returncode=0, stdout="ok", stderr="")
-
-    report = module.run_server_product_state_refresh_sequence(
-        python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
-        env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
-        runner=runner,
-    )
-
-    assert report["status"] == "server_product_state_refresh_sequence_ready"
-    assert report["summary"]["failed_optional_step_count"] == 1
-    assert report["summary"]["failed_required_step_count"] == 0
-    assert report["summary"]["final_goal_status_attempted"] is True
-    assert calls[-1][1] == "scripts/publish_runtime_control_current_projections.py"
-    command_names = [command[1] for command in calls]
-    assert "scripts/materialize_candidate_pool_action_time_lane.py" not in command_names
-    assert "scripts/build_strategygroup_runtime_safety_state.py" not in command_names
-    assert "scripts/materialize_pg_promotion_action_time_lane.py" in command_names
-    assert "scripts/materialize_action_time_ticket.py" in command_names
-    assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
-    assert "scripts/materialize_action_time_operation_layer_handoff.py" in command_names
-    assert "scripts/materialize_ticket_bound_runtime_safety_state.py" in command_names
-    assert "scripts/materialize_ticket_bound_post_submit_closure.py" in command_names
-    assert "scripts/build_runtime_signal_watcher_readiness_pack.py" in command_names
-    assert "scripts/publish_runtime_control_current_projections.py" in command_names
-    assert (tmp_path / "sequence.json").exists()
 
 
 def test_server_product_state_refresh_sequence_uses_pg_control_builders(
@@ -84,27 +58,19 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="action_time",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_ready"
     control_builder_names = {
-        "scripts/build_strategy_live_candidate_pool.py",
-        "scripts/build_daily_live_enablement_table.py",
-        "scripts/build_single_lane_task_packet.py",
         "scripts/materialize_pg_promotion_action_time_lane.py",
-        "scripts/build_strategygroup_runtime_goal_status.py",
         "scripts/publish_runtime_control_current_projections.py",
         "scripts/materialize_action_time_ticket.py",
         "scripts/materialize_action_time_finalgate_preflight.py",
         "scripts/materialize_action_time_operation_layer_handoff.py",
         "scripts/materialize_ticket_bound_runtime_safety_state.py",
-        "scripts/materialize_ticket_bound_post_submit_closure.py",
     }
     control_builder_calls = [
         command
@@ -123,12 +89,25 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
         if command[1] == "scripts/materialize_ticket_bound_post_submit_closure.py":
             assert "--latest-submitted" in command
         if command[1] == "scripts/publish_runtime_control_current_projections.py":
-            assert "--candidate-pool-json" in command
-            assert "--daily-table-json" in command
-            assert "--goal-status-json" in command
+            assert "--candidate-pool-json" not in command
+            assert "--daily-table-json" not in command
+            assert "--goal-status-json" not in command
+            assert "--output-json" not in command
+            assert "--runtime-monitor-dir" not in command
+            assert "--release-manifest" not in command
+            assert "--expected-head" not in command
     for command in calls:
         assert "--collect-live-facts-before-refresh" not in command
         assert "--live-facts-output" not in command
+    removed_export_builders = {
+        "scripts/build_strategy_live_candidate_pool.py",
+        "scripts/build_daily_live_enablement_table.py",
+        "scripts/build_single_lane_task_packet.py",
+        "scripts/build_strategygroup_runtime_goal_status.py",
+        "scripts/build_strategy_fresh_signal_action_time_boundary.py",
+        "scripts/refresh_strategygroup_runtime_product_state_artifacts.py",
+    }
+    assert not removed_export_builders.intersection(command[1] for command in calls)
     assert all(
         "output/runtime-monitor/latest-" not in item
         for command in calls
@@ -148,10 +127,7 @@ def test_server_product_state_refresh_sequence_watcher_tick_summary_is_lightweig
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
         mode="watcher_tick_summary",
         runner=runner,
     )
@@ -160,18 +136,20 @@ def test_server_product_state_refresh_sequence_watcher_tick_summary_is_lightweig
     assert report["status"] == "server_product_state_refresh_sequence_ready"
     assert report["mode"] == "watcher_tick_summary"
     assert command_names == [
-        "scripts/validate_runtime_candidate_universe_coverage.py",
-        "scripts/build_runtime_signal_watcher_readiness_pack.py",
+        "scripts/publish_runtime_control_current_projections.py",
     ]
+    assert "scripts/validate_runtime_candidate_universe_coverage.py" not in command_names
+    assert "scripts/build_runtime_signal_watcher_readiness_pack.py" not in command_names
     assert "scripts/build_strategy_live_candidate_pool.py" not in command_names
     assert "scripts/materialize_action_time_ticket.py" not in command_names
     assert "scripts/materialize_action_time_finalgate_preflight.py" not in command_names
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
-    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["safety_invariants"]["calls_ticket_bound_finalgate_preflight"] is False
     assert report["safety_invariants"]["calls_ticket_bound_operation_layer_handoff"] is False
     assert report["safety_invariants"]["calls_ticket_bound_runtime_safety_state"] is False
     assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
+    assert not (tmp_path / "sequence.json").exists()
 
 
 def test_server_product_state_refresh_sequence_default_mode_is_watcher_tick_summary(
@@ -182,10 +160,7 @@ def test_server_product_state_refresh_sequence_default_mode_is_watcher_tick_summ
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
         runner=lambda command: (
             calls.append(command)
             or module.CommandResult(returncode=0, stdout="ok", stderr="")
@@ -194,8 +169,7 @@ def test_server_product_state_refresh_sequence_default_mode_is_watcher_tick_summ
 
     assert report["mode"] == "watcher_tick_summary"
     assert [command[1] for command in calls] == [
-        "scripts/validate_runtime_candidate_universe_coverage.py",
-        "scripts/build_runtime_signal_watcher_readiness_pack.py",
+        "scripts/publish_runtime_control_current_projections.py",
     ]
 
 
@@ -211,10 +185,7 @@ def test_server_product_state_refresh_sequence_action_time_mode_skips_closure(
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
         mode="action_time",
         runner=runner,
     )
@@ -242,10 +213,7 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_skips_witho
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
         mode="action_time_if_needed",
         action_time_trigger_state={
             "status": "not_triggered",
@@ -281,10 +249,7 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
         mode="action_time_if_needed",
         action_time_trigger_state={
             "status": "triggered",
@@ -316,10 +281,7 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_fails_close
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
         mode="action_time_if_needed",
         action_time_trigger_state={
             "status": "blocked",
@@ -375,10 +337,7 @@ def test_server_product_state_refresh_sequence_closure_mode_skips_control_rebuil
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
         mode="closure",
         runner=runner,
     )
@@ -410,47 +369,6 @@ def test_server_product_state_refresh_sequence_normalizes_child_pg_dsn():
     )
 
 
-def test_server_product_state_refresh_sequence_fails_on_required_step_but_continues(
-    tmp_path: Path,
-):
-    module = _load_module()
-    calls: list[tuple[str, ...]] = []
-
-    def runner(command: tuple[str, ...]):
-        calls.append(command)
-        if any(item.endswith("validate_strategy_live_candidate_pool.py") for item in command):
-            return module.CommandResult(
-                returncode=1,
-                stdout="",
-                stderr="candidate pool invalid",
-            )
-        return module.CommandResult(returncode=0, stdout="ok", stderr="")
-
-    report = module.run_server_product_state_refresh_sequence(
-        python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
-        env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
-        runner=runner,
-    )
-
-    assert report["status"] == "server_product_state_refresh_sequence_failed"
-    assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["skipped_after_required_failure_count"] > 0
-    assert report["summary"]["final_goal_status_attempted"] is False
-    assert report["summary"]["final_goal_status_suppressed"] is True
-    assert report["summary"]["blocked_by_required_step"] == "validate_candidate_pool"
-    assert calls[-1][1] == "scripts/validate_strategy_live_candidate_pool.py"
-    skipped_names = [
-        step["name"]
-        for step in report["step_results"]
-        if step["status"] == "skipped_after_required_failure"
-    ]
-    assert "build_goal_status" in skipped_names
-
-
 def test_server_product_state_refresh_sequence_fails_closed_on_projection_publish_failure(
     tmp_path: Path,
 ):
@@ -472,25 +390,18 @@ def test_server_product_state_refresh_sequence_fails_closed_on_projection_publis
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="action_time",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["final_goal_status_attempted"] is True
+    assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["summary"]["blocked_by_required_step"] == (
         "publish_runtime_control_current_projections"
     )
     assert calls[-1][1] == "scripts/publish_runtime_control_current_projections.py"
-    assert any(
-        step["name"] == "build_goal_status" and step["status"] == "passed"
-        for step in report["step_results"]
-    )
 
 
 def test_server_product_state_refresh_sequence_omits_legacy_candidate_pool_materializer(
@@ -514,17 +425,14 @@ def test_server_product_state_refresh_sequence_omits_legacy_candidate_pool_mater
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="action_time",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_ready"
     assert report["summary"]["failed_required_step_count"] == 0
-    assert report["summary"]["final_goal_status_attempted"] is True
+    assert report["summary"]["current_projection_publish_attempted"] is True
     assert all(
         "scripts/materialize_candidate_pool_action_time_lane.py" not in command
         for command in calls
@@ -552,17 +460,14 @@ def test_server_product_state_refresh_sequence_fails_closed_on_pg_lane_materiali
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="action_time",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is False
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_pg_promotion_action_time_lane"
     )
@@ -573,7 +478,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_pg_lane_materiali
         if step["status"] == "skipped_after_required_failure"
     ]
     assert "materialize_action_time_ticket" in skipped_names
-    assert "build_goal_status" in skipped_names
+    assert "publish_runtime_control_current_projections" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_ticket_failure(
@@ -594,17 +499,14 @@ def test_server_product_state_refresh_sequence_fails_closed_on_ticket_failure(
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="action_time",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is False
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_action_time_ticket"
     )
@@ -614,8 +516,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_ticket_failure(
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "build_readiness_pack_after_materialization" in skipped_names
-    assert "build_goal_status" in skipped_names
+    assert "publish_runtime_control_current_projections" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_finalgate_failure(
@@ -639,17 +540,14 @@ def test_server_product_state_refresh_sequence_fails_closed_on_finalgate_failure
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="action_time",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is False
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_action_time_finalgate_preflight"
     )
@@ -659,8 +557,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_finalgate_failure
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "build_readiness_pack_after_materialization" in skipped_names
-    assert "build_goal_status" in skipped_names
+    assert "publish_runtime_control_current_projections" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_operation_handoff_failure(
@@ -684,17 +581,14 @@ def test_server_product_state_refresh_sequence_fails_closed_on_operation_handoff
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="action_time",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is False
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_action_time_operation_layer_handoff"
     )
@@ -704,8 +598,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_operation_handoff
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "build_readiness_pack_after_materialization" in skipped_names
-    assert "build_goal_status" in skipped_names
+    assert "publish_runtime_control_current_projections" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_failure(
@@ -729,17 +622,14 @@ def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_fa
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="action_time",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is False
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_ticket_bound_runtime_safety_state"
     )
@@ -749,8 +639,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_fa
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "build_readiness_pack_after_materialization" in skipped_names
-    assert "build_goal_status" in skipped_names
+    assert "publish_runtime_control_current_projections" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_post_submit_closure_failure(
@@ -774,17 +663,14 @@ def test_server_product_state_refresh_sequence_fails_closed_on_post_submit_closu
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="closure",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is False
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_ticket_bound_post_submit_closure"
     )
@@ -795,8 +681,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_post_submit_closu
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "build_candidate_pool_after_materialization" in skipped_names
-    assert "build_goal_status" in skipped_names
+    assert "publish_runtime_control_current_projections" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_requires_account_safe_facts(
@@ -820,17 +705,14 @@ def test_server_product_state_refresh_sequence_requires_account_safe_facts(
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
-        report_dir=tmp_path / "reports",
-        runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
-        output_json=tmp_path / "sequence.json",
-        mode="diagnostic_full",
+        mode="action_time",
         runner=runner,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["blocked_by_required_step"] == "build_account_safe_facts"
-    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is False
     assert calls[-1][1] == "scripts/build_runtime_account_safe_facts.py"
     skipped_names = [
         step["name"]
@@ -838,7 +720,7 @@ def test_server_product_state_refresh_sequence_requires_account_safe_facts(
         if step["status"] == "skipped_after_required_failure"
     ]
     assert "materialize_action_time_ticket" in skipped_names
-    assert "build_goal_status" in skipped_names
+    assert "publish_runtime_control_current_projections" in skipped_names
 
 
 def _action_time_trigger_engine():

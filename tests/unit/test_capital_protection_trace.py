@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-import json
 from decimal import Decimal
 
 import pytest
 
 from src.application.capital_protection import CapitalProtectionManager
+from src.application.decision_trace import TraceEvent
 from src.application.decision_trace import TraceService
 from src.domain.models import CapitalProtectionConfig, OrderType
-from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
+
+
+class _CaptureTraceSink:
+    def __init__(self) -> None:
+        self.events = []
+
+    def emit(self, event: TraceEvent) -> None:
+        self.events.append(event.model_dump(mode="json"))
 
 
 class _FakeAccountService:
@@ -34,9 +41,9 @@ class _FakeGateway:
 
 
 @pytest.mark.asyncio
-async def test_capital_protection_emits_risk_decision_trace(tmp_path):
-    trace_path = tmp_path / "runtime" / "risk_decision.jsonl"
-    service = TraceService(sinks=[JsonlTraceSink(trace_path)])
+async def test_capital_protection_emits_risk_decision_trace():
+    sink = _CaptureTraceSink()
+    service = TraceService(sinks=[sink])
 
     manager = CapitalProtectionManager(
         config=CapitalProtectionConfig(),
@@ -58,7 +65,7 @@ async def test_capital_protection_emits_risk_decision_trace(tmp_path):
 
     assert result.allowed is True
 
-    payload = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
+    payload = sink.events[0]
     assert payload["event_type"] == "risk.pre_order_check"
     assert payload["decision"] == "allow"
     assert payload["config_hash"] == "cfg-risk-1"

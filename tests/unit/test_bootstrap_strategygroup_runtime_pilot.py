@@ -593,12 +593,10 @@ def test_execute_blocks_when_active_inventory_is_unavailable():
 
 def test_cli_requires_pg_runtime_control_state(tmp_path, capsys, monkeypatch):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    output_path = tmp_path / "bootstrap.json"
 
-    result = bootstrap.main(["--output-json", str(output_path)])
+    result = bootstrap.main([])
 
     assert result == 2
-    assert not output_path.exists()
     assert "PG_DATABASE_URL is required for PG-only runtime bootstrap" in (
         capsys.readouterr().err
     )
@@ -606,18 +604,14 @@ def test_cli_requires_pg_runtime_control_state(tmp_path, capsys, monkeypatch):
 
 def test_cli_execute_requires_database_url(tmp_path, capsys, monkeypatch):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    output_path = tmp_path / "bootstrap.json"
 
     result = bootstrap.main(
         [
             "--execute",
-            "--output-json",
-            str(output_path),
         ]
     )
 
     assert result == 2
-    assert not output_path.exists()
     assert "PG_DATABASE_URL is required for PG-only runtime bootstrap" in (
         capsys.readouterr().err
     )
@@ -625,7 +619,6 @@ def test_cli_execute_requires_database_url(tmp_path, capsys, monkeypatch):
 
 def test_cli_rejects_removed_local_diagnostic_flag(tmp_path, capsys):
     database_url = _seed_runtime_control_state_db(tmp_path)
-    output_path = tmp_path / "bootstrap.json"
     removed_flag = "--allow-" + "local-file-diagnostic"
 
     with pytest.raises(SystemExit) as exc:
@@ -636,19 +629,15 @@ def test_cli_rejects_removed_local_diagnostic_flag(tmp_path, capsys):
                 "--allow-non-postgres-for-test",
                 removed_flag,
                 "--execute",
-                "--output-json",
-                str(output_path),
             ]
         )
 
     assert exc.value.code == 2
-    assert not output_path.exists()
     assert f"unrecognized arguments: {removed_flag}" in capsys.readouterr().err
 
 
 def test_cli_execute_rejects_non_postgres_test_dsn_override(tmp_path, capsys):
     database_url = _seed_runtime_control_state_db(tmp_path)
-    output_path = tmp_path / "bootstrap.json"
 
     result = bootstrap.main(
         [
@@ -656,28 +645,15 @@ def test_cli_execute_rejects_non_postgres_test_dsn_override(tmp_path, capsys):
             database_url,
             "--allow-non-postgres-for-test",
             "--execute",
-            "--output-json",
-            str(output_path),
         ]
     )
 
     assert result == 2
-    assert not output_path.exists()
     assert "must not be combined with --execute" in capsys.readouterr().err
 
 
 def test_cli_rejects_removed_candidate_universe_file_flag(tmp_path, capsys):
     database_url = _seed_runtime_control_state_db(tmp_path)
-    candidate_universe = tmp_path / "candidate-pool.json"
-    candidate_universe.write_text(
-        json.dumps(
-            {
-                "status": "strategy_live_candidate_pool_ready",
-                "candidate_universe": {"MPG-001": ["OPUSDT"]},
-            }
-        ),
-        encoding="utf-8",
-    )
     removed_flag = "--candidate-" + "universe-json"
 
     with pytest.raises(SystemExit) as exc:
@@ -687,9 +663,7 @@ def test_cli_rejects_removed_candidate_universe_file_flag(tmp_path, capsys):
                 database_url,
                 "--allow-non-postgres-for-test",
                 removed_flag,
-                str(candidate_universe),
-                "--output-json",
-                str(tmp_path / "bootstrap.json"),
+                str(tmp_path / "must-not-be-read.json"),
             ]
         )
 
@@ -712,8 +686,6 @@ def test_cli_pg_bootstrap_requires_active_runtime_scope_binding(tmp_path, capsys
             "--database-url",
             database_url,
             "--allow-non-postgres-for-test",
-            "--output-json",
-            str(tmp_path / "bootstrap.json"),
         ]
     )
 
@@ -738,8 +710,6 @@ def test_cli_pg_bootstrap_requires_policy_notional_leverage_scope(tmp_path, caps
             "--database-url",
             database_url,
             "--allow-non-postgres-for-test",
-            "--output-json",
-            str(tmp_path / "bootstrap.json"),
         ]
     )
 
@@ -749,10 +719,10 @@ def test_cli_pg_bootstrap_requires_policy_notional_leverage_scope(tmp_path, caps
 
 def test_cli_pg_backed_bootstrap_reads_seeded_runtime_control_state(
     tmp_path,
+    capsys,
     monkeypatch,
 ):
     database_url = _seed_runtime_control_state_db(tmp_path)
-    output_path = tmp_path / "bootstrap.json"
     monkeypatch.setattr(bootstrap, "UrlLibApiClient", lambda api_base: object())
     monkeypatch.setattr(bootstrap, "_list_active_runtimes", lambda client: ([], []))
 
@@ -766,13 +736,11 @@ def test_cli_pg_backed_bootstrap_reads_seeded_runtime_control_state(
             "--max-total-new-runtimes",
             "30",
             "--include-observe-only",
-            "--output-json",
-            str(output_path),
         ]
     )
 
     assert result == 0
-    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    artifact = json.loads(capsys.readouterr().out)
     assert artifact["status"] == "planned_runtime_bootstrap"
     assert artifact["runtime_scope"]["candidate_universe_source"] == PG_SOURCE_REF
     assert artifact["runtime_scope"]["candidate_universe_symbol_count"] == 18

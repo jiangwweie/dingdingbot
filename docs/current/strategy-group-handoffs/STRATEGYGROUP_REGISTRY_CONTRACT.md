@@ -32,15 +32,16 @@ or order-sizing authority.
 | Artifact | Role |
 | --- | --- |
 | Research Strategy Cabinet | Research-side shelf of strategy semantics and evidence |
-| StrategyGroup handoff pack | Reviewed main-control intake artifact for one StrategyGroup |
-| StrategyGroup Registry | Owner-readable asset registry contract for strategy governance |
+| PG StrategyGroup registry/version rows | Current main-control intake data for StrategyGroup semantics |
+| StrategyGroup Registry Contract | Owner-readable asset registry contract for strategy governance |
 | Runtime tier policy | Defines what each tier may do |
 | Strategy Asset State evidence | Records current keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block evidence |
 | Tradeability Decision | Records whether the strategy can trade now and the first blocker when it cannot |
 | Review Ledger | Records real action outcomes and post-trial learning |
 
-The registry should summarize handoff and research evidence. It must not copy
-large replay corpora or raw packet details into the main-control layer.
+The registry should summarize PG current strategy rows and selected research
+evidence. It must not copy large replay corpora or raw packet details into the
+main-control layer.
 
 ## Governance Authority
 
@@ -94,7 +95,7 @@ Each StrategyGroup registry row should define these fields:
 | `downshift_rule` | Conditions that move a StrategyGroup to a lower tier or disable candidate preparation |
 | `park_rule` | Conditions that keep it inactive without deleting the idea |
 | `kill_condition` | Conditions that remove it from active strategy allocation |
-| `evidence_refs` | Links to handoff packs, replay summaries, Strategy Asset State evidence rows, or Review Ledger rows |
+| `evidence_refs` | Links to PG import/audit lineage, archive-only replay summaries, Strategy Asset State evidence rows, or Review Ledger rows |
 | `authority_boundary` | Explicit statement that the row does not authorize real orders |
 
 ## Trial Eligibility And Runtime Authority

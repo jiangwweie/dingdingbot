@@ -11,7 +11,6 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import tarfile
 import time
 from typing import Any
 from uuid import uuid4
@@ -23,9 +22,7 @@ DELETE_TOKENS = ("dry-run", "dry_run", "replay", "debug", "history")
 PROTECT_TOKENS = ("latest", "current")
 PROTECTED_NAMES = {
     "strategygroup-runtime-goal-status.json",
-    "post-signal-resume-pack.json",
     "server-product-state-refresh-sequence.json",
-    "runtime-dry-run-audit-chain.json",
     "resume-dispatch-artifact.json",
 }
 
@@ -42,7 +39,6 @@ def main(argv: list[str] | None = None) -> int:
         target=target,
         keep_hours=args.keep_hours,
         now=now,
-        archive_recent=args.archive_recent,
         apply=args.apply,
         max_scan_seconds=args.max_scan_seconds,
         max_candidates=args.max_candidates,
@@ -52,11 +48,8 @@ def main(argv: list[str] | None = None) -> int:
         apply_cleanup(
             manifest,
             root=root,
-            archive_recent=args.archive_recent,
             max_delete_count=args.max_delete_count,
         )
-    if args.manifest_json:
-        _write_json(Path(args.manifest_json), manifest)
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0 if not manifest["checks"]["blockers"] else 2
 
@@ -67,7 +60,6 @@ def build_manifest(
     target: Path,
     keep_hours: int,
     now: float,
-    archive_recent: bool,
     apply: bool,
     max_scan_seconds: float = 10.0,
     max_candidates: int = 2000,
@@ -119,11 +111,6 @@ def build_manifest(
             candidates.append(_entry(path, root, "delete_candidate"))
 
     run_id = f"runtime-report-cleanup:{uuid4().hex[:12]}"
-    archive_path = None
-    if archive_recent and candidates:
-        archive_path = str(
-            root / "archives" / f"{run_id.replace(':', '-')}.tar.gz"
-        )
     return {
         "schema": SCHEMA,
         "status": "blocked" if blockers else ("apply_ready" if apply else "dry_run"),
@@ -132,11 +119,9 @@ def build_manifest(
         "root": str(root),
         "target": str(target),
         "keep_hours": keep_hours,
-        "archive_recent": archive_recent,
         "max_scan_seconds": max_scan_seconds,
         "max_candidates": max_candidates,
         "max_delete_count": max_delete_count,
-        "archive_path": archive_path,
         "candidate_count": len(candidates),
         "protected_count": len(protected),
         "delete_candidates": candidates,
@@ -154,25 +139,12 @@ def apply_cleanup(
     manifest: dict[str, Any],
     *,
     root: Path,
-    archive_recent: bool,
     max_delete_count: int | None = None,
 ) -> None:
     blockers = manifest.get("checks", {}).get("blockers") or []
     if blockers:
         return
     candidates = manifest.get("delete_candidates") or []
-    if archive_recent and candidates and manifest.get("archive_path"):
-        archive_path = Path(str(manifest["archive_path"])).resolve()
-        if not _is_within(root, archive_path):
-            manifest["checks"]["blockers"].append("archive_path_not_under_root")
-            manifest["status"] = "blocked"
-            return
-        archive_path.parent.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(archive_path, "w:gz") as tar:
-            for row in candidates:
-                path = (root / row["relative_path"]).resolve()
-                if path.exists() and _is_within(root, path):
-                    tar.add(path, arcname=row["relative_path"])
     deleted: list[str] = []
     delete_budget = max_delete_count if max_delete_count is not None else len(candidates)
     for row in candidates[:delete_budget]:
@@ -227,13 +199,6 @@ def _is_within(root: Path, path: Path) -> bool:
         return False
 
 
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
-
-
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -241,8 +206,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     mode.add_argument("--apply", action="store_true")
     parser.add_argument("--root", default="/home/ubuntu/brc-deploy/reports")
     parser.add_argument("--keep-hours", type=int, default=72)
-    parser.add_argument("--archive-recent", action="store_true")
-    parser.add_argument("--manifest-json")
     parser.add_argument("--now", type=float)
     parser.add_argument("--max-scan-seconds", type=float, default=10.0)
     parser.add_argument("--max-candidates", type=int, default=2000)

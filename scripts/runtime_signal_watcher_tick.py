@@ -2,9 +2,10 @@
 """Run one read-only runtime signal watcher tick with optional Feishu wake-up.
 
 The watcher is intentionally one-shot so it can be driven by a systemd timer.
-It reuses the active observation supervisor, writes auditable JSON artifacts, and
-only sends a notification when owner attention is required. It never submits,
-places orders, calls OrderLifecycle, mutates runtime budget, or transfers funds.
+It builds runtime status in memory, persists current coverage to PG, emits a
+stdout summary, and only sends a notification when owner attention is required.
+It never writes recurring JSON/MD reports, submits, places orders, calls
+OrderLifecycle, mutates runtime budget, or transfers funds.
 """
 
 from __future__ import annotations
@@ -27,15 +28,17 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts import runtime_active_observation_supervisor as supervisor  # noqa: E402
+from scripts import runtime_active_observation_monitor as active_monitor  # noqa: E402
 from scripts.build_runtime_observation_operator_evidence import (  # noqa: E402
-    build_operator_evidence_from_path,
+    build_operator_evidence,
+)
+from scripts.preview_strategy_group_readonly_observation import (  # noqa: E402
+    build_preview_artifact,
 )
 from scripts.build_runtime_observation_wakeup_evidence import (  # noqa: E402
     build_wakeup_evidence,
 )
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
-from scripts.runtime_active_observation_status import build_status_artifact  # noqa: E402
 
 
 OWNER_ATTENTION_STATUSES = {
@@ -43,6 +46,14 @@ OWNER_ATTENTION_STATUSES = {
     "runtime_signal_ready_for_non_executing_prepare",
     "prepared_shadow_evidence_ready_for_owner_review",
     "operator_evidence_needs_review",
+}
+WAITING_STATUS = "waiting_for_signal"
+STOP_STATUSES = {
+    "ready_for_prepare",
+    "ready_for_final_gate_preflight",
+    "blocked",
+    "mixed",
+    "no_active_runtimes",
 }
 STATUS_ARTIFACT_ATTENTION_STATUSES = {
     "attention",
@@ -62,26 +73,7 @@ FEISHU_WEBHOOK_SECRET_ENV_NAMES = (
     "BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_SECRET",
     "FEISHU_WEBHOOK_SECRET",
 )
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload if isinstance(payload, dict) else {}
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
-
-
-def _state_path(output_dir: Path, value: str | None) -> Path:
-    return Path(value).expanduser() if value else output_dir / "notification-state.json"
+_PROCESS_NOTIFICATION_STATE: dict[str, dict[str, Any]] = {}
 
 
 def _env_file_values(path_value: str | None, names: tuple[str, ...]) -> dict[str, str]:
@@ -265,7 +257,7 @@ def _notification_text(
         f"prepared authorization: {summary.get('prepared_authorization_id') or '-'}",
         f"shadow candidate: {summary.get('shadow_candidate_id') or '-'}",
         f"next: {summary.get('next_step') or operator_plan.get('next_step') or '-'}",
-        f"evidence: {paths.get('wakeup_evidence_json')}",
+        f"evidence: {paths.get('wakeup_evidence_ref')}",
     ]
     blockers = status_artifact.get("blockers") or operator_evidence.get("blockers") or []
     if blockers:
@@ -275,6 +267,187 @@ def _notification_text(
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _nested_get(value: dict[str, Any], path: tuple[str, ...]) -> Any:
+    current: Any = value
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _active_observation_plan_projection(
+    artifact: dict[str, Any], preferred_key: str
+) -> dict[str, Any]:
+    plan = artifact.get(preferred_key)
+    return plan if isinstance(plan, dict) else {}
+
+
+def _active_observation_signal_input_json(artifact: dict[str, Any]) -> str | None:
+    for candidate in (
+        artifact.get("signal_input_json"),
+        _nested_get(artifact, ("observation_monitor_plan", "signal_input_json")),
+        _nested_get(artifact, ("latest_artifact", "signal_input_json")),
+        _nested_get(
+            artifact,
+            ("latest_artifact", "observation_cycle_plan", "signal_input_json"),
+        ),
+    ):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+
+    for item in artifact.get("runtime_summaries") or []:
+        if not isinstance(item, dict):
+            continue
+        for candidate in (
+            item.get("signal_input_json"),
+            _nested_get(item, ("observation_monitor_plan", "signal_input_json")),
+            _nested_get(item, ("latest_artifact", "signal_input_json")),
+            _nested_get(
+                item,
+                ("latest_artifact", "observation_cycle_plan", "signal_input_json"),
+            ),
+        ):
+            text = str(candidate or "").strip()
+            if text:
+                return text
+    return None
+
+
+def _active_observation_prepared_authorization_id(
+    artifact: dict[str, Any],
+) -> str | None:
+    plan = artifact.get("observation_monitor_plan")
+    if isinstance(plan, dict):
+        text = str(plan.get("prepared_authorization_id") or "").strip()
+        if text:
+            return text
+
+    for item in artifact.get("runtime_summaries") or []:
+        if not isinstance(item, dict):
+            continue
+        for candidate in (
+            item.get("prepared_authorization_id"),
+            _nested_get(item, ("observation_monitor_plan", "prepared_authorization_id")),
+            _nested_get(
+                item,
+                (
+                    "latest_artifact",
+                    "observation_cycle_plan",
+                    "prepared_authorization_id",
+                ),
+            ),
+            _nested_get(
+                item,
+                ("latest_artifact", "prepare_evidence", "ids", "authorization_id"),
+            ),
+            _nested_get(
+                item,
+                (
+                    "latest_artifact",
+                    "prepare_evidence",
+                    "first_real_submit_prepare_report",
+                    "ids",
+                    "authorization_id",
+                ),
+            ),
+        ):
+            text = str(candidate or "").strip()
+            if text:
+                return text
+    return None
+
+
+def _active_observation_runtime_signal_summaries(
+    artifact: dict[str, Any],
+) -> list[dict[str, Any]]:
+    summaries = artifact.get("runtime_summaries")
+    if not isinstance(summaries, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in summaries:
+        if not isinstance(item, dict):
+            continue
+        result.append(
+            {
+                "runtime_instance_id": item.get("runtime_instance_id"),
+                "symbol": item.get("symbol"),
+                "side": item.get("side"),
+                "strategy_family_id": item.get("strategy_family_id"),
+                "strategy_family_version_id": item.get(
+                    "strategy_family_version_id"
+                ),
+                "status": item.get("status"),
+                "blockers": list(item.get("blockers") or []),
+                "signal_input_json": item.get("signal_input_json"),
+                "prepared_authorization_id": item.get("prepared_authorization_id"),
+                "signal_summary": item.get("signal_summary") or {},
+            }
+        )
+    return result
+
+
+def _active_observation_summary(
+    artifact: dict[str, Any], *, iteration: int, cycle_dir: Path
+) -> dict[str, Any]:
+    safety = artifact.get("safety_invariants")
+    if not isinstance(safety, dict):
+        safety = {}
+    plan = _active_observation_plan_projection(artifact, "observation_monitor_plan")
+    return {
+        "iteration": iteration,
+        "cycle_dir": str(cycle_dir),
+        "status": str(artifact.get("status") or "unknown"),
+        "active_runtime_count": artifact.get("active_runtime_count"),
+        "monitored_runtime_count": artifact.get("monitored_runtime_count"),
+        "selected_runtime_instance_ids": list(
+            artifact.get("selected_runtime_instance_ids") or []
+        ),
+        "prepare_records_created": bool(safety.get("prepare_records_created")),
+        "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),
+        "runtime_execution_intent_draft_created": bool(
+            safety.get("runtime_execution_intent_draft_created")
+        ),
+        "recorded_execution_intent_created": bool(
+            safety.get("recorded_execution_intent_created")
+        ),
+        "submit_authorization_created": bool(
+            safety.get("submit_authorization_created")
+        ),
+        "protection_plan_created": bool(safety.get("protection_plan_created")),
+        "executable_execution_intent_created": bool(
+            safety.get("executable_execution_intent_created")
+        ),
+        "ready_for_final_gate_preflight": (
+            artifact.get("status") == "ready_for_final_gate_preflight"
+        ),
+        "creates_shadow_candidate": bool(plan.get("creates_shadow_candidate")),
+        "creates_execution_intent": bool(plan.get("creates_execution_intent")),
+        "places_order": bool(plan.get("places_order")),
+        "calls_order_lifecycle": bool(plan.get("calls_order_lifecycle")),
+        "exchange_write_called": bool(safety.get("exchange_write_called")),
+        "order_created": bool(safety.get("order_created")),
+        "order_lifecycle_called": bool(safety.get("order_lifecycle_called")),
+        "attempt_counter_mutated": bool(safety.get("attempt_counter_mutated")),
+        "runtime_budget_mutated": bool(safety.get("runtime_budget_mutated")),
+        "withdrawal_or_transfer_created": bool(
+            safety.get("withdrawal_or_transfer_created")
+        ),
+        "blockers": list(artifact.get("blockers") or []),
+        "warnings": list(artifact.get("warnings") or []),
+        "signal_input_json": _active_observation_signal_input_json(artifact),
+        "prepared_authorization_id": _active_observation_prepared_authorization_id(
+            artifact
+        ),
+        "runtime_signal_summaries": _active_observation_runtime_signal_summaries(
+            artifact
+        ),
+        "candidate_universe_coverage": artifact.get("candidate_universe_coverage")
+        or {},
+    }
 
 
 def _post_signal_auto_resume_plan(
@@ -459,10 +632,6 @@ def _post_signal_auto_resume_plan(
 def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Namespace:
     return argparse.Namespace(
         output_dir=str(output_dir),
-        supervisor_output_json=str(output_dir / "supervisor-artifact.json"),
-        loop_output_json=str(output_dir / "loop-artifact.json"),
-        followup_output_json=str(output_dir / "followup-artifact.json"),
-        status_output_json=str(output_dir / "status-artifact.json"),
         env_file=args.env_file,
         api_base=args.api_base,
         source=args.source,
@@ -491,6 +660,334 @@ def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Nam
     )
 
 
+def _monitor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Namespace:
+    return argparse.Namespace(
+        env_file=args.env_file,
+        api_base=args.api_base,
+        source=args.source,
+        include_exchange=False,
+        allow_prepare_records=args.allow_prepare_records,
+        runtime_instance_id=list(args.runtime_instance_id or []),
+        strategy_family_id=list(args.strategy_family_id or []),
+        database_url=normalize_sync_postgres_dsn(getattr(args, "database_url", "")),
+        require_database_url=getattr(args, "require_database_url", False),
+        allow_non_postgres_for_test=getattr(args, "allow_non_postgres_for_test", False),
+        max_runtimes=100,
+        max_cycles_per_runtime=1,
+        interval_seconds=0.0,
+        continue_on_blocked=False,
+        one_hour_limit=args.one_hour_limit,
+        four_hour_limit=args.four_hour_limit,
+        timeout_seconds=args.cycle_timeout_seconds,
+        playbook_id=None,
+        output_dir=str(output_dir),
+        write_runtime_artifacts=False,
+        include_runtime_artifacts=args.include_artifacts,
+        owner_operator_id="owner",
+        owner_confirmation_reference=(
+            "owner-authorized-runtime-signal-watcher-in-memory-observation"
+        ),
+        reason="runtime signal watcher in-memory active observation",
+    )
+
+
+def _status_from_loop_artifact(
+    *,
+    output_dir: Path,
+    supervisor_artifact: dict[str, Any],
+    loop_artifact: dict[str, Any],
+    latest_summary: dict[str, Any],
+    stale_after_seconds: float,
+) -> dict[str, Any]:
+    latest_status = str(loop_artifact.get("status") or latest_summary.get("status") or "")
+    stop_reason = str(loop_artifact.get("stop_reason") or "")
+    status = "ok"
+    if latest_status == "blocked":
+        status = "blocked"
+    elif latest_status in {
+        "ready_for_prepare",
+        "ready_for_prepare_records",
+        "ready_for_final_gate_preflight",
+        "ready_for_disabled_smoke",
+        "disabled_smoke_completed",
+    }:
+        status = "attention"
+    elif latest_status == "waiting_for_signal" and stop_reason == "max_iterations_exhausted":
+        status = "observation_window_complete_no_signal"
+    elif latest_status == "waiting_for_signal":
+        status = "waiting_for_signal"
+
+    iterations_requested = int(loop_artifact.get("iterations_requested") or 1)
+    iterations_completed = int(loop_artifact.get("iterations_completed") or 1)
+    safety = loop_artifact.get("safety_invariants")
+    if not isinstance(safety, dict):
+        safety = {}
+    observed_flags = {
+        "prepare_records_created": bool(safety.get("prepare_records_created")),
+        "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),
+        "runtime_execution_intent_draft_created": bool(
+            safety.get("runtime_execution_intent_draft_created")
+        ),
+        "recorded_execution_intent_created": bool(
+            safety.get("recorded_execution_intent_created")
+        ),
+        "submit_authorization_created": bool(safety.get("submit_authorization_created")),
+        "protection_plan_created": bool(safety.get("protection_plan_created")),
+    }
+    forbidden_effects = [
+        name
+        for name in (
+            "exchange_write_called",
+            "order_created",
+            "order_lifecycle_called",
+            "attempt_counter_mutated",
+            "runtime_budget_mutated",
+            "withdrawal_or_transfer_created",
+        )
+        if bool(safety.get(name))
+    ]
+    blockers = list(loop_artifact.get("blockers") or [])
+    if forbidden_effects:
+        status = "blocked_forbidden_effect"
+        blockers.append("active_observation_forbidden_effects_detected")
+
+    return {
+        "scope": "runtime_signal_watcher_in_memory_status",
+        "status": status,
+        "output_dir": str(output_dir),
+        "latest_status": latest_status or None,
+        "latest_artifact": "memory:runtime_signal_watcher_in_memory_observation",
+        "artifact_sources": [
+            {
+                "role": "supervisor",
+                "artifact_name": "memory:supervisor",
+                "source_path": "memory:supervisor",
+                "loaded": True,
+            },
+            {
+                "role": "loop",
+                "artifact_name": "memory:loop",
+                "source_path": "memory:loop",
+                "loaded": True,
+            },
+            {
+                "role": "latest_summary",
+                "artifact_name": "memory:latest_summary",
+                "source_path": "memory:latest_summary",
+                "loaded": True,
+            },
+        ],
+        "latest_artifact_age_seconds": 0,
+        "stale_after_seconds": float(stale_after_seconds),
+        "artifact_stale": False,
+        "supervisor_status": supervisor_artifact.get("status"),
+        "loop_status": latest_status or None,
+        "followup_status": None,
+        "iterations_requested": iterations_requested,
+        "iterations_completed": iterations_completed,
+        "iterations_remaining": max(iterations_requested - iterations_completed, 0),
+        "latest_iteration": latest_summary.get("iteration"),
+        "stop_reason": stop_reason or None,
+        "observation_running": stop_reason == "running",
+        "observation_window_complete": stop_reason == "max_iterations_exhausted",
+        "active_runtime_count": latest_summary.get("active_runtime_count"),
+        "monitored_runtime_count": latest_summary.get("monitored_runtime_count"),
+        "selected_runtime_instance_ids": list(
+            latest_summary.get("selected_runtime_instance_ids") or []
+        ),
+        "signal_input_json": latest_summary.get("signal_input_json"),
+        "prepared_authorization_id": latest_summary.get("prepared_authorization_id"),
+        "shadow_candidate_id": latest_summary.get("shadow_candidate_id"),
+        "runtime_signal_summaries": _flatten_runtime_signal_summaries(
+            latest_summary.get("runtime_signal_summaries")
+        ),
+        "candidate_universe_coverage": latest_summary.get("candidate_universe_coverage")
+        or {},
+        "blockers": blockers,
+        "warnings": list(loop_artifact.get("warnings") or []),
+        "forbidden_effects": forbidden_effects,
+        "allowed_prepare_record_effects": [
+            name for name, observed in observed_flags.items() if observed
+        ],
+        "allowed_operation_layer_evidence_prep_effects": [],
+        "observation_plan": {
+            "not_execution_authority": True,
+            "observation_next_step": (
+                "review_non_executing_prepare_or_preview_artifact"
+                if status == "attention"
+                else "continue_active_observation_loop"
+            ),
+        },
+        "safety_invariants": {
+            "read_artifacts_only": False,
+            "in_memory_observation_status": True,
+            "connects_to_api": False,
+            "connects_to_exchange": False,
+            "creates_prepare_records": False,
+            "observed_prepare_records_created": observed_flags[
+                "prepare_records_created"
+            ],
+            "observed_shadow_candidate_created": observed_flags[
+                "shadow_candidate_created"
+            ],
+            "observed_runtime_execution_intent_draft_created": observed_flags[
+                "runtime_execution_intent_draft_created"
+            ],
+            "observed_recorded_execution_intent_created": observed_flags[
+                "recorded_execution_intent_created"
+            ],
+            "observed_submit_authorization_created": observed_flags[
+                "submit_authorization_created"
+            ],
+            "observed_protection_plan_created": observed_flags[
+                "protection_plan_created"
+            ],
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "mutates_runtime_budget": False,
+            "mutates_attempt_counter": False,
+            "withdrawal_or_transfer_created": False,
+            "forbidden_effects": forbidden_effects,
+            "allowed_operation_layer_evidence_prep_effects": [],
+        },
+    }
+
+
+def _flatten_runtime_signal_summaries(rows: Any) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        signal = row.get("signal_summary")
+        if not isinstance(signal, dict):
+            signal = {}
+        result.append(
+            {
+                "runtime_instance_id": row.get("runtime_instance_id"),
+                "strategy_family_id": row.get("strategy_family_id"),
+                "strategy_family_version_id": row.get("strategy_family_version_id"),
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "status": row.get("status"),
+                "signal_input_json": row.get("signal_input_json"),
+                "prepared_authorization_id": row.get("prepared_authorization_id"),
+                "evaluation_status": signal.get("evaluation_status"),
+                "signal_type": signal.get("signal_type"),
+                "signal_side": signal.get("side"),
+                "confidence": signal.get("confidence"),
+                "reason_codes": signal.get("reason_codes") or [],
+                "human_summary": signal.get("human_summary"),
+            }
+        )
+    return result
+
+
+def _build_in_memory_supervisor_artifact(args: argparse.Namespace) -> dict[str, Any]:
+    output_dir = Path(args.output_dir).expanduser()
+    monitor_args = _monitor_args(args, output_dir)
+    monitor_artifact = active_monitor._build_monitor_artifact(monitor_args)
+    monitor_artifact["pg_watcher_runtime_coverage"] = (
+        active_monitor.write_candidate_universe_coverage_to_pg(
+            monitor_artifact,
+            database_url=str(getattr(monitor_args, "database_url", "") or ""),
+            allow_non_postgres_for_test=bool(
+                getattr(monitor_args, "allow_non_postgres_for_test", False)
+            ),
+        )
+    )
+    status = str(monitor_artifact.get("status") or "unknown")
+    latest_summary = _active_observation_summary(
+        monitor_artifact,
+        iteration=1,
+        cycle_dir=Path("memory/runtime-active-observation"),
+    )
+    should_stop = status in STOP_STATUSES or status != WAITING_STATUS
+    stop_reason = (
+        f"status_changed:{status}" if should_stop else "max_iterations_exhausted"
+    )
+    loop_artifact = {
+        "scope": "runtime_signal_watcher_in_memory_observation",
+        "status": status,
+        "stop_reason": stop_reason,
+        "iterations_requested": 1,
+        "iterations_completed": 1,
+        "latest_summary": latest_summary,
+        "cycle_summaries": [latest_summary],
+        "blockers": list(monitor_artifact.get("blockers") or []),
+        "warnings": list(monitor_artifact.get("warnings") or []),
+        "operator_review_plan": {
+            "not_executed": True,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+        },
+        "safety_invariants": monitor_artifact.get("safety_invariants") or {},
+    }
+    artifact = {
+        "scope": "runtime_signal_watcher_in_memory_supervisor",
+        "status": "supervisor_completed",
+        "loop_status": status,
+        "followup_status": None,
+        "blockers": list(monitor_artifact.get("blockers") or []),
+        "warnings": list(monitor_artifact.get("warnings") or []),
+        "loop_artifact": loop_artifact,
+        "latest_summary": latest_summary,
+        "safety_invariants": {
+            "supervisor_in_memory": True,
+            "exchange_order_requested": False,
+            "real_submit_requested": False,
+            "forbidden_effects": [],
+        },
+    }
+    artifact["status_artifact"] = _status_from_loop_artifact(
+        output_dir=output_dir,
+        supervisor_artifact=artifact,
+        loop_artifact=loop_artifact,
+        latest_summary=latest_summary,
+        stale_after_seconds=float(args.status_stale_after_seconds),
+    )
+    return artifact
+
+
+def _missing_status_artifact(*, supervisor_artifact: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "scope": "runtime_signal_watcher_in_memory_status",
+        "status": "blocked",
+        "latest_status": "blocked",
+        "latest_artifact": "memory:missing_status_artifact",
+        "artifact_sources": [
+            {
+                "role": "supervisor",
+                "artifact_name": "memory:supervisor",
+                "source_path": "memory:supervisor",
+                "loaded": bool(supervisor_artifact),
+            }
+        ],
+        "artifact_stale": False,
+        "blockers": ["in_memory_status_artifact_missing"],
+        "warnings": [],
+        "forbidden_effects": [],
+        "observation_plan": {
+            "not_execution_authority": True,
+            "observation_next_step": "rebuild_in_memory_supervisor_status_artifact",
+        },
+        "safety_invariants": {
+            "read_artifacts_only": False,
+            "in_memory_observation_status": True,
+            "connects_to_exchange": False,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "mutates_runtime_budget": False,
+            "withdrawal_or_transfer_created": False,
+            "forbidden_effects": [],
+        },
+    }
+
+
 def build_watcher_tick_artifact(
     args: argparse.Namespace,
     *,
@@ -498,29 +995,25 @@ def build_watcher_tick_artifact(
     notifier: Notifier | None = None,
 ) -> dict[str, Any]:
     output_dir = Path(args.output_dir).expanduser()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    state_file = _state_path(output_dir, args.state_json)
-    previous_state = _read_json(state_file)
+    state_key = f"{args.label}:{output_dir}"
+    previous_state = dict(_PROCESS_NOTIFICATION_STATE.get(state_key) or {})
 
-    supervisor_builder = supervisor_builder or supervisor.build_supervisor_artifact
+    supervisor_builder = supervisor_builder or _build_in_memory_supervisor_artifact
     supervisor_artifact = supervisor_builder(_supervisor_args(args, output_dir))
-    _write_json(output_dir / "supervisor-artifact.json", supervisor_artifact)
-
-    status_artifact = build_status_artifact(
-        output_dir,
-        stale_after_seconds=args.status_stale_after_seconds,
+    status_artifact = (
+        supervisor_artifact.get("status_artifact")
+        if isinstance(supervisor_artifact.get("status_artifact"), dict)
+        else _missing_status_artifact(supervisor_artifact=supervisor_artifact)
     )
-    _write_json(output_dir / "status-artifact.json", status_artifact)
-    _write_json(output_dir / "latest-status.json", status_artifact)
 
-    operator_evidence = build_operator_evidence_from_path(
-        status_artifact_json=output_dir / "status-artifact.json",
-        strategy_source=args.strategy_source,
+    operator_evidence = build_operator_evidence(
+        active_status_artifact=status_artifact,
+        strategy_preview_artifact=build_preview_artifact(
+            source_name=args.strategy_source,
+        ),
     )
-    _write_json(output_dir / "operator-evidence.json", operator_evidence)
 
     wakeup_evidence = build_wakeup_evidence(operator_evidence)
-    _write_json(output_dir / "wakeup-evidence.json", wakeup_evidence)
     auto_resume = _post_signal_auto_resume_plan(
         args=args,
         status_artifact=status_artifact,
@@ -564,10 +1057,10 @@ def build_watcher_tick_artifact(
     webhook_url = _webhook_url(args)
     webhook_secret = _webhook_secret(args)
     paths = {
-        "status_artifact_json": str(output_dir / "status-artifact.json"),
-        "operator_evidence_json": str(output_dir / "operator-evidence.json"),
-        "wakeup_evidence_json": str(output_dir / "wakeup-evidence.json"),
-        "watcher_tick_json": str(output_dir / "watcher-tick.json"),
+        "status_artifact_ref": "memory:runtime_signal_watcher_in_memory_status",
+        "operator_evidence_ref": "memory:runtime_observation_operator_evidence",
+        "wakeup_evidence_ref": "memory:runtime_observation_wakeup_evidence",
+        "watcher_tick_ref": "stdout:runtime_signal_watcher_tick",
     }
     notification = {
         "required": required,
@@ -623,7 +1116,7 @@ def build_watcher_tick_artifact(
             event_key if notification.get("sent") else previous_state.get("last_notified_event_key")
         ),
     }
-    _write_json(state_file, state)
+    _PROCESS_NOTIFICATION_STATE[state_key] = state
 
     artifact = {
         "scope": "runtime_signal_watcher_tick",
@@ -695,7 +1188,6 @@ def build_watcher_tick_artifact(
             "forbidden_effects": list(status_artifact.get("forbidden_effects") or []),
         },
     }
-    _write_json(output_dir / "watcher-tick.json", artifact)
     return artifact
 
 
@@ -719,8 +1211,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run one read-only runtime signal watcher tick and optional Feishu notification.",
     )
-    parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--state-json")
+    parser.set_defaults(output_dir="memory/runtime-signal-watcher")
     parser.add_argument("--env-file")
     parser.add_argument("--api-base", default="http://127.0.0.1:18080")
     parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")

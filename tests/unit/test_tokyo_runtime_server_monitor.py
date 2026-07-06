@@ -47,8 +47,6 @@ def _load_file_module(path: Path, name: str):
 def _pg_args(module, tmp_path: Path):
     return module._parse_args(
         [
-            "--output-json",
-            str(tmp_path / "monitor.json"),
             "--skip-systemd",
             "--feishu-webhook-url",
             "https://example.invalid/webhook",
@@ -284,7 +282,7 @@ def test_legacy_json_monitor_arguments_are_rejected(
     value: str | None,
 ) -> None:
     module = _load_module()
-    argv = ["--output-json", str(tmp_path / "monitor.json"), flag]
+    argv = [flag]
     if value is not None:
         argv.append(str(tmp_path / value))
 
@@ -300,8 +298,6 @@ def test_default_server_monitor_requires_pg_without_file_fallback(
     module = _load_module()
     args = module._parse_args(
         [
-            "--output-json",
-            str(tmp_path / "monitor.json"),
             "--skip-systemd",
         ]
     )
@@ -315,8 +311,6 @@ def test_non_postgres_dsn_is_rejected_outside_test_mode(tmp_path: Path) -> None:
     module = _load_module()
     args = module._parse_args(
         [
-            "--output-json",
-            str(tmp_path / "monitor.json"),
             "--skip-systemd",
             "--database-url",
             "sqlite://",
@@ -334,8 +328,6 @@ def test_server_monitor_normalizes_asyncpg_dsn_for_sync_engine(
     module = _load_module()
     args = module._parse_args(
         [
-            "--output-json",
-            str(tmp_path / "monitor.json"),
             "--skip-systemd",
             "--database-url",
             "postgresql+asyncpg://user:pass@localhost:5432/brc",
@@ -397,6 +389,7 @@ def test_pg_healthy_waiting_is_quiet_and_uses_pg_dedupe(
             assert artifact["source_errors"] == {}
             assert artifact["dedupe_state"]["source"] == "pg:brc_server_monitor_notifications"
             assert not (tmp_path / "server-monitor-dedupe-state.json").exists()
+            assert not (tmp_path / "monitor.json").exists()
             assert calls == []
             assert artifact["safety_invariants"]["calls_finalgate"] is False
             assert artifact["safety_invariants"]["calls_operation_layer"] is False

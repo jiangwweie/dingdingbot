@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
@@ -135,17 +134,11 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
             "--database-url",
             f"sqlite:///{db_path}",
             "--allow-non-postgres-for-test",
-            "--output-json",
-            str(output_json),
         ]
     )
 
     assert exit_code == 0
-    artifact = json.loads(output_json.read_text(encoding="utf-8"))
-    assert artifact["source_mode"] == "db_backed"
-    assert artifact["collector_source_mode"] == "pg_scope_direct_readonly_exchange"
-    assert artifact["facts"]["protection_template_ready"] is True
-    assert len(artifact["pg_fact_snapshot_ids"]) == 2
+    assert not output_json.exists()
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
             """

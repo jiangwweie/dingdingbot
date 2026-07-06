@@ -243,11 +243,11 @@ Generated views summarize.
 Archives preserve provenance.
 ```
 
-StrategyGroup semantics belong in reviewed handoff packs and the registry
-contract. Dynamic actionability belongs to runtime state. Owner risk acceptance
-belongs to explicit Owner policy or current scoped decisions. Generated monitor,
-replay, and ledger outputs are checkpoint evidence; they must not be hand-edited
-into authority.
+StrategyGroup semantics belong in PG strategy registry/version/event/fact rows
+and the registry contract. Dynamic actionability belongs to runtime state. Owner
+risk acceptance belongs to explicit Owner policy or current scoped decisions.
+Generated monitor, replay, and ledger outputs are checkpoint evidence; they must
+not be hand-edited into authority.
 
 ## PG Cutover Source Discipline
 
@@ -303,6 +303,63 @@ JSON export as runtime scope source
 ```
 
 Reviewer agents must check negative constraints, not only happy paths.
+
+## Runtime File I/O And Performance Discipline
+
+Runtime file I/O must follow
+`docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md`.
+
+The target is deletion or PG replacement, not better documentation of file
+paths:
+
+```text
+runtime readers -> migrate to PG or delete
+recurring JSON/MD writers -> delete from cadence or replace with PG rows
+historical material -> archive-only, never runtime input
+Owner explanation -> PG Owner Explanation Read Model only
+```
+
+Agents must not add new production reads from repo/output/report JSON or
+Markdown. Agents must not add new recurring writes of JSON/Markdown reports in
+watcher tick, server monitor, product refresh, dispatcher, FinalGate,
+Operation Layer, or Owner console readmodel paths.
+
+This ban also covers dynamic-path file authority that does not expose a
+literal repo/output path in code: env-selected evidence JSON files, YAML
+config import/export interfaces, JSONL trace or observe sidecars, and tests
+that create legacy report JSON files to feed current code. Current semantics
+must be PG/current services or in-memory typed fixtures; historical material is
+archive-only.
+
+Agents must not add or preserve current artifact/proof/evidence scripts whose
+main interface is JSON/Markdown files, report directories, or artifact file CLI
+parameters. Current semantics must move to PG/current projections or
+API/readmodels; pure history must be archive-only; everything else is deleted.
+
+Agents must not keep file-backed repositories, local comparison repositories,
+or "non-production fallback" readers in current `src/` or current runtime
+scripts. If a file-backed reader has historical value, it belongs outside the
+current runtime path as archive provenance only; otherwise it is deleted.
+
+Every architecture plan, implementation task, and review that touches runtime,
+deploy, monitor, readmodel, or action-time code must state:
+
+| Performance dimension | Required answer |
+| --- | --- |
+| Cadence | per tick, per signal, per deploy, manual, or archive-only |
+| File writes | number of JSON/MD files created by one no-signal tick; target is `0` |
+| PG writes | bounded row count or explicit reason |
+| CPU | whether heavy builders run only on PG trigger |
+| Disk | whether append-only or per-run files are created |
+| Timeout | whether subprocess/API work is bounded |
+| Retention | archive-only owner and cleanup rule, if any |
+
+Do not accept `validator passed` as sufficient evidence if the validator does
+not cover invoked scripts, cadence, file growth, and Owner-facing file reads.
+For runtime/deploy/monitor/readmodel/watcher/action-time/Owner explanation
+changes, review evidence must include `scripts/audit_production_runtime_file_io.py`
+or a stricter successor. Production cadence is not acceptable unless the audit
+reports `performance_risk.status=clear` and zero `frequent_report_write`.
 
 Strategy-research artifacts from `/Users/jiangwei/Documents/final-strategy-research`
 must not become unconditional runtime monitor dependencies. Main control should

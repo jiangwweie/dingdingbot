@@ -97,7 +97,7 @@ def _daily_table() -> dict:
                 "chain_position": "replay_live_parity",
                 "first_blocker": "watcher_tick_missing",
                 "first_blocker_evidence": (
-                    "output/runtime-monitor/latest-replay-live-parity-audit.json:"
+                    "pg_current_projection:tradeability_and_candidate_pool:"
                     "MPG-001/SOLUSDT blocker_class=watcher_tick_missing"
                 ),
                 "owner_action_required": "no",
@@ -165,19 +165,12 @@ def test_single_lane_packet_builds_from_pg_control_state_seed(pg_control_connect
 
 
 def test_single_lane_packet_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: Path):
-    packet_json = tmp_path / "packet.json"
-    packet_md = tmp_path / "packet.md"
-
     build = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
             "--database-url",
             f"sqlite:///{tmp_path / 'runtime.db'}",
-            "--output-json",
-            str(packet_json),
-            "--output-owner-progress",
-            str(packet_md),
         ],
         text=True,
         capture_output=True,
@@ -186,14 +179,10 @@ def test_single_lane_packet_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: P
 
     assert build.returncode == 2
     assert "requires PostgreSQL DSN" in build.stderr
-    assert not packet_json.exists()
-    assert not packet_md.exists()
 
 
 def test_single_lane_packet_pg_cli_round_trip(tmp_path: Path):
     database_url = _seed_runtime_control_db(tmp_path / "runtime.db")
-    packet_json = tmp_path / "packet.json"
-    packet_md = tmp_path / "packet.md"
 
     build = subprocess.run(
         [
@@ -202,10 +191,6 @@ def test_single_lane_packet_pg_cli_round_trip(tmp_path: Path):
             "--database-url",
             database_url,
             "--allow-non-postgres-for-test",
-            "--output-json",
-            str(packet_json),
-            "--output-owner-progress",
-            str(packet_md),
         ],
         text=True,
         capture_output=True,
@@ -213,11 +198,12 @@ def test_single_lane_packet_pg_cli_round_trip(tmp_path: Path):
     )
 
     assert build.returncode == 0, build.stdout + build.stderr
-    packet = json.loads(packet_json.read_text(encoding="utf-8"))
-    assert packet["source_mode"] == "db_backed"
-    assert packet["source"] == "pg_runtime_control_state:daily_live_enablement_table"
-    assert packet_md.exists()
-    assert _validator().validate_single_lane_task_packet(packet) == []
+    summary = json.loads(build.stdout)
+    assert summary["status"] in {
+        "single_lane_task_packet_ready",
+        "single_lane_task_packet_not_applicable_market_wait",
+    }
+    assert summary["active_lane"]
 
 
 def test_single_lane_packet_builds_from_rank_one_daily_row():
@@ -234,7 +220,8 @@ def test_single_lane_packet_builds_from_rank_one_daily_row():
     assert packet["first_blocker"] == "watcher_tick_missing"
     assert packet["source_rank"] == 1
     assert "output/runtime-monitor/latest-*.json" not in packet["allowed_files"]
-    assert "scripts/build_replay_live_parity_audit.py" in packet["allowed_files"]
+    assert "scripts/build_strategygroup_tradeability_decision.py" in packet["allowed_files"]
+    assert "scripts/build_strategy_live_candidate_pool.py" in packet["allowed_files"]
     assert _validator().validate_single_lane_task_packet(packet) == []
 
 
@@ -332,18 +319,12 @@ def test_single_lane_packet_cli_rejects_legacy_file_inputs(
     monkeypatch,
 ):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    packet_json = tmp_path / "packet.json"
-    packet_md = tmp_path / "packet.md"
 
     build = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
             *legacy_args,
-            "--output-json",
-            str(packet_json),
-            "--output-owner-progress",
-            str(packet_md),
         ],
         text=True,
         capture_output=True,
@@ -352,8 +333,6 @@ def test_single_lane_packet_cli_rejects_legacy_file_inputs(
 
     assert build.returncode == 2
     assert "unrecognized arguments" in build.stderr
-    assert not packet_json.exists()
-    assert not packet_md.exists()
 
 
 def test_single_lane_packet_missing_rank_one_does_not_validate():
@@ -374,21 +353,13 @@ def test_single_lane_packet_cli_rejects_daily_table_json_even_without_diagnostic
     monkeypatch,
 ):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    daily_table = tmp_path / "daily-table.json"
-    packet_json = tmp_path / "packet.json"
-    packet_md = tmp_path / "packet.md"
-    daily_table.write_text(json.dumps(_daily_table()), encoding="utf-8")
 
     build = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
             "--daily-table-json",
-            str(daily_table),
-            "--output-json",
-            str(packet_json),
-            "--output-owner-progress",
-            str(packet_md),
+            str(tmp_path / "must-not-be-read.json"),
         ],
         text=True,
         capture_output=True,
@@ -397,8 +368,6 @@ def test_single_lane_packet_cli_rejects_daily_table_json_even_without_diagnostic
 
     assert build.returncode == 2
     assert "unrecognized arguments" in build.stderr
-    assert not packet_json.exists()
-    assert not packet_md.exists()
 
 
 def test_single_lane_packet_pg_cli_requires_database_url_when_requested(
@@ -406,18 +375,12 @@ def test_single_lane_packet_pg_cli_requires_database_url_when_requested(
     monkeypatch,
 ):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    packet_json = tmp_path / "packet.json"
-    packet_md = tmp_path / "packet.md"
 
     build = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
             "--require-database-url",
-            "--output-json",
-            str(packet_json),
-            "--output-owner-progress",
-            str(packet_md),
         ],
         text=True,
         capture_output=True,
@@ -426,5 +389,9 @@ def test_single_lane_packet_pg_cli_requires_database_url_when_requested(
 
     assert build.returncode == 2
     assert "PG_DATABASE_URL is required" in build.stderr
-    assert not packet_json.exists()
-    assert not packet_md.exists()
+
+
+def test_single_lane_packet_validator_is_in_memory_only():
+    packet = _builder().build_single_lane_task_packet(daily_table=_daily_table())
+
+    assert _validator().validate_single_lane_task_packet(packet) == []

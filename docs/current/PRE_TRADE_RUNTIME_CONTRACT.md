@@ -361,11 +361,9 @@ The Daily Live Enablement Table is now the summary surface for this pre-trade
 runtime. It may still show the highest-priority unresolved blocker, but that
 rank does not suppress fresh-signal promotion from another candidate symbol.
 
-The current control snapshot is:
-
-```text
-output/runtime-monitor/latest-strategy-live-candidate-pool.json
-```
+The current PG-backed read model may be exported only by explicit diagnostic
+command. Generated files are not runtime authority and must not be committed as
+current state.
 
 It must include:
 

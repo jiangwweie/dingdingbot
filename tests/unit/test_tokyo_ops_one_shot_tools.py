@@ -44,7 +44,6 @@ def test_report_cleanup_dry_run_protects_latest_and_only_targets_allowlist(tmp_p
         target=target,
         keep_hours=72,
         now=now,
-        archive_recent=False,
         apply=False,
     )
 
@@ -77,15 +76,14 @@ def test_report_cleanup_apply_deletes_candidates_and_keeps_latest(tmp_path: Path
         target=target,
         keep_hours=72,
         now=now,
-        archive_recent=True,
         apply=True,
     )
-    module.apply_cleanup(manifest, root=root, archive_recent=True)
+    module.apply_cleanup(manifest, root=root)
 
     assert manifest["status"] == "applied"
     assert not old.exists()
     assert latest.exists()
-    assert Path(manifest["archive_path"]).exists()
+    assert "archive_path" not in manifest
 
 
 def test_release_prune_keeps_current_previous_and_recent(tmp_path: Path):
@@ -197,14 +195,12 @@ def test_report_cleanup_apply_honors_delete_budget(tmp_path: Path):
         target=target,
         keep_hours=72,
         now=now,
-        archive_recent=False,
         apply=True,
         max_delete_count=2,
     )
     module.apply_cleanup(
         manifest,
         root=root,
-        archive_recent=False,
         max_delete_count=2,
     )
 

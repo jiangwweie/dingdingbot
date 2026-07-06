@@ -52,7 +52,6 @@ from src.application.position_projection_service import PositionProjectionServic
 from src.application.protection_health_monitor import ProtectionHealthMonitor
 from src.application.startup_trading_guard import StartupTradingGuardService
 from src.infrastructure.exchange_gateway import ExchangeGateway
-from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 from src.infrastructure.notifier import NotificationService, get_notification_service
 from src.infrastructure.core_repository_factory import (
     create_execution_intent_repository,
@@ -74,10 +73,6 @@ from src.domain.exceptions import FatalStartupError, DependencyNotReadyError, Co
 from src.infrastructure.logger import logger, setup_logger, register_secret
 from src.infrastructure.database import close_db, validate_pg_core_configuration
 from src.infrastructure.connection_pool import close_all_connections
-from src.infrastructure.strategy_signal_v2_observe_sink import (
-    DEFAULT_STRATEGY_SIGNAL_V2_OBSERVE_PATH,
-    StrategySignalV2ObserveSink,
-)
 
 
 # ============================================================
@@ -151,7 +146,7 @@ def _block_startup_guard_for_shutdown(source: str) -> None:
 
 
 def _build_strategy_signal_v2_observe_writer(env: Optional[dict] = None):
-    """Build optional StrategySignalV2 observe writer from local ops env flags."""
+    """Reject the retired file-backed StrategySignalV2 observe sidecar."""
     if env is None:
         env = os.environ
     enabled = env.get("STRATEGY_SIGNAL_V2_OBSERVE_ENABLED", "").strip().lower() == "true"
@@ -159,23 +154,11 @@ def _build_strategy_signal_v2_observe_writer(env: Optional[dict] = None):
         logger.info("StrategySignalV2 observe disabled")
         return None
 
-    observe_path = env.get(
-        "STRATEGY_SIGNAL_V2_OBSERVE_PATH",
-        DEFAULT_STRATEGY_SIGNAL_V2_OBSERVE_PATH,
+    logger.warning(
+        "StrategySignalV2 file-backed observe sidecar has been removed; "
+        "runtime signal observations must be persisted through PG/current projections."
     )
-    try:
-        sink = StrategySignalV2ObserveSink(observe_path)
-        writer = PatternStrategySignalObserveWriter(sink=sink)
-    except Exception as e:
-        logger.warning(
-            "StrategySignalV2 observe init failed; observe disabled: "
-            f"path={observe_path}, error={e}",
-            exc_info=True,
-        )
-        return None
-
-    logger.info("StrategySignalV2 observe enabled: path=%s", observe_path)
-    return writer
+    return None
 
 
 async def _run_order_watch(symbol: str) -> None:
@@ -768,9 +751,7 @@ async def run_application():
 
         account_service = BinanceAccountService(_exchange_gateway)
         capital_notifier = _CapitalProtectionNotifierAdapter(_notification_service)
-        _trace_service = TraceService(
-            sinks=[JsonlTraceSink(Path("logs/runtime/risk_decision.jsonl"))]
-        )
+        _trace_service = TraceService()
         capital_protection_config = config_manager.build_capital_protection_config()
         if _runtime_config_provider is not None:
             runtime_risk = _runtime_config_provider.resolved_config.risk

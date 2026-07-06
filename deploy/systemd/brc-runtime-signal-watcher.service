@@ -20,7 +20,6 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
   --api-base http://127.0.0.1:18080 \
   --source live_market \
   --strategy-source live_market \
-  --output-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher \
   --max-iterations 1 \
   --cycle-timeout-seconds 180 \
   --status-stale-after-seconds 900 \
@@ -36,12 +35,6 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
   --strategy-family-id SOR-001 \
   --strategy-family-id BRF2-001 \
   --label tokyo-runtime-signal-watcher
-ExecStartPost=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/build_runtime_signal_watcher_readiness_pack.py \
-  --report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher \
-  --output-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher \
-  --stale-after-seconds 180 \
-  --label tokyo-runtime-signal-watcher
-
 NoNewPrivileges=true
 PrivateTmp=true
 Nice=10

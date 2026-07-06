@@ -16,7 +16,7 @@ to trade, and was no-trade caused by market conditions or by a system boundary?
 ```
 
 This skill is deliberately narrower than architecture, planning, or broad
-chain-position work. It turns runtime artifacts into a plain explanation of:
+chain-position work. It turns runtime evidence into a plain explanation of:
 
 - detected signals;
 - strategy and symbol involved;
@@ -47,60 +47,63 @@ absolute date using the current runtime timezone before reporting.
 
 ## Evidence Priority
 
-Prefer PG current state and audit lineage over generated artifacts for
-production questions after PG cutover. Generated JSON/MD remains useful as
-export or diagnostic evidence, not production truth.
+Use **PG current state** and **audit lineage** for production questions.
+Generated JSON/MD files are not a fallback source for current trading state.
 
 Use this authority order:
 
 1. Tokyo PG current state and audit lineage for signal, promotion, lane,
    ticket, policy, fact, FinalGate, Operation Layer, protection,
    reconciliation, and monitor state.
-2. Tokyo DB-backed read-model exports and server monitor reports.
+2. Tokyo DB-backed read models or API responses derived from PG projections.
 3. Tokyo watcher, monitor, and deploy journals for runtime/process evidence.
-4. Tokyo release manifest and deploy-health reports.
-5. Local `output/runtime-monitor/*` only as non-production comparison.
+4. Tokyo release metadata and deploy-health state from the official deploy path.
+5. Archive-only historical evidence only when the user explicitly asks for
+   provenance recovery.
 6. Docs/contracts only to explain allowed meanings, not to invent facts.
 
-When PG lineage exists, do not treat `latest-*.json`, Single Lane Packet, local
-cache, old watcher artifacts, or generated report timestamps as production
-truth. Use them only to explain exports, diagnostics, or historical artifacts.
+Do not treat generated report files, task-packet exports, developer caches, old
+watcher exports, or generated report timestamps as production truth. If
+PG/current read models are unavailable, classify the answer as
+`runtime_data_gap` and name the missing current projection instead of falling
+back to files.
 
 Never claim "market had no opportunity all day" unless the queried time window
-has continuous watcher/monitor coverage or an explicit daily artifact proving
-no fresh eligible signal for that window.
+has continuous watcher/monitor coverage or an explicit daily PG projection
+proving no fresh eligible signal for that window.
 
 Never claim "the system did not notify" as equivalent to "the system did not
 detect a signal." Notification is a separate layer after detection and monitor
-classification. Always inspect the server monitor artifact and its
-`notification` object before explaining missed notifications.
+classification. Inspect the PG-backed monitor decision and notification state
+before explaining missed notifications.
 
 ## Read-Only Collection
 
 Use read-only commands only. Do not deploy, restart services, mutate files,
 call FinalGate, call Operation Layer, or call exchange-write endpoints.
 
-Before PG cutover, or when PG access is explicitly unavailable and the task is a
-diagnostic rather than production truth claim, collect these Tokyo exports:
+Collect current state from PG-backed read-only sources. Required current
+objects are:
 
 ```text
-/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/latest-summary.json
-/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/latest-status.json
-/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/operator-evidence.json
-/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/watcher-tick.json
-/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/post-signal-resume-pack.json
-/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/resume-dispatch-artifact.json
-/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-goal-status.json
-/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json
-/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json
-/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-deploy-health.json
-/home/ubuntu/brc-deploy/reports/runtime-monitor/server-monitor-dedupe-state.json
-/home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-live-candidate-pool.json
-/home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-daily-live-enablement-table.json
-/home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-single-lane-task-packet.json
-/home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json
-/home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json
+live_signal_events
+promotion_candidates
+action_time_lane_inputs
+action_time_tickets
+runtime_fact_snapshots
+watcher_coverage
+runtime_safety_state_snapshots
+monitor_decisions
+notification_attempts
+operation_submit_commands
+protection_state
+reconciliation_state
+review_outcomes
 ```
+
+If the operator only has historical files and no PG access, report
+`runtime_data_gap:pg_current_projection_unavailable`. Do not reconstruct current
+truth from generated JSON/MD.
 
 For a date-window question, also collect:
 
@@ -110,11 +113,7 @@ journalctl -u brc-runtime-monitor.service --since <start> --until <end>
 systemctl status --no-pager brc-runtime-signal-watcher.service
 systemctl status --no-pager brc-runtime-monitor.service
 systemctl list-timers --all --no-pager brc-runtime-signal-watcher.timer brc-runtime-monitor.timer
-find /home/ubuntu/brc-deploy/reports/runtime-signal-watcher -maxdepth 1 -type f -newermt <start> ! -newermt <end>
-find /home/ubuntu/brc-deploy/reports/runtime-monitor -maxdepth 1 -type f -newermt <start> ! -newermt <end>
 ```
-
-If the server lacks `jq`, use Python JSON parsing.
 
 For Feishu notification questions, verify only variable presence, not secret
 values:
@@ -150,17 +149,17 @@ terminal classes:
 | `engineering_handoff_gap` | A valid upstream signal existed, but the next machine object was not materialized | no; propose the repair |
 | `scope_or_policy_gap` | The signal is outside selected StrategyGroup/symbol/side/profile policy | no; name the exact Owner decision |
 | `runtime_safety_or_reconciliation_gap` | Position/order/protection/account state blocks next attempt | no; name the official recovery/reconciliation step |
-| `artifact_evidence_gap` | The artifacts are overwritten/missing/inconsistent and cannot prove the chain | no; say what evidence must be captured next |
+| `current_projection_gap` | PG/readmodel state is unavailable, inconsistent, or insufficient to prove the chain | no; say which current projection must be repaired |
 
 Use this drill-down order:
 
 ```text
 detected signal?
--> is Candidate Pool newer than Server Monitor?
+-> is the PG-backed monitor decision newer than the relevant signal/lane state?
 -> runtime lane or strategy-group preview?
 -> if preview: does it have no_runtime_start / no_execution_permission?
 -> if runtime lane: status waiting_for_signal, blocked, ready_for_prepare, or ready_for_final_gate_preflight?
--> signal_input_json present?
+-> signal input record present?
 -> shadow_candidate_id or prepared_authorization_id present?
 -> FinalGate reached?
 -> Operation Layer reached?
@@ -173,30 +172,30 @@ For each missing object, name the previous object and the exact reason it did
 not advance. Example:
 
 ```text
-prepared_authorization_id is missing because signal_input_json is missing.
-signal_input_json is missing because the runtime lane is blocked by
+prepared_authorization_id is missing because the signal input record is missing.
+The signal input record is missing because the runtime lane is blocked by
 NEXT-ATTEMPT-POSITION-ORDER-CONFLICT. That is a reconciliation/safety gap, not
 a market no-signal conclusion.
 ```
 
-### Artifact Freshness
+### Current Projection Freshness
 
-Before using a monitor or control artifact as evidence, compare
-`generated_at_utc` across:
+Before using monitor or control state as evidence, compare current projection
+timestamps across:
 
-| Artifact | Path |
+| Projection | What it proves |
 | --- | --- |
-| Candidate Pool | `/home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-strategy-live-candidate-pool.json` |
-| Daily Table | `/home/ubuntu/brc-deploy/app/current/output/runtime-monitor/latest-daily-live-enablement-table.json` |
-| Server Monitor | `/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json` |
-| Refresh Sequence | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/server-product-state-refresh-sequence.json` |
-| Goal Status | `/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/strategygroup-runtime-goal-status.json` |
+| `live_signal_events` | whether a fresh signal existed |
+| `promotion_candidates` | whether the signal was eligible to promote |
+| `action_time_lane_inputs` | whether one lane narrowed to action-time |
+| `action_time_tickets` | whether the formal machine ticket exists |
+| `monitor_decisions` | whether the server classified quiet/notify/gap |
+| `notification_attempts` | whether Feishu was configured, attempted, sent, or suppressed |
 
-If Candidate Pool or Daily Table is newer than Server Monitor, do not use the
-older Server Monitor artifact to prove "quiet", "no signal", or "no
-notification." Say the monitor artifact is stale relative to the current
-control state, then run or inspect the next server-monitor tick if the task
-allows read-only validation.
+If monitor state is older than signal/lane state, do not use it to prove
+"quiet", "no signal", or "no notification." Say the monitor projection is
+stale relative to the current trading chain, then inspect the next read-only
+monitor tick or report a monitor freshness gap.
 
 If Server Monitor is newer and says `notify_required`, distinguish the reason:
 
@@ -215,9 +214,9 @@ separate layers:
 
 | Layer | Evidence | What it answers |
 | --- | --- | --- |
-| Detection | Candidate Pool, Daily Table, watcher artifacts | Did a fresh/action-time signal exist? |
-| Monitor classification | `latest-server-side-runtime-monitor.json.decision` | Should the Owner be notified? |
-| Notification send | `latest-server-side-runtime-monitor.json.notification` and dedupe state | Was Feishu configured, attempted, sent, suppressed, or skipped? |
+| Detection | `live_signal_events`, `promotion_candidates`, `action_time_lane_inputs` | Did a fresh/action-time signal exist? |
+| Monitor classification | `monitor_decisions` | Should the Owner be notified? |
+| Notification send | `notification_attempts` and dedupe state | Was Feishu configured, attempted, sent, suppressed, or skipped? |
 
 When explaining "why did I not receive a notification", report:
 
@@ -231,7 +230,7 @@ When explaining "why did I not receive a notification", report:
 - `notification.skipped_reason`;
 - whether `runtime-monitor.env` exists and contains a webhook variable name.
 
-Do not ask the Owner to judge raw monitor artifacts. Translate them into one
+Do not ask the Owner to judge raw monitor objects. Translate them into one
 sentence such as:
 
 ```text
@@ -291,7 +290,7 @@ Interpret them this way:
 | `inactive/dead` with latest `status=0/SUCCESS` | Normal completed oneshot run | no |
 | `failed` or non-zero ExecStart/ExecStartPost | Real service failure | yes |
 
-If an old Server Monitor artifact reports
+If an older monitor projection reports
 `systemd_unit_not_active:brc-runtime-signal-watcher.service:activating`, check a
 later watcher status/journal sample before calling it a real failure. If the
 later watcher run ended successfully and the monitor script now reports
@@ -325,8 +324,8 @@ Classify every detected item into one of these categories:
 - A candidate-pool row with `signal_state=absent` is stronger than a broad
   product-state phrase such as `fresh_signal_present=true` unless the latter
   names a concrete StrategyGroup, symbol, side, and candidate/auth record.
-- A stale Server Monitor `healthy_waiting_quiet` artifact is weaker than a newer
-  Candidate Pool with `action_time_lane_inputs`.
+- A stale monitor `healthy_waiting_quiet` projection is weaker than a newer
+  action-time lane projection with open `action_time_lane_inputs`.
 - A missing Feishu send is not evidence that no signal existed. It may mean
   `notification.configured=false`, `duplicate_suppressed=true`, or a send
   failure.
@@ -346,7 +345,7 @@ Use this decision tree:
 ```text
 continuous watcher coverage for the date?
   no -> cannot prove market had no opportunity for the whole window
-  yes -> any fresh/live-submit-allowed satisfied candidate in Candidate Pool?
+  yes -> any fresh/live-submit-allowed satisfied candidate in PG current state?
     no -> market/no-signal for covered window
     yes -> did it reach action_time_lane_input?
       no -> engineering/scope/classification boundary
@@ -406,8 +405,8 @@ Before final response, verify:
 - The answer says whether the date-window coverage is proven or incomplete.
 - The answer names every detected `would_enter`, `promotion_candidate`, or
   `action_time_lane_input`.
-- The answer compares Candidate Pool, Daily Table, Server Monitor, Refresh
-  Sequence, and Goal Status freshness before making a no-signal or no-notify
+- The answer compares PG current signal, promotion, action-time lane, ticket,
+  monitor, and notification timestamps before making a no-signal or no-notify
   claim.
 - The answer distinguishes market-not-satisfied from system-blocked.
 - The answer distinguishes detection from server-monitor classification and
@@ -420,7 +419,7 @@ Before final response, verify:
   `no_execution_permission`, `not_order`, and the next valid promotion/matching
   step.
 - If a blocked runtime lane is discussed, the answer reports the concrete
-  blocker such as position/order conflict, missing `signal_input_json`, or
+  blocker such as position/order conflict, missing signal input record, or
   strategy fact failure.
 - The answer names how far the signal moved: watcher, candidate pool,
   promotion, action-time, candidate/auth, FinalGate, Operation Layer, or submit.
@@ -431,7 +430,8 @@ Before final response, verify:
 - If systemd is discussed, the answer treats watcher/monitor `activating` or
   `inactive/dead` oneshot states as transient/success only after checking
   journal or latest status, and reports true `failed` states separately.
-- The answer cites concrete artifact paths or journal facts.
+- The answer cites concrete PG row identifiers, current projection timestamps,
+  or journal/process facts.
 - The answer preserves authority boundaries:
   `no FinalGate bypass / no Operation Layer bypass / no exchange write`.
 
@@ -485,9 +485,10 @@ it is a strategy condition not satisfied.
 
 Stop and report uncertainty when:
 
-- the queried date has no watcher journal and no historical runtime artifacts;
-- latest files were overwritten and no archival evidence exists;
-- low-level watcher and candidate pool disagree and no named candidate/auth
+- the queried date has no watcher journal and no PG current/audit lineage;
+- PG/current projections are unavailable and no archive-only provenance was
+  explicitly requested;
+- low-level watcher and PG promotion/action-time state disagree and no named candidate/auth
   record can reconcile them;
 - a claim would require reading private exchange/account data that is not
   present in existing account-safe facts.

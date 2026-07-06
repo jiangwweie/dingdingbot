@@ -9,9 +9,6 @@ state.
 
 from __future__ import annotations
 
-import argparse
-import json
-from pathlib import Path
 from typing import Any
 
 
@@ -124,10 +121,6 @@ def build_wakeup_evidence(operator_evidence: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_wakeup_evidence_from_path(operator_evidence_json: str | Path) -> dict[str, Any]:
-    return build_wakeup_evidence(_load_json_object(Path(operator_evidence_json).expanduser()))
-
-
 def _allowed_while_owner_asleep(
     *,
     status: str,
@@ -188,13 +181,6 @@ def _forbidden_effects(source_evidence: dict[str, Any]) -> list[str]:
     return sorted(set(effects))
 
 
-def _load_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"JSON object required: {path}")
-    return payload
-
-
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -209,23 +195,3 @@ def _int(value: Any) -> int:
 def _text_or_none(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--operator-evidence-json", required=True)
-    parser.add_argument("--output-json")
-    args = parser.parse_args(argv)
-
-    artifact = build_wakeup_evidence_from_path(args.operator_evidence_json)
-    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
-    if args.output_json:
-        output_path = Path(args.output_json).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(payload + "\n", encoding="utf-8")
-    print(payload)
-    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

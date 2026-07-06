@@ -1658,20 +1658,19 @@ Readers: notifier retry loop, runtime audit.
 
 ## Migration Mapping From Current Files
 
-| Current source | DB target |
+| Current source family | DB target |
 | --- | --- |
-| `docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json` | `brc_strategy_groups`, `brc_strategy_group_versions`, existing strategy family tables |
-| `docs/current/strategy-group-handoffs/*/handoff.json` | `brc_strategy_group_versions`, `brc_required_fact_contracts`, evidence refs |
-| `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` | `brc_owner_policy_events`, `brc_owner_policy_current` |
-| `docs/current/strategy-group-handoffs/owner-pretrade-runtime-authorization-v0.json` | `brc_owner_policy_events`, `brc_owner_policy_current`, `brc_strategy_group_candidate_scope`, `brc_runtime_scope_bindings` |
+| Retired StrategyGroup registry seed provenance | Archive-only seed provenance for `brc_strategy_groups`, `brc_strategy_group_versions`, existing strategy family tables |
+| Retired StrategyGroup handoff JSON family | `brc_strategy_group_versions`, `brc_required_fact_contracts`, evidence refs |
+| Retired runtime tier policy JSON family | `brc_owner_policy_events`, `brc_owner_policy_current` |
+| Retired Owner pre-trade authorization JSON family | `brc_owner_policy_events`, `brc_owner_policy_current`, `brc_strategy_group_candidate_scope`, `brc_runtime_scope_bindings` |
 | `DEFAULT_CANDIDATE_UNIVERSE` in scripts | `brc_strategy_group_candidate_scope` |
 | `DEFAULT_SIDE_SCOPE` and broad side fallbacks in scripts | `brc_strategy_group_candidate_scope`, `brc_candidate_scope_event_bindings` |
-| `output/runtime-monitor/latest-runtime-active-observation-status.json` | `brc_watcher_runtime_coverage`, `brc_pretrade_readiness_rows` |
-| `output/runtime-monitor/latest-binance-usdm-public-facts.json` | `brc_runtime_fact_snapshots` |
-| `output/runtime-monitor/latest-account-safe-facts.json` | `brc_runtime_fact_snapshots` |
-| `output/runtime-monitor/latest-strategygroup-tradeability-decision.json` | `brc_control_read_model_snapshots` export |
-| `output/runtime-monitor/latest-strategy-live-candidate-pool.json` | `brc_pretrade_readiness_rows`, `brc_promotion_candidates`, `brc_action_time_lane_inputs`, plus export |
-| `output/runtime-monitor/latest-daily-live-enablement-table.json` | `brc_control_read_model_snapshots` export |
+| Retired active-observation latest export family | `brc_watcher_runtime_coverage`, `brc_pretrade_readiness_rows` |
+| Retired public/account fact latest export family | `brc_runtime_fact_snapshots` |
+| Retired Tradeability latest export family | `brc_control_read_model_snapshots` export |
+| Retired Candidate Pool latest export family | `brc_pretrade_readiness_rows`, `brc_promotion_candidates`, `brc_action_time_lane_inputs`, plus explicit export |
+| Retired Daily Table latest export family | `brc_control_read_model_snapshots` explicit export |
 | server `strategygroup-runtime-goal-status.json` | `brc_goal_status_current` plus export |
 | projection run metadata currently implicit in script execution | `brc_projection_runs`, `brc_current_projection_ownership` |
 | legacy report diagnostics such as `pilot_status.watcher_scope_alignment` | `brc_legacy_diagnostics` |

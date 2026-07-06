@@ -41,8 +41,12 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     RuntimeControlStateRepositoryError,
 )
 
-DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-monitor")
-DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "latest-server-side-runtime-monitor.json"
+PG_CURRENT_PROJECTION_REPORT_DIR = Path("pg_current_projection")
+PG_MONITOR_EVIDENCE_REF = (
+    "pg:brc_server_monitor_runs + "
+    "pg:brc_server_monitor_notifications + "
+    "pg_projection:production_current"
+)
 DEFAULT_SYSTEMD_UNITS = (
     "brc-owner-console-backend.service",
     "brc-runtime-signal-watcher.timer",
@@ -77,15 +81,6 @@ class CommandResult:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -437,7 +432,7 @@ def _notification_title(decision: dict[str, Any]) -> str:
     return "BRC 生产监控：系统运行状态提醒"
 
 
-def _notification_text(decision: dict[str, Any], artifact_path: Path) -> str:
+def _notification_text(decision: dict[str, Any], evidence_ref: str) -> str:
     reasons = ", ".join(str(item) for item in decision.get("reasons") or [])
     return "\n".join(
         [
@@ -447,7 +442,7 @@ def _notification_text(decision: dict[str, Any], artifact_path: Path) -> str:
             f"阻断: {decision.get('blocker_class')}",
             f"检查点: {decision.get('checkpoint')}",
             f"原因: {reasons or '-'}",
-            f"证据: {artifact_path}",
+            f"证据: {evidence_ref}",
         ]
     )
 
@@ -500,7 +495,7 @@ def _apply_pg_notification(
     *,
     conn: sa.engine.Connection,
     decision: dict[str, Any],
-    output_json: Path,
+    evidence_ref: str,
     webhook_url: str | None,
     webhook_secret: str | None,
     notification_timeout_seconds: float,
@@ -545,13 +540,13 @@ def _apply_pg_notification(
         notification["skipped_reason"] = "feishu_webhook_url_missing"
     elif notification_dry_run:
         notification["skipped_reason"] = "notification_dry_run"
-        notification["message_preview"] = _notification_text(decision, output_json)[:1000]
+        notification["message_preview"] = _notification_text(decision, evidence_ref)[:1000]
     else:
         sender = notifier or send_feishu_text
         result = sender(
             webhook_url,
             webhook_secret,
-            {"text": _notification_text(decision, output_json)},
+            {"text": _notification_text(decision, evidence_ref)},
             notification_timeout_seconds,
         )
         notification.update({"attempted": True, **result})
@@ -721,7 +716,6 @@ def build_server_monitor_artifact_from_pg(
 
     now = _utc_now()
     repository = PgBackedRuntimeControlStateRepository(conn)
-    report_dir = Path(args.output_json).parent
     systemd = (
         {"checked": False, "ready": True, "rows": [], "blockers": []}
         if args.skip_systemd
@@ -733,7 +727,6 @@ def build_server_monitor_artifact_from_pg(
         candidate_pool = build_strategy_live_candidate_pool_from_control_state(control_state)
         goal_status = build_goal_status_artifact_from_control_state(
             control_state=control_state,
-            report_dir=report_dir,
         )
         decision = _decision_from_pg_sources(
             goal_status=goal_status,
@@ -760,13 +753,12 @@ def build_server_monitor_artifact_from_pg(
             "table_counts": {},
             "error_class": "RuntimeControlStateRepositoryError",
         }
-    output_json = Path(args.output_json)
     webhook_url = args.feishu_webhook_url or _env_value(FEISHU_WEBHOOK_URL_ENV_NAMES)
     webhook_secret = args.feishu_webhook_secret or _env_value(FEISHU_WEBHOOK_SECRET_ENV_NAMES)
     notification, dedupe_state = _apply_pg_notification(
         conn=conn,
         decision=decision,
-        output_json=output_json,
+        evidence_ref=PG_MONITOR_EVIDENCE_REF,
         webhook_url=webhook_url,
         webhook_secret=webhook_secret,
         notification_timeout_seconds=args.notification_timeout_seconds,
@@ -820,7 +812,7 @@ def build_server_monitor_artifact_from_pg(
         },
         "safety_invariants": {
             "server_side_monitor": True,
-            "local_monitor_sequence_used": False,
+            "legacy_file_monitor_used": False,
             "local_cache_as_production_truth": False,
             "calls_finalgate": False,
             "calls_operation_layer": False,
@@ -835,7 +827,6 @@ def build_server_monitor_artifact_from_pg(
             "replay_or_synthetic_used_as_live_required_facts": False,
         },
     }
-    _write_json(output_json, artifact)
     return artifact
 
 
@@ -843,7 +834,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run Tokyo server-side readonly runtime monitor.",
     )
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--systemd-unit", action="append")
     parser.add_argument("--skip-systemd", action="store_true")
     parser.add_argument("--notification-timeout-seconds", type=float, default=10.0)

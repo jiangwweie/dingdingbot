@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -9,7 +8,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR_PATH = REPO_ROOT / "scripts" / "validate_output_artifact_scope.py"
-MANIFEST_PATH = REPO_ROOT / "config" / "output_control_snapshots.json"
 
 
 def _load_module():
@@ -25,72 +23,74 @@ def _load_module():
     return module
 
 
-def _manifest() -> dict:
-    return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-
-
-def test_output_artifact_manifest_is_valid():
+def test_output_artifact_scope_rejects_previous_control_snapshot_pair():
     module = _load_module()
-
-    assert module.validate_manifest(_manifest()) == []
-
-
-def test_output_artifact_scope_accepts_control_snapshot_pair():
-    module = _load_module()
-    manifest = _manifest()
 
     errors = module.validate_changed_output_paths(
         [
             "output/runtime-monitor/latest-daily-live-enablement-table.json",
             "output/runtime-monitor/latest-daily-live-enablement-table.md",
-        ],
-        manifest,
+        ]
     )
 
-    assert errors == []
+    assert errors == [
+        "output/runtime-monitor/latest-daily-live-enablement-table.json is generated output; do not include output/** in routine commits",
+        "output/runtime-monitor/latest-daily-live-enablement-table.md is generated output; do not include output/** in routine commits",
+    ]
 
 
 def test_output_artifact_scope_rejects_volatile_public_facts():
     module = _load_module()
-    manifest = _manifest()
 
     errors = module.validate_changed_output_paths(
-        ["output/runtime-monitor/latest-binance-usdm-public-facts.json"],
-        manifest,
+        ["output/runtime-monitor/latest-binance-usdm-public-facts.json"]
     )
 
-    assert any("volatile output" in error for error in errors)
+    assert errors == [
+        "output/runtime-monitor/latest-binance-usdm-public-facts.json is generated output; do not include output/** in routine commits"
+    ]
 
 
 def test_output_artifact_scope_rejects_unknown_output():
     module = _load_module()
-    manifest = _manifest()
 
     errors = module.validate_changed_output_paths(
-        ["output/runtime-monitor/latest-random-summary.json"],
-        manifest,
+        ["output/runtime-monitor/latest-random-summary.json"]
     )
 
-    assert any("not an approved control snapshot" in error for error in errors)
+    assert errors == [
+        "output/runtime-monitor/latest-random-summary.json is generated output; do not include output/** in routine commits"
+    ]
 
 
-def test_output_artifact_scope_rejects_tracked_non_snapshot_output():
+def test_output_artifact_scope_rejects_existing_tracked_output(tmp_path: Path):
     module = _load_module()
-    manifest = _manifest()
+    existing = tmp_path / "output" / "runtime-monitor" / "latest-daily-live-enablement-table.json"
+    existing.parent.mkdir(parents=True)
+    existing.touch()
 
     errors = module.validate_tracked_output_paths(
         [
             "output/runtime-monitor/latest-daily-live-enablement-table.json",
             "output/runtime-monitor/latest-random-summary.json",
         ],
-        manifest,
+        repo_root=tmp_path,
     )
 
     assert errors == [
-        "output/runtime-monitor/latest-random-summary.json is tracked but is not "
-        "an approved control snapshot; remove it from the git index or add it to "
-        "the manifest with a source command and validator"
+        "output/runtime-monitor/latest-daily-live-enablement-table.json is tracked generated output; remove it from git",
     ]
+
+
+def test_output_artifact_scope_allows_deleted_tracked_output_cleanup(tmp_path: Path):
+    module = _load_module()
+
+    errors = module.validate_tracked_output_paths(
+        ["output/runtime-monitor/latest-daily-live-enablement-table.json"],
+        repo_root=tmp_path,
+    )
+
+    assert errors == []
 
 
 def test_output_artifact_scope_cli_path_round_trip():
@@ -112,7 +112,8 @@ def test_output_artifact_scope_cli_path_round_trip():
         check=False,
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 1
+    assert "do not include output/** in routine commits" in result.stderr
 
 
 def test_git_status_parser_ignores_output_deletions_for_cleanup():

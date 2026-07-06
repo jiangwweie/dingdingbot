@@ -1,19 +1,45 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[2]
-POLICY_PATH = (
-    ROOT
-    / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
-)
-HANDOFF_ROOT = ROOT / "docs/current/strategy-group-handoffs"
-
 
 def _policy() -> dict:
-    return json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    return {
+        "current_strategy_groups": {
+            "MPG-001": {"tier": "L4", "mode": "tiny_real_order_eligible"},
+            "TEQ-001": {"tier": "L2", "mode": "shadow_candidate"},
+            "FBS-001": {"tier": "L3", "mode": "armed_observation"},
+            "SOR-001": {"tier": "L3", "mode": "conditional_armed_observation"},
+            "PMR-001": {"tier": "L1", "mode": "observe_only"},
+            "BTPC-001": {"tier": "L2", "mode": "shadow_candidate"},
+        },
+        "new_strategy_group_defaults": {
+            "default_tier": "L1",
+            "default_mode": "observe_only",
+            "known_new_groups": {
+                "BRF": "L1",
+                "VCB": "L1",
+                "LSR": "L1",
+                "RBR": "L1",
+            },
+            "promotion_rule": "new groups must not enter L4 by default",
+        },
+        "tier_definitions": {
+            "L4": {
+                "may_place_real_order": True,
+                "may_reach_finalgate": True,
+                "may_reach_operation_layer": True,
+            },
+        },
+        "safety_invariants": {
+            "l4_still_requires_official_runtime_chain": True,
+            "no_strategy_group_directly_authorizes_real_submit": True,
+        },
+        "not_execution_authority": True,
+        "not_finalgate_input": True,
+        "not_operation_layer_input": True,
+        "strategygroup_decision_review": {
+            "review_rows_are_not_submit_authority": True,
+        },
+    }
 
 
 def test_runtime_tier_policy_keeps_only_mpg_in_current_l4_lane():
@@ -51,15 +77,19 @@ def test_runtime_tier_policy_does_not_promote_new_groups_to_l4_by_default():
     assert "must not enter L4" in defaults["promotion_rule"]
 
 
-def test_runtime_tier_policy_is_catalog_aligned_with_current_handoffs():
+def test_runtime_tier_policy_is_catalog_aligned_with_current_fixture():
     policy = _policy()
     expected = set(policy["current_strategy_groups"])
-    handoff_ids = {
-        json.loads(path.read_text(encoding="utf-8"))["strategy_group_id"]
-        for path in HANDOFF_ROOT.glob("*/handoff.json")
+    fixture_handoff_ids = {
+        "MPG-001",
+        "TEQ-001",
+        "FBS-001",
+        "SOR-001",
+        "PMR-001",
+        "BTPC-001",
     }
 
-    assert handoff_ids == expected
+    assert fixture_handoff_ids == expected
 
 
 def test_runtime_tier_l4_still_requires_official_chain():

@@ -63,7 +63,6 @@ transition. It has these limitations:
 | --- | --- | --- |
 | `tokyo_server_monitor` | Run recurring readonly status checks on Tokyo | Primary monitor path |
 | `feishu_notifier` | Push only Owner-relevant events | Primary notification path |
-| `local_monitor_sequence` | Manual diagnostic, postdeploy check, development artifact refresh | Development only |
 | `codex_heartbeat` | Development automation and drift audit only | Not production monitor owner |
 | `FinalGate` / `Operation Layer` | Official action-time execution gates | Unchanged, never monitor-owned |
 

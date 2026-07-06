@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the five StrategyGroup live-candidate pool control snapshot."""
+"""Build the five StrategyGroup live-candidate pool PG-backed export."""
 
 from __future__ import annotations
 
@@ -33,13 +33,6 @@ from scripts.build_daily_live_enablement_table import (  # noqa: E402
 
 SCHEMA = "brc.strategy_live_candidate_pool.v1"
 OWNER_AUTHORIZATION_SCHEMA = "brc.owner_pretrade_runtime_authorization.v0"
-DEFAULT_OUTPUT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.json"
-)
-DEFAULT_OUTPUT_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.md"
-)
-
 AUTHORITY_BOUNDARY = (
     "live_candidate_pool_is_read_model; "
     "no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change"
@@ -119,8 +112,6 @@ P0_P1_ITEMS = (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
-    parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
         "--database-url",
         default=os.getenv("PG_DATABASE_URL", ""),
@@ -165,10 +156,6 @@ def main(argv: list[str] | None = None) -> int:
             )
     finally:
         engine.dispose()
-    output_json = Path(args.output_json)
-    output_md = Path(args.output_owner_progress)
-    _write_json(output_json, artifact)
-    _write_text(output_md, _markdown(artifact, output_json))
     print(
         json.dumps(
             {
@@ -1534,8 +1521,8 @@ def _mi_trial_admission_symbol_facts(
 
 def _mi_failed_facts(row: dict[str, Any]) -> list[str]:
     failed: list[str] = []
-    if row.get("replay_supported") is not True:
-        failed.append("replay_supported")
+    if row.get("strategy_scope_supported") is not True:
+        failed.append("strategy_scope_supported")
     if row.get("public_facts_ready") is not True:
         failed.append("public_facts_ready")
     liquidity = _as_dict(row.get("liquidity"))
@@ -1544,7 +1531,7 @@ def _mi_failed_facts(row: dict[str, Any]) -> list[str]:
             failed.append(key)
     if row.get("funding_not_extreme") is not True:
         failed.append("funding_not_extreme")
-    if str(row.get("strategy_fit") or "") == "not_supported_by_current_replay":
+    if str(row.get("strategy_fit") or "") == "not_supported_by_strategy_scope":
         failed.append("strategy_fit")
     return sorted(set(failed))
 
@@ -2438,12 +2425,12 @@ def _symbol_evidence_ref(
 ) -> str:
     if runtime_coverage_row and runtime_coverage_row.get("blocker_class") == first_blocker:
         return (
-            "runtime_active_observation_status:candidate_universe_coverage:"
+            "pg_watcher_runtime_coverage:candidate_universe_coverage:"
             f"{strategy_group_id}/{symbol} first_blocker={first_blocker}"
         )
     if first_blocker == "runtime_profile_scope_missing" and not runtime_coverage_row:
         return (
-            "runtime_active_observation_status:candidate_universe_coverage:"
+            "pg_watcher_runtime_coverage:candidate_universe_coverage:"
             f"{strategy_group_id}/{symbol} missing_active_watcher_scope"
         )
     if parity_row:
@@ -3135,7 +3122,7 @@ def _p0_p1_status(
     if item == "output_whitelist_gate":
         return (
             "cleared",
-            "deploy gate reruns validate_output_artifact_scope.py --git-status",
+            "deploy gate reruns validate_output_artifact_scope.py --git-status to reject routine output commits",
             "run validate_output_artifact_scope.py --git-status",
         )
     if item == "no_stale_facts":
@@ -3227,70 +3214,6 @@ def _source_validation(
         "valid": all(sources.values()),
         "sources": sources,
     }
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
-    lines = [
-        "## Strategy Live Candidate Pool",
-        "",
-        f"- Status: `{artifact['status']}`",
-        f"- Candidate count: `{artifact['summary']['candidate_count']}`",
-        f"- Symbol readiness rows: `{artifact['summary']['symbol_readiness_count']}`",
-        f"- Fresh promotion candidates: `{artifact['summary']['fresh_candidate_count']}`",
-        f"- Top action-time candidate: `{artifact['summary']['top_action_time_candidate']}`",
-        f"- P0 cleared: `{artifact['summary']['p0_cleared']}`",
-        f"- P1 cleared or waived: `{artifact['summary']['p1_cleared_or_waived']}`",
-        f"- Deploy ready: `{artifact['summary']['deploy_ready']}`",
-        f"- Output JSON: `{output_json}`",
-        "",
-        "| StrategyGroup | Symbol | Status | First blocker | Next action |",
-        "| --- | --- | --- | --- | --- |",
-    ]
-    for row in artifact["candidate_rows"]:
-        lines.append(
-            "| {strategy_group_id} | {selected_symbol} | {candidate_status} | "
-            "{first_blocker} | {next_engineering_action} |".format(**row)
-        )
-    lines.extend(
-        [
-            "",
-            "## Per-Symbol Readiness",
-            "",
-            "| StrategyGroup | Symbol | Facts | Signal | Scope | Promotion | First blocker |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
-        ]
-    )
-    for row in artifact["symbol_readiness_rows"]:
-        facts = _as_dict(row.get("public_facts_state")).get("state", "unknown")
-        lines.append(
-            "| {strategy_group_id} | {symbol} | {facts} | {signal_state} | "
-            "{scope_state} | {promotion_state} | {first_blocker} |".format(
-                facts=facts,
-                **row,
-            )
-        )
-    return "\n".join(lines) + "\n"
 
 
 def _dict_rows(value: Any) -> list[dict[str, Any]]:

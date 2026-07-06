@@ -36,13 +36,6 @@ from runtime_pg_fact_snapshots import (  # noqa: E402
 )
 
 
-DEFAULT_OUTPUT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.json"
-)
-DEFAULT_OUTPUT_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.md"
-)
-
 SCHEMA = "brc.binance_usdm_public_facts.v1"
 BASE_URL = "https://fapi.binance.com"
 DEFAULT_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT")
@@ -77,8 +70,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Allow SQLite/non-PG DSNs only in tests.",
     )
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
-    parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
 
     if not args.database_url:
@@ -114,10 +105,6 @@ def main(argv: list[str] | None = None) -> int:
     artifact["source_mode"] = "db_backed"
     artifact["projection_target"] = "production_current"
     artifact["pg_fact_snapshot_ids"] = fact_snapshot_ids
-    output_json = Path(args.output_json)
-    output_md = Path(args.output_owner_progress)
-    _write_json(output_json, artifact)
-    _write_text(output_md, _markdown(artifact, output_json))
     print(
         json.dumps(
             {
@@ -127,7 +114,6 @@ def main(argv: list[str] | None = None) -> int:
                 "remote_interaction_count": artifact["interaction"][
                     "remote_interaction_count"
                 ],
-                "output_json": str(output_json),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -575,46 +561,6 @@ def _interaction_with_remote_count(level: str, count: int) -> dict[str, Any]:
     interaction = non_executing_interaction(level)
     interaction["remote_interaction_count"] = count
     return interaction
-
-
-def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
-    lines = [
-        "## Binance USD-M Public Facts",
-        "",
-        f"- Status: `{artifact['status']}`",
-        f"- Ready symbols: `{artifact['summary']['ready_symbol_count']}` / `{artifact['summary']['symbol_count']}`",
-        f"- Remote interactions: `{artifact['interaction']['remote_interaction_count']}`",
-        f"- Output JSON: `{output_json}`",
-        "",
-        "| Symbol | Ready | Spread bps | Funding | Min notional | Qty step |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
-    ]
-    for row in artifact["symbols"]:
-        facts = row.get("facts") or {}
-        lines.append(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
-                row["symbol"],
-                str(row["public_facts_ready"]).lower(),
-                facts.get("spread_bps"),
-                facts.get("last_funding_rate"),
-                facts.get("min_notional"),
-                facts.get("qty_step"),
-            )
-        )
-    return "\n".join(lines) + "\n"
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":

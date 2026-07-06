@@ -327,19 +327,12 @@ def test_daily_table_pg_runtime_safety_projection_uses_snapshot_id(
 
 
 def test_daily_table_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: Path):
-    output_json = tmp_path / "daily.json"
-    output_md = tmp_path / "daily.md"
-
     build = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
             "--database-url",
             f"sqlite:///{tmp_path / 'runtime.db'}",
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
         ],
         text=True,
         capture_output=True,
@@ -348,8 +341,6 @@ def test_daily_table_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: Path):
 
     assert build.returncode == 2
     assert "requires PostgreSQL DSN" in build.stderr
-    assert not output_json.exists()
-    assert not output_md.exists()
 
 
 def test_daily_table_pg_cli_requires_database_url_when_requested(
@@ -357,18 +348,11 @@ def test_daily_table_pg_cli_requires_database_url_when_requested(
     monkeypatch,
 ):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    output_json = tmp_path / "daily.json"
-    output_md = tmp_path / "daily.md"
-
     build = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
             "--require-database-url",
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
         ],
         text=True,
         capture_output=True,
@@ -377,8 +361,6 @@ def test_daily_table_pg_cli_requires_database_url_when_requested(
 
     assert build.returncode == 2
     assert "PG_DATABASE_URL is required" in build.stderr
-    assert not output_json.exists()
-    assert not output_md.exists()
 
 
 def test_daily_table_cli_requires_pg(
@@ -386,18 +368,8 @@ def test_daily_table_cli_requires_pg(
     monkeypatch,
 ):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    output_json = tmp_path / "daily.json"
-    output_md = tmp_path / "daily.md"
-
     build = subprocess.run(
-        [
-            sys.executable,
-            str(BUILDER_PATH),
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
-        ],
+        [sys.executable, str(BUILDER_PATH)],
         text=True,
         capture_output=True,
         check=False,
@@ -405,8 +377,6 @@ def test_daily_table_cli_requires_pg(
 
     assert build.returncode == 2
     assert "PG_DATABASE_URL is required for PG-only Daily Table" in build.stderr
-    assert not output_json.exists()
-    assert not output_md.exists()
 
 
 def test_daily_table_pg_cli_round_trip(tmp_path: Path):
@@ -425,9 +395,6 @@ def test_daily_table_pg_cli_round_trip(tmp_path: Path):
             seed.seed_runtime_control_state_foundation(conn)
     finally:
         engine.dispose()
-    output_json = tmp_path / "daily.json"
-    output_md = tmp_path / "daily.md"
-
     build = subprocess.run(
         [
             sys.executable,
@@ -435,10 +402,6 @@ def test_daily_table_pg_cli_round_trip(tmp_path: Path):
             "--database-url",
             database_url,
             "--allow-non-postgres-for-test",
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
         ],
         text=True,
         capture_output=True,
@@ -446,11 +409,9 @@ def test_daily_table_pg_cli_round_trip(tmp_path: Path):
     )
 
     assert build.returncode == 0, build.stdout + build.stderr
-    table = json.loads(output_json.read_text(encoding="utf-8"))
-    assert table["source_mode"] == "db_backed"
-    assert table["summary"]["row_count"] == 5
-    assert output_md.exists()
-    assert _errors(table) == []
+    summary = json.loads(build.stdout)
+    assert summary["status"] == "daily_live_enablement_table_ready"
+    assert summary["row_count"] == 5
 
 
 def test_daily_table_generator_emits_five_wip_rows_and_rank_one():
@@ -1060,18 +1021,11 @@ def test_daily_table_builder_marks_missing_sources_invalid():
 
 def test_daily_table_cli_rejects_local_file_diagnostic_flag(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    output_json = tmp_path / "daily.json"
-    output_md = tmp_path / "daily.md"
-
     result = subprocess.run(
         [
             sys.executable,
             str(BUILDER_PATH),
             "--allow-local-file-diagnostic",
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
         ],
         text=True,
         capture_output=True,
@@ -1079,15 +1033,10 @@ def test_daily_table_cli_rejects_local_file_diagnostic_flag(tmp_path: Path, monk
     )
     assert result.returncode == 2
     assert "unrecognized arguments: --allow-local-file-diagnostic" in result.stderr
-    assert not output_json.exists()
-    assert not output_md.exists()
 
 
 def test_daily_table_cli_rejects_legacy_json_inputs(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    output_json = tmp_path / "daily.json"
-    output_md = tmp_path / "daily.md"
-
     result = subprocess.run(
         [
             sys.executable,
@@ -1102,10 +1051,6 @@ def test_daily_table_cli_rejects_legacy_json_inputs(tmp_path: Path, monkeypatch)
             str(tmp_path / "missing-mi.json"),
             "--runtime-safety-json",
             str(tmp_path / "missing-runtime-safety.json"),
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
         ],
         text=True,
         capture_output=True,
@@ -1113,5 +1058,15 @@ def test_daily_table_cli_rejects_legacy_json_inputs(tmp_path: Path, monkeypatch)
     )
     assert result.returncode == 2
     assert "unrecognized arguments: --tradeability-json" in result.stderr
-    assert not output_json.exists()
-    assert not output_md.exists()
+
+
+def test_daily_table_validator_cli_requires_explicit_artifact_path():
+    result = subprocess.run(
+        [sys.executable, str(VALIDATOR_PATH)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "table_json" in result.stderr

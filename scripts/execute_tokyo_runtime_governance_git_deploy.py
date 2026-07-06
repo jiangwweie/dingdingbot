@@ -16,18 +16,16 @@ REPO_ROOT_FOR_IMPORT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT_FOR_IMPORT))
 
-from scripts.plan_tokyo_runtime_governance_deploy import (
+from scripts.plan_tokyo_runtime_governance_git_deploy import (
     CONFIRMATION_PHRASE,
     DEFAULT_API_BASE,
     DEFAULT_DEPLOY_ROOT,
     DEFAULT_ENV_PATH,
+    DEFAULT_EXPECTED_LATEST_MIGRATION,
+    DEFAULT_GIT_REF,
     DEFAULT_HOST,
     DEFAULT_SERVICE_NAME,
     DEFAULT_VENV_PYTHON,
-)
-from scripts.plan_tokyo_runtime_governance_git_deploy import (
-    DEFAULT_EXPECTED_LATEST_MIGRATION,
-    DEFAULT_GIT_REF,
     GitDeployPlanError,
     build_git_deploy_plan,
 )
@@ -54,11 +52,6 @@ ShellRunner = Callable[[str], ShellResult]
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     repo_root = _repo_root()
-    owner_deploy_artifact = (
-        _load_owner_deploy_artifact(Path(args.owner_deploy_artifact_path))
-        if args.owner_deploy_artifact_path
-        else None
-    )
     repo_url = args.repo_url or _git(repo_root, "remote", "get-url", "origin")
     plan = build_git_deploy_plan(
         repo_root=repo_root,
@@ -82,7 +75,6 @@ def main(argv: list[str] | None = None) -> int:
         plan,
         apply=args.apply,
         confirmation_phrase=args.confirmation_phrase,
-        owner_deploy_artifact=owner_deploy_artifact,
         require_confirmation_phrase=args.require_confirmation_phrase,
     )
     if args.json:
@@ -97,7 +89,6 @@ def execute_git_deploy_plan(
     *,
     apply: bool,
     confirmation_phrase: str | None,
-    owner_deploy_artifact: dict[str, Any] | None = None,
     require_confirmation_phrase: bool = False,
     runner: ShellRunner | None = None,
 ) -> dict[str, Any]:
@@ -135,22 +126,6 @@ def execute_git_deploy_plan(
             blockers=["owner_confirmation_phrase_missing_or_mismatch"],
             command_results=[],
             confirmation_phrase_required=True,
-            confirmation_phrase_matches=confirmation_phrase_matches,
-        )
-
-    artifact_blockers = _owner_deploy_artifact_blockers(
-        plan,
-        owner_deploy_artifact,
-        require_confirmation_phrase=require_confirmation_phrase,
-    )
-    if artifact_blockers:
-        return _execution_report(
-            plan=plan,
-            status="blocked",
-            apply=True,
-            blockers=artifact_blockers,
-            command_results=[],
-            confirmation_phrase_required=require_confirmation_phrase,
             confirmation_phrase_matches=confirmation_phrase_matches,
         )
 
@@ -205,55 +180,6 @@ def execute_git_deploy_plan(
         confirmation_phrase_required=require_confirmation_phrase,
         confirmation_phrase_matches=confirmation_phrase_matches,
     )
-
-
-def _owner_deploy_artifact_blockers(
-    plan: dict[str, Any],
-    artifact: dict[str, Any] | None,
-    *,
-    require_confirmation_phrase: bool = False,
-) -> list[str]:
-    if artifact is None:
-        return []
-
-    blockers: list[str] = []
-    checks = artifact.get("checks") if isinstance(artifact.get("checks"), dict) else {}
-    owner_gate = (
-        artifact.get("owner_gate") if isinstance(artifact.get("owner_gate"), dict) else {}
-    )
-    candidate = (
-        artifact.get("candidate") if isinstance(artifact.get("candidate"), dict) else {}
-    )
-    safety_invariants = (
-        artifact.get("safety_invariants")
-        if isinstance(artifact.get("safety_invariants"), dict)
-        else {}
-    )
-    plan_release = plan.get("release") if isinstance(plan.get("release"), dict) else {}
-    plan_inputs = plan.get("inputs") if isinstance(plan.get("inputs"), dict) else {}
-
-    if artifact.get("status") != "ready_for_owner_git_deploy_decision":
-        blockers.append("owner_git_deploy_confirmation_record_not_ready")
-    if checks.get("ready_for_owner_git_deploy_decision") is not True:
-        blockers.append("owner_git_deploy_decision_check_not_ready")
-    if checks.get("blockers"):
-        blockers.append("owner_git_deploy_artifact_has_blockers")
-    if checks.get("forbidden_effects"):
-        blockers.append("owner_git_deploy_artifact_contains_forbidden_effects")
-    if (
-        require_confirmation_phrase
-        and owner_gate.get("deploy_confirmation_phrase") != CONFIRMATION_PHRASE
-    ):
-        blockers.append("owner_git_deploy_artifact_confirmation_phrase_mismatch")
-    if candidate.get("head") != plan_release.get("head"):
-        blockers.append("owner_git_deploy_artifact_head_mismatch")
-    if candidate.get("repo_url") != plan_inputs.get("repo_url"):
-        blockers.append("owner_git_deploy_artifact_repo_url_mismatch")
-    if candidate.get("git_ref") != plan_inputs.get("git_ref"):
-        blockers.append("owner_git_deploy_artifact_git_ref_mismatch")
-    if safety_invariants.get("deploy_apply_requested") is True:
-        blockers.append("owner_git_deploy_artifact_was_built_from_apply")
-    return blockers
 
 
 def _remote_mutation_phase_authorized(
@@ -375,7 +301,7 @@ def _owner_deploy_summary(
         "blockers": blockers,
         "changed": {
             "remote_files": bool(effects.get("remote_files_modified")),
-            "database_backup": bool(effects.get("database_backup_created")),
+            "deploy_backup": False,
             "migrations": bool(effects.get("migrations_run")),
             "services_restarted": bool(effects.get("services_restarted")),
         },
@@ -426,9 +352,7 @@ def _effects_from_command_results(
                 or any("ln -sfn" in command for command in successful_commands)
             )
         ),
-        "database_backup_created": bool(
-            apply and any("pg_dump" in command for command in successful_commands)
-        ),
+        "deploy_backup_created": False,
         "migrations_run": bool(
             apply
             and any("alembic upgrade head" in command for command in successful_commands)
@@ -504,24 +428,6 @@ def _git(repo_root: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-def _load_owner_deploy_artifact(path: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(path.read_text())
-    except OSError as exc:
-        raise GitDeployExecutionError(
-            f"owner git deploy confirmation record unreadable: {path}"
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise GitDeployExecutionError(
-            f"owner git deploy confirmation record is not JSON: {path}"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise GitDeployExecutionError(
-            "owner git deploy confirmation record must be a JSON object"
-        )
-    return payload
-
-
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Dry-run or apply an owner-gated git-based Tokyo deploy plan."
@@ -559,15 +465,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--require-confirmation-phrase",
         action="store_true",
         help="Require the legacy exact confirmation phrase even during apply.",
-    )
-    parser.add_argument(
-        "--owner-deploy-artifact-path",
-        default=None,
-        help=(
-            "Optional with --apply: JSON output from "
-            "build_tokyo_runtime_governance_git_owner_deploy_policy_artifact.py for the "
-            "same repo/ref/commit."
-        ),
     )
     return parser.parse_args(argv)
 

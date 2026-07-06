@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
-import json
 import os
 import time
 from dataclasses import dataclass
@@ -74,15 +73,9 @@ from src.application.readmodels.owner_projection import (
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
 )
-from scripts.build_strategy_group_handoff_intake_artifact import (
-    DEFAULT_HANDOFF_DIR as DEFAULT_STRATEGY_GROUP_HANDOFF_DIR,
-    DEFAULT_SOURCE_BRANCH as DEFAULT_STRATEGY_GROUP_HANDOFF_BRANCH,
-    DEFAULT_SOURCE_COMMIT as DEFAULT_STRATEGY_GROUP_HANDOFF_COMMIT,
-    DEFAULT_SOURCE_REPO as DEFAULT_STRATEGY_GROUP_HANDOFF_REPO,
-    build_artifact as build_strategy_group_handoff_intake_artifact,
-)
 from scripts.build_strategy_group_live_facts_readiness_artifact import (
     build_blocked_pg_readiness_artifact as build_strategy_group_blocked_pg_live_facts_artifact,
+    build_strategy_group_intake_artifact_from_candidate_pool,
     build_readiness_artifact_from_database_url as build_strategy_group_live_facts_readiness_artifact_from_database_url,
 )
 from scripts.build_strategygroup_runtime_pilot_status import (
@@ -93,58 +86,6 @@ from scripts.build_strategygroup_runtime_pilot_status import (
 DEFAULT_SYMBOL = "BNB/USDT:USDT"
 DEFAULT_CARRIER_ID = "MI-001-BNB-LONG"
 DEFAULT_STRATEGY_FAMILY_ID = "MI-001"
-DEFAULT_SIGNAL_WATCHER_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher"
-DEFAULT_STRATEGY_GROUP_REPORT_DIR = "/home/ubuntu/brc-deploy/reports/strategygroup-runtime-pilot"
-DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH = (
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "strategy-group-intake-evidence.json"
-)
-DEFAULT_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH = (
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "runtime-dry-run-audit-chain.json"
-)
-DEFAULT_STRATEGYGROUP_RUNTIME_GOAL_STATUS_PATH = (
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "strategygroup-runtime-goal-status.json"
-)
-DEFAULT_TOKYO_DEPLOY_CHANNEL_STATUS_PATH = (
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "tokyo-deploy-channel-status.json"
-)
-DEFAULT_TOKYO_READONLY_PROBE_STATUS_PATH = (
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "tokyo-readonly-probe-current.json"
-)
-OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS = {
-    "required_scenarios_present",
-    "all_scenarios_passed",
-    "dangerous_effects_absent",
-    "disabled_smoke_not_real_execution_proof",
-    "ticket_bound_operation_layer_handoff_checked",
-    "ticket_bound_protected_submit_boundary_checked",
-    "scoped_pipeline_operation_layer_submit_projection_checked",
-    "fresh_signal_fast_auto_chain_checked",
-    "legacy_authorization_finalgate_ready_retirement_checked",
-    "legacy_authorization_submit_retirement_checked",
-    "operation_layer_blocker_review_policy_checked",
-    "operation_layer_hard_safety_blocker_matrix_checked",
-    "expanded_watcher_scope_execution_guard_checked",
-    "operation_layer_authorization_chain_guard_checked",
-    "post_submit_closed_loop_evidence_guard_checked",
-    "operation_layer_submit_result_identity_guard_checked",
-    "post_submit_finalize_result_identity_guard_checked",
-    "execution_attempt_rehearsal_prepare_checked",
-    "shared_runtime_pipeline_checked",
-    "common_execution_chain_reuse_checked",
-    "strategygroup_adapter_boundary_checked",
-    "strategy_intake_no_execution_pipeline_fields_checked",
-    "runtime_tier_policy_checked",
-    "only_mpg_tiny_real_order_eligible_checked",
-    "new_strategygroups_default_observe_only_checked",
-    "selected_strategygroup_dispatch_guard_checked",
-    "all_selected_strategygroups_reach_finalgate_dispatch_checked",
-}
-DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_GLOB = "strategy-group-intake-evidence-*.json"
 EXCHANGE_READ_TIMEOUT_SECONDS = 8.0
 OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
 PROTECTION_ROLES = {"SL", "TP1", "TP2", "TP3", "TP4", "TP5"}
@@ -161,6 +102,8 @@ SIGNAL_WATCHER_UNSAFE_FLAGS = {
     "runtime_budget_mutated",
     "withdrawal_or_transfer_created",
 }
+
+PG_CURRENT_PROJECTION_ERROR_CLASS = "pg_current_projection_unavailable"
 
 
 def _runtime_signal_watcher_owner_state(
@@ -344,27 +287,25 @@ def _runtime_signal_watcher_action_time_resume(
 @dataclass(frozen=True)
 class _RuntimeSignalWatcherDeploymentProjection:
     status: str
-    report_dir: Path
-    file_status: dict[str, dict[str, Any]]
+    source_mode: str
+    projection_target: str
     latest_evidence_age_seconds: int | None
     stale_after_seconds: int
-    feishu_configured: bool
-    notification_state: dict[str, Any]
+    control_state_watermark: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
-            "report_dir": str(self.report_dir),
-            "file_status": copy.deepcopy(self.file_status),
+            "source_mode": self.source_mode,
+            "projection_target": self.projection_target,
+            "report_files_read": False,
+            "legacy_json_fallback": False,
+            "control_state_watermark": copy.deepcopy(self.control_state_watermark),
             "latest_evidence_age_seconds": self.latest_evidence_age_seconds,
             "stale_after_seconds": self.stale_after_seconds,
-            "systemd_timer": "verified_by_deployment_readiness_artifact",
-            "feishu_configured": self.feishu_configured,
-            "duplicate_suppression": (
-                "active"
-                if self.notification_state.get("last_notified_event_key")
-                else "not_yet_observed"
-            ),
+            "systemd_timer": "not_checked_by_owner_readmodel",
+            "feishu_configured": None,
+            "duplicate_suppression": "owned_by_server_monitor_pg_projection",
         }
 
 
@@ -438,7 +379,7 @@ class _RuntimeSignalWatcherResumeProjection:
     action_time_resume: dict[str, Any]
     can_resume_steps_5_8: bool
     post_signal_auto_resume: dict[str, Any]
-    resume_pack_path: Path
+    resume_pack_ref: str
     resume_pack_present: bool
     raw_resume_pack_status: Any
 
@@ -456,7 +397,7 @@ class _RuntimeSignalWatcherResumeProjection:
             ),
             "post_signal_auto_resume": copy.deepcopy(self.post_signal_auto_resume),
             "action_time_resume": copy.deepcopy(self.action_time_resume),
-            "resume_pack_path": str(self.resume_pack_path),
+            "resume_pack_ref": self.resume_pack_ref,
             "resume_pack_present": self.resume_pack_present,
             "raw_resume_pack_status": self.raw_resume_pack_status,
         }
@@ -570,6 +511,89 @@ class TradingConsoleReadModelService:
 
     def __init__(self, deps: TradingConsoleDependencies) -> None:
         self._deps = deps
+        self._runtime_control_projection_cache: dict[str, Any] | None = None
+
+    def _runtime_control_current_projections(
+        self,
+        *,
+        generated_at_ms: int,
+    ) -> dict[str, Any]:
+        if self._runtime_control_projection_cache is not None:
+            return self._runtime_control_projection_cache
+
+        database_url = str(os.getenv("PG_DATABASE_URL") or "").strip()
+        if not database_url:
+            self._runtime_control_projection_cache = {
+                "status": "unavailable",
+                "source_mode": "db_backed_required",
+                "projection_target": "production_current",
+                "generated_at_ms": generated_at_ms,
+                "error": "PG_DATABASE_URL missing",
+                "candidate_pool": {},
+                "goal_status": {},
+                "control_state_watermark": {
+                    "schema": "unavailable",
+                    "table_counts": {},
+                },
+            }
+            return self._runtime_control_projection_cache
+
+        try:
+            import sqlalchemy as sa
+
+            from scripts.build_strategy_live_candidate_pool import (
+                build_strategy_live_candidate_pool_from_control_state,
+            )
+            from scripts.build_strategygroup_runtime_goal_status import (
+                build_goal_status_artifact_from_control_state,
+            )
+            from src.infrastructure.runtime_control_state_repository import (
+                PgBackedRuntimeControlStateRepository,
+            )
+
+            engine = sa.create_engine(database_url)
+            try:
+                with engine.connect() as conn:
+                    control_state = PgBackedRuntimeControlStateRepository(
+                        conn
+                    ).read_control_state()
+            finally:
+                engine.dispose()
+            candidate_pool = build_strategy_live_candidate_pool_from_control_state(
+                control_state
+            )
+            goal_status = build_goal_status_artifact_from_control_state(
+                control_state=control_state,
+            )
+            self._runtime_control_projection_cache = {
+                "status": "ready",
+                "source_mode": "db_backed",
+                "projection_target": "production_current",
+                "generated_at_ms": generated_at_ms,
+                "error": "",
+                "candidate_pool": candidate_pool,
+                "goal_status": goal_status,
+                "control_state_watermark": {
+                    "schema": str(control_state.get("schema") or ""),
+                    "table_counts": _as_dict(control_state.get("table_counts")),
+                },
+            }
+        except Exception as exc:
+            self._runtime_control_projection_cache = {
+                "status": "unavailable",
+                "source_mode": "db_backed_required",
+                "projection_target": "production_current",
+                "generated_at_ms": generated_at_ms,
+                "error": f"{type(exc).__name__}: {exc}",
+                "candidate_pool": {},
+                "goal_status": {},
+                "control_state_watermark": {
+                    "schema": "unavailable",
+                    "table_counts": {},
+                    "error_class": type(exc).__name__,
+                },
+            }
+        return self._runtime_control_projection_cache
 
     async def snapshot(
         self,
@@ -1696,121 +1720,52 @@ class TradingConsoleReadModelService:
         stale_after_seconds: int = 180,
     ) -> TradingConsoleReadModelResponse:
         generated_at_ms = _now_ms()
-        report_dir = Path(
-            os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR", DEFAULT_SIGNAL_WATCHER_REPORT_DIR)
-        ).expanduser()
-        files = {
-            "watcher_tick": report_dir / "watcher-tick.json",
-            "wakeup_evidence": report_dir / "wakeup-evidence.json",
-            "operator_evidence": report_dir / "operator-evidence.json",
-            "watcher_status_evidence": report_dir / "status-artifact.json",
-            "notification_state": report_dir / "notification-state.json",
+        projections = self._runtime_control_current_projections(
+            generated_at_ms=generated_at_ms,
+        )
+        goal_status = _as_dict(projections.get("goal_status"))
+        candidate_pool = _as_dict(projections.get("candidate_pool"))
+        projection_error = str(projections.get("error") or "")
+        projection_ready = projections.get("status") == "ready"
+        safety = {
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "execution_intent_created": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
         }
-        payloads = {name: _read_json_file(path) for name, path in files.items()}
-        resume_pack_path = report_dir / "post-signal-resume-pack.json"
-        resume_pack: dict[str, Any] = {}
-        watcher_tick = payloads["watcher_tick"]
-        wakeup_evidence = payloads["wakeup_evidence"]
-        operator_evidence = payloads["operator_evidence"]
-        watcher_status_evidence = payloads["watcher_status_evidence"]
-        notification_state = payloads["notification_state"]
-        file_status = {
-            name: {
-                "path": str(path),
-                "present": path.exists(),
-                "mtime_ms": _file_mtime_ms(path),
-            }
-            for name, path in files.items()
-        }
-        missing = [name for name, status in file_status.items() if not status["present"]]
-        latest_mtime_ms = max(
-            [int(status["mtime_ms"] or 0) for status in file_status.values()],
-            default=0,
+        unsafe_flags: list[str] = []
+        coverage = _as_dict(candidate_pool.get("server_runtime_coverage"))
+        checks = _as_dict(goal_status.get("checks"))
+        watcher_liveness_healthy = checks.get("watcher_liveness_healthy") is True
+        readiness_status = (
+            "ready"
+            if projection_ready and watcher_liveness_healthy
+            else PG_CURRENT_PROJECTION_ERROR_CLASS
+            if not projection_ready
+            else "pg_watcher_liveness_not_healthy"
         )
-        age_seconds = (
-            max(0, int((generated_at_ms - latest_mtime_ms) / 1000))
-            if latest_mtime_ms
-            else None
+        action_time_resume = _runtime_signal_watcher_action_time_resume_from_goal_status(
+            goal_status=goal_status,
+            projection_ready=projection_ready,
         )
-        stale = bool(age_seconds is not None and age_seconds > stale_after_seconds)
-        safety = watcher_tick.get("safety_invariants") if isinstance(watcher_tick, dict) else {}
-        safety = safety if isinstance(safety, dict) else {}
-        post_signal_auto_resume = (
-            watcher_tick.get("post_signal_auto_resume")
-            if isinstance(watcher_tick.get("post_signal_auto_resume"), dict)
-            else {}
+        post_signal_auto_resume = _runtime_signal_watcher_auto_resume_from_goal_status(
+            goal_status=goal_status,
+            action_time_resume=action_time_resume,
+            projection_ready=projection_ready,
+            projection_error=projection_error,
         )
-        post_signal_auto_resume = _owner_state_without_legacy_input_recovery_action(
-            post_signal_auto_resume
-        )
-        unsafe_flags = [
-            name for name in sorted(SIGNAL_WATCHER_UNSAFE_FLAGS)
-            if safety.get(name) not in {False, None}
-        ]
-        notification = watcher_tick.get("notification") if isinstance(watcher_tick, dict) else {}
-        notification = notification if isinstance(notification, dict) else {}
-        wakeup_status = str(
-            watcher_tick.get("wakeup_status") or wakeup_evidence.get("status") or "unknown"
-        )
-        operator_status = str(
-            watcher_tick.get("operator_status") or operator_evidence.get("status") or "unknown"
-        )
-        watcher_status_evidence_status = str(
-            watcher_status_evidence.get("status")
-            or "unknown"
-        )
-        resume_pack_can_continue = resume_pack.get("can_continue_steps_5_8")
         can_resume_steps_5_8 = (
-            bool(resume_pack_can_continue)
-            if isinstance(resume_pack_can_continue, bool)
-            else wakeup_status in SIGNAL_WATCHER_RESUME_READY_STATUSES
-            and not unsafe_flags
+            projection_ready
+            and action_time_resume.get("status") == "ready_for_action_time_final_gate"
         )
-        if missing:
-            readiness_status = "evidence_missing"
-        elif stale:
-            readiness_status = "evidence_stale"
-        elif unsafe_flags:
-            readiness_status = "unsafe_watcher_effect_detected"
-        elif not notification.get("configured"):
-            readiness_status = "notification_not_configured"
-        else:
-            readiness_status = "ready"
-        action_time_resume = _runtime_signal_watcher_action_time_resume(
-            resume_pack=resume_pack,
-            post_signal_auto_resume=post_signal_auto_resume,
-            can_resume_steps_5_8=can_resume_steps_5_8,
+        owner_state = _runtime_signal_watcher_owner_state_from_goal_status(
+            goal_status=goal_status,
+            action_time_resume=action_time_resume,
+            projection_ready=projection_ready,
+            projection_error=projection_error,
         )
-        owner_state = resume_pack.get("owner_state")
-        if not isinstance(owner_state, dict) or not owner_state:
-            owner_state = _runtime_signal_watcher_owner_state(
-                post_signal_auto_resume=post_signal_auto_resume,
-                readiness_status=readiness_status,
-                missing=missing,
-                stale=stale,
-                unsafe_flags=unsafe_flags,
-                can_resume_steps_5_8=can_resume_steps_5_8,
-            )
-        else:
-            owner_state = dict(owner_state)
-            blocked_reason = str(owner_state.get("blocked_reason") or "none")
-            owner_state.setdefault(
-                "why_not_executable",
-                [] if blocked_reason == "none" else [blocked_reason],
-            )
-            owner_state.setdefault(
-                "can_continue_without_owner_chat",
-                bool(post_signal_auto_resume.get("can_continue_without_owner_chat"))
-                or can_resume_steps_5_8,
-            )
-            owner_state.setdefault(
-                "requires_action_time_final_gate",
-                bool(action_time_resume.get("requires_action_time_final_gate")),
-            )
-            owner_state.setdefault(
-                "requires_official_operation_layer",
-                bool(action_time_resume.get("requires_official_operation_layer")),
-            )
         owner_state = _owner_state_with_explicit_action_authority(
             owner_state=owner_state,
             action_time_resume=action_time_resume,
@@ -1822,34 +1777,25 @@ class TradingConsoleReadModelService:
         owner_state_projection = {
             **_owner_state_without_legacy_input_recovery_action(owner_state),
             "non_authority_checkpoint": owner_checkpoint,
-            "checkpoint_source": str(owner_state.get("checkpoint_source") or "owner_state"),
+            "checkpoint_source": str(owner_state.get("checkpoint_source") or "pg_goal_status_current"),
         }
 
         blockers: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
-        if missing:
+        if not projection_ready:
             blockers.append(
                 {
-                    "code": "runtime_signal_watcher_evidence_missing",
-                    "message": "Runtime Signal Watcher evidence files are missing.",
-                    "affected_area": ",".join(missing),
+                    "code": "runtime_signal_watcher_pg_current_projection_unavailable",
+                    "message": "Runtime Signal Watcher status must be built from PG current projection.",
+                    "affected_area": projection_error or "pg_current_projection",
                 }
             )
-        if unsafe_flags:
+        elif not watcher_liveness_healthy:
             blockers.append(
                 {
-                    "code": "runtime_signal_watcher_unsafe_effect",
-                    "message": "Watcher evidence contains forbidden effect flags.",
-                    "affected_area": ",".join(unsafe_flags),
-                }
-            )
-        if stale:
-            warnings.append(
-                {
-                    "code": "runtime_signal_watcher_evidence_stale",
-                    "severity": "warning",
-                    "message": "Runtime Signal Watcher evidence is older than the configured freshness window.",
-                    "count": 1,
+                    "code": "runtime_signal_watcher_liveness_not_healthy",
+                    "message": "PG current projection reports watcher liveness is not healthy.",
+                    "affected_area": ",".join(list(goal_status.get("blockers") or [])[:8]),
                 }
             )
         freshness_status = "fresh"
@@ -1868,45 +1814,74 @@ class TradingConsoleReadModelService:
             data={
                 "deployment_readiness": _RuntimeSignalWatcherDeploymentProjection(
                     status=readiness_status,
-                    report_dir=report_dir,
-                    file_status=file_status,
-                    latest_evidence_age_seconds=age_seconds,
+                    source_mode=str(projections.get("source_mode") or "db_backed_required"),
+                    projection_target=str(projections.get("projection_target") or "production_current"),
+                    latest_evidence_age_seconds=None,
                     stale_after_seconds=stale_after_seconds,
-                    feishu_configured=bool(notification.get("configured")),
-                    notification_state=notification_state,
+                    control_state_watermark=_as_dict(projections.get("control_state_watermark")),
                 ).to_dict(),
                 "watcher": _RuntimeSignalWatcherStatusProjection(
-                    watcher_tick=watcher_tick,
-                    watcher_status_evidence=watcher_status_evidence,
-                    wakeup_status=wakeup_status,
-                    operator_status=operator_status,
-                    watcher_status_evidence_status=watcher_status_evidence_status,
+                    watcher_tick={
+                        "status": goal_status.get("status") or readiness_status,
+                        "blockers": list(goal_status.get("blockers") or []),
+                        "warnings": list(goal_status.get("warnings") or []),
+                    },
+                    watcher_status_evidence={
+                        "status": readiness_status,
+                        "runtime_signal_summaries": _pg_runtime_signal_summaries(
+                            candidate_pool
+                        ),
+                    },
+                    wakeup_status=str(goal_status.get("status") or readiness_status),
+                    operator_status=str(goal_status.get("non_authority_checkpoint") or owner_checkpoint),
+                    watcher_status_evidence_status=readiness_status,
                     post_signal_auto_resume=post_signal_auto_resume,
                 ).to_dict(),
                 "watcher_status_evidence": _RuntimeSignalWatcherEvidenceProjection(
-                    evidence=watcher_status_evidence,
+                    evidence={
+                        "status": readiness_status,
+                        "latest_status": goal_status.get("status"),
+                        "runtime_signal_summaries": _pg_runtime_signal_summaries(
+                            candidate_pool
+                        ),
+                    },
                 ).to_dict(),
                 "notification": _RuntimeSignalWatcherNotificationProjection(
-                    notification=notification,
+                    notification={
+                        "required": bool(goal_status.get("owner_action_required")),
+                        "configured": None,
+                        "attempted": False,
+                        "sent": False,
+                        "duplicate_suppressed": False,
+                        "skipped_reason": "owned_by_server_monitor_pg_projection",
+                    },
                 ).to_dict(),
                 "post_signal_resume": _RuntimeSignalWatcherResumeProjection(
                     action_time_resume=action_time_resume,
                     can_resume_steps_5_8=can_resume_steps_5_8,
                     post_signal_auto_resume=post_signal_auto_resume,
-                    resume_pack_path=resume_pack_path,
+                    resume_pack_ref="pg_current_projection:goal_status",
                     resume_pack_present=False,
-                    raw_resume_pack_status=None,
+                    raw_resume_pack_status=goal_status.get("status"),
                 ).to_dict(),
                 "action_time_resume": action_time_resume,
                 "post_signal_auto_resume": post_signal_auto_resume,
                 "owner_state": owner_state_projection,
                 "why_not_executable": owner_state_projection["why_not_executable"],
                 "non_authority_checkpoint": owner_checkpoint,
-                "checkpoint_source": "owner_state",
+                "checkpoint_source": "pg_goal_status_current",
                 "safety_invariants": _RuntimeSignalWatcherSafetyProjection(
                     safety=safety,
                     unsafe_flags=unsafe_flags,
                 ).to_dict(),
+                "source_refs": {
+                    "runtime_control_state": "pg_runtime_control_state:production_current",
+                    "candidate_pool": "pg_projection:strategy_live_candidate_pool",
+                    "goal_status": "pg_projection:strategygroup_runtime_goal_status",
+                    "legacy_report_files_read": False,
+                    "legacy_json_fallback": False,
+                    "server_runtime_coverage": coverage,
+                },
             },
             live_ready=False,
         )
@@ -1920,117 +1895,46 @@ class TradingConsoleReadModelService:
         source_commit: Optional[str] = None,
     ) -> TradingConsoleReadModelResponse:
         generated_at_ms = _now_ms()
-        configured_artifact_path = os.environ.get(
-            "BRC_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH"
+        _ = (handoff_dir, source_repo, source_branch, source_commit)
+        projections = self._runtime_control_current_projections(
+            generated_at_ms=generated_at_ms,
         )
-        default_artifact_path = Path(
-            DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH
-        ).expanduser()
-        resolved_artifact_path = (
-            Path(configured_artifact_path).expanduser()
-            if configured_artifact_path
-            else default_artifact_path
-        )
-        latest_artifact_path = _latest_existing_path(
-            Path(DEFAULT_STRATEGY_GROUP_REPORT_DIR),
-            DEFAULT_STRATEGY_GROUP_INTAKE_EVIDENCE_GLOB,
-        )
-        artifact_path = (
-            resolved_artifact_path
-            if resolved_artifact_path.exists()
-            else latest_artifact_path
-        )
-        resolved_handoff_dir = Path(
-            handoff_dir
-            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_DIR")
-            or str(DEFAULT_STRATEGY_GROUP_HANDOFF_DIR)
-        ).expanduser()
-        resolved_source_repo = (
-            source_repo
-            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_REPO")
-            or DEFAULT_STRATEGY_GROUP_HANDOFF_REPO
-        )
-        resolved_source_branch = (
-            source_branch
-            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_BRANCH")
-            or DEFAULT_STRATEGY_GROUP_HANDOFF_BRANCH
-        )
-        resolved_source_commit = (
-            source_commit
-            or os.environ.get("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_COMMIT")
-            or DEFAULT_STRATEGY_GROUP_HANDOFF_COMMIT
-        )
-        if artifact_path is not None and handoff_dir is None:
-            artifact = _read_json_file(artifact_path)
-            if artifact:
-                artifact["intake_evidence_source"] = {
-                    "path": str(artifact_path),
-                    "present": True,
-                    "source": "prebuilt_strategy_group_intake_evidence",
-                }
-        else:
-            artifact = {}
-        if not artifact:
-            try:
-                artifact = build_strategy_group_handoff_intake_artifact(
-                    handoff_dir=resolved_handoff_dir,
-                    source_repo=resolved_source_repo,
-                    source_branch=resolved_source_branch,
-                    source_commit=resolved_source_commit,
-                )
-            except Exception as exc:
-                artifact = {
-                    "scope": "strategy_group_intake_main_control_projection",
-                    "status": "blocked_strategy_intake_source",
-                    "generated_at_ms": generated_at_ms,
-                    "source_anchor": {
-                        "repo": resolved_source_repo,
-                        "branch": resolved_source_branch,
-                        "commit": resolved_source_commit,
-                        "intake_source_dir": str(resolved_handoff_dir),
-                    },
-                    "counts": {
-                        "strategy_groups": 0,
-                        "armed_observation_intake_ready": 0,
-                        "observe_only_intake_ready": 0,
-                        "required_fact_rows": 0,
-                    },
-                    "strategy_picker": [],
-                    "required_facts_matrix": [],
-                    "watcher_scope": [],
-                    "blockers": [f"strategy_intake_source_build_failed:{type(exc).__name__}"],
-                    "safety_invariants": {
-                        "reads_research_intake_source_only": True,
-                        "registers_runtime": False,
-                        "creates_candidate": False,
-                        "authorizes_execution": False,
-                        "places_order": False,
-                        "mutates_pg": False,
-                    },
-                }
-        if not artifact:
+        candidate_pool = _as_dict(projections.get("candidate_pool"))
+        try:
+            artifact = build_strategy_group_intake_artifact_from_candidate_pool(
+                candidate_pool,
+                generated_at_ms=generated_at_ms,
+            )
+        except Exception as exc:
             artifact = {
                 "scope": "strategy_group_intake_main_control_projection",
-                "status": "blocked_strategy_intake_source",
+                "status": "blocked_pg_strategy_intake_source",
                 "generated_at_ms": generated_at_ms,
                 "source_anchor": {
-                    "repo": resolved_source_repo,
-                    "branch": resolved_source_branch,
-                    "commit": resolved_source_commit,
-                    "intake_source_dir": str(resolved_handoff_dir),
+                    "source_mode": str(projections.get("source_mode") or "db_backed_required"),
+                    "projection_target": "production_current",
+                    "model": "strategy_live_candidate_pool",
+                    "legacy_file_source": False,
                 },
                 "counts": {
                     "strategy_groups": 0,
                     "armed_observation_intake_ready": 0,
                     "observe_only_intake_ready": 0,
                     "required_fact_rows": 0,
+                    "candidate_lanes": 0,
                 },
                 "strategy_picker": [],
                 "required_facts_matrix": [],
                 "watcher_scope": [],
-                "blockers": [f"strategy_intake_source_build_failed:{type(exc).__name__}"],
+                "source_refs": {
+                    "candidate_pool": "pg_current_projection:strategy_live_candidate_pool",
+                    "legacy_handoff_json_read": False,
+                    "legacy_packet_env_read": False,
+                },
+                "blockers": [f"pg_strategy_intake_projection_failed:{type(exc).__name__}"],
                 "safety_invariants": {
-                    "reads_research_intake_source_only": True,
+                    "reads_research_intake_source_only": False,
+                    "reads_pg_current_projection": True,
                     "registers_runtime": False,
                     "creates_candidate": False,
                     "authorizes_execution": False,
@@ -2041,8 +1945,8 @@ class TradingConsoleReadModelService:
         artifact_blockers = list(artifact.get("blockers") or [])
         blockers = [
             {
-                "code": "strategy_group_intake_source_blocked",
-                "message": "StrategyGroup intake source is not ready for main-control consumption.",
+                "code": "strategy_group_pg_intake_source_blocked",
+                "message": "StrategyGroup PG current projection is not ready for main-control consumption.",
                 "affected_area": ",".join(artifact_blockers[:8]),
             }
         ] if artifact_blockers else []
@@ -2202,53 +2106,10 @@ class TradingConsoleReadModelService:
             and isinstance(live_facts_response.data.get("live_facts_source"), dict)
             else {}
         )
-        report_dir = Path(
-            os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR", DEFAULT_SIGNAL_WATCHER_REPORT_DIR)
-        ).expanduser()
-        dry_run_audit_path = Path(
-            os.environ.get(
-                "BRC_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH",
-                str(report_dir / "runtime-dry-run-audit-chain.json")
-                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
-                else DEFAULT_RUNTIME_DRY_RUN_AUDIT_CHAIN_PATH,
-            )
-        ).expanduser()
-        dry_run_audit = _read_json_file(dry_run_audit_path)
-        runtime_goal_status_path = Path(
-            os.environ.get(
-                "BRC_STRATEGYGROUP_RUNTIME_GOAL_STATUS_PATH",
-                str(report_dir / "strategygroup-runtime-goal-status.json")
-                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
-                else DEFAULT_STRATEGYGROUP_RUNTIME_GOAL_STATUS_PATH,
-            )
-        ).expanduser()
-        runtime_goal_status = _read_json_file(runtime_goal_status_path)
-        deploy_channel_path = Path(
-            os.environ.get(
-                "BRC_TOKYO_DEPLOY_CHANNEL_STATUS_PATH",
-                str(report_dir / "tokyo-deploy-channel-status.json")
-                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
-                else DEFAULT_TOKYO_DEPLOY_CHANNEL_STATUS_PATH,
-            )
-        ).expanduser()
-        deploy_channel = _read_json_file(deploy_channel_path)
-        readonly_probe_path = Path(
-            os.environ.get(
-                "BRC_TOKYO_READONLY_PROBE_STATUS_PATH",
-                str(report_dir / "tokyo-readonly-probe-current.json")
-                if os.environ.get("BRC_SIGNAL_WATCHER_REPORT_DIR")
-                else DEFAULT_TOKYO_READONLY_PROBE_STATUS_PATH,
-            )
-        ).expanduser()
-        readonly_probe = _read_json_file(readonly_probe_path)
-        effective_deploy_channel, effective_deploy_channel_path = (
-            _owner_console_effective_deploy_channel_artifact(
-                deploy_channel=deploy_channel,
-                deploy_channel_path=str(deploy_channel_path),
-                readonly_probe=readonly_probe,
-                readonly_probe_path=str(readonly_probe_path),
-            )
+        projections = self._runtime_control_current_projections(
+            generated_at_ms=generated_at_ms,
         )
+        runtime_goal_status = _as_dict(projections.get("goal_status"))
         artifact = _owner_console_source_readiness_artifact(
             generated_at_ms=generated_at_ms,
             intake_response=intake_response,
@@ -2257,13 +2118,20 @@ class TradingConsoleReadModelService:
             runtime_response=runtime_response,
             live_facts=live_facts,
             live_facts_source=live_facts_source,
-            dry_run_audit=dry_run_audit,
-            dry_run_audit_path=str(dry_run_audit_path),
             runtime_goal_status=runtime_goal_status,
-            runtime_goal_status_path=str(runtime_goal_status_path),
-            deploy_channel=effective_deploy_channel,
-            deploy_channel_path=effective_deploy_channel_path,
-            readonly_probe_path=str(readonly_probe_path),
+            deploy_channel={},
+            source_refs={
+                "runtime_control_state": "pg_runtime_control_state:production_current",
+                "candidate_pool": "pg_projection:strategy_live_candidate_pool",
+                "goal_status": "pg_projection:strategygroup_runtime_goal_status",
+                "legacy_report_files_read": False,
+                "legacy_json_fallback": False,
+                "projection_status": str(projections.get("status") or "unavailable"),
+                "projection_error": str(projections.get("error") or ""),
+                "control_state_watermark": _as_dict(
+                    projections.get("control_state_watermark")
+                ),
+            },
             selected_strategy_group_id=selected_strategy_group_id,
             max_symbols=max_symbols,
             stale_after_seconds=stale_after_seconds,
@@ -3530,33 +3398,202 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _read_json_file(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
-def _latest_existing_path(directory: Path, pattern: str) -> Optional[Path]:
-    try:
-        paths = [path for path in directory.expanduser().glob(pattern) if path.is_file()]
-    except OSError:
-        return None
-    if not paths:
-        return None
-    return max(paths, key=lambda path: path.stat().st_mtime)
+def _runtime_signal_watcher_action_time_resume_from_goal_status(
+    *,
+    goal_status: dict[str, Any],
+    projection_ready: bool,
+) -> dict[str, Any]:
+    status = str(goal_status.get("status") or "")
+    next_checkpoint = str(
+        goal_status.get("non_authority_checkpoint")
+        or _as_dict(goal_status.get("owner_state")).get("non_authority_checkpoint")
+        or ""
+    )
+    if not projection_ready:
+        resume_status = "blocked"
+        next_step = "repair_pg_current_projection"
+        allowed_auto_actions: list[str] = []
+        requires_fresh_action_time_facts = False
+        final_gate_status = "not_reached"
+    elif status in {
+        "ready_for_action_time_final_gate",
+        "action_time_finalgate_ready",
+        "operation_layer_ready",
+        "fresh_signal_processing",
+        "fresh_signal_detected",
+    }:
+        resume_status = "ready_for_action_time_final_gate"
+        next_step = next_checkpoint or "run_official_action_time_final_gate_preflight"
+        allowed_auto_actions = [next_step]
+        requires_fresh_action_time_facts = True
+        final_gate_status = (
+            "passed"
+            if status in {"action_time_finalgate_ready", "operation_layer_ready"}
+            else "not_run"
+        )
+    elif status in {"waiting_for_signal", "waiting_for_market", "watching_no_signal"}:
+        resume_status = "waiting_for_market"
+        next_step = next_checkpoint or "continue_watcher_observation"
+        allowed_auto_actions = ["continue_watcher_observation"]
+        requires_fresh_action_time_facts = False
+        final_gate_status = "not_reached"
+    else:
+        resume_status = "blocked"
+        next_step = next_checkpoint or "repair_pg_current_projection"
+        allowed_auto_actions = []
+        requires_fresh_action_time_facts = False
+        final_gate_status = "not_reached"
+
+    return {
+        "status": resume_status,
+        "next_step": next_step,
+        "signal_input_ref": "pg:brc_live_signal_events",
+        "shadow_candidate_id": None,
+        "prepared_authorization_id": None,
+        "allowed_auto_actions": allowed_auto_actions,
+        "forbidden_auto_actions_until_final_gate_pass": [
+            "official_operation_layer_submit",
+            "exchange_order",
+            "order_lifecycle_submit",
+            "runtime_budget_mutation",
+        ],
+        "requires_fresh_action_time_facts": requires_fresh_action_time_facts,
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "final_gate_status": final_gate_status,
+        "operation_layer_status": (
+            "ready" if status == "operation_layer_ready" else "not_reached"
+        ),
+        "places_order": False,
+        "calls_order_lifecycle": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_requested": False,
+        "source_mode": "db_backed" if projection_ready else "db_backed_required",
+        "legacy_json_fallback": False,
+    }
 
 
-def _file_mtime_ms(path: Path) -> Optional[int]:
-    if not path.exists():
-        return None
-    try:
-        return int(path.stat().st_mtime * 1000)
-    except OSError:
-        return None
+def _runtime_signal_watcher_auto_resume_from_goal_status(
+    *,
+    goal_status: dict[str, Any],
+    action_time_resume: dict[str, Any],
+    projection_ready: bool,
+    projection_error: str,
+) -> dict[str, Any]:
+    owner_state = _as_dict(goal_status.get("owner_state"))
+    status = str(goal_status.get("status") or action_time_resume.get("status") or "")
+    blocked_reason = str(
+        owner_state.get("detail")
+        or goal_status.get("plain_language_reason")
+        or projection_error
+        or status
+    )
+    next_checkpoint = str(
+        goal_status.get("non_authority_checkpoint")
+        or owner_state.get("non_authority_checkpoint")
+        or action_time_resume.get("next_step")
+        or "repair_pg_current_projection"
+    )
+    return _owner_state_without_legacy_input_recovery_action(
+        {
+            "status": status or PG_CURRENT_PROJECTION_ERROR_CLASS,
+            "blocked_at": next_checkpoint,
+            "blocked_reason": blocked_reason,
+            "next_recover_condition": next_checkpoint,
+            "non_authority_checkpoint": next_checkpoint,
+            "checkpoint_source": "pg_goal_status_current",
+            "downgrade_mode": "no_legacy_file_fallback",
+            "can_continue_without_owner_chat": (
+                projection_ready and goal_status.get("owner_action_required") is not True
+            ),
+            "requires_action_time_final_gate": True,
+            "requires_official_operation_layer": True,
+        }
+    )
+
+
+def _runtime_signal_watcher_owner_state_from_goal_status(
+    *,
+    goal_status: dict[str, Any],
+    action_time_resume: dict[str, Any],
+    projection_ready: bool,
+    projection_error: str,
+) -> dict[str, Any]:
+    owner_state = _as_dict(goal_status.get("owner_state"))
+    status = str(goal_status.get("status") or "")
+    blockers = [str(item) for item in list(goal_status.get("blockers") or []) if str(item)]
+    next_checkpoint = str(
+        goal_status.get("non_authority_checkpoint")
+        or owner_state.get("non_authority_checkpoint")
+        or action_time_resume.get("next_step")
+        or "repair_pg_current_projection"
+    )
+    if not projection_ready:
+        blocked_reason = projection_error or "pg_current_projection_unavailable"
+        blocker_class = "runtime_data_gap"
+    elif status in {"waiting_for_signal", "waiting_for_market", "watching_no_signal"}:
+        blocked_reason = "no_fresh_strategy_signal"
+        blocker_class = "waiting_for_market"
+    elif blockers:
+        blocked_reason = ",".join(blockers[:8])
+        blocker_class = "runtime_current_projection_blocked"
+    else:
+        blocked_reason = str(
+            owner_state.get("detail")
+            or goal_status.get("plain_language_reason")
+            or "none"
+        )
+        blocker_class = "none" if blocked_reason == "none" else "review_only_warning"
+    why_not_executable = (
+        blockers
+        if blockers
+        else []
+        if blocked_reason == "none"
+        else [blocked_reason]
+    )
+    return {
+        "status": status or PG_CURRENT_PROJECTION_ERROR_CLASS,
+        "blocker_class": blocker_class,
+        "blocked_at": next_checkpoint,
+        "blocked_reason": blocked_reason,
+        "next_recover_condition": next_checkpoint,
+        "non_authority_checkpoint": next_checkpoint,
+        "checkpoint_source": "pg_goal_status_current",
+        "downgrade_mode": "no_legacy_file_fallback",
+        "can_continue_without_owner_chat": (
+            projection_ready and goal_status.get("owner_action_required") is not True
+        ),
+        "requires_action_time_final_gate": True,
+        "requires_official_operation_layer": True,
+        "why_not_executable": list(dict.fromkeys(why_not_executable)),
+    }
+
+
+def _pg_runtime_signal_summaries(candidate_pool: dict[str, Any]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for key in ("action_time_lane_inputs", "promotion_candidates", "symbol_readiness_rows"):
+        rows = candidate_pool.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows[:20]:
+            if not isinstance(row, dict):
+                continue
+            summaries.append(
+                {
+                    "strategy_group_id": row.get("strategy_group_id"),
+                    "symbol": row.get("symbol"),
+                    "side": row.get("side"),
+                    "status": row.get("status")
+                    or row.get("readiness_state")
+                    or row.get("first_blocker"),
+                    "source": f"pg_projection:{key}",
+                }
+            )
+    return summaries
 
 
 def _iso_ms(value: Optional[int]) -> Optional[str]:
@@ -7286,13 +7323,9 @@ def _owner_console_source_readiness_artifact(
     runtime_response: TradingConsoleReadModelResponse,
     live_facts: dict[str, Any],
     live_facts_source: dict[str, Any],
-    dry_run_audit: dict[str, Any],
-    dry_run_audit_path: str,
     runtime_goal_status: dict[str, Any],
-    runtime_goal_status_path: str,
     deploy_channel: dict[str, Any],
-    deploy_channel_path: str,
-    readonly_probe_path: str,
+    source_refs: dict[str, Any],
     selected_strategy_group_id: str | None,
     max_symbols: int,
     stale_after_seconds: int,
@@ -7371,7 +7404,6 @@ def _owner_console_source_readiness_artifact(
         runtime=runtime,
         watcher=watcher,
     )
-    dry_run_audit_source = _owner_console_dry_run_audit_source(dry_run_audit)
     runtime_goal_status_source = _owner_console_runtime_goal_status_source(
         runtime_goal_status
     )
@@ -7384,7 +7416,7 @@ def _owner_console_source_readiness_artifact(
             status=catalog_status,
             ready_label="策略组可见",
             not_ready_label="策略组暂不可用",
-            reason="strategy_group_handoff_catalog",
+            reason="pg_strategy_group_candidate_scope_catalog",
         ),
         "runtime_source": _owner_console_binary_label_source(
             status=runtime_status,
@@ -7410,7 +7442,6 @@ def _owner_console_source_readiness_artifact(
         "protection": protection_source,
         "reconciliation": reconciliation_source,
         "operation_audit": operation_audit_source,
-        "runtime_dry_run_audit": dry_run_audit_source,
         "strategygroup_runtime_goal_status": runtime_goal_status_source,
         "real_order_readiness": real_order_readiness["source_health"],
         "deploy_channel": deploy_channel_source,
@@ -7438,18 +7469,9 @@ def _owner_console_source_readiness_artifact(
             "max_symbols": max_symbols,
             "stale_after_seconds": stale_after_seconds,
         },
-        "source_paths": {
+        "source_refs": {
+            **copy.deepcopy(source_refs),
             "live_facts_source": live_facts_source,
-            "runtime_dry_run_audit_chain_path": dry_run_audit_path,
-            "strategygroup_runtime_goal_status_path": runtime_goal_status_path,
-            "tokyo_deploy_channel_status_path": deploy_channel_path,
-            "tokyo_readonly_probe_status_path": readonly_probe_path,
-            "watcher_report_dir": str(
-                os.environ.get(
-                    "BRC_SIGNAL_WATCHER_REPORT_DIR",
-                    DEFAULT_SIGNAL_WATCHER_REPORT_DIR,
-                )
-            ),
         },
         "owner_state": owner_state,
         "owner_summary": {
@@ -7462,7 +7484,6 @@ def _owner_console_source_readiness_artifact(
             "protection": protection_source["owner_label"],
             "reconciliation": reconciliation_source["owner_label"],
             "operation_audit": operation_audit_source["owner_label"],
-            "runtime_dry_run_audit": dry_run_audit_source["owner_label"],
             "runtime_goal_status": runtime_goal_status_source["owner_label"],
             "real_order_readiness": real_order_readiness["owner_label"],
             "deploy_channel": deploy_channel_source["owner_label"],
@@ -7473,11 +7494,10 @@ def _owner_console_source_readiness_artifact(
         "real_order_readiness": real_order_readiness,
         "critical_unavailable_sources": critical_unavailable,
         "raw_status_refs": {
-            "handoff_intake_status": intake.get("status"),
+            "pg_strategy_intake_status": intake.get("status"),
             "runtime_pilot_status": runtime.get("status"),
             "watcher_status": (watcher.get("watcher") or {}).get("status"),
             "live_facts_readiness_status": live_readiness.get("status"),
-            "runtime_dry_run_audit_status": dry_run_audit.get("status"),
             "strategygroup_runtime_goal_status": runtime_goal_status.get("status"),
             "strategygroup_runtime_goal_blockers": list(
                 runtime_goal_status.get("blockers") or []
@@ -7879,140 +7899,6 @@ def _owner_console_deploy_channel_source(
     )
 
 
-def _owner_console_dry_run_audit_source(dry_run_audit: dict[str, Any]) -> dict[str, Any]:
-    if not dry_run_audit:
-        return _owner_console_detail_source(
-            status="degraded",
-            owner_label="审计演练暂不可用",
-            reason="runtime_dry_run_audit_chain_missing",
-        )
-    checks = dry_run_audit.get("checks") if isinstance(dry_run_audit.get("checks"), dict) else {}
-    safety = (
-        dry_run_audit.get("safety_invariants")
-        if isinstance(dry_run_audit.get("safety_invariants"), dict)
-        else {}
-    )
-    dangerous_effects = safety.get("dangerous_effects")
-    dangerous_effects_absent = (
-        checks.get("dangerous_effects_absent") is True
-        and (not isinstance(dangerous_effects, list) or len(dangerous_effects) == 0)
-    )
-    scenario_count = _optional_int_value(checks.get("scenario_count"))
-    missing_required_checks = sorted(
-        name
-        for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS
-        if checks.get(name) is not True
-    )
-    passed = (
-        dry_run_audit.get("status") == "passed"
-        and not missing_required_checks
-        and checks.get("all_scenarios_passed") is True
-        and checks.get("required_scenarios_present") is True
-        and dangerous_effects_absent
-        and safety.get("exchange_write_called") is False
-        and safety.get("order_created") is False
-        and safety.get("order_lifecycle_called") is False
-        and safety.get("withdrawal_or_transfer_created") is False
-        and safety.get("disabled_smoke_is_real_execution_proof") is False
-    )
-    if passed:
-        required_checks = {
-            name: checks.get(name)
-            for name in sorted(OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS)
-        }
-        return _owner_console_detail_source(
-            status="ready",
-            owner_label="审计演练正常",
-            reason="runtime_dry_run_audit_chain_passed",
-            summary={
-                "scenario_count": scenario_count,
-                "dangerous_effects_absent": True,
-                "disabled_smoke_is_real_execution_proof": False,
-                "required_checks_present": True,
-                "shared_runtime_pipeline_checked": (
-                    checks.get("shared_runtime_pipeline_checked") is True
-                ),
-                "common_execution_chain_reuse_checked": (
-                    checks.get("common_execution_chain_reuse_checked") is True
-                ),
-                "strategygroup_adapter_boundary_checked": (
-                    checks.get("strategygroup_adapter_boundary_checked") is True
-                ),
-                "strategy_intake_no_execution_pipeline_fields_checked": (
-                    checks.get(
-                        "strategy_intake_no_execution_pipeline_fields_checked"
-                    )
-                    is True
-                ),
-                "runtime_tier_policy_checked": (
-                    checks.get("runtime_tier_policy_checked") is True
-                ),
-                "only_mpg_tiny_real_order_eligible_checked": (
-                    checks.get("only_mpg_tiny_real_order_eligible_checked")
-                    is True
-                ),
-                "new_strategygroups_default_observe_only_checked": (
-                    checks.get(
-                        "new_strategygroups_default_observe_only_checked"
-                    )
-                    is True
-                ),
-                "selected_strategygroup_dispatch_guard_checked": (
-                    checks.get("selected_strategygroup_dispatch_guard_checked")
-                    is True
-                ),
-                "all_selected_strategygroups_reach_finalgate_dispatch_checked": (
-                    checks.get(
-                        "all_selected_strategygroups_reach_finalgate_dispatch_checked"
-                    )
-                    is True
-                ),
-                "operation_layer_hard_safety_blocker_matrix_checked": (
-                    checks.get("operation_layer_hard_safety_blocker_matrix_checked")
-                    is True
-                ),
-                "expanded_watcher_scope_execution_guard_checked": (
-                    checks.get("expanded_watcher_scope_execution_guard_checked")
-                    is True
-                ),
-                "operation_layer_authorization_chain_guard_checked": (
-                    checks.get("operation_layer_authorization_chain_guard_checked")
-                    is True
-                ),
-                "post_submit_closed_loop_evidence_guard_checked": (
-                    checks.get("post_submit_closed_loop_evidence_guard_checked")
-                    is True
-                ),
-                "operation_layer_submit_result_identity_guard_checked": (
-                    checks.get(
-                        "operation_layer_submit_result_identity_guard_checked"
-                    )
-                    is True
-                ),
-                "post_submit_finalize_result_identity_guard_checked": (
-                    checks.get(
-                        "post_submit_finalize_result_identity_guard_checked"
-                    )
-                    is True
-                ),
-                "execution_attempt_rehearsal_prepare_checked": (
-                    checks.get("execution_attempt_rehearsal_prepare_checked") is True
-                ),
-                "required_checks": required_checks,
-            },
-        )
-    return _owner_console_detail_source(
-        status="degraded",
-        owner_label="审计演练需检查",
-        reason=(
-            "runtime_dry_run_missing_required_check:"
-            + ",".join(missing_required_checks)
-            if missing_required_checks
-            else str(dry_run_audit.get("status") or "runtime_dry_run_audit_chain_not_passed")
-        ),
-    )
-
-
 def _owner_console_runtime_goal_status_source(
     runtime_goal_status: dict[str, Any],
 ) -> dict[str, Any]:
@@ -8056,7 +7942,6 @@ def _owner_console_runtime_goal_status_source(
         "deployment_issue",
         "missing_fact",
         "source_readiness_degraded",
-        "dry_run_audit_degraded",
     }:
         return _owner_console_detail_source(
             status="degraded",
@@ -8320,7 +8205,6 @@ def _owner_console_apply_runtime_goal_status_overlay(
         "deployment_issue",
         "missing_fact",
         "source_readiness_degraded",
-        "dry_run_audit_degraded",
     }:
         return {
             **owner_state,

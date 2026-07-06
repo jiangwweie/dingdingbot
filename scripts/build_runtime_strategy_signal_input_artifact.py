@@ -8,7 +8,6 @@ import asyncio
 from contextlib import redirect_stdout
 from decimal import Decimal
 import json
-import os
 from pathlib import Path
 import sys
 import time
@@ -17,21 +16,6 @@ from typing import Any
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-
-
-def _load_env_file(path: str | None) -> None:
-    if not path:
-        return
-    env_path = Path(path).expanduser()
-    for raw_line in env_path.read_text().splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip("'").strip('"')
-        if key and not os.environ.get(key):
-            os.environ[key] = value
 
 
 def _json_value(value: Any) -> Any:
@@ -229,8 +213,6 @@ def _build_signal_input(
 
 
 async def _build_artifact(args: argparse.Namespace) -> dict[str, Any]:
-    _load_env_file(args.env_file)
-
     from src.application.runtime_strategy_signal_evaluation_service import (
         RuntimeStrategySignalEvaluationService,
         RuntimeStrategySignalEvaluationStatus,
@@ -266,20 +248,6 @@ async def _build_artifact(args: argparse.Namespace) -> dict[str, Any]:
         evaluation.status
         == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
     )
-    output_path = None
-    if args.output_signal_input_json:
-        output_path = Path(args.output_signal_input_json).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                signal_input.model_dump(mode="json"),
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
     return {
         "scope": "runtime_strategy_signal_input_artifact",
         "status": "ready_for_shadow_candidate_prepare" if ready else evaluation.status.value,
@@ -292,15 +260,21 @@ async def _build_artifact(args: argparse.Namespace) -> dict[str, Any]:
         "source_type": getattr(source, "source_type", "read_only_market_source"),
         "signal_input": _json_value(signal_input),
         "evaluation_result": _json_value(evaluation),
-        "output_signal_input_json": str(output_path) if output_path is not None else None,
         "signal_input_artifact_plan": {
             "scope": "runtime_strategy_signal_input_artifact_plan",
             "next_step": (
-                "run_runtime_next_attempt_prepare_api_flow"
+                "materialize_pg_promotion_action_time_lane"
                 if ready
                 else "observe_only_or_wait_for_next_closed_bar"
             ),
-            "signal_input_json": str(output_path) if output_path is not None else None,
+            "pg_materialization_steps": (
+                [
+                    "materialize_pg_promotion_action_time_lane",
+                    "materialize_action_time_ticket",
+                ]
+                if ready
+                else []
+            ),
             "not_executed": True,
             "creates_shadow_candidate": False,
             "creates_execution_intent": False,
@@ -329,7 +303,6 @@ def main() -> int:
         description="Build a read-only strategy signal input artifact for one runtime.",
     )
     parser.add_argument("--runtime-instance-id", required=True)
-    parser.add_argument("--env-file")
     parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")
     parser.add_argument("--symbol")
     parser.add_argument("--evaluation-id")
@@ -337,7 +310,6 @@ def main() -> int:
     parser.add_argument("--one-hour-limit", type=int, default=25)
     parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
-    parser.add_argument("--output-signal-input-json")
     args = parser.parse_args()
     with redirect_stdout(sys.stderr):
         payload = asyncio.run(_build_artifact(args))

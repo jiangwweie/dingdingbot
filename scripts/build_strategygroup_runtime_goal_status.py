@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Build the PG-backed StrategyGroup runtime Goal Status export.
 
-Goal Status is a read-only current projection. Production and CLI callers must
-read PG control state; generated JSON/MD and report-dir artifacts are exports or
-diagnostics and must not decide runtime or trading state.
+Goal Status is a read-only current projection. Production and CLI callers read
+PG control state and do not emit report-dir JSON/MD artifacts.
 """
 
 from __future__ import annotations
@@ -26,21 +25,6 @@ if str(REPO_ROOT) not in sys.path:
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
-
-DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
-DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "strategygroup-runtime-goal-status.json"
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
-    tmp_path.replace(path)
-
 
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
@@ -87,19 +71,6 @@ def _matrix_submit_blocking_items(
         for item in readiness_matrix
         if item.get("blocks_real_submit") is True
     ]
-
-
-def _resolve_output_json(
-    *,
-    report_dir: Path,
-    output_json: Path | None,
-    report_dir_explicit: bool,
-) -> Path:
-    if output_json is not None:
-        return output_json
-    if report_dir_explicit:
-        return report_dir / DEFAULT_OUTPUT_JSON.name
-    return DEFAULT_OUTPUT_JSON
 
 
 def _candidate_pool_fresh_row(
@@ -597,9 +568,6 @@ def _build_pg_goal_status_artifact(
     *,
     control_state: dict[str, Any],
     candidate_pool: dict[str, Any],
-    report_dir: Path,
-    release_manifest: Path | None,
-    expected_head: str | None,
 ) -> dict[str, Any]:
     open_lanes = _pg_open_action_time_lanes(control_state)
     tickets_by_lane = _pg_active_tickets_by_lane(control_state)
@@ -641,7 +609,6 @@ def _build_pg_goal_status_artifact(
     checks = {
         "required_artifacts_present": True,
         "deployment_aligned": True,
-        "runtime_dry_run_audit_passed": True,
         "source_readiness_ready": True,
         "live_facts_ready": action_time_facts_ready,
         "dangerous_effects_absent": True,
@@ -711,11 +678,6 @@ def _build_pg_goal_status_artifact(
         "checks": checks,
         "blockers": blockers,
         "evidence": {
-            "report_dir": str(report_dir),
-            "report_dir_ignored_for_pg_current": True,
-            "release_manifest": str(release_manifest) if release_manifest else None,
-            "release_manifest_ignored_for_pg_current": release_manifest is not None,
-            "expected_head": expected_head,
             "deployed_head": None,
             "deploy_channel_enforced": False,
             "candidate_pool_status": _artifact_status(candidate_pool),
@@ -811,9 +773,6 @@ def _build_pg_goal_status_artifact(
 def build_goal_status_artifact_from_control_state(
     *,
     control_state: dict[str, Any],
-    report_dir: Path,
-    release_manifest: Path | None = None,
-    expected_head: str | None = None,
 ) -> dict[str, Any]:
     if control_state.get("source_mode") != "db_backed":
         raise ValueError("Goal Status PG path requires DB-backed state")
@@ -825,9 +784,6 @@ def build_goal_status_artifact_from_control_state(
     artifact = _build_pg_goal_status_artifact(
         control_state=control_state,
         candidate_pool=candidate_pool,
-        report_dir=report_dir,
-        release_manifest=release_manifest,
-        expected_head=expected_head,
     )
     artifact["source_mode"] = "db_backed"
     artifact["projection_target"] = "production_current"
@@ -844,10 +800,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Build a PG-backed read-only StrategyGroup runtime goal status artifact."
     )
-    parser.add_argument("--report-dir", type=Path)
-    parser.add_argument("--release-manifest", type=Path)
-    parser.add_argument("--expected-head")
-    parser.add_argument("--output-json", type=Path)
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument(
         "--require-database-url",
@@ -862,12 +814,6 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    report_dir = args.report_dir or DEFAULT_REPORT_DIR
-    output_json = _resolve_output_json(
-        report_dir=report_dir,
-        output_json=args.output_json,
-        report_dir_explicit=args.report_dir is not None,
-    )
     if not args.database_url:
         print(
             "ERROR: PG_DATABASE_URL is required for PG-only Goal Status",
@@ -889,16 +835,28 @@ def main() -> int:
             repository = PgBackedRuntimeControlStateRepository(conn)
             artifact = build_goal_status_artifact_from_control_state(
                 control_state=repository.read_control_state(),
-                report_dir=report_dir,
-                release_manifest=args.release_manifest,
-                expected_head=args.expected_head,
             )
     finally:
         engine.dispose()
 
-    _write_json(output_json, artifact)
     if args.json:
         print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(
+            json.dumps(
+                {
+                    "status": artifact["status"],
+                    "ready_for_real_order_action": artifact[
+                        "ready_for_real_order_action"
+                    ],
+                    "non_authority_checkpoint": artifact[
+                        "non_authority_checkpoint"
+                    ],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
     return (
         0
         if artifact["status"] not in {"hard_safety_stop", "deployment_issue"}

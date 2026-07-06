@@ -39,7 +39,6 @@ MAX_AMOUNT = Decimal("0.01")
 APPROVAL_ENV = "OWNER_APPROVED_BNB_CLOSE_SCOPE"
 APPROVAL_VALUE = "BNB/USDT:USDT:LONG:0.01:close_or_cancel_residual_protection:2026-06-04"
 MODE_ENV = "OWNER_BNB_CLOSE_MODE"
-EVIDENCE_ENV = "OWNER_BNB_CLOSE_EVIDENCE_PATH"
 DEFAULT_SIGNAL_PREFIX = "owner-live-auth-"
 PROTECTION_ROLES = {OrderRole.SL, OrderRole.TP1, OrderRole.TP2, OrderRole.TP3, OrderRole.TP4, OrderRole.TP5}
 ACTIVE_ORDER_STATUSES = {OrderStatus.SUBMITTED, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}
@@ -451,11 +450,6 @@ async def _run() -> dict[str, Any]:
 
 def main() -> None:
     result = asyncio.run(_run())
-    path = os.environ.get(EVIDENCE_ENV)
-    if path:
-        evidence_path = Path(path)
-        evidence_path.parent.mkdir(parents=True, exist_ok=True)
-        evidence_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 

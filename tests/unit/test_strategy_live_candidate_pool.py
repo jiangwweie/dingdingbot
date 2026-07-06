@@ -113,7 +113,7 @@ def _daily_table() -> dict:
                 "chain_position": "replay_live_parity",
                 "first_blocker": first_blocker,
                 "first_blocker_evidence": (
-                    "output/runtime-monitor/latest-replay-live-parity-audit.json:"
+                    "pg_current_projection:tradeability_and_candidate_pool:"
                     f"{strategy_group_id}/{symbol} first_blocker={first_blocker} "
                     "watcher_tick_present=True"
                 ),
@@ -281,7 +281,7 @@ def _mi_trial_admission() -> dict:
         "symbol_evidence": [
             {
                 "symbol": "AVAXUSDT",
-                "replay_supported": False,
+                "strategy_scope_supported": False,
                 "public_facts_ready": True,
                 "liquidity": {
                     "spread_ok": True,
@@ -289,11 +289,11 @@ def _mi_trial_admission() -> dict:
                     "qty_step_ok": True,
                 },
                 "funding_not_extreme": True,
-                "strategy_fit": "not_supported_by_current_replay",
+                "strategy_fit": "not_supported_by_strategy_scope",
             },
             {
                 "symbol": "SOLUSDT",
-                "replay_supported": True,
+                "strategy_scope_supported": True,
                 "public_facts_ready": False,
                 "liquidity": {
                     "spread_ok": False,
@@ -301,7 +301,7 @@ def _mi_trial_admission() -> dict:
                     "qty_step_ok": True,
                 },
                 "funding_not_extreme": True,
-                "strategy_fit": "formal_replay_review_opened",
+                "strategy_fit": "formal_strategy_scope_supported",
             },
         ],
     }
@@ -444,25 +444,16 @@ def test_candidate_pool_builds_from_pg_control_state_seed(pg_control_connection)
 
 def test_candidate_pool_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: Path):
     builder = _builder()
-    output_json = tmp_path / "candidate_pool.json"
-    output_md = tmp_path / "candidate_pool.md"
 
     assert (
         builder.main(
             [
                 "--database-url",
                 f"sqlite:///{tmp_path / 'runtime.db'}",
-                "--output-json",
-                str(output_json),
-                "--output-owner-progress",
-                str(output_md),
             ]
         )
         == 2
     )
-
-    assert not output_json.exists()
-    assert not output_md.exists()
 
 
 def test_candidate_pool_pg_cli_requires_database_url_when_requested(
@@ -471,24 +462,15 @@ def test_candidate_pool_pg_cli_requires_database_url_when_requested(
 ):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
     builder = _builder()
-    output_json = tmp_path / "candidate_pool.json"
-    output_md = tmp_path / "candidate_pool.md"
 
     assert (
         builder.main(
             [
                 "--require-database-url",
-                "--output-json",
-                str(output_json),
-                "--output-owner-progress",
-                str(output_md),
             ]
         )
         == 2
     )
-
-    assert not output_json.exists()
-    assert not output_md.exists()
 
 
 def test_candidate_pool_cli_requires_pg_by_default_without_local_diagnostic_flag(
@@ -497,23 +479,11 @@ def test_candidate_pool_cli_requires_pg_by_default_without_local_diagnostic_flag
 ):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
     builder = _builder()
-    output_json = tmp_path / "candidate_pool.json"
-    output_md = tmp_path / "candidate_pool.md"
 
     assert (
-        builder.main(
-            [
-                "--output-json",
-                str(output_json),
-                "--output-owner-progress",
-                str(output_md),
-            ]
-        )
+        builder.main([])
         == 2
     )
-
-    assert not output_json.exists()
-    assert not output_md.exists()
 
 
 def test_candidate_pool_pg_scope_does_not_refill_from_code_defaults(pg_control_connection):
@@ -682,7 +652,7 @@ def test_candidate_pool_does_not_fallback_to_tradeability_policy_when_owner_auth
     assert artifact["action_time_lane_inputs"] == []
 
 
-def test_candidate_pool_pg_cli_round_trip(tmp_path: Path):
+def test_candidate_pool_pg_cli_round_trip(tmp_path: Path, capsys):
     migration = _load_module(MIGRATION_PATH, "migration_086_candidate_pool_cli")
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_candidate_pool_cli")
     database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
@@ -699,29 +669,20 @@ def test_candidate_pool_pg_cli_round_trip(tmp_path: Path):
     finally:
         engine.dispose()
 
-    output_json = tmp_path / "candidate_pool.json"
-    output_md = tmp_path / "candidate_pool.md"
-
     assert (
         _builder().main(
             [
                 "--database-url",
                 database_url,
                 "--allow-non-postgres-for-test",
-                "--output-json",
-                str(output_json),
-                "--output-owner-progress",
-                str(output_md),
             ]
         )
         == 0
     )
 
-    artifact = json.loads(output_json.read_text(encoding="utf-8"))
-    assert artifact["source_mode"] == "db_backed"
-    assert artifact["summary"]["symbol_readiness_count"] == 22
-    assert output_md.exists()
-    assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["status"] == "strategy_live_candidate_pool_ready"
+    assert summary["candidate_count"] == 5
 
 
 def test_candidate_pool_builds_five_wip_candidate_rows():
@@ -814,7 +775,7 @@ def test_candidate_pool_treats_cpm_action_time_reclassification_as_computed_refr
     cpm_daily["first_blocker"] = "action_time_boundary_not_reproduced"
     cpm_daily["next_engineering_action"] = "prepare_cpm_candidate_authorization_evidence"
     cpm_daily["first_blocker_evidence"] = (
-        "output/runtime-monitor/latest-replay-live-parity-audit.json:"
+        "pg_current_projection:tradeability_and_candidate_pool:"
         "CPM-RO-001/AVAXUSDT first_blocker=action_time_boundary_not_reproduced "
         "watcher_tick_present=True"
     )
@@ -1115,9 +1076,9 @@ def test_candidate_pool_consumes_mi_trial_admission_symbol_evidence():
     assert row["detector_state"] == "ready"
     assert row["watcher_state"] == "fresh"
     assert row["public_facts_state"]["state"] == "computed_not_satisfied"
-    assert row["public_facts_state"]["computed_not_satisfied"] == [
-        "replay_supported",
+    assert sorted(row["public_facts_state"]["computed_not_satisfied"]) == [
         "strategy_fit",
+        "strategy_scope_supported",
     ]
     assert row["first_blocker"] == "computed_not_satisfied"
     assert row["next_action"] == "continue_observation_with_failed_fact_matrix"
@@ -2758,11 +2719,9 @@ def test_candidate_pool_validator_rejects_preflight_ready_without_public_facts()
     assert any("public_facts_ready" in error for error in errors)
 
 
-def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path, monkeypatch):
+def test_candidate_pool_cli_prints_pg_summary(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
     database_url = _seed_runtime_control_db(tmp_path / "runtime-control-state.db")
-    output_json = tmp_path / "candidate_pool.json"
-    output_md = tmp_path / "candidate_pool.md"
 
     build = subprocess.run(
         [
@@ -2771,24 +2730,15 @@ def test_candidate_pool_cli_and_validator_cli_round_trip(tmp_path: Path, monkeyp
             "--database-url",
             database_url,
             "--allow-non-postgres-for-test",
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
         ],
         text=True,
         capture_output=True,
         check=False,
     )
     assert build.returncode == 0, build.stdout + build.stderr
-
-    validate = subprocess.run(
-        [sys.executable, str(VALIDATOR_PATH), str(output_json)],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert validate.returncode == 0, validate.stdout + validate.stderr
+    summary = json.loads(build.stdout)
+    assert summary["status"] == "strategy_live_candidate_pool_ready"
+    assert summary["candidate_count"] == 5
 
 
 @pytest.mark.parametrize(
@@ -2812,10 +2762,6 @@ def test_candidate_pool_cli_rejects_legacy_file_inputs(
             sys.executable,
             str(BUILDER_PATH),
             *legacy_args,
-            "--output-json",
-            str(tmp_path / "candidate_pool.json"),
-            "--output-owner-progress",
-            str(tmp_path / "candidate_pool.md"),
         ],
         text=True,
         capture_output=True,

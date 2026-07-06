@@ -60,12 +60,13 @@ class StrategyGroupReviewabilityResponse(BaseModel):
     live_ready: Literal[False] = False
 
 
-_COST_BASELINE = "reports/directional-opportunity-broad-smoke-20260529/cost_baseline_enrichment.md"
-_BNB_SOL_REVIEW = "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md"
-_SHELF_REPORT = "reports/directional-opportunity-broad-smoke-20260529/strategy_group_shelf_result.md"
-_TRIAL_CANDIDATES = "reports/directional-opportunity-broad-smoke-20260529/trial_candidate_with_known_risks_v2.md"
-_CPM_OOS = "docs/ops/crypto-pullback-module-v1-oos-failure-classification.md"
-_CPM_CONTEXT = "docs/ops/cpm-1-readonly-feature-context-extraction-report.md"
+_COST_BASELINE = "pg_strategy_review_cost_baseline"
+_BNB_SOL_REVIEW = "pg_strategy_review_mi001_bnb_sol_evidence"
+_SHELF_REPORT = "pg_strategy_group_reviewability_shelf"
+_TRIAL_CANDIDATES = "pg_strategy_trial_candidate_review"
+_CPM_OOS = "pg_strategy_review_cpm_oos_classification"
+_CPM_CONTEXT = "pg_strategy_review_cpm_readonly_context"
+_LIVE_OBSERVATION_READMODEL = "pg_strategy_group_live_readonly_observation_readmodel"
 def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityResponse:
     """Return the Owner-reviewable strategy group shelf.
 
@@ -122,7 +123,7 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
                 "BNB repaired evidence still needs Owner review for 2025 weakness, top-tail dependence, and campaign replay gap",
             ],
             source_refs=[
-                "src/application/strategy_group_live_readonly_observation.py",
+                _LIVE_OBSERVATION_READMODEL,
                 _BNB_SOL_REVIEW,
                 _COST_BASELINE,
                 _TRIAL_CANDIDATES,
@@ -172,7 +173,7 @@ def build_strategy_group_reviewability_snapshot() -> StrategyGroupReviewabilityR
                 "not runtime eligible by default",
             ],
             source_refs=[
-                "src/application/strategy_group_live_readonly_observation.py",
+                _LIVE_OBSERVATION_READMODEL,
                 _CPM_OOS,
                 _CPM_CONTEXT,
                 _SHELF_REPORT,

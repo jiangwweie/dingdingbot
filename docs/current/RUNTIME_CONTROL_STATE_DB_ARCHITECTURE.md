@@ -116,7 +116,7 @@ These are current repo facts as of 2026-07-05.
 | Owner/policy records already partially exist | `brc_owner_risk_acknowledgements`, `brc_owner_risk_acceptances`, bounded trial authorization tables, and budget authorization tables exist |
 | Runtime profile is already modeled | `runtime_profiles` exists |
 | Candidate universe is still partly hard-coded | `DEFAULT_CANDIDATE_UNIVERSE` appears in runtime builders and monitor scripts |
-| Owner pre-trade authorization is currently a docs JSON input | `docs/current/strategy-group-handoffs/owner-pretrade-runtime-authorization-v0.json` |
+| Owner pre-trade authorization is PG-owned | Owner policy/current scope rows replace retired docs JSON inputs |
 
 ## Problem
 
@@ -125,8 +125,8 @@ output files, and code constants.
 
 | Role | Current problem | Runtime impact |
 | --- | --- | --- |
-| Strategy semantics | Registry baseline, handoff packs, and code constants can disagree | A strategy may be treated differently by intake, Tradeability, and Candidate Pool |
-| Owner policy | Authorization JSON, tier policy JSON, runtime profile, and deployed runtime scope can drift | `live_submit_allowed` can mean different things in different links |
+| Strategy semantics | Retired registry/handoff files and code constants can disagree with PG | A strategy may be treated differently if old file sources are reintroduced |
+| Owner policy | Retired authorization/tier JSON and deployed runtime scope can drift from PG | `live_submit_allowed` can mean different things if old files are reintroduced |
 | Runtime facts | Watcher status, public facts, active monitor, and runtime safety are separate files | A fresh signal may not promote because the chain reads a stale source |
 | Read models | Daily Table and Candidate Pool are generated, but other scripts then treat them as inputs | Generated views become second-order sources of truth |
 | Output governance | Some output files are valid snapshots and others are volatile runtime noise | Git and runtime can accidentally preserve stale facts |
@@ -157,7 +157,7 @@ JSON/MD only for compatibility.
 | Account fact collector | live-facts readonly input from product-state refresh | `latest-account-safe-facts.json` export | Account-safe JSON must not feed action-time or operator live-fact decisions | `brc_runtime_fact_snapshots` global `account_safe` / `account_mode` rows with short valid-until timestamps |
 | Strategy detector builders | PG public fact snapshots, strategy constants, local non-authority artifacts | detector fact JSON/MD such as SOR/MI/BRF2/MPG outputs | Detector output must remain an export until detector events/facts are fully materialized in PG | `brc_live_signal_events` and fact snapshots |
 | Tradeability Decision | PG current projections through `PgBackedRuntimeControlStateRepository`; production CLI rejects repo/output JSON inputs | `latest-strategygroup-tradeability-decision.json/md` | Export can still be mistaken for an upstream source by later builders | PG-only Tradeability read model over current projections |
-| Replay/Live Parity Audit | replay JSON, CPM/MPG/SOR detector or watcher outputs | `latest-replay-live-parity-audit.json/md` | Historical parity diagnostics can be confused with current live coverage | diagnostic/read-model rows separate from watcher coverage |
+| Replay/live parity diagnostics | PG detector parity / watcher coverage diagnostics only; retired replay JSON builders are archive-only | no current `latest-replay-live-parity-audit` builder | Historical parity diagnostics can be confused with current live coverage | diagnostic/read-model rows separate from watcher coverage |
 | Action-time boundary | PG current projections through `PgBackedRuntimeControlStateRepository`; no CPM/MPG/SOR strategy JSON arguments | `latest-strategy-fresh-signal-action-time-boundary.json/md` | Reintroducing detector/evidence/readiness files would create a second fresh-signal-to-action-time authority path | `brc_live_signal_events`, `brc_runtime_fact_snapshots`, `brc_promotion_candidates`, `brc_action_time_lane_inputs`, `brc_action_time_tickets` |
 | Candidate Pool | PG control state through `PgBackedRuntimeControlStateRepository`; generated fact/readiness outputs are export/diagnostic only | `latest-strategy-live-candidate-pool.json/md` | Reintroducing file-backed inputs would let generated views recompute source priority and become authority | `brc_pretrade_readiness_rows`, `brc_promotion_candidates`, `brc_action_time_lane_inputs` |
 | Daily Table | PG control state via `PgBackedRuntimeControlStateRepository`; generated fact/readiness outputs are export/diagnostic only | `latest-daily-live-enablement-table.json/md` | Reintroducing file-backed inputs would let the management table inherit stale generated inputs | DB-backed read-model export from current projections |
@@ -175,7 +175,7 @@ ownership, not just a DB table for every existing artifact.
 | Conflict | Concrete shape | Why it matters | Target rule |
 | --- | --- | --- | --- |
 | Multiple writers for one current file | `strategygroup-runtime-goal-status.json` can be written by more than one post-step path | Last writer wins even if it used older inputs | One current projection has exactly one owner projector |
-| Retired optional control source | Goal Status no longer accepts `--candidate-pool-json` or local file diagnostic fallback | Reintroducing the option would let the same command produce different authority conclusions | Goal Status derives Candidate Pool/current projection from PG control state only |
+| Retired optional control source | Goal Status no longer accepts Candidate Pool JSON input or local file diagnostic fallback | Reintroducing file input would let the same command produce different authority conclusions | Goal Status derives Candidate Pool/current projection from PG control state only |
 | Legacy diagnostic promoted to blocker | `pilot_status.watcher_scope_alignment` can still emit scope mismatch after Candidate Pool proves coverage | Old status can hide real waiting/fresh-signal state | Legacy artifacts may write diagnostics only |
 | Watcher universe from generated view | production watcher tick and active monitor reject `--candidate-universe-json` and require PG candidate scope/runtime bindings | A previous-cycle read model must not define the current observation universe | Watcher reads DB candidate scope/runtime bindings; Candidate Pool export is diagnostic/export only |
 | Runtime bootstrap from files | `bootstrap_strategygroup_runtime_pilot.py` historically read handoff/intake/Candidate Pool files | Runtime records could be admitted from stale file scope | Bootstrap requires PG current state and rejects file-backed scope/inventory inputs in plan and execute modes |
@@ -243,8 +243,8 @@ RuntimeControlStateRepository
 
 They must not independently decide whether to read:
 
-- `docs/current/**/*.json`;
-- `output/runtime-monitor/latest-*.json`;
+- repo structured JSON files;
+- generated latest-file exports;
 - server report JSON;
 - code constants;
 - local cache files.
@@ -358,21 +358,22 @@ It must not grant:
 - live profile mutation;
 - order-sizing mutation.
 
-### Generated Views Stay Commit-Bounded
+### Generated Views Stay Untracked
 
-`output/**` remains governed by `config/output_control_snapshots.json`.
+`output/**` is generated runtime output and must stay out of routine commits.
 
-DB-backed exports may still write these files for agent compatibility, but the
-files are read-model snapshots, not the authority source.
+DB-backed exports may still write local files for manual diagnostics or archive
+commands, but the files are read-model snapshots, not the authority source and
+not a commit whitelist.
 
 ## Target Source Model
 
 | Information class | Target source | Current transitional source | Export/read model |
 | --- | --- | --- | --- |
 | Governance contract | `docs/current/*.md` | same | none |
-| StrategyGroup identity and semantics | DB strategy registry tables | registry baseline JSON and handoff packs | registry export JSON/MD |
-| RequiredFacts contract | DB versioned fact contract tables | handoff packs and mapping docs | fact contract export |
-| Owner scope and policy | DB owner policy event tables and current projection | Owner explicit decisions plus policy JSON | policy export JSON |
+| StrategyGroup identity and semantics | DB strategy registry tables | archive-only registry/handoff provenance | registry export JSON/MD |
+| RequiredFacts contract | DB versioned fact contract tables | archive-only mapping provenance | fact contract export |
+| Owner scope and policy | DB owner policy event tables and current projection | Owner explicit decisions plus archive-only policy provenance | policy export JSON |
 | Candidate universe | DB scoped symbol/side rows | code constants and authorization JSON | Candidate Pool read model |
 | Runtime profile and scope binding | DB runtime profile and scope binding tables | `runtime_profiles` plus JSON policy | Runtime Safety State and Candidate Pool |
 | Watcher/server coverage | DB coverage snapshots | active monitor JSON and server reports | server monitor export |
@@ -434,7 +435,7 @@ state and fail closed when required PG state is unavailable.
 ```mermaid
 flowchart TD
   Docs["docs/current contracts"] --> Repo["RuntimeControlStateRepository"]
-  RegistrySeed["handoff packs and registry seed"] --> Importer["seed/import tools"]
+  RegistrySeed["PG registry seed and archive provenance"] --> Importer["seed/import tools"]
   OwnerPolicy["Owner policy events"] --> DB["Runtime Control State DB"]
   Watcher["server watcher and detectors"] --> DB
   RuntimeFacts["public/account/runtime facts"] --> DB
@@ -520,11 +521,11 @@ compatibility. They must not become hand-edited authority.
 | File class | DB migration treatment |
 | --- | --- |
 | `docs/current/*.md` contracts | Stay in repo as human/agent authority |
-| Strategy handoff JSON | Become seed/import inputs and provenance refs |
-| Owner policy JSON | Migrate into owner policy events and current projection |
-| Runtime tier policy JSON | Migrate into policy/tier tables or seed config |
+| Strategy handoff JSON | Removed from current; git-history/archive provenance only |
+| Owner policy JSON | Removed from current; owner policy events/current projection are PG-backed |
+| Runtime tier policy JSON | Removed from current; policy/tier state is PG-backed |
 | Candidate universe constants | Migrate into scoped candidate universe rows |
-| Output control snapshots | Stay generated exports; DB is source |
+| Generated output exports | Stay untracked/archive-only; DB is source |
 | Volatile output facts | Move to DB snapshots or stay untracked diagnostic exports |
 | Replay fixtures | Stay as repo fixtures, not DB current state |
 | Deploy/session reports | Stay deploy evidence, not runtime source |

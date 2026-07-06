@@ -2,9 +2,8 @@
 """Publish PG-backed current read-model projections.
 
 This projector is non-authority from a trading perspective. It converts the
-current PG control state into durable current projections and read-model
-snapshots so generated JSON exports are no longer the only place where the
-current Candidate Pool, Daily Table, and Goal Status are visible.
+current PG control state directly into durable current projections and
+read-model snapshots without generating JSON/Markdown export files.
 """
 
 from __future__ import annotations
@@ -41,12 +40,6 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 )
 
 
-DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
-DEFAULT_RUNTIME_MONITOR_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-monitor")
-DEFAULT_RELEASE_MANIFEST = Path("/home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json")
-DEFAULT_OUTPUT_JSON = (
-    DEFAULT_REPORT_DIR / "runtime-control-current-projection-publish.json"
-)
 PROJECTOR_NAME = "pg_current_projection_publisher"
 SCHEMA = "brc.runtime_control_current_projection_publish.v1"
 
@@ -74,17 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         with engine.begin() as conn:
             report = publish_runtime_control_current_projections(
                 conn,
-                report_dir=args.report_dir,
-                runtime_monitor_dir=args.runtime_monitor_dir,
-                release_manifest=args.release_manifest,
-                expected_head=args.expected_head,
-                output_paths={
-                    "candidate_pool": args.candidate_pool_json,
-                    "daily_live_enablement_table": args.daily_table_json,
-                    "goal_status": args.goal_status_json,
-                },
             )
-            _write_json(args.output_json, report)
     finally:
         engine.dispose()
 
@@ -95,12 +78,6 @@ def main(argv: list[str] | None = None) -> int:
 
 def publish_runtime_control_current_projections(
     conn: sa.engine.Connection,
-    *,
-    report_dir: Path = DEFAULT_REPORT_DIR,
-    runtime_monitor_dir: Path = DEFAULT_RUNTIME_MONITOR_DIR,
-    release_manifest: Path | None = DEFAULT_RELEASE_MANIFEST,
-    expected_head: str | None = None,
-    output_paths: dict[str, Path | None] | None = None,
 ) -> dict[str, Any]:
     started_ms = int(time.time() * 1000)
     generated = datetime.now(timezone.utc).isoformat()
@@ -130,12 +107,8 @@ def publish_runtime_control_current_projections(
                 computed_at_ms=started_ms,
             ),
         },
-        report_dir=report_dir,
-        release_manifest=release_manifest,
-        expected_head=expected_head,
     )
 
-    output_paths = output_paths or {}
     projector_runs = [
         _projection_run(
             model_type="candidate_pool",
@@ -172,7 +145,6 @@ def publish_runtime_control_current_projections(
             ),
             source_watermark=_source_watermark(candidate_pool),
             input_watermark=_input_watermark(control_state, candidate_pool),
-            output_path=output_paths.get("candidate_pool"),
             generated_at_ms=started_ms,
         ),
         _snapshot_row(
@@ -184,7 +156,6 @@ def publish_runtime_control_current_projections(
             ),
             source_watermark=_source_watermark(daily_table),
             input_watermark=_input_watermark(control_state, daily_table),
-            output_path=output_paths.get("daily_live_enablement_table"),
             generated_at_ms=started_ms,
         ),
         _snapshot_row(
@@ -196,7 +167,6 @@ def publish_runtime_control_current_projections(
             ),
             source_watermark=_source_watermark(goal_status),
             input_watermark=_input_watermark(control_state, goal_status),
-            output_path=output_paths.get("goal_status"),
             generated_at_ms=started_ms,
         ),
     ]
@@ -211,7 +181,6 @@ def publish_runtime_control_current_projections(
         updated_at_ms=started_ms,
     )
     _insert_current_snapshots(conn, snapshots)
-    _write_projection_exports(snapshots)
 
     return {
         "schema": SCHEMA,
@@ -264,26 +233,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="Allow SQLite/non-PG DSNs only in tests.",
     )
-    parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
-    parser.add_argument("--runtime-monitor-dir", type=Path, default=DEFAULT_RUNTIME_MONITOR_DIR)
-    parser.add_argument("--release-manifest", type=Path, default=DEFAULT_RELEASE_MANIFEST)
-    parser.add_argument("--expected-head")
-    parser.add_argument(
-        "--candidate-pool-json",
-        type=Path,
-        default=DEFAULT_RUNTIME_MONITOR_DIR / "latest-strategy-live-candidate-pool.json",
-    )
-    parser.add_argument(
-        "--daily-table-json",
-        type=Path,
-        default=DEFAULT_RUNTIME_MONITOR_DIR / "latest-daily-live-enablement-table.json",
-    )
-    parser.add_argument(
-        "--goal-status-json",
-        type=Path,
-        default=DEFAULT_REPORT_DIR / "strategygroup-runtime-goal-status.json",
-    )
-    parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
     parser.add_argument("--json", action="store_true")
     return parser.parse_args(argv)
 
@@ -353,13 +302,6 @@ def _export_payload_with_lineage(
             or "pg_current_projection_export_only_no_runtime_authority"
         ),
     }
-
-
-def _write_projection_exports(snapshots: list[dict[str, Any]]) -> None:
-    for snapshot in snapshots:
-        output_path = snapshot.get("output_path")
-        if output_path:
-            _write_json(Path(str(output_path)), _dict(snapshot.get("payload")))
 
 
 def _normalized_database_url(database_url: str) -> str:
@@ -485,7 +427,6 @@ def _snapshot_row(
     payload: dict[str, Any],
     source_watermark: dict[str, Any],
     input_watermark: dict[str, Any],
-    output_path: Path | None,
     generated_at_ms: int,
 ) -> dict[str, Any]:
     return {
@@ -495,7 +436,7 @@ def _snapshot_row(
         "source_watermark": source_watermark,
         "owner_projector": _snapshot_owner_projector(model_type),
         "input_watermark": input_watermark,
-        "output_path": str(output_path) if output_path else None,
+        "output_path": None,
         "is_current": True,
         "generated_at_ms": generated_at_ms,
         "generated_by": PROJECTOR_NAME,
@@ -639,17 +580,6 @@ def _dict(value: Any) -> dict[str, Any]:
 
 def _dict_rows(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
-    tmp_path.replace(path)
 
 
 if __name__ == "__main__":

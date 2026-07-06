@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 from decimal import Decimal
+from typing import Any
 
 from src.application.strategy_signal_v2_observe_writer import (
     PatternStrategySignalObserveWriter,
 )
 from src.domain.models import Direction, FilterResult, KlineData, PatternResult, SignalAttempt
-from src.infrastructure.strategy_signal_v2_observe_sink import StrategySignalV2ObserveSink
 
 
 def _kline() -> KlineData:
@@ -56,14 +55,18 @@ class _FailingSink:
         raise RuntimeError("disk unavailable")
 
 
-def _read_jsonl(path):
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+class _CaptureObserveSink:
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    def write(self, snapshot):
+        self.events.append(snapshot)
 
 
-def test_signal_fired_attempt_with_pattern_writes_one_jsonl_snapshot(tmp_path):
-    path = tmp_path / "runtime" / "strategy_signal_v2_observe.jsonl"
+def test_signal_fired_attempt_with_pattern_captures_one_snapshot():
+    sink = _CaptureObserveSink()
     writer = PatternStrategySignalObserveWriter(
-        sink=StrategySignalV2ObserveSink(path),
+        sink=sink,
     )
 
     writer.write_observations(
@@ -72,7 +75,7 @@ def test_signal_fired_attempt_with_pattern_writes_one_jsonl_snapshot(tmp_path):
         source_context_id="ctx-fired",
     )
 
-    payloads = _read_jsonl(path)
+    payloads = sink.events
     assert len(payloads) == 1
     payload = payloads[0]
     assert payload["schema"] == "strategy_signal_v2"
@@ -85,10 +88,10 @@ def test_signal_fired_attempt_with_pattern_writes_one_jsonl_snapshot(tmp_path):
     assert payload["source_context_id"] == "ctx-fired"
 
 
-def test_filtered_attempt_with_pattern_writes_one_jsonl_snapshot(tmp_path):
-    path = tmp_path / "runtime" / "strategy_signal_v2_observe.jsonl"
+def test_filtered_attempt_with_pattern_captures_one_snapshot():
+    sink = _CaptureObserveSink()
     writer = PatternStrategySignalObserveWriter(
-        sink=StrategySignalV2ObserveSink(path),
+        sink=sink,
     )
 
     writer.write_observations(
@@ -96,15 +99,15 @@ def test_filtered_attempt_with_pattern_writes_one_jsonl_snapshot(tmp_path):
         attempts=[_attempt("FILTERED", _pattern())],
     )
 
-    payloads = _read_jsonl(path)
+    payloads = sink.events
     assert len(payloads) == 1
     assert payloads[0]["attempt_context"]["final_result"] == "FILTERED"
 
 
-def test_no_pattern_attempt_writes_nothing(tmp_path):
-    path = tmp_path / "runtime" / "strategy_signal_v2_observe.jsonl"
+def test_no_pattern_attempt_writes_nothing():
+    sink = _CaptureObserveSink()
     writer = PatternStrategySignalObserveWriter(
-        sink=StrategySignalV2ObserveSink(path),
+        sink=sink,
     )
 
     writer.write_observations(
@@ -112,13 +115,13 @@ def test_no_pattern_attempt_writes_nothing(tmp_path):
         attempts=[_attempt("NO_PATTERN", None)],
     )
 
-    assert not path.exists()
+    assert sink.events == []
 
 
-def test_snapshot_includes_strategy_signal_v2_model_dump(tmp_path):
-    path = tmp_path / "runtime" / "strategy_signal_v2_observe.jsonl"
+def test_snapshot_includes_strategy_signal_v2_model_dump():
+    sink = _CaptureObserveSink()
     writer = PatternStrategySignalObserveWriter(
-        sink=StrategySignalV2ObserveSink(path),
+        sink=sink,
     )
 
     writer.write_observations(
@@ -127,7 +130,7 @@ def test_snapshot_includes_strategy_signal_v2_model_dump(tmp_path):
         adapter_version="v2",
     )
 
-    snapshot = _read_jsonl(path)[0]
+    snapshot = sink.events[0]
     signal = snapshot["strategy_signal_v2"]
     assert signal["strategy_id"] == "pinbar_v2"
     assert signal["strategy_family"] == "pattern"
@@ -137,11 +140,11 @@ def test_snapshot_includes_strategy_signal_v2_model_dump(tmp_path):
     assert snapshot["adapter_version"] == "v2"
 
 
-def test_adapter_failure_logs_warning_and_does_not_raise(caplog, tmp_path):
-    path = tmp_path / "runtime" / "strategy_signal_v2_observe.jsonl"
+def test_adapter_failure_logs_warning_and_does_not_raise(caplog):
+    sink = _CaptureObserveSink()
     writer = PatternStrategySignalObserveWriter(
         adapter=_FailingAdapter(),
-        sink=StrategySignalV2ObserveSink(path),
+        sink=sink,
     )
 
     writer.write_observations(
@@ -149,7 +152,7 @@ def test_adapter_failure_logs_warning_and_does_not_raise(caplog, tmp_path):
         attempts=[_attempt("SIGNAL_FIRED", _pattern())],
     )
 
-    snapshot = _read_jsonl(path)[0]
+    snapshot = sink.events[0]
     assert snapshot["adapter_status"] == "failed"
     assert "RuntimeError: adapter unavailable" in snapshot["error"]
     assert "StrategySignalV2 observe adapter failed" in caplog.text

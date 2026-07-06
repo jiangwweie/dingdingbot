@@ -355,6 +355,6 @@ def test_action_time_boundary_rejects_retired_strategy_json_arg(tmp_path: Path):
         module.main(
             [
                 "--cpm-capture-json",
-                str(tmp_path / "latest-cpm-runtime-signal-capture.json"),
+                str(tmp_path / "cpm-runtime-signal-capture-fixture.json"),
             ]
         )

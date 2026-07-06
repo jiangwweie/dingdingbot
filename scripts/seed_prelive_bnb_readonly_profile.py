@@ -19,7 +19,6 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Mapping
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,7 +35,6 @@ DESCRIPTION = (
 )
 APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_PROFILE_SEED"
 UPDATE_APPROVAL_ENV = "OWNER_APPROVED_RUNTIME_PROFILE_UPDATE"
-EVIDENCE_PATH_ENV = "RUNTIME_PROFILE_SEED_EVIDENCE_PATH"
 
 
 class InMemoryRuntimeProfileRepository:
@@ -209,19 +207,6 @@ def build_seed_evidence(
     }
 
 
-def _default_evidence_path() -> Path:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return Path("reports") / f"runtime-profile-seed-evidence-{PROFILE_NAME}-{stamp}.json"
-
-
-def write_seed_evidence(evidence: Mapping[str, Any], env: Mapping[str, str]) -> Path:
-    raw_path = (env.get(EVIDENCE_PATH_ENV) or "").strip()
-    path = Path(raw_path) if raw_path else _default_evidence_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2, default=str) + "\n")
-    return path
-
-
 def print_dry_run_sql(payload: dict, summary: dict) -> None:
     print("DRY RUN - PG runtime profile metadata that would be applied:")
     print("-" * 72)
@@ -283,7 +268,6 @@ async def apply_profile() -> None:
             after_report=after_report,
             seeded_profile=profile,
         )
-        evidence_path = write_seed_evidence(evidence, os.environ)
     finally:
         await repo.close()
         await close_all_connections()
@@ -294,7 +278,8 @@ async def apply_profile() -> None:
     print(f"  readonly={profile.is_readonly}")
     print("  symbols=['BNB/USDT:USDT']")
     print("  permission grant: none")
-    print(f"  evidence={evidence_path}")
+    print("Seed evidence:")
+    print(json.dumps(evidence, ensure_ascii=False, indent=2, default=str))
 
 
 async def main() -> None:

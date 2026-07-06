@@ -41,9 +41,6 @@ from scripts.runtime_live_bootstrap_api_flow import (  # noqa: E402
 )
 
 
-DEFAULT_OUTPUT_JSON = (
-    ROOT_DIR / "output/strategygroup-runtime-pilot/runtime-bootstrap-artifact.json"
-)
 DEFAULT_PLAYBOOK_ID = "PB-BRC-STRATEGYGROUP-RUNTIME-PILOT-V1"
 DEFAULT_MAX_SYMBOLS_PER_GROUP = 1
 DEFAULT_MAX_TOTAL_NEW_RUNTIMES = 4
@@ -76,7 +73,6 @@ class RuntimePilotBootstrapConfig:
     account_facts_source: str = "binance_readonly"
     owner_operator_id: str = "owner-standing-authorization"
     playbook_id: str = DEFAULT_PLAYBOOK_ID
-    output_json: str | None = None
     renew_exhausted_runtimes: bool = False
     renewal_batch_id: str | None = None
     candidate_universe_source: str | None = None
@@ -404,16 +400,6 @@ def _load_bootstrap_inputs(
         return _bootstrap_inputs_from_control_state(control_state)
 
     raise RuntimeError("PG_DATABASE_URL is required for PG-only runtime bootstrap")
-
-
-def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
-    output_path = Path(path).expanduser()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 def _load_env_file(path_value: str | None) -> None:
@@ -1279,7 +1265,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--renew-exhausted-runtimes", action="store_true")
     parser.add_argument("--renewal-batch-id")
     parser.add_argument("--execute", action="store_true")
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     return parser.parse_args(argv)
 
 
@@ -1310,7 +1295,6 @@ def main(argv: list[str] | None = None) -> int:
             account_facts_source=args.account_facts_source,
             owner_operator_id=args.owner_operator_id,
             playbook_id=args.playbook_id,
-            output_json=args.output_json,
             renew_exhausted_runtimes=args.renew_exhausted_runtimes,
             renewal_batch_id=args.renewal_batch_id,
             candidate_universe_source=candidate_universe_source,
@@ -1323,7 +1307,6 @@ def main(argv: list[str] | None = None) -> int:
         client=client,
         candidate_pool=candidate_pool,
     )
-    _write_json(args.output_json, artifact)
     print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0 if not artifact["blockers"] else 2
 

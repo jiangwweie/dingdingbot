@@ -42,8 +42,9 @@ surface.
 ## Required Table
 
 The daily table must contain one strategy-level row per active WIP
-StrategyGroup. The expanded per-symbol readiness matrix lives in
-`output/runtime-monitor/latest-strategy-live-candidate-pool.json`.
+StrategyGroup. The expanded per-symbol readiness matrix lives in the
+PG-backed Candidate Pool read model and may be exported only through an
+explicit diagnostic command.
 
 | Field | Meaning |
 | --- | --- |

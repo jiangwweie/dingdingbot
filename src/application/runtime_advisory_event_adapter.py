@@ -199,7 +199,7 @@ def build_completion_audit_advisory_event(
     return build_llm_advisory_event(
         event_type=LlmConsumableEventType.DAILY_AUDIT_DIGEST,
         source_type="completion_audit",
-        source_id=_source_id(report, default="first_bounded_live_order_completion_audit"),
+        source_id=_source_id(report, default="runtime_completion_audit"),
         now_ms=timestamp,
         context_artifact=context_artifact,
         allowed_llm_actions=_allowed_actions_for_digest(blockers=gaps),

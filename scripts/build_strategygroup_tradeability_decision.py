@@ -39,15 +39,6 @@ from scripts.strategygroup_non_executing_projection import (  # noqa: E402
     recursive_true_key_paths,
 )
 
-DEFAULT_OUTPUT_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-tradeability-decision.json"
-)
-DEFAULT_OUTPUT_MD = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-tradeability-decision.md"
-)
-
 SCHEMA = "brc.strategygroup_tradeability_decision.v1"
 JULY_BULLISH_REBOUND_HYPOTHESIS_ID = "JULY-BULLISH-REBOUND-TRADE-PATH-CLOSURE-001"
 
@@ -196,8 +187,6 @@ FORBIDDEN_TRUE_KEYS = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
-    parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
         "--database-url",
         default=os.getenv("PG_DATABASE_URL", ""),
@@ -242,10 +231,6 @@ def main(argv: list[str] | None = None) -> int:
             )
     finally:
         engine.dispose()
-    output_json = Path(args.output_json)
-    output_md = Path(args.output_owner_progress)
-    _write_json(output_json, decision_artifact)
-    _write_text(output_md, _markdown(decision_artifact, output_json))
     print(
         json.dumps(
             {
@@ -254,7 +239,6 @@ def main(argv: list[str] | None = None) -> int:
                 "top_decision": decision_artifact["summary"]["top_decision"],
                 "top_strategy_group_id": decision_artifact["summary"]["top_strategy_group_id"],
                 "tradable_now_count": decision_artifact["summary"]["tradable_now_count"],
-                "output_json": str(output_json),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -2135,7 +2119,7 @@ def _brf2_runtime_signal_capture_blocker(artifact: dict[str, Any]) -> dict[str, 
             "brf2_candidate_authorization_evidence_not_created",
             "BRF2 fresh signal is present in the non-executing detector; shadow evidence exists before official candidate authorization and action-time evidence",
             "runtime",
-            "build_brf2_shadow_candidate_evidence_for_action_time_chain",
+            "materialize_pg_brf2_candidate_authorization_for_action_time_chain",
             "shadow_candidate_evidence_ready",
         )
     if signal_state in {"fresh_signal_absent", "blocked_by_disable_fact"}:
@@ -4425,49 +4409,6 @@ def _selected_strategy_group_id(
     )
 
 
-def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
-    summary = artifact["summary"]
-    lines = [
-        "## StrategyGroup Tradeability Decision",
-        "",
-        f"- Status: `{artifact['status']}`",
-        f"- Generated: `{artifact['generated_at_utc']}`",
-        f"- Output JSON: `{output_json}`",
-        f"- Decision rows: `{summary['row_count']}`",
-        f"- Tradable now: `{summary['tradable_now_count']}`",
-        f"- Top blocker: `{summary['top_strategy_group_id']}` / `{summary['top_decision']}` / `{summary['top_first_blocker_class']}`",
-        f"- Next action: `{summary['top_next_action']}`",
-        "",
-        "## Decision Rows",
-        "",
-        "| StrategyGroup | Stage | Decision | First Blocker | Owner | Next Action | After |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
-    ]
-    for row in artifact["decision_rows"]:
-        lines.append(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
-                row["strategy_group_id"],
-                row["stage"],
-                row["decision"],
-                row["first_blocker_class"],
-                row["blocker_owner"],
-                row["next_action"],
-                row["after_next_state"],
-            )
-        )
-    lines.extend(
-        [
-            "",
-            "## Boundary",
-            "",
-            "- Tradeability Decision is a read model only.",
-            "- It does not call FinalGate, Operation Layer, or exchange write.",
-            "- Runtime Safety State remains the live-submit safety source; Execution Attempt remains the lifecycle entry object.",
-        ]
-    )
-    return "\n".join(lines) + "\n"
-
-
 def _forbidden_effects(*source_artifacts: dict[str, Any]) -> list[str]:
     return recursive_true_key_paths(*source_artifacts, true_keys=FORBIDDEN_TRUE_KEYS)
 
@@ -4525,19 +4466,6 @@ def _int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 def _yes_no(value: bool) -> str:

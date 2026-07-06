@@ -46,8 +46,6 @@ def _args(**overrides):
         "four_hour_limit": 25,
         "timeout_seconds": 10.0,
         "playbook_id": None,
-        "output_dir": "output/unit-active-monitor",
-        "output_json": None,
         "include_runtime_artifacts": False,
         "owner_operator_id": "owner",
         "owner_confirmation_reference": "owner-authorized-unit",
@@ -143,7 +141,6 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
                 "side": args.side,
                 "allow_prepare_records": args.allow_prepare_records,
                 "four_hour_limit": args.four_hour_limit,
-                "output_json": args.output_json,
             }
         )
         return {
@@ -201,7 +198,7 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
         }
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(output_dir=str(tmp_path)),
+        _args(),
         client=client,
         runtime_artifact_builder=builder,
     )
@@ -218,15 +215,9 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
     assert packet["safety_invariants"]["order_lifecycle_called"] is False
     assert "operator_command_plan" not in packet
     assert packet["observation_monitor_plan"]["places_order"] is False
-    for summary in packet["runtime_summaries"]:
-        report_path = summary["report_path"]
-        with open(report_path, encoding="utf-8") as handle:
-            report = json.load(handle)
-        assert report["runtime_instance_id"] in {
-            "runtime-active-1",
-            "runtime-active-2",
-        }
-        assert report["safety_invariants"]["exchange_write_called"] is False
+    assert {
+        summary["runtime_instance_id"] for summary in packet["runtime_summaries"]
+    } == {"runtime-active-1", "runtime-active-2"}
     signal_summary = packet["runtime_summaries"][0]["signal_summary"]
     assert signal_summary["evaluation_status"] == "observe_only"
     assert signal_summary["reason_codes"] == [
@@ -265,7 +256,6 @@ def test_active_monitor_can_filter_specific_active_runtimes(tmp_path):
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(
-            output_dir=str(tmp_path),
             runtime_instance_id=["runtime-ada", "runtime-avax"],
         ),
         client=client,
@@ -321,7 +311,7 @@ def test_active_monitor_can_filter_by_strategy_family(tmp_path):
         }
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(output_dir=str(tmp_path), strategy_family_id=["MPG-001", "TEQ-001"]),
+        _args(strategy_family_id=["MPG-001", "TEQ-001"]),
         client=client,
         runtime_artifact_builder=builder,
     )
@@ -401,7 +391,6 @@ def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(
-            output_dir=str(tmp_path),
             strategy_family_id=["MPG-001", "SOR-001"],
         ),
         client=client,
@@ -465,7 +454,6 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(
-            output_dir=str(tmp_path),
             strategy_family_id=["MPG-001", "SOR-001"],
         ),
         client=client,
@@ -580,8 +568,6 @@ def test_active_monitor_cli_rejects_candidate_universe_json():
             [
                 "--api-base",
                 "http://unit",
-                "--output-dir",
-                "output/unit",
                 "--candidate-universe-json",
                 "candidate-pool.json",
             ]
@@ -613,7 +599,6 @@ def test_active_monitor_records_side_specific_candidate_universe_coverage(
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(
-            output_dir=str(tmp_path),
             strategy_family_id=["SOR-001"],
         ),
         client=client,
@@ -747,8 +732,6 @@ def test_active_monitor_cli_rejects_strategy_handoff_dir():
             [
                 "--api-base",
                 "http://unit",
-                "--output-dir",
-                "output/unit",
                 "--strategy-handoff-dir",
                 "docs/current/strategy-group-handoffs",
             ]
@@ -759,7 +742,7 @@ def test_active_monitor_cli_rejects_strategy_handoff_dir():
 
 def test_active_monitor_cli_does_not_expose_handoff_file_authority():
     args = runtime_active_observation_monitor._parse_args(
-        ["--api-base", "http://unit", "--output-dir", "output/unit"]
+        ["--api-base", "http://unit"]
     )
 
     assert not hasattr(args, "strategy_handoff_dir")
@@ -794,7 +777,6 @@ def test_active_monitor_projects_runtime_profile_boundary_for_runtime_scope(
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(
-            output_dir=str(tmp_path),
             strategy_family_id=["SOR-001"],
         ),
         client=client,
@@ -876,7 +858,7 @@ def test_active_monitor_downgrades_non_actionable_historical_observation_blocker
         }
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(output_dir=str(tmp_path)),
+        _args(),
         client=client,
         runtime_artifact_builder=builder,
     )
@@ -909,7 +891,7 @@ def test_active_monitor_downgrades_observe_only_stop_reference_gap(tmp_path):
     )
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(output_dir=str(tmp_path)),
+        _args(),
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "blocked",
@@ -996,7 +978,7 @@ def test_active_monitor_keeps_stop_reference_gap_hard_when_not_observe_only(tmp_
     )
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(output_dir=str(tmp_path)),
+        _args(),
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "blocked",
@@ -1040,7 +1022,7 @@ def test_active_monitor_keeps_non_actionable_blocker_hard_after_order_side_effec
     client = _FakeClient([_runtime("runtime-prepared", strategy_family_id="MPG-001")])
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(output_dir=str(tmp_path)),
+        _args(),
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "blocked",
@@ -1070,7 +1052,6 @@ def test_active_monitor_reports_missing_requested_runtime_as_warning(tmp_path):
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
         _args(
-            output_dir=str(tmp_path),
             runtime_instance_id=["runtime-ada", "runtime-missing"],
         ),
         client=client,
@@ -1217,7 +1198,7 @@ def test_active_monitor_preserves_signal_input_when_prepare_records_need_candida
         }
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(allow_prepare_records=True, output_dir=str(tmp_path)),
+        _args(allow_prepare_records=True),
         client=client,
         runtime_artifact_builder=builder,
     )
@@ -1257,7 +1238,7 @@ def test_active_monitor_clamps_timeout_to_observation_api_limit(tmp_path):
         }
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(output_dir=str(tmp_path), timeout_seconds=120.0),
+        _args(timeout_seconds=120.0),
         client=client,
         runtime_artifact_builder=builder,
     )
@@ -1287,9 +1268,7 @@ def test_active_monitor_handles_no_active_runtimes():
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
-def test_active_monitor_cli_can_write_output_json(monkeypatch, capsys, tmp_path):
-    output_path = tmp_path / "active-monitor.json"
-
+def test_active_monitor_cli_prints_stdout_only(monkeypatch, capsys):
     def fake_build_monitor_artifact(args):
         return {
             "status": "waiting_for_signal",
@@ -1307,14 +1286,10 @@ def test_active_monitor_cli_can_write_output_json(monkeypatch, capsys, tmp_path)
         "argv",
         [
             "runtime_active_observation_monitor.py",
-            "--output-json",
-            str(output_path),
         ],
     )
 
     assert runtime_active_observation_monitor.main() == 0
 
     stdout_payload = json.loads(capsys.readouterr().out)
-    file_payload = json.loads(output_path.read_text())
-    assert file_payload == stdout_payload
-    assert file_payload["status"] == "waiting_for_signal"
+    assert stdout_payload["status"] == "waiting_for_signal"

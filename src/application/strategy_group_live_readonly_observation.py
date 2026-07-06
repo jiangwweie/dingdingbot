@@ -397,8 +397,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "impulse_return_pct",
             ],
             source_refs=[
-                "src/application/strategy_group_live_readonly_observation.py",
-                "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md",
+                "pg_strategy_group_live_readonly_observation_readmodel",
+                "pg_strategy_review_mi001_bnb_sol_evidence",
             ],
             candidate_blockers=["scheduled live read-only observation not started", "PG observation sink schema gap"],
             evaluator=mi_evaluator,
@@ -421,8 +421,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "impulse_return_pct",
             ],
             source_refs=[
-                "src/application/strategy_group_live_readonly_observation.py",
-                "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md",
+                "pg_strategy_group_live_readonly_observation_readmodel",
+                "pg_strategy_review_mi001_bnb_sol_evidence",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -450,8 +450,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "short_loss_confirmed",
             ],
             source_refs=[
-                "src/domain/cpm_historical_evaluator.py",
-                "docs/ops/crypto-pullback-module-v1-oos-failure-classification.md",
+                "domain_cpm_historical_evaluator",
+                "pg_strategy_review_cpm_oos_classification",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -478,8 +478,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "short_squeeze_risk",
             ],
             source_refs=[
-                "src/domain/brf_price_action_evaluator.py",
-                "docs/ops/td-governance-and-refactor-plan-2026-06.md",
+                "domain_brf_price_action_evaluator",
+                "pg_strategy_review_brf_governance",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -506,8 +506,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "candidate_semantics",
             ],
             source_refs=[
-                "src/domain/reference_price_action_evaluators.py",
-                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+                "domain_reference_price_action_evaluators",
+                "pg_strategy_runtime_semantics",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -533,8 +533,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "candidate_semantics",
             ],
             source_refs=[
-                "src/domain/reference_price_action_evaluators.py",
-                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+                "domain_reference_price_action_evaluators",
+                "pg_strategy_runtime_semantics",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -561,8 +561,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "candidate_semantics",
             ],
             source_refs=[
-                "src/domain/reference_price_action_evaluators.py",
-                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+                "domain_reference_price_action_evaluators",
+                "pg_strategy_runtime_semantics",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -588,8 +588,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "candidate_semantics",
             ],
             source_refs=[
-                "src/domain/reference_price_action_evaluators.py",
-                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+                "domain_reference_price_action_evaluators",
+                "pg_strategy_runtime_semantics",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",

@@ -30,55 +30,36 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 
 
 SCHEMA = "brc.single_lane_task_packet.v1"
-DEFAULT_OUTPUT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.json"
-)
-DEFAULT_OUTPUT_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.md"
-)
 
 BASE_ALLOWED_FILES = [
     "scripts/build_single_lane_task_packet.py",
-    "scripts/validate_single_lane_task_packet.py",
     "scripts/build_daily_live_enablement_table.py",
     "scripts/validate_daily_live_enablement_table.py",
     "tests/unit/test_single_lane_task_packet.py",
     "tests/unit/test_daily_live_enablement_table.py",
-    "output/runtime-monitor/latest-single-lane-task-packet.json",
-    "output/runtime-monitor/latest-single-lane-task-packet.md",
-    "output/runtime-monitor/latest-daily-live-enablement-table.json",
-    "output/runtime-monitor/latest-daily-live-enablement-table.md",
 ]
 CHAIN_ALLOWED_FILES = {
     "replay_live_parity": [
-        "scripts/build_replay_live_parity_audit.py",
-        "tests/unit/test_replay_live_parity_audit.py",
-        "output/runtime-monitor/latest-replay-live-parity-audit.json",
-        "output/runtime-monitor/latest-replay-live-parity-audit.md",
+        "scripts/build_strategygroup_tradeability_decision.py",
+        "scripts/build_strategy_live_candidate_pool.py",
+        "tests/unit/test_strategygroup_tradeability_decision.py",
+        "tests/unit/test_strategy_live_candidate_pool.py",
     ],
     "symbol_scope_decision": [
         "scripts/build_strategygroup_tradeability_decision.py",
         "tests/unit/test_strategygroup_tradeability_decision.py",
-        "output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
-        "output/runtime-monitor/latest-strategygroup-tradeability-decision.md",
     ],
     "action_time_boundary": [
         "scripts/build_strategy_fresh_signal_action_time_boundary.py",
         "tests/unit/test_strategy_fresh_signal_action_time_boundary.py",
-        "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json",
-        "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.md",
     ],
     "daily_live_enablement_status": [
-        "scripts/run_strategygroup_runtime_local_monitor_sequence.py",
-        "tests/unit/test_strategygroup_runtime_local_monitor_sequence.py",
-        "output/runtime-monitor/latest-local-monitor-sequence.json",
-        "output/runtime-monitor/latest-local-monitor-sequence.md",
+        "scripts/build_daily_live_enablement_table.py",
+        "tests/unit/test_daily_live_enablement_table.py",
     ],
     "tradeability_first_blocker": [
         "scripts/build_strategygroup_tradeability_decision.py",
         "tests/unit/test_strategygroup_tradeability_decision.py",
-        "output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
-        "output/runtime-monitor/latest-strategygroup-tradeability-decision.md",
     ],
 }
 FORBIDDEN_FILES = [
@@ -109,8 +90,6 @@ MARKET_WAIT_STATUS = "single_lane_task_packet_not_applicable_market_wait"
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
-    parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
         "--database-url",
         default=os.getenv("PG_DATABASE_URL", ""),
@@ -155,10 +134,6 @@ def main(argv: list[str] | None = None) -> int:
             )
     finally:
         engine.dispose()
-    output_json = Path(args.output_json)
-    output_md = Path(args.output_owner_progress)
-    _write_json(output_json, artifact)
-    _write_text(output_md, _markdown(artifact) + "\n")
     print(
         json.dumps(
             {
@@ -365,16 +340,15 @@ def _market_wait_done_when(
 
 def _tests_for(chain_position: str) -> list[str]:
     tests = [
-        "python3 -m py_compile scripts/build_single_lane_task_packet.py scripts/validate_single_lane_task_packet.py",
+        "python3 -m py_compile scripts/build_single_lane_task_packet.py",
         "pytest -q tests/unit/test_single_lane_task_packet.py",
-        "python3 scripts/validate_single_lane_task_packet.py output/runtime-monitor/latest-single-lane-task-packet.json",
-        "python3 scripts/validate_output_artifact_scope.py --git-status",
+        "python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked",
         "git diff --check",
     ]
     if chain_position == "replay_live_parity":
         tests.insert(
             0,
-            "pytest -q tests/unit/test_replay_live_parity_audit.py tests/unit/test_daily_live_enablement_table.py",
+            "pytest -q tests/unit/test_strategygroup_tradeability_decision.py tests/unit/test_strategy_live_candidate_pool.py tests/unit/test_daily_live_enablement_table.py",
         )
     elif chain_position == "action_time_boundary":
         tests.insert(
@@ -397,49 +371,6 @@ def _row_fingerprint(row: dict[str, Any]) -> dict[str, Any]:
         "closest_to_live_rank": row.get("closest_to_live_rank"),
         "next_engineering_action": row.get("next_engineering_action"),
     }
-
-
-def _markdown(artifact: dict[str, Any]) -> str:
-    lane = _as_dict(artifact.get("active_lane"))
-    lines = [
-        "## Single Lane Task Packet",
-        "",
-        f"- Status: `{artifact.get('status')}`",
-        f"- Task ID: `{artifact.get('task_id')}`",
-        (
-            "- Active lane: "
-            f"`{lane.get('strategy_group_id')} / {lane.get('symbol')} / {lane.get('side')}`"
-        ),
-        f"- Chain position: `{artifact.get('chain_position')}`",
-        f"- First blocker: `{artifact.get('first_blocker')}`",
-        f"- Evidence: `{artifact.get('evidence')}`",
-        f"- Expected state change: `{artifact.get('expected_state_change')}`",
-        f"- Next action: `{artifact.get('next_action')}`",
-        f"- Stop condition: `{artifact.get('stop_condition')}`",
-        f"- Authority boundary: `{artifact.get('authority_boundary')}`",
-        "",
-        "### Allowed Files",
-        "",
-    ]
-    lines.extend(f"- `{item}`" for item in artifact.get("allowed_files") or [])
-    lines.extend(["", "### Forbidden Files", ""])
-    for item in artifact.get("forbidden_files") or []:
-        if "/" in str(item):
-            lines.append(f"- `{item}`")
-        else:
-            lines.append(f"- {item}")
-    lines.extend(["", "### Done When", "", f"`{artifact.get('done_when')}`"])
-    return "\n".join(lines)
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 def _dict_rows(value: Any) -> list[dict[str, Any]]:

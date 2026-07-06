@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 
@@ -243,28 +242,3 @@ def test_watch_evidence_blocks_forbidden_effects():
     assert artifact["watch_evidence_plan"]["next_step"] == (
         "resolve_signal_watch_forbidden_effects"
     )
-
-
-def test_watch_evidence_cli_reads_status_file(tmp_path, capsys):
-    module = _load_module()
-    status_path = tmp_path / "status.json"
-    output_path = tmp_path / "watch.json"
-    status_path.write_text(json.dumps(_status_artifact()), encoding="utf-8")
-
-    code = module.main(
-        [
-            "--status-artifact-json",
-            str(status_path),
-            "--strategy-source",
-            "sample",
-            "--output-json",
-            str(output_path),
-        ]
-    )
-
-    assert code == 0
-    stdout_payload = json.loads(capsys.readouterr().out)
-    file_payload = json.loads(output_path.read_text())
-    assert stdout_payload == file_payload
-    assert file_payload["scope"] == "runtime_strategy_signal_watch_evidence"
-    assert file_payload["safety_invariants"]["pg_observation_written"] is False

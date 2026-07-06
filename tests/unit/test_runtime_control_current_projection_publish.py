@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
@@ -56,17 +55,7 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
     engine = _seeded_engine()
     try:
         with engine.begin() as conn:
-            report = module.publish_runtime_control_current_projections(
-                conn,
-                report_dir=tmp_path / "reports",
-                runtime_monitor_dir=tmp_path / "runtime-monitor",
-                release_manifest=tmp_path / ".brc-release-manifest.json",
-                output_paths={
-                    "candidate_pool": tmp_path / "candidate-pool.json",
-                    "daily_live_enablement_table": tmp_path / "daily-table.json",
-                    "goal_status": tmp_path / "goal-status.json",
-                },
-            )
+            report = module.publish_runtime_control_current_projections(conn)
             readiness_count = conn.execute(
                 sa.text("SELECT COUNT(*) FROM brc_pretrade_readiness_rows")
             ).scalar_one()
@@ -85,6 +74,12 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
                     "WHERE projection_run_id LIKE 'projection:%'"
                 )
             ).scalar_one()
+            output_path_count = conn.execute(
+                sa.text(
+                    "SELECT COUNT(*) FROM brc_control_read_model_snapshots "
+                    "WHERE output_path IS NOT NULL"
+                )
+            ).scalar_one()
 
         assert report["status"] == "current_projections_published"
         assert readiness_count == report["candidate_pool"]["symbol_readiness_count"]
@@ -92,16 +87,11 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
         assert goal_count == 1
         assert current_snapshot_count == 3
         assert projection_run_count == 3
+        assert output_path_count == 0
         assert report["safety_invariants"]["calls_exchange_write"] is False
-        candidate_export = json.loads(
-            (tmp_path / "candidate-pool.json").read_text(encoding="utf-8")
-        )
-        assert candidate_export["projection_run_id"].startswith(
-            "projection:candidate_pool:"
-        )
-        assert candidate_export["owner_projector"] == "pg_candidate_pool_projector"
-        assert candidate_export["source_priority"] == ["pg"]
-        assert candidate_export["authority_boundary"]
+        assert not (tmp_path / "candidate-pool.json").exists()
+        assert not (tmp_path / "daily-table.json").exists()
+        assert not (tmp_path / "goal-status.json").exists()
     finally:
         engine.dispose()
 
@@ -113,13 +103,9 @@ def test_publish_current_projections_keeps_one_current_snapshot_per_model(tmp_pa
         with engine.begin() as conn:
             module.publish_runtime_control_current_projections(
                 conn,
-                report_dir=tmp_path / "reports",
-                runtime_monitor_dir=tmp_path / "runtime-monitor",
             )
             module.publish_runtime_control_current_projections(
                 conn,
-                report_dir=tmp_path / "reports",
-                runtime_monitor_dir=tmp_path / "runtime-monitor",
             )
             rows = conn.execute(
                 sa.text(
@@ -156,8 +142,6 @@ def test_publish_current_projections_rejects_legacy_projection_owner(tmp_path: P
             with pytest.raises(RuntimeError, match="current projection owner mismatch"):
                 module.publish_runtime_control_current_projections(
                     conn,
-                    report_dir=tmp_path / "reports",
-                    runtime_monitor_dir=tmp_path / "runtime-monitor",
                 )
     finally:
         engine.dispose()

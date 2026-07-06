@@ -44,9 +44,6 @@ COMMANDS = (
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     payload = build_payload(execute_local=args.execute_local)
-    if args.manifest_json:
-        with open(args.manifest_json, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2, sort_keys=True)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0 if payload["status"] != "critical" else 2
 
@@ -99,7 +96,6 @@ def build_payload(*, execute_local: bool) -> dict[str, Any]:
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute-local", action="store_true")
-    parser.add_argument("--manifest-json")
     return parser.parse_args(argv)
 
 

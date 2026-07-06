@@ -3,13 +3,10 @@
 
 This is an operator wrapper around ``runtime_next_attempt_observation_monitor``.
 It discovers ACTIVE runtimes from the Trading Console API, runs the existing
-per-runtime monitor for each one, and writes an auditable aggregate artifact.
+per-runtime monitor for each one, and prints an aggregate monitor summary.
 
-By default it is observe-only. With ``--allow-prepare-records`` it may create
-shadow SignalEvaluation / shadow OrderCandidate / prepare authorization records
-only when a real strategy signal is ready for prepare. It never arms local
-registration, arms exchange submit, calls OrderLifecycle, submits orders, or
-moves funds.
+It is observe-only. It never arms local registration, arms exchange submit,
+calls OrderLifecycle, submits orders, or moves funds.
 """
 
 from __future__ import annotations
@@ -19,6 +16,7 @@ from contextlib import redirect_stdout
 import json
 import os
 from pathlib import Path
+import shlex
 import sys
 import time
 from typing import Any, Callable
@@ -38,9 +36,6 @@ from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     DEFAULT_API_BASE,
     UrlLibApiClient,
 )
-from scripts import runtime_next_attempt_observation_api_prepare_flow as observation_flow  # noqa: E402
-from scripts import runtime_next_attempt_observation_monitor as monitor  # noqa: E402
-
 
 MAX_OBSERVATION_API_TIMEOUT_SECONDS = 60.0
 NON_ACTIONABLE_OBSERVATION_BLOCKERS = {
@@ -61,10 +56,32 @@ def _api_base(args: argparse.Namespace) -> str:
 
     return (
         args.api_base
-        or os.environ.get(observation_flow.API_BASE_ENV)
         or os.environ.get(FIRST_REAL_SUBMIT_API_BASE_ENV)
         or DEFAULT_API_BASE
     )
+
+
+def _load_env_file(path_value: str | None) -> None:
+    if not path_value:
+        return
+    path = Path(path_value).expanduser()
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        try:
+            parsed = shlex.split(raw_value, comments=False, posix=True)
+        except ValueError:
+            parsed = []
+        value = parsed[0] if len(parsed) == 1 else raw_value.strip().strip("\"'")
+        if value and not os.environ.get(key):
+            os.environ[key] = value
 
 
 def _effective_observation_timeout_seconds(args: argparse.Namespace) -> float:
@@ -642,8 +659,6 @@ def _monitor_args(args: argparse.Namespace, runtime: dict[str, Any]) -> argparse
         one_hour_limit=args.one_hour_limit,
         four_hour_limit=args.four_hour_limit,
         timeout_seconds=_effective_observation_timeout_seconds(args),
-        signal_output_json=None,
-        output_dir=str(Path(args.output_dir).expanduser() / runtime_instance_id),
         allow_prepare_records=args.allow_prepare_records,
         candidate_id=None,
         context_id=None,
@@ -658,12 +673,106 @@ def _monitor_args(args: argparse.Namespace, runtime: dict[str, Any]) -> argparse
         max_cycles=args.max_cycles_per_runtime,
         interval_seconds=args.interval_seconds,
         continue_on_blocked=args.continue_on_blocked,
-        output_json=str(
-            Path(args.output_dir).expanduser()
-            / runtime_instance_id
-            / "monitor-artifact.json"
-        ),
     )
+
+
+def _build_runtime_observation_cycle_artifact(
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    client = UrlLibApiClient(api_base=args.api_base)
+    body = {
+        "source": args.source,
+        "include_exchange": bool(args.include_exchange),
+        "allow_prepare_records": False,
+        "symbol": args.symbol,
+        "side": args.side,
+        "family": args.family,
+        "strategy_family_id": args.strategy_family_id,
+        "carrier_id": args.carrier_id,
+        "quantity": args.quantity,
+        "target_notional_usdt": args.target_notional_usdt,
+        "max_notional": args.max_notional,
+        "leverage": args.leverage,
+        "max_attempts": args.max_attempts,
+        "protection_mode": args.protection_mode,
+        "review_requirement": args.review_requirement,
+        "evaluation_id": args.evaluation_id,
+        "playbook_id": args.playbook_id,
+        "one_hour_limit": args.one_hour_limit,
+        "four_hour_limit": args.four_hour_limit,
+        "timeout_seconds": args.timeout_seconds,
+        "non_executing": True,
+    }
+    response = client.request_json(
+        "POST",
+        (
+            "/api/trading-console/strategy-runtimes/"
+            f"{args.runtime_instance_id}/next-attempt-observation-cycle"
+        ),
+        body=body,
+    )
+    payload = response.get("body")
+    if response.get("http_status", 0) >= 300 or response.get("error"):
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "blocked",
+            "runtime_instance_id": args.runtime_instance_id,
+            "blockers": [
+                f"runtime_observation_cycle_http_{response.get('http_status')}"
+            ],
+            "warnings": [str(payload)] if payload else [],
+            "observation_cycle_plan": {
+                "next_step": "repair_runtime_observation_cycle_api",
+                "not_executed": True,
+                "creates_shadow_candidate": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _non_executing_runtime_observation_safety(),
+        }
+    if not isinstance(payload, dict):
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "blocked",
+            "runtime_instance_id": args.runtime_instance_id,
+            "blockers": ["runtime_observation_cycle_response_not_object"],
+            "warnings": [],
+            "observation_cycle_plan": {
+                "next_step": "repair_runtime_observation_cycle_api",
+                "not_executed": True,
+                "creates_shadow_candidate": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _non_executing_runtime_observation_safety(),
+        }
+    return payload
+
+
+def _non_executing_runtime_observation_safety() -> dict[str, bool]:
+    return {
+        "allow_prepare_records": False,
+        "prepare_records_created": False,
+        "shadow_candidate_created": False,
+        "runtime_execution_intent_draft_created": False,
+        "recorded_execution_intent_created": False,
+        "submit_authorization_created": False,
+        "protection_plan_created": False,
+        "executable_execution_intent_created": False,
+        "local_registration_armed": False,
+        "exchange_submit_armed": False,
+        "execute_real_submit": False,
+        "exchange_write_called": False,
+        "order_created": False,
+        "order_lifecycle_called": False,
+        "attempt_counter_mutated": False,
+        "runtime_budget_mutated": False,
+        "position_opened": False,
+        "position_closed": False,
+        "withdrawal_or_transfer_created": False,
+    }
 
 
 def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
@@ -738,7 +847,6 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
         ),
         "blockers": list(artifact.get("blockers") or []),
         "warnings": list(artifact.get("warnings") or []),
-        "report_path": plan.get("report_path") or artifact.get("output_json"),
         "signal_input_json": artifact.get("signal_input_json")
         or plan.get("signal_input_json"),
         "prepared_authorization_id": artifact.get("prepared_authorization_id")
@@ -772,16 +880,6 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
             ),
         },
     }
-
-
-def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
-    output_path = Path(path).expanduser()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 def _safety(
@@ -847,9 +945,9 @@ def _build_monitor_artifact(
     client: Any | None = None,
     runtime_artifact_builder: Callable[[argparse.Namespace], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    observation_flow._load_env_file(args.env_file)
+    _load_env_file(args.env_file)
     api_client = client or UrlLibApiClient(api_base=_api_base(args))
-    builder = runtime_artifact_builder or monitor._build_monitor_artifact
+    builder = runtime_artifact_builder or _build_runtime_observation_cycle_artifact
     active = _active_runtimes(client=api_client)
     requested_runtime_instance_ids = list(
         getattr(args, "runtime_instance_id", None) or []
@@ -896,8 +994,6 @@ def _build_monitor_artifact(
             runtime_artifact
         )
         runtime_artifact["runtime_instance_id"] = runtime_args.runtime_instance_id
-        runtime_artifact["output_json"] = runtime_args.output_json
-        _write_json(runtime_args.output_json, runtime_artifact)
         runtime_artifacts.append(runtime_artifact)
         summaries.append(_summary(runtime, runtime_artifact))
 
@@ -1187,12 +1283,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
     parser.add_argument("--playbook-id")
-    parser.add_argument(
-        "--output-dir",
-        default="output/runtime-active-observation-monitor",
-    )
-    parser.add_argument("--output-json")
-    parser.add_argument("--include-runtime-artifacts", action="store_true", default=False)
     parser.add_argument("--owner-operator-id", default="owner")
     parser.add_argument(
         "--owner-confirmation-reference",
@@ -1217,8 +1307,6 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     output = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-    if args.output_json:
-        _write_json(args.output_json, artifact)
     print(output)
     return 0 if artifact["status"] in {
         "waiting_for_signal",

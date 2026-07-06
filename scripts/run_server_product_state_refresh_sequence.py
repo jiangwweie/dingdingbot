@@ -35,17 +35,12 @@ from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 
 DEFAULT_PYTHON = "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
-DEFAULT_RUNTIME_MONITOR_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-monitor")
 DEFAULT_ENV_FILE = Path("/home/ubuntu/brc-deploy/env/live-readonly.env")
-DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "server-product-state-refresh-sequence.json"
 REFRESH_MODES = {
     "watcher_tick_summary",
     "action_time_if_needed",
-    "control_refresh",
     "action_time",
     "closure",
-    "diagnostic_full",
 }
 
 
@@ -71,10 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     report = run_server_product_state_refresh_sequence(
         python=args.python,
         api_base=args.api_base,
-        report_dir=Path(args.report_dir),
-        runtime_monitor_dir=Path(args.runtime_monitor_dir),
         env_file=Path(args.env_file),
-        output_json=Path(args.output_json),
         mode=args.mode,
     )
     print(
@@ -99,10 +91,7 @@ def run_server_product_state_refresh_sequence(
     *,
     python: str = DEFAULT_PYTHON,
     api_base: str = DEFAULT_API_BASE,
-    report_dir: Path = DEFAULT_REPORT_DIR,
-    runtime_monitor_dir: Path = DEFAULT_RUNTIME_MONITOR_DIR,
     env_file: Path = DEFAULT_ENV_FILE,
-    output_json: Path = DEFAULT_OUTPUT_JSON,
     mode: str = "watcher_tick_summary",
     runner: Runner | None = None,
     action_time_trigger_state: dict[str, Any] | None = None,
@@ -128,7 +117,6 @@ def run_server_product_state_refresh_sequence(
                 status="server_product_state_refresh_sequence_failed",
                 action_time_trigger=trigger_state,
             )
-            _write_json(output_json, report)
             return report
         if trigger_state.get("triggered") is not True:
             report = _empty_refresh_report(
@@ -138,14 +126,11 @@ def run_server_product_state_refresh_sequence(
                 status="server_product_state_refresh_sequence_ready",
                 action_time_trigger=trigger_state,
             )
-            _write_json(output_json, report)
             return report
         effective_mode = "action_time"
     steps = _refresh_steps(
         python=python,
         api_base=api_base,
-        report_dir=report_dir,
-        runtime_monitor_dir=runtime_monitor_dir,
         env_file=env_file,
         mode=effective_mode,
     )
@@ -200,8 +185,9 @@ def run_server_product_state_refresh_sequence(
         for result in step_results
         if result["status"] == "skipped_after_required_failure"
     ]
-    goal_status_attempted = any(
-        result["name"] == "build_goal_status" and result["returncode"] is not None
+    current_projection_publish_attempted = any(
+        result["name"] == "publish_runtime_control_current_projections"
+        and result["returncode"] is not None
         for result in step_results
     )
     attempted_step_names = {
@@ -229,8 +215,10 @@ def run_server_product_state_refresh_sequence(
             "failed_required_step_count": len(failed_required),
             "failed_optional_step_count": len(failed_optional),
             "skipped_after_required_failure_count": len(skipped),
-            "final_goal_status_attempted": goal_status_attempted,
-            "final_goal_status_suppressed": not goal_status_attempted,
+            "current_projection_publish_attempted": current_projection_publish_attempted,
+            "current_projection_publish_suppressed": (
+                not current_projection_publish_attempted
+            ),
             "blocked_by_required_step": blocked_by_required_failure,
         },
         "step_results": step_results,
@@ -263,7 +251,6 @@ def run_server_product_state_refresh_sequence(
             "order_sizing_changed": False,
         },
     }
-    _write_json(output_json, report)
     return report
 
 
@@ -307,8 +294,8 @@ def _empty_refresh_report(
             "failed_required_step_count": len(step_results),
             "failed_optional_step_count": 0,
             "skipped_after_required_failure_count": 0,
-            "final_goal_status_attempted": False,
-            "final_goal_status_suppressed": True,
+            "current_projection_publish_attempted": False,
+            "current_projection_publish_suppressed": True,
             "blocked_by_required_step": (
                 "pg_action_time_trigger_state"
                 if failed
@@ -466,178 +453,12 @@ def _refresh_steps(
     *,
     python: str,
     api_base: str,
-    report_dir: Path,
-    runtime_monitor_dir: Path,
     env_file: Path,
     mode: str,
 ) -> list[RefreshStep]:
-    status = report_dir / "latest-status.json"
-    public = runtime_monitor_dir / "latest-binance-usdm-public-facts.json"
-    public_md = runtime_monitor_dir / "latest-binance-usdm-public-facts.md"
-    account = runtime_monitor_dir / "latest-account-safe-facts.json"
-    goal = report_dir / "strategygroup-runtime-goal-status.json"
-    candidate_pool = runtime_monitor_dir / "latest-strategy-live-candidate-pool.json"
-    candidate_pool_md = runtime_monitor_dir / "latest-strategy-live-candidate-pool.md"
-    daily_table = runtime_monitor_dir / "latest-daily-live-enablement-table.json"
-    daily_table_md = runtime_monitor_dir / "latest-daily-live-enablement-table.md"
-    single_lane = runtime_monitor_dir / "latest-single-lane-task-packet.json"
-    single_lane_md = runtime_monitor_dir / "latest-single-lane-task-packet.md"
-    action_time_boundary = (
-        runtime_monitor_dir / "latest-strategy-fresh-signal-action-time-boundary.json"
-    )
-    action_time_boundary_md = (
-        runtime_monitor_dir / "latest-strategy-fresh-signal-action-time-boundary.md"
-    )
-    sor_detector_dir = runtime_monitor_dir
-    mi_trial = runtime_monitor_dir / "latest-mi-trial-admission-decision.json"
-    mi_trial_md = runtime_monitor_dir / "latest-mi-trial-admission-decision.md"
-    brf2_facts = runtime_monitor_dir / "latest-brf2-runtime-signal-facts.json"
-    brf2_facts_md = runtime_monitor_dir / "latest-brf2-runtime-signal-facts.md"
-    release_manifest = Path("/home/ubuntu/brc-deploy/app/current/.brc-release-manifest.json")
-
     pg_required = ("--require-database-url",)
-    action_time_boundary_inputs = (
-        *pg_required,
-        "--output-json",
-        str(action_time_boundary),
-        "--output-owner-progress",
-        str(action_time_boundary_md),
-    )
 
     steps = [
-        RefreshStep(
-            "fetch_public_facts",
-            (
-                python,
-                "scripts/fetch_binance_usdm_public_facts.py",
-                "--symbols",
-                "BTCUSDT",
-                "ETHUSDT",
-                "SOLUSDT",
-                "AVAXUSDT",
-                "SUIUSDT",
-                "OPUSDT",
-                *pg_required,
-                "--output-json",
-                str(public),
-                "--output-owner-progress",
-                str(public_md),
-            ),
-        ),
-        RefreshStep(
-            "build_sor_detector",
-            (
-                python,
-                "scripts/build_sor_session_scope_detector.py",
-                *pg_required,
-                "--output-dir",
-                str(sor_detector_dir),
-            ),
-        ),
-        RefreshStep(
-            "build_action_time_boundary_public",
-            (
-                python,
-                "scripts/build_strategy_fresh_signal_action_time_boundary.py",
-                *action_time_boundary_inputs,
-            ),
-        ),
-        RefreshStep(
-            "build_mi_trial_admission",
-            (
-                python,
-                "scripts/build_mi_trial_admission_decision.py",
-                "--replay-json",
-                str(runtime_monitor_dir / "latest-four-candidate-recent-live-submit-replay.json"),
-                *pg_required,
-                "--output-json",
-                str(mi_trial),
-                "--output-owner-progress",
-                str(mi_trial_md),
-            ),
-        ),
-        RefreshStep(
-            "build_brf2_runtime_signal_facts",
-            (
-                python,
-                "scripts/build_brf2_runtime_signal_facts.py",
-                "--strategy-source",
-                "live_market",
-                *pg_required,
-                "--output-json",
-                str(brf2_facts),
-                "--output-owner-progress",
-                str(brf2_facts_md),
-            ),
-        ),
-        RefreshStep("validate_runtime_coverage", (python, "scripts/validate_runtime_candidate_universe_coverage.py", str(status))),
-        RefreshStep(
-            "build_candidate_pool",
-            (
-                python,
-                "scripts/build_strategy_live_candidate_pool.py",
-                *pg_required,
-                "--output-json",
-                str(candidate_pool),
-                "--output-owner-progress",
-                str(candidate_pool_md),
-            ),
-        ),
-        RefreshStep("validate_candidate_pool", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
-        RefreshStep(
-            "build_daily_table",
-            (
-                python,
-                "scripts/build_daily_live_enablement_table.py",
-                *pg_required,
-                "--output-json",
-                str(daily_table),
-                "--output-owner-progress",
-                str(daily_table_md),
-            ),
-        ),
-        RefreshStep("validate_daily_table", (python, "scripts/validate_daily_live_enablement_table.py", str(daily_table))),
-        RefreshStep(
-            "build_single_lane_task_packet",
-            (
-                python,
-                "scripts/build_single_lane_task_packet.py",
-                *pg_required,
-                "--output-json",
-                str(single_lane),
-                "--output-owner-progress",
-                str(single_lane_md),
-            ),
-        ),
-        RefreshStep("validate_single_lane_task_packet", (python, "scripts/validate_single_lane_task_packet.py", str(single_lane))),
-        RefreshStep(
-            "refresh_product_state_artifacts",
-            (
-                python,
-                "scripts/refresh_strategygroup_runtime_product_state_artifacts.py",
-                "--api-base",
-                api_base,
-                "--output-dir",
-                str(report_dir),
-                "--output-json",
-                str(report_dir / "product-state-refresh-packet.json"),
-                "--refresh-chain-closure-status",
-                "--chain-closure-output-json",
-                str(report_dir / "runtime-execution-chain-closure-status.json"),
-                "--refresh-live-closure-evidence",
-                "--live-closure-evidence-report-dir",
-                str(report_dir),
-                "--live-closure-evidence-output-json",
-                str(report_dir / "runtime-live-closure-evidence.json"),
-                "--live-closure-evidence-verification-output-json",
-                str(report_dir / "runtime-live-closure-evidence-verification.json"),
-                "--live-closure-evidence-refresh-output-json",
-                str(report_dir / "runtime-live-closure-evidence-refresh.json"),
-                "--label",
-                "tokyo-runtime-signal-watcher",
-            ),
-            required=False,
-        ),
         RefreshStep(
             "build_account_safe_facts",
             (
@@ -646,39 +467,14 @@ def _refresh_steps(
                 *pg_required,
                 "--env-file",
                 str(env_file),
-                "--output-json",
-                str(account),
             ),
         ),
-        RefreshStep(
-            "build_action_time_boundary_account",
-            (
-                python,
-                "scripts/build_strategy_fresh_signal_action_time_boundary.py",
-                *action_time_boundary_inputs,
-            ),
-        ),
-        RefreshStep(
-            "build_candidate_pool_after_account",
-            (
-                python,
-                "scripts/build_strategy_live_candidate_pool.py",
-                *pg_required,
-                "--output-json",
-                str(candidate_pool),
-                "--output-owner-progress",
-                str(candidate_pool_md),
-            ),
-        ),
-        RefreshStep("validate_candidate_pool_after_account", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
         RefreshStep(
             "materialize_pg_promotion_action_time_lane",
             (
                 python,
                 "scripts/materialize_pg_promotion_action_time_lane.py",
                 *pg_required,
-                "--output-json",
-                str(report_dir / "pg-promotion-action-time-lane-materialization.json"),
             ),
         ),
         RefreshStep(
@@ -687,8 +483,6 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_ticket.py",
                 *pg_required,
-                "--output-json",
-                str(report_dir / "action-time-ticket-materialization.json"),
             ),
         ),
         RefreshStep(
@@ -697,8 +491,6 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_finalgate_preflight.py",
                 *pg_required,
-                "--output-json",
-                str(report_dir / "action-time-finalgate-preflight.json"),
             ),
         ),
         RefreshStep(
@@ -707,8 +499,6 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_operation_layer_handoff.py",
                 *pg_required,
-                "--output-json",
-                str(report_dir / "operation-layer-handoff.json"),
             ),
         ),
         RefreshStep(
@@ -717,8 +507,6 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_ticket_bound_runtime_safety_state.py",
                 *pg_required,
-                "--output-json",
-                str(report_dir / "ticket-bound-runtime-safety-state.json"),
             ),
         ),
         RefreshStep(
@@ -728,76 +516,6 @@ def _refresh_steps(
                 "scripts/materialize_ticket_bound_post_submit_closure.py",
                 *pg_required,
                 "--latest-submitted",
-                "--output-json",
-                str(report_dir / "ticket-bound-post-submit-closure.json"),
-            ),
-        ),
-        RefreshStep(
-            "build_candidate_pool_after_materialization",
-            (
-                python,
-                "scripts/build_strategy_live_candidate_pool.py",
-                *pg_required,
-                "--output-json",
-                str(candidate_pool),
-                "--output-owner-progress",
-                str(candidate_pool_md),
-            ),
-        ),
-        RefreshStep("validate_candidate_pool_after_materialization", (python, "scripts/validate_strategy_live_candidate_pool.py", str(candidate_pool))),
-        RefreshStep(
-            "build_readiness_pack_after_materialization",
-            (
-                python,
-                "scripts/build_runtime_signal_watcher_readiness_pack.py",
-                "--report-dir",
-                str(report_dir),
-                "--output-dir",
-                str(report_dir),
-                "--stale-after-seconds",
-                "180",
-                "--label",
-                "tokyo-runtime-signal-watcher",
-            ),
-        ),
-        RefreshStep(
-            "build_daily_table_after_account",
-            (
-                python,
-                "scripts/build_daily_live_enablement_table.py",
-                *pg_required,
-                "--output-json",
-                str(daily_table),
-                "--output-owner-progress",
-                str(daily_table_md),
-            ),
-        ),
-        RefreshStep("validate_daily_table_after_account", (python, "scripts/validate_daily_live_enablement_table.py", str(daily_table))),
-        RefreshStep(
-            "build_single_lane_task_packet_after_account",
-            (
-                python,
-                "scripts/build_single_lane_task_packet.py",
-                *pg_required,
-                "--output-json",
-                str(single_lane),
-                "--output-owner-progress",
-                str(single_lane_md),
-            ),
-        ),
-        RefreshStep("validate_single_lane_task_packet_after_account", (python, "scripts/validate_single_lane_task_packet.py", str(single_lane))),
-        RefreshStep(
-            "build_goal_status",
-            (
-                python,
-                "scripts/build_strategygroup_runtime_goal_status.py",
-                "--report-dir",
-                str(report_dir),
-                "--release-manifest",
-                str(release_manifest),
-                *pg_required,
-                "--output-json",
-                str(goal),
             ),
         ),
         RefreshStep(
@@ -806,20 +524,6 @@ def _refresh_steps(
                 python,
                 "scripts/publish_runtime_control_current_projections.py",
                 *pg_required,
-                "--candidate-pool-json",
-                str(candidate_pool),
-                "--daily-table-json",
-                str(daily_table),
-                "--goal-status-json",
-                str(goal),
-                "--report-dir",
-                str(report_dir),
-                "--runtime-monitor-dir",
-                str(runtime_monitor_dir),
-                "--release-manifest",
-                str(release_manifest),
-                "--output-json",
-                str(report_dir / "runtime-control-current-projection-publish.json"),
             ),
         ),
     ]
@@ -827,52 +531,21 @@ def _refresh_steps(
 
 
 def _steps_for_mode(steps: list[RefreshStep], *, mode: str) -> list[RefreshStep]:
-    if mode == "diagnostic_full":
-        return steps
     names_by_mode = {
         "watcher_tick_summary": {
-            "validate_runtime_coverage",
-            "build_readiness_pack_after_materialization",
-        },
-        "control_refresh": {
-            "fetch_public_facts",
-            "build_sor_detector",
-            "build_action_time_boundary_public",
-            "build_mi_trial_admission",
-            "build_brf2_runtime_signal_facts",
-            "validate_runtime_coverage",
-            "build_candidate_pool",
-            "validate_candidate_pool",
-            "build_daily_table",
-            "validate_daily_table",
-            "build_single_lane_task_packet",
-            "validate_single_lane_task_packet",
-            "build_goal_status",
             "publish_runtime_control_current_projections",
         },
         "action_time": {
             "build_account_safe_facts",
-            "build_action_time_boundary_account",
-            "build_candidate_pool_after_account",
-            "validate_candidate_pool_after_account",
             "materialize_pg_promotion_action_time_lane",
             "materialize_action_time_ticket",
             "materialize_action_time_finalgate_preflight",
             "materialize_action_time_operation_layer_handoff",
             "materialize_ticket_bound_runtime_safety_state",
-            "build_candidate_pool_after_materialization",
-            "validate_candidate_pool_after_materialization",
-            "build_readiness_pack_after_materialization",
-            "build_daily_table_after_account",
-            "validate_daily_table_after_account",
-            "build_single_lane_task_packet_after_account",
-            "validate_single_lane_task_packet_after_account",
-            "build_goal_status",
             "publish_runtime_control_current_projections",
         },
         "closure": {
             "materialize_ticket_bound_post_submit_closure",
-            "build_goal_status",
             "publish_runtime_control_current_projections",
         },
     }
@@ -908,16 +581,6 @@ def _run_command(
     )
 
 
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    tmp_path.replace(path)
-
-
 def _tail(text: str, *, max_chars: int = 500) -> str:
     stripped = text.strip()
     return stripped if len(stripped) <= max_chars else stripped[-max_chars:]
@@ -927,18 +590,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python", default=DEFAULT_PYTHON)
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
-    parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR))
-    parser.add_argument("--runtime-monitor-dir", default=str(DEFAULT_RUNTIME_MONITOR_DIR))
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE))
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument(
         "--mode",
         choices=sorted(REFRESH_MODES),
         default="watcher_tick_summary",
         help=(
             "Refresh mode. watcher_tick_summary is the normal watcher post-step; "
-            "diagnostic_full preserves the legacy full diagnostic sequence and "
-            "must be selected explicitly."
+            "action_time_if_needed checks PG current state before running "
+            "ticket/preflight/handoff/safety materializers."
         ),
     )
     return parser.parse_args(argv)

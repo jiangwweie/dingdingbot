@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate JSON exports match PG current read-model snapshots."""
+"""Validate PG current projections are not backed by JSON export files."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Any
 
 import sqlalchemy as sa
 
@@ -33,29 +32,9 @@ def validate_export_matches_pg_projection(conn: sa.engine.Connection) -> list[st
     for row in rows:
         model_type = str(row.get("model_type") or "")
         output_path = str(row.get("output_path") or "")
-        if not output_path:
-            continue
-        path = Path(output_path)
-        if not path.exists():
-            errors.append(f"{model_type} export missing: {output_path}")
-            continue
-        try:
-            export_payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            errors.append(f"{model_type} export invalid json: {exc}")
-            continue
-        if _normalized_payload(export_payload) != _normalized_payload(row.get("payload")):
-            errors.append(f"{model_type} export does not match PG snapshot")
+        if output_path:
+            errors.append(f"{model_type} current projection must not define export path: {output_path}")
     return errors
-
-
-def _normalized_payload(payload: Any) -> Any:
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except json.JSONDecodeError:
-            return payload
-    return json.loads(json.dumps(payload, sort_keys=True, default=str))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -74,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.dispose()
     report = {
-        "status": "export_matches_pg_projection_valid" if not errors else "blocked",
+        "status": "pg_current_projection_export_absent" if not errors else "blocked",
         "errors": errors,
     }
     if args.json:

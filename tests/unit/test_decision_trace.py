@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-import json
 from decimal import Decimal
 
 from src.application.decision_trace import TraceEvent, TraceService
-from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 
 
-def test_jsonl_trace_sink_writes_valid_jsonl(tmp_path):
-    path = tmp_path / "runtime" / "risk_decision.jsonl"
-    sink = JsonlTraceSink(path)
+class _CaptureTraceSink:
+    def __init__(self) -> None:
+        self.events = []
+
+    def emit(self, event: TraceEvent) -> None:
+        self.events.append(event.model_dump(mode="json"))
+
+
+def test_trace_sink_captures_valid_event_payload():
+    sink = _CaptureTraceSink()
     event = TraceEvent(
         trace_id="trace-1",
         lifecycle_id="lifecycle-1",
@@ -22,10 +27,8 @@ def test_jsonl_trace_sink_writes_valid_jsonl(tmp_path):
 
     sink.emit(event)
 
-    lines = path.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 1
-
-    payload = json.loads(lines[0])
+    assert len(sink.events) == 1
+    payload = sink.events[0]
     assert payload["trace_id"] == "trace-1"
     assert payload["lifecycle_id"] == "lifecycle-1"
     assert payload["event_type"] == "risk.pre_order_check"
@@ -35,9 +38,9 @@ def test_jsonl_trace_sink_writes_valid_jsonl(tmp_path):
     assert payload["config_hash"] == "cfg-123"
 
 
-def test_trace_service_emits_risk_decision(tmp_path):
-    path = tmp_path / "runtime" / "risk_decision.jsonl"
-    service = TraceService(sinks=[JsonlTraceSink(path)])
+def test_trace_service_emits_risk_decision():
+    sink = _CaptureTraceSink()
+    service = TraceService(sinks=[sink])
 
     event = service.emit_risk_decision(
         lifecycle_id="risk-lifecycle-1",
@@ -48,7 +51,7 @@ def test_trace_service_emits_risk_decision(tmp_path):
     )
 
     assert event.trace_id
-    payload = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    payload = sink.events[0]
     assert payload["lifecycle_id"] == "risk-lifecycle-1"
     assert payload["decision"] == "allow"
     assert payload["metadata"]["symbol"] == "ETH/USDT:USDT"

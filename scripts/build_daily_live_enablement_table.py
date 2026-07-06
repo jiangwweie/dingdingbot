@@ -26,13 +26,6 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
 
-DEFAULT_OUTPUT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-daily-live-enablement-table.json"
-)
-DEFAULT_OUTPUT_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-daily-live-enablement-table.md"
-)
-
 SCHEMA = "brc.daily_live_enablement_table.v1"
 WIP_LANES = ("CPM-RO-001", "MPG-001", "MI-001", "SOR-001", "BRF2-001")
 WIP_PRIORITY_BONUS = {
@@ -110,8 +103,6 @@ BLOCKER_STAGE_TIER = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
-    parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument(
         "--database-url",
         default=os.getenv("PG_DATABASE_URL", ""),
@@ -153,10 +144,6 @@ def main(argv: list[str] | None = None) -> int:
             )
     finally:
         engine.dispose()
-    output_json = Path(args.output_json)
-    output_md = Path(args.output_owner_progress)
-    _write_json(output_json, artifact)
-    _write_text(output_md, _markdown(artifact, output_json))
     print(
         json.dumps(
             {
@@ -1017,64 +1004,6 @@ def _rank_stage_tier(row: dict[str, Any]) -> int:
 
 def _rank_wip_priority(row: dict[str, Any]) -> int:
     return WIP_PRIORITY_BONUS.get(str(row.get("strategy_group_id") or ""), 0)
-
-
-def _read_optional_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
-    rows = artifact["rows"]
-    lines = [
-        "# Daily Live Enablement Table",
-        "",
-        f"- Source JSON: `{output_json}`",
-        f"- Generated: `{artifact['generated_at_utc']}`",
-        f"- Rank 1 lane: `{artifact['summary']['rank_1_lane']}`",
-        "",
-        "| Rank | StrategyGroup | Symbol | Stage | First blocker | Owner action | Next action | Stop condition |",
-        "| ---: | --- | --- | --- | --- | --- | --- | --- |",
-    ]
-    for row in sorted(rows, key=lambda item: item["closest_to_live_rank"]):
-        lines.append(
-            "| {rank} | `{strategy}` | `{symbol}` | `{stage}` | `{blocker}` | `{owner}` | `{action}` | {stop} |".format(
-                rank=row["closest_to_live_rank"],
-                strategy=row["strategy_group_id"],
-                symbol=row["symbol"],
-                stage=row["stage"],
-                blocker=row["first_blocker"],
-                owner=row["owner_action_required"],
-                action=row["next_engineering_action"],
-                stop=row["stop_condition"],
-            )
-        )
-    lines.extend(
-        [
-            "",
-            "This table is a non-authority read model. It does not call FinalGate, Operation Layer, or exchange write.",
-            "",
-        ]
-    )
-    return "\n".join(lines)
 
 
 def _dict_rows(value: Any) -> list[dict[str, Any]]:

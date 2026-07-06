@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build StrategyGroup live-facts readiness artifact from intake and read-only facts.
+"""Build StrategyGroup live-facts readiness artifact from PG current state.
 
 The artifact separates observe readiness from armed candidate-preparation
 readiness. Missing account, open-order, budget, protection, or next-gate facts
 must block candidate preparation, but they do not erase the StrategyGroup
-handoff or authorize any execution.
+candidate scope or authorize any execution.
 """
 
 from __future__ import annotations
@@ -12,9 +12,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import sqlalchemy as sa
@@ -23,13 +24,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.build_strategy_group_handoff_intake_artifact import (
-    DEFAULT_HANDOFF_DIR,
-    build_artifact as build_handoff_intake_artifact,
+from scripts.build_strategy_live_candidate_pool import (
+    build_strategy_live_candidate_pool_from_control_state,
 )
 from scripts.runtime_pg_fact_snapshots import (
     read_latest_account_safe_facts_artifact,
     read_pretrade_public_facts_artifact,
+)
+from src.infrastructure.runtime_control_state_repository import (
+    PgBackedRuntimeControlStateRepository,
 )
 
 
@@ -60,25 +63,6 @@ UNSAFE_FLAGS = {
     "runtime_budget_mutated",
     "withdrawal_or_transfer_created",
 }
-
-
-def _read_json(path: str | Path | None) -> dict[str, Any]:
-    if not path:
-        return {}
-    payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return payload
-
-
-def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
-    output_path = Path(path).expanduser()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 def _status(value: Any) -> str:
@@ -250,10 +234,10 @@ def _owner_state(
     if not rows:
         return {
             "status": "blocked",
-            "blocked_at": "strategy_group_intake",
-            "blocked_reason": "no_strategy_group_handoff_intake",
-            "next_recover_condition": "repo_local_strategy_group_handoff_intake_exists",
-            "non_authority_checkpoint": "build_strategy_group_handoff_intake_artifact",
+            "blocked_at": "pg_strategy_group_intake",
+            "blocked_reason": "no_pg_strategy_group_candidate_scope",
+            "next_recover_condition": "pg_current_candidate_scope_projection_exists",
+            "non_authority_checkpoint": "publish_pg_current_strategy_group_intake_projection",
             "checkpoint_source": "owner_state",
             "downgrade_mode": "not_selected",
         }
@@ -365,6 +349,154 @@ def build_readiness_artifact(
         "candidate_prepare_blockers": candidate_prepare_blockers,
         "blockers": observation_blockers,
     }
+
+
+def build_strategy_group_intake_artifact_from_candidate_pool(
+    candidate_pool: dict[str, Any],
+    *,
+    generated_at_ms: int | None = None,
+) -> dict[str, Any]:
+    generated_at_ms = generated_at_ms or int(time.time() * 1000)
+    rows = [
+        row
+        for row in candidate_pool.get("symbol_readiness_rows") or []
+        if isinstance(row, dict)
+    ]
+    by_group: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        strategy_group_id = str(row.get("strategy_group_id") or "")
+        symbol = str(row.get("symbol") or "")
+        side = str(row.get("side") or "")
+        if not strategy_group_id:
+            continue
+        group = by_group.setdefault(
+            strategy_group_id,
+            {
+                "strategy_group_id": strategy_group_id,
+                "version": "pg_current",
+                "name": strategy_group_id,
+                "source_path": "pg_current_projection:candidate_pool",
+                "intake_status": "armed_observation_intake_ready",
+                "picker": {
+                    "show": True,
+                    "rank": len(by_group) + 1,
+                    "default_mode": "armed_observation",
+                    "badge": "pg_current",
+                },
+                "supported_symbols": [],
+                "supported_symbol_count": 0,
+                "supported_sides": [],
+                "risk_defaults": {},
+                "required_fact_categories": [],
+                "required_fact_count": 0,
+                "watcher_scope": {
+                    "source": "pg_current_projection:candidate_pool",
+                    "candidate_scope_closed": True,
+                },
+                "sample_statuses": {},
+                "hard_stop_count": 0,
+                "blockers": [],
+                "warnings": [],
+                "execution_boundary": {
+                    "research_intake_source_only": False,
+                    "pg_current_projection_source": True,
+                    "runtime_registration_authorized": False,
+                    "candidate_creation_authorized": False,
+                    "final_gate_input": False,
+                    "operation_layer_input": False,
+                    "real_submit_authorized": False,
+                },
+            },
+        )
+        if symbol and symbol not in group["supported_symbols"]:
+            group["supported_symbols"].append(symbol)
+        if side and side not in group["supported_sides"]:
+            group["supported_sides"].append(side)
+
+    strategy_picker = sorted(
+        by_group.values(),
+        key=lambda item: (int(item["picker"]["rank"]), item["strategy_group_id"]),
+    )
+    for index, group in enumerate(strategy_picker, start=1):
+        group["picker"]["rank"] = index
+        group["supported_symbols"] = sorted(group["supported_symbols"])
+        group["supported_sides"] = sorted(group["supported_sides"])
+        group["supported_symbol_count"] = len(group["supported_symbols"])
+
+    blockers: list[str] = []
+    if not strategy_picker:
+        blockers.append("pg_current_candidate_scope_missing")
+    status = (
+        "ready_for_main_control_intake"
+        if not blockers
+        else "blocked_pg_strategy_intake_source"
+    )
+    return {
+        "scope": "strategy_group_intake_main_control_projection",
+        "status": status,
+        "generated_at_ms": generated_at_ms,
+        "source_anchor": {
+            "source_mode": str(candidate_pool.get("source_mode") or "db_backed"),
+            "projection_target": str(
+                candidate_pool.get("projection_target") or "production_current"
+            ),
+            "model": "strategy_live_candidate_pool",
+            "legacy_file_source": False,
+        },
+        "counts": {
+            "strategy_groups": len(strategy_picker),
+            "armed_observation_intake_ready": len(strategy_picker),
+            "observe_only_intake_ready": 0,
+            "required_fact_rows": 0,
+            "candidate_lanes": len(rows),
+        },
+        "strategy_picker": strategy_picker,
+        "required_facts_matrix": [],
+        "watcher_scope": [
+            {
+                "strategy_group_id": group["strategy_group_id"],
+                "candidate_symbols": group["supported_symbols"],
+                "side_scope": group["supported_sides"],
+                "source": "pg_current_projection:candidate_pool",
+                "default_mode": group["picker"]["default_mode"],
+                "intake_status": group["intake_status"],
+            }
+            for group in strategy_picker
+        ],
+        "source_refs": {
+            "candidate_pool": "pg_current_projection:strategy_live_candidate_pool",
+            "legacy_handoff_json_read": False,
+            "legacy_packet_env_read": False,
+        },
+        "safety_invariants": {
+            **{name: False for name in sorted(UNSAFE_FLAGS)},
+            "reads_research_intake_source_only": False,
+            "reads_pg_current_projection": True,
+            "registers_runtime": False,
+            "creates_candidate": False,
+            "authorizes_execution": False,
+            "places_order": False,
+            "mutates_pg": False,
+        },
+        "blockers": blockers,
+        "warnings": [],
+    }
+
+
+def build_strategy_group_intake_artifact_from_control_state(
+    control_state: dict[str, Any],
+    *,
+    generated_at_ms: int | None = None,
+) -> dict[str, Any]:
+    generated_at_utc = datetime.now(timezone.utc).isoformat()
+    candidate_pool = build_strategy_live_candidate_pool_from_control_state(
+        control_state,
+        generated_at_utc=generated_at_utc,
+    )
+    return build_strategy_group_intake_artifact_from_candidate_pool(
+        candidate_pool,
+        generated_at_ms=generated_at_ms,
+    )
 
 
 def build_readiness_artifact_from_pg(
@@ -578,33 +710,33 @@ def build_blocked_pg_readiness_artifact(
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build StrategyGroup live-facts readiness from intake and facts.",
+        description="Build StrategyGroup live-facts readiness from PG current state.",
     )
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--allow-non-postgres-for-test", action="store_true")
-    parser.add_argument("--intake-json")
-    parser.add_argument("--handoff-dir")
-    parser.add_argument("--output-json", required=True)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    if args.intake_json:
-        intake = _read_json(args.intake_json)
-    else:
-        intake = build_handoff_intake_artifact(
-            handoff_dir=Path(args.handoff_dir).expanduser()
-            if args.handoff_dir
-            else DEFAULT_HANDOFF_DIR
-        )
-    artifact = build_readiness_artifact_from_database_url(
-        database_url=args.database_url,
-        intake_artifact=intake,
-        allow_non_postgres_for_test=args.allow_non_postgres_for_test,
-    )
-    _write_json(args.output_json, artifact)
+    if not args.database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for live-facts readiness")
+    engine = sa.create_engine(args.database_url)
+    try:
+        with engine.connect() as conn:
+            control_state = PgBackedRuntimeControlStateRepository(
+                conn
+            ).read_control_state()
+            intake = build_strategy_group_intake_artifact_from_control_state(
+                control_state
+            )
+            artifact = build_readiness_artifact_from_pg(
+                conn=conn,
+                intake_artifact=intake,
+            )
+    finally:
+        engine.dispose()
     print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0 if artifact["operator_path"]["can_continue_observation"] else 2
 

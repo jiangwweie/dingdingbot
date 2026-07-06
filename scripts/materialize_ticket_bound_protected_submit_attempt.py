@@ -40,8 +40,6 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 )
 
 
-DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
-DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "ticket-bound-protected-submit-attempt.json"
 AUTHORITY_BOUNDARY = (
     "ticket_bound_protected_submit; "
     "requires_pg_runtime_safety_submit_allowed_and_official_operation_layer"
@@ -278,7 +276,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--operation-submit-command-id", required=True)
     parser.add_argument("--submit-mode", default=SUBMIT_MODE_DISABLED_SMOKE)
     parser.add_argument("--now-ms", type=int, default=None)
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--allow-non-postgres-for-test",
@@ -315,7 +312,6 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.dispose()
 
-    _write_json(Path(args.output_json), report)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True, default=str))
     else:
@@ -970,15 +966,6 @@ def _result(
     if extra:
         payload.update(extra)
     return payload
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 if __name__ == "__main__":

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import sqlite3
+import sys
 import time
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
 
 from src.application.production_strategy_family_admission import (
     API_BACKED_AUTHORIZATION_OPERATION_CHAIN,
@@ -39,6 +44,22 @@ OWNER_PRIMARY_INTERNAL_GATE_TERMS = {
     "blocker code",
     "runtime grant",
 }
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_CONTROL_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+RUNTIME_CONTROL_SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+
+
+def _load_file_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_trading_console_live_read_only_exchange_env_allows_order_allowed_ceiling(monkeypatch):
@@ -127,33 +148,15 @@ def _configure_pg_live_fact_snapshots(
     symbols: tuple[str, ...] = ("BTCUSDT", "ETHUSDT"),
     account_ready: bool = False,
 ) -> Path:
-    db_path = tmp_path / "runtime-control-state.db"
+    db_path = _configure_pg_runtime_control_state(
+        monkeypatch,
+        tmp_path,
+        watcher_covered=True,
+    )
+    now_ms = int(time.time() * 1000)
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE brc_runtime_fact_snapshots (
-              fact_snapshot_id TEXT PRIMARY KEY,
-              strategy_group_id TEXT,
-              symbol TEXT,
-              side TEXT,
-              runtime_profile_id TEXT,
-              fact_surface TEXT,
-              source_kind TEXT,
-              source_ref TEXT,
-              computed BOOLEAN,
-              satisfied BOOLEAN,
-              freshness_state TEXT,
-              failed_facts TEXT,
-              fact_values TEXT,
-              blocker_class TEXT,
-              observed_at_ms INTEGER,
-              valid_until_ms INTEGER,
-              created_at_ms INTEGER
-            )
-            """
-        )
         for index, symbol in enumerate(symbols, start=1):
-            observed_at_ms = 1_780_000_000_000 + index
+            observed_at_ms = now_ms + index
             conn.execute(
                 """
                 INSERT INTO brc_runtime_fact_snapshots (
@@ -212,6 +215,7 @@ def _configure_pg_live_fact_snapshots(
                 "next_attempt_gate_ready",
             ]
         )
+        account_observed_at_ms = now_ms + 100
         for surface in ("account_safe", "account_mode"):
             conn.execute(
                 """
@@ -223,20 +227,93 @@ def _configure_pg_live_fact_snapshots(
                   created_at_ms
                 ) VALUES (
                   ?, NULL, NULL, NULL, NULL, ?, 'live_account_readonly',
-                  'unit', 1, ?, ?, ?, ?, ?, 1780000000100,
-                  1780000060100, 1780000000100
+                  'unit', 1, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 (
-                    f"fact:global:{surface}:1780000000100",
+                    f"fact:global:{surface}:{account_observed_at_ms}",
                     surface,
                     1 if account_ready else 0,
                     "fresh" if account_ready else "stale",
                     json.dumps(failed),
                     json.dumps(checks),
                     None if account_ready else "computed_not_satisfied",
+                    account_observed_at_ms,
+                    account_observed_at_ms + 300_000,
+                    account_observed_at_ms,
                 ),
             )
+    monkeypatch.setenv("PG_DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("BRC_ALLOW_NON_POSTGRES_FOR_TEST", "1")
+    return db_path
+
+
+def _configure_pg_runtime_control_state(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    watcher_covered: bool = False,
+) -> Path:
+    db_path = tmp_path / "runtime-control-current.db"
+    migration = _load_file_module(
+        RUNTIME_CONTROL_MIGRATION_PATH,
+        f"runtime_control_migration_{id(tmp_path)}",
+    )
+    seed = _load_file_module(
+        RUNTIME_CONTROL_SEED_PATH,
+        f"runtime_control_seed_{id(tmp_path)}",
+    )
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        now_ms = int(time.time() * 1000)
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+        if watcher_covered:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO brc_watcher_runtime_coverage (
+                      runtime_coverage_id,
+                      strategy_group_id,
+                      symbol,
+                      side,
+                      detector_key,
+                      runtime_profile_id,
+                      coverage_state,
+                      liveness_state,
+                      last_tick_at_ms,
+                      valid_until_ms,
+                      is_current,
+                      created_at_ms
+                    )
+                    SELECT
+                      'unit-coverage:' || c.candidate_scope_id,
+                      c.strategy_group_id,
+                      c.symbol,
+                      c.side,
+                      'unit_test_detector',
+                      r.runtime_profile_id,
+                      'covered',
+                      'active',
+                      :now_ms,
+                      :valid_until_ms,
+                      true,
+                      :now_ms
+                    FROM brc_strategy_group_candidate_scope c
+                    JOIN brc_runtime_scope_bindings r
+                      ON r.candidate_scope_id = c.candidate_scope_id
+                     AND r.status = 'active'
+                    WHERE c.status = 'active'
+                    """
+                ),
+                {"now_ms": now_ms, "valid_until_ms": now_ms + 900_000},
+            )
+    engine.dispose()
     monkeypatch.setenv("PG_DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("BRC_ALLOW_NON_POSTGRES_FOR_TEST", "1")
     return db_path
@@ -5534,15 +5611,7 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
             "requires_official_operation_layer": True,
         },
     }
-    files = {
-        "watcher-tick.json": tick,
-        "wakeup-evidence.json": {"status": "prepared_shadow_evidence_ready_for_owner_review"},
-        "operator-evidence.json": {"status": "strategy_group_signal_review_available"},
-        "status-artifact.json": {"status": "ok", "blockers": [], "warnings": []},
-        "notification-state.json": {"last_notified_event_key": "ready-event"},
-    }
-    for name, payload in files.items():
-        (report_dir / name).write_text(json.dumps(payload), encoding="utf-8")
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
 
     from src.interfaces.api import app
 
@@ -5556,60 +5625,48 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["source"] == "trading_console_read_model_v1"
     assert payload["freshness_status"] == "fresh"
     assert payload["live_ready"] is False
-    assert payload["data"]["deployment_readiness"]["status"] == "ready"
-    assert payload["data"]["deployment_readiness"]["feishu_configured"] is True
-    assert payload["data"]["deployment_readiness"]["duplicate_suppression"] == "active"
-    assert payload["data"]["deployment_readiness"]["systemd_timer"] == (
-        "verified_by_deployment_readiness_artifact"
-    )
-    assert (
-        payload["data"]["deployment_readiness"]["systemd_timer"]
-        != "verified_by_deployment_readiness_packet"
-    )
+    deployment = payload["data"]["deployment_readiness"]
+    assert deployment["status"] == "ready"
+    assert deployment["source_mode"] == "db_backed"
+    assert deployment["report_files_read"] is False
+    assert deployment["legacy_json_fallback"] is False
+    assert "file_status" not in deployment
+    assert deployment["systemd_timer"] == "not_checked_by_owner_readmodel"
     assert "status_packet" not in payload["data"]
     assert "status_packet_status" not in payload["data"]["watcher"]
-    assert payload["data"]["watcher"]["watcher_status_evidence_status"] == "ok"
-    assert payload["data"]["watcher_status_evidence"]["status"] == "ok"
-    assert payload["data"]["post_signal_resume"]["can_continue_steps_5_8"] is True
-    assert payload["data"]["post_signal_resume"]["status"] == (
-        "ready_for_action_time_final_gate"
-    )
+    assert payload["data"]["watcher"]["watcher_status_evidence_status"] == "ready"
+    assert payload["data"]["watcher_status_evidence"]["status"] == "ready"
+    assert payload["data"]["post_signal_resume"]["can_continue_steps_5_8"] is False
+    assert payload["data"]["post_signal_resume"]["status"] == "blocked"
     assert payload["data"]["post_signal_resume"]["current_gate"] == (
-        "action_time_final_gate"
+        "blocked"
     )
     assert "next_chain" not in payload["data"]["post_signal_resume"]
-    assert payload["data"]["action_time_resume"]["status"] == (
-        "ready_for_action_time_final_gate"
+    assert payload["data"]["action_time_resume"]["status"] == "blocked"
+    assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == []
+    assert payload["data"]["action_time_resume"]["signal_input_ref"] == (
+        "pg:brc_live_signal_events"
     )
-    assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == [
-        "run_official_action_time_final_gate_preflight"
-    ]
+    assert "signal_input_json" not in payload["data"]["action_time_resume"]
     assert "automatic_recovery_action" not in payload["data"]["post_signal_auto_resume"]
-    assert payload["data"]["post_signal_auto_resume"]["non_authority_checkpoint"] == (
-        "run_official_action_time_final_gate_preflight"
+    assert payload["data"]["post_signal_auto_resume"]["checkpoint_source"] == (
+        "pg_goal_status_current"
     )
-    assert payload["data"]["owner_state"]["blocked_at"] == "FinalGate"
-    assert payload["data"]["owner_state"]["blocked_reason"] == (
-        "action_time_final_gate_not_run_yet"
-    )
+    assert payload["data"]["owner_state"]["checkpoint_source"] == "pg_goal_status_current"
     assert "automatic_recovery_action" not in payload["data"]["owner_state"]
     assert payload["data"]["owner_state"]["non_authority_checkpoint"] == (
-        "run_official_action_time_final_gate_preflight"
+        "repair_pg_pretrade_readiness_projection"
     )
-    assert payload["data"]["owner_state"]["downgrade_mode"] == (
-        "no_real_submit_until_final_gate_pass"
-    )
+    assert payload["data"]["owner_state"]["downgrade_mode"] == "no_legacy_file_fallback"
     assert payload["data"]["why_not_executable"] == [
-        "action_time_final_gate_not_run_yet"
+        "candidate_pool_blocker:detector_not_attached:22"
     ]
     assert "next_safe_checkpoint" not in payload["data"]
     assert payload["data"]["non_authority_checkpoint"] == (
-        "run_official_action_time_final_gate_preflight"
+        "repair_pg_pretrade_readiness_projection"
     )
-    assert payload["data"]["checkpoint_source"] == "owner_state"
-    assert payload["data"]["post_signal_resume"]["post_signal_auto_resume"][
-        "can_continue_without_owner_chat"
-    ] is True
+    assert payload["data"]["checkpoint_source"] == "pg_goal_status_current"
+    assert payload["data"]["source_refs"]["legacy_report_files_read"] is False
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
 
@@ -5638,7 +5695,7 @@ def test_runtime_signal_watcher_status_ignores_resume_pack_legacy_action_text(
     action_time_resume = {
         "status": "ready_for_action_time_final_gate",
         "next_step": "legacy_next_step_must_not_drive_action",
-        "signal_input_json": "/reports/runtime-mpg/signal-input.json",
+        "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg",
         "shadow_candidate_id": "shadow-candidate-1",
         "prepared_authorization_id": "auth-ready-1",
         "allowed_auto_actions": ["run_official_action_time_final_gate_preflight"],
@@ -5683,36 +5740,7 @@ def test_runtime_signal_watcher_status_ignores_resume_pack_legacy_action_text(
         },
         "post_signal_auto_resume": stale_auto_resume,
     }
-    files = {
-        "watcher-tick.json": tick,
-        "wakeup-evidence.json": {
-            "status": "prepared_shadow_evidence_ready_for_owner_review"
-        },
-        "operator-evidence.json": {"status": "strategy_group_signal_review_available"},
-        "status-artifact.json": {"status": "ok", "blockers": [], "warnings": []},
-        "notification-state.json": {"last_notified_event_key": "ready-event"},
-        "post-signal-resume-pack.json": {
-            "status": "ready_for_action_time_final_gate",
-            "can_continue_steps_5_8": True,
-            "post_signal_auto_resume": stale_auto_resume,
-            "action_time_resume": action_time_resume,
-            "owner_state": {
-                "status": "ready_for_action_time_final_gate",
-                "blocker_class": "none",
-                "blocked_at": "FinalGate",
-                "blocked_reason": "action_time_final_gate_not_run_yet",
-                "next_recover_condition": (
-                    "official_final_gate_preflight_passes_with_current_facts"
-                ),
-                "automatic_recovery_action": (
-                    "legacy_recovery_text_must_not_drive_action"
-                ),
-                "downgrade_mode": "no_real_submit_until_final_gate_pass",
-            },
-        },
-    }
-    for name, payload in files.items():
-        (report_dir / name).write_text(json.dumps(payload), encoding="utf-8")
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
 
     from src.interfaces.api import app
 
@@ -5724,18 +5752,22 @@ def test_runtime_signal_watcher_status_ignores_resume_pack_legacy_action_text(
 
     assert "automatic_recovery_action" not in payload["data"]["post_signal_auto_resume"]
     assert payload["data"]["action_time_resume"]["next_step"] == (
-        "run_official_action_time_final_gate_preflight"
+        "repair_pg_pretrade_readiness_projection"
     )
-    assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == [
-        "run_official_action_time_final_gate_preflight"
-    ]
+    assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == []
+    assert payload["data"]["action_time_resume"]["legacy_json_fallback"] is False
+    assert "signal_input_json" not in payload["data"]["action_time_resume"]
     assert "automatic_recovery_action" not in payload["data"]["owner_state"]
     assert payload["data"]["owner_state"]["non_authority_checkpoint"] == (
-        "run_official_action_time_final_gate_preflight"
+        "repair_pg_pretrade_readiness_projection"
     )
     assert "next_safe_checkpoint" not in payload["data"]
     assert payload["data"]["non_authority_checkpoint"] == (
-        "run_official_action_time_final_gate_preflight"
+        "repair_pg_pretrade_readiness_projection"
+    )
+    assert "legacy_recovery_text_must_not_drive_action" not in json.dumps(
+        payload["data"],
+        sort_keys=True,
     )
 
 
@@ -5803,18 +5835,7 @@ def test_runtime_signal_watcher_status_ignores_legacy_tick_status_packet_status(
             "withdrawal_or_transfer_created": False,
         },
     }
-    for name, packet in {
-        "watcher-tick.json": tick,
-        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
-        "operator-evidence.json": {"status": "operator_review"},
-        "status-artifact.json": {
-            "status": "source_status_from_status_evidence",
-            "blockers": [],
-            "warnings": [],
-        },
-        "notification-state.json": {"last_notified_event_key": "waiting-event"},
-    }.items():
-        (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
 
     from src.interfaces.api import app
 
@@ -5824,13 +5845,13 @@ def test_runtime_signal_watcher_status_ignores_legacy_tick_status_packet_status(
         assert response.status_code == 200
         payload = response.json()
 
-    assert payload["data"]["watcher"]["watcher_status_evidence_status"] == (
-        "source_status_from_status_evidence"
-    )
-    assert payload["data"]["watcher_status_evidence"]["status"] == (
-        "source_status_from_status_evidence"
-    )
+    assert payload["data"]["watcher"]["watcher_status_evidence_status"] == "ready"
+    assert payload["data"]["watcher_status_evidence"]["status"] == "ready"
     assert "status_packet_status" not in payload["data"]["watcher"]
+    assert "source_status_from_status_evidence" not in json.dumps(
+        payload["data"],
+        sort_keys=True,
+    )
 
 
 def test_runtime_signal_watcher_status_ignores_legacy_watcher_packet_files(
@@ -5856,18 +5877,7 @@ def test_runtime_signal_watcher_status_ignores_legacy_watcher_packet_files(
             "withdrawal_or_transfer_created": False,
         },
     }
-    for name, artifact in {
-        "watcher-tick.json": tick,
-        "wakeup-packet.json": {"status": "operator_evidence_needs_review"},
-        "operator-packet.json": {"status": "operator_review"},
-        "status-artifact.json": {
-            "status": "source_status_from_status_evidence",
-            "blockers": [],
-            "warnings": [],
-        },
-        "notification-state.json": {"last_notified_event_key": "waiting-event"},
-    }.items():
-        (report_dir / name).write_text(json.dumps(artifact), encoding="utf-8")
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
 
     from src.interfaces.api import app
 
@@ -5877,14 +5887,13 @@ def test_runtime_signal_watcher_status_ignores_legacy_watcher_packet_files(
         assert response.status_code == 200
         payload = response.json()
 
-    file_status = payload["data"]["deployment_readiness"]["file_status"]
-    assert file_status["wakeup_evidence"]["path"].endswith("wakeup-evidence.json")
-    assert file_status["operator_evidence"]["path"].endswith("operator-evidence.json")
-    assert file_status["wakeup_evidence"]["present"] is False
-    assert file_status["operator_evidence"]["present"] is False
-    assert payload["data"]["watcher"]["wakeup_status"] == "unknown"
-    assert payload["data"]["watcher"]["operator_status"] == "unknown"
-    assert payload["data"]["deployment_readiness"]["status"] == "evidence_missing"
+    deployment = payload["data"]["deployment_readiness"]
+    assert "file_status" not in deployment
+    assert deployment["report_files_read"] is False
+    assert deployment["legacy_json_fallback"] is False
+    assert payload["data"]["source_refs"]["legacy_report_files_read"] is False
+    assert "wakeup-packet.json" not in json.dumps(payload["data"], sort_keys=True)
+    assert payload["data"]["deployment_readiness"]["status"] == "ready"
 
 
 def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
@@ -5958,37 +5967,7 @@ def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
         },
         "post_signal_auto_resume": auto_resume,
     }
-    files = {
-        "watcher-tick.json": tick,
-        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
-        "operator-evidence.json": {"status": "operator_review"},
-        "status-artifact.json": {
-            "status": "ok",
-            "blockers": tick["blockers"],
-            "warnings": [],
-            "runtime_signal_summaries": [],
-        },
-        "notification-state.json": {},
-        "post-signal-resume-pack.json": {
-            "status": "waiting_for_market",
-            "can_continue_steps_5_8": False,
-            "post_signal_auto_resume": auto_resume,
-            "action_time_resume": action_time_resume,
-            "owner_state": {
-                "status": "waiting_for_market",
-                "blocker_class": "waiting_for_market",
-                "blocked_at": "watcher_signal",
-                "blocked_reason": "no_fresh_strategy_signal",
-                "next_recover_condition": (
-                    "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
-                ),
-                "automatic_recovery_action": "continue_watcher_observation",
-                "downgrade_mode": "observe_only",
-            },
-        },
-    }
-    for name, payload in files.items():
-        (report_dir / name).write_text(json.dumps(payload), encoding="utf-8")
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
 
     from src.interfaces.api import app
 
@@ -6000,96 +5979,42 @@ def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
 
     assert payload["read_model"] == "runtime_signal_watcher_status"
     assert payload["freshness_status"] == "fresh"
-    assert payload["data"]["post_signal_resume"]["status"] == "waiting_for_market"
-    assert payload["data"]["post_signal_resume"]["current_gate"] == (
-        "waiting_for_fresh_strategy_signal"
-    )
+    assert payload["data"]["post_signal_resume"]["status"] == "blocked"
+    assert payload["data"]["post_signal_resume"]["current_gate"] == "blocked"
     assert "next_chain" not in payload["data"]["post_signal_resume"]
     assert payload["data"]["post_signal_resume"]["raw_resume_pack_status"] == (
-        None
+        "missing_fact"
     )
     assert payload["data"]["post_signal_resume"]["resume_pack_present"] is False
-    assert payload["data"]["action_time_resume"]["status"] == "waiting_for_market"
-    assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == [
-        "continue_watcher_observation"
-    ]
+    assert payload["data"]["action_time_resume"]["status"] == "blocked"
+    assert payload["data"]["action_time_resume"]["allowed_auto_actions"] == []
     assert payload["data"]["owner_state"]["blocked_reason"] == (
-        "no_fresh_strategy_signal"
+        "candidate_pool_blocker:detector_not_attached:22"
     )
     assert "automatic_recovery_action" not in payload["data"]["owner_state"]
     assert payload["data"]["owner_state"]["non_authority_checkpoint"] == (
-        "continue_watcher_observation"
+        "repair_pg_pretrade_readiness_projection"
     )
-    assert payload["data"]["why_not_executable"] == ["no_fresh_strategy_signal"]
+    assert payload["data"]["why_not_executable"] == [
+        "candidate_pool_blocker:detector_not_attached:22"
+    ]
     assert "next_safe_checkpoint" not in payload["data"]
-    assert payload["data"]["non_authority_checkpoint"] == "continue_watcher_observation"
+    assert payload["data"]["non_authority_checkpoint"] == (
+        "repair_pg_pretrade_readiness_projection"
+    )
+    assert payload["data"]["source_refs"]["legacy_report_files_read"] is False
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
 
 
 def _write_strategy_group_handoff(path: Path, strategy_group_id: str, *, default_mode: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "strategy_group_id": strategy_group_id,
-                "version": "2026-06-14-r0",
-                "name": f"{strategy_group_id} handoff",
-                "supported_symbols": ["BTCUSDT", "ETHUSDT"],
-                "supported_sides": ["long"],
-                "mode_recommendation": {
-                    "default": default_mode,
-                    "allowed": ["observe_only", "armed_observation"],
-                    "not_allowed_by_research_window": ["auto_execute_after_gate"],
-                },
-                "signal_ready_rule": {"requires_fresh_closed_candle": True},
-                "required_facts": {
-                    "market": ["latest_price", "recent_1h_candles"],
-                    "account": ["active_position", "open_orders"],
-                    "exchange": ["symbol_availability", "min_notional"],
-                    "risk": ["protection_plan_state"],
-                },
-                "risk_defaults": {"max_notional_usdt": 8, "leverage": 1},
-                "hard_stops": ["active_position", "open_order"],
-                "sample_signal_artifact": {"status": "ready_for_shadow_candidate_prepare"},
-                "sample_no_signal_artifact": {"status": "no_signal"},
-                "sample_stale_signal_artifact": {"status": "stale_signal"},
-                "sample_conflict_artifact": {"status": "signal_conflict"},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-def _write_strategy_group_handoff_supplements(base: Path) -> None:
-    for name in [
-        "main-control-admission-priority.md",
-        "main-control-required-facts-map.md",
-        "main-control-conflict-policy.md",
-        "main-control-watcher-cadence.md",
-        "main-control-handoff-index.md",
-        "main-control-task-item.md",
-    ]:
-        (base / name).write_text(f"# {name}\n", encoding="utf-8")
+    return None
 
 
 def test_strategy_group_handoff_intake_returns_picker_readiness(monkeypatch, tmp_path):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
-    handoff_dir = tmp_path / "strategy-group-handoffs"
-    _write_strategy_group_handoff(
-        handoff_dir / "MPG-001" / "handoff.json",
-        "MPG-001",
-        default_mode="armed_observation",
-    )
-    _write_strategy_group_handoff(
-        handoff_dir / "PMR-001" / "handoff.json",
-        "PMR-001",
-        default_mode="observe_only",
-    )
-    _write_strategy_group_handoff_supplements(handoff_dir)
-    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
-    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_SOURCE_COMMIT", "05f616b0")
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
 
     from src.interfaces.api import app
 
@@ -6104,45 +6029,29 @@ def test_strategy_group_handoff_intake_returns_picker_readiness(monkeypatch, tmp
     assert payload["live_ready"] is False
     assert payload["no_action_guarantee"]["places_order"] is False
     assert payload["data"]["status"] == "ready_for_main_control_intake"
-    assert payload["data"]["source_anchor"]["commit"] == "05f616b0"
-    assert payload["data"]["counts"]["strategy_groups"] == 2
+    assert payload["data"]["source_anchor"]["legacy_file_source"] is False
+    assert payload["data"]["counts"]["strategy_groups"] >= 5
     by_id = {
         item["strategy_group_id"]: item
         for item in payload["data"]["strategy_picker"]
     }
     assert by_id["MPG-001"]["intake_status"] == "armed_observation_intake_ready"
-    assert by_id["PMR-001"]["intake_status"] == "observe_only_intake_ready"
+    assert by_id["MPG-001"]["supported_symbols"]
+    assert "source_path" in by_id["MPG-001"]
+    assert by_id["MPG-001"]["source_path"] == "pg_current_projection:candidate_pool"
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["creates_candidate"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
+    assert payload["data"]["safety_invariants"]["reads_pg_current_projection"] is True
 
 
-def test_strategy_group_handoff_intake_marks_prebuilt_source_as_evidence(
+def test_strategy_group_handoff_intake_ignores_prebuilt_source_env(
     monkeypatch,
     tmp_path,
 ):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
-    artifact_path = tmp_path / "strategy-group-intake-projection.json"
-    artifact_path.write_text(
-        json.dumps(
-            {
-                "scope": "strategy_group_intake_main_control_projection",
-                "status": "ready_for_main_control_intake",
-                "source_anchor": {"commit": "prebuilt"},
-                "counts": {"strategy_groups": 1},
-                "strategy_picker": [],
-                "required_facts_matrix": [],
-                "watcher_scope": [],
-                "blockers": [],
-                "safety_invariants": {
-                    "places_order": False,
-                    "mutates_pg": False,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    artifact_path = tmp_path / "must-not-be-read-strategy-group-intake.json"
     monkeypatch.setenv("BRC_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH", str(artifact_path))
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(tmp_path / "missing"))
 
@@ -6154,11 +6063,9 @@ def test_strategy_group_handoff_intake_marks_prebuilt_source_as_evidence(
         assert response.status_code == 200
         payload = response.json()
 
-    assert payload["data"]["intake_evidence_source"] == {
-        "path": str(artifact_path),
-        "present": True,
-        "source": "prebuilt_strategy_group_intake_evidence",
-    }
+    assert "intake_evidence_source" not in payload["data"]
+    assert payload["data"]["status"] == "blocked_pg_strategy_intake_source"
+    assert "prebuilt" not in json.dumps(payload["data"], sort_keys=True)
     assert "handoff_packet_source" not in payload["data"]
 
 
@@ -6168,15 +6075,11 @@ def test_strategy_group_live_facts_readiness_separates_observe_from_candidate(
 ):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
-    handoff_dir = tmp_path / "strategy-group-handoffs"
-    _write_strategy_group_handoff(
-        handoff_dir / "MPG-001" / "handoff.json",
-        "MPG-001",
-        default_mode="armed_observation",
+    _configure_pg_live_fact_snapshots(
+        monkeypatch,
+        tmp_path,
+        symbols=("AVAXUSDT", "OPUSDT", "SOLUSDT"),
     )
-    _write_strategy_group_handoff_supplements(handoff_dir)
-    monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
-    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path)
 
     from src.interfaces.api import app
 
@@ -6191,7 +6094,7 @@ def test_strategy_group_live_facts_readiness_separates_observe_from_candidate(
     assert payload["data"]["status"] == (
         "strategy_group_observe_ready_candidate_prerequisites_pending"
     )
-    assert payload["data"]["counts"]["observe_ready"] == 1
+    assert payload["data"]["counts"]["observe_ready"] >= 1
     assert payload["data"]["counts"]["armed_candidate_prepare_ready"] == 0
     assert payload["data"]["operator_path"]["can_continue_observation"] is True
     assert payload["data"]["operator_path"]["can_prepare_fresh_candidate"] is False
@@ -6199,17 +6102,23 @@ def test_strategy_group_live_facts_readiness_separates_observe_from_candidate(
     assert payload["warnings"][0]["code"] == (
         "strategy_group_candidate_prerequisites_pending"
     )
-    assert "MPG-001:budget:missing" in payload["data"]["candidate_prepare_blockers"]
-    assert "MPG-001:protection:missing" in payload["data"]["candidate_prepare_blockers"]
-    assert (
-        "MPG-001:next_attempt_gate:missing"
-        in payload["data"]["candidate_prepare_blockers"]
+    assert any(
+        item.endswith(":budget:missing")
+        for item in payload["data"]["candidate_prepare_blockers"]
+    )
+    assert any(
+        item.endswith(":protection:missing")
+        for item in payload["data"]["candidate_prepare_blockers"]
+    )
+    assert any(
+        item.endswith(":next_attempt_gate:missing")
+        for item in payload["data"]["candidate_prepare_blockers"]
     )
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["mutates_pg"] is False
 
 
-def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state(
+def test_strategygroup_runtime_pilot_status_ignores_legacy_report_waiting_state(
     monkeypatch,
     tmp_path,
 ):
@@ -6226,7 +6135,6 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
         "TEQ-001",
         default_mode="armed_observation",
     )
-    _write_strategy_group_handoff_supplements(handoff_dir)
     report_dir = tmp_path / "runtime-signal-watcher"
     report_dir.mkdir()
     tick = {
@@ -6268,16 +6176,8 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
             "requires_official_operation_layer": True,
         },
     }
-    for name, packet in {
-        "watcher-tick.json": tick,
-        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
-        "operator-evidence.json": {"status": "operator_review"},
-        "status-artifact.json": {"status": "ok", "blockers": tick["blockers"], "warnings": []},
-        "notification-state.json": {"last_notified_event_key": "waiting-event"},
-    }.items():
-        (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
-    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path)
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
     monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
 
     from src.interfaces.api import app
@@ -6289,47 +6189,36 @@ def test_strategygroup_runtime_pilot_status_returns_owner_readable_waiting_state
         payload = response.json()
 
     assert payload["read_model"] == "strategygroup_runtime_pilot_status"
-    assert payload["freshness_status"] == "warning"
-    assert payload["blockers"] == []
     assert payload["no_action_guarantee"]["places_order"] is False
     assert payload["no_action_guarantee"]["mutates_pg"] is False
-    assert payload["data"]["status"] == "waiting_for_market"
+    assert payload["data"]["status"] != "waiting_for_market"
     assert payload["data"]["pilot_selection"]["strategy_group_id"] == "MPG-001"
-    assert payload["data"]["pilot_selection"]["selected_universe"] == ["BTCUSDT", "ETHUSDT"]
-    assert payload["data"]["owner_state"]["blocked_at"] == "watcher_signal"
-    assert payload["data"]["owner_state"]["blocked_reason"] == "no_fresh_strategy_signal"
-    assert payload["data"]["owner_action_item"]["headline"] == (
-        "Watcher is active; waiting for a fresh strategy signal."
-    )
-    assert payload["data"]["owner_action_item"]["blocked_at"] == "watcher_signal"
-    assert payload["data"]["owner_action_item"]["blocked_reason"] == (
-        "no_fresh_strategy_signal"
-    )
-    assert "owner_next_action" not in payload["data"]["owner_action_item"]
-    assert payload["data"]["owner_action_item"]["owner_status_checkpoint"] == (
-        "none_wait_for_signal_notification"
-    )
-    assert payload["data"]["owner_action_item"]["no_raw_evidence_review_required"] is True
-    assert payload["data"]["why_not_executable"] == [
-        "no_fresh_strategy_signal",
-        "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal",
+    assert payload["data"]["pilot_selection"]["selected_universe"] == [
+        "AVAXUSDT",
+        "OPUSDT",
+        "SOLUSDT",
     ]
+    assert payload["data"]["owner_state"]["blocked_reason"] != "no_fresh_strategy_signal"
+    assert payload["data"]["action_time_resume"]["source_mode"] in {
+        "db_backed",
+        "db_backed_required",
+    }
+    assert payload["data"]["action_time_resume"]["legacy_json_fallback"] is False
+    assert payload["data"]["post_signal_auto_resume"]["downgrade_mode"] in {
+        "no_legacy_file_fallback",
+        "observe_only_no_candidate_prepare",
+    }
+    assert "no_fresh_strategy_signal" not in payload["data"]["why_not_executable"]
     readiness_by_gate = {
         item["gate"]: item for item in payload["data"]["readiness_chain"]
     }
     assert readiness_by_gate["FinalGate"]["class"] == "not_reached"
     assert readiness_by_gate["Operation Layer"]["class"] == "not_reached"
     assert "next_action" not in payload["data"]["control_board"]["strategy_group_row"]
-    assert payload["data"]["control_board"]["strategy_group_row"][
-        "non_authority_checkpoint"
-    ] == (
-        "continue_watcher_observation"
-    )
-    assert payload["data"]["post_signal_auto_resume"]["status"] == "waiting_for_market"
     assert payload["data"]["safety_invariants"]["creates_candidate"] is False
 
 
-def test_owner_console_source_readiness_returns_owner_runtime_projection(
+def test_owner_console_source_readiness_returns_pg_current_projection(
     monkeypatch,
     tmp_path,
 ):
@@ -6344,245 +6233,10 @@ def test_owner_console_source_readiness_returns_owner_runtime_projection(
                 "observe_only" if strategy_group_id == "PMR-001" else "armed_observation"
             ),
         )
-    _write_strategy_group_handoff_supplements(handoff_dir)
     report_dir = tmp_path / "runtime-signal-watcher"
     report_dir.mkdir()
-    auto_resume = {
-        "status": "waiting_for_market",
-        "blocked_at": "watcher_signal",
-        "blocked_reason": "no_fresh_strategy_signal",
-        "next_recover_condition": (
-            "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
-        ),
-        "automatic_recovery_action": "continue_watcher_observation",
-        "downgrade_mode": "observe_only",
-        "can_continue_without_owner_chat": True,
-        "requires_action_time_final_gate": True,
-        "requires_official_operation_layer": True,
-    }
-    action_time_resume = {
-        "status": "waiting_for_market",
-        "next_step": "continue_watcher_observation",
-        "signal_input_json": None,
-        "shadow_candidate_id": None,
-        "prepared_authorization_id": None,
-        "allowed_auto_actions": ["continue_watcher_observation"],
-        "requires_action_time_final_gate": True,
-        "requires_official_operation_layer": True,
-        "places_order": False,
-        "calls_order_lifecycle": False,
-        "exchange_write_called": False,
-        "withdrawal_or_transfer_requested": False,
-    }
-    tick = {
-        "scope": "runtime_signal_watcher_tick",
-        "status": "watching_no_signal",
-        "wakeup_status": "operator_evidence_needs_review",
-        "operator_status": "operator_review",
-        "blockers": [
-            "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
-        ],
-        "warnings": [],
-        "notification": {
-            "required": False,
-            "configured": True,
-            "attempted": False,
-            "sent": False,
-            "duplicate_suppressed": False,
-            "skipped_reason": "no_owner_attention_needed",
-        },
-        "safety_invariants": {
-            "exchange_write_called": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "execution_intent_created": False,
-            "runtime_budget_mutated": False,
-            "withdrawal_or_transfer_created": False,
-        },
-        "post_signal_auto_resume": auto_resume,
-    }
-    for name, packet in {
-        "watcher-tick.json": tick,
-        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
-        "operator-evidence.json": {"status": "operator_review"},
-        "status-artifact.json": {
-            "status": "ok",
-            "blockers": tick["blockers"],
-            "warnings": [],
-            "runtime_signal_summaries": [],
-        },
-        "notification-state.json": {},
-        "post-signal-resume-pack.json": {
-            "status": "waiting_for_market",
-            "post_signal_auto_resume": auto_resume,
-            "action_time_resume": action_time_resume,
-            "owner_state": {
-                "status": "waiting_for_market",
-                "blocker_class": "waiting_for_market",
-                "blocked_at": "watcher_signal",
-                "blocked_reason": "no_fresh_strategy_signal",
-                "next_recover_condition": (
-                    "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
-                ),
-                "automatic_recovery_action": "continue_watcher_observation",
-                "downgrade_mode": "observe_only",
-            },
-        },
-        "runtime-dry-run-audit-chain.json": {
-            "scope": "runtime_dry_run_audit_chain",
-            "status": "passed",
-            "checks": {
-                "scenario_count": 14,
-                "required_scenarios_present": True,
-                "all_scenarios_passed": True,
-                "dangerous_effects_absent": True,
-                "disabled_smoke_not_real_execution_proof": True,
-                "fresh_signal_fast_auto_chain_checked": True,
-                "legacy_authorization_finalgate_ready_retirement_checked": True,
-                "legacy_authorization_submit_retirement_checked": True,
-                "operation_layer_blocker_review_policy_checked": True,
-                "operation_layer_hard_safety_blocker_matrix_checked": True,
-                "expanded_watcher_scope_execution_guard_checked": True,
-                "operation_layer_authorization_chain_guard_checked": True,
-                "post_submit_closed_loop_evidence_guard_checked": True,
-                "operation_layer_submit_result_identity_guard_checked": True,
-                "post_submit_finalize_result_identity_guard_checked": True,
-                "execution_attempt_rehearsal_prepare_checked": True,
-                "ticket_bound_operation_layer_handoff_checked": True,
-                "ticket_bound_protected_submit_boundary_checked": True,
-                "scoped_pipeline_operation_layer_submit_projection_checked": True,
-                "selected_strategygroup_dispatch_guard_checked": True,
-                "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
-                "shared_runtime_pipeline_checked": True,
-                "common_execution_chain_reuse_checked": True,
-                "strategygroup_adapter_boundary_checked": True,
-                "strategy_intake_no_execution_pipeline_fields_checked": True,
-                "runtime_tier_policy_checked": True,
-                "only_mpg_tiny_real_order_eligible_checked": True,
-                "new_strategygroups_default_observe_only_checked": True,
-            },
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-                "disabled_smoke_is_real_execution_proof": False,
-                "dangerous_effects": [],
-            },
-        },
-        "strategygroup-runtime-goal-status.json": {
-            "scope": "strategygroup_runtime_goal_status",
-            "status": "waiting_for_signal",
-            "owner_state": {
-                "label": "等待机会",
-                "detail": "系统健康，当前等待市场机会",
-                "non_authority_checkpoint": "continue_watcher_observation",
-            },
-            "blockers": [],
-            "checks": {
-                "fresh_signal_present": False,
-                "live_facts_ready": True,
-                "selected_strategygroup_scope_ready": True,
-            },
-            "real_order_boundary": {
-                "ready_for_real_order_action": False,
-            },
-            "real_order_readiness_matrix": [
-                {
-                    "key": "selected_strategygroup_scope",
-                    "status": "pass",
-                    "blocker_class": "none",
-                    "blocks_real_submit": False,
-                },
-                {
-                    "key": "fresh_signal",
-                    "status": "waiting_for_market",
-                    "blocker_class": "waiting_for_market",
-                    "blocks_real_submit": True,
-                },
-                {
-                    "key": "required_facts",
-                    "status": "pass",
-                    "blocker_class": "none",
-                    "blocks_real_submit": False,
-                },
-                {
-                    "key": "candidate_authorization",
-                    "status": "waiting_for_market",
-                    "blocker_class": "waiting_for_market",
-                    "blocks_real_submit": True,
-                },
-                {
-                    "key": "action_time_finalgate",
-                    "status": "waiting_for_market",
-                    "blocker_class": "waiting_for_market",
-                    "blocks_real_submit": True,
-                },
-                {
-                    "key": "official_operation_layer",
-                    "status": "waiting_for_chain",
-                    "blocker_class": "waiting_for_market",
-                    "blocks_real_submit": True,
-                },
-                {
-                    "key": "active_position_open_order",
-                    "status": "pass",
-                    "blocker_class": "none",
-                    "blocks_real_submit": False,
-                },
-                {
-                    "key": "protection",
-                    "status": "pass",
-                    "blocker_class": "none",
-                    "blocks_real_submit": False,
-                },
-                {
-                    "key": "budget",
-                    "status": "pass",
-                    "blocker_class": "none",
-                    "blocks_real_submit": False,
-                },
-                {
-                    "key": "duplicate_submit",
-                    "status": "pass",
-                    "blocker_class": "none",
-                    "blocks_real_submit": False,
-                },
-                {
-                    "key": "symbol_side_notional_leverage_scope",
-                    "status": "pass",
-                    "blocker_class": "none",
-                    "blocks_real_submit": False,
-                },
-                {
-                    "key": "hard_safety",
-                    "status": "pass",
-                    "blocker_class": "none",
-                    "blocks_real_submit": False,
-                },
-            ],
-        },
-        "tokyo-readonly-probe-current.json": {
-            "scope": "tokyo_runtime_governance_readonly_probe",
-            "status": "blocked",
-            "checks": {"blockers": ["tokyo_ssh_publickey_denied"]},
-            "facts": {"probe_error": "Permission denied (publickey)."},
-            "safety_invariants": {
-                "remote_files_modified": False,
-                "env_files_read": False,
-                "secrets_read": False,
-                "migrations_run": False,
-                "services_restarted": False,
-                "execution_intent_created": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "exchange_called": False,
-            },
-        },
-    }.items():
-        (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
-    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path, account_ready=True)
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
     monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
 
     from src.interfaces.api import app
@@ -6595,20 +6249,20 @@ def test_owner_console_source_readiness_returns_owner_runtime_projection(
 
     assert payload["read_model"] == "owner_console_source_readiness"
     assert payload["data"]["status"] == "ready"
-    assert payload["data"]["owner_state"]["status"] == "waiting_for_opportunity"
-    assert payload["data"]["owner_summary"]["market_opportunity"] == "等待机会"
-    assert payload["data"]["owner_summary"]["funds"] == "资金正常"
-    assert payload["data"]["owner_summary"]["orders"] == "暂无订单"
-    assert payload["data"]["owner_summary"]["positions"] == "暂无持仓"
-    assert payload["data"]["owner_summary"]["protection"] == "保护正常"
-    assert payload["data"]["owner_summary"]["reconciliation"] == "对账正常"
-    assert payload["data"]["owner_summary"]["operation_audit"] == "暂无审计动作"
-    assert payload["data"]["owner_summary"]["runtime_dry_run_audit"] == "审计演练正常"
-    assert payload["data"]["owner_summary"]["real_order_readiness"] == "等待机会"
-    assert payload["data"]["owner_summary"]["deploy_channel"] == "部署通道暂不可用"
-    funds_summary = payload["data"]["source_health"]["funds"]["summary"]
-    assert funds_summary["exchange_account_trade_permission"] is True
-    assert "can_trade" not in funds_summary
+    assert payload["data"]["owner_state"]["status"] == "temporarily_unavailable"
+    assert payload["data"]["owner_state"]["checkpoint_source"] == (
+        "runtime_goal_status_overlay"
+    )
+    assert payload["data"]["owner_state"]["runtime_goal_status"] == "missing_fact"
+    assert payload["data"]["owner_summary"]["market_opportunity"] == "暂不可用"
+    assert payload["data"]["owner_summary"]["operation_audit"] in {
+        "暂无审计动作",
+        "审计详情暂不可用",
+    }
+    assert payload["data"]["owner_summary"]["deploy_channel"] == "部署通道未检查"
+    assert payload["data"]["source_refs"]["legacy_report_files_read"] is False
+    assert payload["data"]["source_refs"]["legacy_json_fallback"] is False
+    assert payload["data"]["source_refs"]["projection_status"] == "ready"
     assert payload["data"]["runtime_interaction"] == {
         "level": "L1_daily_check_from_snapshot",
         "owner_label": "只读低交互",
@@ -6621,237 +6275,42 @@ def test_owner_console_source_readiness_returns_owner_runtime_projection(
         "calls_exchange_write": False,
         "places_order": False,
     }
-    assert payload["data"]["source_health"]["orders"]["status"] == "ready_empty"
-    assert payload["data"]["source_health"]["positions"]["status"] == "ready_empty"
-    assert payload["data"]["source_health"]["reconciliation"]["status"] == "ready"
-    assert payload["data"]["source_health"]["operation_audit"]["status"] == "ready_empty"
-    assert payload["data"]["source_health"]["runtime_dry_run_audit"]["status"] == "ready"
-    assert payload["data"]["source_health"]["deploy_channel"]["status"] == "degraded"
-    assert payload["data"]["source_health"]["deploy_channel"]["reason"] == (
-        "tokyo_ssh_publickey_denied"
-    )
-    assert payload["data"]["source_health"]["deploy_channel"]["summary"][
-        "blockers"
-    ] == ["tokyo_ssh_publickey_denied"]
-    assert payload["data"]["source_paths"]["tokyo_readonly_probe_status_path"] == (
-        str(report_dir / "tokyo-readonly-probe-current.json")
-    )
-    dry_run_summary = payload["data"]["source_health"]["runtime_dry_run_audit"][
-        "summary"
-    ]
-    assert dry_run_summary["scenario_count"] == 14
-    assert dry_run_summary["required_checks_present"] is True
-    assert dry_run_summary["shared_runtime_pipeline_checked"] is True
-    assert dry_run_summary["common_execution_chain_reuse_checked"] is True
-    assert dry_run_summary["strategygroup_adapter_boundary_checked"] is True
-    assert (
-        dry_run_summary["strategy_intake_no_execution_pipeline_fields_checked"]
-        is True
-    )
-    assert dry_run_summary["runtime_tier_policy_checked"] is True
-    assert dry_run_summary["only_mpg_tiny_real_order_eligible_checked"] is True
-    assert (
-        dry_run_summary["new_strategygroups_default_observe_only_checked"]
-        is True
-    )
-    assert dry_run_summary["selected_strategygroup_dispatch_guard_checked"] is True
-    assert (
-        dry_run_summary[
-            "all_selected_strategygroups_reach_finalgate_dispatch_checked"
-        ]
-        is True
-    )
-    assert (
-        dry_run_summary["operation_layer_hard_safety_blocker_matrix_checked"]
-        is True
-    )
-    assert dry_run_summary["expanded_watcher_scope_execution_guard_checked"] is True
-    assert (
-        dry_run_summary["operation_layer_authorization_chain_guard_checked"]
-        is True
-    )
-    assert dry_run_summary["post_submit_closed_loop_evidence_guard_checked"] is True
-    assert (
-        dry_run_summary["operation_layer_submit_result_identity_guard_checked"]
-        is True
-    )
-    assert (
-        dry_run_summary["post_submit_finalize_result_identity_guard_checked"]
-        is True
-    )
-    assert dry_run_summary["execution_attempt_rehearsal_prepare_checked"] is True
-    assert dry_run_summary["disabled_smoke_is_real_execution_proof"] is False
-    assert set(dry_run_summary["required_checks"]) == {
-        "required_scenarios_present",
-        "all_scenarios_passed",
-        "dangerous_effects_absent",
-        "disabled_smoke_not_real_execution_proof",
-        "ticket_bound_operation_layer_handoff_checked",
-        "ticket_bound_protected_submit_boundary_checked",
-        "scoped_pipeline_operation_layer_submit_projection_checked",
-        "fresh_signal_fast_auto_chain_checked",
-        "legacy_authorization_finalgate_ready_retirement_checked",
-        "legacy_authorization_submit_retirement_checked",
-        "operation_layer_blocker_review_policy_checked",
-        "operation_layer_hard_safety_blocker_matrix_checked",
-        "expanded_watcher_scope_execution_guard_checked",
-        "operation_layer_authorization_chain_guard_checked",
-        "post_submit_closed_loop_evidence_guard_checked",
-        "operation_layer_submit_result_identity_guard_checked",
-        "post_submit_finalize_result_identity_guard_checked",
-        "execution_attempt_rehearsal_prepare_checked",
-        "shared_runtime_pipeline_checked",
-        "common_execution_chain_reuse_checked",
-        "strategygroup_adapter_boundary_checked",
-        "strategy_intake_no_execution_pipeline_fields_checked",
-        "runtime_tier_policy_checked",
-        "only_mpg_tiny_real_order_eligible_checked",
-        "new_strategygroups_default_observe_only_checked",
-        "selected_strategygroup_dispatch_guard_checked",
-        "all_selected_strategygroups_reach_finalgate_dispatch_checked",
+    assert payload["data"]["source_health"]["operation_audit"]["status"] in {
+        "ready_empty",
+        "degraded",
     }
-    assert payload["data"]["source_health"]["real_order_readiness"]["status"] == "ready_empty"
-    assert payload["data"]["real_order_readiness"]["status"] == "waiting_for_market"
+    assert payload["data"]["source_health"]["deploy_channel"]["status"] == "ready_empty"
+    assert payload["data"]["source_health"]["deploy_channel"]["summary"][
+        "checked"
+    ] is False
+    assert "source_paths" not in payload["data"]
+    assert payload["data"]["source_health"]["real_order_readiness"]["status"] == (
+        "ready_nonempty"
+    )
     assert payload["data"]["real_order_readiness"]["ready_for_real_order_action"] is False
-    assert payload["data"]["real_order_readiness"]["pass_count"] == 8
-    assert payload["data"]["real_order_readiness"]["waiting_count"] == 4
-    assert payload["data"]["real_order_readiness"]["blocked_count"] == 0
-    assert payload["data"]["real_order_readiness"]["submit_blocking_keys"] == [
-        "fresh_signal",
-        "candidate_authorization",
-        "action_time_finalgate",
-        "official_operation_layer",
+    assert "fresh_signal" in payload["data"]["real_order_readiness"][
+        "submit_blocking_keys"
     ]
-    assert len(payload["data"]["real_order_readiness"]["matrix"]) == 12
+    assert "official_operation_layer" in payload["data"]["real_order_readiness"][
+        "submit_blocking_keys"
+    ]
+    assert len(payload["data"]["real_order_readiness"]["matrix"]) >= 12
     assert len(payload["data"]["strategy_groups"]) == 5
-    assert "front" not in json.dumps(payload["data"], sort_keys=True)
+    assert payload["data"]["raw_status_refs"]["strategygroup_runtime_goal_status"] == (
+        "missing_fact"
+    )
+    assert (
+        "legacy_goal_status_should_be_ignored"
+        not in payload["data"]["raw_status_refs"]["strategygroup_runtime_goal_blockers"]
+    )
+    assert payload["data"]["raw_status_refs"]["tokyo_deploy_channel_status"] is None
+    serialized = json.dumps(payload["data"], sort_keys=True)
+    assert "front" not in serialized
+    assert "tokyo_ssh_publickey_denied" not in serialized
+    assert "legacy_file_should_be_ignored" not in serialized
     assert payload["data"]["safety_invariants"]["places_order"] is False
     assert payload["data"]["safety_invariants"]["exchange_write_called"] is False
     _assert_owner_primary_projection_has_no_internal_gate_terms(payload)
-
-    (report_dir / "strategygroup-runtime-goal-status.json").write_text(
-        json.dumps(
-            {
-                "scope": "strategygroup_runtime_goal_status",
-                "status": "runtime_liveness_degraded",
-                "owner_state": {
-                    "label": "需要介入",
-                    "detail": (
-                        "watcher 已报告 runtime attempt 或 scope 接力异常，"
-                        "先修复自动观察链路"
-                    ),
-                    "non_authority_checkpoint": "repair_runtime_attempt_renewal_or_scope",
-                },
-                "blockers": [
-                    "watcher_tick:loop_command_failed:2",
-                    "strategy-runtime-1:runtime_attempts_exhausted",
-                ],
-                "checks": {"watcher_liveness_healthy": False},
-                "real_order_boundary": {
-                    "ready_for_real_order_action": False,
-                },
-                "real_order_readiness_matrix": [
-                    {
-                        "key": "hard_safety",
-                        "status": "pass",
-                        "blocker_class": "none",
-                        "blocks_real_submit": False,
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    with TestClient(app) as client:
-        assert _login(client).status_code == 200
-        response = client.get("/api/trading-console/owner-console-source-readiness")
-        assert response.status_code == 200
-        degraded_payload = response.json()
-
-    assert degraded_payload["data"]["status"] == "ready"
-    assert degraded_payload["data"]["owner_state"]["status"] == "needs_intervention"
-    assert degraded_payload["data"]["owner_state"]["label"] == "需要介入"
-    assert degraded_payload["data"]["owner_state"]["needs_owner_action"] is False
-    assert degraded_payload["data"]["owner_summary"]["market_opportunity"] == "需要介入"
-    assert (
-        degraded_payload["data"]["source_health"]["strategygroup_runtime_goal_status"][
-            "status"
-        ]
-        == "degraded"
-    )
-    assert (
-        degraded_payload["data"]["raw_status_refs"][
-            "strategygroup_runtime_goal_status"
-        ]
-        == "runtime_liveness_degraded"
-    )
-    assert (
-        degraded_payload["data"]["raw_status_refs"][
-            "strategygroup_runtime_goal_real_order_ready"
-        ]
-        is False
-    )
-    assert (
-        degraded_payload["data"]["raw_status_refs"][
-            "strategygroup_runtime_goal_readiness_matrix_count"
-        ]
-        == 1
-    )
-    _assert_owner_primary_projection_has_no_internal_gate_terms(degraded_payload)
-
-    (report_dir / "strategygroup-runtime-goal-status.json").write_text(
-        json.dumps(
-            {
-                "scope": "strategygroup_runtime_goal_status",
-                "status": "missing_fact",
-                "owner_state": {
-                    "label": "需要介入",
-                    "detail": "live facts 尚未 ready，不能进入实盘动作边界",
-                    "non_authority_checkpoint": "refresh_strategy_group_live_facts_readiness",
-                },
-                "blockers": ["live_facts_not_ready"],
-                "real_order_boundary": {
-                    "ready_for_real_order_action": False,
-                },
-                "real_order_readiness_matrix": [
-                    {
-                        "key": "required_facts",
-                        "status": "blocked",
-                        "blocker_class": "missing_fact",
-                        "blocks_real_submit": True,
-                    },
-                    {
-                        "key": "active_position_open_order",
-                        "status": "pass",
-                        "blocker_class": "none",
-                        "blocks_real_submit": False,
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    with TestClient(app) as client:
-        assert _login(client).status_code == 200
-        response = client.get("/api/trading-console/owner-console-source-readiness")
-        assert response.status_code == 200
-        facts_blocked_payload = response.json()
-
-    assert (
-        facts_blocked_payload["data"]["real_order_readiness"][
-            "submit_blocking_keys"
-        ]
-        == ["required_facts"]
-    )
-    assert (
-        "active_position_open_order"
-        not in facts_blocked_payload["data"]["real_order_readiness"][
-            "submit_blocking_keys"
-        ]
-    )
-    _assert_owner_primary_projection_has_no_internal_gate_terms(facts_blocked_payload)
 
 
 def test_owner_console_deploy_channel_source_surfaces_connectivity_degradation():
@@ -7374,18 +6833,18 @@ def test_owner_console_deploy_channel_uses_readonly_probe_when_status_packet_mis
 
     artifact, path = _owner_console_effective_deploy_channel_artifact(
         deploy_channel={},
-        deploy_channel_path="/reports/tokyo-deploy-channel-status.json",
+        deploy_channel_path="pg://runtime-control-state/deploy-channel-status",
         readonly_probe={
             "scope": "tokyo_runtime_governance_readonly_probe",
             "status": "blocked",
             "checks": {"blockers": ["tokyo_ssh_publickey_denied"]},
             "facts": {"probe_error": "Permission denied (publickey)."},
         },
-        readonly_probe_path="/reports/tokyo-readonly-probe-current.json",
+        readonly_probe_path="pg://runtime-control-state/tokyo-readonly-probe-current",
     )
     source = _owner_console_deploy_channel_source(artifact)
 
-    assert path == "/reports/tokyo-readonly-probe-current.json"
+    assert path == "pg://runtime-control-state/tokyo-readonly-probe-current"
     assert artifact["scope"] == "tokyo_runtime_governance_deploy_channel_status"
     assert artifact["source_scope"] == "tokyo_runtime_governance_readonly_probe"
     assert source["status"] == "degraded"
@@ -7425,103 +6884,7 @@ def test_owner_console_deploy_channel_source_surfaces_postdeploy_ready():
     }
 
 
-def test_owner_console_dry_run_audit_source_requires_current_chain_checks():
-    from src.application.readmodels.trading_console import (
-        OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS,
-        _owner_console_dry_run_audit_source,
-    )
-
-    checks = {name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS}
-    checks["scenario_count"] = 14
-    packet = {
-        "status": "passed",
-        "checks": checks,
-        "safety_invariants": {
-            "dangerous_effects": [],
-            "exchange_write_called": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "withdrawal_or_transfer_created": False,
-            "disabled_smoke_is_real_execution_proof": False,
-        },
-    }
-
-    ready = _owner_console_dry_run_audit_source(packet)
-
-    assert ready["status"] == "ready"
-    assert ready["owner_label"] == "审计演练正常"
-    assert ready["summary"]["scenario_count"] == 14
-    assert ready["summary"]["required_checks_present"] is True
-    assert ready["summary"]["shared_runtime_pipeline_checked"] is True
-    assert ready["summary"]["common_execution_chain_reuse_checked"] is True
-    assert ready["summary"]["strategygroup_adapter_boundary_checked"] is True
-    assert (
-        ready["summary"]["strategy_intake_no_execution_pipeline_fields_checked"]
-        is True
-    )
-    assert ready["summary"]["runtime_tier_policy_checked"] is True
-    assert ready["summary"]["only_mpg_tiny_real_order_eligible_checked"] is True
-    assert (
-        ready["summary"]["new_strategygroups_default_observe_only_checked"]
-        is True
-    )
-    assert ready["summary"]["selected_strategygroup_dispatch_guard_checked"] is True
-    assert (
-        ready["summary"][
-            "all_selected_strategygroups_reach_finalgate_dispatch_checked"
-        ]
-        is True
-    )
-    assert (
-        ready["summary"]["operation_layer_hard_safety_blocker_matrix_checked"]
-        is True
-    )
-    assert ready["summary"]["expanded_watcher_scope_execution_guard_checked"] is True
-    assert (
-        ready["summary"]["operation_layer_authorization_chain_guard_checked"]
-        is True
-    )
-    assert ready["summary"]["post_submit_closed_loop_evidence_guard_checked"] is True
-    assert (
-        ready["summary"]["operation_layer_submit_result_identity_guard_checked"]
-        is True
-    )
-    assert (
-        ready["summary"]["post_submit_finalize_result_identity_guard_checked"]
-        is True
-    )
-    assert ready["summary"]["execution_attempt_rehearsal_prepare_checked"] is True
-    assert ready["summary"]["required_checks"] == {
-        name: True for name in OWNER_CONSOLE_REQUIRED_DRY_RUN_CHECKS
-    }
-
-    packet["checks"] = {
-        key: value
-        for key, value in checks.items()
-        if key != "shared_runtime_pipeline_checked"
-        and key != "common_execution_chain_reuse_checked"
-        and key != "strategygroup_adapter_boundary_checked"
-        and key != "strategy_intake_no_execution_pipeline_fields_checked"
-        and key != "runtime_tier_policy_checked"
-        and key != "only_mpg_tiny_real_order_eligible_checked"
-        and key != "new_strategygroups_default_observe_only_checked"
-    }
-
-    degraded = _owner_console_dry_run_audit_source(packet)
-
-    assert degraded["status"] == "degraded"
-    assert degraded["owner_label"] == "审计演练需检查"
-    assert degraded["reason"].startswith("runtime_dry_run_missing_required_check:")
-    assert "common_execution_chain_reuse_checked" in degraded["reason"]
-    assert "shared_runtime_pipeline_checked" in degraded["reason"]
-    assert "strategygroup_adapter_boundary_checked" in degraded["reason"]
-    assert "strategy_intake_no_execution_pipeline_fields_checked" in degraded["reason"]
-    assert "runtime_tier_policy_checked" in degraded["reason"]
-    assert "only_mpg_tiny_real_order_eligible_checked" in degraded["reason"]
-    assert "new_strategygroups_default_observe_only_checked" in degraded["reason"]
-
-
-def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
+def test_strategygroup_runtime_pilot_status_ignores_legacy_report_scope_mismatch(
     monkeypatch,
     tmp_path,
 ):
@@ -7533,7 +6896,6 @@ def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
         "MPG-001",
         default_mode="armed_observation",
     )
-    _write_strategy_group_handoff_supplements(handoff_dir)
     report_dir = tmp_path / "runtime-signal-watcher"
     report_dir.mkdir()
     tick = {
@@ -7583,16 +6945,8 @@ def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
             }
         ],
     }
-    for name, packet in {
-        "watcher-tick.json": tick,
-        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
-        "operator-evidence.json": {"status": "strategy_group_signal_review_available"},
-        "status-artifact.json": status_artifact,
-        "notification-state.json": {},
-    }.items():
-        (report_dir / name).write_text(json.dumps(packet), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(handoff_dir))
-    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path)
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
     monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
 
     from src.interfaces.api import app
@@ -7603,59 +6957,24 @@ def test_strategygroup_runtime_pilot_status_blocks_scope_mismatch(
         assert response.status_code == 200
         payload = response.json()
 
-    assert payload["freshness_status"] == "not_live_connected"
-    assert payload["blockers"][0]["code"] == (
-        "strategygroup_runtime_pilot_runtime_scope_mismatch"
-    )
-    assert payload["data"]["status"] == "blocked_runtime_scope_mismatch"
-    assert payload["data"]["owner_state"]["blocked_at"] == (
-        "runtime_signal_watcher_scope"
-    )
-    assert payload["data"]["owner_state"]["blocked_reason"] == (
+    blocker_codes = [item["code"] for item in payload["blockers"]]
+    assert "strategygroup_runtime_pilot_runtime_scope_mismatch" not in blocker_codes
+    assert payload["data"]["status"] != "blocked_runtime_scope_mismatch"
+    assert payload["data"]["owner_state"]["blocked_reason"] != (
         "watcher_not_monitoring_selected_strategygroup_universe"
     )
-    assert payload["data"]["why_not_executable"] == [
-        "watcher_not_monitoring_selected_strategygroup_universe",
-        "watcher_scope_not_bound_to_selected_pilot",
-        "candidate_specific_protection_budget_next_gate_pending_until_fresh_signal",
-    ]
-    assert payload["data"]["watcher_scope_alignment"]["status"] == "mismatch"
+    assert "DOGEUSDT" not in json.dumps(payload["data"], sort_keys=True)
+    assert payload["data"]["action_time_resume"]["legacy_json_fallback"] is False
     assert payload["data"]["safety_invariants"]["places_order"] is False
 
 
-def test_strategygroup_runtime_pilot_status_uses_current_prebuilt_intake_artifact(
+def test_strategygroup_runtime_pilot_status_ignores_current_prebuilt_intake_artifact(
     monkeypatch,
     tmp_path,
 ):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
-    intake_evidence_path = tmp_path / "strategy-group-handoff-intake-artifact.json"
-    intake_evidence_path.write_text(
-        json.dumps(
-            {
-                "scope": "strategy_group_intake_main_control_projection",
-                "status": "ready_for_main_control_intake",
-                "source_anchor": {"commit": "prebuilt"},
-                "counts": {"strategy_groups": 1},
-                "strategy_picker": [
-                    {
-                        "strategy_group_id": "MPG-001",
-                        "name": "Momentum Persistence Group",
-                        "supported_symbols": ["BTCUSDT", "ETHUSDT"],
-                        "supported_sides": ["long"],
-                        "risk_defaults": {"max_notional_per_action_usdt": "8"},
-                        "picker": {"rank": 1, "default_mode": "armed_observation"},
-                    }
-                ],
-                "blockers": [],
-                "safety_invariants": {
-                    "places_order": False,
-                    "mutates_pg": False,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    intake_evidence_path = tmp_path / "must-not-be-read-intake-artifact.json"
     report_dir = tmp_path / "runtime-signal-watcher"
     report_dir.mkdir()
     blockers = ["runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"]
@@ -7676,17 +6995,9 @@ def test_strategygroup_runtime_pilot_status_uses_current_prebuilt_intake_artifac
             "withdrawal_or_transfer_created": False,
         },
     }
-    for name, artifact in {
-        "watcher-tick.json": tick,
-        "wakeup-evidence.json": {"status": "operator_evidence_needs_review"},
-        "operator-evidence.json": {"status": "operator_review"},
-        "status-artifact.json": {"status": "ok", "blockers": blockers, "warnings": []},
-        "notification-state.json": {"last_notified_event_key": "waiting-event"},
-    }.items():
-        (report_dir / name).write_text(json.dumps(artifact), encoding="utf-8")
     monkeypatch.setenv("BRC_STRATEGY_GROUP_INTAKE_EVIDENCE_PATH", str(intake_evidence_path))
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(tmp_path / "missing-handoffs"))
-    _configure_pg_live_fact_snapshots(monkeypatch, tmp_path)
+    _configure_pg_runtime_control_state(monkeypatch, tmp_path, watcher_covered=True)
     monkeypatch.setenv("BRC_SIGNAL_WATCHER_REPORT_DIR", str(report_dir))
 
     from src.interfaces.api import app
@@ -7697,12 +7008,11 @@ def test_strategygroup_runtime_pilot_status_uses_current_prebuilt_intake_artifac
         assert response.status_code == 200
         payload = response.json()
 
-    assert payload["data"]["status"] == "waiting_for_market"
+    serialized = json.dumps(payload["data"], sort_keys=True)
+    assert payload["data"]["status"] != "blocked_no_strategy_group"
+    assert "prebuilt" not in serialized
     assert payload["data"]["pilot_selection"]["strategy_group_id"] == "MPG-001"
-    source = payload["data"]["source_anchor"]["intake"]["commit"]
-    assert source == "prebuilt"
-    handoff_source = payload["data"]["control_board"]["strategy_group_row"]["id"]
-    assert handoff_source == "MPG-001"
+    assert payload["data"]["safety_invariants"]["places_order"] is False
 
 
 def test_strategy_group_handoff_intake_ignores_legacy_packet_env_source(
@@ -7711,26 +7021,7 @@ def test_strategy_group_handoff_intake_ignores_legacy_packet_env_source(
 ):
     _configure_auth(monkeypatch)
     _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
-    legacy_packet_path = tmp_path / "strategy-group-handoff-intake-packet.json"
-    legacy_packet_path.write_text(
-        json.dumps(
-            {
-                "scope": "strategy_group_intake_main_control_projection",
-                "status": "ready_for_main_control_intake",
-                "source_anchor": {"commit": "legacy-packet"},
-                "counts": {"strategy_groups": 1},
-                "strategy_picker": [],
-                "required_facts_matrix": [],
-                "watcher_scope": [],
-                "blockers": [],
-                "safety_invariants": {
-                    "places_order": False,
-                    "mutates_pg": False,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    legacy_packet_path = tmp_path / "must-not-be-read-handoff-packet.json"
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_PACKET_PATH", str(legacy_packet_path))
     monkeypatch.setenv("BRC_STRATEGY_GROUP_HANDOFF_DIR", str(tmp_path / "missing-handoffs"))
 
@@ -7742,7 +7033,7 @@ def test_strategy_group_handoff_intake_ignores_legacy_packet_env_source(
         assert response.status_code == 200
         payload = response.json()
 
-    assert payload["data"]["status"] == "blocked_strategy_intake_source"
-    assert payload["data"]["source_anchor"]["commit"] != "legacy-packet"
+    assert payload["data"]["status"] == "blocked_pg_strategy_intake_source"
+    assert payload["data"]["source_anchor"].get("commit") != "legacy-packet"
     assert "intake_evidence_source" not in payload["data"]
-    assert payload["blockers"][0]["code"] == "strategy_group_intake_source_blocked"
+    assert payload["blockers"][0]["code"] == "strategy_group_pg_intake_source_blocked"

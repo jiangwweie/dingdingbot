@@ -13,8 +13,6 @@ ExecutionIntents, place orders, call OrderLifecycle, or mutate runtime state.
 
 from __future__ import annotations
 
-import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,11 +26,7 @@ from scripts.build_runtime_no_signal_diagnostic_evidence import (  # noqa: E402
     build_no_signal_diagnostic_evidence,
 )
 from scripts.build_runtime_strategy_signal_watch_evidence import (  # noqa: E402
-    SourceName,
     build_watch_evidence,
-)
-from scripts.preview_strategy_group_readonly_observation import (  # noqa: E402
-    build_preview_artifact,
 )
 
 
@@ -134,19 +128,6 @@ def build_operator_evidence(
     }
 
 
-def build_operator_evidence_from_path(
-    *,
-    status_artifact_json: str | Path,
-    strategy_source: SourceName,
-) -> dict[str, Any]:
-    active_status = _load_json_object(Path(status_artifact_json).expanduser())
-    preview = build_preview_artifact(source_name=strategy_source)
-    return build_operator_evidence(
-        active_status_artifact=active_status,
-        strategy_preview_artifact=preview,
-    )
-
-
 def _allowed_review_checkpoints(
     *,
     status: str,
@@ -201,38 +182,3 @@ def _forbidden_effects(*sources: tuple[str, dict[str, Any]]) -> list[str]:
             if safety.get(key) is True:
                 effects.append(f"{source_name}.{key}")
     return sorted(set(str(item) for item in effects if item))
-
-
-def _load_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"JSON object required: {path}")
-    return payload
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--status-artifact-json", required=True)
-    parser.add_argument(
-        "--strategy-source",
-        choices=["sample", "local_sqlite_read_only", "live_market"],
-        default="local_sqlite_read_only",
-    )
-    parser.add_argument("--output-json")
-    args = parser.parse_args(argv)
-
-    artifact = build_operator_evidence_from_path(
-        status_artifact_json=args.status_artifact_json,
-        strategy_source=args.strategy_source,
-    )
-    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
-    if args.output_json:
-        output_path = Path(args.output_json).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(payload + "\n", encoding="utf-8")
-    print(payload)
-    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -36,8 +36,6 @@ from scripts.materialize_action_time_ticket import (  # noqa: E402
 )
 
 
-DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
-DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "operation-layer-handoff.json"
 AUTHORITY_BOUNDARY = (
     "ticket_id_finalgate_pass_operation_layer_handoff; "
     "no_operation_layer_submit_no_exchange_write"
@@ -170,7 +168,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ticket-id", default="")
     parser.add_argument("--finalgate-pass-id", default="")
     parser.add_argument("--now-ms", type=int, default=None)
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--allow-non-postgres-for-test",
@@ -206,7 +203,6 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.dispose()
 
-    _write_json(Path(args.output_json), report)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True, default=str))
     else:
@@ -570,15 +566,6 @@ def _dedupe(values: list[str]) -> list[str]:
 def _stable_id(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:24]
     return f"{prefix}:{digest}"
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 if __name__ == "__main__":

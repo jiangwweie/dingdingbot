@@ -62,15 +62,11 @@ async def test_post_submit_finalize_loop_report_covers_runtime_level_paths():
     assert missing["checks"]["adapter_not_used_to_create_missing_facts"] is True
 
 
-def test_post_submit_finalize_loop_script_writes_json(tmp_path):
-    output_path = tmp_path / "rtf048-post-submit-finalize-loop.json"
-
+def test_post_submit_finalize_loop_script_prints_stdout_only():
     completed = subprocess.run(
         [
             sys.executable,
             "scripts/verify_runtime_post_submit_finalize_loop.py",
-            "--output-json",
-            str(output_path),
         ],
         check=True,
         capture_output=True,
@@ -78,7 +74,5 @@ def test_post_submit_finalize_loop_script_writes_json(tmp_path):
     )
 
     stdout_payload = json.loads(completed.stdout)
-    file_payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert stdout_payload["status"] == "rtf048_runtime_post_submit_finalize_loop_passed"
-    assert file_payload["status"] == stdout_payload["status"]
-    assert file_payload["scenario_count"] == 3
+    assert stdout_payload["scenario_count"] == 3

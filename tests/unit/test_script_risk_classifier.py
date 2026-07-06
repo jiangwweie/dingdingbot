@@ -100,27 +100,6 @@ def test_tokyo_migration_gap_audit_is_read_only_not_mutating() -> None:
     assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
 
 
-def test_tokyo_deploy_plan_is_planning_only_not_mutating() -> None:
-    result = classify_script_path(
-        REPO_ROOT / "scripts/plan_tokyo_runtime_governance_deploy.py"
-    )
-
-    assert result.level == ScriptRiskLevel.MUTATION_RESTRICTED
-    assert result.default_allowed is False
-    assert result.owner_confirmation_required is True
-    assert result.live_action_possible is False
-    assert result.exchange_write_possible is False
-    assert result.database_write_possible is True
-    assert result.runtime_control_possible is False
-    assert ScriptRiskCategory.DECLARED_READ_ONLY in result.categories
-    assert ScriptRiskCategory.DATABASE_WRITE in result.categories
-    assert ScriptRiskCategory.LIVE_SCOPE in result.categories
-    assert ScriptRiskCategory.OWNER_AUTH_REQUIRED in result.categories
-    assert ScriptRiskCategory.REMOTE_DEPLOYMENT in result.categories
-    assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
-    assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
-
-
 def test_remote_deployment_markers_are_mutation_restricted() -> None:
     result = classify_script_text(
         path="scripts/deploy_example.py",
@@ -160,9 +139,9 @@ def test_tokyo_postdeploy_verifier_is_readonly_review_required_not_write() -> No
     assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
 
 
-def test_tokyo_deploy_executor_is_mutation_restricted_without_exchange_write() -> None:
+def test_tokyo_git_deploy_executor_is_mutation_restricted_without_exchange_write() -> None:
     result = classify_script_path(
-        REPO_ROOT / "scripts/execute_tokyo_runtime_governance_deploy.py"
+        REPO_ROOT / "scripts/execute_tokyo_runtime_governance_git_deploy.py"
     )
 
     assert result.level == ScriptRiskLevel.MUTATION_RESTRICTED
@@ -176,66 +155,6 @@ def test_tokyo_deploy_executor_is_mutation_restricted_without_exchange_write() -
     assert ScriptRiskCategory.REMOTE_DEPLOYMENT in result.categories
     assert ScriptRiskCategory.OWNER_AUTH_REQUIRED in result.categories
     assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
-
-
-def test_tokyo_owner_deploy_artifact_builder_is_readonly_not_mutating() -> None:
-    result = classify_script_path(
-        REPO_ROOT / "scripts/build_tokyo_runtime_governance_owner_deploy_policy_artifact.py"
-    )
-
-    assert result.level == ScriptRiskLevel.READ_ONLY
-    assert result.live_action_possible is False
-    assert result.exchange_write_possible is False
-    assert result.database_write_possible is False
-    assert result.runtime_control_possible is False
-    assert ScriptRiskCategory.DECLARED_READ_ONLY in result.categories
-    assert ScriptRiskCategory.OWNER_AUTH_REQUIRED in result.categories
-    assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
-    assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
-
-
-def test_tokyo_postdeploy_acceptance_evidence_builder_is_readonly_not_mutating() -> None:
-    result = classify_script_path(
-        REPO_ROOT
-        / "scripts/build_tokyo_runtime_governance_postdeploy_acceptance_evidence.py"
-    )
-
-    assert result.level in {ScriptRiskLevel.READ_ONLY, ScriptRiskLevel.REVIEW_REQUIRED}
-    assert result.live_action_possible is False
-    assert result.exchange_write_possible is False
-    assert result.database_write_possible is False
-    assert result.runtime_control_possible is False
-    assert ScriptRiskCategory.DECLARED_READ_ONLY in result.categories
-    assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
-    assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
-
-
-def test_runtime_first_real_submit_owner_evidence_is_readonly_not_mutating() -> None:
-    result = classify_script_path(
-        REPO_ROOT / "scripts/build_runtime_first_real_submit_owner_evidence.py"
-    )
-
-    assert result.level in {ScriptRiskLevel.READ_ONLY, ScriptRiskLevel.REVIEW_REQUIRED}
-    assert result.live_action_possible is False
-    assert result.exchange_write_possible is False
-    assert result.database_write_possible is False
-    assert result.runtime_control_possible is False
-    assert ScriptRiskCategory.DECLARED_READ_ONLY in result.categories
-    assert ScriptRiskCategory.OWNER_AUTH_REQUIRED in result.categories
-    assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories
-    assert ScriptRiskCategory.RUNTIME_CONTROL not in result.categories
-
-
-def test_order_lifecycle_adapter_enablement_evidence_is_readonly_not_mutating() -> None:
-    result = classify_script_path(
-        REPO_ROOT / "scripts/build_order_lifecycle_adapter_enablement_evidence.py"
-    )
-
-    assert result.level in {ScriptRiskLevel.READ_ONLY, ScriptRiskLevel.REVIEW_REQUIRED}
-    assert result.live_action_possible is False
-    assert result.exchange_write_possible is False
-    assert result.database_write_possible is False
-    assert result.runtime_control_possible is False
     assert ScriptRiskCategory.DECLARED_READ_ONLY in result.categories
     assert ScriptRiskCategory.OWNER_AUTH_REQUIRED in result.categories
     assert ScriptRiskCategory.EXCHANGE_WRITE not in result.categories

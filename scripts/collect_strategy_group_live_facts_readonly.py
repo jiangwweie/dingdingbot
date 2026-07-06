@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect minimal read-only live facts for StrategyGroup readiness.
+"""Collect minimal read-only live facts for explicit StrategyGroup scope.
 
 Only signed Binance USD-M Futures GET endpoints are used. The collector never
 submits, cancels, replaces, or transfers anything and never prints API secrets.
@@ -23,7 +23,6 @@ import urllib.request
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_HANDOFF_DIR = PROJECT_ROOT / "docs/current/strategy-group-handoffs"
 DEFAULT_BASE_URL = "https://fapi.binance.com"
 READ_ONLY_ENDPOINTS = {
     "exchange_info": ("GET", "/fapi/v1/exchangeInfo", False),
@@ -107,48 +106,6 @@ def _decimal(value: Any) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
-
-
-def _handoff_summary(handoff_dir: Path) -> dict[str, Any]:
-    symbols: set[str] = set()
-    max_notional_values: list[Decimal] = []
-    protection_templates = 0
-    for path in sorted(handoff_dir.expanduser().glob("*/handoff.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        for symbol in data.get("supported_symbols") or []:
-            symbols.add(str(symbol))
-        risk_defaults = data.get("risk_defaults")
-        if isinstance(risk_defaults, dict):
-            max_notional = _decimal(
-                risk_defaults.get("max_notional_per_action_usdt")
-                or risk_defaults.get("max_notional_usdt")
-            )
-            if max_notional is not None:
-                max_notional_values.append(max_notional)
-            if risk_defaults.get("requires_sl") and (
-                risk_defaults.get("requires_tp_or_exit_plan")
-                or risk_defaults.get("default_exit_horizon")
-            ):
-                protection_templates += 1
-    max_notional_requirement = (
-        max(max_notional_values) if max_notional_values else None
-    )
-    return {
-        "symbols": sorted(symbols),
-        "strategy_group_count": len(
-            list(handoff_dir.expanduser().glob("*/handoff.json"))
-        ),
-        "max_notional_requirement_usdt": (
-            str(max_notional_requirement)
-            if max_notional_requirement is not None
-            else None
-        ),
-        "has_candidate_specific_protection_template": protection_templates > 0,
-    }
-
-
-def _handoff_symbols(handoff_dir: Path) -> list[str]:
-    return list(_handoff_summary(handoff_dir)["symbols"])
 
 
 def _exchange_rules(exchange_info: dict[str, Any], symbols: list[str]) -> dict[str, Any]:
@@ -316,14 +273,22 @@ def _next_attempt_gate_state(
 
 def collect_live_facts(
     *,
-    handoff_dir: Path,
+    symbols: list[str],
+    max_notional_requirement_usdt: str | None = None,
+    has_candidate_specific_protection_template: bool = False,
+    strategy_group_count: int | None = None,
     env_file: Path | None,
     base_url: str = DEFAULT_BASE_URL,
     timeout_seconds: float = 12,
     urlopen: UrlOpen = urllib.request.urlopen,
 ) -> dict[str, Any]:
-    handoff = _handoff_summary(handoff_dir)
-    symbols = list(handoff["symbols"])
+    scope = {
+        "symbols": sorted({str(symbol).upper() for symbol in symbols if str(symbol).strip()}),
+        "strategy_group_count": strategy_group_count,
+        "max_notional_requirement_usdt": max_notional_requirement_usdt,
+        "has_candidate_specific_protection_template": has_candidate_specific_protection_template,
+    }
+    symbols = list(scope["symbols"])
     api_key = _env_value(("EXCHANGE_API_KEY", "BINANCE_API_KEY", "binance_exchange_key"), env_file=env_file)
     api_secret = _env_value(("EXCHANGE_API_SECRET", "BINANCE_SECRET_KEY", "binance_exchange_secret"), env_file=env_file)
     payloads: dict[str, dict[str, Any]] = {}
@@ -348,9 +313,9 @@ def collect_live_facts(
     account = _account_summary(payloads["account"])
     budget = _budget_state(
         account_payload=payloads["account"],
-        handoff_summary=handoff,
+        handoff_summary=scope,
     )
-    protection = _protection_state(handoff)
+    protection = _protection_state(scope)
     next_attempt_gate = _next_attempt_gate_state(
         position=position,
         open_orders=open_orders,
@@ -358,7 +323,8 @@ def collect_live_facts(
     return {
         "scope": "strategy_group_live_facts_input",
         "status": "ready" if not errors else "partial",
-        "source": "binance_usdm_futures_readonly_get_endpoints",
+        "source": "explicit_scope_binance_usdm_futures_readonly_get_endpoints",
+        "source_mode": "explicit_runtime_scope",
         "supported_symbol_count": len(symbols),
         "exchange_rules": exchange_rules,
         "account": account,
@@ -384,26 +350,37 @@ def collect_live_facts(
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect StrategyGroup read-only live facts.")
-    parser.add_argument("--handoff-dir", default=str(DEFAULT_HANDOFF_DIR))
+    parser.add_argument(
+        "--symbols",
+        required=True,
+        help="Comma-separated runtime scope symbols. Production callers should derive this from PG.",
+    )
+    parser.add_argument("--max-notional-requirement-usdt")
+    parser.add_argument(
+        "--has-candidate-specific-protection-template",
+        action="store_true",
+    )
+    parser.add_argument("--strategy-group-count", type=int)
     parser.add_argument("--env-file", default=".env.local")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--output-json", required=True)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     artifact = collect_live_facts(
-        handoff_dir=Path(args.handoff_dir),
+        symbols=[
+            item.strip()
+            for item in str(args.symbols).split(",")
+            if item.strip()
+        ],
+        max_notional_requirement_usdt=args.max_notional_requirement_usdt,
+        has_candidate_specific_protection_template=bool(
+            args.has_candidate_specific_protection_template
+        ),
+        strategy_group_count=args.strategy_group_count,
         env_file=Path(args.env_file).expanduser() if args.env_file else None,
         base_url=args.base_url,
-    )
-    output_path = Path(args.output_json).expanduser()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
     )
     print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     return 0 if artifact["exchange_rules"]["status"] == "ready" else 2

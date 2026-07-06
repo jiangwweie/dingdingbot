@@ -24,9 +24,6 @@ DEFAULT_EXPECTED_MIN_MIGRATIONS = 81
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
     "2026-06-11-081_create_llm_advisory_plane.py"
 )
-DEFAULT_OUTPUT_DIR = "output/tokyo-runtime-governance-release"
-
-
 class ReleaseReadinessError(RuntimeError):
     """Raised when release readiness inspection cannot proceed."""
 
@@ -45,8 +42,6 @@ def main(argv: list[str] | None = None) -> int:
         deployed_head=args.deployed_head,
         expected_min_migrations=args.expected_min_migrations,
         expected_latest_migration=args.expected_latest_migration,
-        write_artifacts=args.write_artifacts,
-        output_dir=Path(args.output_dir),
         allow_tracked_dirty_for_remote_git_export=(
             args.allow_tracked_dirty_for_remote_git_export
         ),
@@ -64,8 +59,6 @@ def build_release_readiness_report(
     deployed_head: str,
     expected_min_migrations: int,
     expected_latest_migration: str,
-    write_artifacts: bool,
-    output_dir: Path,
     allow_tracked_dirty_for_remote_git_export: bool = False,
 ) -> dict[str, Any]:
     """Build a local-only readiness manifest for a future Tokyo release."""
@@ -157,36 +150,13 @@ def build_release_readiness_report(
             "secrets_read": False,
         },
         "artifact_plan": {
-            "write_artifacts_requested": write_artifacts,
-            "output_dir": str((repo_root / output_dir).resolve()),
+            "local_archive_generation": "disabled",
             "artifact_name": artifact_name,
             "archive_path": None,
             "manifest_path": None,
+            "manifest_written": False,
         },
     }
-
-    if write_artifacts:
-        if blockers:
-            raise ReleaseReadinessError(
-                "refusing to write release artifacts while readiness blockers exist: "
-                + ", ".join(blockers)
-            )
-        artifact_dir = repo_root / output_dir / artifact_name
-        artifact_dir.mkdir(parents=True, exist_ok=False)
-        archive_path = artifact_dir / f"{artifact_name}.tar.gz"
-        manifest_path = artifact_dir / "release-readiness-manifest.json"
-        _git(
-            repo_root,
-            "archive",
-            "--format=tar.gz",
-            f"--prefix={artifact_name}/",
-            "-o",
-            str(archive_path),
-            "HEAD",
-        )
-        report["artifact_plan"]["archive_path"] = str(archive_path)
-        report["artifact_plan"]["manifest_path"] = str(manifest_path)
-        manifest_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
 
     return report
 
@@ -194,8 +164,7 @@ def build_release_readiness_report(
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Inspect local git/migration facts and optionally create a local "
-            "git-archive release artifact for a future Tokyo deployment."
+            "Inspect local git/migration facts for a future Tokyo deployment."
         )
     )
     parser.add_argument("--json", action="store_true", help="Print JSON output.")
@@ -214,19 +183,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--expected-latest-migration",
         default=DEFAULT_EXPECTED_LATEST_MIGRATION,
         help="Latest migration filename expected for this release stage.",
-    )
-    parser.add_argument(
-        "--output-dir",
-        default=DEFAULT_OUTPUT_DIR,
-        help="Local output directory used only with --write-artifacts.",
-    )
-    parser.add_argument(
-        "--write-artifacts",
-        action="store_true",
-        help=(
-            "Write a local git archive and manifest. This never deploys or "
-            "modifies remote state."
-        ),
     )
     parser.add_argument(
         "--allow-tracked-dirty-for-remote-git-export",

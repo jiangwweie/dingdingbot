@@ -29,7 +29,6 @@ from strategygroup_non_executing_projection import (  # noqa: E402
 from runtime_pg_fact_snapshots import read_pretrade_public_facts_artifact  # noqa: E402
 
 
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "output/runtime-monitor"
 BASE_URL = "https://fapi.binance.com"
 PRIMARY_LIVE_SCOPE = ("BTCUSDT", "ETHUSDT")
 READONLY_EXPANSION_SCOPE = ("SOLUSDT", "AVAXUSDT")
@@ -41,7 +40,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--allow-non-postgres-for-test", action="store_true")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument(
         "--ssh-host",
         default="",
@@ -65,12 +63,6 @@ def main(argv: list[str] | None = None) -> int:
         engine.dispose()
 
     artifacts = build_sor_session_scope_detector(public_facts=public_facts, ssh_host=args.ssh_host)
-    output_dir = Path(args.output_dir)
-    for artifact in artifacts.values():
-        json_path = output_dir / artifact["output_file_names"]["json"]
-        md_path = output_dir / artifact["output_file_names"]["md"]
-        _write_json(json_path, artifact)
-        _write_text(md_path, _markdown(artifact, json_path))
     print(
         json.dumps(
             {
@@ -406,31 +398,6 @@ def _safety_invariants() -> dict[str, bool]:
         "live_profile_changed": False,
         "order_sizing_changed": False,
     }
-
-
-def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
-    return "\n".join(
-        [
-            f"## {artifact['schema']}",
-            "",
-            f"- Status: `{artifact['status']}`",
-            f"- StrategyGroup: `{artifact['strategy_group_id']}`",
-            f"- Output JSON: `{output_json}`",
-        ]
-    ) + "\n"
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 def _parse_utc(value: str) -> datetime:

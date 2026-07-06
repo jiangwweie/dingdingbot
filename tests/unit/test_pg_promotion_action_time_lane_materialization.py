@@ -62,8 +62,6 @@ def test_cli_requires_database_url(tmp_path: Path, capsys, monkeypatch):
     result = lane_materializer.main(
         [
             "--require-database-url",
-            "--output-json",
-            str(tmp_path / "lane.json"),
         ]
     )
 

@@ -1,112 +1,55 @@
-# Main-Control StrategyGroup Handoff Index
+# StrategyGroup File-Source Retirement Index
 
-Status: CURRENT_PILOT_SUPPLEMENT
-Last updated: 2026-06-20
+Status: CURRENT_GOVERNANCE_INDEX
+Last updated: 2026-07-07
 
-## Research Sync
+## Current Rule
 
-Current research handoff source:
+`docs/current/strategy-group-handoffs/` is no longer a StrategyGroup runtime
+input directory.
 
-```text
-branch: codex/strategy-research-20260613-goal
-commit: d62ce55727614fcfdb2d12f8fee1d3c226950048
-status: reviewed_and_synced_to_main_control_baseline
-```
-
-See `docs/current/strategy-group-handoffs/main-control-research-sync.md`.
-
-## Authority Entrypoints
-
-Before interpreting StrategyGroup handoffs, follow:
+Current StrategyGroup scope, side, event, policy, RequiredFacts, runtime
+binding, and live-submit eligibility must come from PG current state:
 
 ```text
-docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
-docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
-docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
+brc_strategy_groups
+brc_strategy_group_versions
+brc_strategy_side_event_specs
+brc_strategy_group_candidate_scope
+brc_candidate_scope_event_bindings
+brc_owner_policy_current
+brc_runtime_scope_bindings
+brc_runtime_fact_snapshots
+brc_pretrade_readiness_rows
+brc_control_read_model_snapshots_current
+brc_goal_status_current
 ```
 
-Use the global authority split:
+## Remaining Current Document
 
-```text
-Owner controls policy.
-System executes process.
-Tradeability Decision answers can-trade; Runtime Safety State answers live-submit safety.
-Review updates strategy governance.
-```
-
-StrategyGroup handoffs and registry rows may support `trial_eligible`, tier
-review, and Owner policy decisions. They do not grant runtime trade/order
-authority and must not turn the Owner into the manual operator of RequiredFacts,
-fresh signal, candidate/auth, FinalGate, Operation Layer, replay rows, or
-no-action rows.
-
-Runtime eligibility tiers are defined in:
-
-```text
-docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.md
-docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json
-```
-
-Strategy asset registry semantics are defined in:
-
-```text
-docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
-```
-
-Current StrategyGroup asset baseline rows are generated at:
-
-```text
-docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json
-docs/current/strategy-group-handoffs/strategygroup-registry-baseline.md
-```
-
-Current StrategyGroup tier review rows are generated at:
-
-```text
-docs/current/strategy-group-handoffs/strategygroup-tier-review-current.json
-docs/current/strategy-group-handoffs/strategygroup-tier-review-current.md
-```
-
-Current StrategyGroup quality-governance wave rows are generated at:
-
-```text
-docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json
-docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.md
-```
-
-Pre-live StrategyGroup decision rows are defined in:
-
-```text
-docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
-```
-
-## Batch
-
-| StrategyGroup | Role | Default Mode |
+| File | Role | Runtime authority |
 | --- | --- | --- |
-| `MPG-001` | Momentum persistence | `armed_observation` |
-| `TEQ-001` | Equity-like perpetual momentum | `armed_observation` |
-| `FBS-001` | Funding / basis stress | `armed_observation` |
-| `PMR-001` | Precious-metal overlay | `observe_only` |
-| `SOR-001` | Session opening-range structure | `conditional_armed_observation` |
+| `STRATEGYGROUP_REGISTRY_CONTRACT.md` | Explains StrategyGroup registry semantics and the active PG seed contract | None |
 
-## Expansion Intake
+## Retired File Families
 
-| StrategyGroup | Role | Default Mode | Main-Control Boundary |
-| --- | --- | --- | --- |
-| `BTPC-001` | Bear trend pullback continuation | `L2 policy: shadow_candidate; handoff: non-executing input` | May support L2 shadow-candidate observation through runtime tier policy only; not L4 real-order scope |
-| `VCB-001` | Volatility compression breakout | `L1 policy: observe_only; replay: non-executing review input` | May support L1 no-action / would-enter replay review only; not L2 shadow-candidate or L4 real-order scope |
-| `LSR-001` | Liquidity sweep reversal / short-revival rewrite lane | `L1 policy: observe_only; replay: non-executing review input` | May support L1 no-action / would-enter / rewrite-gap replay review only; not L2 shadow-candidate or L4 real-order scope |
-| `BRF-001` | Bear rally failure short lane | `L1 policy: observe_only; replay: non-executing review input` | May support L1 no-action / would-enter / squeeze-risk replay review only; not L2 shadow-candidate or L4 real-order scope |
+The following file families were removed from `docs/current` as current inputs:
+
+| Retired family | Current replacement |
+| --- | --- |
+| `*/handoff.json` | PG StrategyGroup version, event spec, candidate scope, policy, and runtime scope rows |
+| `*/replay/*.json` | Research/archive provenance or explicit test fixtures only |
+| `main-control-runtime-tier-policy.json` | PG owner policy current projection |
+| `owner-pretrade-runtime-authorization-v0.json` | PG owner policy and runtime scope bindings |
+| `research-intake-snapshots/*.json` | Strategy governance DB admission data or archive provenance |
+| `main-control-*.md` supplement files | Current contracts plus PG current projection; no runtime file input |
 
 ## Boundary
 
-These handoffs are Strategy Picker and watcher-scope inputs only. They are not
-order authority, FinalGate pass evidence, Operation Layer evidence, deploy
-authority, credential changes, live profile changes, or order-sizing defaults.
+Old handoff/replay/policy files must not be used by production code, Owner
+read models, watcher scope selection, Tradeability, Candidate Pool, action-time
+ticketing, FinalGate preparation, Operation Layer preparation, or server
+monitoring.
 
-High-priority no-action, would-enter, stale, missing-fact, and
-classifier-conflict observations from these handoffs should enter Strategy
-Asset State pre-live evidence only when they influence keep, revise, promote,
-park, kill, go-live, do-not-go-live, or safety-block decisions. The old
-Strategy Asset State path is compatibility/provenance only.
+Historical review may use git history or archive-only provenance. Historical
+material must not be wired back into current runtime decisions.

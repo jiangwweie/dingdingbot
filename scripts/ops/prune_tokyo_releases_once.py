@@ -28,8 +28,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.apply:
         apply_prune(manifest, root=root, max_delete_count=args.max_delete_count)
-    if args.manifest_json:
-        _write_json(Path(args.manifest_json), manifest)
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0 if not manifest["checks"]["blockers"] else 2
 
@@ -147,13 +145,6 @@ def _is_within(root: Path, path: Path) -> bool:
         return False
 
 
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
-
-
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -163,7 +154,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--current-symlink", default="/home/ubuntu/brc-deploy/app/current")
     parser.add_argument("--keep-count", type=int, default=5)
     parser.add_argument("--max-delete-count", type=int, default=2)
-    parser.add_argument("--manifest-json")
     return parser.parse_args(argv)
 
 

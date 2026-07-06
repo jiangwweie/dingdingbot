@@ -9,8 +9,6 @@ no ExecutionIntent, no orders, and no runtime mutation.
 
 from __future__ import annotations
 
-import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,12 +17,6 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
-from scripts.preview_strategy_group_readonly_observation import (  # noqa: E402
-    SourceName,
-    build_preview_artifact,
-)
-
 
 def build_watch_evidence(
     *,
@@ -179,26 +171,6 @@ def build_watch_evidence(
     }
 
 
-def build_watch_evidence_from_paths(
-    *,
-    status_artifact_json: str | Path,
-    strategy_source: SourceName,
-) -> dict[str, Any]:
-    status_artifact = _load_json_object(Path(status_artifact_json).expanduser())
-    strategy_preview = build_preview_artifact(source_name=strategy_source)
-    return build_watch_evidence(
-        active_status_artifact=status_artifact,
-        strategy_preview_artifact=strategy_preview,
-    )
-
-
-def _load_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"JSON object required: {path}")
-    return payload
-
-
 def _runtime_summary(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "runtime_instance_id": row.get("runtime_instance_id"),
@@ -281,31 +253,3 @@ def _forbidden_effects(*sources: tuple[str, dict[str, Any]]) -> list[str]:
         for item in safety.get("forbidden_effects") or []:
             effects.append(f"{source_name}.{item}")
     return sorted(set(effects))
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--status-artifact-json", required=True)
-    parser.add_argument(
-        "--strategy-source",
-        choices=["sample", "local_sqlite_read_only", "live_market"],
-        default="local_sqlite_read_only",
-    )
-    parser.add_argument("--output-json")
-    args = parser.parse_args(argv)
-
-    artifact = build_watch_evidence_from_paths(
-        status_artifact_json=args.status_artifact_json,
-        strategy_source=args.strategy_source,
-    )
-    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
-    if args.output_json:
-        output_path = Path(args.output_json).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(payload + "\n", encoding="utf-8")
-    print(payload)
-    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

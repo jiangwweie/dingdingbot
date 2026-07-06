@@ -85,14 +85,13 @@ Operation Layer evidence, or exchange-write permission.
 | Class | Purpose | Current location | Authority behavior |
 | --- | --- | --- | --- |
 | `governance_doc` | Product objective, Owner role, safety boundaries, AI constraints, architecture rules | `docs/current/*.md` | Human-readable authority for intent and constraints |
-| `strategy_registry` | StrategyGroup identity, edge thesis, trade logic, risk gaps, promotion gates, downshift and kill rules | `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md` plus reviewed handoff packs | Defines strategy assets; not execution authority |
-| `machine_config` | Structured policy or config consumed by scripts | `docs/current/**/*.json` where scripts read it | Must be schema-like, testable, and stable |
+| `strategy_registry` | StrategyGroup identity, edge thesis, trade logic, risk gaps, promotion gates, downshift and kill rules | PG strategy registry/version/event/fact rows plus `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md` | Defines strategy assets; not execution authority |
+| `machine_config` | Structured policy or config represented by code schema or PG seed/import rows | PG current tables, migrations, typed code schemas | Repo JSON must not be runtime authority; reusable semantics must be seeded into PG or archived |
 | `owner_policy` | Owner risk acceptance, tier switches, capital scope, pauses, parks, kills | Future runtime/policy store; during pilot only explicit Owner decisions and bounded docs | Dynamic authorization state; should not live as narrative Markdown long-term |
-| `runtime_state` | Watcher state, live facts, candidate/auth state, orders, positions, protection, reconciliation | Runtime DB, Tokyo reports, generated watcher artifacts | Current operational truth, subject to freshness rules |
+| `runtime_state` | Watcher state, live facts, candidate/auth state, orders, positions, protection, reconciliation | Runtime DB / PG current services | Current operational truth, subject to freshness rules |
 | `current_projection` | Single-owner current state over facts/events, such as Candidate Pool readiness, Goal Status, Runtime Safety State, and server monitor state | Target DB-backed current projection; transitional file-backed repository only | Runtime decision source after repository migration; exactly one owner projector |
 | `generated_view` | Strategy Asset State evidence, Review Ledger, monitor summaries, Owner summaries | `output/**`, runtime report directories | Generated from sources; do not hand-edit as authority |
-| `tracked_control_snapshot` | Small generated views that are allowed into routine Live Enablement commits | Paths listed in `config/output_control_snapshots.json` | Commit only with known source command, validator, and named task deliverable |
-| `volatile_output_artifact` | Watcher ticks, public facts refreshes, dry-run chains, deploy snapshots, replay labs, and local runtime noise | `output/**` paths not listed as tracked control snapshots | Must remain untracked and ignored; regenerate or archive separately |
+| `generated_output_artifact` | Watcher ticks, public facts refreshes, dry-run chains, deploy snapshots, replay labs, local runtime noise, and generated control views | `output/**` | Must remain untracked and ignored; regenerate from PG/current services or archive separately |
 | `archive` | Historical plans and obsolete evidence | `docs/history-archive-2026-06-15-pre-governance.tar.gz`, historical output | Recovery/provenance only |
 
 ## Authority Order
@@ -130,6 +129,7 @@ Owner decisions.
 | Production runtime monitor ownership | `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` |
 | Tokyo runtime deployment boundary | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` |
 | Repo file source elimination governance | `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md` |
+| Production runtime file I/O elimination | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | Runtime control state DB architecture | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md` |
 | Runtime control state DB table design | `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | Runtime control state mainline file I/O map | `docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md` |
@@ -141,18 +141,14 @@ Owner decisions.
 | Agent boundaries and goal-mode execution | `docs/current/AI_AGENT_CONSTRAINTS.md` |
 | Owner-facing control board semantics | `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md` |
 | Strategy asset registry contract | `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md` |
-| Strategy asset registry baseline | `docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json` and `docs/current/strategy-group-handoffs/strategygroup-registry-baseline.md` |
-| Current StrategyGroup tier review | `docs/current/strategy-group-handoffs/strategygroup-tier-review-current.json` and `docs/current/strategy-group-handoffs/strategygroup-tier-review-current.md` |
-| Current StrategyGroup quality wave | `docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.json` and `docs/current/strategy-group-handoffs/strategygroup-quality-wave-current.md` |
+| Strategy asset registry current state | PG strategy registry / strategy version / RequiredFacts projections |
+| StrategyGroup tier and quality current state | PG Owner policy, strategy review, and tradeability projections |
+| Retired StrategyGroup file snapshots | `docs/archive/strategy-group-handoffs-retired-file-sources/` for provenance only |
 | Goal-mode task handoff contract | `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md` |
-| Runtime tier definitions | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.md` |
-| Machine tier mapping | `docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json` |
-| Output control snapshot whitelist | `config/output_control_snapshots.json` |
-| RequiredFacts classes | `docs/current/strategy-group-handoffs/main-control-required-facts-map.md` |
+| Runtime tier definitions | PG Owner policy / runtime profile projections plus explanatory Markdown |
+| Machine tier mapping | PG Owner policy / runtime profile projections |
+| RequiredFacts classes | PG RequiredFacts/version rows and typed code schema |
 | Strategy Asset State pre-live evidence compatibility path | `docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` |
-| Tradeability Decision generated view | `output/runtime-monitor/latest-strategygroup-tradeability-decision.json` and `output/runtime-monitor/latest-strategygroup-tradeability-decision.md` |
-| Current goal audit | `docs/current/STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md` |
-| Monitor baseline config | `docs/current/RUNTIME_MONITOR_BASELINE.json` |
 
 ## Markdown Rules
 
@@ -191,15 +187,16 @@ It must:
 - keep real-order authority explicit and false unless the official runtime
   chain grants action-time authority.
 
-During the pilot, `docs/current/**/*.json` can act as structured source input.
-Long-term dynamic state should move to runtime or policy stores.
+Repo JSON must not act as structured runtime source input. Reusable semantics
+belong in typed code schemas or PG seed/import rows; historical material belongs
+in archive-only provenance.
 
 ## Generated View Rules
 
 Generated views include:
 
-- `output/runtime-monitor/*.json`;
-- `output/runtime-monitor/*.md`;
+- explicit diagnostic JSON exports;
+- explicit diagnostic Markdown exports;
 - deploy-session summaries;
 - local monitor sequence artifacts;
 - replay and audit reports generated by scripts.
@@ -243,16 +240,13 @@ Routine commits must apply this stricter split:
 
 | Output class | Commit rule | Examples |
 | --- | --- | --- |
-| `tracked_control_snapshot` | May be committed only when listed in `config/output_control_snapshots.json`, produced by the named source command, and accepted by its validator | Daily Live Enablement Table, Tradeability Decision, Replay/Live Parity Audit, Action-Time Boundary, Local Monitor Sequence, Single Lane Task Packet |
-| `volatile_output_artifact` | Must not be committed by default; keep local, regenerate, or archive outside routine Live Enablement commits | public facts ticks, strategy runtime-signal facts, dry-run audit chains, deploy/session snapshots, replay labs |
+| `generated_output_artifact` | Must not be committed by default; keep local, regenerate from PG/current services, or archive outside routine Live Enablement commits | Daily Live Enablement Table exports, Candidate Pool exports, public facts ticks, strategy runtime-signal facts, dry-run audit chains, deploy/session snapshots, replay labs |
 | `historical_evidence_output` | Commit only when the task explicitly requires provenance capture and the artifact has a bounded retention reason | dated audits, one-off migration/deploy evidence, historical strategy-capture reports |
 
 Git tracking under `output/**` is closed by default. `.gitignore` ignores the
-whole output tree and re-admits only the exact control snapshot paths listed in
-`config/output_control_snapshots.json`. Historical output files that are not
-listed in the manifest are local compatibility evidence only and must be
-removed from the git index with `git rm --cached`, not hand-promoted through a
-routine commit.
+whole output tree. Historical output files are local compatibility evidence only
+and must be removed from the git index, not hand-promoted through a routine
+commit.
 
 Before accepting output changes, run:
 
@@ -260,10 +254,9 @@ Before accepting output changes, run:
 python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked
 ```
 
-The validator checks the current output change set against
-`config/output_control_snapshots.json`. Existing tracked output files remain
-compatibility evidence, but their historical presence does not make them valid
-routine commit candidates.
+The validator rejects routine output changes and tracked generated output.
+Existing tracked output files are cleanup targets, not valid routine commit
+candidates.
 
 The Tradeability Decision generated view has one narrow role: it summarizes
 registry, policy, runtime, research-intake, and ledger inputs into a current
@@ -312,9 +305,9 @@ The target table design is defined in
 
 The strategy governance pipeline DB design is defined in
 `docs/current/STRATEGY_GOVERNANCE_PIPELINE_DB_DESIGN.md`. It is a P1 design
-for converting strategy research, handoff packs, and admission artifacts into
-DB-backed strategy candidate and governance state after the P0 repository and
-runtime-control DB source boundary is in place.
+for converting strategy research, archive-only handoff provenance, and
+admission artifacts into DB-backed strategy candidate and governance state
+after the P0 repository and runtime-control DB source boundary is in place.
 
 This direction does not move governance Markdown, replay fixtures, deploy
 configuration, or historical archives into DB. It moves dynamic registry

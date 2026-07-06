@@ -10,9 +10,7 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/brc-deploy/app/current
 EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-monitor.env
-ExecStartPre=/bin/mkdir -p /home/ubuntu/brc-deploy/reports/runtime-monitor
 ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/run_tokyo_runtime_server_monitor.py \
-  --output-json /home/ubuntu/brc-deploy/reports/runtime-monitor/latest-server-side-runtime-monitor.json \
   --require-database-url \
   --systemd-unit brc-owner-console-backend.service \
   --systemd-unit brc-runtime-signal-watcher.timer \
@@ -21,4 +19,3 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/home/ubuntu/brc-deploy/reports/runtime-monitor

@@ -3,10 +3,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
-
-import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -77,8 +74,6 @@ def test_release_readiness_report_passes_for_clean_ancestor_release(tmp_path: Pa
         expected_latest_migration=(
             "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
         ),
-        write_artifacts=False,
-        output_dir=Path("output/release-check"),
     )
 
     assert report["status"] == "ready_for_local_packaging"
@@ -91,6 +86,7 @@ def test_release_readiness_report_passes_for_clean_ancestor_release(tmp_path: Pa
         "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
     )
     assert all(value is False for value in report["safety_invariants"].values())
+    assert report["artifact_plan"]["local_archive_generation"] == "disabled"
     assert report["artifact_plan"]["archive_path"] is None
     assert report["secret_scan"]["tracked_secret_candidates"] == []
 
@@ -118,25 +114,12 @@ def test_release_readiness_blocks_dirty_tracked_tree_and_refuses_artifacts(
         expected_latest_migration=(
             "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
         ),
-        write_artifacts=False,
-        output_dir=Path("output/release-check"),
     )
 
     assert report["status"] == "blocked"
     assert report["release_checks"]["ready_for_packaging"] is False
     assert "tracked_worktree_dirty" in report["release_checks"]["blockers"]
-
-    with pytest.raises(module.ReleaseReadinessError, match="tracked_worktree_dirty"):
-        module.build_release_readiness_report(
-            repo_root=repo,
-            deployed_head=deployed_head,
-            expected_min_migrations=1,
-            expected_latest_migration=(
-                "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
-            ),
-            write_artifacts=True,
-            output_dir=Path("output/release-check"),
-        )
+    assert report["artifact_plan"]["local_archive_generation"] == "disabled"
 
 
 def test_release_readiness_can_warn_for_remote_git_export_dirty_tree(
@@ -153,8 +136,6 @@ def test_release_readiness_can_warn_for_remote_git_export_dirty_tree(
         expected_latest_migration=(
             "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
         ),
-        write_artifacts=False,
-        output_dir=Path("output/release-check"),
         allow_tracked_dirty_for_remote_git_export=True,
     )
 
@@ -168,7 +149,7 @@ def test_release_readiness_can_warn_for_remote_git_export_dirty_tree(
     assert report["local_git"]["tracked_dirty"] is True
 
 
-def test_release_artifact_uses_git_archive_and_excludes_untracked_files(
+def test_release_readiness_does_not_generate_local_archive_for_untracked_files(
     tmp_path: Path,
 ):
     module = _load_module()
@@ -182,8 +163,6 @@ def test_release_artifact_uses_git_archive_and_excludes_untracked_files(
         expected_latest_migration=(
             "2026-06-10-064_add_runtime_profile_proposal_snapshot.py"
         ),
-        write_artifacts=True,
-        output_dir=Path("output/release-check"),
     )
 
     assert report["release_checks"]["ready_for_packaging"] is True
@@ -191,13 +170,8 @@ def test_release_artifact_uses_git_archive_and_excludes_untracked_files(
     assert report["release_checks"]["warnings"] == [
         "untracked_files_exist_and_are_not_in_git_archive"
     ]
-    archive_path = Path(report["artifact_plan"]["archive_path"])
-    manifest_path = Path(report["artifact_plan"]["manifest_path"])
-    assert archive_path.exists()
-    assert manifest_path.exists()
-
-    with tarfile.open(archive_path, "r:gz") as archive:
-        names = archive.getnames()
-    assert any(name.endswith("/README.md") for name in names)
-    assert not any("untracked-secret.env" in name for name in names)
+    assert report["artifact_plan"]["local_archive_generation"] == "disabled"
+    assert report["artifact_plan"]["archive_path"] is None
+    assert report["artifact_plan"]["manifest_path"] is None
+    assert report["artifact_plan"]["manifest_written"] is False
     assert all(value is False for value in report["safety_invariants"].values())

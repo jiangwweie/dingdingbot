@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
-import json
 from pathlib import Path
 import sys
 from typing import Any
@@ -24,9 +22,6 @@ from scripts.build_single_lane_task_packet import (  # noqa: E402
 )
 
 
-DEFAULT_INPUT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-single-lane-task-packet.json"
-)
 FORBIDDEN_TRUE_KEYS = {
     "actionable_now",
     "real_order_authority",
@@ -41,29 +36,6 @@ FORBIDDEN_TRUE_KEYS = {
     "live_profile_changed",
     "order_sizing_changed",
 }
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("packet_json", nargs="?", default=str(DEFAULT_INPUT_JSON))
-    args = parser.parse_args(argv)
-    path = Path(args.packet_json)
-    errors = validate_single_lane_task_packet(_read_json(path))
-    if errors:
-        for error in errors:
-            print(f"ERROR: {error}", file=sys.stderr)
-        return 1
-    print(
-        json.dumps(
-            {
-                "status": "single_lane_task_packet_valid",
-                "path": str(path),
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-    )
-    return 0
 
 
 def validate_single_lane_task_packet(artifact: dict[str, Any]) -> list[str]:
@@ -131,21 +103,8 @@ def _validate_allowed_files(artifact: dict[str, Any]) -> list[str]:
             errors.append(f"allowed_files must not include forbidden path {item}")
         if "*" in item:
             errors.append(f"allowed_files must use exact paths, not glob {item}")
-        if item.startswith("output/") and item not in {
-            "output/runtime-monitor/latest-single-lane-task-packet.json",
-            "output/runtime-monitor/latest-single-lane-task-packet.md",
-            "output/runtime-monitor/latest-daily-live-enablement-table.json",
-            "output/runtime-monitor/latest-daily-live-enablement-table.md",
-            "output/runtime-monitor/latest-strategygroup-tradeability-decision.json",
-            "output/runtime-monitor/latest-strategygroup-tradeability-decision.md",
-            "output/runtime-monitor/latest-replay-live-parity-audit.json",
-            "output/runtime-monitor/latest-replay-live-parity-audit.md",
-            "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json",
-            "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.md",
-            "output/runtime-monitor/latest-local-monitor-sequence.json",
-            "output/runtime-monitor/latest-local-monitor-sequence.md",
-        }:
-            errors.append(f"allowed output file is not a control snapshot: {item}")
+        if item.startswith("output/"):
+            errors.append(f"allowed_files must not include generated output path {item}")
     return errors
 
 
@@ -163,14 +122,6 @@ def _forbidden_true_paths(value: Any, path: str = "") -> list[str]:
     return errors
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -179,7 +130,3 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if isinstance(item, str)]
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

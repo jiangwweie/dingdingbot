@@ -216,7 +216,7 @@ def _watcher_prepared() -> dict:
         "can_continue_without_owner_chat": True,
         "requires_action_time_final_gate": True,
         "requires_official_operation_layer": True,
-        "signal_input_json": "/reports/runtime-mpg/signal-input.json",
+        "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg",
         "shadow_candidate_id": "shadow-candidate-1",
         "prepared_authorization_id": "auth-ready-1",
     }
@@ -225,7 +225,7 @@ def _watcher_prepared() -> dict:
     )
     watcher["data"]["post_signal_auto_resume"] = prepared_auto_resume
     watcher["data"]["post_signal_resume"]["prepared_evidence"] = {
-        "signal_input_json": "/reports/runtime-mpg/signal-input.json",
+        "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg",
         "shadow_candidate_id": "shadow-candidate-1",
         "prepared_authorization_id": "auth-ready-1",
         "ready_for_action_time_final_gate": True,
@@ -408,13 +408,13 @@ def test_pilot_status_promotes_prepared_evidence_to_candidate_row_and_final_gate
         "none_system_runs_official_finalgate"
     )
     assert packet["candidate_evidence"] == {
-        "signal_input_json": "/reports/runtime-mpg/signal-input.json",
+        "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg",
         "shadow_candidate_id": "shadow-candidate-1",
         "prepared_authorization_id": "auth-ready-1",
         "ready_for_action_time_final_gate": True,
     }
     candidate = packet["control_board"]["candidate_row"]
-    assert candidate["signal_input_json"] == "/reports/runtime-mpg/signal-input.json"
+    assert candidate["signal_input_json"] == "pg://runtime-control-state/live-signal-events/signal-mpg"
     assert "fresh_signal_id" not in candidate
     assert candidate["shadow_candidate_id"] == "shadow-candidate-1"
     assert candidate["prepared_authorization_id"] == "auth-ready-1"
@@ -457,7 +457,7 @@ def test_pilot_status_prefers_allowed_action_over_legacy_recovery_text():
     watcher["data"]["action_time_resume"] = {
         "status": "ready_for_action_time_final_gate",
         "next_step": "legacy_next_step_must_not_drive_action",
-        "signal_input_json": "/reports/runtime-mpg/signal-input.json",
+        "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg",
         "shadow_candidate_id": "shadow-candidate-1",
         "prepared_authorization_id": "auth-ready-1",
         "allowed_auto_actions": ["run_official_action_time_final_gate_preflight"],

@@ -4,10 +4,15 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import pytest
 import sqlalchemy as sa
 
 import scripts.runtime_signal_watcher_resume_dispatcher as dispatcher
 from scripts.runtime_signal_watcher_resume_dispatcher import build_dispatch_artifact, main
+
+
+def _captured_stdout_artifact(capsys) -> dict:
+    return json.loads(capsys.readouterr().out)
 
 
 def _assert_legacy_operation_layer_submit_blocked(artifact: dict) -> None:
@@ -77,7 +82,7 @@ def _resume_pack(status: str = "waiting_for_market") -> dict:
             {
                 "next_step": "run_official_action_time_final_gate_preflight",
                 "ticket_id": "ticket-ready-1",
-                "signal_input_json": "/reports/runtime-mpg-1/signal-input.json",
+                "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-ready-1",
                 "shadow_candidate_id": "shadow-candidate-1",
                 "prepared_authorization_id": "auth-ready-1",
                 "allowed_auto_actions": [
@@ -137,23 +142,7 @@ def _with_runtime_summary(
     return resume
 
 
-def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
-    handoff_path = tmp_path / "handoff.json"
-    handoff_path.write_text(
-        json.dumps(
-            {
-                "api_payload": {
-                    "handoff_id": "handoff-runtime-mpg-1",
-                    "runtime_instance_id": "runtime-mpg-1",
-                    "strategy_family_id": "MPG-001",
-                    "strategy_group_id": "MPG-001",
-                    "readiness_packet_id": "readiness-1",
-                    "status": "ready_for_official_submit_call",
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
+def _fresh_authorization_resume_pack() -> dict:
     return {
         "scope": "runtime_signal_watcher_post_signal_resume_pack",
         "status": "ready_for_fresh_submit_authorization",
@@ -161,7 +150,7 @@ def _fresh_authorization_resume_pack(tmp_path: Path) -> dict:
         "runtime_instance_id": "runtime-mpg-1",
         "selected_runtime_instance_ids": ["runtime-mpg-1"],
         "artifact_paths": {
-            "readiness_handoff_evidence": str(handoff_path),
+            "readiness_handoff_evidence": "archive://retired-handoff-json",
         },
         "action_time_resume": {
             "status": "ready_for_fresh_submit_authorization",
@@ -710,7 +699,7 @@ def _operation_layer_report_with_satisfied_legacy_probe_blocker() -> dict:
 def test_dispatcher_waiting_for_market_is_no_action():
     artifact = build_dispatch_artifact(
         resume_pack=_resume_pack(),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         selected_strategy_group_id="MPG-001",
     )
 
@@ -723,16 +712,13 @@ def test_dispatcher_waiting_for_market_is_no_action():
     assert artifact["safety_invariants"]["places_order"] is False
 
 
-def test_dispatcher_non_executing_prepare_emits_common_chain_prepare_plan():
+def test_dispatcher_blocks_retired_non_executing_prepare_file_authority():
     resume = _with_runtime_summary(_resume_pack("ready_for_non_executing_prepare"))
-    resume["signal_input_json"] = "/reports/runtime-mpg-1/signal-input.json"
-    resume["artifact_paths"] = {
-        "readiness_handoff_evidence": "/reports/runtime-mpg-1/readiness-handoff-evidence.json",
-    }
+    resume["signal_input_json"] = "pg://runtime-control-state/live-signal-events/signal-mpg-1"
     resume["action_time_resume"].update(
         {
             "next_step": "prepare_fresh_candidate_grant_authorization_evidence",
-            "signal_input_json": "/reports/runtime-mpg-1/signal-input.json",
+            "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg-1",
             "allowed_auto_actions": [
                 "prepare_fresh_candidate_authorization_evidence"
             ],
@@ -746,378 +732,27 @@ def test_dispatcher_non_executing_prepare_emits_common_chain_prepare_plan():
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         api_base="http://127.0.0.1:18080",
         selected_strategy_group_id="MPG-001",
     )
 
-    assert artifact["status"] == "ready_for_non_executing_prepare"
-    assert artifact["blocker_class"] == "none"
-    assert artifact["dispatch_action"] == (
-        "prepare_fresh_candidate_authorization_evidence"
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_action"] is None
+    assert artifact["dispatch_status"] == (
+        "blocked_by_retired_non_executing_prepare_file_authority"
     )
-    assert artifact["dispatch_status"] == "non_executing_prepare_dispatch_ready"
-    assert "automatic_recovery_action" not in artifact["owner_state"]
+    assert artifact["command_plan"] is None
+    assert (
+        "retired_file_authority_scope:non_executing_prepare_signal_input_json"
+        in artifact["blockers"]
+    )
+    assert "pg_promotion_candidate_required" in artifact["blockers"]
+    assert "pg_action_time_ticket_required" in artifact["blockers"]
     assert artifact["owner_state"]["non_authority_checkpoint"] == (
-        "prepare_fresh_candidate_authorization_evidence"
+        "materialize_pg_action_time_ticket"
     )
-    assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
-    command = artifact["command_plan"]
-    assert command["kind"] == "fresh_candidate_authorization_evidence_preparation"
-    assert command["requires_runtime_instance_id"] is True
-    assert command["requires_readiness_handoff_evidence"] is True
-    assert command["readiness_handoff_evidence"] == (
-        "/reports/runtime-mpg-1/readiness-handoff-evidence.json"
-    )
-    assert command["signal_input_json"] == "/reports/runtime-mpg-1/signal-input.json"
-    assert command["calls_official_submit_endpoint"] is False
-    assert command["places_order"] is False
-    assert command["exchange_write_called"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
-
-
-def test_dispatcher_non_executing_prepare_uses_signal_input_runtime_id():
-    resume = _resume_pack("ready_for_non_executing_prepare")
-    resume["selected_runtime_instance_ids"] = ["runtime-old-1", "runtime-sor-btc"]
-    resume["signal_input_json"] = "/reports/runtime-sor-btc/signal-input.json"
-    resume["artifact_paths"] = {
-        "readiness_handoff_evidence": "/reports/runtime-sor-btc/readiness-handoff-evidence.json",
-    }
-    resume["action_time_resume"].update(
-        {
-            "next_step": "prepare_fresh_candidate_grant_authorization_evidence",
-            "signal_input_json": "/reports/runtime-sor-btc/signal-input.json",
-            "allowed_auto_actions": [
-                "prepare_fresh_candidate_authorization_evidence"
-            ],
-            "requires_fresh_candidate_authorization_evidence": True,
-        }
-    )
-    resume["runtime_signal_summaries"] = [
-        {
-            "runtime_instance_id": "runtime-old-1",
-            "strategy_family_id": "MPG-001",
-            "strategy_family_version_id": "MPG-001-v0",
-            "signal_input_json": "/reports/runtime-old-1/signal-input.json",
-            "status": "blocked",
-        },
-        {
-            "runtime_instance_id": "runtime-sor-btc",
-            "strategy_family_id": "SOR-001",
-            "strategy_family_version_id": "SOR-001-v0",
-            "signal_input_json": "/reports/runtime-sor-btc/signal-input.json",
-            "status": "ready_for_final_gate_preflight",
-        },
-    ]
-    resume["owner_state"] = {
-        "status": "ready_for_non_executing_prepare",
-        "blocker_class": "none",
-    }
-
-    artifact = build_dispatch_artifact(
-        resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
-        api_base="http://127.0.0.1:18080",
-        selected_strategy_group_id=None,
-    )
-
-    assert artifact["status"] == "ready_for_non_executing_prepare"
-    assert artifact["command_plan"]["runtime_instance_id"] == "runtime-sor-btc"
-    assert artifact["command_plan"]["signal_input_json"] == (
-        "/reports/runtime-sor-btc/signal-input.json"
-    )
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
-
-
-def test_dispatcher_non_executing_prepare_requires_allowed_auto_action():
-    resume = _with_runtime_summary(_resume_pack("ready_for_non_executing_prepare"))
-    resume["action_time_resume"]["allowed_auto_actions"] = [
-        "continue_watcher_observation"
-    ]
-
-    artifact = build_dispatch_artifact(
-        resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
-    )
-
-    assert artifact["status"] == "blocked"
-    assert artifact["blocker_class"] == "hard_safety_stop"
-    assert artifact["dispatch_status"] == "blocked_by_resume_allowed_actions"
-    assert "allowed_auto_actions_missing_non_executing_prepare" in artifact["blockers"]
-    assert artifact["command_plan"] is None
-
-
-def test_dispatcher_non_executing_prepare_rejects_legacy_action_fallback():
-    resume = _with_runtime_summary(_resume_pack("ready_for_non_executing_prepare"))
-    resume["action_time_resume"].pop("allowed_auto_actions", None)
-    resume["action_time_resume"]["next_step"] = (
-        "prepare_fresh_candidate_authorization_evidence"
-    )
-    resume["action_time_resume"]["automatic_recovery_action"] = (
-        "prepare_fresh_candidate_authorization_evidence"
-    )
-    resume["automatic_recovery_action"] = (
-        "prepare_fresh_candidate_authorization_evidence"
-    )
-    resume["operator_command_plan"] = {
-        "next_step": "prepare_fresh_candidate_authorization_evidence"
-    }
-
-    artifact = build_dispatch_artifact(
-        resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
-    )
-
-    assert artifact["status"] == "blocked"
-    assert artifact["blocker_class"] == "hard_safety_stop"
-    assert artifact["dispatch_status"] == "blocked_by_resume_allowed_actions"
-    assert "allowed_auto_actions_missing_non_executing_prepare" in artifact["blockers"]
-    assert artifact["command_plan"] is None
-
-
-def _non_executing_prepare_resume(
-    *,
-    strategy_group_id: str = "MPG-001",
-    runtime_instance_id: str = "runtime-mpg-1",
-) -> dict:
-    resume = _with_runtime_summary(
-        _resume_pack("ready_for_non_executing_prepare"),
-        strategy_group_id=strategy_group_id,
-        runtime_instance_id=runtime_instance_id,
-    )
-    signal_input_json = f"/reports/{runtime_instance_id}/signal-input.json"
-    ticket_id = f"ticket-{runtime_instance_id}"
-    resume["ticket_id"] = ticket_id
-    resume["signal_input_json"] = signal_input_json
-    resume["action_time_resume"].update(
-        {
-            "next_step": "prepare_fresh_candidate_grant_authorization_evidence",
-            "ticket_id": ticket_id,
-            "signal_input_json": signal_input_json,
-            "allowed_auto_actions": [
-                "prepare_fresh_candidate_authorization_evidence"
-            ],
-            "requires_fresh_candidate_authorization_evidence": True,
-        }
-    )
-    resume["runtime_signal_summaries"][0]["signal_input_json"] = signal_input_json
-    resume["owner_state"] = {
-        "status": "ready_for_non_executing_prepare",
-        "blocker_class": "none",
-    }
-    return resume
-
-
-def _non_executing_prepare_ready_artifact(
-    *,
-    authorization_id: str = "auth-prepared-1",
-    candidate_id: str = "candidate-1",
-) -> dict:
-    return {
-        "scope": "runtime_next_attempt_prepare_artifact",
-        "status": "ready_for_final_gate_preflight",
-        "ids": {
-            "authorization_id": authorization_id,
-            "execution_intent_id": "intent-1",
-            "runtime_execution_intent_draft_id": "draft-1",
-            "order_candidate_id": candidate_id,
-        },
-        "operator_command_plan": {
-            "prepared_authorization_id": authorization_id,
-        },
-        "created_records": {
-            "shadow_candidate_created": True,
-            "runtime_execution_intent_draft_created": True,
-            "execution_intent_created": True,
-            "submit_authorization_created": True,
-            "protection_plan_created": True,
-            "attempt_reservation_created": False,
-            "attempt_mutation_created": False,
-            "order_lifecycle_handoff_created": False,
-        },
-        "safety_invariants": {
-            "uses_official_trading_console_api": True,
-            "next_attempt_gate_checked": True,
-            "local_registration_armed": False,
-            "exchange_submit_armed": False,
-            "execute_real_submit": False,
-            "exchange_write_called": False,
-            "order_created": False,
-            "order_lifecycle_called": False,
-            "attempt_counter_mutated": False,
-            "runtime_budget_mutated": False,
-            "position_opened": False,
-            "withdrawal_or_transfer_created": False,
-        },
-        "blockers": [],
-        "warnings": [],
-    }
-
-
-def test_dispatcher_execute_non_executing_prepare_reaches_finalgate_checkpoint(
-    monkeypatch,
-):
-    calls = []
-    prepare_calls = []
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _prepare_runner(command_plan):
-        prepare_calls.append(command_plan)
-        return _non_executing_prepare_ready_artifact()
-
-    monkeypatch.setattr(
-        dispatcher,
-        "_request_json",
-        _ticket_bound_finalgate_handoff_and_submit_request(
-            calls,
-            submit_body=_protected_submit_disabled_smoke_body(),
-        ),
-    )
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_non_executing_prepare_resume(),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
-        api_base="http://127.0.0.1:18080",
-        execute_preflight=True,
-        non_executing_preparer=_prepare_runner,
-        selected_strategy_group_id="MPG-001",
-    )
-
-    _assert_ticket_bound_operation_layer_ready(artifact)
-    assert artifact["non_executing_prepare_result"]["status"] == (
-        "ready_for_final_gate_preflight"
-    )
-    assert prepare_calls[0]["runtime_instance_id"] == "runtime-mpg-1"
-    assert prepare_calls[0]["signal_input_json"] == (
-        "/reports/runtime-mpg-1/signal-input.json"
-    )
-    assert "prepared_authorization_id" not in artifact["command_plan"]
-    assert "shadow_candidate_id" not in artifact["command_plan"]
-    assert "signal_input_json" not in artifact["command_plan"]
-    assert artifact["finalgate_preflight_result"]["places_order"] is False
-    assert artifact["safety_invariants"]["official_non_executing_prepare_called"] is True
-    assert artifact["safety_invariants"]["allowed_prepare_evidence_created"] is True
-    assert artifact["safety_invariants"]["calls_order_lifecycle"] is False
-    assert [item["method"] for item in calls] == ["GET", "POST"]
-
-
-def test_dispatcher_execute_non_executing_prepare_blocks_forbidden_effect(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**_kwargs):
-        raise AssertionError("FinalGate must not run after forbidden prepare effect")
-
-    def _prepare_runner(_command_plan):
-        prepare_artifact = _non_executing_prepare_ready_artifact()
-        prepare_artifact["safety_invariants"]["exchange_write_called"] = True
-        return prepare_artifact
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_non_executing_prepare_resume(),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
-        execute_preflight=True,
-        non_executing_preparer=_prepare_runner,
-        selected_strategy_group_id="MPG-001",
-    )
-
-    assert artifact["status"] == "blocked"
-    assert artifact["blocker_class"] == "hard_safety_stop"
-    assert artifact["dispatch_status"] == (
-        "blocked_by_non_executing_prepare_forbidden_effect"
-    )
-    assert "non_executing_prepare_effect:exchange_write_called" in artifact["blockers"]
-    assert artifact["safety_invariants"]["official_non_executing_prepare_called"] is True
-    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
-
-
-def test_dispatcher_execute_non_executing_prepare_blocks_missing_signal_input():
-    resume = _non_executing_prepare_resume()
-    resume["signal_input_json"] = None
-    resume["action_time_resume"]["signal_input_json"] = None
-    resume["runtime_signal_summaries"][0]["signal_input_json"] = None
-
-    artifact = build_dispatch_artifact(
-        resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
-        execute_preflight=True,
-        non_executing_preparer=(
-            lambda _command_plan: _non_executing_prepare_ready_artifact()
-        ),
-        selected_strategy_group_id="MPG-001",
-    )
-
-    assert artifact["status"] == "blocked"
-    assert artifact["blocker_class"] == "missing_fact"
-    assert artifact["dispatch_status"] == (
-        "blocked_by_missing_non_executing_prepare_inputs"
-    )
-    assert "missing_fact:signal_input_json" in artifact["blockers"]
-    assert artifact["safety_invariants"]["official_non_executing_prepare_called"] is False
-    assert artifact["safety_invariants"]["official_finalgate_preflight_called"] is False
-
-
-def test_dispatcher_non_executing_prepare_common_chain_reuses_strategygroup_scope(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        dispatcher,
-        "_request_json",
-        _ticket_bound_finalgate_handoff_and_submit_request(
-            calls,
-            submit_body=_protected_submit_disabled_smoke_body(),
-        ),
-    )
-    prepared_runtime_ids = []
-
-    def _prepare_runner(command_plan):
-        prepared_runtime_ids.append(command_plan["runtime_instance_id"])
-        return _non_executing_prepare_ready_artifact(
-            authorization_id=f"auth-{command_plan['runtime_instance_id']}",
-            candidate_id=f"candidate-{command_plan['runtime_instance_id']}",
-        )
-
-    for strategy_group_id, runtime_instance_id in (
-        ("TEQ-001", "runtime-teq-1"),
-        ("SOR-001", "runtime-sor-1"),
-    ):
-        artifact = build_dispatch_artifact(
-            resume_pack=_non_executing_prepare_resume(
-                strategy_group_id=strategy_group_id,
-                runtime_instance_id=runtime_instance_id,
-            ),
-            source_path=Path("/tmp/post-signal-resume-pack.json"),
-            execute_preflight=True,
-            non_executing_preparer=_prepare_runner,
-            selected_strategy_group_id=strategy_group_id,
-        )
-
-        _assert_ticket_bound_operation_layer_ready(artifact)
-        assert artifact["selected_strategy_group_id"] == strategy_group_id
-        assert "prepared_authorization_id" not in artifact["command_plan"]
-        assert artifact["command_plan"]["ticket_id"] == f"ticket-{runtime_instance_id}"
-
-    assert prepared_runtime_ids == ["runtime-teq-1", "runtime-sor-1"]
 
 
 def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
@@ -1125,7 +760,7 @@ def test_dispatcher_ready_for_finalgate_emits_official_preflight_plan():
         resume_pack=_with_runtime_summary(
             _resume_pack("ready_for_action_time_final_gate")
         ),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         api_base="http://127.0.0.1:18080",
         selected_strategy_group_id="MPG-001",
     )
@@ -1157,7 +792,7 @@ def test_dispatcher_blocks_finalgate_auth_only_without_ticket_id():
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         api_base="http://127.0.0.1:18080",
         selected_strategy_group_id="MPG-001",
     )
@@ -1179,7 +814,7 @@ def test_dispatcher_blocks_actionable_resume_outside_selected_strategygroup_scop
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         selected_strategy_group_id="MPG-001",
         execute_preflight=True,
     )
@@ -1207,7 +842,7 @@ def test_dispatcher_blocks_actionable_resume_when_selected_scope_cannot_be_prove
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         selected_strategy_group_id="MPG-001",
     )
 
@@ -1227,7 +862,7 @@ def test_dispatcher_blocks_real_submit_when_unselected_scope_cannot_be_proven():
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         execute_operation_layer_submit=True,
     )
@@ -1263,7 +898,7 @@ def test_dispatcher_blocks_real_submit_when_unselected_scope_is_ambiguous():
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         execute_operation_layer_submit=True,
     )
@@ -1278,38 +913,41 @@ def test_dispatcher_blocks_real_submit_when_unselected_scope_is_ambiguous():
     assert artifact["safety_invariants"]["places_order"] is False
 
 
-def test_dispatcher_fresh_authorization_emits_binding_plan(tmp_path):
+def test_dispatcher_blocks_retired_fresh_authorization_handoff_file_authority():
     artifact = build_dispatch_artifact(
-        resume_pack=_fresh_authorization_resume_pack(tmp_path),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        resume_pack=_fresh_authorization_resume_pack(),
+        source_path=Path("pg-ticket-identity"),
         api_base="http://127.0.0.1:18080",
         selected_strategy_group_id="MPG-001",
     )
 
-    assert artifact["status"] == "ready_for_fresh_submit_authorization"
-    assert artifact["blocker_class"] == "none"
-    assert artifact["dispatch_action"] == (
-        "run_official_fresh_submit_authorization_binding"
-    )
+    assert artifact["status"] == "blocked"
+    assert artifact["blocker_class"] == "hard_safety_stop"
+    assert artifact["dispatch_action"] is None
+    assert artifact["command_plan"] is None
     assert artifact["dispatch_status"] == (
-        "official_fresh_authorization_binding_dispatch_ready"
+        "blocked_by_retired_fresh_authorization_file_authority"
     )
-    assert artifact["owner_state"]["blocked_at"] == "fresh_submit_authorization"
-    command = artifact["command_plan"]
-    assert command["method"] == "POST"
-    assert command["path"] == (
-        "/api/trading-console/strategy-runtimes/runtime-mpg-1/"
-        "official-submit-handoff-fresh-authorizations/bind"
+    assert artifact["blockers"] == [
+        "retired_file_authority_scope:fresh_authorization_handoff_json",
+        "pg_action_time_ticket_required",
+        "ticket_bound_operation_layer_handoff_required",
+    ]
+    assert artifact["owner_state"]["blocked_at"] == "file_authority_retired"
+    assert artifact["owner_state"]["non_authority_checkpoint"] == (
+        "materialize_pg_action_time_ticket"
     )
-    assert command["calls_official_submit_endpoint"] is False
-    assert command["places_order"] is False
-    assert command["exchange_write_called"] is False
+    assert (
+        artifact["safety_invariants"].get("official_fresh_authorization_binding_called")
+        is not True
+    )
+    assert artifact["safety_invariants"]["places_order"] is False
 
 
 def test_dispatcher_blocks_retired_fresh_attempt_readiness_projection_alias(
     tmp_path,
 ):
-    resume = _fresh_authorization_resume_pack(tmp_path)
+    resume = _fresh_authorization_resume_pack()
     resume["scope"] = "runtime_fresh_attempt_readiness_projection"
     resume.pop("action_time_resume")
     resume["status"] = "waiting_for_fresh_authorization"
@@ -1320,7 +958,7 @@ def test_dispatcher_blocks_retired_fresh_attempt_readiness_projection_alias(
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/fresh-attempt-readiness.json"),
+        source_path=Path("archive://fresh-attempt-readiness.json"),
         api_base="http://127.0.0.1:18080",
     )
 
@@ -1337,157 +975,6 @@ def test_dispatcher_blocks_retired_fresh_attempt_readiness_projection_alias(
         "materialize_pg_action_time_ticket"
     )
     assert artifact["safety_invariants"]["places_order"] is False
-
-
-def test_dispatcher_execute_fresh_authorization_binding_reaches_finalgate_checkpoint(
-    tmp_path,
-    monkeypatch,
-):
-    calls = []
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        if "runtime-operation-layer-handoffs" in kwargs["url"]:
-            return {
-                "http_status": 200,
-                "error": False,
-                "body": _operation_layer_handoff_ready_body(),
-            }
-        if kwargs["method"] == "GET":
-            return {
-                "http_status": 200,
-                "error": False,
-                "body": _finalgate_ready_body(),
-            }
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "created_authorization",
-                "blockers": [],
-                "warnings": [],
-                "fresh_submit_authorization_id": "fresh-auth-1",
-                "execution_intent_id": "intent-1",
-                "runtime_execution_intent_draft_id": "draft-1",
-                "ready_for_fresh_authorization_resolution": True,
-                "ready_for_disabled_smoke_call": True,
-                "binding_source": "existing_intent",
-                "creates_execution_intent": False,
-                "creates_submit_authorization": True,
-                "calls_official_submit_endpoint": False,
-                "requests_real_gateway_action": False,
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "runtime_budget_mutated": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        }
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_fresh_authorization_resume_pack(tmp_path),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
-        api_base="http://127.0.0.1:18080",
-        execute_preflight=True,
-    )
-
-    _assert_ticket_bound_operation_layer_ready(artifact)
-    assert artifact["fresh_submit_authorization_id"] == "fresh-auth-1"
-    assert artifact["fresh_authorization_binding_result"]["called"] is True
-    assert "automatic_recovery_action" not in artifact["owner_state"]
-    assert artifact["owner_state"]["non_authority_checkpoint"] == (
-        "prepare_ticket_bound_protected_submit"
-    )
-    assert artifact["owner_state"]["checkpoint_source"] == "owner_state"
-    assert artifact["safety_invariants"]["official_fresh_authorization_binding_called"]
-    assert artifact["safety_invariants"]["creates_submit_authorization"] is True
-    assert artifact["safety_invariants"]["pg_prepare_evidence_mutated"] is True
-    assert artifact["safety_invariants"]["mutates_pg"] is True
-    assert artifact["safety_invariants"]["calls_official_submit_endpoint"] is False
-    assert artifact["operation_layer_command_plan"]["ticket_id"] == "ticket-ready-1"
-    assert len(calls) == 3
-    bind_call = calls[0]
-    assert bind_call["method"] == "POST"
-    assert "runtime-execution-first-real-submit-actions" not in bind_call["url"]
-    assert bind_call["body"]["no_exchange_side_effects"] is True
-    assert bind_call["body"]["handoff_artifact"]["handoff_id"] == (
-        "handoff-runtime-mpg-1"
-    )
-    preflight_call = calls[1]
-    assert preflight_call["method"] == "GET"
-    assert preflight_call["url"].endswith(
-        "/runtime-action-time-finalgate-preflights/tickets/ticket-ready-1"
-    )
-    handoff_call = calls[2]
-    assert handoff_call["method"] == "POST"
-    assert "/runtime-operation-layer-handoffs/tickets/ticket-ready-1/" in (
-        handoff_call["url"]
-    )
-
-
-def test_dispatcher_execute_fresh_authorization_binding_blocks_forbidden_effect(
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-    monkeypatch.setattr(
-        dispatcher,
-        "_request_json",
-        lambda **_kwargs: {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "created_authorization",
-                "blockers": [],
-                "fresh_submit_authorization_id": "fresh-auth-1",
-                "ready_for_fresh_authorization_resolution": True,
-                "exchange_write_called": True,
-            },
-        },
-    )
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_fresh_authorization_resume_pack(tmp_path),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
-        execute_preflight=True,
-    )
-
-    assert artifact["status"] == "blocked"
-    assert artifact["blocker_class"] == "hard_safety_stop"
-    assert artifact["dispatch_status"] == (
-        "blocked_by_fresh_authorization_binding_forbidden_effect"
-    )
-    assert "fresh_authorization_binding_effect:exchange_write_called" in (
-        artifact["blockers"]
-    )
-    assert artifact["safety_invariants"]["places_order"] is False
-
-
-def test_dispatcher_blocks_fresh_authorization_without_handoff_artifact(tmp_path):
-    resume = _fresh_authorization_resume_pack(tmp_path)
-    resume["artifact_paths"] = {}
-
-    artifact = build_dispatch_artifact(
-        resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
-    )
-
-    assert artifact["status"] == "blocked"
-    assert artifact["blocker_class"] == "missing_fact"
-    assert artifact["dispatch_status"] == "blocked_by_missing_handoff_artifact"
-    assert "missing_fact:handoff_artifact_json" in artifact["blockers"]
-    assert artifact["owner_state"]["blocked_at"] == "fresh_submit_authorization"
 
 
 def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monkeypatch):
@@ -1510,7 +997,7 @@ def test_dispatcher_execute_preflight_passes_to_operation_layer_checkpoint(monke
         resume_pack=_with_runtime_summary(
             _resume_pack("ready_for_action_time_final_gate")
         ),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
     )
@@ -1548,7 +1035,7 @@ def test_dispatcher_finalgate_rejects_legacy_action_fallback_without_allowed_act
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
     )
 
     assert artifact["status"] == "blocked"
@@ -1593,7 +1080,7 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
         resume_pack=_with_runtime_summary(
             _resume_pack("ready_for_action_time_final_gate")
         ),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
         execute_operation_layer_submit=True,
@@ -1635,7 +1122,7 @@ def test_dispatcher_records_ticket_bound_post_submit_closure_after_real_submit(
         resume_pack=_with_runtime_summary(
             _resume_pack("ready_for_action_time_final_gate")
         ),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
         execute_operation_layer_submit=True,
@@ -1696,7 +1183,7 @@ def test_dispatcher_blocks_ticket_bound_closed_closure_without_settlement_releas
         resume_pack=_with_runtime_summary(
             _resume_pack("ready_for_action_time_final_gate")
         ),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
         execute_operation_layer_submit=True,
@@ -1764,7 +1251,7 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
         resume_pack=_with_runtime_summary(
             _resume_pack("ready_for_action_time_final_gate")
         ),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
         execute_operation_layer_submit=True,
@@ -1861,10 +1348,10 @@ def test_runtime_live_enablement_query_omits_missing_optional_evidence_ids(
 def test_dispatcher_blocks_legacy_finalgate_ready_before_operation_layer_evidence_blocker():
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_blocked_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
     )
 
@@ -1875,10 +1362,10 @@ def test_dispatcher_blocks_legacy_finalgate_ready_before_operation_layer_evidenc
 def test_dispatcher_blocks_legacy_finalgate_ready_before_operation_layer_evidence_ready():
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
     )
 
@@ -1903,10 +1390,10 @@ def test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regre
 
     artifact = build_dispatch_artifact(
         resume_pack=resume_pack,
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
         execute_operation_layer_submit=True,
     )
@@ -1951,10 +1438,10 @@ def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypa
 
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
         execute_operation_layer_submit=True,
     )
@@ -1995,10 +1482,10 @@ def test_dispatcher_executes_operation_layer_disabled_smoke_when_requested(
 
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
         execute_operation_layer_submit=True,
         operation_layer_submit_mode="disabled_smoke",
@@ -2078,10 +1565,10 @@ def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
 
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
         execute_operation_layer_submit=True,
         execute_post_submit_finalize=True,
@@ -2153,10 +1640,10 @@ def test_dispatcher_blocks_incomplete_post_submit_closed_loop(monkeypatch):
 
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
         execute_operation_layer_submit=True,
         execute_post_submit_finalize=True,
@@ -2204,10 +1691,10 @@ def test_dispatcher_blocks_submit_result_identity_mismatch_before_finalize(monke
 
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
         execute_operation_layer_submit=True,
         execute_post_submit_finalize=True,
@@ -2277,10 +1764,10 @@ def test_dispatcher_blocks_post_submit_finalize_runtime_mismatch(monkeypatch):
 
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
         execute_operation_layer_submit=True,
         execute_post_submit_finalize=True,
@@ -2311,10 +1798,10 @@ def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=_operation_layer_ready_report(),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
         execute_operation_layer_submit=True,
     )
@@ -2329,10 +1816,10 @@ def test_dispatcher_blocks_legacy_finalgate_ready_before_stale_authorization_evi
 
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=report,
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
     )
 
@@ -2346,12 +1833,12 @@ def test_dispatcher_blocks_legacy_finalgate_ready_before_stale_authorization_evi
 def test_dispatcher_blocks_legacy_finalgate_ready_before_local_registration_probe():
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=(
             _operation_layer_report_with_satisfied_legacy_probe_blocker()
         ),
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
     )
 
@@ -2365,10 +1852,10 @@ def test_dispatcher_blocks_legacy_finalgate_ready_before_unsatisfied_local_regis
 
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("/tmp/resume-dispatch-artifact.json"),
+        source_path=Path("pg-ticket-dispatch-identity"),
         operation_layer_evidence_report=report,
         operation_layer_evidence_report_path=(
-            "/reports/runtime-signal-watcher/operation-layer-arm-evidence.json"
+            "pg://runtime-control-state/operation-layer-handoff/evidence"
         ),
     )
 
@@ -2407,7 +1894,7 @@ def test_dispatcher_execute_preflight_blocks_finalgate_failure(monkeypatch):
 
     artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         execute_preflight=True,
     )
 
@@ -2437,7 +1924,7 @@ def test_dispatcher_execute_preflight_blocks_operator_session_unavailable(monkey
 
     artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         execute_preflight=True,
     )
 
@@ -2482,7 +1969,7 @@ def test_dispatcher_execute_preflight_blocks_forbidden_preflight_effect(monkeypa
 
     artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         execute_preflight=True,
     )
 
@@ -2501,7 +1988,7 @@ def test_dispatcher_allows_ticket_bound_ready_without_signal_json():
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
     )
 
     assert artifact["status"] == "ready_for_action_time_final_gate"
@@ -2532,7 +2019,7 @@ def test_dispatcher_allows_ready_preflight_without_shadow_candidate_id(monkeypat
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         execute_preflight=True,
     )
 
@@ -2572,7 +2059,7 @@ def test_dispatcher_blocks_ticket_bound_handoff_forbidden_effects(monkeypatch):
 
     artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         execute_preflight=True,
     )
 
@@ -2613,7 +2100,7 @@ def test_dispatcher_blocks_ticket_bound_handoff_identity_mismatch(monkeypatch):
 
     artifact = build_dispatch_artifact(
         resume_pack=_resume_pack("ready_for_action_time_final_gate"),
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
         execute_preflight=True,
     )
 
@@ -2642,7 +2129,7 @@ def test_dispatcher_blocks_unsafe_resume_flags():
 
     artifact = build_dispatch_artifact(
         resume_pack=resume,
-        source_path=Path("/tmp/post-signal-resume-pack.json"),
+        source_path=Path("pg-ticket-identity"),
     )
 
     assert artifact["status"] == "blocked"
@@ -2731,9 +2218,11 @@ def test_dispatcher_pg_ticket_identity_emits_ticket_bound_preflight_plan(tmp_pat
     assert resume_pack["safety_invariants"]["exchange_write_called"] is False
 
 
-def test_dispatcher_cli_pg_ticket_identity_writes_ticket_bound_artifact(tmp_path):
+def test_dispatcher_cli_pg_ticket_identity_emits_ticket_bound_artifact_stdout(
+    tmp_path,
+    capsys,
+):
     database_url = _pg_ticket_identity_db(tmp_path)
-    output_path = tmp_path / "resume-dispatch-artifact.json"
 
     exit_code = main(
         [
@@ -2741,62 +2230,29 @@ def test_dispatcher_cli_pg_ticket_identity_writes_ticket_bound_artifact(tmp_path
             "pg_ticket",
             "--database-url",
             database_url,
-            "--output-json",
-            str(output_path),
         ]
     )
 
     assert exit_code == 0
-    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    artifact = _captured_stdout_artifact(capsys)
     assert artifact["status"] == "ready_for_action_time_final_gate"
     assert artifact["dispatch_action"] == "run_official_action_time_final_gate_preflight"
     assert artifact["command_plan"]["ticket_id"] == "ticket-1"
+    assert not (tmp_path / "resume-dispatch-artifact.json").exists()
 
 
-def test_dispatcher_cli_resume_pack_json_requires_diagnostic_only(tmp_path):
-    resume_path = tmp_path / "post-signal-resume-pack.json"
-    output_path = tmp_path / "resume-dispatch-artifact.json"
-    resume_path.write_text(json.dumps(_resume_pack()), encoding="utf-8")
+def test_dispatcher_cli_rejects_removed_resume_pack_json_identity():
+    with pytest.raises(SystemExit) as exc:
+        main(["--identity-source", "resume_pack_json"])
 
-    exit_code = main(
-        [
-            "--identity-source",
-            "resume_pack_json",
-            "--resume-pack-json",
-            str(resume_path),
-            "--output-json",
-            str(output_path),
-        ]
-    )
-
-    assert exit_code == 2
-    assert not output_path.exists()
+    assert exc.value.code == 2
 
 
-def test_dispatcher_cli_writes_artifact(tmp_path):
-    resume_path = tmp_path / "post-signal-resume-pack.json"
-    output_path = tmp_path / "resume-dispatch-artifact.json"
-    resume_path.write_text(json.dumps(_resume_pack()), encoding="utf-8")
-
-    exit_code = main(
-        [
-            "--diagnostic-only",
-            "--identity-source",
-            "resume_pack_json",
-            "--resume-pack-json",
-            str(resume_path),
-            "--output-json",
-            str(output_path),
-        ]
-    )
-
-    assert exit_code == 0
-    artifact = json.loads(output_path.read_text(encoding="utf-8"))
-    assert artifact["status"] == "waiting_for_market"
-    assert artifact["dispatch_action"] == "continue_watcher_observation"
-
-
-def test_dispatcher_cli_finalgate_ready_is_success_exit(tmp_path, monkeypatch):
+def test_dispatcher_cli_finalgate_ready_is_success_exit(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
     monkeypatch.setattr(
         dispatcher,
         "_session_cookie",
@@ -2808,27 +2264,20 @@ def test_dispatcher_cli_finalgate_ready_is_success_exit(tmp_path, monkeypatch):
         "_request_json",
         _ticket_bound_finalgate_and_handoff_request(calls),
     )
-    resume_path = tmp_path / "post-signal-resume-pack.json"
-    output_path = tmp_path / "resume-dispatch-artifact.json"
-    resume_path.write_text(
-        json.dumps(_resume_pack("ready_for_action_time_final_gate")),
-        encoding="utf-8",
-    )
+    database_url = _pg_ticket_identity_db(tmp_path)
 
     exit_code = main(
         [
-            "--diagnostic-only",
             "--identity-source",
-            "resume_pack_json",
-            "--resume-pack-json",
-            str(resume_path),
-            "--output-json",
-            str(output_path),
+            "pg_ticket",
+            "--database-url",
+            database_url,
             "--execute-preflight",
         ]
     )
 
     assert exit_code == 0
-    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    artifact = _captured_stdout_artifact(capsys)
     _assert_ticket_bound_operation_layer_ready(artifact)
     assert [call["method"] for call in calls] == ["GET", "POST"]
+    assert not (tmp_path / "resume-dispatch-artifact.json").exists()

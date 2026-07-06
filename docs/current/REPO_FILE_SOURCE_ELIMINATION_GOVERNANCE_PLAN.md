@@ -59,27 +59,23 @@ read repo MD/JSON as an authority source after migration is complete.
 
 ## Known Current Facts
 
-As of 2026-07-03 local repo scan:
+As of the 2026-07-07 file-source elimination pass:
 
 | Area | Count | Current meaning |
 | --- | ---: | --- |
-| `docs/current` top-level MD/JSON | 23 | Mostly governance, contracts, roadmap, and one monitor baseline JSON |
-| `docs/current/strategy-group-handoffs` MD/JSON | 45 | Strategy handoffs, policy JSON, replay corpora, review snapshots, registry baseline |
-| `output` MD/JSON | 68 | Generated read models, volatile facts, monitor artifacts, historical reports |
-| Tracked `docs/current` top-level files | 21 | Current docs and design contracts |
-| Tracked `strategy-group-handoffs` files | 45 | Strategy packs and current strategy snapshots |
-| Tracked `output` files | 14 | A reduced but still nonzero output footprint |
+| `docs/current` top-level MD/JSON | Governance contracts only | Runtime decisions must not read them as state |
+| `docs/current/strategy-group-handoffs` current files | Registry contract and retirement index only | No handoff/replay/policy JSON remains as current input |
+| `output` tracked files | Deletion target | Generated output must not be committed as current state |
 
 Current direct runtime-like file dependencies include:
 
 | File family | Current reader examples | Problem |
 | --- | --- | --- |
-| `strategygroup-registry-baseline.json` | Tradeability, quality wave, owner policy package, regime map | Strategy semantics are file-sourced |
-| `main-control-runtime-tier-policy.json` | Tradeability, tier review, goal progress, policy package | Tier/scope policy is file-sourced |
-| `owner-pretrade-runtime-authorization-v0.json` | Candidate Pool | Owner authorization is file-sourced |
-| `RUNTIME_MONITOR_BASELINE.json` | Daily check, goal progress | Monitor baseline is file-sourced |
-| `output/runtime-monitor/latest-*.json` | remaining diagnostics and daily checks; Candidate Pool, Daily Table, Tradeability, Goal Status, Single Lane Packet, and server monitor production CLIs are PG-only | Generated outputs must not become inputs to later decisions |
-| replay corpora under `strategy-group-handoffs/*/replay` | Review and policy scripts | Replay assets are stored in current docs tree |
+| Retired strategy registry baseline JSON family | Tradeability, quality wave, owner policy package, regime map | Strategy semantics were file-sourced |
+| Retired runtime tier policy JSON family | Tradeability, tier review, goal progress, policy package | Tier/scope policy was file-sourced |
+| Retired Owner pre-trade authorization JSON family | Candidate Pool | Owner authorization was file-sourced |
+| Generated latest JSON export family | remaining diagnostics and daily checks; Candidate Pool, Daily Table, Tradeability, Goal Status, Single Lane Packet, and server monitor production CLIs are PG-only | Generated outputs must not become inputs to later decisions |
+| Retired replay corpus family | Review and policy scripts | Replay assets must move to fixtures, research storage, or archive-only provenance |
 
 ## Mainline MD/JSON Read/Write Map
 
@@ -93,7 +89,7 @@ live-enablement chain.
 | Public/account facts | exchange API and readonly live-facts input; public facts write `pretrade_public`, account facts write global `account_safe` / `account_mode` rows | public/account fact JSON and MD exports | JSON exports can still be mistaken for runtime inputs | Keep runtime consumers on `brc_runtime_fact_snapshots`; JSON/MD remains export only |
 | Detector builders | PG public fact snapshots and strategy-specific files/constants | detector facts JSON/MD | Detector facts must not become file sources for downstream decisions | Write signal events and fact snapshots |
 | Tradeability Decision | PG current projections through `PgBackedRuntimeControlStateRepository`; production CLI rejects repo/output JSON inputs | `latest-strategygroup-tradeability-decision.json/md` | Export can still be mistaken for an upstream source by later builders | Keep Tradeability PG-only and treat JSON/MD as export only |
-| Replay/Live Parity Audit | replay JSON, CPM/MPG/SOR detector or watcher outputs | `latest-replay-live-parity-audit.json/md` | Historical parity diagnostics can be confused with current live coverage | Store diagnostic/read-model rows separate from watcher coverage |
+| Replay/live parity diagnostics | PG detector parity / watcher coverage diagnostics only; retired replay JSON builders are archive-only | no current `latest-replay-live-parity-audit` builder | Historical parity diagnostics can be confused with current live coverage | Store diagnostic/read-model rows separate from watcher coverage; delete current file readers/builders |
 | Action-time boundary | PG current projections through `PgBackedRuntimeControlStateRepository`; production CLI rejects CPM/MPG/SOR strategy JSON inputs | `latest-strategy-fresh-signal-action-time-boundary.json/md` | Detector/evidence/readiness JSON can recreate a second path from fresh signal to action-time | Read `brc_live_signal_events`, `brc_runtime_fact_snapshots`, `brc_promotion_candidates`, `brc_action_time_lane_inputs`, and `brc_action_time_tickets`; JSON/MD remains export only |
 | Candidate Pool | PG control state through `PgBackedRuntimeControlStateRepository`; generated fact/readiness outputs are export/diagnostic only | `latest-strategy-live-candidate-pool.json/md` | Reintroducing file-backed inputs would let one generated view recompute many source priorities | Project readiness, promotion, and action-time lane rows |
 | Daily Table | PG control state through `PgBackedRuntimeControlStateRepository`; generated outputs are export/diagnostic only | `latest-daily-live-enablement-table.json/md` | Reintroducing file-backed inputs would let the management view inherit stale generated inputs | Export from current projections |
@@ -115,7 +111,7 @@ live-enablement chain.
 | Same fact family in multiple directories | Public/account facts can exist under app `output/**` and server report dirs | DB fact snapshots become the source; paths become exports |
 | Missing shared lineage | Candidate Pool and Goal Status may describe different ticks | Every current projection stores `projection_run_id` and `input_watermark` |
 | Mixed output governance | Volatile facts and control snapshots both live under `output/**` | Output becomes export-only and untracked by default |
-| Hard-coded candidate universe | Scope lives in code constants and policy JSON | Candidate scope lives in DB current projection |
+| Hard-coded candidate universe | Scope used to live in code constants and retired policy JSON | Candidate scope lives in DB current projection |
 | Docs JSON policy source | Owner authorization and tier policy are file inputs | Owner policy events/current projection become source |
 
 ## Target End State
@@ -150,14 +146,14 @@ The repo should not keep:
 
 | Remove from long-lived git | Target home |
 | --- | --- |
-| Current Owner policy JSON | DB owner policy events/current projection |
+| Retired Owner policy JSON | DB owner policy events/current projection |
 | Current strategy registry baseline JSON | DB StrategyGroup registry/version tables |
 | Current candidate universe JSON/constants as authority | DB candidate scope tables |
 | Current readiness/review snapshots | DB read-model snapshots or archive |
 | Daily Table / Candidate Pool current JSON | Generated export only, not committed long-term |
 | Public/account fact latest JSON | Runtime fact snapshot tables |
 | Watcher/latest monitor JSON | Server monitor tables/reports outside repo |
-| Strategy handoff packs | DB registry/RequiredFacts/risk envelope plus archive |
+| Retired StrategyGroup file packs | PG registry/RequiredFacts/risk envelope plus git-history/archive provenance |
 | Replay corpora | test fixture subset, object storage, or research archive |
 | Historical reports | archive/object storage, not current repo |
 
@@ -186,21 +182,20 @@ Every repo MD/JSON should be classified into one of these dispositions.
 | Blocker/status contracts | `move_to_code_schema` plus thin doc | Blocker classes and state enums should be enforced by code/tests |
 | Roadmap/current goal docs | `move_to_db_runtime_state` or `move_to_archive` | Roadmap should become work items/status records, not runtime authority |
 | Owner operating docs | `keep_thin_doc` | Keep for product/authority language only |
-| `RUNTIME_MONITOR_BASELINE.json` | `move_to_db_seed` or typed config | Monitor baseline should not be repo JSON authority |
 | New DB design docs | `keep_thin_doc` | They explain migration only |
 
 ### `docs/current/strategy-group-handoffs`
 
 | File family | Target disposition | DB target |
 | --- | --- | --- |
-| StrategyGroup registry baseline | `move_to_db_seed` | `brc_strategy_groups`, `brc_strategy_group_versions` |
-| Individual handoff JSON | `move_to_db_seed` then archive | StrategyGroup versions, RequiredFacts, risk envelope |
-| Runtime tier policy JSON | `move_to_db_seed` | Owner policy/tier projection |
-| Owner pretrade authorization JSON | `move_to_db_seed` | Owner policy events/current projection, runtime scope bindings |
-| Current review snapshots | `move_to_db_runtime_state` | review/read-model snapshot tables |
-| RequiredFacts map MD | `move_to_code_schema` and DB RequiredFacts rows | RequiredFacts contract table |
-| Replay corpora | `move_to_archive` or `move_to_fixture` | Object store or minimal tests/fixtures |
-| Handoff index/task-card docs | `move_to_archive` | Not runtime authority |
+| StrategyGroup registry baseline | `removed_from_current` | `brc_strategy_groups`, `brc_strategy_group_versions` |
+| Individual handoff JSON | `removed_from_current` | StrategyGroup versions, RequiredFacts, risk envelope |
+| Runtime tier policy JSON | `removed_from_current` | Owner policy/tier projection |
+| Owner pretrade authorization JSON | `removed_from_current` | Owner policy events/current projection, runtime scope bindings |
+| Current review snapshots | `removed_from_current` | review/read-model snapshot tables |
+| RequiredFacts map MD | `removed_from_current` | RequiredFacts contract table / typed schema |
+| Replay corpora | `removed_from_current` | Archive/object store or minimal tests/fixtures |
+| Handoff supplement docs | `removed_from_current` | Not runtime authority |
 
 ### `output`
 
@@ -226,16 +221,16 @@ Minimum required rows:
 
 | Old source | Required disposition | Runtime replacement | Deletion or archive condition |
 | --- | --- | --- | --- |
-| `owner-pretrade-runtime-authorization-v0.json` | `move_to_db_seed` then remove as authority | `brc_owner_policy_events`, `brc_owner_policy_current`, `brc_runtime_scope_bindings` | DB seed validated and runtime readers reject JSON authority |
-| `main-control-runtime-tier-policy.json` | `move_to_db_seed` then remove as authority | `brc_owner_policy_events`, `brc_owner_policy_current` | Tier/profile policy version exists in DB and tests prove no runtime JSON read |
-| `strategygroup-registry-baseline.json` | `move_to_db_seed` then archive | `brc_strategy_groups`, `brc_strategy_group_versions`, RequiredFacts tables | Registry rows seeded, event specs versioned, old JSON no longer read by runtime |
-| StrategyGroup `handoff.json` files | `move_to_db_seed` then archive | StrategyGroup versions, event specs, RequiredFacts, risk envelope, evidence refs | Seed/import audit preserves semantics and runtime ignores handoff files |
+| Retired Owner pre-trade authorization JSON family | `move_to_db_seed` then remove as authority | `brc_owner_policy_events`, `brc_owner_policy_current`, `brc_runtime_scope_bindings` | DB seed validated and runtime readers reject JSON authority |
+| Retired runtime tier policy JSON family | `move_to_db_seed` then remove as authority | `brc_owner_policy_events`, `brc_owner_policy_current` | Tier/profile policy version exists in DB and tests prove no runtime JSON read |
+| Retired strategy registry baseline JSON family | `move_to_db_seed` then archive | `brc_strategy_groups`, `brc_strategy_group_versions`, RequiredFacts tables | Registry rows seeded, event specs versioned, old JSON no longer read by runtime |
+| Retired StrategyGroup handoff JSON family | `move_to_db_seed` then archive | StrategyGroup versions, event specs, RequiredFacts, risk envelope, evidence refs | Seed/import audit preserves semantics and runtime ignores handoff files |
 | `bootstrap_strategygroup_runtime_pilot.py` file inputs | `delete_noise` / replaced by PG-only bootstrap | PG candidate scope, Owner policy current, runtime scope bindings | Bootstrap CLI rejects Candidate Pool / handoff / intake / active-runtime JSON authority in both plan and execute modes |
 | Candidate Pool strategy side / scope constants | `delete_or_rewrite`; no fallback authority | PG candidate scope, Owner policy current, runtime scope bindings, event specs | Production Candidate Pool fails closed when policy/runtime scope is incomplete and derives side support from PG authorization scope only |
-| `output/runtime-monitor/latest-strategy-live-candidate-pool.json` | `export_only` | readiness, promotion, action-time lane, ticket tables plus read-model snapshot | Watcher, Goal Status, Daily Table, and monitor no longer consume it as source |
-| `output/runtime-monitor/latest-daily-live-enablement-table.json` | `export_only` | DB-backed read-model snapshot | Packet/export tools read repository state, not previous JSON |
-| `output/runtime-monitor/latest-single-lane-task-packet.json` | `export_only` | task/export projection over DB blockers | No runtime process reads packet as authority |
-| `output/runtime-monitor/latest-*-facts.json` | `move_to_db_runtime_state` | `brc_runtime_fact_snapshots` | Fact collectors write DB snapshots and generated files become optional exports |
+| Candidate Pool latest export | `delete_runtime_path` / optional explicit export only | readiness, promotion, action-time lane, ticket tables plus read-model snapshot | Watcher, Goal Status, Daily Table, and monitor no longer consume generated files as source |
+| Daily Live Enablement latest export | `delete_runtime_path` / optional explicit export only | DB-backed read-model snapshot | Packet/export tools read repository state, not previous JSON |
+| Single Lane Packet latest export | `delete_runtime_path` / optional explicit export only | task/export projection over DB blockers | No runtime process reads packet as authority |
+| Runtime fact latest exports | `move_to_db_runtime_state` | `brc_runtime_fact_snapshots` | Fact collectors write DB snapshots and generated files become optional explicit exports |
 | server `strategygroup-runtime-goal-status.json` | `export_only` | `brc_goal_status_current` | One DB owner projector writes current status and JSON is generated view |
 | server monitor dedupe JSON | `delete_noise` / retired legacy state | `brc_server_monitor_notifications` | Current notifier dedupe reads/writes PG state and rejects file-state arguments |
 | `DEFAULT_SIDE_SCOPE` and broad side constants | `delete_noise` / replace with DB scope | `brc_strategy_group_candidate_scope`, `brc_candidate_scope_event_bindings` | Production candidate/scope builders fail if constant fallback is used |
@@ -249,7 +244,7 @@ hidden fallback path.
 
 | File family | Target disposition | Notes |
 | --- | --- | --- |
-| Output control snapshot manifest | transitional `keep_thin_config` | Needed until output is export-only and untracked |
+| Output control snapshot manifest | `deleted` | Removed because output is export-only/untracked; routine output commits are forbidden |
 | Runtime dynamic config | `move_to_db_seed` or typed config | Must not become hidden runtime state |
 
 ## Architecture Options
@@ -303,12 +298,12 @@ Acceptance:
 Deliverables:
 
 - add validator that fails new direct reads from runtime paths:
-  - `docs/current/**/*.json`;
-  - `output/runtime-monitor/latest-*.json`;
+  - repo structured JSON files used as runtime authority;
+  - generated latest-file exports used as runtime authority;
   - local monitor cache paths;
-- current implemented validator:
-  - `scripts/validate_runtime_file_authority_boundary.py`;
-  - `config/runtime_file_authority_boundary.json`;
+- current implemented validators:
+  - `scripts/audit_production_runtime_file_io.py`;
+  - `scripts/validate_no_runtime_file_authority.py`;
 - allow exceptions only for:
   - test fixtures;
   - explicit import/seed tools;
@@ -323,7 +318,7 @@ Acceptance:
 | New direct reads blocked | CI/test validator catches new raw path reads |
 | Exceptions explicit | Each exception has a file, reason, and sunset condition |
 | Runtime scripts scoped | Candidate Pool, Daily Table, Tradeability, server monitor become priority migration targets |
-| Baseline debt frozen | `python3 scripts/validate_runtime_file_authority_boundary.py --json` passes and blocks new source literals or extra occurrences in monitored mainline files |
+| Baseline debt reduced | `python3 scripts/audit_production_runtime_file_io.py --max-owner-explanation-file-source 0 --max-frequent-report-write 0 --max-blocking-cleanup-required 0` and `python3 scripts/validate_no_runtime_file_authority.py` pass |
 
 ### Phase 2: RuntimeControlStateRepository
 
@@ -368,8 +363,8 @@ Migrate the state that directly controls multi-strategy, multi-symbol runtime:
 
 | Current source | Target |
 | --- | --- |
-| `owner-pretrade-runtime-authorization-v0.json` | Owner policy events/current projection |
-| `main-control-runtime-tier-policy.json` | Tier/scope policy tables |
+| Retired Owner pre-trade authorization JSON family | Owner policy events/current projection |
+| Retired runtime tier policy JSON family | Tier/scope policy tables |
 | `DEFAULT_CANDIDATE_UNIVERSE` | Candidate scope table |
 | runtime active coverage JSON | Watcher runtime coverage table |
 | public/account fact latest JSON | Runtime fact snapshots |
@@ -385,7 +380,9 @@ Acceptance:
 
 ### Phase 4: Strategy Pack Migration
 
-Migrate strategy packs out of `docs/current/strategy-group-handoffs`.
+Current file-source closure status: strategy packs have been removed from
+`docs/current/strategy-group-handoffs`; only the registry contract and the
+retirement index remain.
 
 | Current source | Target |
 | --- | --- |
@@ -487,7 +484,7 @@ Acceptance:
 | Repository parity tests | File-backed and DB-backed repository produce same read model during migration |
 | Source-ban tests | Candidate Pool, Daily Table, Tradeability, server monitor do not read raw files |
 | Projection ownership tests | Goal Status cannot be written without Candidate Pool/current readiness lineage once that projection is authoritative |
-| Policy import tests | Owner policy JSON imports to DB without authority expansion |
+| Policy import tests | Retired Owner policy provenance imports to DB without authority expansion |
 | Candidate scope tests | Five StrategyGroups and multi-symbol scopes are DB-backed |
 | Coverage/facts tests | stale/missing facts fail closed at Runtime Safety State |
 | Export tests | JSON/MD exports can be regenerated from DB snapshots |
@@ -509,19 +506,19 @@ Allowed MD/JSON in git:
 | DB/schema migration metadata | migration files and schema code |
 | Small test fixtures | `tests/fixtures/**` |
 | Deployment templates | `deploy/**`, `.env*.example` |
-| Transitional manifest | `config/output_control_snapshots.json` until output is export-only |
+| Retired output manifest | deleted; historical provenance belongs in archive only |
 
 Disallowed MD/JSON in git:
 
 | Class | Example |
 | --- | --- |
-| Current runtime state | `latest-runtime-active-observation-status.json` |
-| Generated control read models | `latest-daily-live-enablement-table.json` |
-| Public/account fact snapshots | `latest-binance-usdm-public-facts.json` and `latest-account-safe-facts.json` are export-only after the public/account fact PG cutover |
-| Owner current policy snapshots | `owner-pretrade-runtime-authorization-v0.json` after DB migration |
-| Strategy packs | `strategy-group-handoffs/*/handoff.json` after DB migration |
-| Large replay corpora | `strategy-group-handoffs/*/replay/*.json` |
-| Local monitor reports | `latest-local-monitor-sequence.json` |
+| Current runtime state | PG runtime current projection rows |
+| Generated control read models | explicit export-only read model files |
+| Public/account fact snapshots | PG runtime fact snapshots; explicit exports only |
+| Owner current policy snapshots | PG owner policy current rows |
+| Strategy packs | StrategyGroup version / RequiredFacts rows plus archive-only provenance |
+| Large replay corpora | fixture subset, research storage, or archive-only provenance |
+| Retired local monitor reports | archive-only provenance; no current writer or reader |
 
 ### Commit Gate
 

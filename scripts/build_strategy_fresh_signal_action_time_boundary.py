@@ -37,12 +37,6 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 
 
 SCHEMA = "brc.strategy_fresh_signal_action_time_boundary.v1"
-DEFAULT_OUTPUT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.json"
-)
-DEFAULT_OUTPUT_MD = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategy-fresh-signal-action-time-boundary.md"
-)
 OPEN_REAL_LANE_STATUSES = {
     "opened",
     "facts_refreshing",
@@ -76,8 +70,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Allow SQLite/non-PG DSNs only in tests.",
     )
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
-    parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     parser.add_argument("--now-ms", type=int, default=None)
     args = parser.parse_args(argv)
 
@@ -113,10 +105,6 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.dispose()
 
-    output_json = Path(args.output_json)
-    output_md = Path(args.output_owner_progress)
-    _write_json(output_json, artifact)
-    _write_text(output_md, _markdown(artifact, output_json))
     print(
         json.dumps(
             {
@@ -705,33 +693,6 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, list | tuple | set):
         return [str(item) for item in value if str(item)]
     return []
-
-
-def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
-    lines = [
-        "## Strategy Fresh Signal Action-Time Boundary",
-        "",
-        f"- Status: `{artifact['status']}`",
-        f"- Source mode: `{artifact.get('source_mode', '')}`",
-        f"- Fresh signals present: `{artifact['summary']['fresh_signal_present_count']}`",
-        f"- Action-time lane inputs: `{artifact['summary']['action_time_lane_input_count']}`",
-        f"- Would enter FinalGate if private facts ready: `{artifact['summary']['would_enter_finalgate_if_private_facts_ready_count']}`",
-        f"- Output JSON: `{output_json}`",
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":

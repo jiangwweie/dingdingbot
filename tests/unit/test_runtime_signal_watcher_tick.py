@@ -12,7 +12,6 @@ from scripts import runtime_signal_watcher_tick
 def _args(tmp_path: Path, **overrides):
     defaults = {
         "output_dir": str(tmp_path / "watcher"),
-        "state_json": None,
         "env_file": None,
         "api_base": "http://127.0.0.1:18080",
         "source": "sample",
@@ -97,10 +96,9 @@ def _summary(status: str = "waiting_for_signal", *, ready: bool = False) -> dict
 def _fake_supervisor(output_status: str, *, ready: bool = False):
     def builder(args):
         output_dir = Path(args.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
         latest = _summary(output_status, ready=ready)
         loop = {
-            "scope": "runtime_active_observation_loop",
+            "scope": "runtime_signal_watcher_in_memory_observation",
             "status": output_status,
             "stop_reason": (
                 f"status_changed:{output_status}"
@@ -139,27 +137,32 @@ def _fake_supervisor(output_status: str, *, ready: bool = False):
                 "withdrawal_or_transfer_created": False,
             },
         }
-        Path(args.loop_output_json).write_text(json.dumps(loop), encoding="utf-8")
-        (output_dir / "latest-summary.json").write_text(
-            json.dumps(latest), encoding="utf-8"
-        )
-        (output_dir / "latest-status.txt").write_text(output_status + "\n", encoding="utf-8")
-        return {
-            "scope": "runtime_active_observation_supervisor",
+        artifact = {
+            "scope": "runtime_signal_watcher_in_memory_supervisor",
             "status": "supervisor_completed",
             "blockers": [],
             "warnings": [],
+            "loop_artifact": loop,
+            "latest_summary": latest,
             "safety_invariants": {"forbidden_effects": []},
         }
+        artifact["status_artifact"] = runtime_signal_watcher_tick._status_from_loop_artifact(
+            output_dir=output_dir,
+            supervisor_artifact=artifact,
+            loop_artifact=loop,
+            latest_summary=latest,
+            stale_after_seconds=float(args.status_stale_after_seconds),
+        )
+        return artifact
 
     return builder
 
 
-def test_watcher_tick_writes_artifacts_without_notifying_on_no_signal(tmp_path, monkeypatch):
+def test_watcher_tick_uses_memory_refs_without_notifying_on_no_signal(tmp_path, monkeypatch):
     sent = []
     monkeypatch.setattr(
         runtime_signal_watcher_tick,
-        "build_operator_evidence_from_path",
+        "build_operator_evidence",
         lambda **kwargs: {
             "scope": "runtime_observation_operator_evidence",
             "status": "observation_running_no_signal",
@@ -221,14 +224,16 @@ def test_watcher_tick_writes_artifacts_without_notifying_on_no_signal(tmp_path, 
         "waiting_for_market_no_owner_attention_needed"
     )
     assert sent == []
-    assert (tmp_path / "watcher" / "latest-status.json").exists()
-    state = json.loads((tmp_path / "watcher" / "notification-state.json").read_text())
-    assert state["last_watcher_status_evidence_status"] == (
-        "observation_window_complete_no_signal"
-    )
-    assert "last_status_packet_status" not in state
-    assert (tmp_path / "watcher" / "operator-evidence.json").exists()
-    assert (tmp_path / "watcher" / "wakeup-evidence.json").exists()
+    assert not (tmp_path / "watcher" / "latest-status.json").exists()
+    assert not (tmp_path / "watcher" / "notification-state.json").exists()
+    assert not (tmp_path / "watcher" / "operator-evidence.json").exists()
+    assert not (tmp_path / "watcher" / "wakeup-evidence.json").exists()
+    assert artifact["paths"] == {
+        "status_artifact_ref": "memory:runtime_signal_watcher_in_memory_status",
+        "operator_evidence_ref": "memory:runtime_observation_operator_evidence",
+        "wakeup_evidence_ref": "memory:runtime_observation_wakeup_evidence",
+        "watcher_tick_ref": "stdout:runtime_signal_watcher_tick",
+    }
     assert not (tmp_path / "watcher" / "supervisor-packet.json").exists()
     assert not (tmp_path / "watcher" / "operator-packet.json").exists()
     assert not (tmp_path / "watcher" / "wakeup-packet.json").exists()
@@ -242,7 +247,7 @@ def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monke
     captured = {}
     monkeypatch.setattr(
         runtime_signal_watcher_tick,
-        "build_operator_evidence_from_path",
+        "build_operator_evidence",
         lambda **kwargs: {
             "scope": "runtime_observation_operator_evidence",
             "status": "observation_running_no_signal",
@@ -339,7 +344,7 @@ def test_watcher_tick_passes_pg_candidate_scope_flags_to_supervisor(
     captured = {}
     monkeypatch.setattr(
         runtime_signal_watcher_tick,
-        "build_operator_evidence_from_path",
+        "build_operator_evidence",
         lambda **kwargs: {
             "scope": "runtime_observation_operator_evidence",
             "status": "observation_running_no_signal",
@@ -393,36 +398,18 @@ def test_watcher_tick_passes_pg_candidate_scope_flags_to_supervisor(
 
 def test_watcher_tick_stale_status_recovers_on_fresh_observation_artifacts(
     tmp_path,
-    monkeypatch,
 ):
-    monkeypatch.setattr(
-        runtime_signal_watcher_tick,
-        "build_operator_evidence_from_path",
-        lambda **kwargs: {
-            "scope": "runtime_observation_operator_evidence",
-            "status": "observation_running_no_signal",
-            "blockers": ["active_observation_artifacts_stale_or_missing"],
-            "operator_review_plan": {
-                "next_step": "continue_active_runtime_observation",
-                "creates_execution_intent": False,
-                "places_order": False,
-                "calls_order_lifecycle": False,
-            },
-            "safety_invariants": {
-                "operator_evidence_only": True,
-                "execution_intent_created": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "exchange_write_called": False,
-                "withdrawal_or_transfer_created": False,
-                "forbidden_effects": [],
-            },
-        },
-    )
+    def supervisor_builder(args):
+        artifact = _fake_supervisor("waiting_for_signal")(args)
+        artifact["status_artifact"]["status"] = "stale"
+        artifact["status_artifact"]["blockers"] = [
+            "active_observation_status_stale"
+        ]
+        return artifact
 
     artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
-        _args(tmp_path, status_stale_after_seconds=-1),
-        supervisor_builder=_fake_supervisor("waiting_for_signal"),
+        _args(tmp_path),
+        supervisor_builder=supervisor_builder,
     )
 
     assert artifact["post_signal_auto_resume"]["status"] == (
@@ -441,7 +428,7 @@ def test_watcher_tick_does_not_notify_when_operator_evidence_needs_review_but_wa
     sent = []
     monkeypatch.setattr(
         runtime_signal_watcher_tick,
-        "build_operator_evidence_from_path",
+        "build_operator_evidence",
         lambda **kwargs: {
             "scope": "runtime_observation_operator_evidence",
             "status": "strategy_group_signal_review_available",
@@ -607,18 +594,17 @@ def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
 ):
     def supervisor_builder(args):
         output_dir = Path(args.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
         latest = _summary("ready_for_final_gate_preflight", ready=False)
         latest.update(
             {
-                "signal_input_json": "/reports/runtime-sor-btc/signal-input.json",
+                "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-sor-btc",
                 "blockers": [
                     "runtime-old:{'id': 'NEXT-ATTEMPT-POSITION-ORDER-CONFLICT', 'evidence': 'pg_open_order_count=1'}"
                 ],
             }
         )
         loop = {
-            "scope": "runtime_active_observation_loop",
+            "scope": "runtime_signal_watcher_in_memory_observation",
             "status": "ready_for_final_gate_preflight",
             "stop_reason": "status_changed:ready_for_final_gate_preflight",
             "iterations_requested": 1,
@@ -653,25 +639,27 @@ def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
                 "withdrawal_or_transfer_created": False,
             },
         }
-        Path(args.loop_output_json).write_text(json.dumps(loop), encoding="utf-8")
-        (output_dir / "latest-summary.json").write_text(
-            json.dumps(latest), encoding="utf-8"
-        )
-        (output_dir / "latest-status.txt").write_text(
-            "ready_for_final_gate_preflight\n",
-            encoding="utf-8",
-        )
-        return {
-            "scope": "runtime_active_observation_supervisor",
+        artifact = {
+            "scope": "runtime_signal_watcher_in_memory_supervisor",
             "status": "supervisor_completed",
             "blockers": [],
             "warnings": [],
+            "loop_artifact": loop,
+            "latest_summary": latest,
             "safety_invariants": {"forbidden_effects": []},
         }
+        artifact["status_artifact"] = runtime_signal_watcher_tick._status_from_loop_artifact(
+            output_dir=output_dir,
+            supervisor_artifact=artifact,
+            loop_artifact=loop,
+            latest_summary=latest,
+            stale_after_seconds=float(args.status_stale_after_seconds),
+        )
+        return artifact
 
     monkeypatch.setattr(
         runtime_signal_watcher_tick,
-        "build_operator_evidence_from_path",
+        "build_operator_evidence",
         lambda **kwargs: {
             "scope": "runtime_observation_operator_evidence",
             "status": "strategy_group_signal_review_available",
@@ -722,7 +710,7 @@ def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
         "ready_for_non_executing_prepare"
     )
     assert artifact["post_signal_auto_resume"]["signal_input_json"] == (
-        "/reports/runtime-sor-btc/signal-input.json"
+        "pg://runtime-control-state/live-signal-events/signal-sor-btc"
     )
     assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
         "wait_for_prepare_records_then_rebuild_final_gate_status"

@@ -28,9 +28,6 @@ from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
 )
 
 
-DEFAULT_INPUT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-strategy-live-candidate-pool.json"
-)
 FORBIDDEN_TRUE_KEYS = {
     "actionable_now",
     "real_order_authority",
@@ -56,7 +53,7 @@ SERVER_RUNTIME_COVERAGE_STATES = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("candidate_pool_json", nargs="?", default=str(DEFAULT_INPUT_JSON))
+    parser.add_argument("candidate_pool_json")
     args = parser.parse_args(argv)
     path = Path(args.candidate_pool_json)
     errors = validate_strategy_live_candidate_pool(_read_json(path))

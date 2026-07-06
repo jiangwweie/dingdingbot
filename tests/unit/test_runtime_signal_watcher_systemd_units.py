@@ -79,6 +79,7 @@ def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin
     for support_only_strategy_family_id in ("TEQ-001", "FBS-001", "PMR-001"):
         assert f"--strategy-family-id {support_only_strategy_family_id}" not in text
     assert "--runtime-instance-id" not in text
+    assert "build_runtime_signal_watcher_readiness_pack.py" not in text
 
 
 def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
@@ -88,8 +89,8 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     assert "--identity-source pg_ticket" in text
     assert "post-signal-resume-pack.json" not in text
     assert "--resume-pack-json" not in text
-    assert "--output-json" in text
-    assert "resume-dispatch-artifact.json" in text
+    assert "--output-json" not in text
+    assert "resume-dispatch-artifact.json" not in text
     assert "resume-dispatch-packet.json" not in text
     assert "--report-dir" not in text
     assert "--resume-dispatch-json" not in text
@@ -127,7 +128,9 @@ def test_signal_watcher_action_time_dropin_runs_only_if_pg_triggered():
 
     assert "run_server_product_state_refresh_sequence.py" in text
     assert "--mode action_time_if_needed" in text
-    assert "server-action-time-refresh-sequence.json" in text
+    assert "--report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher" not in text
+    assert "--runtime-monitor-dir /home/ubuntu/brc-deploy/reports/runtime-monitor" not in text
+    assert "server-action-time-refresh-sequence.json" not in text
     assert "runtime_dry_run_audit_chain.py" not in text
     assert "--resume-pack-json" not in text
 
@@ -140,10 +143,10 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     text = PRODUCT_STATE_DROPIN_PATH.read_text(encoding="utf-8")
 
     assert "run_server_product_state_refresh_sequence.py" in text
-    assert "server-product-state-refresh-sequence.json" in text
-    assert "--report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher" in text
-    assert "--runtime-monitor-dir /home/ubuntu/brc-deploy/reports/runtime-monitor" in text
-    assert "--env-file /home/ubuntu/brc-deploy/env/live-readonly.env" in text
+    assert "server-product-state-refresh-sequence.json" not in text
+    assert "--report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher" not in text
+    assert "--runtime-monitor-dir /home/ubuntu/brc-deploy/reports/runtime-monitor" not in text
+    assert "--env-file /home/ubuntu/brc-deploy/env/live-readonly.env" not in text
     assert "--mode watcher_tick_summary" in text
     assert "/bin/sh -lc" not in text
     assert "set -eu;" not in text
@@ -172,7 +175,7 @@ def test_runtime_monitor_service_uses_pg_control_state_not_json_sources():
     assert "--watcher-status-json" not in text
     assert "--deploy-health-json" not in text
     assert "--dedupe-state-json" not in text
-    assert "ReadWritePaths=/home/ubuntu/brc-deploy/reports/runtime-monitor" in text
+    assert "ReadWritePaths=/home/ubuntu/brc-deploy/reports/runtime-monitor" not in text
     assert "FinalGate" not in text
     assert "Operation Layer" not in text
     assert "exchange write" not in text
@@ -199,17 +202,12 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
         deploy_root="/home/ubuntu/brc-deploy",
         source_root="/home/ubuntu/brc-deploy/source",
         source_repo_path="/home/ubuntu/brc-deploy/source/dingdingbot",
-        reports_dir="/home/ubuntu/brc-deploy/reports/test",
-        watcher_reports_dir="/home/ubuntu/brc-deploy/reports/runtime-signal-watcher",
-        runtime_monitor_reports_dir="/home/ubuntu/brc-deploy/reports/runtime-monitor",
-        backups_dir="/home/ubuntu/brc-deploy/backups",
         app_current="/home/ubuntu/brc-deploy/app/current",
         remote_release_path="/home/ubuntu/brc-deploy/releases/test",
         remote_tmp_release_path="/home/ubuntu/brc-deploy/releases/test.tmp",
         release_manifest=(
             "/home/ubuntu/brc-deploy/releases/test/.brc-release-manifest.json"
         ),
-        backup_path="/home/ubuntu/brc-deploy/backups/test.pgdump",
         service_name="brc-owner-console-backend.service",
         env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
         venv_python=(
@@ -261,5 +259,7 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "systemctl start brc-runtime-monitor.service" in commands
     assert "systemctl disable --now brc-runtime-db-retention.timer" in commands
     assert "systemctl enable --now brc-runtime-db-retention.timer" not in commands
-    assert "tokyo-deploy-channel-status.json" in commands
-    assert "latest-deploy-health.json" in commands
+    assert "tokyo-deploy-channel-status.json" not in commands
+    assert "latest-deploy-health.json" not in commands
+    assert "/home/ubuntu/brc-deploy/reports" not in commands
+    assert "pg_dump" not in commands

@@ -76,18 +76,19 @@ promotion.
 | `not_tradable_strategy_quality` | Strategy is not experiment-worthy or its failure/loss envelope cannot be expressed | Strategy review |
 | `not_tradable_safety_stop` | A hard safety or authority boundary forbids execution | Runtime / safety |
 
-## Required Artifact Shape
+## Required Read Model Shape
 
-The current main-control artifact should be generated as:
+The current main-control projection must be available from the PG-backed
+Tradeability read model. JSON/MD files are optional explicit exports only and
+must not be runtime inputs.
 
 ```text
-output/runtime-monitor/latest-strategygroup-tradeability-decision.json
-output/runtime-monitor/latest-strategygroup-tradeability-decision.md
+brc.strategygroup_tradeability_decision.v1
 ```
 
-The `tradeability-decision` file path is the direct generated view path. The
-payload identity must be `brc.strategygroup_tradeability_decision.v1`, and
-active consumers must expose this read model as `tradeability_decision`.
+The payload identity must be `brc.strategygroup_tradeability_decision.v1`, and
+active consumers must expose this read model as `tradeability_decision` from PG
+current projections.
 
 Each row should contain:
 

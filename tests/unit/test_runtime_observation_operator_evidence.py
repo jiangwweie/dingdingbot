@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 
@@ -185,32 +184,3 @@ def test_operator_evidence_blocks_forbidden_preview_effect():
         "forbidden_effects"
     ]
     assert evidence["safety_invariants"]["order_lifecycle_called"] is False
-
-
-def test_operator_evidence_cli_reads_status_and_writes_json(monkeypatch, tmp_path, capsys):
-    module = _load_module()
-    status_path = tmp_path / "status.json"
-    output_path = tmp_path / "operator.json"
-    status_path.write_text(json.dumps(_status_artifact()), encoding="utf-8")
-    monkeypatch.setattr(
-        module,
-        "build_preview_artifact",
-        lambda source_name: _strategy_preview(),
-    )
-
-    exit_code = module.main(
-        [
-            "--status-artifact-json",
-            str(status_path),
-            "--strategy-source",
-            "sample",
-            "--output-json",
-            str(output_path),
-        ]
-    )
-
-    assert exit_code == 0
-    stdout_payload = json.loads(capsys.readouterr().out)
-    file_payload = json.loads(output_path.read_text())
-    assert stdout_payload == file_payload
-    assert file_payload["scope"] == "runtime_observation_operator_evidence"

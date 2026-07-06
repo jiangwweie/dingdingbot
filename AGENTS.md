@@ -27,6 +27,7 @@ docs/current/PRE_TRADE_RUNTIME_CONTRACT.md
 docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md
 docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md
 docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md
+docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md
 docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md
 docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
 docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md
@@ -39,7 +40,6 @@ docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
 docs/current/STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md
 docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
 docs/current/strategy-group-handoffs/main-control-handoff-index.md
-config/output_control_snapshots.json
 ```
 
 Compressed historical docs live in:
@@ -84,12 +84,16 @@ deployment boundary: local SSH is the control plane, Tokyo code acquisition uses
 approved git fetch/export or explicitly scoped archive upload paths, and deploy
 success never grants live-submit or exchange-write authority.
 `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md`,
+`docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md`,
 `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`,
 `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md`, and
 `docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md` define the target
 DB-backed current projection boundary: runtime/trading decisions must not
 depend on repo MD/JSON, each current projection has one owner projector, and
-generated JSON/MD is an export rather than a source of truth.
+generated JSON/MD is not a runtime source. The target is not to document file
+I/O forever; it is to delete production file readers and recurring JSON/MD
+writers, migrate required current state into PG/current services, and keep
+valuable old material only as archive/provenance outside runtime cadence.
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` defines the
 single daily management table.
 `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` defines active lane limits and stop
@@ -100,16 +104,12 @@ Do not turn generated output, historical archive material, stale roadmap text,
 or chat summaries into current authority when current code, machine config,
 runtime state, or explicit Owner decisions disagree.
 
-`output/**` is not a single commit bucket. Routine StrategyGroup
-live-enablement commits may include only tracked control snapshots listed in
-`config/output_control_snapshots.json`, and only when they are the named task
-deliverable, have a known source command, and pass their validator. Volatile
-runtime facts, watcher refreshes, dry-run audit chains, deploy/session
-snapshots, replay labs, and historical evidence directories must not enter
-routine commits unless the task explicitly names them as deliverables and the
-output-scope validator is updated first. Use
-`python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked` before
-accepting output changes.
+`output/**` is generated runtime output. It must not enter routine commits.
+Current runtime state belongs in PG/current services; generated JSON/MD output
+is local, volatile, or archive-only evidence. Use
+`python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked`
+before accepting output changes; any tracked output path is a cleanup target,
+not a commit whitelist candidate.
 
 ## Product Objective
 
@@ -178,10 +178,10 @@ The main bottleneck is no longer a general explanation of no-trade periods or a
 single fixed daily lane. The main bottleneck is keeping the active
 StrategyGroups in a multi-symbol pre-trade candidate pool, proving per-symbol
 readiness, and allowing a fresh satisfied symbol to become the single
-action-time lane. Reports, markdown, read-only watcher expansion, replay
-outputs, and daily status reports are mainline only when they move a candidate
-symbol forward or replace a broad blocker with a precise per-symbol / per-fact
-blocker and next action.
+action-time lane. Reports, markdown, JSON exports, replay outputs, and daily
+status files are not mainline authority. If their semantics are current, move
+them to PG/current projections or API/readmodels; if they are historical, keep
+them archive-only; otherwise delete them.
 
 `StrategyGroup Decision Ledger` is the minimal pre-live strategy-learning
 ledger. For compatibility, its active contract lives at
@@ -403,9 +403,11 @@ Strategy research artifacts belong in:
 /Users/jiangwei/Documents/final-strategy-research
 ```
 
-Main control accepts only StrategyGroup handoff packs, runtime admission facts,
-RequiredFacts definitions, risk defaults, hard stops, sample packets, and review
-outcomes.
+Main control accepts StrategyGroup semantics through PG strategy registry,
+versioned event specs, candidate scope, RequiredFacts rows, Owner policy, runtime
+scope bindings, and review outcomes. Historical StrategyGroup handoff/replay
+files are provenance only and must not be treated as current intake or runtime
+authority.
 
 ## Codex / Claude Workflow
 
@@ -463,8 +465,34 @@ Claude can touch a core file only when the task card explicitly allows it.
 - Sensitive values must be masked in logs.
 - Core parameters should use named Pydantic models instead of unstructured
   dictionaries.
-- Execution, recovery, reconciliation, and circuit-breaker state should prefer
-  the PG mainline unless explicitly documented as transitional.
+- Execution, recovery, reconciliation, and circuit-breaker state must use the
+  PG mainline. Transitional PG + file dual authority, local JSON fallback, and
+  current file-backed repositories are not allowed.
+- Runtime, deploy, monitor, readmodel, watcher, action-time, and Owner
+  explanation changes must include cadence and performance impact. Production
+  no-signal ticks should create zero JSON/MD report files; heavy builders must
+  run only on explicit PG triggers; subprocess/API work must be timeout-bounded;
+  archive output must be manual, owner-scoped, and retention-bounded.
+- Runtime, deploy, monitor, readmodel, watcher, action-time, and Owner
+  explanation reviews must include machine evidence from
+  `scripts/audit_production_runtime_file_io.py` or a stricter successor.
+  `performance_risk.status` must be `clear` for production cadence unless the
+  task is explicitly an archive-only/manual ops cleanup.
+- Do not add new production reads from repo/output/report JSON or Markdown.
+  Delete or migrate existing readers to PG/current services. Do not add new
+  recurring JSON/MD writers; delete them from cadence or replace them with PG
+  rows/current projections.
+- Do not add dynamic-path evidence JSON writers, YAML config import/export
+  file interfaces, JSONL trace/observe sidecars, or tests that create legacy
+  report JSON files for current code. Useful current semantics must use
+  PG/current services or in-memory typed test fixtures; history is archive-only.
+- Do not add or preserve current artifact/proof/evidence scripts whose main
+  interface is JSON/Markdown files, report directories, or artifact CLI
+  parameters such as file input/output paths. Existing occurrences are cleanup
+  targets under `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md`.
+- Do not add project-local agent tools that write benchmark, transcript,
+  result, report, or generated analysis files into the trading repo. Use
+  external/system skills instead of vendoring write-heavy toolkits here.
 
 ## Git Discipline
 

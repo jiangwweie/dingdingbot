@@ -45,20 +45,28 @@ views, and archive material according to
 
 If a task reads generated output, treat it as checkpoint evidence, not a
 hand-edited source of truth. If a task changes StrategyGroup semantics, tie the
-change back to the StrategyGroup registry contract, handoff pack, runtime tier
-policy, Decision Ledger, or an explicit Codex-issued task card.
+change back to PG strategy registry/version/event/policy rows, the StrategyGroup
+registry contract, the Decision Ledger, or an explicit Codex-issued task card.
 
 After PG cutover, Claude must treat PG current state and append-only audit
 lineage as the production runtime truth for L2-L7 work. Generated JSON/MD,
-output artifacts, local cache, Single Lane Packet, old handoff JSON, and code
-fallback constants may be used only as exports, fixtures, archives,
-diagnostics, or seed provenance when the task explicitly allows it.
+output artifacts, local cache, Single Lane Packet, old handoff/replay JSON, and code
+fallback constants may be used only as stdout exports, typed/PG test fixtures,
+archive provenance, diagnostics, or seed provenance when the task explicitly
+allows it. They must not be exposed through current file-backed repositories,
+artifact-file validators, report-directory readers, or JSON fixture CLIs.
 
 Claude must not implement or preserve:
 
 ```text
 production JSON/MD/output fallback
 long-term PG + file dual authority
+current file-backed repository or local comparison reader
+artifact-file validator or JSON fixture CLI
+dynamic-path evidence JSON writer
+YAML config import/export file interface
+JSONL trace or observe sidecar
+test-created legacy report JSON fixture for current code
 DEFAULT_SIDE_SCOPE-style side expansion
 unsupported long/short mirroring
 generated_at as event_time_ms

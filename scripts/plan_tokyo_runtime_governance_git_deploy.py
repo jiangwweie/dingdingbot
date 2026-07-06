@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Plan a git-based Tokyo runtime-governance deployment.
 
-This is the preferred deployment plan for follow-up runtime-governance stages.
-It avoids uploading a local archive: Tokyo fetches a pushed branch head from the
+This is the Tokyo deployment plan for follow-up runtime-governance stages. It
+avoids uploading a local archive: Tokyo fetches a pushed branch head from the
 repository, exports that exact commit into a clean release directory, writes a
-release manifest, then follows the same backup/migration/restart/smoke gates as
-the archive fallback.
+release manifest, then runs migration/restart/smoke gates without report-file
+or deploy-backup side effects.
 
 Default behavior is dry-run planning only. This script does not SSH, fetch on
 Tokyo, write remote files, run migrations, restart services, create orders, call
@@ -28,25 +28,44 @@ REPO_ROOT_FOR_IMPORT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT_FOR_IMPORT))
 
-from scripts.plan_tokyo_runtime_governance_deploy import (
-    CONFIRMATION_PHRASE,
-    DEFAULT_API_BASE,
-    DEFAULT_DEPLOY_ROOT,
-    DEFAULT_ENV_PATH,
-    DEFAULT_HOST,
-    DEFAULT_PG_CONTAINER_NAME,
-    DEFAULT_SERVICE_NAME,
-    DEFAULT_VENV_PYTHON,
-    runtime_signal_watcher_dispatcher_dropin_install_command,
-)
 from src.domain.standing_authorization import (
     OWNER_STANDING_AUTHORIZATION_REFERENCE,
 )
 
 
+DEFAULT_HOST = "tokyo"
+DEFAULT_DEPLOY_ROOT = "/home/ubuntu/brc-deploy"
+DEFAULT_SERVICE_NAME = "brc-owner-console-backend.service"
+DEFAULT_ENV_PATH = "/home/ubuntu/brc-deploy/env/live-readonly.env"
+DEFAULT_VENV_PYTHON = (
+    "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
+)
+DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_GIT_REF = "program/live-safe-v1"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
     "2026-07-05-090_create_runtime_retention_runs.py"
+)
+CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
+DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.service"
+DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME = "brc-runtime-signal-watcher.timer"
+DEFAULT_RUNTIME_MONITOR_SERVICE_NAME = "brc-runtime-monitor.service"
+DEFAULT_RUNTIME_MONITOR_TIMER_NAME = "brc-runtime-monitor.timer"
+RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service"
+)
+RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.timer"
+)
+RUNTIME_MONITOR_SERVICE_REPO_PATH = "deploy/systemd/brc-runtime-monitor.service"
+RUNTIME_MONITOR_TIMER_REPO_PATH = "deploy/systemd/brc-runtime-monitor.timer"
+RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf"
+)
+RUNTIME_SIGNAL_WATCHER_PRODUCT_STATE_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf"
+)
+RUNTIME_SIGNAL_WATCHER_ACTION_TIME_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/85-action-time-refresh-if-needed.conf"
 )
 
 
@@ -197,10 +216,6 @@ def build_git_deploy_plan(
     source_root = f"{deploy_root}/source"
     source_repo_path = f"{source_root}/dingdingbot"
     releases_dir = f"{deploy_root}/releases"
-    reports_dir = f"{deploy_root}/reports/{final_release_name}"
-    watcher_reports_dir = f"{deploy_root}/reports/runtime-signal-watcher"
-    runtime_monitor_reports_dir = f"{deploy_root}/reports/runtime-monitor"
-    backups_dir = f"{deploy_root}/backups"
     app_current = f"{deploy_root}/app/current"
     remote_release_path = f"{releases_dir}/{final_release_name}"
     remote_tmp_release_path = f"{remote_release_path}.tmp"
@@ -208,7 +223,6 @@ def build_git_deploy_plan(
         releases_dir=releases_dir,
         previous_release=previous_release,
     )
-    backup_path = f"{backups_dir}/{final_release_name}.pgdump"
     release_manifest = f"{remote_release_path}/.brc-release-manifest.json"
     manifest_payload = _release_manifest_payload(
         branch=branch,
@@ -227,15 +241,10 @@ def build_git_deploy_plan(
         deploy_root=deploy_root,
         source_root=source_root,
         source_repo_path=source_repo_path,
-        reports_dir=reports_dir,
-        watcher_reports_dir=watcher_reports_dir,
-        runtime_monitor_reports_dir=runtime_monitor_reports_dir,
-        backups_dir=backups_dir,
         app_current=app_current,
         remote_release_path=remote_release_path,
         remote_tmp_release_path=remote_tmp_release_path,
         release_manifest=release_manifest,
-        backup_path=backup_path,
         service_name=service_name,
         env_path=env_path,
         venv_python=venv_python,
@@ -295,7 +304,6 @@ def build_git_deploy_plan(
             "remote_release_path": remote_release_path,
             "remote_tmp_release_path": remote_tmp_release_path,
             "remote_release_manifest_path": release_manifest,
-            "backup_path": backup_path,
             "target_migration_count": target_migration_count,
             "latest_migration": local_latest_migration,
         },
@@ -342,15 +350,10 @@ def _plan_phases(
     deploy_root: str,
     source_root: str,
     source_repo_path: str,
-    reports_dir: str,
-    watcher_reports_dir: str,
-    runtime_monitor_reports_dir: str,
-    backups_dir: str,
     app_current: str,
     remote_release_path: str,
     remote_tmp_release_path: str,
     release_manifest: str,
-    backup_path: str,
     service_name: str,
     env_path: str,
     venv_python: str,
@@ -369,33 +372,6 @@ def _plan_phases(
     q = shlex.quote
     local_python = "/opt/homebrew/bin/python3"
     manifest_json = json.dumps(manifest_payload, indent=2, sort_keys=True)
-    deploy_channel_status_json = json.dumps(
-        {
-            "scope": "tokyo_runtime_governance_deploy_channel_status",
-            "status": "postdeploy_accepted",
-            "deployed_head": target_commit,
-            "release_path": remote_release_path,
-            "checks": {
-                "blockers": [],
-                "tokyo_probe_blockers": [],
-                "tokyo_connectivity_blockers": [],
-                "tokyo_connectivity_probe_ready": True,
-                "postdeploy_acceptance_passed": True,
-            },
-            "safety_invariants": {
-                "deploy_channel_status_only": True,
-                "places_order": False,
-                "calls_order_lifecycle": False,
-                "exchange_write_called": False,
-                "withdrawal_or_transfer_created": False,
-                "mutates_secrets": False,
-                "mutates_live_profile": False,
-                "mutates_order_sizing": False,
-            },
-        },
-        indent=2,
-        sort_keys=True,
-    )
     health_url = api_base.rstrip("/") + "/api/health"
     health_wait_command = (
         f"set -eu; HEALTH_URL={q(health_url)}; "
@@ -420,7 +396,7 @@ def _plan_phases(
         f'test "$REMOTE_HEAD" = {q(target_commit)}'
     )
     remote_export_command = (
-        f"set -eu; mkdir -p {q(source_root)} {q(reports_dir)} {q(backups_dir)}; "
+        f"set -eu; mkdir -p {q(source_root)}; "
         f"if [ ! -d {q(source_repo_path)}/.git ]; then "
         f"git clone --no-checkout {q(repo_url)} {q(source_repo_path)}; "
         "fi; "
@@ -438,26 +414,8 @@ def _plan_phases(
         f"mv {q(remote_tmp_release_path)} {q(remote_release_path)}; "
         f"test $(readlink -f {q(app_current)}) = {q(previous_release_path)}"
     )
-    quiesce_backup_and_migrate_command = (
+    quiesce_and_migrate_command = (
         f"set -eu; sudo -n systemctl stop {q(service_name)}; "
-        f"umask 077; set -a; . {q(env_path)}; set +a; "
-        'DB_URL="${PG_DATABASE_URL:-${DATABASE_URL:-}}"; '
-        'test -n "$DB_URL" || '
-        "{ echo PG_DATABASE_URL_or_DATABASE_URL_required >&2; exit 2; }; "
-        "if command -v pg_dump >/dev/null 2>&1; then "
-        f"pg_dump \"$DB_URL\" -Fc -f {q(backup_path)}; "
-        "else "
-        f"DB_USER=$({q(venv_python)} -c "
-        "'import os; from urllib.parse import urlparse; "
-        "print(urlparse(os.environ[\"PG_DATABASE_URL\"]).username or \"\")'); "
-        f"DB_NAME=$({q(venv_python)} -c "
-        "'import os; from urllib.parse import urlparse; "
-        "print((urlparse(os.environ[\"PG_DATABASE_URL\"]).path or \"/\").lstrip(\"/\"))'); "
-        'test -n "$DB_USER"; test -n "$DB_NAME"; '
-        f"sudo -n docker exec {q(DEFAULT_PG_CONTAINER_NAME)} "
-        'pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc '
-        f"> {q(backup_path)}; "
-        "fi; "
         f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
         f"test ! -f requirements.txt || {q(venv_python)} -m pip install "
         "--disable-pip-version-check -r requirements.txt; "
@@ -474,12 +432,6 @@ def _plan_phases(
         f"sudo -n systemctl start {q(service_name)}; "
         f"sudo -n systemctl is-active {q(service_name)}; "
         f"{health_wait_command}; "
-        f"mkdir -p {q(watcher_reports_dir)}; "
-        f"cat > {q(watcher_reports_dir + '/tokyo-deploy-channel-status.json')} <<'JSON'\n"
-        f"{deploy_channel_status_json}\nJSON\n"
-        f"mkdir -p {q(runtime_monitor_reports_dir)}; "
-        f"cat > {q(runtime_monitor_reports_dir + '/latest-deploy-health.json')} <<'JSON'\n"
-        f"{deploy_channel_status_json}\nJSON\n"
         f"{runtime_signal_watcher_dispatcher_dropin_install_command(remote_release_path=remote_release_path, deploy_root=deploy_root)}; "
         f"test -f {q(release_manifest)}; "
         f"test $(readlink -f {q(app_current)}) = {q(remote_release_path)}"
@@ -503,16 +455,12 @@ def _plan_phases(
                 f"--expected-revision-count {expected_gap_count}",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
-                f"cd {q(str(repo_root))} && {local_python} "
-                "scripts/verify_runtime_submit_rehearsal_pre_live_evidence.py --json "
-                "--skip-current-head-deployed-check",
             ],
             "stop_if": [
                 "local release readiness is not true",
                 "target commit is not the pushed remote branch head",
                 "migration gap audit does not pass",
                 "shadow-planning rehearsal does not pass",
-                "runtime submit pre-live evidence contains forbidden execution flags",
             ],
         },
         {
@@ -550,16 +498,15 @@ def _plan_phases(
             ],
         },
         {
-            "phase": "3_quiesce_backup_and_migrate",
+            "phase": "3_quiesce_and_migrate",
             "remote_mutation": True,
             "remote_mutation_authorization": (
                 OWNER_STANDING_AUTHORIZATION_REFERENCE
             ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
-            "commands": [_ssh(host, quiesce_backup_and_migrate_command)],
+            "commands": [_ssh(host, quiesce_and_migrate_command)],
             "stop_if": [
                 "service cannot be stopped with non-interactive sudo",
-                "database backup is not created",
                 "alembic upgrade fails",
             ],
         },
@@ -732,6 +679,110 @@ def _text_tail(text: str, *, max_chars: int = 500) -> str:
     if len(stripped) <= max_chars:
         return stripped
     return stripped[-max_chars:]
+
+
+def runtime_signal_watcher_dispatcher_dropin_install_command(
+    *,
+    remote_release_path: str,
+    deploy_root: str = DEFAULT_DEPLOY_ROOT,
+) -> str:
+    q = shlex.quote
+    service_dir = "/etc/systemd/system"
+    service_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}"
+    timer_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME}"
+    runtime_monitor_service_path = (
+        f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_SERVICE_NAME}"
+    )
+    runtime_monitor_timer_path = f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_TIMER_NAME}"
+    stale_runtime_db_retention_service_path = (
+        f"{service_dir}/brc-runtime-db-retention.service"
+    )
+    stale_runtime_db_retention_timer_path = (
+        f"{service_dir}/brc-runtime-db-retention.timer"
+    )
+    service_dropin_dir = (
+        f"/etc/systemd/system/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}.d"
+    )
+    service_dropin_path = f"{service_dropin_dir}/90-resume-dispatcher-after-refresh.conf"
+    dry_run_audit_dropin_path = f"{service_dropin_dir}/60-dry-run-audit-chain.conf"
+    goal_status_dropin_path = f"{service_dropin_dir}/70-goal-status.conf"
+    product_state_dropin_path = f"{service_dropin_dir}/80-product-state-refresh.conf"
+    action_time_dropin_path = f"{service_dropin_dir}/85-action-time-refresh-if-needed.conf"
+    stale_scope_dropin_path = (
+        f"{service_dropin_dir}/30-strategygroup-runtime-pilot-scope.conf"
+    )
+    stale_operation_layer_flags_dropin_path = (
+        f"{service_dropin_dir}/30-operation-layer-followup-flags.conf"
+    )
+    stale_product_state_refresh_dropin_path = (
+        f"{service_dropin_dir}/50-product-state-refresh.conf"
+    )
+    stale_resume_dispatcher_dropin_path = (
+        f"{service_dropin_dir}/40-resume-dispatcher.conf"
+    )
+    release_service_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH}"
+    )
+    release_timer_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH}"
+    )
+    release_runtime_monitor_service_path = (
+        f"{remote_release_path.rstrip('/')}/{RUNTIME_MONITOR_SERVICE_REPO_PATH}"
+    )
+    release_runtime_monitor_timer_path = (
+        f"{remote_release_path.rstrip('/')}/{RUNTIME_MONITOR_TIMER_REPO_PATH}"
+    )
+    release_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
+    )
+    release_product_state_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_PRODUCT_STATE_DROPIN_REPO_PATH}"
+    )
+    release_action_time_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_ACTION_TIME_DROPIN_REPO_PATH}"
+    )
+    return (
+        f"set -eu; "
+        f"test -f {q(release_service_path)}; "
+        f"test -f {q(release_timer_path)}; "
+        f"test -f {q(release_runtime_monitor_service_path)}; "
+        f"test -f {q(release_runtime_monitor_timer_path)}; "
+        f"test -f {q(release_dropin_path)}; "
+        f"test -f {q(release_product_state_dropin_path)}; "
+        f"test -f {q(release_action_time_dropin_path)}; "
+        f"sudo -n cp {q(release_service_path)} {q(service_path)}; "
+        f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
+        f"sudo -n cp {q(release_runtime_monitor_service_path)} {q(runtime_monitor_service_path)}; "
+        f"sudo -n cp {q(release_runtime_monitor_timer_path)} {q(runtime_monitor_timer_path)}; "
+        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)} {q(runtime_monitor_service_path)} {q(runtime_monitor_timer_path)}; "
+        f"sudo -n mkdir -p {q(service_dropin_dir)}; "
+        f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
+        f"sudo -n cp {q(release_product_state_dropin_path)} {q(product_state_dropin_path)}; "
+        f"sudo -n cp {q(release_action_time_dropin_path)} {q(action_time_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(service_dropin_path)} {q(product_state_dropin_path)} {q(action_time_dropin_path)}; "
+        f"sudo -n rm -f {q(dry_run_audit_dropin_path)}; "
+        f"sudo -n rm -f {q(goal_status_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_operation_layer_flags_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_product_state_refresh_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_resume_dispatcher_dropin_path)}; "
+        "sudo -n systemctl disable --now brc-runtime-db-retention.timer 2>/dev/null || true; "
+        f"sudo -n rm -f {q(stale_runtime_db_retention_service_path)}; "
+        f"sudo -n rm -f {q(stale_runtime_db_retention_timer_path)}; "
+        "sudo -n systemctl daemon-reload; "
+        f"sudo -n systemctl enable {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl start {q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)}; "
+        f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}"
+    )
 
 
 def _ssh(host: str, remote_command: str) -> str:

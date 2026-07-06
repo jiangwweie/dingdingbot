@@ -64,7 +64,7 @@ new report layer
 | Pre-Trade Runtime already supports five active StrategyGroups with multiple candidate symbols | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
 | WIP limits active StrategyGroups, not candidate symbols inside an active StrategyGroup | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` |
 | DB table design already includes registry, RequiredFacts, Owner policy, candidate scope, runtime coverage, readiness, promotion, action-time, and runtime safety tables | `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
-| Current scripts already represent partial pipeline steps | `scripts/build_strategygroup_research_intake_review.py`, `scripts/build_strategygroup_trial_asset_admission_proposal.py`, `scripts/build_strategygroup_tradeability_decision.py`, `scripts/build_strategy_live_candidate_pool.py`, `scripts/build_daily_live_enablement_table.py` |
+| Current PG/current projections already represent partial pipeline steps | Strategy research intake, trial asset admission, Tradeability Decision, Candidate Pool, and Daily Table must be represented by DB rows or PG-backed current projections rather than standalone JSON/MD builders |
 | Existing PG models already contain strategy family, admission, trial binding, observation, and forward-review tables | `src/infrastructure/pg_models.py` |
 
 ## Problem
@@ -86,8 +86,8 @@ The failure mode is:
 
 ```text
 strategy document says admitted
-handoff JSON says trial candidate
-policy JSON says scoped
+retired handoff JSON says trial candidate
+retired policy JSON says scoped
 runtime coverage file says missing
 Candidate Pool picks one source by file availability
 ```
@@ -141,7 +141,7 @@ The right ordering is:
 
 ```text
 first make runtime/control state DB-backed
-then migrate strategy handoff packs into DB admission data
+then migrate any archive-only strategy handoff provenance into DB admission data
 then optimize the strategy governance pipeline
 ```
 
@@ -348,7 +348,7 @@ The import path should treat old documents as migration input, not runtime
 truth.
 
 ```text
-research doc / handoff pack / replay summary
+research doc / archive-only handoff provenance / replay summary
 -> parse into candidate draft
 -> validate required intake fields
 -> store normalized candidate row
@@ -359,7 +359,7 @@ research doc / handoff pack / replay summary
 
 | Step | Input | Output | Failure behavior |
 | --- | --- | --- | --- |
-| Parse | Research archive, handoff pack, seed file | Import run and raw parse result | Mark run `partial` or `rejected` |
+| Parse | Research archive, archive-only handoff provenance, seed row | Import run and raw parse result | Mark run `partial` or `rejected` |
 | Normalize | Parsed candidate | `brc_strategy_research_candidates` | Reject missing thesis, side, risk, or evidence refs |
 | Intake validate | Normalized candidate | `engineering_intake_ready` candidate | Block if first blocker, next action, risk envelope, or kill condition is absent |
 | Governance decision | Candidate and evidence | `brc_strategy_governance_decisions` | Park, revise, reject, or promote with explicit scope |
@@ -446,11 +446,12 @@ the action-time front door without waiting for the full strategy pipeline.
 
 Deliverables:
 
-- import current active StrategyGroups and handoff pack summaries into
-  registry/version/RequiredFacts rows;
+- import current active StrategyGroups and archive-only handoff provenance into
+  registry/version/RequiredFacts rows when provenance is still useful;
 - store evidence refs instead of replay blobs;
 - create current pipeline state projection for the five active StrategyGroups;
-- mark old handoff packs as archive/export, not runtime source.
+- keep old handoff packs out of current repo authority; use git-history/archive
+  provenance only.
 
 ### Phase 3: Add Research Candidate Intake
 
@@ -487,7 +488,7 @@ The design is accepted when these statements are true after implementation.
 | Criterion | Required result |
 | --- | --- |
 | Runtime independence | Production runtime and trading decisions do not depend on repo MD/JSON |
-| Strategy pack migration | Strategy handoff packs become DB rows plus archive refs, not current repo authority |
+| Strategy pack migration | Archive-only handoff provenance becomes DB rows plus archive refs, not current repo authority |
 | One current state | Each active StrategyGroup has one current pipeline state projection |
 | Admission traceability | Every admitted trial asset traces back to an import, governance decision, or Owner/system admission record |
 | Scope precision | Multi-symbol candidate scope is DB-backed and does not imply live-submit authority |

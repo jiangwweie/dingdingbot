@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -107,28 +105,6 @@ def _deploy_ready_candidate_pool() -> dict:
     return artifact
 
 
-def _local_monitor_sequence() -> dict:
-    return {
-        "status": "temporarily_unavailable_monitor_refresh_needed",
-        "steps": [
-            {"name": "daily_live_enablement_table", "returncode": 0},
-            {"name": "validate_daily_live_enablement_table", "returncode": 0},
-            {"name": "single_lane_task_packet", "returncode": 0},
-            {"name": "validate_single_lane_task_packet", "returncode": 0},
-            {"name": "strategy_live_candidate_pool", "returncode": 0},
-            {"name": "validate_strategy_live_candidate_pool", "returncode": 0},
-        ],
-    }
-
-
-def _manifest() -> dict:
-    return json.loads(
-        (REPO_ROOT / "config" / "output_control_snapshots.json").read_text(
-            encoding="utf-8"
-        )
-    )
-
-
 def test_deploy_gate_blocks_when_candidate_pool_not_deploy_ready():
     module = _load_module()
 
@@ -136,8 +112,6 @@ def test_deploy_gate_blocks_when_candidate_pool_not_deploy_ready():
         candidate_pool=_candidate_pool(deploy_ready=False),
         daily_table=_daily_table(),
         single_lane_task_packet=_single_lane(),
-        local_monitor_sequence=_local_monitor_sequence(),
-        manifest=_manifest(),
         changed_output_paths=[],
     )
 
@@ -152,25 +126,6 @@ def test_deploy_gate_accepts_valid_non_authority_artifacts_when_ready():
         candidate_pool=_deploy_ready_candidate_pool(),
         daily_table=_daily_table(),
         single_lane_task_packet=_single_lane(),
-        local_monitor_sequence=_local_monitor_sequence(),
-        manifest=_manifest(),
-        changed_output_paths=[],
-    )
-
-    assert errors == []
-
-
-def test_deploy_gate_accepts_waiting_for_market_monitor_sequence():
-    module = _load_module()
-    monitor = _local_monitor_sequence()
-    monitor["status"] = "waiting_for_market"
-
-    errors = module.validate_strategy_live_candidate_pool_deploy_gate(
-        candidate_pool=_deploy_ready_candidate_pool(),
-        daily_table=_daily_table(),
-        single_lane_task_packet=_single_lane(),
-        local_monitor_sequence=monitor,
-        manifest=_manifest(),
         changed_output_paths=[],
     )
 
@@ -184,8 +139,6 @@ def test_deploy_gate_recomputes_p0_p1_and_blocks_forged_summary():
         candidate_pool=_candidate_pool(deploy_ready=True),
         daily_table=_daily_table(),
         single_lane_task_packet=_single_lane(),
-        local_monitor_sequence=_local_monitor_sequence(),
-        manifest=_manifest(),
         changed_output_paths=[],
     )
 
@@ -202,8 +155,6 @@ def test_deploy_gate_blocks_owner_action_without_policy_waiver():
         candidate_pool=candidate_pool,
         daily_table=_daily_table(),
         single_lane_task_packet=_single_lane(),
-        local_monitor_sequence=_local_monitor_sequence(),
-        manifest=_manifest(),
         changed_output_paths=[],
     )
 
@@ -222,8 +173,6 @@ def test_deploy_gate_blocks_blocked_public_facts_without_waiver():
         candidate_pool=candidate_pool,
         daily_table=_daily_table(),
         single_lane_task_packet=_single_lane(),
-        local_monitor_sequence=_local_monitor_sequence(),
-        manifest=_manifest(),
         changed_output_paths=[],
     )
 
@@ -241,8 +190,6 @@ def test_deploy_gate_blocks_action_time_boundary_not_reproduced():
         candidate_pool=candidate_pool,
         daily_table=_daily_table(),
         single_lane_task_packet=_single_lane(),
-        local_monitor_sequence=_local_monitor_sequence(),
-        manifest=_manifest(),
         changed_output_paths=[],
     )
 
@@ -261,8 +208,6 @@ def test_deploy_gate_blocks_replay_live_rule_mismatch():
         candidate_pool=candidate_pool,
         daily_table=_daily_table(),
         single_lane_task_packet=_single_lane(),
-        local_monitor_sequence=_local_monitor_sequence(),
-        manifest=_manifest(),
         changed_output_paths=[],
     )
 
@@ -271,38 +216,14 @@ def test_deploy_gate_blocks_replay_live_rule_mismatch():
     )
 
 
-def test_deploy_gate_cli_reports_blocked_for_current_not_ready_pool(tmp_path: Path):
-    candidate_pool = tmp_path / "candidate_pool.json"
-    daily_table = tmp_path / "daily_table.json"
-    single_lane = tmp_path / "single_lane.json"
-    monitor_sequence = tmp_path / "monitor_sequence.json"
-    manifest = tmp_path / "manifest.json"
-    candidate_pool.write_text(json.dumps(_candidate_pool(deploy_ready=False)), encoding="utf-8")
-    daily_table.write_text(json.dumps(_daily_table()), encoding="utf-8")
-    single_lane.write_text(json.dumps(_single_lane()), encoding="utf-8")
-    monitor_sequence.write_text(json.dumps(_local_monitor_sequence()), encoding="utf-8")
-    manifest.write_text(json.dumps(_manifest()), encoding="utf-8")
+def test_deploy_gate_blocks_current_not_ready_pool_in_memory():
+    module = _load_module()
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(VALIDATOR_PATH),
-            "--candidate-pool-json",
-            str(candidate_pool),
-            "--daily-table-json",
-            str(daily_table),
-            "--single-lane-task-packet-json",
-            str(single_lane),
-            "--local-monitor-sequence-json",
-            str(monitor_sequence),
-            "--manifest",
-            str(manifest),
-            "--skip-git-output-status",
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
+    errors = module.validate_strategy_live_candidate_pool_deploy_gate(
+        candidate_pool=_candidate_pool(deploy_ready=False),
+        daily_table=_daily_table(),
+        single_lane_task_packet=_single_lane(),
+        changed_output_paths=[],
     )
 
-    assert result.returncode == 1
-    assert "strategy_live_candidate_pool_deploy_gate_blocked" in result.stdout
+    assert errors

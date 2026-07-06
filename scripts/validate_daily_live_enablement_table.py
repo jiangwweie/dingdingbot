@@ -24,9 +24,6 @@ from scripts.build_daily_live_enablement_table import (  # noqa: E402
 )
 
 
-DEFAULT_INPUT_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-daily-live-enablement-table.json"
-)
 FORBIDDEN_TRUE_KEYS = {
     "actionable_now",
     "real_order_authority",
@@ -45,7 +42,7 @@ FORBIDDEN_TRUE_KEYS = {
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("table_json", nargs="?", default=str(DEFAULT_INPUT_JSON))
+    parser.add_argument("table_json")
     args = parser.parse_args(argv)
     path = Path(args.table_json)
     errors = validate_daily_live_enablement_table(_read_json(path))

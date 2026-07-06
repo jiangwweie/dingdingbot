@@ -59,8 +59,6 @@ def test_cli_requires_database_url(tmp_path: Path, capsys, monkeypatch):
     result = ticket_materializer.main(
         [
             "--require-database-url",
-            "--output-json",
-            str(tmp_path / "ticket.json"),
         ]
     )
 

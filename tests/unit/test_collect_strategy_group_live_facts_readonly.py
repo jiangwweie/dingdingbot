@@ -20,27 +20,7 @@ class _Response:
         return json.dumps(self.payload).encode("utf-8")
 
 
-def _write_handoff(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "strategy_group_id": "MPG-001",
-                "supported_symbols": ["BTCUSDT", "ETHUSDT"],
-                "risk_defaults": {
-                    "max_notional_per_action_usdt": "8",
-                    "requires_sl": True,
-                    "requires_tp_or_exit_plan": True,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
 def test_collect_strategy_group_live_facts_readonly_uses_get_and_masks_values(tmp_path):
-    handoff_dir = tmp_path / "handoffs"
-    _write_handoff(handoff_dir / "MPG-001" / "handoff.json")
     env_file = tmp_path / ".env.local"
     env_file.write_text(
         "EXCHANGE_API_KEY=test-key\nEXCHANGE_API_SECRET=test-secret\n",
@@ -93,7 +73,10 @@ def test_collect_strategy_group_live_facts_readonly_uses_get_and_masks_values(tm
         raise AssertionError(request.full_url)
 
     packet = collect_live_facts(
-        handoff_dir=handoff_dir,
+        symbols=["BTCUSDT", "ETHUSDT"],
+        max_notional_requirement_usdt="8",
+        has_candidate_specific_protection_template=True,
+        strategy_group_count=1,
         env_file=env_file,
         base_url="https://unit.test",
         urlopen=fake_urlopen,
@@ -126,8 +109,6 @@ def test_collect_strategy_group_live_facts_readonly_uses_get_and_masks_values(tm
 
 
 def test_collect_strategy_group_live_facts_derives_candidate_prerequisites_when_flat(tmp_path):
-    handoff_dir = tmp_path / "handoffs"
-    _write_handoff(handoff_dir / "MPG-001" / "handoff.json")
     env_file = tmp_path / ".env.local"
     env_file.write_text(
         "EXCHANGE_API_KEY=test-key\nEXCHANGE_API_SECRET=test-secret\n",
@@ -166,7 +147,10 @@ def test_collect_strategy_group_live_facts_derives_candidate_prerequisites_when_
         raise AssertionError(request.full_url)
 
     packet = collect_live_facts(
-        handoff_dir=handoff_dir,
+        symbols=["BTCUSDT", "ETHUSDT"],
+        max_notional_requirement_usdt="8",
+        has_candidate_specific_protection_template=True,
+        strategy_group_count=1,
         env_file=env_file,
         base_url="https://unit.test",
         urlopen=fake_urlopen,

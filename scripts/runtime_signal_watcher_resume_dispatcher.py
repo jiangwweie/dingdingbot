@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """Dispatch the Runtime Signal Watcher PG ticket identity to the next safe step.
 
-The default mode consumes PG Action-Time Ticket identity and writes an
-Owner/agent-readable dispatch artifact without calling the API. The legacy
-post-signal-resume-pack JSON path is diagnostic-only and must be explicitly
-requested with ``--diagnostic-only --identity-source resume_pack_json``. With
+The CLI consumes PG Action-Time Ticket identity only. With
 ``--execute-preflight`` it may call the official action-time FinalGate preflight
-GET endpoint, or the official fresh-submit-authorization binding endpoint when
-the resume pack is parked at that non-executing checkpoint. With
-``--execute-operation-layer-submit`` it may call only the ticket-bound protected
-submit endpoint after the same-run ticket FinalGate and handoff checks pass.
-The legacy authorization Operation Layer submit branch is retired and blocks
-fail-closed. With ``--execute-post-submit-finalize`` it may then call the
-official post-submit finalize endpoint after ticket-bound submit succeeds.
+GET endpoint. With ``--execute-operation-layer-submit`` it may call only the
+ticket-bound protected submit endpoint after the same-run ticket FinalGate and
+handoff checks pass. Legacy resume-pack JSON and loose evidence-file identity
+are not accepted as production or diagnostic CLI sources.
 """
 
 from __future__ import annotations
@@ -42,18 +36,6 @@ from src.application.readmodels.owner_projection import (
 )
 
 
-DEFAULT_RESUME_PACK = Path(
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "post-signal-resume-pack.json"
-)
-DEFAULT_OUTPUT_JSON = Path(
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "resume-dispatch-artifact.json"
-)
-DEFAULT_OPERATION_LAYER_EVIDENCE_JSON = Path(
-    "/home/ubuntu/brc-deploy/reports/runtime-signal-watcher/"
-    "operation-layer-arm-evidence.json"
-)
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 OPEN_PG_TICKET_STATUSES = {"created", "preflight_pending", "finalgate_ready"}
 OPEN_PG_LANE_STATUSES = {"opened", "facts_refreshing", "ticket_pending", "ticket_created"}
@@ -80,14 +62,7 @@ OPERATION_LAYER_SUBMIT_MODES = {
     OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE,
 }
 POST_SUBMIT_FINALIZE_ACTION = "post_submit_finalize_reconciliation_budget_settlement"
-FRESH_AUTHORIZATION_ACTION = "bind_or_resolve_fresh_submit_authorization"
-FRESH_AUTHORIZATION_BINDING_ACTION = "run_official_fresh_submit_authorization_binding"
 RUNTIME_LIVE_ENABLEMENT_ACTION = "apply_bounded_runtime_live_enablement"
-FRESH_AUTHORIZATION_ALLOWED_ACTIONS = {
-    FRESH_AUTHORIZATION_ACTION,
-    "bind_or_resolve_fresh_authorization",
-    FRESH_AUTHORIZATION_BINDING_ACTION,
-}
 RETIRED_FILE_AUTHORITY_SCOPES = {
     "runtime_fresh_attempt_readiness_projection",
 }
@@ -148,40 +123,6 @@ LIVE_ENABLEMENT_HARD_STOP_TOKENS = (
     "leverage_scope",
     "authorization_id_mismatch",
 )
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return payload
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
-
-
-def _read_optional_json(path_value: str | None) -> tuple[dict[str, Any] | None, str | None]:
-    if not path_value:
-        return None, None
-    path = Path(path_value).expanduser()
-    if not path.exists():
-        return None, None
-    try:
-        return _read_json(path), str(path)
-    except Exception as exc:
-        return {
-            "blockers": [
-                f"operation_layer_evidence_report_unreadable:{type(exc).__name__}"
-            ],
-            "warnings": [],
-            "ids": {},
-        }, str(path)
 
 
 def _pg_ticket_resume_pack(
@@ -783,66 +724,6 @@ def _action_time_ticket_id(
     )
 
 
-def _fresh_authorization_handoff_artifact_path(
-    *,
-    resume_pack: dict[str, Any],
-    action_time_resume: dict[str, Any],
-) -> str | None:
-    artifact_paths = _dict(resume_pack.get("artifact_paths"))
-    action_artifact_paths = _dict(action_time_resume.get("artifact_paths"))
-    readiness_projection = _dict(resume_pack.get("readiness_projection"))
-    projection_artifact_paths = _dict(readiness_projection.get("artifact_paths"))
-    return _first_text(
-        action_time_resume.get("handoff_artifact_json"),
-        action_time_resume.get("fresh_submit_handoff_artifact_json"),
-        action_time_resume.get("handoff_json"),
-        action_time_resume.get("fresh_submit_handoff_json"),
-        action_time_resume.get("readiness_handoff_evidence_json"),
-        action_artifact_paths.get("readiness_handoff_evidence"),
-        action_artifact_paths.get("official_submit_handoff_flow"),
-        resume_pack.get("handoff_artifact_json"),
-        resume_pack.get("fresh_submit_handoff_artifact_json"),
-        resume_pack.get("handoff_json"),
-        resume_pack.get("fresh_submit_handoff_json"),
-        resume_pack.get("readiness_handoff_evidence_json"),
-        artifact_paths.get("readiness_handoff_evidence"),
-        artifact_paths.get("official_submit_handoff_flow"),
-        artifact_paths.get("cycle_executable_submit_handoff"),
-        projection_artifact_paths.get("readiness_handoff_evidence"),
-        projection_artifact_paths.get("official_submit_handoff_flow"),
-    )
-
-
-def _unwrap_handoff_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    if payload.get("handoff_id"):
-        return payload
-    for key in ("api_payload", "artifact", "handoff_artifact"):
-        nested = payload.get(key)
-        if isinstance(nested, dict):
-            return _unwrap_handoff_payload(nested)
-    for key in (
-        "official_submit_handoff_flow",
-        "readiness_handoff_evidence",
-        "cycle_executable_submit_handoff",
-    ):
-        nested = payload.get(key)
-        if isinstance(nested, dict):
-            return _unwrap_handoff_payload(nested)
-    return {}
-
-
-def _load_handoff_payload(path_value: str) -> tuple[dict[str, Any], str | None]:
-    path = Path(path_value).expanduser()
-    try:
-        payload = _read_json(path)
-    except Exception as exc:
-        return {}, f"handoff_artifact_unreadable:{type(exc).__name__}"
-    handoff = _unwrap_handoff_payload(payload)
-    if not handoff:
-        return {}, "handoff_payload_missing_from_json"
-    return handoff, None
-
-
 def _operation_layer_command_plan(*, authorization_id: str) -> dict[str, Any]:
     return {
         "kind": "official_operation_layer_submit_next_checkpoint",
@@ -1345,371 +1226,6 @@ def _owner_state_for_operation_layer_blocked(
     }
 
 
-def _fresh_authorization_binding_command_plan(
-    *,
-    api_base: str,
-    runtime_instance_id: str,
-    handoff_artifact_json: str,
-    requested_fresh_submit_authorization_id: str | None,
-) -> dict[str, Any]:
-    endpoint = (
-        "/api/trading-console/strategy-runtimes/"
-        f"{runtime_instance_id}/official-submit-handoff-fresh-authorizations/bind"
-    )
-    return {
-        "kind": "official_fresh_submit_authorization_binding",
-        "method": "POST",
-        "api_base": api_base.rstrip("/"),
-        "path": endpoint,
-        "handoff_artifact_json": handoff_artifact_json,
-        "requested_fresh_submit_authorization_id": (
-            requested_fresh_submit_authorization_id
-        ),
-        "requires_operator_session": True,
-        "allowed_prepare_evidence_creation": True,
-        "calls_official_submit_endpoint": False,
-        "places_order": False,
-        "calls_order_lifecycle": False,
-        "exchange_write_called": False,
-    }
-
-
-def _non_executing_prepare_command_plan(
-    *,
-    api_base: str,
-    resume_pack: dict[str, Any],
-    action_time_resume: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "kind": "fresh_candidate_authorization_evidence_preparation",
-        "method": "POST",
-        "api_base": api_base.rstrip("/"),
-        "path": (
-            "/api/trading-console/strategy-runtimes/{runtime_instance_id}/"
-            "official-submit-handoff-fresh-authorizations/bind"
-        ),
-        "runtime_instance_id": _non_executing_prepare_runtime_instance_id(
-            resume_pack=resume_pack,
-            action_time_resume=action_time_resume,
-        ),
-        "requires_runtime_instance_id": True,
-        "requires_readiness_handoff_evidence": True,
-        "readiness_handoff_evidence": _fresh_authorization_handoff_artifact_path(
-            resume_pack=resume_pack,
-            action_time_resume=action_time_resume,
-        ),
-        "signal_input_json": _non_executing_prepare_signal_input_json(
-            resume_pack=resume_pack,
-            action_time_resume=action_time_resume,
-        ),
-        "order_candidate_id": _first_text(
-            action_time_resume.get("shadow_candidate_id"),
-            resume_pack.get("shadow_candidate_id"),
-            action_time_resume.get("order_candidate_id"),
-            resume_pack.get("order_candidate_id"),
-        ),
-        "allowed_prepare_evidence_creation": True,
-        "calls_official_submit_endpoint": False,
-        "places_order": False,
-        "calls_order_lifecycle": False,
-        "exchange_write_called": False,
-    }
-
-
-def _non_executing_prepare_runtime_instance_id(
-    *,
-    resume_pack: dict[str, Any],
-    action_time_resume: dict[str, Any],
-) -> str | None:
-    signal_input_json = _non_executing_prepare_signal_input_json(
-        resume_pack=resume_pack,
-        action_time_resume=action_time_resume,
-    )
-    if signal_input_json:
-        for item in _list(resume_pack.get("runtime_signal_summaries")):
-            if not isinstance(item, dict):
-                continue
-            if str(item.get("signal_input_json") or "").strip() != signal_input_json:
-                continue
-            runtime_id = _first_text(item.get("runtime_instance_id"))
-            if runtime_id:
-                return runtime_id
-    return _first_text(
-        action_time_resume.get("runtime_instance_id"),
-        resume_pack.get("runtime_instance_id"),
-        *list(resume_pack.get("selected_runtime_instance_ids") or []),
-    )
-
-
-def _non_executing_prepare_signal_input_json(
-    *,
-    resume_pack: dict[str, Any],
-    action_time_resume: dict[str, Any],
-) -> str | None:
-    return _first_text(
-        action_time_resume.get("signal_input_json"),
-        resume_pack.get("signal_input_json"),
-    )
-
-
-def _run_non_executing_prepare(
-    command_plan: dict[str, Any],
-) -> dict[str, Any]:
-    from scripts import runtime_next_attempt_prepare_api_flow as prepare_flow  # noqa: WPS433
-
-    args = argparse.Namespace(
-        env_file=None,
-        api_base=command_plan.get("api_base"),
-        runtime_instance_id=command_plan.get("runtime_instance_id"),
-        signal_input_json=command_plan.get("signal_input_json"),
-        order_candidate_id=command_plan.get("order_candidate_id"),
-        candidate_id=None,
-        context_id=None,
-        owner_operator_id="owner",
-        owner_confirmation_reference=(
-            "owner-standing-authorization-runtime-signal-watcher-"
-            "non-executing-prepare"
-        ),
-        reason=(
-            "runtime signal watcher standing authorization "
-            "non-executing candidate authorization evidence prepare"
-        ),
-        next_attempt_symbol=None,
-        next_attempt_side=None,
-        next_attempt_family=None,
-        next_attempt_strategy_family_id=None,
-        next_attempt_carrier_id=None,
-    )
-    config = prepare_flow._build_flow_config(args)  # noqa: SLF001
-    report = prepare_flow.FirstRealSubmitApiFlow(
-        client=prepare_flow.UrlLibApiClient(api_base=config.api_base),
-        config=config,
-    ).run()
-    return prepare_flow._summarize_prepare_report(report)  # noqa: SLF001
-
-
-def _non_executing_prepare_forbidden_effects(
-    prepare_artifact: dict[str, Any],
-) -> list[str]:
-    safety = _dict(prepare_artifact.get("safety_invariants"))
-    checks = {
-        "local_registration_armed": False,
-        "exchange_submit_armed": False,
-        "execute_real_submit": False,
-        "exchange_write_called": False,
-        "order_created": False,
-        "order_lifecycle_called": False,
-        "attempt_counter_mutated": False,
-        "runtime_budget_mutated": False,
-        "position_opened": False,
-        "withdrawal_or_transfer_created": False,
-    }
-    effects: list[str] = []
-    for name, expected in checks.items():
-        if safety.get(name) not in {expected, None, "", 0}:
-            effects.append(f"non_executing_prepare_effect:{name}")
-    return effects
-
-
-def _non_executing_prepare_authorization_id(
-    prepare_artifact: dict[str, Any],
-) -> str | None:
-    return _first_text(_dict(prepare_artifact.get("ids")).get("authorization_id"))
-
-
-def _non_executing_prepare_candidate_id(
-    prepare_artifact: dict[str, Any],
-) -> str | None:
-    ids = _dict(prepare_artifact.get("ids"))
-    return _first_text(
-        ids.get("order_candidate_id"),
-        ids.get("shadow_candidate_id"),
-        ids.get("runtime_execution_intent_draft_id"),
-    )
-
-
-def _non_executing_prepare_ready(
-    prepare_artifact: dict[str, Any],
-) -> bool:
-    return (
-        prepare_artifact.get("status") == "ready_for_final_gate_preflight"
-        and bool(_non_executing_prepare_authorization_id(prepare_artifact))
-        and not _list(prepare_artifact.get("blockers"))
-    )
-
-
-def _dispatch_artifact_from_non_executing_prepare(
-    *,
-    artifact: dict[str, Any],
-    status: str,
-    blocker_class: str,
-    dispatch_status: str,
-    blockers: list[str],
-    prepare_result: dict[str, Any] | None,
-    next_command_plan: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    created_records = _dict((prepare_result or {}).get("created_records"))
-    prepare_safety = _dict((prepare_result or {}).get("safety_invariants"))
-    prepare_evidence_mutated = any(
-        bool(created_records.get(name))
-        for name in (
-            "shadow_candidate_created",
-            "runtime_execution_intent_draft_created",
-            "execution_intent_created",
-            "submit_authorization_created",
-            "protection_plan_created",
-        )
-    )
-    return {
-        **artifact,
-        "status": status,
-        "blocker_class": blocker_class,
-        "dispatch_status": dispatch_status,
-        "dispatch_action": FINALGATE_ACTION if status == READY_STATUS else None,
-        "owner_state": (
-            _owner_state_for_preflight(
-                status=READY_STATUS,
-                blocker_class="none",
-                dispatch_status="non_executing_prepare_ready_for_finalgate",
-                blockers=[],
-            )
-            if status == READY_STATUS
-            else {
-                "status": "needs_intervention",
-                "blocker_class": blocker_class,
-                "blocked_at": "non_executing_prepare",
-                "blocked_reason": blockers[0] if blockers else dispatch_status,
-                "next_recover_condition": (
-                    "fresh_candidate_authorization_evidence_ready"
-                ),
-                "non_authority_checkpoint": NON_EXECUTING_PREPARE_ACTION,
-                "downgrade_mode": "continue_watcher_observation_no_submit",
-            }
-        ),
-        "command_plan": next_command_plan or artifact.get("command_plan"),
-        "non_executing_prepare_command_plan": artifact.get("command_plan"),
-        "non_executing_prepare_result": prepare_result,
-        "blockers": blockers,
-        "safety_invariants": {
-            **_dict(artifact.get("safety_invariants")),
-            "dispatcher_only": False,
-            "official_non_executing_prepare_called": prepare_result is not None,
-            "allowed_prepare_evidence_created": status == READY_STATUS,
-            "pg_prepare_evidence_mutated": prepare_evidence_mutated,
-            "created_records": created_records,
-            "prepare_safety_invariants": prepare_safety,
-            "calls_official_submit_endpoint": False,
-            "places_order": False,
-            "calls_order_lifecycle": False,
-            "exchange_write_called": False,
-            "runtime_budget_mutated": False,
-            "withdrawal_or_transfer_created": False,
-            "official_operation_layer_submit_called": False,
-            "official_post_submit_finalize_called": False,
-        },
-    }
-
-
-def _execute_non_executing_prepare(
-    *,
-    artifact: dict[str, Any],
-    timeout_seconds: int,
-    prepare_runner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-    operation_layer_evidence_report: dict[str, Any] | None = None,
-    operation_layer_evidence_report_path: str | None = None,
-    operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
-    | None = None,
-    runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
-    execute_operation_layer_submit: bool = False,
-    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
-    execute_post_submit_finalize: bool = False,
-) -> dict[str, Any]:
-    command_plan = _dict(artifact.get("command_plan"))
-    runtime_instance_id = _first_text(command_plan.get("runtime_instance_id"))
-    signal_input_json = _first_text(command_plan.get("signal_input_json"))
-    missing: list[str] = []
-    if not runtime_instance_id:
-        missing.append("runtime_instance_id")
-    if not signal_input_json and not command_plan.get("order_candidate_id"):
-        missing.append("signal_input_json")
-    if missing:
-        return _dispatch_artifact_from_non_executing_prepare(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="missing_fact",
-            dispatch_status="blocked_by_missing_non_executing_prepare_inputs",
-            blockers=[f"missing_fact:{name}" for name in missing],
-            prepare_result=None,
-        )
-
-    runner = prepare_runner or _run_non_executing_prepare
-    prepare_result = runner(command_plan)
-    forbidden_effects = _non_executing_prepare_forbidden_effects(prepare_result)
-    if forbidden_effects:
-        return _dispatch_artifact_from_non_executing_prepare(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="hard_safety_stop",
-            dispatch_status="blocked_by_non_executing_prepare_forbidden_effect",
-            blockers=forbidden_effects,
-            prepare_result=prepare_result,
-        )
-
-    if not _non_executing_prepare_ready(prepare_result):
-        blockers = _dedupe_text(prepare_result.get("blockers") or [])
-        if prepare_result.get("status") != "ready_for_final_gate_preflight":
-            blockers.append(
-                f"non_executing_prepare_status:{prepare_result.get('status')}"
-            )
-        return _dispatch_artifact_from_non_executing_prepare(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="missing_fact",
-            dispatch_status="blocked_by_non_executing_prepare",
-            blockers=blockers or ["non_executing_prepare_not_ready"],
-            prepare_result=prepare_result,
-        )
-
-    ticket_id = _action_time_ticket_id(
-        resume_pack=artifact,
-        action_time_resume=_dict(artifact.get("action_time_resume")),
-        command_plan=_dict(artifact.get("command_plan")),
-    )
-    if not ticket_id:
-        return _dispatch_artifact_from_non_executing_prepare(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="missing_fact",
-            dispatch_status="blocked_by_missing_action_time_ticket_id",
-            blockers=["missing_fact:ticket_id"],
-            prepare_result=prepare_result,
-        )
-    next_command_plan = _preflight_command_plan(
-        api_base=str(command_plan.get("api_base") or DEFAULT_API_BASE),
-        ticket_id=ticket_id,
-    )
-    ready_artifact = _dispatch_artifact_from_non_executing_prepare(
-        artifact=artifact,
-        status=READY_STATUS,
-        blocker_class="none",
-        dispatch_status="non_executing_prepare_ready_for_finalgate",
-        blockers=[],
-        prepare_result=prepare_result,
-        next_command_plan=next_command_plan,
-    )
-    return _execute_finalgate_preflight(
-        artifact=ready_artifact,
-        timeout_seconds=timeout_seconds,
-        operation_layer_evidence_report=operation_layer_evidence_report,
-        operation_layer_evidence_report_path=operation_layer_evidence_report_path,
-        operation_layer_evidence_preparer=operation_layer_evidence_preparer,
-        runtime_live_enabler=runtime_live_enabler,
-        execute_operation_layer_submit=execute_operation_layer_submit,
-        operation_layer_submit_mode=operation_layer_submit_mode,
-        execute_post_submit_finalize=execute_post_submit_finalize,
-    )
-
-
 def build_dispatch_artifact(
     *,
     resume_pack: dict[str, Any],
@@ -1722,7 +1238,6 @@ def build_dispatch_artifact(
     operation_layer_evidence_report_path: str | None = None,
     operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
     | None = None,
-    non_executing_preparer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
     execute_operation_layer_submit: bool = False,
     operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
@@ -1829,107 +1344,70 @@ def build_dispatch_artifact(
         )
 
     if status == NON_EXECUTING_PREPARE_STATUS:
-        if NON_EXECUTING_PREPARE_ACTION not in allowed_auto_actions:
-            return _dispatch_artifact(
-                label=label,
-                source_path=source_path,
-                resume_pack=resume_pack,
-                action_time_resume=action_time_resume,
-                owner_state=owner_state,
-                status="blocked",
-                blocker_class="hard_safety_stop",
-                dispatch_action=None,
-                dispatch_status="blocked_by_resume_allowed_actions",
-                blockers=base_blockers + [
-                    "allowed_auto_actions_missing_non_executing_prepare"
-                ],
-                command_plan=None,
-                selected_strategy_group_id=selected_strategy_group_id,
-            )
-        selected_scope_blockers = _selected_scope_action_blockers(
-            selected_strategy_group_id=selected_strategy_group_id,
-            resume_pack=resume_pack,
-            action_time_resume=action_time_resume,
-            require_unique_when_unselected=execute_operation_layer_submit,
-        )
-        if selected_scope_blockers:
-            return _dispatch_artifact(
-                label=label,
-                source_path=source_path,
-                resume_pack=resume_pack,
-                action_time_resume=action_time_resume,
-                owner_state={
-                    "status": "needs_intervention",
-                    "blocker_class": "hard_safety_stop",
-                    "blocked_at": "selected_strategygroup_scope",
-                    "blocked_reason": ",".join(selected_scope_blockers),
-                    "non_authority_checkpoint": "review_selected_strategygroup_scope",
-                    "downgrade_mode": "continue_watcher_observation_no_submit",
-                },
-                status="blocked",
-                blocker_class="hard_safety_stop",
-                dispatch_action=None,
-                dispatch_status="blocked_by_selected_strategygroup_scope",
-                blockers=base_blockers + selected_scope_blockers,
-                command_plan=None,
-                selected_strategy_group_id=selected_strategy_group_id,
-            )
-        artifact = _dispatch_artifact(
+        return _dispatch_artifact(
             label=label,
             source_path=source_path,
             resume_pack=resume_pack,
             action_time_resume=action_time_resume,
             owner_state={
-                "status": NON_EXECUTING_PREPARE_STATUS,
-                "blocker_class": "none",
-                "blocked_at": "candidate_authorization",
-                "blocked_reason": (
-                    "fresh_signal_waiting_for_candidate_authorization_evidence"
-                ),
+                "status": "needs_intervention",
+                "blocker_class": "hard_safety_stop",
+                "blocked_at": "file_authority_retired",
+                "blocked_reason": "non_executing_prepare_signal_file_path_retired",
                 "next_recover_condition": (
-                    "fresh_candidate_runtime_grant_authorization_evidence_exists"
+                    "pg_promotion_candidate_and_action_time_ticket_materialized"
                 ),
-                "non_authority_checkpoint": NON_EXECUTING_PREPARE_ACTION,
-                "downgrade_mode": (
-                    "no_real_submit_until_candidate_authorization_finalgate"
-                ),
+                "non_authority_checkpoint": "materialize_pg_action_time_ticket",
+                "downgrade_mode": "continue_watcher_observation_no_submit",
             },
-            status=NON_EXECUTING_PREPARE_STATUS,
-            blocker_class="none",
-            dispatch_action=NON_EXECUTING_PREPARE_ACTION,
-            dispatch_status="non_executing_prepare_dispatch_ready",
-            blockers=[],
-            command_plan=_non_executing_prepare_command_plan(
-                api_base=api_base,
-                resume_pack=resume_pack,
-                action_time_resume=action_time_resume,
-            ),
+            status="blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_action=None,
+            dispatch_status="blocked_by_retired_non_executing_prepare_file_authority",
+            blockers=base_blockers
+            + [
+                "retired_file_authority_scope:non_executing_prepare_signal_input_json",
+                "pg_promotion_candidate_required",
+                "pg_action_time_ticket_required",
+                "ticket_bound_finalgate_required",
+            ],
+            command_plan=None,
             selected_strategy_group_id=selected_strategy_group_id,
-        )
-        if not execute_preflight:
-            return artifact
-        return _execute_non_executing_prepare(
-            artifact=artifact,
-            timeout_seconds=preflight_timeout_seconds,
-            prepare_runner=non_executing_preparer,
-            operation_layer_evidence_report=operation_layer_evidence_report,
-            operation_layer_evidence_report_path=operation_layer_evidence_report_path,
-            operation_layer_evidence_preparer=operation_layer_evidence_preparer,
-            runtime_live_enabler=runtime_live_enabler,
-            execute_operation_layer_submit=execute_operation_layer_submit,
-            operation_layer_submit_mode=operation_layer_submit_mode,
-            execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
-    selected_scope_blockers = (
-        []
-        if status in FRESH_AUTHORIZATION_STATUSES
-        else _selected_scope_action_blockers(
-            selected_strategy_group_id=selected_strategy_group_id,
+    if status in FRESH_AUTHORIZATION_STATUSES:
+        return _dispatch_artifact(
+            label=label,
+            source_path=source_path,
             resume_pack=resume_pack,
             action_time_resume=action_time_resume,
-            require_unique_when_unselected=execute_operation_layer_submit,
+            owner_state={
+                "status": "needs_intervention",
+                "blocker_class": "hard_safety_stop",
+                "blocked_at": "file_authority_retired",
+                "blocked_reason": "fresh_authorization_handoff_file_path_retired",
+                "non_authority_checkpoint": "materialize_pg_action_time_ticket",
+                "downgrade_mode": "continue_watcher_observation_no_submit",
+            },
+            status="blocked",
+            blocker_class="hard_safety_stop",
+            dispatch_action=None,
+            dispatch_status="blocked_by_retired_fresh_authorization_file_authority",
+            blockers=base_blockers
+            + [
+                "retired_file_authority_scope:fresh_authorization_handoff_json",
+                "pg_action_time_ticket_required",
+                "ticket_bound_operation_layer_handoff_required",
+            ],
+            command_plan=None,
+            selected_strategy_group_id=selected_strategy_group_id,
         )
+
+    selected_scope_blockers = _selected_scope_action_blockers(
+        selected_strategy_group_id=selected_strategy_group_id,
+        resume_pack=resume_pack,
+        action_time_resume=action_time_resume,
+        require_unique_when_unselected=execute_operation_layer_submit,
     )
     if selected_scope_blockers:
         return _dispatch_artifact(
@@ -1952,178 +1430,6 @@ def build_dispatch_artifact(
             blockers=base_blockers + selected_scope_blockers,
             command_plan=None,
             selected_strategy_group_id=selected_strategy_group_id,
-        )
-
-    if status in FRESH_AUTHORIZATION_STATUSES:
-        if not any(
-            action in allowed_auto_actions
-            for action in FRESH_AUTHORIZATION_ALLOWED_ACTIONS
-        ):
-            return _dispatch_artifact(
-                label=label,
-                source_path=source_path,
-                resume_pack=resume_pack,
-                action_time_resume=action_time_resume,
-                owner_state=owner_state,
-                status="blocked",
-                blocker_class="hard_safety_stop",
-                dispatch_action=None,
-                dispatch_status="blocked_by_resume_allowed_actions",
-                blockers=base_blockers + [
-                    "allowed_auto_actions_missing_fresh_authorization_binding"
-                ],
-                command_plan=None,
-                selected_strategy_group_id=selected_strategy_group_id,
-            )
-        handoff_artifact_json = _fresh_authorization_handoff_artifact_path(
-            resume_pack=resume_pack,
-            action_time_resume=action_time_resume,
-        )
-        if not handoff_artifact_json:
-            return _dispatch_artifact(
-                label=label,
-                source_path=source_path,
-                resume_pack=resume_pack,
-                action_time_resume=action_time_resume,
-                owner_state=_owner_state_for_fresh_authorization(
-                    status="blocked",
-                    blocker_class="missing_fact",
-                    dispatch_status="blocked_by_missing_handoff_artifact",
-                    blockers=["missing_fact:handoff_artifact_json"],
-                ),
-                status="blocked",
-                blocker_class="missing_fact",
-                dispatch_action=None,
-                dispatch_status="blocked_by_missing_handoff_artifact",
-                blockers=base_blockers + ["missing_fact:handoff_artifact_json"],
-                command_plan=None,
-                selected_strategy_group_id=selected_strategy_group_id,
-            )
-        handoff_payload, handoff_error = _load_handoff_payload(handoff_artifact_json)
-        if handoff_error:
-            return _dispatch_artifact(
-                label=label,
-                source_path=source_path,
-                resume_pack=resume_pack,
-                action_time_resume=action_time_resume,
-                owner_state=_owner_state_for_fresh_authorization(
-                    status="blocked",
-                    blocker_class="missing_fact",
-                    dispatch_status="blocked_by_invalid_handoff_artifact",
-                    blockers=[handoff_error],
-                ),
-                status="blocked",
-                blocker_class="missing_fact",
-                dispatch_action=None,
-                dispatch_status="blocked_by_invalid_handoff_artifact",
-                blockers=base_blockers + [handoff_error],
-                command_plan=None,
-                selected_strategy_group_id=selected_strategy_group_id,
-            )
-        handoff_groups = _action_strategy_group_ids(
-            resume_pack=resume_pack,
-            action_time_resume=action_time_resume,
-        )
-        for value in (
-            handoff_payload.get("strategy_group_id"),
-            handoff_payload.get("strategy_family_id"),
-        ):
-            text = str(value or "").strip()
-            if text and text not in handoff_groups:
-                handoff_groups.append(text)
-        selected_scope_blockers = _selected_scope_group_blockers(
-            selected_strategy_group_id=selected_strategy_group_id,
-            action_groups=handoff_groups,
-            require_unique_when_unselected=execute_operation_layer_submit,
-        )
-        if selected_scope_blockers:
-            return _dispatch_artifact(
-                label=label,
-                source_path=source_path,
-                resume_pack=resume_pack,
-                action_time_resume=action_time_resume,
-                owner_state={
-                    "status": "needs_intervention",
-                    "blocker_class": "hard_safety_stop",
-                    "blocked_at": "selected_strategygroup_scope",
-                    "blocked_reason": ",".join(selected_scope_blockers),
-                    "non_authority_checkpoint": "review_selected_strategygroup_scope",
-                    "downgrade_mode": "continue_watcher_observation_no_submit",
-                },
-                status="blocked",
-                blocker_class="hard_safety_stop",
-                dispatch_action=None,
-                dispatch_status="blocked_by_selected_strategygroup_scope",
-                blockers=base_blockers + selected_scope_blockers,
-                command_plan=None,
-                selected_strategy_group_id=selected_strategy_group_id,
-            )
-        runtime_instance_id = _first_text(
-            handoff_payload.get("runtime_instance_id"),
-            resume_pack.get("runtime_instance_id"),
-            *list(resume_pack.get("selected_runtime_instance_ids") or []),
-        )
-        if not runtime_instance_id:
-            return _dispatch_artifact(
-                label=label,
-                source_path=source_path,
-                resume_pack=resume_pack,
-                action_time_resume=action_time_resume,
-                owner_state=_owner_state_for_fresh_authorization(
-                    status="blocked",
-                    blocker_class="missing_fact",
-                    dispatch_status="blocked_by_missing_runtime_instance_id",
-                    blockers=["missing_fact:runtime_instance_id"],
-                ),
-                status="blocked",
-                blocker_class="missing_fact",
-                dispatch_action=None,
-                dispatch_status="blocked_by_missing_runtime_instance_id",
-                blockers=base_blockers + ["missing_fact:runtime_instance_id"],
-                command_plan=None,
-                selected_strategy_group_id=selected_strategy_group_id,
-            )
-        requested_authorization_id = _first_text(
-            action_time_resume.get("requested_fresh_submit_authorization_id"),
-            resume_pack.get("requested_fresh_submit_authorization_id"),
-        )
-        artifact = _dispatch_artifact(
-            label=label,
-            source_path=source_path,
-            resume_pack=resume_pack,
-            action_time_resume=action_time_resume,
-            owner_state=_owner_state_for_fresh_authorization(
-                status=status,
-                blocker_class="none",
-                dispatch_status="official_fresh_authorization_binding_dispatch_ready",
-                blockers=[],
-            ),
-            status=status,
-            blocker_class="none",
-            dispatch_action=FRESH_AUTHORIZATION_BINDING_ACTION,
-            dispatch_status="official_fresh_authorization_binding_dispatch_ready",
-            blockers=[],
-            command_plan=_fresh_authorization_binding_command_plan(
-                api_base=api_base,
-                runtime_instance_id=runtime_instance_id,
-                handoff_artifact_json=handoff_artifact_json,
-                requested_fresh_submit_authorization_id=requested_authorization_id,
-            ),
-            selected_strategy_group_id=selected_strategy_group_id,
-        )
-        if not execute_preflight:
-            return artifact
-        return _execute_fresh_authorization_binding(
-            artifact=artifact,
-            handoff_payload=handoff_payload,
-            timeout_seconds=preflight_timeout_seconds,
-            operation_layer_evidence_report=operation_layer_evidence_report,
-            operation_layer_evidence_report_path=operation_layer_evidence_report_path,
-            operation_layer_evidence_preparer=operation_layer_evidence_preparer,
-            runtime_live_enabler=runtime_live_enabler,
-            execute_operation_layer_submit=execute_operation_layer_submit,
-            operation_layer_submit_mode=operation_layer_submit_mode,
-            execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
     if status == FINALGATE_READY_STATUS:
@@ -2392,8 +1698,6 @@ def _maybe_prepare_operation_layer_evidence(
         return current_report
     preparer = evidence_preparer or _run_operation_layer_evidence_prep
     report = preparer(authorization_id, command_plan)
-    if current_report_path:
-        _write_json(Path(current_report_path).expanduser(), report)
     return report
 
 
@@ -3086,296 +2390,6 @@ def _execute_ticket_bound_operation_layer_handoff(
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
     return result
-
-
-def _execute_fresh_authorization_binding(
-    *,
-    artifact: dict[str, Any],
-    handoff_payload: dict[str, Any],
-    timeout_seconds: int,
-    operation_layer_evidence_report: dict[str, Any] | None = None,
-    operation_layer_evidence_report_path: str | None = None,
-    operation_layer_evidence_preparer: Callable[[str, dict[str, Any]], dict[str, Any]]
-    | None = None,
-    runtime_live_enabler: Callable[..., dict[str, Any]] | None = None,
-    execute_operation_layer_submit: bool = False,
-    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
-    execute_post_submit_finalize: bool = False,
-) -> dict[str, Any]:
-    command_plan = _dict(artifact.get("command_plan"))
-    if command_plan.get("method") != "POST":
-        return _dispatch_artifact_from_fresh_authorization_binding(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="hard_safety_stop",
-            dispatch_status="blocked_by_invalid_fresh_authorization_binding_plan",
-            blockers=["invalid_fresh_authorization_binding_plan"],
-            binding_result=None,
-        )
-
-    cookie, cookie_error = _session_cookie()
-    if not cookie:
-        return _dispatch_artifact_from_fresh_authorization_binding(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="deployment_issue",
-            dispatch_status="blocked_by_operator_session_unavailable",
-            blockers=[cookie_error or "operator_session_unavailable"],
-            binding_result={
-                "called": False,
-                "http_status": None,
-                "body": None,
-                "error": cookie_error or "operator_session_unavailable",
-            },
-        )
-
-    url = str(command_plan["api_base"]).rstrip("/") + str(command_plan["path"])
-    response = _request_json(
-        method="POST",
-        url=url,
-        cookie=cookie,
-        timeout_seconds=timeout_seconds,
-        body={
-            "handoff_artifact": handoff_payload,
-            "requested_fresh_submit_authorization_id": (
-                command_plan.get("requested_fresh_submit_authorization_id")
-            ),
-            "allow_create_from_existing_intent": True,
-            "allow_create_intent_from_latest_draft": True,
-            "metadata": {
-                "runtime_signal_watcher_resume_dispatcher": True,
-                "non_authority_checkpoint": FRESH_AUTHORIZATION_BINDING_ACTION,
-            },
-            "no_exchange_side_effects": True,
-        },
-    )
-    binding_result = {
-        "called": True,
-        "method": "POST",
-        "path": command_plan["path"],
-        "http_status": response.get("http_status"),
-        "body": response.get("body"),
-        "error": bool(response.get("error")),
-        "error_type": response.get("error_type"),
-        "error_message": response.get("error_message"),
-        "calls_official_submit_endpoint": False,
-        "places_order": False,
-        "calls_order_lifecycle": False,
-        "exchange_write_called": False,
-    }
-    http_status = response.get("http_status")
-    if http_status in {401, 403}:
-        return _dispatch_artifact_from_fresh_authorization_binding(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="deployment_issue",
-            dispatch_status="blocked_by_operator_session_http_error",
-            blockers=[f"operator_session_http_status:{http_status}"],
-            binding_result=binding_result,
-        )
-    if response.get("error"):
-        return _dispatch_artifact_from_fresh_authorization_binding(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="deployment_issue",
-            dispatch_status="blocked_by_fresh_authorization_binding_http_error",
-            blockers=[
-                f"fresh_authorization_binding_http_status:{http_status or 'unavailable'}"
-            ],
-            binding_result=binding_result,
-        )
-
-    body = _dict(response.get("body"))
-    forbidden_effects = _fresh_authorization_binding_forbidden_effects(body)
-    if forbidden_effects:
-        return _dispatch_artifact_from_fresh_authorization_binding(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="hard_safety_stop",
-            dispatch_status="blocked_by_fresh_authorization_binding_forbidden_effect",
-            blockers=forbidden_effects,
-            binding_result=binding_result,
-        )
-    if not _fresh_authorization_binding_ready(body):
-        blockers = [
-            str(item) for item in _list(body.get("blockers")) if str(item).strip()
-        ]
-        if body.get("status") not in {
-            "bound_existing_authorization",
-            "created_authorization",
-            "created_intent_and_authorization",
-        }:
-            blockers.append(f"fresh_authorization_binding_status:{body.get('status')}")
-        return _dispatch_artifact_from_fresh_authorization_binding(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="missing_fact",
-            dispatch_status="blocked_by_fresh_authorization_binding",
-            blockers=sorted(set(blockers)) or ["fresh_authorization_binding_not_ready"],
-            binding_result=binding_result,
-        )
-
-    next_command_plan = _bound_fresh_authorization_preflight_plan(
-        artifact=artifact,
-        binding_body=body,
-    )
-    bound_artifact = _dispatch_artifact_from_fresh_authorization_binding(
-        artifact=artifact,
-        status="fresh_authorization_bound",
-        blocker_class="none",
-        dispatch_status="official_fresh_authorization_binding_ready",
-        blockers=[],
-        binding_result=binding_result,
-        next_command_plan=next_command_plan,
-    )
-    if next_command_plan is None:
-        return _dispatch_artifact_from_fresh_authorization_binding(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="missing_fact",
-            dispatch_status="blocked_by_missing_bound_fresh_authorization_id",
-            blockers=["missing_fact:fresh_submit_authorization_id"],
-            binding_result=binding_result,
-        )
-    if next_command_plan.get("missing_ticket_id") is True:
-        return _dispatch_artifact_from_fresh_authorization_binding(
-            artifact=artifact,
-            status="blocked",
-            blocker_class="missing_fact",
-            dispatch_status="blocked_by_missing_action_time_ticket_id",
-            blockers=["missing_fact:ticket_id"],
-            binding_result=binding_result,
-        )
-    return _execute_finalgate_preflight(
-        artifact=bound_artifact,
-        timeout_seconds=timeout_seconds,
-        operation_layer_evidence_report=operation_layer_evidence_report,
-        operation_layer_evidence_report_path=operation_layer_evidence_report_path,
-        operation_layer_evidence_preparer=operation_layer_evidence_preparer,
-        runtime_live_enabler=runtime_live_enabler,
-        execute_operation_layer_submit=execute_operation_layer_submit,
-        operation_layer_submit_mode=operation_layer_submit_mode,
-        execute_post_submit_finalize=execute_post_submit_finalize,
-    )
-
-
-def _fresh_authorization_binding_forbidden_effects(body: dict[str, Any]) -> list[str]:
-    checks = {
-        "calls_official_submit_endpoint": False,
-        "requests_real_gateway_action": False,
-        "exchange_write_called": False,
-        "exchange_called": False,
-        "exchange_order_submitted": False,
-        "order_created": False,
-        "order_lifecycle_called": False,
-        "runtime_budget_mutated": False,
-        "withdrawal_or_transfer_created": False,
-    }
-    effects: list[str] = []
-    for name, expected in checks.items():
-        if body.get(name) not in {expected, None, "", 0}:
-            effects.append(f"fresh_authorization_binding_effect:{name}")
-    return effects
-
-
-def _fresh_authorization_binding_ready(body: dict[str, Any]) -> bool:
-    return (
-        body.get("status")
-        in {
-            "bound_existing_authorization",
-            "created_authorization",
-            "created_intent_and_authorization",
-        }
-        and bool(body.get("fresh_submit_authorization_id"))
-        and not body.get("blockers")
-        and body.get("ready_for_fresh_authorization_resolution") is True
-    )
-
-
-def _bound_fresh_authorization_preflight_plan(
-    *,
-    artifact: dict[str, Any],
-    binding_body: dict[str, Any],
-) -> dict[str, Any] | None:
-    fresh_authorization_id = _first_text(
-        binding_body.get("fresh_submit_authorization_id")
-    )
-    if not fresh_authorization_id:
-        return None
-    command_plan = _dict(artifact.get("command_plan"))
-    action_time_resume = _dict(artifact.get("action_time_resume"))
-    ticket_id = _action_time_ticket_id(
-        resume_pack=artifact,
-        action_time_resume=action_time_resume,
-        command_plan=command_plan,
-    )
-    if not ticket_id:
-        return {"missing_ticket_id": True}
-    return _preflight_command_plan(
-        api_base=str(command_plan.get("api_base") or DEFAULT_API_BASE),
-        ticket_id=ticket_id,
-    )
-
-
-def _dispatch_artifact_from_fresh_authorization_binding(
-    *,
-    artifact: dict[str, Any],
-    status: str,
-    blocker_class: str,
-    dispatch_status: str,
-    blockers: list[str],
-    binding_result: dict[str, Any] | None,
-    next_command_plan: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    body = _dict((binding_result or {}).get("body"))
-    prepare_evidence_mutated = bool(
-        body.get("creates_execution_intent") or body.get("creates_submit_authorization")
-    )
-    owner_state = _owner_state_for_fresh_authorization(
-        status=status,
-        blocker_class=blocker_class,
-        dispatch_status=dispatch_status,
-        blockers=blockers,
-    )
-    return {
-        **artifact,
-        "status": status,
-        "blocker_class": blocker_class,
-        "dispatch_status": dispatch_status,
-        "dispatch_action": (
-            FINALGATE_ACTION if status == "fresh_authorization_bound" else None
-        ),
-        "owner_state": _owner_state_projection(owner_state),
-        "command_plan": (
-            next_command_plan
-            if status == "fresh_authorization_bound" and next_command_plan
-            else artifact.get("command_plan")
-        ),
-        "fresh_authorization_binding_command_plan": artifact.get("command_plan"),
-        "fresh_authorization_binding_result": binding_result,
-        "fresh_submit_authorization_id": body.get("fresh_submit_authorization_id"),
-        "blockers": blockers,
-        "safety_invariants": {
-            **_dict(artifact.get("safety_invariants")),
-            "dispatcher_only": False,
-            "official_fresh_authorization_binding_called": binding_result is not None
-            and bool(binding_result.get("called")),
-            "allowed_prepare_evidence_created": status == "fresh_authorization_bound",
-            "pg_prepare_evidence_mutated": prepare_evidence_mutated,
-            "creates_execution_intent": bool(body.get("creates_execution_intent")),
-            "creates_submit_authorization": bool(
-                body.get("creates_submit_authorization")
-            ),
-            "mutates_pg": prepare_evidence_mutated,
-            "calls_official_submit_endpoint": False,
-            "places_order": False,
-            "calls_order_lifecycle": False,
-            "exchange_write_called": False,
-            "runtime_budget_mutated": False,
-            "withdrawal_or_transfer_created": False,
-            "official_operation_layer_submit_called": False,
-        },
-    }
 
 
 def _dispatch_artifact_from_preflight(
@@ -4971,67 +3985,6 @@ def _owner_state_for_preflight(
     }
 
 
-def _owner_state_for_fresh_authorization(
-    *,
-    status: str,
-    blocker_class: str,
-    dispatch_status: str,
-    blockers: list[str],
-) -> dict[str, Any]:
-    if status == "fresh_authorization_bound":
-        return {
-            "status": "fresh_authorization_bound",
-            "blocker_class": "none",
-            "blocked_at": "none",
-            "blocked_reason": "none",
-            "next_recover_condition": (
-                "readiness_handoff_rebuilt_with_fresh_submit_authorization_id"
-            ),
-            "non_authority_checkpoint": (
-                "rerun_readiness_evidence_or_dispatcher_for_action_time_finalgate"
-            ),
-            "downgrade_mode": "none",
-        }
-    if blocker_class == "none":
-        return {
-            "status": "ready_for_fresh_submit_authorization",
-            "blocker_class": "none",
-            "blocked_at": "fresh_submit_authorization",
-            "blocked_reason": "fresh_submit_authorization_not_bound_yet",
-            "next_recover_condition": (
-                "fresh_submit_authorization_binding_api_returns_ready"
-            ),
-            "non_authority_checkpoint": (
-                FRESH_AUTHORIZATION_BINDING_ACTION
-            ),
-            "downgrade_mode": "armed_observation_no_submit",
-        }
-    if dispatch_status in {
-        "blocked_by_operator_session_unavailable",
-        "blocked_by_operator_session_http_error",
-    }:
-        return {
-            "status": "blocked",
-            "blocker_class": blocker_class,
-            "blocked_at": "operator_session",
-            "blocked_reason": dispatch_status,
-            "next_recover_condition": "operator_session_available_for_local_binding_api",
-            "non_authority_checkpoint": "restore_operator_session_or_local_session_signing",
-            "downgrade_mode": "continue_watcher_observation_no_submit",
-        }
-    return {
-        "status": "blocked",
-        "blocker_class": blocker_class,
-        "blocked_at": "fresh_submit_authorization",
-        "blocked_reason": blockers[0] if blockers else dispatch_status,
-        "next_recover_condition": "fresh_authorization_binding_blocker_resolved",
-        "non_authority_checkpoint": (
-            "retry_official_fresh_submit_authorization_binding_after_repair"
-        ),
-        "downgrade_mode": "continue_watcher_observation_no_submit",
-    }
-
-
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -5039,39 +3992,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "calling the official action-time FinalGate preflight GET."
         ),
     )
-    parser.add_argument("--resume-pack-json", default=str(DEFAULT_RESUME_PACK))
     parser.add_argument(
         "--identity-source",
-        choices=("pg_ticket", "resume_pack_json"),
+        choices=("pg_ticket",),
         default="pg_ticket",
-        help=(
-            "Trade identity source. Production submit-adjacent dispatch must use "
-            "pg_ticket; resume_pack_json is retained for diagnostics and legacy tests."
-        ),
-    )
-    parser.add_argument(
-        "--diagnostic-only",
-        action="store_true",
-        help=(
-            "Required when --identity-source=resume_pack_json. The JSON resume "
-            "pack path is diagnostic only and must not be used as production "
-            "trade identity authority."
-        ),
+        help="Trade identity source. Production dispatch uses PG ticket identity only.",
     )
     parser.add_argument(
         "--database-url",
         default=os.environ.get("PG_DATABASE_URL") or os.environ.get("DATABASE_URL") or "",
         help="PG DSN used when --identity-source=pg_ticket.",
-    )
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
-    parser.add_argument(
-        "--operation-layer-evidence-json",
-        default=str(DEFAULT_OPERATION_LAYER_EVIDENCE_JSON),
-        help=(
-            "Optional first-real-submit evidence flow report. If present and "
-            "FinalGate is ready, the dispatcher translates it into Operation "
-            "Layer readiness or blocker state."
-        ),
     )
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--label", default="tokyo-runtime-signal-watcher")
@@ -5137,23 +4067,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    if args.identity_source == "pg_ticket":
-        resume_pack, source_path = _pg_ticket_resume_pack(
-            database_url=args.database_url,
-            api_base=args.api_base,
-        )
-    else:
-        if not args.diagnostic_only:
-            print(
-                "ERROR: resume_pack_json identity is diagnostic-only; pass "
-                "--diagnostic-only explicitly",
-                file=sys.stderr,
-            )
-            return 2
-        source_path = Path(args.resume_pack_json).expanduser()
-        resume_pack = _read_json(source_path)
-    operation_layer_evidence_report, operation_layer_evidence_report_path = (
-        _read_optional_json(args.operation_layer_evidence_json)
+    resume_pack, source_path = _pg_ticket_resume_pack(
+        database_url=args.database_url,
+        api_base=args.api_base,
     )
     artifact = build_dispatch_artifact(
         resume_pack=resume_pack,
@@ -5162,14 +4078,13 @@ def main(argv: list[str] | None = None) -> int:
         label=args.label,
         execute_preflight=args.execute_preflight,
         preflight_timeout_seconds=args.preflight_timeout_seconds,
-        operation_layer_evidence_report=operation_layer_evidence_report,
-        operation_layer_evidence_report_path=operation_layer_evidence_report_path,
+        operation_layer_evidence_report=None,
+        operation_layer_evidence_report_path=None,
         execute_operation_layer_submit=args.execute_operation_layer_submit,
         operation_layer_submit_mode=args.operation_layer_submit_mode,
         execute_post_submit_finalize=args.execute_post_submit_finalize,
         selected_strategy_group_id=args.selected_strategy_group_id,
     )
-    _write_json(Path(args.output_json).expanduser(), artifact)
     print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
     if artifact.get("dispatch_status") == (
         "blocked_by_missing_ticket_bound_operation_layer_handoff"

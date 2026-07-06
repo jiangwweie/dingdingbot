@@ -132,15 +132,10 @@ def main(argv: list[str] | None = None) -> int:
         default="local_sqlite_read_only",
         help="Read-only closed-candle source.",
     )
-    parser.add_argument("--output-json")
     args = parser.parse_args(argv)
 
     artifact = build_preview_artifact(source_name=args.source)
     payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
-    if args.output_json:
-        output_path = Path(args.output_json).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(payload + "\n", encoding="utf-8")
     print(payload)
     return 0
 

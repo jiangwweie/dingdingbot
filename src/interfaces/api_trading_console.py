@@ -1355,8 +1355,8 @@ async def runtime_next_attempt_observation_cycle(
         raise HTTPException(
             status_code=400,
             detail=(
-                "next-attempt observation API is non-executing; use the "
-                "official runtime_next_attempt_prepare_api_flow after "
+                "next-attempt observation API is non-executing; materialize "
+                "PG promotion candidates and Action-Time Ticket after "
                 "ready_for_prepare"
             ),
         )
@@ -5006,13 +5006,7 @@ def _runtime_post_close_followup_plan(
         ),
         "owner_close_approval_env": followup_evidence.owner_close_approval_env,
         "owner_close_approval_value": followup_evidence.owner_close_approval_value,
-        "refresh_followup_command_args": with_env_file(
-            [
-                "scripts/build_runtime_post_close_followup_artifact.py",
-                "--runtime-instance-id",
-                runtime_instance_id,
-            ]
-        ),
+        "refresh_followup_command_args": [],
         "owner_close_dry_run_command_args": (
             close_args if followup_evidence.owner_close_approval_value else []
         ),
@@ -5035,13 +5029,7 @@ def _runtime_post_close_followup_plan(
             if standing_recovery_ready
             else []
         ),
-        "closed_review_facts_refresh_command_args": with_env_file(
-            [
-                "scripts/build_runtime_closed_trade_review_facts_artifact.py",
-                "--runtime-instance-id",
-                runtime_instance_id,
-            ]
-        ),
+        "closed_review_facts_refresh_command_args": [],
         "closed_review_command_args": (
             [] if post_close_complete else list(followup_evidence.closed_review_command_args)
         ),
@@ -5241,18 +5229,13 @@ async def _runtime_next_attempt_observation_cycle_payload(
         "blockers": [],
         "warnings": list(evaluation.warnings),
         "observation_cycle_plan": {
-            "next_step": "run_official_runtime_next_attempt_prepare_api_flow",
-            "api_prepare_endpoint": (
-                f"/api/trading-console/strategy-runtimes/{runtime_instance_id}"
-                "/strategy-signal-shadow-plans"
-            ),
-            "cli_prepare_command_args": [
-                "scripts/runtime_next_attempt_prepare_api_flow.py",
-                "--runtime-instance-id",
-                runtime_instance_id,
-                "--signal-input-json",
-                "<write signal_artifact.signal_input to a local json file first>",
+            "next_step": "materialize_pg_promotion_action_time_lane",
+            "api_prepare_endpoint": None,
+            "pg_materialization_steps": [
+                "materialize_pg_promotion_action_time_lane",
+                "materialize_action_time_ticket",
             ],
+            "cli_prepare_command_args": [],
             "signal_input_embedded": True,
             "not_executed": True,
             "creates_shadow_candidate": False,

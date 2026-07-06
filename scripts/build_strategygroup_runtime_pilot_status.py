@@ -8,8 +8,6 @@ grants authorization, calls exchange write APIs, mutates PG, or places orders.
 
 from __future__ import annotations
 
-import argparse
-import json
 from pathlib import Path
 import sys
 import time
@@ -51,25 +49,6 @@ OPEN_ORDER_STATUSES = {
     "open_order_present",
     "has_open_orders",
 }
-
-
-def _read_json(path: str | Path | None) -> dict[str, Any]:
-    if not path:
-        return {}
-    payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{path} must contain a JSON object")
-    return payload
-
-
-def _write_json(path: str | Path, payload: dict[str, Any]) -> None:
-    output_path = Path(path).expanduser()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 def _items(value: Any) -> list[dict[str, Any]]:
@@ -732,13 +711,17 @@ def _gate_failure_ledger(
 
     return [
         _gate_row(
-            gate="strategy_group_handoff",
+            gate="pg_strategy_group_candidate_scope",
             status=group_status,
             blocker_class="missing_fact" if no_group else "none",
             blocked_at="strategy_group_selection" if no_group else "none",
-            blocked_reason="no_strategy_group_handoff_available" if no_group else "none",
+            blocked_reason=(
+                "no_pg_strategy_group_candidate_scope_available"
+                if no_group
+                else "none"
+            ),
             next_recover_condition=(
-                owner_recover if no_group else "strategy_group_handoff_selected"
+                owner_recover if no_group else "pg_strategy_group_scope_selected"
             ),
             non_authority_checkpoint=(
                 owner_action if no_group else "continue_selected_pilot_observation"
@@ -930,11 +913,11 @@ def _owner_state(
             "status": "blocked_no_strategy_group",
             "blocker_class": "missing_fact",
             "blocked_at": "strategy_group_selection",
-            "blocked_reason": "no_strategy_group_handoff_available",
+            "blocked_reason": "no_pg_strategy_group_candidate_scope_available",
             "next_recover_condition": (
-                "strategy_group_handoff_intake_contains_at_least_one_group"
+                "pg_current_candidate_scope_projection_contains_at_least_one_group"
             ),
-            "non_authority_checkpoint": "rebuild_strategy_group_handoff_intake",
+            "non_authority_checkpoint": "publish_pg_current_strategy_group_intake_projection",
             "downgrade_mode": "no_runtime_observation",
         }
     if runtime_binding.get("status") != "configured":
@@ -1489,7 +1472,7 @@ def build_status_artifact(
         "gate_failure_ledger": gate_failure_ledger,
         "readiness_chain": [
             {
-                "gate": "strategy_group_handoff",
+                "gate": "pg_strategy_group_candidate_scope",
                 "status": "ready" if group else "blocked",
                 "class": "missing_fact" if not group else "none",
             },
@@ -1602,34 +1585,3 @@ def build_status_artifact(
         },
     }
     return artifact
-
-
-def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Build Owner-readable StrategyGroup runtime pilot status.",
-    )
-    parser.add_argument("--intake-json", required=True)
-    parser.add_argument("--live-facts-readiness-json", required=True)
-    parser.add_argument("--watcher-status-json", required=True)
-    parser.add_argument("--selected-strategy-group-id")
-    parser.add_argument("--max-symbols", type=int, default=DEFAULT_MAX_SYMBOLS)
-    parser.add_argument("--output-json", required=True)
-    return parser.parse_args(argv)
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
-    artifact = build_status_artifact(
-        intake_artifact=_read_json(args.intake_json),
-        live_facts_readiness=_read_json(args.live_facts_readiness_json),
-        watcher_status=_read_json(args.watcher_status_json),
-        selected_strategy_group_id=args.selected_strategy_group_id,
-        max_symbols=args.max_symbols,
-    )
-    _write_json(args.output_json, artifact)
-    print(json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if not artifact["status"].startswith("blocked_hard_safety_stop") else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

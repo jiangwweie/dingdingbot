@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
@@ -70,13 +69,6 @@ def test_pg_current_projection_validators_accept_published_current(tmp_path: Pat
         with engine.begin() as conn:
             publish.publish_runtime_control_current_projections(
                 conn,
-                report_dir=tmp_path / "reports",
-                runtime_monitor_dir=tmp_path / "runtime-monitor",
-                output_paths={
-                    "candidate_pool": tmp_path / "candidate-pool.json",
-                    "daily_live_enablement_table": tmp_path / "daily-table.json",
-                    "goal_status": tmp_path / "goal-status.json",
-                },
             )
             assert ownership.validate_current_projection_ownership(conn) == []
             assert lineage.validate_pg_current_projection_lineage(conn) == []
@@ -87,7 +79,7 @@ def test_pg_current_projection_validators_accept_published_current(tmp_path: Pat
         engine.dispose()
 
 
-def test_export_validator_rejects_export_mismatch(tmp_path: Path):
+def test_export_validator_rejects_current_projection_export_path(tmp_path: Path):
     publish = _load_module(PUBLISH_PATH, "publish_projection_validator_mismatch")
     export = _load_module(EXPORT_VALIDATOR_PATH, "export_validator_mismatch")
     engine = _seeded_engine()
@@ -95,21 +87,20 @@ def test_export_validator_rejects_export_mismatch(tmp_path: Path):
         with engine.begin() as conn:
             publish.publish_runtime_control_current_projections(
                 conn,
-                report_dir=tmp_path / "reports",
-                runtime_monitor_dir=tmp_path / "runtime-monitor",
-                output_paths={
-                    "candidate_pool": tmp_path / "candidate-pool.json",
-                    "daily_live_enablement_table": tmp_path / "daily-table.json",
-                    "goal_status": tmp_path / "goal-status.json",
-                },
             )
-            (tmp_path / "candidate-pool.json").write_text(
-                json.dumps({"status": "stale"}),
-                encoding="utf-8",
+            conn.execute(
+                sa.text(
+                    "UPDATE brc_control_read_model_snapshots "
+                    "SET output_path = :output_path "
+                    "WHERE model_type = 'candidate_pool' AND is_current = true"
+                ),
+                {"output_path": str(tmp_path / "candidate-pool.json")},
             )
             errors = export.validate_export_matches_pg_projection(conn)
 
-        assert "candidate_pool export does not match PG snapshot" in errors
+        assert errors == [
+            f"candidate_pool current projection must not define export path: {tmp_path / 'candidate-pool.json'}"
+        ]
     finally:
         engine.dispose()
 

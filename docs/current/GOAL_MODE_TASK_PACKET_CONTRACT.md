@@ -82,10 +82,9 @@ A Goal Packet must include:
 ## Pre-Trade Task Packet Gate
 
 After the Pre-Trade Candidate Pool exists, every live-enablement engineering
-task must start from either one readiness row in
-`output/runtime-monitor/latest-strategy-live-candidate-pool.json` or one
-strategy-level Daily Table summary row in
-`output/runtime-monitor/latest-daily-live-enablement-table.json`.
+task must start from either one PG-backed Candidate Pool readiness row or one
+PG-backed Daily Live Enablement Table summary row. Generated JSON/MD exports
+are diagnostic material only and must not be used as task authority.
 
 The task entry must name one StrategyGroup, one candidate symbol when the work is
 symbol-specific, and one first blocker. Broad prompts such as `continue MPG`,

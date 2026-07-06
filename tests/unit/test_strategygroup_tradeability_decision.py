@@ -11,6 +11,9 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine
 
+from src.infrastructure.runtime_control_state_repository import (
+    PgBackedRuntimeControlStateRepository,
+)
 
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[2]
@@ -667,7 +670,7 @@ def _brf2_runtime_signal_capture(signal_state: str = "fresh_signal_absent") -> d
             ),
             "first_blocker_owner": "runtime" if fresh else "market",
             "signal_capture_checkpoint": (
-                "build_brf2_shadow_candidate_evidence"
+                "materialize_pg_brf2_candidate_authorization"
                 if fresh
                 else (
                     "continue_brf2_armed_observation_until_disable_clears"
@@ -2055,7 +2058,7 @@ def test_tradeability_decision_moves_brf2_to_candidate_packet_after_fresh_captur
     assert brf2["first_blocker_class"] == "action_time_boundary_not_reproduced"
     assert brf2["blocker_owner"] == "runtime"
     assert brf2["next_action"] == (
-        "build_brf2_shadow_candidate_evidence_for_action_time_chain"
+        "materialize_pg_brf2_candidate_authorization_for_action_time_chain"
     )
     assert brf2["after_next_state"] == "shadow_candidate_evidence_ready"
     assert "actionable_now" not in brf2
@@ -2167,19 +2170,9 @@ def test_tradeability_prefers_runtime_safety_candidate_authorization_state():
 
 
 def test_cli_requires_pg_database_url(tmp_path: Path) -> None:
-    output_json = tmp_path / "tradeability.json"
-    output_md = tmp_path / "tradeability.md"
-
     env = {**os.environ, "PG_DATABASE_URL": ""}
     result = subprocess.run(
-        [
-            sys.executable,
-            "scripts/build_strategygroup_tradeability_decision.py",
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
-        ],
+        [sys.executable, "scripts/build_strategygroup_tradeability_decision.py"],
         text=True,
         capture_output=True,
         check=False,
@@ -2188,15 +2181,22 @@ def test_cli_requires_pg_database_url(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "PG_DATABASE_URL is required" in result.stderr
-    assert not output_json.exists()
 
 
 def test_cli_pg_backed_tradeability_decision_reads_seeded_runtime_control_state(
     tmp_path: Path,
 ) -> None:
+    module = _load_module()
     database_url = _create_seeded_runtime_control_db(tmp_path / "runtime.db")
-    output_json = tmp_path / "tradeability.json"
-    output_md = tmp_path / "tradeability.md"
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn)
+            packet = module.build_tradeability_decision_from_control_state(
+                repository.read_control_state()
+            )
+    finally:
+        engine.dispose()
 
     result = subprocess.run(
         [
@@ -2205,10 +2205,6 @@ def test_cli_pg_backed_tradeability_decision_reads_seeded_runtime_control_state(
             "--database-url",
             database_url,
             "--allow-non-postgres-for-test",
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
         ],
         text=True,
         capture_output=True,
@@ -2216,7 +2212,9 @@ def test_cli_pg_backed_tradeability_decision_reads_seeded_runtime_control_state(
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
+    summary = json.loads(result.stdout)
+    assert summary["status"] == "tradeability_decision_ready"
+    assert summary["row_count"] == 5
     rows = {row["strategy_group_id"]: row for row in packet["decision_rows"]}
     assert packet["source_mode"] == "db_backed"
     assert packet["projection_target"] == "production_current"
@@ -2420,49 +2418,20 @@ def test_legacy_live_submit_mirrors_do_not_reconstruct_runtime_safety_state():
         assert row["runtime_safety_reference"]["live_submit_ready_for_strategy"] is False
 
 
-def test_tradeability_decision_cli_writes_json_and_markdown(tmp_path: Path):
+def test_tradeability_decision_cli_prints_summary(tmp_path: Path, capsys):
     module = _load_module()
     database_url = _create_seeded_runtime_control_db(tmp_path / "runtime.db")
-    output_json = tmp_path / "decision.json"
-    output_md = tmp_path / "decision.md"
 
     exit_code = module.main(
         [
             "--database-url",
             database_url,
             "--allow-non-postgres-for-test",
-            "--output-json",
-            str(output_json),
-            "--output-owner-progress",
-            str(output_md),
         ]
     )
 
     assert exit_code == 0
-    packet = json.loads(output_json.read_text(encoding="utf-8"))
-    assert packet["status"] == "tradeability_decision_ready"
-    assert packet["schema"] == module.SCHEMA
-    assert packet["scope"] == "strategygroup_tradeability_decision_read_model"
-    assert packet["generated_at_utc"]
-    assert "real_order_authority" not in packet["owner_summary"]
-    assert "actionable_now" not in packet["owner_summary"]
-    assert packet["summary"]["row_count"] == len(packet["decision_rows"])
-    assert packet["checks"]["row_count_matches_decision_rows"] is True
-    assert (
-        packet["checks"]["decision_rows_do_not_emit_legacy_authority_mirrors"]
-        is True
-    )
-    assert packet["checks"]["tradable_now_scoped_to_live_submit"] is True
-    assert packet["safety_invariants"][
-        "decision_generator_changes_runtime_safety_state"
-    ] is False
-    assert packet["safety_invariants"][
-        "decision_generator_creates_execution_attempt"
-    ] is False
-    assert "legacy_verdict_generator_actionable_now" not in packet["safety_invariants"]
-    assert "legacy_verdict_generator_real_order_authority" not in packet["safety_invariants"]
-    markdown = output_md.read_text(encoding="utf-8")
-    assert "StrategyGroup Tradeability Decision" in markdown
-    assert "Real order authority" not in markdown
-    assert "does not set actionable_now or real_order_authority" not in markdown
-    assert "Runtime Safety State remains the live-submit safety source" in markdown
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["status"] == "tradeability_decision_ready"
+    assert summary["row_count"] == 5
+    assert summary["tradable_now_count"] == 0

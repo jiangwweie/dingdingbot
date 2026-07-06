@@ -12,8 +12,11 @@ last_verified: 2026-07-06
 This document defines the executable design for closing the StrategyGroup
 pre-trade runtime around **PG current projections**.
 
-The goal is not to remove every JSON or Markdown export. The goal is to remove
-JSON/Markdown/report files from the runtime authority path.
+The immediate goal was to remove JSON/Markdown/report files from the runtime
+authority path. The stricter current goal is defined by
+`docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md`: delete
+production file readers, remove recurring JSON/MD writers from cadence, and
+keep historical material archive-only.
 
 The target architecture is:
 
@@ -69,7 +72,7 @@ This creates five concrete failures.
 | --- | --- | --- |
 | **Repeated projection work** | Candidate Pool, Daily Table, Goal Status, ticket materializers, and closure materializers run in one heavy sequence | High CPU and unnecessary work when no fresh signal exists |
 | **JSON feedback risk** | Generated exports can be read by later steps or validators as if they were authority | Stale export may compete with fresh PG rows |
-| **Loose trade identity** | Resume dispatcher can still consume `post-signal-resume-pack.json` | "This trade" is not guaranteed to be uniquely ticket-bound at every step |
+| **Loose trade identity** | Resume dispatcher can still consume retired resume-pack exports | "This trade" is not guaranteed to be uniquely ticket-bound at every step |
 | **Legacy diagnostics bleed-through** | Pilot status, dry-run audit, closure evidence, and deploy/probe reports remain near current status | Old diagnostics can look like current blockers |
 | **Report accumulation** | Every tick can write many report files and some diagnostic histories | Disk growth and unclear operational surface |
 
@@ -179,7 +182,8 @@ status
 
 ## JSON/MD Export Contract
 
-JSON and Markdown exports remain allowed only under this contract.
+JSON and Markdown exports remain allowed only as temporary diagnostics or
+manual archive material. They are not a permanent integration layer.
 
 | Export family | Allowed? | Rule |
 | --- | --- | --- |
@@ -240,7 +244,7 @@ state exists.
 
 ## Dispatcher Closure
 
-The resume dispatcher must stop using `post-signal-resume-pack.json` as the
+The resume dispatcher must stop using retired resume-pack exports as the
 identity source for a candidate trade.
 
 The target dispatcher input is:
@@ -330,7 +334,7 @@ Goal:
 
 Work:
 
-- Dispatcher reads PG lane/ticket rows instead of `post-signal-resume-pack.json`
+- Dispatcher reads PG lane/ticket rows instead of retired resume-pack exports
   as authority.
 - FinalGate preflight, Operation Layer handoff, Runtime Safety State, protected
   submit attempt, and post-submit closure all require `ticket_id`.
@@ -383,9 +387,8 @@ Work:
   used for production acceptance.
 - Keep export validators only to verify export fidelity against PG projection
   rows.
-- Remove any production CLI options that reintroduce `--candidate-pool-json`,
-  `--daily-table-json`, `--goal-status-json`, or `--live-facts-json` as current
-  authority inputs.
+- Remove any production CLI options that reintroduce Candidate Pool, Daily
+  Table, Goal Status, or live-facts JSON files as current authority inputs.
 
 Acceptance:
 

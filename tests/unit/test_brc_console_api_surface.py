@@ -817,6 +817,10 @@ def test_strategy_group_reviewability_api_exposes_safe_shelf(monkeypatch):
     assert "Run Strategy" not in raw_payload
     assert "execution_permission_granted" not in raw_payload
     assert "order_permission_granted" not in raw_payload
+    assert "reports/" not in raw_payload
+    assert "docs/ops/" not in raw_payload
+    assert "src/" not in raw_payload
+    assert ".py" not in raw_payload
 
 
 def test_strategy_group_live_readonly_observation_v1_api_is_safe(monkeypatch):

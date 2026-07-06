@@ -6,9 +6,16 @@ from decimal import Decimal
 import pytest
 
 from src.application.capital_protection import CapitalProtectionManager
-from src.application.decision_trace import TraceService
+from src.application.decision_trace import TraceEvent, TraceService
 from src.domain.models import CapitalProtectionConfig, OrderType
-from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
+
+
+class _CaptureTraceSink:
+    def __init__(self) -> None:
+        self.events = []
+
+    def emit(self, event: TraceEvent) -> None:
+        self.events.append(event.model_dump(mode="json"))
 
 
 class _FakeAccountService:
@@ -134,8 +141,8 @@ async def test_pre_order_check_normal_path_still_allows_safe_order():
     ],
 )
 async def test_internal_exception_paths_emit_deny_trace(tmp_path, gateway, expected_reason):
-    trace_path = tmp_path / "risk_decision.jsonl"
-    trace_service = TraceService(sinks=[JsonlTraceSink(trace_path)])
+    sink = _CaptureTraceSink()
+    trace_service = TraceService(sinks=[sink])
     manager = _build_manager(gateway, trace_service=trace_service)
 
     result = await _run_safe_limit_check(manager)
@@ -143,7 +150,7 @@ async def test_internal_exception_paths_emit_deny_trace(tmp_path, gateway, expec
     assert result.allowed is False
     assert result.reason == expected_reason
 
-    payload = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
+    payload = sink.events[0]
     assert payload["event_type"] == "risk.pre_order_check"
     assert payload["decision"] == "deny"
     assert payload["reason"] == expected_reason

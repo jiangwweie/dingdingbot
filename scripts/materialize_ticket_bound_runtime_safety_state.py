@@ -37,8 +37,6 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 )
 
 
-DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watcher")
-DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "ticket-bound-runtime-safety-state.json"
 AUTHORITY_BOUNDARY = (
     "ticket_bound_runtime_safety_state; "
     "no_operation_layer_submit_no_exchange_write"
@@ -145,7 +143,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ticket-id", default="")
     parser.add_argument("--operation-layer-handoff-id", default="")
     parser.add_argument("--now-ms", type=int, default=None)
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--allow-non-postgres-for-test",
@@ -181,7 +178,6 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.dispose()
 
-    _write_json(Path(args.output_json), report)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True, default=str))
     else:
@@ -742,16 +738,6 @@ def _dedupe(values: list[str]) -> list[str]:
         if text and text not in result:
             result.append(text)
     return result
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
-        encoding="utf-8",
-    )
-    tmp_path.replace(path)
 
 
 if __name__ == "__main__":

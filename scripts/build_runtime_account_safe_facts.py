@@ -36,9 +36,6 @@ from collect_strategy_group_live_facts_readonly import (  # noqa: E402
     _protection_state,
     _request_json,
 )
-DEFAULT_OUTPUT_JSON = Path(
-    "/home/ubuntu/brc-deploy/reports/runtime-monitor/latest-account-safe-facts.json"
-)
 DEFAULT_ENV_FILE = Path("/home/ubuntu/brc-deploy/env/live-readonly.env")
 
 
@@ -50,7 +47,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE))
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--timeout-seconds", type=float, default=12)
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     args = parser.parse_args(argv)
 
     if not args.database_url:
@@ -89,8 +85,6 @@ def main(argv: list[str] | None = None) -> int:
     artifact["projection_target"] = "production_current"
     artifact["collector_source_mode"] = "pg_scope_direct_readonly_exchange"
     artifact["pg_fact_snapshot_ids"] = fact_snapshot_ids
-    output_json = Path(args.output_json)
-    _write_json(output_json, artifact)
     print(
         json.dumps(
             {
@@ -98,7 +92,6 @@ def main(argv: list[str] | None = None) -> int:
                 "account_safe_facts_ready": artifact["checks"][
                     "account_safe_facts_ready"
                 ],
-                "output_json": str(output_json),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -369,14 +362,6 @@ def build_runtime_account_safe_facts(
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
 
 
 if __name__ == "__main__":
