@@ -4,6 +4,10 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import sqlalchemy as sa
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "run_server_product_state_refresh_sequence.py"
@@ -45,6 +49,7 @@ def test_server_product_state_refresh_sequence_records_optional_failure(tmp_path
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -83,6 +88,7 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -166,6 +172,31 @@ def test_server_product_state_refresh_sequence_watcher_tick_summary_is_lightweig
     assert report["safety_invariants"]["calls_ticket_bound_operation_layer_handoff"] is False
     assert report["safety_invariants"]["calls_ticket_bound_runtime_safety_state"] is False
     assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
+
+
+def test_server_product_state_refresh_sequence_default_mode_is_watcher_tick_summary(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        runner=lambda command: (
+            calls.append(command)
+            or module.CommandResult(returncode=0, stdout="ok", stderr="")
+        ),
+    )
+
+    assert report["mode"] == "watcher_tick_summary"
+    assert [command[1] for command in calls] == [
+        "scripts/validate_runtime_candidate_universe_coverage.py",
+        "scripts/build_runtime_signal_watcher_readiness_pack.py",
+    ]
 
 
 def test_server_product_state_refresh_sequence_action_time_mode_skips_closure(
@@ -305,6 +336,33 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_fails_close
     assert report["step_results"][0]["name"] == "pg_action_time_trigger_state"
 
 
+def test_action_time_trigger_counts_ignore_expired_closed_and_invalidated_rows():
+    module = _load_module()
+    engine = _action_time_trigger_engine()
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            _insert_action_time_trigger_rows(conn, now_ms=now_ms, expired=True)
+            counts = module._action_time_trigger_counts(conn, now_ms=now_ms)
+            assert counts == {
+                "fresh_live_signal_events": 0,
+                "open_promotion_candidates": 0,
+                "open_action_time_lane_inputs": 0,
+                "open_action_time_tickets": 0,
+            }
+
+            _insert_action_time_trigger_rows(conn, now_ms=now_ms, expired=False)
+            counts = module._action_time_trigger_counts(conn, now_ms=now_ms)
+            assert counts == {
+                "fresh_live_signal_events": 1,
+                "open_promotion_candidates": 1,
+                "open_action_time_lane_inputs": 1,
+                "open_action_time_tickets": 1,
+            }
+    finally:
+        engine.dispose()
+
+
 def test_server_product_state_refresh_sequence_closure_mode_skips_control_rebuild(
     tmp_path: Path,
 ):
@@ -374,6 +432,7 @@ def test_server_product_state_refresh_sequence_fails_on_required_step_but_contin
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -417,6 +476,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_projection_publis
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -458,6 +518,7 @@ def test_server_product_state_refresh_sequence_omits_legacy_candidate_pool_mater
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -495,6 +556,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_pg_lane_materiali
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -536,6 +598,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_ticket_failure(
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -580,6 +643,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_finalgate_failure
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -624,6 +688,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_operation_handoff
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -668,6 +733,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_fa
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -712,6 +778,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_post_submit_closu
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -757,6 +824,7 @@ def test_server_product_state_refresh_sequence_requires_account_safe_facts(
         runtime_monitor_dir=tmp_path / "runtime-monitor",
         env_file=tmp_path / "live-readonly.env",
         output_json=tmp_path / "sequence.json",
+        mode="diagnostic_full",
         runner=runner,
     )
 
@@ -771,3 +839,142 @@ def test_server_product_state_refresh_sequence_requires_account_safe_facts(
     ]
     assert "materialize_action_time_ticket" in skipped_names
     assert "build_goal_status" in skipped_names
+
+
+def _action_time_trigger_engine():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_live_signal_events (
+                    signal_event_id TEXT PRIMARY KEY,
+                    freshness_state TEXT,
+                    status TEXT,
+                    expires_at_ms INTEGER,
+                    invalidated_at_ms INTEGER
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_promotion_candidates (
+                    promotion_candidate_id TEXT PRIMARY KEY,
+                    status TEXT,
+                    expires_at_ms INTEGER,
+                    closed_at_ms INTEGER
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_action_time_lane_inputs (
+                    action_time_lane_input_id TEXT PRIMARY KEY,
+                    lane_scope TEXT,
+                    status TEXT,
+                    expires_at_ms INTEGER,
+                    closed_at_ms INTEGER
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_action_time_tickets (
+                    ticket_id TEXT PRIMARY KEY,
+                    status TEXT,
+                    expires_at_ms INTEGER
+                )
+                """
+            )
+        )
+    return engine
+
+
+def _insert_action_time_trigger_rows(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+    expired: bool,
+) -> None:
+    suffix = "expired" if expired else "active"
+    expires_at_ms = now_ms - 1 if expired else now_ms + 60_000
+    closed_at_ms = now_ms - 1 if expired else None
+    invalidated_at_ms = now_ms - 1 if expired else None
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_live_signal_events VALUES (
+                :id,
+                'fresh',
+                'facts_validated',
+                :expires_at_ms,
+                :invalidated_at_ms
+            )
+            """
+        ),
+        {
+            "id": f"signal-{suffix}",
+            "expires_at_ms": expires_at_ms,
+            "invalidated_at_ms": invalidated_at_ms,
+        },
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_promotion_candidates VALUES (
+                :id,
+                'eligible',
+                :expires_at_ms,
+                :closed_at_ms
+            )
+            """
+        ),
+        {
+            "id": f"promotion-{suffix}",
+            "expires_at_ms": expires_at_ms,
+            "closed_at_ms": closed_at_ms,
+        },
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_action_time_lane_inputs VALUES (
+                :id,
+                'real_submit_candidate',
+                'ticket_pending',
+                :expires_at_ms,
+                :closed_at_ms
+            )
+            """
+        ),
+        {
+            "id": f"lane-{suffix}",
+            "expires_at_ms": expires_at_ms,
+            "closed_at_ms": closed_at_ms,
+        },
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_action_time_tickets VALUES (
+                :id,
+                'created',
+                :expires_at_ms
+            )
+            """
+        ),
+        {
+            "id": f"ticket-{suffix}",
+            "expires_at_ms": expires_at_ms,
+        },
+    )

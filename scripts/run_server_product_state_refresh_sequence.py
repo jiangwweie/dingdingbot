@@ -103,7 +103,7 @@ def run_server_product_state_refresh_sequence(
     runtime_monitor_dir: Path = DEFAULT_RUNTIME_MONITOR_DIR,
     env_file: Path = DEFAULT_ENV_FILE,
     output_json: Path = DEFAULT_OUTPUT_JSON,
-    mode: str = "diagnostic_full",
+    mode: str = "watcher_tick_summary",
     runner: Runner | None = None,
     action_time_trigger_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -340,6 +340,7 @@ def _empty_safety_invariants() -> dict[str, bool]:
 
 
 def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
+    now_ms = _now_ms()
     database_url = normalize_sync_postgres_dsn(
         env.get("PG_DATABASE_URL") or env.get("DATABASE_URL") or ""
     )
@@ -353,7 +354,7 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
     engine = sa.create_engine(database_url)
     try:
         with engine.connect() as conn:
-            counts = _action_time_trigger_counts(conn)
+            counts = _action_time_trigger_counts(conn, now_ms=now_ms)
     except Exception as exc:  # noqa: BLE001 - fail closed on PG current read errors.
         return {
             "status": "blocked",
@@ -368,11 +369,17 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
         "status": "triggered" if triggered else "not_triggered",
         "triggered": triggered,
         "blocker": "",
+        "now_ms": now_ms,
         "counts": counts,
     }
 
 
-def _action_time_trigger_counts(conn: sa.engine.Connection) -> dict[str, int]:
+def _action_time_trigger_counts(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int | None = None,
+) -> dict[str, int]:
+    now = _now_ms() if now_ms is None else int(now_ms)
     metadata = sa.MetaData()
     live_signals = sa.Table("brc_live_signal_events", metadata, autoload_with=conn)
     promotions = sa.Table("brc_promotion_candidates", metadata, autoload_with=conn)
@@ -385,17 +392,24 @@ def _action_time_trigger_counts(conn: sa.engine.Connection) -> dict[str, int]:
             sa.and_(
                 live_signals.c.freshness_state == "fresh",
                 live_signals.c.status == "facts_validated",
+                live_signals.c.expires_at_ms.is_not(None),
+                live_signals.c.expires_at_ms > now,
+                live_signals.c.invalidated_at_ms.is_(None),
             ),
         ),
         "open_promotion_candidates": _count_where(
             conn,
             promotions,
-            promotions.c.status.in_(
-                [
-                    "eligible",
-                    "arbitration_pending",
-                    "arbitration_won",
-                ]
+            sa.and_(
+                promotions.c.status.in_(
+                    [
+                        "eligible",
+                        "arbitration_pending",
+                        "arbitration_won",
+                    ]
+                ),
+                promotions.c.expires_at_ms > now,
+                promotions.c.closed_at_ms.is_(None),
             ),
         ),
         "open_action_time_lane_inputs": _count_where(
@@ -411,20 +425,29 @@ def _action_time_trigger_counts(conn: sa.engine.Connection) -> dict[str, int]:
                         "ticket_created",
                     ]
                 ),
+                lanes.c.expires_at_ms > now,
+                lanes.c.closed_at_ms.is_(None),
             ),
         ),
         "open_action_time_tickets": _count_where(
             conn,
             tickets,
-            tickets.c.status.in_(
-                [
-                    "created",
-                    "preflight_pending",
-                    "finalgate_ready",
-                ]
+            sa.and_(
+                tickets.c.status.in_(
+                    [
+                        "created",
+                        "preflight_pending",
+                        "finalgate_ready",
+                    ]
+                ),
+                tickets.c.expires_at_ms > now,
             ),
         ),
     }
+
+
+def _now_ms() -> int:
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 
 def _count_where(
@@ -911,10 +934,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         choices=sorted(REFRESH_MODES),
-        default="diagnostic_full",
+        default="watcher_tick_summary",
         help=(
             "Refresh mode. watcher_tick_summary is the normal watcher post-step; "
-            "diagnostic_full preserves the legacy full diagnostic sequence."
+            "diagnostic_full preserves the legacy full diagnostic sequence and "
+            "must be selected explicitly."
         ),
     )
     return parser.parse_args(argv)
