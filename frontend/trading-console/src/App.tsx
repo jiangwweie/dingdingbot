@@ -48,6 +48,8 @@ import type {
 
 type RouteKey = "dashboard" | "account-risk" | "order-ledger" | "strategy-groups" | "exceptions";
 
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 const routes: Array<{ key: RouteKey; label: string; path: string; icon: typeof Grid2X2 }> = [
   { key: "dashboard", label: "仪表盘", path: "/dashboard", icon: Grid2X2 },
   { key: "account-risk", label: "账户风险", path: "/account-risk", icon: WalletCards },
@@ -65,7 +67,14 @@ const endpointMap: Record<RouteKey, string> = {
 };
 
 function routeFromPath(pathname: string): RouteKey {
-  return routes.find((route) => route.path === pathname)?.key || "dashboard";
+  const normalized = basePath && pathname.startsWith(`${basePath}/`)
+    ? pathname.slice(basePath.length)
+    : pathname;
+  return routes.find((route) => route.path === normalized)?.key || "dashboard";
+}
+
+function routePath(route: { path: string }): string {
+  return `${basePath}${route.path}`;
 }
 
 function currentTheme(): ThemeMode {
@@ -150,7 +159,7 @@ export function App() {
   const navigate = (next: RouteKey) => {
     const target = routes.find((item) => item.key === next);
     if (!target) return;
-    window.history.pushState({}, "", target.path);
+    window.history.pushState({}, "", routePath(target));
     setRoute(next);
   };
 
