@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -91,6 +93,15 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
         assert current_snapshot_count == 3
         assert projection_run_count == 3
         assert report["safety_invariants"]["calls_exchange_write"] is False
+        candidate_export = json.loads(
+            (tmp_path / "candidate-pool.json").read_text(encoding="utf-8")
+        )
+        assert candidate_export["projection_run_id"].startswith(
+            "projection:candidate_pool:"
+        )
+        assert candidate_export["owner_projector"] == "pg_candidate_pool_projector"
+        assert candidate_export["source_priority"] == ["pg"]
+        assert candidate_export["authority_boundary"]
     finally:
         engine.dispose()
 
@@ -123,6 +134,31 @@ def test_publish_current_projections_keeps_one_current_snapshot_per_model(tmp_pa
             "daily_live_enablement_table": 1,
             "goal_status": 1,
         }
+    finally:
+        engine.dispose()
+
+
+def test_publish_current_projections_rejects_legacy_projection_owner(tmp_path: Path):
+    module = _load_module(
+        SCRIPT_PATH,
+        "publish_runtime_control_current_projections_owner_guard",
+    )
+    engine = _seeded_engine()
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    "UPDATE brc_current_projection_ownership "
+                    "SET owner_projector = 'legacy_goal_status_writer' "
+                    "WHERE model_type = 'goal_status'"
+                )
+            )
+            with pytest.raises(RuntimeError, match="current projection owner mismatch"):
+                module.publish_runtime_control_current_projections(
+                    conn,
+                    report_dir=tmp_path / "reports",
+                    runtime_monitor_dir=tmp_path / "runtime-monitor",
+                )
     finally:
         engine.dispose()
 

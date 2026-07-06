@@ -26,11 +26,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import sqlalchemy as sa
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 from src.application.readmodels.owner_projection import (
     owner_non_authority_checkpoint,
     owner_state_without_legacy_input_recovery_action,
@@ -50,6 +53,8 @@ DEFAULT_OPERATION_LAYER_EVIDENCE_JSON = Path(
     "operation-layer-arm-evidence.json"
 )
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
+OPEN_PG_TICKET_STATUSES = {"created", "preflight_pending", "finalgate_ready"}
+OPEN_PG_LANE_STATUSES = {"opened", "facts_refreshing", "ticket_pending", "ticket_created"}
 READY_STATUS = "ready_for_action_time_final_gate"
 FINALGATE_READY_STATUS = "finalgate_ready"
 WAITING_STATUS = "waiting_for_market"
@@ -175,6 +180,220 @@ def _read_optional_json(path_value: str | None) -> tuple[dict[str, Any] | None, 
             "warnings": [],
             "ids": {},
         }, str(path)
+
+
+def _pg_ticket_resume_pack(
+    *,
+    database_url: str,
+    api_base: str,
+) -> tuple[dict[str, Any], Path]:
+    normalized = normalize_sync_postgres_dsn(database_url)
+    if not normalized:
+        return _blocked_pg_ticket_resume_pack(
+            "blocked_by_missing_pg_database_url",
+            ["missing_fact:PG_DATABASE_URL"],
+        ), Path("pg://runtime-control-state/action-time-ticket")
+    engine = sa.create_engine(normalized)
+    try:
+        with engine.connect() as conn:
+            rows = _open_pg_ticket_identity_rows(conn)
+    finally:
+        engine.dispose()
+    source_path = Path("pg://runtime-control-state/action-time-ticket")
+    if not rows:
+        return _blocked_pg_ticket_resume_pack(
+            "blocked_by_missing_pg_ticket_identity",
+            ["missing_fact:open_pg_action_time_ticket"],
+        ), source_path
+    mismatched = [
+        row for row in rows if row.get("identity_mismatch_fields")
+    ]
+    if mismatched:
+        ticket_ids = ",".join(
+            sorted(str(row["ticket_id"]) for row in mismatched)
+        )
+        mismatch_fields = ",".join(
+            sorted(
+                {
+                    str(field)
+                    for row in mismatched
+                    for field in row.get("identity_mismatch_fields", [])
+                }
+            )
+        )
+        return _blocked_pg_ticket_resume_pack(
+            "blocked_by_inconsistent_pg_ticket_identity",
+            [f"inconsistent_pg_action_time_ticket_identity:{ticket_ids}:{mismatch_fields}"],
+        ), source_path
+    if len(rows) > 1:
+        ticket_ids = ",".join(sorted(str(row["ticket_id"]) for row in rows))
+        return _blocked_pg_ticket_resume_pack(
+            "blocked_by_ambiguous_pg_ticket_identity",
+            [f"ambiguous_open_pg_action_time_ticket:{ticket_ids}"],
+        ), source_path
+
+    row = rows[0]
+    ticket_id = str(row["ticket_id"])
+    strategy_group_id = str(row["strategy_group_id"])
+    symbol = str(row["symbol"])
+    side = str(row["side"])
+    runtime_profile_id = str(row["runtime_profile_id"])
+    action_time_lane_input_id = str(row["action_time_lane_input_id"])
+    promotion_candidate_id = str(row["promotion_candidate_id"])
+    signal_event_id = str(row["signal_event_id"])
+    allowed_actions = [FINALGATE_ACTION]
+    return {
+        "scope": "pg_ticket_bound_resume_identity",
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "status": READY_STATUS,
+        "ticket_id": ticket_id,
+        "action_time_ticket_id": ticket_id,
+        "action_time_lane_input_id": action_time_lane_input_id,
+        "promotion_candidate_id": promotion_candidate_id,
+        "signal_event_id": signal_event_id,
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "side": side,
+        "runtime_profile_id": runtime_profile_id,
+        "selected_runtime_instance_ids": [],
+        "action_time_resume": {
+            "status": READY_STATUS,
+            "next_step": FINALGATE_ACTION,
+            "ticket_id": ticket_id,
+            "action_time_ticket_id": ticket_id,
+            "action_time_lane_input_id": action_time_lane_input_id,
+            "promotion_candidate_id": promotion_candidate_id,
+            "signal_event_id": signal_event_id,
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+            "runtime_profile_id": runtime_profile_id,
+            "allowed_auto_actions": allowed_actions,
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "withdrawal_or_transfer_requested": False,
+        },
+        "owner_state": {
+            "status": READY_STATUS,
+            "blocker_class": "none",
+            "non_authority_checkpoint": FINALGATE_ACTION,
+        },
+        "command_plan": _preflight_command_plan(api_base=api_base, ticket_id=ticket_id),
+        "safety_invariants": {
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "mutates_pg": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "forbidden_effect_flags": [],
+        },
+        "allowed_auto_actions": allowed_actions,
+        "blockers": [],
+        "warnings": [],
+    }, source_path
+
+
+def _open_pg_ticket_identity_rows(conn: sa.engine.Connection) -> list[dict[str, Any]]:
+    metadata = sa.MetaData()
+    tickets = sa.Table("brc_action_time_tickets", metadata, autoload_with=conn)
+    lanes = sa.Table("brc_action_time_lane_inputs", metadata, autoload_with=conn)
+    statement = (
+        sa.select(
+            tickets.c.ticket_id,
+            tickets.c.action_time_lane_input_id,
+            tickets.c.promotion_candidate_id,
+            tickets.c.signal_event_id,
+            tickets.c.strategy_group_id,
+            tickets.c.symbol,
+            tickets.c.side,
+            tickets.c.runtime_profile_id,
+            tickets.c.status.label("ticket_status"),
+            lanes.c.promotion_candidate_id.label("lane_promotion_candidate_id"),
+            lanes.c.signal_event_id.label("lane_signal_event_id"),
+            lanes.c.strategy_group_id.label("lane_strategy_group_id"),
+            lanes.c.symbol.label("lane_symbol"),
+            lanes.c.side.label("lane_side"),
+            lanes.c.runtime_profile_id.label("lane_runtime_profile_id"),
+            lanes.c.status.label("lane_status"),
+        )
+        .select_from(
+            tickets.join(
+                lanes,
+                tickets.c.action_time_lane_input_id
+                == lanes.c.action_time_lane_input_id,
+            )
+        )
+        .where(tickets.c.status.in_(sorted(OPEN_PG_TICKET_STATUSES)))
+        .where(lanes.c.lane_scope == "real_submit_candidate")
+        .where(lanes.c.status.in_(sorted(OPEN_PG_LANE_STATUSES)))
+        .order_by(tickets.c.created_at_ms.asc(), tickets.c.ticket_id.asc())
+    )
+    rows: list[dict[str, Any]] = []
+    for row in conn.execute(statement).mappings():
+        item = dict(row)
+        item["identity_mismatch_fields"] = _pg_ticket_identity_mismatch_fields(item)
+        rows.append(item)
+    return rows
+
+
+def _pg_ticket_identity_mismatch_fields(row: dict[str, Any]) -> list[str]:
+    pairs = (
+        ("promotion_candidate_id", "lane_promotion_candidate_id"),
+        ("signal_event_id", "lane_signal_event_id"),
+        ("strategy_group_id", "lane_strategy_group_id"),
+        ("symbol", "lane_symbol"),
+        ("side", "lane_side"),
+        ("runtime_profile_id", "lane_runtime_profile_id"),
+    )
+    return [
+        left
+        for left, right in pairs
+        if str(row.get(left) or "") != str(row.get(right) or "")
+    ]
+
+
+def _blocked_pg_ticket_resume_pack(
+    dispatch_status: str,
+    blockers: list[str],
+) -> dict[str, Any]:
+    return {
+        "scope": "pg_ticket_bound_resume_identity",
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "status": "blocked",
+        "action_time_resume": {
+            "status": "blocked",
+            "allowed_auto_actions": [],
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "withdrawal_or_transfer_requested": False,
+        },
+        "owner_state": {
+            "status": "temporarily_unavailable",
+            "blocker_class": "runtime_data_gap",
+            "blocked_at": "pg_action_time_ticket_identity",
+            "blocked_reason": blockers[0] if blockers else dispatch_status,
+            "non_authority_checkpoint": "materialize_action_time_ticket",
+            "downgrade_mode": "continue_watcher_observation_no_submit",
+            "owner_action_required": False,
+        },
+        "safety_invariants": {
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "mutates_pg": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "forbidden_effect_flags": [],
+        },
+        "blockers": blockers,
+        "warnings": [],
+        "pg_ticket_identity_dispatch_status": dispatch_status,
+    }
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -1567,6 +1786,28 @@ def build_dispatch_artifact(
             dispatch_status="blocked_by_unsafe_resume_flags",
             blockers=base_blockers + [f"unsafe_flag:{name}" for name in unsafe_flags],
             command_plan=None,
+        )
+
+    if (
+        status == "blocked"
+        and str(resume_pack.get("scope") or "") == "pg_ticket_bound_resume_identity"
+    ):
+        return _dispatch_artifact(
+            label=label,
+            source_path=source_path,
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+            owner_state=owner_state,
+            status="blocked",
+            blocker_class=str(owner_state.get("blocker_class") or "runtime_data_gap"),
+            dispatch_action=None,
+            dispatch_status=str(
+                resume_pack.get("pg_ticket_identity_dispatch_status")
+                or "blocked_by_missing_pg_ticket_identity"
+            ),
+            blockers=base_blockers,
+            command_plan=None,
+            selected_strategy_group_id=selected_strategy_group_id,
         )
 
     if status == WAITING_STATUS:
@@ -4797,6 +5038,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--resume-pack-json", default=str(DEFAULT_RESUME_PACK))
+    parser.add_argument(
+        "--identity-source",
+        choices=("pg_ticket", "resume_pack_json"),
+        default="resume_pack_json",
+        help=(
+            "Trade identity source. Production submit-adjacent dispatch must use "
+            "pg_ticket; resume_pack_json is retained for diagnostics and legacy tests."
+        ),
+    )
+    parser.add_argument(
+        "--database-url",
+        default=os.environ.get("PG_DATABASE_URL") or os.environ.get("DATABASE_URL") or "",
+        help="PG DSN used when --identity-source=pg_ticket.",
+    )
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
     parser.add_argument(
         "--operation-layer-evidence-json",
@@ -4871,12 +5126,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    source_path = Path(args.resume_pack_json).expanduser()
+    if args.identity_source == "pg_ticket":
+        resume_pack, source_path = _pg_ticket_resume_pack(
+            database_url=args.database_url,
+            api_base=args.api_base,
+        )
+    else:
+        source_path = Path(args.resume_pack_json).expanduser()
+        resume_pack = _read_json(source_path)
     operation_layer_evidence_report, operation_layer_evidence_report_path = (
         _read_optional_json(args.operation_layer_evidence_json)
     )
     artifact = build_dispatch_artifact(
-        resume_pack=_read_json(source_path),
+        resume_pack=resume_pack,
         source_path=source_path,
         api_base=args.api_base,
         label=args.label,

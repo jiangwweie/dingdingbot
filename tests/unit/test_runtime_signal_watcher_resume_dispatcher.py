@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import sqlalchemy as sa
+
 import scripts.runtime_signal_watcher_resume_dispatcher as dispatcher
 from scripts.runtime_signal_watcher_resume_dispatcher import build_dispatch_artifact, main
 
@@ -251,6 +253,134 @@ def _operation_layer_blocked_report() -> dict:
         }
     ]
     return report
+
+
+def _pg_ticket_identity_db(
+    tmp_path: Path,
+    *,
+    lane_count: int = 1,
+    ticket_count: int = 1,
+    ticket_symbol: str = "ETHUSDT",
+) -> str:
+    db_path = tmp_path / "runtime-control-state.db"
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_action_time_lane_inputs (
+                        action_time_lane_input_id TEXT PRIMARY KEY,
+                        promotion_candidate_id TEXT,
+                        signal_event_id TEXT,
+                        strategy_group_id TEXT,
+                        symbol TEXT,
+                        side TEXT,
+                        runtime_profile_id TEXT,
+                        lane_scope TEXT,
+                        status TEXT,
+                        created_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_action_time_tickets (
+                        ticket_id TEXT PRIMARY KEY,
+                        action_time_lane_input_id TEXT,
+                        promotion_candidate_id TEXT,
+                        signal_event_id TEXT,
+                        strategy_group_id TEXT,
+                        symbol TEXT,
+                        side TEXT,
+                        runtime_profile_id TEXT,
+                        status TEXT,
+                        created_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            for index in range(lane_count):
+                suffix = index + 1
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_action_time_lane_inputs (
+                            action_time_lane_input_id,
+                            promotion_candidate_id,
+                            signal_event_id,
+                            strategy_group_id,
+                            symbol,
+                            side,
+                            runtime_profile_id,
+                            lane_scope,
+                            status,
+                            created_at_ms
+                        ) VALUES (
+                            :lane_id,
+                            :promotion_id,
+                            :signal_id,
+                            'SOR-001',
+                            'ETHUSDT',
+                            'long',
+                            'runtime-profile-v0',
+                            'real_submit_candidate',
+                            'ticket_created',
+                            :created_at_ms
+                        )
+                        """
+                    ),
+                    {
+                        "lane_id": f"lane-{suffix}",
+                        "promotion_id": f"promotion-{suffix}",
+                        "signal_id": f"signal-{suffix}",
+                        "created_at_ms": 1000 + suffix,
+                    },
+                )
+            for index in range(ticket_count):
+                suffix = index + 1
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_action_time_tickets (
+                            ticket_id,
+                            action_time_lane_input_id,
+                            promotion_candidate_id,
+                            signal_event_id,
+                            strategy_group_id,
+                            symbol,
+                            side,
+                            runtime_profile_id,
+                            status,
+                            created_at_ms
+                        ) VALUES (
+                            :ticket_id,
+                            :lane_id,
+                            :promotion_id,
+                            :signal_id,
+                            'SOR-001',
+                            :ticket_symbol,
+                            'long',
+                            'runtime-profile-v0',
+                            'created',
+                            :created_at_ms
+                        )
+                        """
+                    ),
+                    {
+                        "ticket_id": f"ticket-{suffix}",
+                        "lane_id": f"lane-{suffix}",
+                        "promotion_id": f"promotion-{suffix}",
+                        "signal_id": f"signal-{suffix}",
+                        "ticket_symbol": ticket_symbol,
+                        "created_at_ms": 2000 + suffix,
+                    },
+                )
+    finally:
+        engine.dispose()
+    return f"sqlite:///{db_path}"
 
 
 def _finalgate_ready_body() -> dict:
@@ -2520,6 +2650,107 @@ def test_dispatcher_blocks_unsafe_resume_flags():
     assert artifact["dispatch_status"] == "blocked_by_unsafe_resume_flags"
     assert "unsafe_flag:exchange_write_called" in artifact["blockers"]
     assert artifact["command_plan"] is None
+
+
+def test_dispatcher_pg_ticket_identity_missing_fails_closed(tmp_path):
+    database_url = _pg_ticket_identity_db(tmp_path, lane_count=0, ticket_count=0)
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["status"] == "blocked"
+    assert resume_pack["pg_ticket_identity_dispatch_status"] == (
+        "blocked_by_missing_pg_ticket_identity"
+    )
+    assert resume_pack["owner_state"]["blocker_class"] == "runtime_data_gap"
+    assert resume_pack["owner_state"]["owner_action_required"] is False
+    assert resume_pack["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_pg_ticket_identity_multiple_fails_closed(tmp_path):
+    database_url = _pg_ticket_identity_db(tmp_path, lane_count=2, ticket_count=2)
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["status"] == "blocked"
+    assert resume_pack["pg_ticket_identity_dispatch_status"] == (
+        "blocked_by_ambiguous_pg_ticket_identity"
+    )
+    assert "ambiguous_open_pg_action_time_ticket:ticket-1,ticket-2" in resume_pack[
+        "blockers"
+    ]
+
+
+def test_dispatcher_pg_ticket_identity_mismatch_fails_closed(tmp_path):
+    database_url = _pg_ticket_identity_db(
+        tmp_path,
+        lane_count=1,
+        ticket_count=1,
+        ticket_symbol="BTCUSDT",
+    )
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["status"] == "blocked"
+    assert resume_pack["pg_ticket_identity_dispatch_status"] == (
+        "blocked_by_inconsistent_pg_ticket_identity"
+    )
+    assert resume_pack["blockers"] == [
+        "inconsistent_pg_action_time_ticket_identity:ticket-1:symbol"
+    ]
+
+
+def test_dispatcher_pg_ticket_identity_emits_ticket_bound_preflight_plan(tmp_path):
+    database_url = _pg_ticket_identity_db(tmp_path)
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["scope"] == "pg_ticket_bound_resume_identity"
+    assert resume_pack["source_mode"] == "db_backed"
+    assert resume_pack["ticket_id"] == "ticket-1"
+    assert resume_pack["action_time_lane_input_id"] == "lane-1"
+    assert resume_pack["promotion_candidate_id"] == "promotion-1"
+    assert resume_pack["signal_event_id"] == "signal-1"
+    assert resume_pack["strategy_group_id"] == "SOR-001"
+    assert resume_pack["symbol"] == "ETHUSDT"
+    assert resume_pack["side"] == "long"
+    assert resume_pack["command_plan"]["path"].endswith(
+        "/runtime-action-time-finalgate-preflights/tickets/ticket-1"
+    )
+    assert resume_pack["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_cli_pg_ticket_identity_writes_ticket_bound_artifact(tmp_path):
+    database_url = _pg_ticket_identity_db(tmp_path)
+    output_path = tmp_path / "resume-dispatch-artifact.json"
+
+    exit_code = main(
+        [
+            "--identity-source",
+            "pg_ticket",
+            "--database-url",
+            database_url,
+            "--output-json",
+            str(output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["status"] == "ready_for_action_time_final_gate"
+    assert artifact["dispatch_action"] == "run_official_action_time_final_gate_preflight"
+    assert artifact["command_plan"]["ticket_id"] == "ticket-1"
 
 
 def test_dispatcher_cli_writes_artifact(tmp_path):

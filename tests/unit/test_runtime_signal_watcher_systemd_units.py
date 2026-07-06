@@ -78,6 +78,7 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     text = DROPIN_PATH.read_text(encoding="utf-8")
 
     assert "runtime_signal_watcher_resume_dispatcher.py" in text
+    assert "--identity-source pg_ticket" in text
     assert "post-signal-resume-pack.json" in text
     assert "--resume-pack-json" in text
     assert "--output-json" in text

@@ -161,10 +161,15 @@ def publish_runtime_control_current_projections(
         control_state=control_state,
         computed_at_ms=started_ms,
     )
+    _validate_projection_ownership(conn, projector_runs)
     snapshots = [
         _snapshot_row(
             model_type="candidate_pool",
-            payload=candidate_pool,
+            payload=_export_payload_with_lineage(
+                candidate_pool,
+                projection_run=projector_runs[0],
+                generated_at_ms=started_ms,
+            ),
             source_watermark=_source_watermark(candidate_pool),
             input_watermark=_input_watermark(control_state, candidate_pool),
             output_path=output_paths.get("candidate_pool"),
@@ -172,7 +177,11 @@ def publish_runtime_control_current_projections(
         ),
         _snapshot_row(
             model_type="daily_live_enablement_table",
-            payload=daily_table,
+            payload=_export_payload_with_lineage(
+                daily_table,
+                projection_run=projector_runs[1],
+                generated_at_ms=started_ms,
+            ),
             source_watermark=_source_watermark(daily_table),
             input_watermark=_input_watermark(control_state, daily_table),
             output_path=output_paths.get("daily_live_enablement_table"),
@@ -180,7 +189,11 @@ def publish_runtime_control_current_projections(
         ),
         _snapshot_row(
             model_type="goal_status",
-            payload=goal_status,
+            payload=_export_payload_with_lineage(
+                goal_status,
+                projection_run=projector_runs[2],
+                generated_at_ms=started_ms,
+            ),
             source_watermark=_source_watermark(goal_status),
             input_watermark=_input_watermark(control_state, goal_status),
             output_path=output_paths.get("goal_status"),
@@ -193,11 +206,12 @@ def publish_runtime_control_current_projections(
         _upsert_by_pk(conn, "brc_projection_runs", run)
     _upsert_goal_status_current(
         conn,
-        goal_status=goal_status,
+        goal_status=snapshots[2]["payload"],
         projection_run_id=projector_runs[-1]["projection_run_id"],
         updated_at_ms=started_ms,
     )
     _insert_current_snapshots(conn, snapshots)
+    _write_projection_exports(snapshots)
 
     return {
         "schema": SCHEMA,
@@ -272,6 +286,80 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
     parser.add_argument("--json", action="store_true")
     return parser.parse_args(argv)
+
+
+def _validate_projection_ownership(
+    conn: sa.engine.Connection,
+    projector_runs: list[dict[str, Any]],
+) -> None:
+    table = _table(conn, "brc_current_projection_ownership")
+    rows = [
+        dict(row)
+        for row in conn.execute(sa.select(table)).mappings()
+    ]
+    by_model_scope: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (
+            str(row.get("model_type") or ""),
+            str(row.get("projection_scope_key") or ""),
+        )
+        if not key[0] or not key[1]:
+            raise RuntimeError("current projection ownership missing model/scope")
+        if key in by_model_scope:
+            raise RuntimeError(
+                f"duplicate current projection ownership: {key[0]}:{key[1]}"
+            )
+        by_model_scope[key] = row
+        if row.get("legacy_writer_allowed") is not False:
+            raise RuntimeError(f"{key[0]}:{key[1]} allows legacy writer")
+        if row.get("current_source_mode") != "db_backed":
+            raise RuntimeError(f"{key[0]}:{key[1]} is not db_backed")
+
+    for run in projector_runs:
+        model_type = str(run["model_type"])
+        owner = by_model_scope.get((model_type, "global"))
+        if not owner:
+            raise RuntimeError(f"missing current projection ownership: {model_type}")
+        if owner.get("owner_projector") != run["owner_projector"]:
+            raise RuntimeError(
+                f"current projection owner mismatch for {model_type}: "
+                f"expected={owner.get('owner_projector')}:"
+                f"actual={run['owner_projector']}"
+            )
+        if run.get("source_mode") != "db_backed":
+            raise RuntimeError(f"{model_type} projection run is not db_backed")
+        if run.get("projection_target") != "production_current":
+            raise RuntimeError(f"{model_type} projection run is not production_current")
+        if run.get("legacy_diagnostics_affected_current") is not False:
+            raise RuntimeError(f"{model_type} legacy diagnostics affected current")
+
+
+def _export_payload_with_lineage(
+    payload: dict[str, Any],
+    *,
+    projection_run: dict[str, Any],
+    generated_at_ms: int,
+) -> dict[str, Any]:
+    return {
+        **payload,
+        "projection_run_id": projection_run["projection_run_id"],
+        "owner_projector": projection_run["owner_projector"],
+        "input_watermark": projection_run["input_watermark"],
+        "source_priority": projection_run["source_priority"],
+        "generated_at_ms": generated_at_ms,
+        "code_version": projection_run.get("code_version"),
+        "authority_boundary": (
+            str(payload.get("authority_boundary") or "")
+            or "pg_current_projection_export_only_no_runtime_authority"
+        ),
+    }
+
+
+def _write_projection_exports(snapshots: list[dict[str, Any]]) -> None:
+    for snapshot in snapshots:
+        output_path = snapshot.get("output_path")
+        if output_path:
+            _write_json(Path(str(output_path)), _dict(snapshot.get("payload")))
 
 
 def _normalized_database_url(database_url: str) -> str:
