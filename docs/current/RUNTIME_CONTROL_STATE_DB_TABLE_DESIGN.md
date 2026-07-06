@@ -2,7 +2,7 @@
 title: RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN
 status: CURRENT_DESIGN
 authority: docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
-last_verified: 2026-07-03
+last_verified: 2026-07-06
 ---
 
 # Runtime Control State DB Table Design
@@ -246,6 +246,22 @@ Checks and indexes:
 | `ck_brc_strategy_event_required_facts_operator` | `operator` is one of the supported operator values |
 | `ck_brc_strategy_event_required_facts_disable_shape` | `disable_on_match=true` rows must name a `failed_blocker_class` and cannot be silently ignored |
 | `ck_brc_strategy_event_required_facts_no_v0_exception` | Current production rows must not encode `explicit_not_required_for_v0` or similar transitional text |
+
+Disable facts are fail-closed. `disable_on_match=true` means the row describes a
+condition that disables promotion, ticket materialization, or a later gate when
+the condition is matched.
+
+| Runtime observation | Meaning | Required result |
+| --- | --- | --- |
+| Fact key exists and condition matches | Disable condition is active | Block with `disable_fact_active:<fact_key>` or the row's `failed_blocker_class` |
+| Fact key exists and condition does not match | Disable condition is explicitly clear | Continue only if all other required facts pass |
+| Fact key is absent from `fact_values` | Disable condition is unknown | Block with `disable_fact_missing:<fact_key>` or the row's `missing_blocker_class` |
+| Fact snapshot is stale, expired, `missing`, or `unknown` | Disable condition is unknown | Block as missing/stale; never treat as clear |
+
+`disable_on_match=true` rows must not use absence as a successful negative
+signal. For example, a BRF2 short-side `strong_uptrend_disable` fact is clear
+only when the current action-time fact snapshot explicitly observes the disable
+condition as false. Missing, stale, unknown, or expired values remain blockers.
 
 MI-LONG current seed has no `v0` exception. `relative_strength_confirmed` is a
 hard RequiredFact for the current `MI-LONG` event spec unless a future versioned
@@ -1059,6 +1075,17 @@ Checks and indexes:
 Writer: watcher, server monitor, action-time fact refresher.
 
 Readers: Candidate Pool, Runtime Safety State, FinalGate preflight services.
+
+When a `brc_strategy_event_required_facts` row has `disable_on_match=true`,
+readers must evaluate `brc_runtime_fact_snapshots.fact_values` with three states:
+
+1. **active disable**: key exists and condition matches;
+2. **explicit clear**: key exists and condition does not match;
+3. **unknown disable**: key is absent or the snapshot is stale/expired/missing/unknown.
+
+Only **explicit clear** may allow promotion, ticket materialization, or later
+pre-submit readiness to continue. Unknown disable is a blocker, not a default
+false value.
 
 ### `brc_live_signal_events`
 

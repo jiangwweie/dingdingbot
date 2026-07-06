@@ -198,6 +198,32 @@ def test_blocks_fresh_signal_without_action_time_facts(pg_control_connection):
     assert "action_time_fact_snapshot_missing" in json.loads(row["blockers"])
 
 
+def test_blocks_brf2_promotion_when_disable_fact_is_missing(pg_control_connection):
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        "BRF2-001",
+        "BTCUSDT",
+        "short",
+        fact_values={
+            "rally_failure_confirmed": True,
+            "short_side_not_disabled": True,
+            "rally_high_reference": "1800",
+        },
+    )
+
+    payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "promotion_candidates_blocked"
+    assert "disable_fact_missing:strong_uptrend_disable" in payload["blockers"]
+    assert _count(pg_control_connection, "brc_promotion_candidates") == 1
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+    assert _count(pg_control_connection, "brc_budget_reservations") == 0
+    assert _count(pg_control_connection, "brc_protection_references") == 0
+
+
 def test_conditional_rehearsal_scope_does_not_create_real_submit_lane(pg_control_connection):
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
     pg_control_connection.execute(
@@ -342,6 +368,7 @@ def _insert_ready_fresh_signal(
     side: str,
     *,
     insert_action_time_fact: bool = True,
+    fact_values: dict | None = None,
 ) -> None:
     row = _candidate_runtime_row(conn, strategy_group_id, symbol, side)
     suffix = f"{strategy_group_id}:{symbol}:{side}:unit"
@@ -352,7 +379,7 @@ def _insert_ready_fresh_signal(
     signal_event_id = f"signal:{suffix}"
     readiness_row_id = f"readiness:{suffix}"
     expires_at_ms = NOW_MS + 600_000
-    fact_values = _fact_values(conn, row)
+    fact_values = fact_values or _fact_values(conn, row)
 
     _insert_coverage(conn, row, expires_at_ms=expires_at_ms)
     _insert_fact(

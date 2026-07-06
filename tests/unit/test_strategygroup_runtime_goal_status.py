@@ -664,6 +664,18 @@ def _matrix_by_key(packet: dict) -> dict[str, dict]:
         for item in packet.get("real_order_readiness_matrix", [])
     }
 
+
+def test_goal_owner_action_required_does_not_escalate_engineering_gaps() -> None:
+    assert goal_status._goal_owner_label("runtime_liveness_degraded") == "处理中"
+    assert goal_status._goal_owner_label("missing_fact") == "处理中"
+    assert goal_status._goal_owner_action_required(
+        "runtime_liveness_degraded",
+        "需要介入",
+    ) is False
+    assert goal_status._goal_owner_action_required("missing_fact", "需要介入") is False
+    assert goal_status._goal_owner_action_required("hard_safety_stop", "需要介入") is True
+
+
 def test_goal_status_uses_pg_candidate_pool_without_json_file(
     tmp_path: Path,
     pg_control_connection,

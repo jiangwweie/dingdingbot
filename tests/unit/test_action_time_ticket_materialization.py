@@ -318,6 +318,30 @@ def test_materializer_blocks_brf2_ticket_when_disable_fact_matches(pg_control_co
     assert _ticket_count(pg_control_connection) == 0
 
 
+def test_materializer_blocks_brf2_ticket_when_disable_fact_is_missing(pg_control_connection):
+    _insert_action_time_lane_graph(
+        pg_control_connection,
+        strategy_group_id="BRF2-001",
+        symbol="BTCUSDT",
+        side="short",
+        fact_values={
+            "rally_failure_confirmed": True,
+            "short_side_not_disabled": True,
+            "rally_high_reference": "1800",
+        },
+    )
+
+    payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "disable_fact_missing:strong_uptrend_disable" in payload["blockers"]
+    assert "disable_fact_active:strong_uptrend_disable" not in payload["blockers"]
+    assert _ticket_count(pg_control_connection) == 0
+
+
 def test_materializer_blocks_non_live_submit_promotion_scope(pg_control_connection):
     _insert_action_time_lane_graph(pg_control_connection)
     pg_control_connection.execute(

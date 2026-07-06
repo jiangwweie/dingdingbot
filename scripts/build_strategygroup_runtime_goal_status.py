@@ -407,11 +407,34 @@ def _plain_language_next_system_action(checkpoint: str) -> str:
     }.get(checkpoint, checkpoint or "等待下一次 PG current projection")
 
 
+OWNER_PROCESSING_STATUSES = {
+    "fresh_signal_detected",
+    "fresh_signal_processing",
+    "action_time_finalgate_ready",
+    "operation_layer_ready",
+    "runtime_liveness_degraded",
+    "active_position_resolution",
+    "missing_fact",
+}
+OWNER_INTERVENTION_STATUSES = {
+    "hard_safety_stop",
+    "deployment_issue",
+}
+
+
+def _goal_owner_label(status: str) -> str:
+    if status == "waiting_for_signal":
+        return "等待机会"
+    if status in OWNER_PROCESSING_STATUSES:
+        return "处理中"
+    if status in OWNER_INTERVENTION_STATUSES:
+        return "需要介入"
+    return "处理中"
+
+
 def _goal_owner_action_required(status: str, owner_label: str) -> bool:
-    return owner_label == "需要介入" or status in {
-        "hard_safety_stop",
-        "deployment_issue",
-    }
+    del owner_label
+    return status in OWNER_INTERVENTION_STATUSES
 
 
 def _pg_readiness_matrix(
@@ -662,19 +685,7 @@ def _build_pg_goal_status_artifact(
         str(item.get("key") or "") for item in submit_blocker_review_items
     ]
     submit_blocker_review_required = bool(submit_blocker_review_items)
-    owner_label = (
-        "等待机会"
-        if status == "waiting_for_signal"
-        else "处理中"
-        if status
-        in {
-            "fresh_signal_detected",
-            "fresh_signal_processing",
-            "action_time_finalgate_ready",
-            "operation_layer_ready",
-        }
-        else "需要介入"
-    )
+    owner_label = _goal_owner_label(status)
     owner_action_required = _goal_owner_action_required(status, owner_label)
     missing_ticket_lane_ids = [
         lane_id for lane_id in active_lane_ids if lane_id not in tickets_by_lane

@@ -38,6 +38,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
+    RuntimeControlStateRepositoryError,
 )
 
 DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-monitor")
@@ -392,6 +393,22 @@ def _decision_from_pg_sources(
     }
 
 
+def _decision_from_pg_current_state_error(exc: RuntimeControlStateRepositoryError) -> dict[str, Any]:
+    reason = f"runtime_data_gap:pg_current_state_invalid:{exc}"
+    return {
+        "decision": "notify",
+        "notify": True,
+        "status": "notify_required",
+        "reasons": [reason],
+        "automation_id": "tokyo-runtime-server-monitor",
+        "strategy_group_id": "runtime",
+        "symbol": "all",
+        "blocker_class": "runtime_data_gap",
+        "checkpoint": "pg_current_state_repository",
+        "owner_message": "PG current state 校验失败，系统需要修复运行投影",
+    }
+
+
 def _dedupe_identity(decision: dict[str, Any]) -> str:
     parts = [
         str(decision.get("automation_id") or ""),
@@ -687,23 +704,45 @@ def build_server_monitor_artifact_from_pg(
 
     now = _utc_now()
     repository = PgBackedRuntimeControlStateRepository(conn)
-    control_state = repository.read_control_state()
-    candidate_pool = build_strategy_live_candidate_pool_from_control_state(control_state)
     report_dir = Path(args.output_json).parent
-    goal_status = build_goal_status_artifact_from_control_state(
-        control_state=control_state,
-        report_dir=report_dir,
-    )
     systemd = (
         {"checked": False, "ready": True, "rows": [], "blockers": []}
         if args.skip_systemd
         else _systemd_status(list(args.systemd_unit or []), runner=systemd_runner)
     )
-    decision = _decision_from_pg_sources(
-        goal_status=goal_status,
-        candidate_pool=candidate_pool,
-        systemd=systemd,
-    )
+    source_errors: dict[str, Any] = {}
+    try:
+        control_state = repository.read_control_state()
+        candidate_pool = build_strategy_live_candidate_pool_from_control_state(control_state)
+        goal_status = build_goal_status_artifact_from_control_state(
+            control_state=control_state,
+            report_dir=report_dir,
+        )
+        decision = _decision_from_pg_sources(
+            goal_status=goal_status,
+            candidate_pool=candidate_pool,
+            systemd=systemd,
+        )
+        control_state_watermark = {
+            "schema": str(control_state.get("schema") or ""),
+            "table_counts": _as_dict(control_state.get("table_counts")),
+        }
+    except RuntimeControlStateRepositoryError as exc:
+        candidate_pool = {}
+        goal_status = {}
+        decision = _decision_from_pg_current_state_error(exc)
+        if not systemd.get("ready"):
+            decision["reasons"] = _dedupe(
+                [*decision["reasons"], *[str(item) for item in systemd.get("blockers") or []]]
+            )
+            decision["blocker_class"] = "watcher_or_service_failure"
+            decision["checkpoint"] = "systemd"
+        source_errors["pg_current_state_repository"] = str(exc)
+        control_state_watermark = {
+            "schema": "unavailable",
+            "table_counts": {},
+            "error_class": "RuntimeControlStateRepositoryError",
+        }
     output_json = Path(args.output_json)
     webhook_url = args.feishu_webhook_url or _env_value(FEISHU_WEBHOOK_URL_ENV_NAMES)
     webhook_secret = args.feishu_webhook_secret or _env_value(FEISHU_WEBHOOK_SECRET_ENV_NAMES)
@@ -725,10 +764,7 @@ def build_server_monitor_artifact_from_pg(
         "goal_status": "pg_projection:strategygroup_runtime_goal_status",
         "server_monitor_runs": "pg:brc_server_monitor_runs",
         "server_monitor_notifications": "pg:brc_server_monitor_notifications",
-        "control_state_watermark": {
-            "schema": str(control_state.get("schema") or ""),
-            "table_counts": _as_dict(control_state.get("table_counts")),
-        },
+        "control_state_watermark": control_state_watermark,
     }
     _record_pg_monitor_run(
         conn=conn,
@@ -748,7 +784,7 @@ def build_server_monitor_artifact_from_pg(
         "notification": notification,
         "dedupe_state": dedupe_state,
         "source_paths": {},
-        "source_errors": {},
+        "source_errors": source_errors,
         "source_statuses": {
             "candidate_pool": str(candidate_pool.get("status") or ""),
             "goal_status": str(goal_status.get("status") or ""),

@@ -471,10 +471,11 @@ def test_pg_action_time_lane_notifies_once_with_pg_dedupe(
             )
 
             assert first["decision"]["decision"] == "notify"
-            assert first["decision"]["strategy_group_id"] == "SOR-001"
-            assert first["decision"]["symbol"] == "ETHUSDT"
-            assert first["decision"]["blocker_class"] == "action_time_ticket_missing"
-            assert first["decision"]["checkpoint"] == "materialize_action_time_ticket"
+            assert first["decision"]["strategy_group_id"] == "runtime"
+            assert first["decision"]["symbol"] == "all"
+            assert first["decision"]["blocker_class"] == "runtime_data_gap"
+            assert first["decision"]["checkpoint"] == "pg_current_state_repository"
+            assert "pg_current_state_repository" in first["source_errors"]
             assert first["notification"]["attempted"] is True
             assert first["notification"]["sent"] is True
             assert second["notification"]["duplicate_suppressed"] is True
@@ -521,6 +522,9 @@ def test_pg_feishu_failure_retries_from_pg_notification_state(
 
             assert first["notification"]["attempted"] is True
             assert first["notification"]["sent"] is False
+            assert first["decision"]["blocker_class"] == "runtime_data_gap"
+            assert first["decision"]["checkpoint"] == "pg_current_state_repository"
+            assert "pg_current_state_repository" in first["source_errors"]
             assert second["notification"]["retry_pending"] is True
             assert second["notification"]["attempted"] is True
             assert second["notification"]["sent"] is True

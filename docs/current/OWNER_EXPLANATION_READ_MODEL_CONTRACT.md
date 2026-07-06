@@ -182,10 +182,13 @@ No-trade explanations must distinguish **market wait**, **engineering gap**,
 | --- | --- |
 | `market_wait_validated` | Say the system is healthy and waiting for valid opportunity |
 | `computed_not_satisfied` | Say conditions were computed but market facts did not satisfy |
+| `runtime_data_gap` | Say runtime data is incomplete and the system is waiting for automatic refresh or engineering repair |
 | `detector_not_attached` / `watcher_tick_missing` | Say monitoring input is pending or stale |
 | `scope_not_attached` | Say runtime scope is not connected |
 | `policy_scope_missing` | Say Owner policy/risk scope is missing |
 | `runtime_profile_scope_missing` | Say runtime profile is incomplete |
+| `runtime_liveness_degraded` | Say server observation coverage is incomplete and system repair is next |
+| `missing_fact` | Say required facts are incomplete and system fact refresh or projection repair is next |
 | `action_time_preflight_ready` | Say system is processing pre-trade checks |
 | `active_position_resolution` | Say position or open order state needs resolution |
 | `hard_safety_stop` | Say safety boundary stopped progression |
@@ -211,6 +214,77 @@ Owner policy, recovery, or review decision.
 Ordinary no-signal, computed-not-satisfied market conditions, normal pre-trade
 processing, monitor cache refresh, and detail/audit availability must not create
 Owner intervention.
+
+### Owner Action Classification
+
+Backend projections must classify Owner action from the next decision owner, not
+from scary technical wording. Engineering blockers are not Owner actions.
+
+| Status / Reason | Owner Action Required | Owner Explanation |
+| --- | --- | --- |
+| `market_wait_validated` | no | Market opportunity is not present; system keeps observing |
+| `computed_not_satisfied` | no | Market facts were computed and did not satisfy the strategy |
+| `runtime_data_gap` | no by default | PG, watcher, monitor, or projection data is incomplete; system refresh or engineering repair owns the next step |
+| `missing_fact` | no by default | Required facts are absent or incomplete; system fact refresh or projection repair owns the next step |
+| `runtime_liveness_degraded` | no by default | Server observation coverage is incomplete; system repair owns the next step |
+| `policy_scope_missing` | yes | Owner must decide allowed strategy, symbol, side, profile, budget, tier, or eligibility scope |
+| `budget_gap` | yes | Owner must adjust or confirm budget/risk boundary |
+| `recovery_review` | yes | Owner must review an abnormal recovery proposal |
+| `strategy_review` | yes | Owner must keep, revise, promote, park, pause, or kill strategy |
+| `hard_safety_stop` | yes when recovery or policy decision is required | Safety boundary stopped progression and abnormal recovery/policy review may be needed |
+
+When `runtime_data_gap` is emitted by the server monitor because PG current state
+validation failed, the backend explanation must use this shape or an equivalent
+composed read model:
+
+```json
+{
+  "owner_state": "temporarily_unavailable",
+  "owner_action_required": false,
+  "no_trade_reason_code": "runtime_data_gap",
+  "plain_language_reason": "系统当前运行数据不完整，正在等待自动修复或工程处理"
+}
+```
+
+`owner_action_required=true` is reserved for policy, budget, scope, abnormal
+recovery review, or strategy review. It must not be set merely because PG
+current state, watcher coverage, monitor data, or RequiredFacts projection needs
+engineering repair.
+
+## Disable Fact Explanation Rules
+
+`disable_on_match=true` facts are fail-closed disable conditions.
+
+| Disable fact state | Backend meaning | Promotion / Ticket result |
+| --- | --- | --- |
+| Condition matches, for example observed `true` when expected `true` | Disable condition is active | Block with `disable_fact_active:<fact_key>` |
+| Condition is explicitly observed not to match, for example observed `false` when expected `true` | Disable condition is clear | May continue if other facts pass |
+| Fact key is missing | Disable condition is unknown | Block with `disable_fact_missing:<fact_key>` |
+| Fact snapshot is stale, expired, or `unknown` | Disable condition is unknown | Block as missing/stale fact; do not treat as clear |
+
+The explanation layer must never say a disable condition is clear when the
+backend did not observe a current explicit non-match. This matters especially
+for short-side or conditional strategies where a missing disable fact is a
+safety ambiguity, not permission to proceed.
+
+## Action-Time Ticket Stage Explanation
+
+The Owner explanation must distinguish opportunity selection from formal
+candidate/ticket materialization. A ticket is an identity and audit object; it is
+not submit authority and it does not bypass FinalGate or Operation Layer.
+
+| Backend state | Owner-facing explanation | Owner Action |
+| --- | --- | --- |
+| No fresh signal | 当前没有市场机会 | No |
+| Promotion candidate exists | 有机会，系统正在选择唯一交易前通道 | No |
+| Action-time lane exists but no ticket | 机会已进入交易前链路，但还没有正式候选交易记录 | No |
+| Ticket exists but FinalGate not passed | 候选交易已锁定，等待最终安全检查 | No |
+| FinalGate / Operation Layer blocked | 安全边界阻断，不允许绕过 | Only if abnormal recovery or policy review is required |
+| Runtime Safety State ready | 已到官方提交入口前，但仍必须走官方路径 | No by itself |
+
+Frontend, notification, and forensics consumers must not infer trade identity
+from a promotion candidate alone. The formal candidate identity starts at the
+Action-Time Ticket and its lineage refs.
 
 ## Account Safety Rules
 
@@ -292,6 +366,8 @@ coverage for:
 | No signal, all non-market blockers closed | Waiting for opportunity, no Owner action |
 | Computed facts not satisfied | Market conditions not met, no Owner action |
 | Detector missing | Monitoring input not connected, engineering/system next action |
+| PG current state validation fails | Temporarily unavailable, `runtime_data_gap`, no Owner action by default |
+| Disable fact missing for a scoped candidate | Disable condition unknown, block promotion/ticket, no clear-state wording |
 | Policy scope missing | Owner action required with policy reason |
 | Fresh signal promoted but no ticket | Opportunity exists, pre-trade processing not complete |
 | Ticket exists but FinalGate not passed | Final safety check not passed, no bypass |

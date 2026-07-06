@@ -821,6 +821,9 @@ def _required_fact_blockers(
         fact_key = str(row.get("fact_key") or "")
         satisfied = _fact_condition_satisfied(row, fact_values)
         if row.get("disable_on_match") is True:
+            if fact_key not in fact_values:
+                blockers.append(f"disable_fact_missing:{fact_key}")
+                continue
             if satisfied:
                 blockers.append(f"disable_fact_active:{fact_key}")
             continue

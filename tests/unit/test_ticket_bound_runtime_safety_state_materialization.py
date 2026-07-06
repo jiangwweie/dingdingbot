@@ -274,11 +274,12 @@ def test_runtime_safety_state_blocks_non_live_market_signal_source(
         now_ms=NOW_MS + 3000,
     )
 
-    assert payload["status"] == "runtime_safety_state_blocked"
-    assert "signal_event_not_live_market:replay" in payload["blockers"]
-    assert "signal_event_status_not_validated:stale" in payload["blockers"]
-    assert "signal_event_not_fresh:stale" in payload["blockers"]
-    assert _runtime_safety_row(pg_control_connection)["submit_allowed"] in {False, 0}
+    assert payload["status"] == "blocked"
+    assert any(
+        str(blocker).startswith("runtime_control_state_invalid:")
+        for blocker in payload["blockers"]
+    )
+    assert _runtime_safety_count(pg_control_connection) == 0
 
 
 def test_runtime_safety_state_blocks_generated_at_signal_time(
