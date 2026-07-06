@@ -102,6 +102,10 @@ def test_signal_watcher_timer_does_not_persistent_catch_up():
         REPO_ROOT / "deploy" / "systemd" / "brc-runtime-signal-watcher.timer"
     ).read_text(encoding="utf-8")
 
+    assert "OnActiveSec=5min" in timer_text
+    assert "OnBootSec=" not in timer_text
+    assert "OnUnitActiveSec=10min" in timer_text
+    assert "OnUnitActiveSec=60s" not in timer_text
     assert "Persistent=false" in timer_text
     assert "Persistent=true" not in timer_text
 
@@ -235,6 +239,9 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "systemctl daemon-reload" in commands
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "systemctl enable --now" in commands
+    assert "systemctl enable --now brc-runtime-signal-watcher.timer" not in commands
+    assert "systemctl is-active brc-runtime-signal-watcher.timer" not in commands
+    assert "systemctl enable brc-runtime-signal-watcher.timer" in commands
     assert "systemctl restart brc-runtime-signal-watcher.timer" not in commands
     assert "systemctl start brc-runtime-monitor.service" in commands
     assert "systemctl disable --now brc-runtime-db-retention.timer" in commands

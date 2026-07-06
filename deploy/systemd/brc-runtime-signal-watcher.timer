@@ -1,10 +1,10 @@
 [Unit]
-Description=Run BRC runtime signal watcher every minute
+Description=Run BRC runtime signal watcher on bounded cadence
 
 [Timer]
-OnBootSec=90s
-OnUnitActiveSec=60s
-AccuracySec=10s
+OnActiveSec=5min
+OnUnitActiveSec=10min
+AccuracySec=30s
 Persistent=false
 Unit=brc-runtime-signal-watcher.service
 
