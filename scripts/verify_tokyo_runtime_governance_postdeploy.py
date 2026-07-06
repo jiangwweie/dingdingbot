@@ -27,6 +27,7 @@ DEFAULT_EXPECTED_MIGRATION_COUNT = 84
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
     "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
 )
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
 
 
 class PostDeployVerifyError(RuntimeError):
@@ -563,13 +564,24 @@ def _ssh_result(
 
 
 def _run(command: tuple[str, ...]) -> CommandResult:
-    completed = subprocess.run(
-        command,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return CommandResult(
+            stdout=exc.stdout or "",
+            stderr=(
+                (exc.stderr or "")
+                + f"\ncommand timed out after {DEFAULT_COMMAND_TIMEOUT_SECONDS}s"
+            ).strip(),
+            returncode=124,
+        )
     return CommandResult(
         stdout=completed.stdout,
         stderr=completed.stderr,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -205,3 +206,17 @@ def test_postdeploy_verifier_blocks_head_and_schema_mismatch():
     assert "postdeploy_release_head_mismatch" in blockers
     assert "postdeploy_migration_count_mismatch" in blockers
     assert "postdeploy_latest_migration_mismatch" in blockers
+
+
+def test_postdeploy_verifier_subprocess_timeout_returns_failure(monkeypatch):
+    module = _load_module()
+
+    def timeout_run(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=("ssh", "tokyo"), timeout=20)
+
+    monkeypatch.setattr(module.subprocess, "run", timeout_run)
+
+    result = module._run(("ssh", "tokyo", "hostname"))
+
+    assert result.returncode == 124
+    assert "command timed out after 20s" in result.stderr
