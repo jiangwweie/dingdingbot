@@ -12,6 +12,12 @@ last_verified: 2026-07-06
 This document defines how the project should explain runtime, strategy, and
 execution-chain terminology to the Owner.
 
+The field-level backend read-model contract lives in
+`docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`. If the glossary in
+this document and that field contract appear to overlap, this document governs
+language and terminology, while `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`
+governs required projection fields and source boundaries.
+
 The goal is:
 
 ```text

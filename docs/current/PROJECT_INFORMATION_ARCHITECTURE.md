@@ -123,6 +123,7 @@ Owner decisions.
 | Pre-Trade Runtime and Candidate Pool | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
 | L1-L9 full-chain audit and optimization review | `docs/current/L1_L9_SYSTEM_REVIEW_AND_OPTIMIZATION_AUDIT.md` |
 | Runtime terminology and Owner explanation governance | `docs/current/RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` |
+| Owner Explanation Read Model contract | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | Active StrategyGroup semantics review and optimization plan | `docs/current/ACTIVE_STRATEGYGROUP_SEMANTICS_REVIEW_AND_OPTIMIZATION_PLAN.md` |
 | Multi-StrategyGroup multi-symbol multi-side action-time evolution | `docs/current/MULTI_STRATEGY_MULTI_SYMBOL_MULTI_SIDE_ACTION_TIME_EVOLUTION_DESIGN.md` |
 | L1-L9 optimization execution plan | `docs/current/L1_L9_OPTIMIZATION_EXECUTION_PLAN.md` |
