@@ -838,7 +838,12 @@ def _disable_fact_unknown(fact_key: str, fact_values: dict[str, Any]) -> bool:
     observed = fact_values.get(fact_key)
     if observed is None:
         return True
-    if isinstance(observed, str) and observed.strip().lower() in {"", "unknown", "missing"}:
+    if isinstance(observed, str) and observed.strip().lower() in {
+        "",
+        "unknown",
+        "missing",
+        "null",
+    }:
         return True
     return False
 

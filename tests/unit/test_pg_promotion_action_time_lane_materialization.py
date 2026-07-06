@@ -224,7 +224,7 @@ def test_blocks_brf2_promotion_when_disable_fact_is_missing(pg_control_connectio
     assert _count(pg_control_connection, "brc_protection_references") == 0
 
 
-@pytest.mark.parametrize("disable_value", [None, "unknown", "missing", ""])
+@pytest.mark.parametrize("disable_value", [None, "unknown", "missing", "null", ""])
 def test_blocks_brf2_promotion_when_disable_fact_is_unknown(
     pg_control_connection,
     disable_value,

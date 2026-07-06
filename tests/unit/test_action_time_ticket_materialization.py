@@ -342,7 +342,7 @@ def test_materializer_blocks_brf2_ticket_when_disable_fact_is_missing(pg_control
     assert _ticket_count(pg_control_connection) == 0
 
 
-@pytest.mark.parametrize("disable_value", [None, "unknown", "missing", ""])
+@pytest.mark.parametrize("disable_value", [None, "unknown", "missing", "null", ""])
 def test_materializer_blocks_brf2_ticket_when_disable_fact_is_unknown(
     pg_control_connection,
     disable_value,
