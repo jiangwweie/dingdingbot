@@ -161,6 +161,9 @@ EXPECTED_ACTIVE_SCOPE_KEYS = {
     )
     for spec in EXPECTED_ACTIVE_EVENT_SPECS.values()
 }
+ACTIVE_RUNTIME_STRATEGY_GROUP_IDS = {
+    str(spec["strategy_group_id"]) for spec in EXPECTED_ACTIVE_EVENT_SPECS.values()
+}
 OPEN_REAL_LANE_STATUSES = {
     "opened",
     "facts_refreshing",
@@ -407,7 +410,12 @@ class PgBackedRuntimeControlStateRepository:
         expected_ids = set(EXPECTED_ACTIVE_EVENT_SPECS)
         actual_ids = set(current_events)
         missing = expected_ids - actual_ids
-        extra = actual_ids - expected_ids
+        extra = {
+            event_spec_id
+            for event_spec_id in actual_ids - expected_ids
+            if str(current_events[event_spec_id].get("strategy_group_id") or "")
+            in ACTIVE_RUNTIME_STRATEGY_GROUP_IDS
+        }
         if missing or extra:
             details = []
             if missing:
@@ -554,6 +562,8 @@ class PgBackedRuntimeControlStateRepository:
             if row.get("status") == "current"
         }
         for signal in rows["live_signal_events"]:
+            if not _is_current_fresh_signal(signal):
+                continue
             signal_id = str(signal.get("signal_event_id") or "")
             candidate_id = str(signal.get("candidate_scope_id") or "")
             candidate = candidates.get(candidate_id)
@@ -632,6 +642,8 @@ class PgBackedRuntimeControlStateRepository:
             )
 
         for promotion in rows["promotion_candidates"]:
+            if not _requires_current_promotion_validation(promotion):
+                continue
             promotion_id = str(promotion.get("promotion_candidate_id") or "")
             signal = signals.get(str(promotion.get("signal_event_id") or ""))
             row = readiness.get(str(promotion.get("readiness_row_id") or ""))
@@ -677,6 +689,8 @@ class PgBackedRuntimeControlStateRepository:
                 "multiple open real-submit action-time lanes"
             )
         for lane in rows["action_time_lane_inputs"]:
+            if not _requires_current_lane_validation(lane):
+                continue
             lane_id = str(lane.get("action_time_lane_input_id") or "")
             promotion = promotions.get(str(lane.get("promotion_candidate_id") or ""))
             signal = signals.get(str(lane.get("signal_event_id") or ""))
@@ -841,3 +855,26 @@ def _json_safe(value: Any) -> Any:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _is_current_fresh_signal(row: dict[str, Any]) -> bool:
+    return (
+        row.get("status") == "facts_validated"
+        and row.get("freshness_state") == "fresh"
+        and row.get("invalidated_at_ms") is None
+    )
+
+
+def _requires_current_promotion_validation(row: dict[str, Any]) -> bool:
+    return (
+        row.get("closed_at_ms") is None
+        and row.get("status")
+        in {"eligible", "arbitration_pending", "arbitration_won"}
+    )
+
+
+def _requires_current_lane_validation(row: dict[str, Any]) -> bool:
+    return (
+        row.get("lane_scope") == "real_submit_candidate"
+        and row.get("status") in OPEN_REAL_LANE_STATUSES
+    )

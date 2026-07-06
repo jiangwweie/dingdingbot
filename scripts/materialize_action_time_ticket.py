@@ -591,7 +591,12 @@ def _required_fact_blockers(
         if row.get("status") != "current" or row.get("required_for_ticket") is not True:
             continue
         fact_key = str(row.get("fact_key") or "")
-        if not _fact_condition_satisfied(row, fact_values):
+        satisfied = _fact_condition_satisfied(row, fact_values)
+        if row.get("disable_on_match") is True:
+            if satisfied:
+                blockers.append(f"disable_fact_active:{fact_key}")
+            continue
+        if not satisfied:
             blockers.append(f"required_fact_not_satisfied:{fact_key}")
     return blockers
 

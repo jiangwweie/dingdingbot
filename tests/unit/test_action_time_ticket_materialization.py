@@ -266,6 +266,58 @@ def test_materializer_blocks_required_fact_not_satisfied(pg_control_connection):
     assert _ticket_count(pg_control_connection) == 0
 
 
+def test_materializer_allows_brf2_ticket_when_disable_fact_is_clear(pg_control_connection):
+    lane_id = _insert_action_time_lane_graph(
+        pg_control_connection,
+        strategy_group_id="BRF2-001",
+        symbol="BTCUSDT",
+        side="short",
+        fact_values={
+            "rally_failure_confirmed": True,
+            "short_side_not_disabled": True,
+            "rally_high_reference": "1800",
+            "strong_uptrend_disable": False,
+        },
+    )
+
+    payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "action_time_ticket_created"
+    assert payload["action_time_lane_input_id"] == lane_id
+    assert payload["strategy_group_id"] == "BRF2-001"
+    assert payload["symbol"] == "BTCUSDT"
+    assert payload["side"] == "short"
+    assert _ticket_count(pg_control_connection) == 1
+
+
+def test_materializer_blocks_brf2_ticket_when_disable_fact_matches(pg_control_connection):
+    _insert_action_time_lane_graph(
+        pg_control_connection,
+        strategy_group_id="BRF2-001",
+        symbol="BTCUSDT",
+        side="short",
+        fact_values={
+            "rally_failure_confirmed": True,
+            "short_side_not_disabled": True,
+            "rally_high_reference": "1800",
+            "strong_uptrend_disable": True,
+        },
+    )
+
+    payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "disable_fact_active:strong_uptrend_disable" in payload["blockers"]
+    assert "required_fact_not_satisfied:strong_uptrend_disable" not in payload["blockers"]
+    assert _ticket_count(pg_control_connection) == 0
+
+
 def test_materializer_blocks_non_live_submit_promotion_scope(pg_control_connection):
     _insert_action_time_lane_graph(pg_control_connection)
     pg_control_connection.execute(
@@ -294,6 +346,10 @@ def test_materializer_blocks_non_live_submit_promotion_scope(pg_control_connecti
 def _insert_action_time_lane_graph(
     conn,
     *,
+    strategy_group_id: str = "SOR-001",
+    symbol: str = "ETHUSDT",
+    side: str = "long",
+    fact_values: dict | None = None,
     candidate_authorization_ref: str | None = "candidate_auth:SOR-001:ETHUSDT:long:unit",
     insert_budget: bool = True,
     insert_protection: bool = True,
@@ -322,22 +378,31 @@ def _insert_action_time_lane_graph(
             JOIN brc_strategy_side_event_specs e
               ON e.event_spec_id = b.event_spec_id
              AND e.status = 'current'
-            WHERE c.strategy_group_id = 'SOR-001'
-              AND c.symbol = 'ETHUSDT'
-              AND c.side = 'long'
+            WHERE c.strategy_group_id = :strategy_group_id
+              AND c.symbol = :symbol
+              AND c.side = :side
             LIMIT 1
             """
-        )
+        ),
+        {"strategy_group_id": strategy_group_id, "symbol": symbol, "side": side},
     ).mappings().one()
-    lane_id = "lane:SOR-001:ETHUSDT:long:unit"
-    readiness_row_id = "readiness:SOR-001:ETHUSDT:long:unit"
-    signal_event_id = "signal:SOR-001:ETHUSDT:long:unit"
-    promotion_candidate_id = "promotion:SOR-001:ETHUSDT:long:unit"
-    public_fact_id = "fact:SOR-001:ETHUSDT:long:public:unit"
-    action_time_fact_id = "fact:SOR-001:ETHUSDT:long:action-time:unit"
-    account_safe_fact_id = "fact:SOR-001:ETHUSDT:long:account-safe:unit"
-    account_mode_fact_id = "fact:SOR-001:ETHUSDT:long:account-mode:unit"
+    suffix = f"{strategy_group_id}:{symbol}:{side}:unit"
+    if candidate_authorization_ref == "candidate_auth:SOR-001:ETHUSDT:long:unit":
+        candidate_authorization_ref = f"candidate_auth:{suffix}"
+    lane_id = f"lane:{suffix}"
+    readiness_row_id = f"readiness:{suffix}"
+    signal_event_id = f"signal:{suffix}"
+    promotion_candidate_id = f"promotion:{suffix}"
+    public_fact_id = f"fact:{strategy_group_id}:{symbol}:{side}:public:unit"
+    action_time_fact_id = f"fact:{strategy_group_id}:{symbol}:{side}:action-time:unit"
+    account_safe_fact_id = f"fact:{strategy_group_id}:{symbol}:{side}:account-safe:unit"
+    account_mode_fact_id = f"fact:{strategy_group_id}:{symbol}:{side}:account-mode:unit"
     expires_at_ms = NOW_MS + 600_000
+    fact_values = fact_values or {
+        "opening_range_defined": True,
+        "breakout_confirmed": True,
+        "opening_range_low_reference": "1800",
+    }
 
     _insert_fact(
         conn,
@@ -345,11 +410,7 @@ def _insert_action_time_lane_graph(
         row=row,
         fact_surface="pretrade_public",
         source_ref="unit:public",
-        fact_values={
-            "opening_range_defined": True,
-            "breakout_confirmed": True,
-            "opening_range_low_reference": "1800",
-        },
+        fact_values=fact_values,
         observed_at_ms=NOW_MS - 10_000,
         valid_until_ms=expires_at_ms,
     )
@@ -359,11 +420,7 @@ def _insert_action_time_lane_graph(
         row=row,
         fact_surface="action_time",
         source_ref="unit:action-time",
-        fact_values={
-            "opening_range_defined": True,
-            "breakout_confirmed": True,
-            "opening_range_low_reference": "1800",
-        },
+        fact_values=fact_values,
         observed_at_ms=NOW_MS - 5_000,
         valid_until_ms=expires_at_ms,
     )
@@ -402,7 +459,7 @@ def _insert_action_time_lane_graph(
               expires_at_ms, invalidated_at_ms, created_at_ms
             ) VALUES (
               :signal_event_id, :candidate_scope_id, :event_spec_id, :strategy_group_id,
-              :symbol, :side, 'detector:SOR-001:long', 'SOR-LONG',
+              :symbol, :side, :detector_key, :signal_type,
               'live_market', 'facts_validated', 'fresh', 0.9, :fact_snapshot_id,
               :reason_codes, :signal_payload, :event_time_ms,
               :trigger_candle_close_time_ms, :observed_at_ms, :expires_at_ms,
@@ -417,6 +474,8 @@ def _insert_action_time_lane_graph(
             "strategy_group_id": row["strategy_group_id"],
             "symbol": row["symbol"],
             "side": row["side"],
+            "detector_key": f"detector:{strategy_group_id}:{side}",
+            "signal_type": row["event_id"],
             "fact_snapshot_id": public_fact_id,
             "reason_codes": _json(["unit_fresh_signal"]),
             "signal_payload": _json(
@@ -540,7 +599,7 @@ def _insert_action_time_lane_graph(
                   reserved_margin, reserved_at_ms, expires_at_ms, status, release_reason,
                   policy_version
                 ) VALUES (
-                  'budget:SOR-001:ETHUSDT:long:unit', :promotion_candidate_id, :lane_id,
+                  :budget_reservation_id, :promotion_candidate_id, :lane_id,
                   NULL, :signal_event_id, :event_spec_id, :runtime_profile_id,
                   'owner-subaccount-runtime-v0', :strategy_group_id, :symbol, :side,
                   20, 2, 10, :reserved_at_ms, :expires_at_ms, 'active', NULL,
@@ -549,6 +608,7 @@ def _insert_action_time_lane_graph(
                 """
             ),
             {
+                "budget_reservation_id": f"budget:{suffix}",
                 "promotion_candidate_id": promotion_candidate_id,
                 "lane_id": lane_id,
                 "signal_event_id": signal_event_id,
@@ -571,7 +631,7 @@ def _insert_action_time_lane_graph(
                   stop_order_type, stop_time_in_force, protection_policy_version,
                   source_fact_snapshot_id, expires_at_ms
                 ) VALUES (
-                  'protection:SOR-001:ETHUSDT:long:unit', :event_spec_id,
+                  :protection_ref_id, :event_spec_id,
                   :strategy_group_id, :symbol, :side, :reference_type, 1800,
                   'breakout invalidated below opening range low', 'stop_market',
                   'GTC', 'protection-v1', :source_fact_snapshot_id, :expires_at_ms
@@ -579,6 +639,7 @@ def _insert_action_time_lane_graph(
                 """
             ),
             {
+                "protection_ref_id": f"protection:{suffix}",
                 "event_spec_id": row["event_spec_id"],
                 "strategy_group_id": row["strategy_group_id"],
                 "symbol": row["symbol"],

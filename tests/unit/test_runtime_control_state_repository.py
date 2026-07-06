@@ -294,6 +294,34 @@ def test_pg_backed_runtime_control_state_repository_rejects_generic_sor_event_sp
         repository.read_control_state()
 
 
+def test_pg_backed_runtime_control_state_repository_allows_support_only_current_event_spec(
+    pg_control_connection,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_strategy_side_event_specs (
+                event_spec_id, strategy_group_id, strategy_group_version_id,
+                event_id, side, timeframe, event_spec_version, status,
+                freshness_window_ms, time_authority, protection_ref_type,
+                created_at_ms, created_by
+            ) VALUES (
+                'event_spec:SUPPORT-001:SUPPORT-LONG:v1', 'SUPPORT-001',
+                'sgv:SUPPORT-001:v1', 'SUPPORT-LONG', 'long', '1h', 'v1',
+                'current', 3600000, 'trigger_candle_close_time_ms',
+                'support_reference', 1770000000000, 'unit_test'
+            )
+            """
+        )
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+
+    state = repository.read_control_state()
+
+    assert state["table_counts"]["strategy_side_event_specs"] == 7
+
+
 def test_pg_backed_runtime_control_state_repository_requires_hard_required_facts(
     pg_control_connection,
 ):
@@ -443,6 +471,83 @@ def test_pg_backed_runtime_control_state_repository_rejects_lane_without_arbitra
 
     with pytest.raises(RuntimeControlStateRepositoryError, match="does not reference arbitration_won"):
         repository.read_control_state()
+
+
+def test_pg_backed_runtime_control_state_repository_ignores_closed_rehearsal_lineage(
+    pg_control_connection,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_live_signal_events (
+              signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
+              symbol, side, detector_key, signal_type, source_kind, status,
+              freshness_state, confidence, fact_snapshot_id, reason_codes,
+              signal_payload, event_time_ms, trigger_candle_close_time_ms,
+              observed_at_ms, expires_at_ms, invalidated_at_ms, created_at_ms
+            ) VALUES (
+              'signal:historical:closed:review', 'candidate_scope:retired',
+              'event_spec:SOR-001:SOR-LONG:v1', 'SOR-001', 'ETHUSDT',
+              'long', 'detector:SOR-001:long', 'SOR-LONG', 'historical',
+              'stale', 'stale', NULL, NULL, '[]', '{}', 1770000120000,
+              1770000120000, 1770000120001, NULL, 1770000130000,
+              1770000120002
+            )
+            """
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_promotion_candidates (
+              promotion_candidate_id, signal_event_id, readiness_row_id,
+              strategy_group_id, symbol, side, promotion_scope, status,
+              scope_state, risk_state, facts_snapshot_id, blockers,
+              arbitration_rank, created_at_ms, expires_at_ms, closed_at_ms,
+              authority_boundary
+            ) VALUES (
+              'promotion:historical:closed:review',
+              'signal:historical:closed:review',
+              'readiness:historical:closed:review',
+              'SOR-001', 'ETHUSDT', 'long', 'action_time_rehearsal',
+              'arbitration_lost', 'live_submit_allowed', 'acceptable',
+              NULL, '[]', 2, 1770000120004, 1770000720000,
+              1770000120005,
+              'historical_rehearsal_lineage; no_finalgate_no_operation_layer_no_exchange_write'
+            )
+            """
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_action_time_lane_inputs (
+              action_time_lane_input_id, promotion_candidate_id, strategy_group_id,
+              symbol, side, runtime_profile_id, lane_scope, status,
+              signal_event_id, public_fact_snapshot_id, action_time_fact_snapshot_id,
+              runtime_scope_binding_id, candidate_authorization_ref,
+              runtime_safety_snapshot_id, first_blocker_class, created_at_ms,
+              expires_at_ms, closed_at_ms, authority_boundary
+            ) VALUES (
+              'lane:historical:closed:review',
+              'promotion:historical:closed:review', 'SOR-001', 'ETHUSDT',
+              'long', 'owner-runtime-console-v1', 'rehearsal',
+              'closed', 'signal:historical:closed:review', NULL, NULL,
+              'runtime_scope:retired', NULL, NULL, NULL, 1770000120006,
+              1770000720000, 1770000120010,
+              'closed_rehearsal_lineage; no_finalgate_no_operation_layer_no_exchange_write'
+            )
+            """
+        )
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+
+    state = repository.read_control_state()
+
+    assert state["table_counts"]["action_time_lane_inputs"] == 1
+    assert state["table_counts"]["promotion_candidates"] == 1
+    assert state["table_counts"]["live_signal_events"] == 1
 
 
 def test_pg_backed_runtime_control_state_repository_requires_runtime_policy_binding(
