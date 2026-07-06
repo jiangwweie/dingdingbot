@@ -95,7 +95,7 @@ local build -> server static directory -> Nginx domain -> backend API proxy
 | **Domain** | `https://jiaoyingpan.cloud/trading-console/` |
 | **SSH target** | `tokyo` |
 | **Static root** | `/var/www/trading-console` |
-| **Release directory** | `/home/ubuntu/brc-deploy/releases/trading-console-frontend-09eecb8e-20260705T175236Z` |
+| **Release directory** | `/home/ubuntu/brc-deploy/releases/trading-console-frontend-d319da86-20260706T000646Z` |
 | **Nginx site config** | `/etc/nginx/sites-available/owner-ai-gateway` |
 | **Nginx backup** | `/etc/nginx/sites-available/owner-ai-gateway.bak-trading-console-20260705T175236Z` |
 | **Rollback tag** | Owner reports tag exists; code changes are isolated on `codex/frontend-trading-console` |
@@ -139,16 +139,21 @@ local build -> server static directory -> Nginx domain -> backend API proxy
 | **Domain login theme toggle** | Passed | `output/playwright/trading-console/12-domain-login-theme-toggle-audit.png` |
 | **Domain auth script missing-credential guard** | Passed | `npm run acceptance:domain-auth` exits `2` and names required env vars |
 | **Domain auth script invalid-login guard** | Passed | Invalid credentials exit non-zero after capturing `14-domain-auth-login-failed.png` |
+| **Authenticated Chrome session dashboard** | Passed | `output/playwright/trading-console/26-chrome-auth-base-dashboard.png` |
+| **Authenticated Chrome session account risk** | Passed | `output/playwright/trading-console/27-chrome-auth-base-account-risk.png` |
+| **Authenticated Chrome session order ledger** | Passed | `output/playwright/trading-console/28-chrome-auth-base-order-ledger.png` |
+| **Authenticated Chrome session strategy groups** | Passed | `output/playwright/trading-console/29-chrome-auth-base-strategy-groups.png` |
+| **Authenticated Chrome session exceptions** | Passed | `output/playwright/trading-console/30-chrome-auth-base-exceptions.png` |
+| **Authenticated Chrome session theme toggle** | Passed | `output/playwright/trading-console/31-chrome-auth-base-theme-toggle.png` |
+| **Base path route retention** | Passed | Authenticated navigation stayed under `/trading-console/account-risk`, `/trading-console/order-ledger`, `/trading-console/strategy-groups`, `/trading-console/exceptions` |
 | **Local five-page render** | Passed | `output/playwright/trading-console/01-dashboard-dark.png` through `05-exceptions-dark.png` |
 | **Theme switch** | Passed | `output/playwright/trading-console/06-exceptions-light.png` |
 | **Responsive smoke** | Passed | `output/playwright/trading-console/07-order-ledger-900px-dark.png` |
 
-### Remaining Acceptance Constraint
+### Authenticated Acceptance Result
 
-Authenticated domain acceptance for the five protected pages requires a valid
-test operator username, password, and current **Google Authenticator TOTP** code.
-No frontend or backend bypass was used. Until that credential is available, the
-completed server-domain evidence covers static deployment, unauthenticated auth
-boundary, login rendering, invalid-login behavior, and login-page theme
-switching. The repeatable command for the remaining authenticated check is
-`npm run acceptance:domain-auth`.
+Authenticated domain acceptance is complete through the Owner-provided logged-in
+Chrome session. No credential, password, **TOTP secret**, or current **TOTP
+code** was read, exported, stored, or committed. The browser acceptance verified
+the five protected pages, theme switching, and route retention under the
+`/trading-console/` static partition.
