@@ -446,7 +446,11 @@ def _upsert_goal_status_current(
 
 
 def _owner_action_required(goal_status: dict[str, Any]) -> bool:
+    if isinstance(goal_status.get("owner_action_required"), bool):
+        return bool(goal_status["owner_action_required"])
     owner_state = _dict(goal_status.get("owner_state"))
+    if isinstance(owner_state.get("owner_action_required"), bool):
+        return bool(owner_state["owner_action_required"])
     label = str(owner_state.get("label") or "")
     return label == "需要介入" or str(goal_status.get("status") or "") in {
         "hard_safety_stop",

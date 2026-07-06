@@ -375,6 +375,45 @@ def _pg_status_tuple(
     )
 
 
+def _plain_language_stage(status: str) -> str:
+    return {
+        "waiting_for_signal": "等待市场机会",
+        "fresh_signal_detected": "发现新信号",
+        "fresh_signal_processing": "正在把信号推进成正式票据",
+        "action_time_finalgate_ready": "正式票据已生成，等待最终安全检查",
+        "operation_layer_ready": "已到官方执行入口前",
+        "runtime_scope_mismatch": "运行范围不一致",
+        "runtime_liveness_degraded": "服务器观察链路不完整",
+        "active_position_resolution": "需要先处理持仓或挂单冲突",
+        "missing_fact": "前置事实不完整",
+        "hard_safety_stop": "安全边界阻断",
+        "deployment_issue": "部署或运行环境异常",
+    }.get(status, "当前状态需要工程诊断")
+
+
+def _plain_language_next_system_action(checkpoint: str) -> str:
+    return {
+        "continue_watcher_observation": "系统继续观察市场，不需要 Owner 操作",
+        "promote_fresh_signal_candidate": "系统把 fresh signal 推进为候选机会",
+        "select_single_action_time_lane_input": "系统从多个候选中仲裁出唯一 action-time lane",
+        "materialize_action_time_ticket": "系统为当前 lane 生成 Action-Time Ticket",
+        "run_official_action_time_finalgate": "系统使用 ticket 进入官方 FinalGate 检查",
+        "refresh_action_time_ticket_or_runtime_safety_state": "系统刷新 ticket 或运行安全状态",
+        "call_official_operation_layer_submit_after_action_time_recheck": "系统在最终复核后进入官方执行入口",
+        "repair_pg_selected_scope_projection": "系统修复 PG 运行范围投影",
+        "repair_pg_runtime_coverage_projection": "系统修复服务器观察覆盖投影",
+        "repair_pg_pretrade_readiness_projection": "系统修复 pre-trade readiness 投影",
+        "resolve_active_position_or_open_order_conflict": "系统先处理持仓或挂单冲突",
+    }.get(checkpoint, checkpoint or "等待下一次 PG current projection")
+
+
+def _goal_owner_action_required(status: str, owner_label: str) -> bool:
+    return owner_label == "需要介入" or status in {
+        "hard_safety_stop",
+        "deployment_issue",
+    }
+
+
 def _pg_readiness_matrix(
     *,
     status: str,
@@ -623,28 +662,40 @@ def _build_pg_goal_status_artifact(
         str(item.get("key") or "") for item in submit_blocker_review_items
     ]
     submit_blocker_review_required = bool(submit_blocker_review_items)
+    owner_label = (
+        "等待机会"
+        if status == "waiting_for_signal"
+        else "处理中"
+        if status
+        in {
+            "fresh_signal_detected",
+            "fresh_signal_processing",
+            "action_time_finalgate_ready",
+            "operation_layer_ready",
+        }
+        else "需要介入"
+    )
+    owner_action_required = _goal_owner_action_required(status, owner_label)
+    missing_ticket_lane_ids = [
+        lane_id for lane_id in active_lane_ids if lane_id not in tickets_by_lane
+    ]
     return {
         "scope": "strategygroup_runtime_goal_status",
         "generated_at_ms": int(time.time() * 1000),
         "status": status,
         "ready_for_real_order_action": real_order_ready,
         "non_authority_checkpoint": next_checkpoint,
+        "plain_language_stage": _plain_language_stage(status),
+        "plain_language_reason": owner_detail,
+        "plain_language_next_system_action": _plain_language_next_system_action(
+            next_checkpoint
+        ),
+        "owner_action_required": owner_action_required,
         "owner_state": {
-            "label": (
-                "等待机会"
-                if status == "waiting_for_signal"
-                else "处理中"
-                if status
-                in {
-                    "fresh_signal_detected",
-                    "fresh_signal_processing",
-                    "action_time_finalgate_ready",
-                    "operation_layer_ready",
-                }
-                else "需要介入"
-            ),
+            "label": owner_label,
             "detail": owner_detail,
             "non_authority_checkpoint": next_checkpoint,
+            "owner_action_required": owner_action_required,
         },
         "checks": checks,
         "blockers": blockers,
@@ -688,6 +739,27 @@ def _build_pg_goal_status_artifact(
             "active_ticket_ids": [
                 str(row.get("ticket_id") or "") for row in tickets_by_lane.values()
             ],
+        },
+        "action_time_ticket_explanation": {
+            "plain_language_stage": (
+                "已有正式候选交易票据"
+                if tickets_by_lane
+                else "尚未生成正式候选交易票据"
+                if open_lanes
+                else "当前没有 action-time lane"
+            ),
+            "plain_language_reason": (
+                "Action-Time Ticket 已锁定策略、币种、方向、事件时间、预算和保护引用"
+                if tickets_by_lane
+                else "当前 lane 还缺 Action-Time Ticket，FinalGate 没有可审对象"
+                if open_lanes
+                else "当前没有 fresh signal 推进到 action-time lane"
+            ),
+            "missing_ticket_lane_ids": missing_ticket_lane_ids,
+            "active_ticket_ids": [
+                str(row.get("ticket_id") or "") for row in tickets_by_lane.values()
+            ],
+            "decides_trade_authority": False,
         },
         "real_order_boundary": {
             "ready_for_real_order_action": real_order_ready,

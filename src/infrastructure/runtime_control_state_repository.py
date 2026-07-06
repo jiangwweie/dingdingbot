@@ -67,6 +67,107 @@ REQUIRED_PRODUCTION_PROJECTIONS = {
     "tradeability_decision",
 }
 
+EXPECTED_ACTIVE_EVENT_SPECS: dict[str, dict[str, Any]] = {
+    "event_spec:CPM-RO-001:CPM-LONG:v1": {
+        "strategy_group_id": "CPM-RO-001",
+        "event_id": "CPM-LONG",
+        "side": "long",
+        "timeframe": "1h",
+        "time_authority": "trigger_candle_close_time_ms",
+        "protection_ref_type": "pullback_low_reference",
+        "required_facts": {
+            "htf_trend_intact",
+            "reclaim_confirmed",
+            "pullback_low_reference",
+        },
+        "disable_facts": set(),
+    },
+    "event_spec:MPG-001:MPG-LONG:v1": {
+        "strategy_group_id": "MPG-001",
+        "event_id": "MPG-LONG",
+        "side": "long",
+        "timeframe": "1h",
+        "time_authority": "trigger_candle_close_time_ms",
+        "protection_ref_type": "momentum_floor_reference",
+        "required_facts": {
+            "momentum_persistence_confirmed",
+            "leader_strength_confirmed",
+            "momentum_floor_reference",
+        },
+        "disable_facts": set(),
+    },
+    "event_spec:MI-001:MI-LONG:v1": {
+        "strategy_group_id": "MI-001",
+        "event_id": "MI-LONG",
+        "side": "long",
+        "timeframe": "1h",
+        "time_authority": "trigger_candle_close_time_ms",
+        "protection_ref_type": "impulse_invalidation_reference",
+        "required_facts": {
+            "impulse_confirmed",
+            "relative_strength_confirmed",
+            "impulse_invalidation_reference",
+        },
+        "disable_facts": set(),
+    },
+    "event_spec:SOR-001:SOR-LONG:v1": {
+        "strategy_group_id": "SOR-001",
+        "event_id": "SOR-LONG",
+        "side": "long",
+        "timeframe": "15m",
+        "time_authority": "trigger_candle_close_time_ms",
+        "protection_ref_type": "opening_range_low_reference",
+        "required_facts": {
+            "opening_range_defined",
+            "breakout_confirmed",
+            "opening_range_low_reference",
+        },
+        "disable_facts": set(),
+    },
+    "event_spec:SOR-001:SOR-SHORT:v1": {
+        "strategy_group_id": "SOR-001",
+        "event_id": "SOR-SHORT",
+        "side": "short",
+        "timeframe": "15m",
+        "time_authority": "trigger_candle_close_time_ms",
+        "protection_ref_type": "opening_range_high_reference",
+        "required_facts": {
+            "opening_range_defined",
+            "breakdown_confirmed",
+            "opening_range_high_reference",
+        },
+        "disable_facts": set(),
+    },
+    "event_spec:BRF2-001:BRF2-SHORT:v1": {
+        "strategy_group_id": "BRF2-001",
+        "event_id": "BRF2-SHORT",
+        "side": "short",
+        "timeframe": "1h",
+        "time_authority": "trigger_candle_close_time_ms",
+        "protection_ref_type": "rally_high_reference",
+        "required_facts": {
+            "rally_failure_confirmed",
+            "short_side_not_disabled",
+            "rally_high_reference",
+        },
+        "disable_facts": {"strong_uptrend_disable"},
+    },
+}
+EXPECTED_ACTIVE_SCOPE_KEYS = {
+    (
+        spec["strategy_group_id"],
+        spec["side"],
+        spec["event_id"],
+    )
+    for spec in EXPECTED_ACTIVE_EVENT_SPECS.values()
+}
+OPEN_REAL_LANE_STATUSES = {
+    "opened",
+    "facts_refreshing",
+    "ticket_pending",
+    "ticket_created",
+}
+
 
 class PgBackedRuntimeControlStateRepository:
     """Read production runtime control-state from PG current tables."""
@@ -97,8 +198,11 @@ class PgBackedRuntimeControlStateRepository:
             for key, table_name in CONTROL_STATE_TABLES.items()
         }
         self._validate_projection_ownership(rows)
+        self._validate_active_event_semantics(rows)
         self._validate_candidate_scope_event_bindings(rows)
         self._validate_runtime_scope_bindings(rows)
+        self._validate_live_signal_events(rows)
+        self._validate_promotion_and_lane_identity(rows)
         return {
             "schema": "brc.runtime_control_state_repository.v1",
             "source_mode": self.source_mode,
@@ -195,6 +299,17 @@ class PgBackedRuntimeControlStateRepository:
         }
         if not active_candidates:
             raise RuntimeControlStateRepositoryError("active candidate scope is empty")
+        for candidate_id, candidate in active_candidates.items():
+            event_id = str(_as_dict(candidate.get("metadata")).get("event_id") or "")
+            key = (
+                str(candidate.get("strategy_group_id") or ""),
+                str(candidate.get("side") or ""),
+                event_id,
+            )
+            if key not in EXPECTED_ACTIVE_SCOPE_KEYS:
+                raise RuntimeControlStateRepositoryError(
+                    f"{candidate_id} is outside active PG event scope"
+                )
 
         current_events = {
             str(row["event_spec_id"]): row
@@ -215,6 +330,10 @@ class PgBackedRuntimeControlStateRepository:
             if not bindings:
                 raise RuntimeControlStateRepositoryError(
                     f"{candidate_id} has no active event binding"
+                )
+            if len(bindings) != 1:
+                raise RuntimeControlStateRepositoryError(
+                    f"{candidate_id} must have exactly one active event binding"
                 )
             for binding in bindings:
                 event = current_events.get(str(binding.get("event_spec_id") or ""))
@@ -275,6 +394,313 @@ class PgBackedRuntimeControlStateRepository:
                 raise RuntimeControlStateRepositoryError(
                     f"{binding.get('runtime_scope_binding_id')} allows live submit without closed scope"
                 )
+
+    def _validate_active_event_semantics(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        current_events = {
+            str(row.get("event_spec_id") or ""): row
+            for row in rows["strategy_side_event_specs"]
+            if row.get("status") == "current"
+        }
+        expected_ids = set(EXPECTED_ACTIVE_EVENT_SPECS)
+        actual_ids = set(current_events)
+        missing = expected_ids - actual_ids
+        extra = actual_ids - expected_ids
+        if missing or extra:
+            details = []
+            if missing:
+                details.append("missing=" + ",".join(sorted(missing)))
+            if extra:
+                details.append("unexpected=" + ",".join(sorted(extra)))
+            raise RuntimeControlStateRepositoryError(
+                "current PG event specs do not match active contract: "
+                + "; ".join(details)
+            )
+
+        for event_spec_id, expected in EXPECTED_ACTIVE_EVENT_SPECS.items():
+            event = current_events[event_spec_id]
+            for key in (
+                "strategy_group_id",
+                "event_id",
+                "side",
+                "timeframe",
+                "time_authority",
+                "protection_ref_type",
+            ):
+                if str(event.get(key) or "") != str(expected[key]):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id} mismatches {key}"
+                    )
+            if str(event.get("event_spec_version") or "") != "v1":
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} must use event_spec_version=v1"
+                )
+            if int(event.get("freshness_window_ms") or 0) <= 0:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} freshness_window_ms must be positive"
+                )
+
+        self._validate_event_required_facts(rows, current_events)
+
+    def _validate_event_required_facts(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+        current_events: dict[str, dict[str, Any]],
+    ) -> None:
+        facts_by_event: dict[str, list[dict[str, Any]]] = {}
+        for row in rows["strategy_event_required_facts"]:
+            if row.get("status") != "current":
+                continue
+            event_spec_id = str(row.get("event_spec_id") or "")
+            facts_by_event.setdefault(event_spec_id, []).append(row)
+
+        contract_keys = {
+            (
+                str(row.get("strategy_group_version_id") or ""),
+                str(row.get("fact_key") or ""),
+                str(row.get("required_surface") or ""),
+            )
+            for row in rows["required_fact_contracts"]
+        }
+        for event_spec_id, expected in EXPECTED_ACTIVE_EVENT_SPECS.items():
+            facts = facts_by_event.get(event_spec_id) or []
+            required_keys = {
+                str(row.get("fact_key") or "")
+                for row in facts
+                if row.get("fact_role") == "required"
+            }
+            disable_keys = {
+                str(row.get("fact_key") or "")
+                for row in facts
+                if row.get("fact_role") == "disable"
+            }
+            if required_keys != expected["required_facts"]:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} required facts mismatch: "
+                    f"expected={sorted(expected['required_facts'])}, "
+                    f"actual={sorted(required_keys)}"
+                )
+            if disable_keys != expected["disable_facts"]:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} disable facts mismatch: "
+                    f"expected={sorted(expected['disable_facts'])}, "
+                    f"actual={sorted(disable_keys)}"
+                )
+
+            event = current_events[event_spec_id]
+            version_id = str(event.get("strategy_group_version_id") or "")
+            for fact in facts:
+                fact_key = str(fact.get("fact_key") or "")
+                if not str(fact.get("required_facts_version_id") or "").endswith(":v1"):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id}:{fact_key} has invalid RequiredFacts version"
+                    )
+                if fact.get("value_source") != "runtime_fact_snapshot":
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id}:{fact_key} must read runtime_fact_snapshot"
+                    )
+                if not str(fact.get("operator") or ""):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id}:{fact_key} missing machine operator"
+                    )
+                if fact.get("required_for_promotion") is not True:
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id}:{fact_key} must be required_for_promotion"
+                    )
+                if fact.get("required_for_ticket") is not True:
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id}:{fact_key} must be required_for_ticket"
+                    )
+                if fact.get("required_for_finalgate") is not True:
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id}:{fact_key} must be required_for_finalgate"
+                    )
+                if fact.get("fact_role") == "disable" and fact.get("disable_on_match") is not True:
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id}:{fact_key} disable fact must disable_on_match"
+                    )
+                if fact.get("fact_role") == "required" and fact.get("disable_on_match") is not False:
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id}:{fact_key} required fact must not disable_on_match"
+                    )
+                if fact.get("fact_role") == "required" and (
+                    version_id,
+                    fact_key,
+                    str(fact.get("fact_surface") or ""),
+                ) not in contract_keys:
+                    raise RuntimeControlStateRepositoryError(
+                        f"{event_spec_id}:{fact_key} missing fact contract"
+                    )
+
+    def _validate_live_signal_events(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        candidates = {
+            str(row.get("candidate_scope_id") or ""): row
+            for row in rows["candidate_scope"]
+            if row.get("status") == "active"
+        }
+        bindings = {
+            str(row.get("candidate_scope_id") or ""): row
+            for row in rows["candidate_scope_event_bindings"]
+            if row.get("status") == "active"
+        }
+        events = {
+            str(row.get("event_spec_id") or ""): row
+            for row in rows["strategy_side_event_specs"]
+            if row.get("status") == "current"
+        }
+        for signal in rows["live_signal_events"]:
+            signal_id = str(signal.get("signal_event_id") or "")
+            candidate_id = str(signal.get("candidate_scope_id") or "")
+            candidate = candidates.get(candidate_id)
+            if not candidate:
+                raise RuntimeControlStateRepositoryError(
+                    f"{signal_id} has no active candidate scope"
+                )
+            binding = bindings.get(candidate_id)
+            event = events.get(str(signal.get("event_spec_id") or ""))
+            if not binding or not event:
+                raise RuntimeControlStateRepositoryError(
+                    f"{signal_id} has no active event binding/current event spec"
+                )
+            if str(binding.get("event_spec_id") or "") != str(signal.get("event_spec_id") or ""):
+                raise RuntimeControlStateRepositoryError(
+                    f"{signal_id} mismatches candidate event spec"
+                )
+            for key in ("strategy_group_id", "symbol", "side"):
+                if str(signal.get(key) or "") != str(candidate.get(key) or ""):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{signal_id} mismatches candidate {key}"
+                    )
+            if str(signal.get("signal_type") or "") != str(event.get("event_id") or ""):
+                raise RuntimeControlStateRepositoryError(
+                    f"{signal_id} signal_type must equal event_id"
+                )
+            event_time_ms = int(signal.get("event_time_ms") or 0)
+            trigger_ms = int(signal.get("trigger_candle_close_time_ms") or 0)
+            created_ms = int(signal.get("created_at_ms") or 0)
+            if event_time_ms <= 0 or trigger_ms <= 0:
+                raise RuntimeControlStateRepositoryError(
+                    f"{signal_id} missing event time authority"
+                )
+            if event_time_ms != trigger_ms:
+                raise RuntimeControlStateRepositoryError(
+                    f"{signal_id} event_time_ms must equal trigger_candle_close_time_ms"
+                )
+            if created_ms == event_time_ms:
+                raise RuntimeControlStateRepositoryError(
+                    f"{signal_id} uses generated_at as event_time"
+                )
+            if (
+                signal.get("status") == "facts_validated"
+                and signal.get("freshness_state") == "fresh"
+                and signal.get("source_kind") != "live_market"
+            ):
+                raise RuntimeControlStateRepositoryError(
+                    f"{signal_id} fresh signal must be live_market"
+                )
+
+    def _validate_promotion_and_lane_identity(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        signals = {
+            str(row.get("signal_event_id") or ""): row
+            for row in rows["live_signal_events"]
+        }
+        readiness = {
+            str(row.get("readiness_row_id") or ""): row
+            for row in rows["pretrade_readiness_rows"]
+        }
+        promotions = {
+            str(row.get("promotion_candidate_id") or ""): row
+            for row in rows["promotion_candidates"]
+        }
+        open_winners = [
+            row
+            for row in rows["promotion_candidates"]
+            if row.get("status") == "arbitration_won"
+            and row.get("closed_at_ms") is None
+        ]
+        if len(open_winners) > 1:
+            raise RuntimeControlStateRepositoryError(
+                "multiple open arbitration_won promotion candidates"
+            )
+
+        for promotion in rows["promotion_candidates"]:
+            promotion_id = str(promotion.get("promotion_candidate_id") or "")
+            signal = signals.get(str(promotion.get("signal_event_id") or ""))
+            row = readiness.get(str(promotion.get("readiness_row_id") or ""))
+            if not signal:
+                raise RuntimeControlStateRepositoryError(
+                    f"{promotion_id} has no live signal event"
+                )
+            if not row:
+                raise RuntimeControlStateRepositoryError(
+                    f"{promotion_id} has no readiness row"
+                )
+            for key in ("strategy_group_id", "symbol", "side"):
+                if str(promotion.get(key) or "") != str(signal.get(key) or ""):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{promotion_id} mismatches signal {key}"
+                    )
+                if str(promotion.get(key) or "") != str(row.get(key) or ""):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{promotion_id} mismatches readiness {key}"
+                    )
+            if promotion.get("status") == "arbitration_won":
+                if signal.get("status") != "facts_validated":
+                    raise RuntimeControlStateRepositoryError(
+                        f"{promotion_id} winner signal is not facts_validated"
+                    )
+                if signal.get("freshness_state") != "fresh":
+                    raise RuntimeControlStateRepositoryError(
+                        f"{promotion_id} winner signal is not fresh"
+                    )
+                if signal.get("source_kind") != "live_market":
+                    raise RuntimeControlStateRepositoryError(
+                        f"{promotion_id} winner signal is not live_market"
+                    )
+
+        open_real_lanes = [
+            row
+            for row in rows["action_time_lane_inputs"]
+            if row.get("lane_scope") == "real_submit_candidate"
+            and row.get("status") in OPEN_REAL_LANE_STATUSES
+        ]
+        if len(open_real_lanes) > 1:
+            raise RuntimeControlStateRepositoryError(
+                "multiple open real-submit action-time lanes"
+            )
+        for lane in rows["action_time_lane_inputs"]:
+            lane_id = str(lane.get("action_time_lane_input_id") or "")
+            promotion = promotions.get(str(lane.get("promotion_candidate_id") or ""))
+            signal = signals.get(str(lane.get("signal_event_id") or ""))
+            if not promotion:
+                raise RuntimeControlStateRepositoryError(
+                    f"{lane_id} has no promotion candidate"
+                )
+            if not signal:
+                raise RuntimeControlStateRepositoryError(
+                    f"{lane_id} has no live signal event"
+                )
+            if promotion.get("status") != "arbitration_won":
+                raise RuntimeControlStateRepositoryError(
+                    f"{lane_id} does not reference arbitration_won promotion"
+                )
+            if str(promotion.get("signal_event_id") or "") != str(lane.get("signal_event_id") or ""):
+                raise RuntimeControlStateRepositoryError(
+                    f"{lane_id} mismatches promotion signal_event_id"
+                )
+            for key in ("strategy_group_id", "symbol", "side"):
+                if str(lane.get(key) or "") != str(promotion.get(key) or ""):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{lane_id} mismatches promotion {key}"
+                    )
 
 
 class FileBackedRuntimeControlStateRepository:
@@ -411,3 +837,7 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
     return value
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}

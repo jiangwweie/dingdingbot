@@ -227,7 +227,11 @@ def test_materializer_blocks_runtime_scope_side_mismatch(pg_control_connection):
     )
 
     assert payload["status"] == "blocked"
-    assert any(blocker.endswith("_mismatch:side") for blocker in payload["blockers"])
+    assert any(
+        blocker.endswith("_mismatch:side")
+        or blocker.startswith("runtime_control_state_invalid:")
+        for blocker in payload["blockers"]
+    )
     assert _ticket_count(pg_control_connection) == 0
 
 

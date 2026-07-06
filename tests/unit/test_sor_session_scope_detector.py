@@ -83,6 +83,24 @@ def _candles(*, breakout: bool) -> list[list]:
     return rows
 
 
+def _breakdown_candles() -> list[list]:
+    start = int(datetime(2026, 6, 30, tzinfo=timezone.utc).timestamp() * 1000)
+    fifteen = 15 * 60 * 1000
+    rows = [
+        _row(start + idx * fifteen, close="100", high="101", low="99")
+        for idx in range(4)
+    ]
+    rows.append(
+        _row(
+            start + 4 * fifteen,
+            close="97",
+            high="99",
+            low="96.5",
+        )
+    )
+    return rows
+
+
 def test_sor_session_detector_builds_authorized_symbol_scope():
     module = _load_module()
 
@@ -115,9 +133,22 @@ def test_sor_session_detector_builds_authorized_symbol_scope():
     assert sol["follow_through"] is True
     assert sol["invalidation"]["held"] is True
     assert sol["fresh_session_range_signal"] is True
+    assert sol["generic_sor_signal_allowed"] is False
+    long_event = next(row for row in sol["side_event_rows"] if row["event_id"] == "SOR-LONG")
+    short_event = next(row for row in sol["side_event_rows"] if row["event_id"] == "SOR-SHORT")
+    assert long_event["side"] == "long"
+    assert long_event["event_spec_id"] == "event_spec:SOR-001:SOR-LONG:v1"
+    assert long_event["fresh_signal"] is True
+    assert long_event["protection_ref_type"] == "opening_range_low_reference"
+    assert short_event["side"] == "short"
+    assert short_event["event_spec_id"] == "event_spec:SOR-001:SOR-SHORT:v1"
+    assert short_event["fresh_signal"] is False
+    assert short_event["protection_ref_type"] == "opening_range_high_reference"
     assert avax["fresh_session_range_signal"] is False
     assert "breakout_level_crossed" in avax["missing_required_trigger_facts"]
     assert detector["summary"]["fresh_session_signal_count"] == 1
+    assert detector["summary"]["supported_event_ids"] == ["SOR-LONG", "SOR-SHORT"]
+    assert detector["generic_sor_signal_allowed"] is False
     for artifact in artifacts.values():
         checks = artifact["checks"]
         assert checks["primary_live_submit_scope_changed"] is False
@@ -176,3 +207,32 @@ def test_sor_session_detector_can_fetch_candles_via_readonly_ssh(monkeypatch):
     sol = next(row for row in detector["symbol_detector_rows"] if row["symbol"] == "SOLUSDT")
     assert sol["latest_candle_close_time_utc"]
     assert sol["fresh_session_range_signal"] is True
+
+
+def test_sor_session_detector_splits_short_breakdown_event_from_long_breakout():
+    module = _load_module()
+
+    artifacts = module.build_sor_session_scope_detector(
+        public_facts=_public_facts(),
+        candle_payloads={
+            "ETHUSDT": _breakdown_candles(),
+            "SOLUSDT": _candles(breakout=False),
+            "BTCUSDT": _candles(breakout=False),
+            "AVAXUSDT": _candles(breakout=False),
+        },
+        generated_at_utc="2026-06-30T02:00:00+00:00",
+    )
+
+    detector = artifacts["detector"]
+    eth = next(row for row in detector["symbol_detector_rows"] if row["symbol"] == "ETHUSDT")
+    long_event = next(row for row in eth["side_event_rows"] if row["event_id"] == "SOR-LONG")
+    short_event = next(row for row in eth["side_event_rows"] if row["event_id"] == "SOR-SHORT")
+    assert eth["fresh_session_range_signal"] is False
+    assert eth["fresh_session_range_short_signal"] is True
+    assert long_event["fresh_signal"] is False
+    assert "breakout_level_crossed" in long_event["missing_required_trigger_facts"]
+    assert short_event["side"] == "short"
+    assert short_event["fresh_signal"] is True
+    assert short_event["event_direction"] == "closed_15m_breakdown_below_opening_range_low"
+    assert short_event["protection_ref_type"] == "opening_range_high_reference"
+    assert detector["summary"]["fresh_session_signal_count"] == 1

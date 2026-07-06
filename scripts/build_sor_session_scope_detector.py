@@ -147,18 +147,25 @@ def _scope_artifact(rows: list[dict[str, Any]], generated_at_utc: str) -> dict[s
 
 
 def _detector_artifact(rows: list[dict[str, Any]], generated_at_utc: str) -> dict[str, Any]:
-    fresh_count = sum(row["fresh_session_range_signal"] is True for row in rows)
+    fresh_count = sum(
+        event_row.get("fresh_signal") is True
+        for row in rows
+        for event_row in row.get("side_event_rows", [])
+    )
     return {
         "schema": "brc.sor_session_detector_facts.v1",
         "scope": "sor_session_breakout_detector_facts_non_authority",
         "status": "sor_session_detector_facts_ready",
         "generated_at_utc": generated_at_utc,
         "strategy_group_id": "SOR-001",
-        "path_id": "SOR-SESSION-BREAKOUT",
+        "path_id": "SOR-SIDE-SPECIFIC-SESSION-RANGE",
         "detector_source_mode": "binance_usdm_public_closed_candles",
+        "generic_sor_signal_allowed": False,
         "symbol_detector_rows": rows,
         "summary": {
             "fresh_session_signal_count": fresh_count,
+            "fresh_side_event_count": fresh_count,
+            "supported_event_ids": ["SOR-LONG", "SOR-SHORT"],
             "first_blocker": (
                 "private_action_time_facts_required"
                 if fresh_count
@@ -195,9 +202,12 @@ def _detector_row(
     close = _float(latest.get("close"))
     prior = session[-2] if len(session) >= 2 else {}
     prior_close = _float(prior.get("close"))
-    breakout = close is not None and opening_high is not None and close > opening_high
-    follow_through = breakout and (prior_close is None or close >= prior_close)
-    invalidation_ok = close is not None and opening_low is not None and close > opening_low
+    long_breakout = close is not None and opening_high is not None and close > opening_high
+    long_follow_through = long_breakout and (prior_close is None or close >= prior_close)
+    long_invalidation_ok = close is not None and opening_low is not None and close > opening_low
+    short_breakdown = close is not None and opening_low is not None and close < opening_low
+    short_follow_through = short_breakdown and (prior_close is None or close <= prior_close)
+    short_invalidation_ok = close is not None and opening_high is not None and close < opening_high
     public_ready = (
         public_row.get("public_facts_ready") is True
         and public_row.get("spread_ok") is True
@@ -205,37 +215,81 @@ def _detector_row(
         and public_row.get("qty_step_ok") is True
         and public_row.get("funding_not_extreme") is True
     )
-    fresh = bool(public_ready and breakout and follow_through and invalidation_ok)
-    missing = []
+    long_fresh = bool(public_ready and long_breakout and long_follow_through and long_invalidation_ok)
+    short_fresh = bool(public_ready and short_breakdown and short_follow_through and short_invalidation_ok)
+    long_missing = []
+    short_missing = []
     if not public_ready:
-        missing.append("public_facts_ready")
+        long_missing.append("public_facts_ready")
+        short_missing.append("public_facts_ready")
     if opening_high is None or opening_low is None:
-        missing.append("opening_range_available")
-    if not breakout:
-        missing.append("breakout_level_crossed")
-    if not follow_through:
-        missing.append("follow_through_confirmed")
-    if not invalidation_ok:
-        missing.append("invalidation_level_held")
+        long_missing.append("opening_range_available")
+        short_missing.append("opening_range_available")
+    if not long_breakout:
+        long_missing.append("breakout_level_crossed")
+    if not long_follow_through:
+        long_missing.append("follow_through_confirmed")
+    if not long_invalidation_ok:
+        long_missing.append("invalidation_level_held")
+    if not short_breakdown:
+        short_missing.append("breakdown_level_crossed")
+    if not short_follow_through:
+        short_missing.append("bearish_follow_through_confirmed")
+    if not short_invalidation_ok:
+        short_missing.append("reclaim_invalidation_clear")
+    side_event_rows = [
+        {
+            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v1",
+            "event_id": "SOR-LONG",
+            "side": "long",
+            "event_direction": "closed_15m_breakout_above_opening_range_high",
+            "trigger_level": opening_high,
+            "protection_ref_type": "opening_range_low_reference",
+            "protection_level": opening_low,
+            "follow_through": long_follow_through,
+            "invalidation_held": long_invalidation_ok,
+            "fresh_signal": long_fresh,
+            "missing_required_trigger_facts": long_missing,
+            "trigger_candle_close_time_utc": latest.get("close_time_utc"),
+        },
+        {
+            "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v1",
+            "event_id": "SOR-SHORT",
+            "side": "short",
+            "event_direction": "closed_15m_breakdown_below_opening_range_low",
+            "trigger_level": opening_low,
+            "protection_ref_type": "opening_range_high_reference",
+            "protection_level": opening_high,
+            "follow_through": short_follow_through,
+            "invalidation_held": short_invalidation_ok,
+            "fresh_signal": short_fresh,
+            "missing_required_trigger_facts": short_missing,
+            "trigger_candle_close_time_utc": latest.get("close_time_utc"),
+        },
+    ]
     return {
         "symbol": symbol,
         "timeframe": "15m_closed",
         "public_facts_ready": public_ready,
+        "generic_sor_signal_allowed": False,
+        "side_event_rows": side_event_rows,
         "opening_range": {
             "high": opening_high,
             "low": opening_low,
             "source": "utc_session_first_four_15m_closed_candles",
         },
         "breakout_level": opening_high,
-        "follow_through": follow_through,
+        "breakdown_level": opening_low,
+        "follow_through": long_follow_through,
         "invalidation": {
             "level": opening_low,
-            "held": invalidation_ok,
+            "held": long_invalidation_ok,
         },
         "latest_close": close,
         "latest_candle_close_time_utc": latest.get("close_time_utc"),
-        "fresh_session_range_signal": fresh,
-        "missing_required_trigger_facts": missing,
+        "fresh_session_range_signal": long_fresh,
+        "fresh_session_range_short_signal": short_fresh,
+        "missing_required_trigger_facts": long_missing,
         "primary_trial_scope_decision": "readonly_watcher_only_not_primary_live_scope",
         "primary_trial_scope_rejection_reason": (
             "requires_session_detector_forward_observation_and_private_action_time_facts"

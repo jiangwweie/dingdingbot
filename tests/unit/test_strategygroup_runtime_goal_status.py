@@ -367,17 +367,154 @@ def _insert_pg_action_time_lane_without_ticket(conn) -> str:
     row = conn.execute(
         text(
             """
-            SELECT runtime_scope_binding_id, candidate_scope_id, strategy_group_id, symbol, side, runtime_profile_id
-            FROM brc_runtime_scope_bindings
-            WHERE status = 'active'
-              AND strategy_group_id = 'SOR-001'
-              AND symbol = 'ETHUSDT'
-              AND side = 'long'
+            SELECT r.runtime_scope_binding_id,
+                   r.candidate_scope_id,
+                   r.strategy_group_id,
+                   r.symbol,
+                   r.side,
+                   r.runtime_profile_id,
+                   b.event_spec_id,
+                   e.event_id
+            FROM brc_runtime_scope_bindings r
+            JOIN brc_candidate_scope_event_bindings b
+              ON b.candidate_scope_id = r.candidate_scope_id
+             AND b.status = 'active'
+            JOIN brc_strategy_side_event_specs e
+              ON e.event_spec_id = b.event_spec_id
+             AND e.status = 'current'
+            WHERE r.status = 'active'
+              AND r.strategy_group_id = 'SOR-001'
+              AND r.symbol = 'ETHUSDT'
+              AND r.side = 'long'
             LIMIT 1
             """
         )
     ).mappings().one()
     lane_id = "lane:SOR-001:ETHUSDT:long:ticket-pending"
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_live_signal_events (
+              signal_event_id, candidate_scope_id, event_spec_id,
+              strategy_group_id, symbol, side, detector_key, signal_type,
+              source_kind, status, freshness_state, confidence, fact_snapshot_id,
+              reason_codes, signal_payload, event_time_ms,
+              trigger_candle_close_time_ms, observed_at_ms, expires_at_ms,
+              invalidated_at_ms, created_at_ms
+            ) VALUES (
+              'signal:SOR-001:ETHUSDT:long',
+              :candidate_scope_id,
+              :event_spec_id,
+              :strategy_group_id,
+              :symbol,
+              :side,
+              'detector:SOR-001:long',
+              :event_id,
+              'live_market',
+              'facts_validated',
+              'fresh',
+              0.9,
+              'fact:SOR-001:ETHUSDT:long:public',
+              '["unit_goal_status_signal"]',
+              '{"time_authority": "trigger_candle_close_time_ms"}',
+              1770000900000,
+              1770000900000,
+              1770000900001,
+              1770001900000,
+              NULL,
+              1770000900002
+            )
+            """
+        ),
+        {
+            "candidate_scope_id": row["candidate_scope_id"],
+            "event_spec_id": row["event_spec_id"],
+            "strategy_group_id": row["strategy_group_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+            "event_id": row["event_id"],
+        },
+    )
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_pretrade_readiness_rows (
+              readiness_row_id, candidate_scope_id, strategy_group_id, symbol,
+              side, readiness_state, detector_state, watcher_state,
+              public_facts_state, signal_lifecycle_status,
+              signal_freshness_state, risk_state, scope_state, promotion_state,
+              first_blocker_class, first_blocker_detail, next_action,
+              stop_condition, evidence_ref, source_watermark, computed_at_ms,
+              valid_until_ms
+            ) VALUES (
+              'readiness:SOR-001:ETHUSDT:long',
+              :candidate_scope_id,
+              :strategy_group_id,
+              :symbol,
+              :side,
+              'ready',
+              'ready',
+              'fresh',
+              'satisfied',
+              'facts_validated',
+              'fresh',
+              'acceptable',
+              'live_submit_allowed',
+              'action_time_lane',
+              'action_time_preflight_ready',
+              'ready',
+              'materialize_action_time_ticket',
+              'ticket_created_or_lane_expires',
+              'fact:SOR-001:ETHUSDT:long:public',
+              'unit',
+              1770000950000,
+              1770001900000
+            )
+            """
+        ),
+        {
+            "candidate_scope_id": row["candidate_scope_id"],
+            "strategy_group_id": row["strategy_group_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+        },
+    )
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_promotion_candidates (
+              promotion_candidate_id, signal_event_id, readiness_row_id,
+              strategy_group_id, symbol, side, promotion_scope, status,
+              scope_state, risk_state, facts_snapshot_id, blockers,
+              arbitration_rank, created_at_ms, expires_at_ms, closed_at_ms,
+              authority_boundary
+            ) VALUES (
+              'promotion:SOR-001:ETHUSDT:long',
+              'signal:SOR-001:ETHUSDT:long',
+              'readiness:SOR-001:ETHUSDT:long',
+              :strategy_group_id,
+              :symbol,
+              :side,
+              'live_submit_candidate',
+              'arbitration_won',
+              'live_submit_allowed',
+              'acceptable',
+              'fact:SOR-001:ETHUSDT:long:public',
+              '[]',
+              1,
+              1770000960000,
+              1770001900000,
+              NULL,
+              'pg_promotion_candidate_non_executing; no_finalgate_no_operation_layer_no_exchange_write'
+            )
+            """
+        ),
+        {
+            "strategy_group_id": row["strategy_group_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+        },
+    )
     conn.execute(
         text(
             """
@@ -603,6 +740,14 @@ def test_pg_goal_status_ignores_legacy_report_dir_mismatch_when_pg_current_is_cl
     )
 
     assert packet["status"] == "waiting_for_signal"
+    assert packet["plain_language_stage"] == "等待市场机会"
+    assert packet["plain_language_next_system_action"] == (
+        "系统继续观察市场，不需要 Owner 操作"
+    )
+    assert packet["owner_action_required"] is False
+    assert packet["action_time_ticket_explanation"]["plain_language_stage"] == (
+        "当前没有 action-time lane"
+    )
     assert packet["checks"]["fresh_signal_present"] is False
     assert packet["checks"]["selected_strategygroup_scope_ready"] is True
     assert packet["checks"]["watcher_liveness_healthy"] is True
@@ -631,10 +776,24 @@ def test_pg_goal_status_reports_missing_action_time_ticket_for_open_lane(
 
     assert packet["status"] == "fresh_signal_processing"
     assert packet["non_authority_checkpoint"] == "materialize_action_time_ticket"
+    assert packet["plain_language_stage"] == "正在把信号推进成正式票据"
+    assert packet["plain_language_next_system_action"] == (
+        "系统为当前 lane 生成 Action-Time Ticket"
+    )
+    assert packet["owner_action_required"] is False
     assert packet["checks"]["fresh_signal_present"] is True
     assert packet["evidence"]["pg_action_time_lane_input_count"] == 1
     assert packet["evidence"]["pg_active_ticket_count"] == 0
     assert f"action_time_ticket_missing:{lane_id}" in packet["blockers"]
+    assert packet["action_time_ticket_explanation"]["plain_language_stage"] == (
+        "尚未生成正式候选交易票据"
+    )
+    assert packet["action_time_ticket_explanation"]["missing_ticket_lane_ids"] == [
+        lane_id
+    ]
+    assert (
+        packet["action_time_ticket_explanation"]["decides_trade_authority"] is False
+    )
     matrix = _matrix_by_key(packet)
     assert matrix["action_time_ticket"]["status"] == "waiting_for_chain"
     assert matrix["action_time_ticket"]["blocks_real_submit"] is True
@@ -660,9 +819,20 @@ def test_pg_goal_status_advances_open_lane_after_action_time_ticket_exists(
 
     assert packet["status"] == "action_time_finalgate_ready"
     assert packet["non_authority_checkpoint"] == "run_official_action_time_finalgate"
+    assert packet["plain_language_stage"] == "正式票据已生成，等待最终安全检查"
+    assert packet["plain_language_next_system_action"] == (
+        "系统使用 ticket 进入官方 FinalGate 检查"
+    )
+    assert packet["owner_action_required"] is False
     assert packet["evidence"]["pg_action_time_lane_input_count"] == 1
     assert packet["evidence"]["pg_active_ticket_count"] == 1
     assert f"action_time_ticket_missing:{lane_id}" not in packet["blockers"]
+    assert packet["action_time_ticket_explanation"]["plain_language_stage"] == (
+        "已有正式候选交易票据"
+    )
+    assert packet["action_time_ticket_explanation"]["active_ticket_ids"] == [
+        "ticket:SOR-001:ETHUSDT:long:unit"
+    ]
     matrix = _matrix_by_key(packet)
     assert matrix["action_time_ticket"]["status"] == "pass"
     assert matrix["action_time_ticket"]["blocks_real_submit"] is False
