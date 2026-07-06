@@ -16,7 +16,7 @@ mutation.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
@@ -166,6 +166,7 @@ def materialize_pg_promotion_action_time_lane(
             next_action="continue_watcher_observation",
         )
 
+    bundles = _apply_same_session_opposite_side_conflicts(bundles)
     eligible = [bundle for bundle in bundles if not bundle.blockers]
     blocked = [bundle for bundle in bundles if bundle.blockers]
     selected = _select_winner(eligible)
@@ -401,6 +402,47 @@ def _fresh_signal_bundles(
             )
         )
     return bundles
+
+
+def _apply_same_session_opposite_side_conflicts(
+    bundles: list[CandidateBundle],
+) -> list[CandidateBundle]:
+    sides_by_session: dict[tuple[str, str, int], set[str]] = {}
+    for bundle in bundles:
+        key = (
+            str(bundle.candidate.get("strategy_group_id") or ""),
+            str(bundle.candidate.get("symbol") or ""),
+            int(bundle.signal.get("trigger_candle_close_time_ms") or 0),
+        )
+        sides_by_session.setdefault(key, set()).add(str(bundle.candidate.get("side") or ""))
+
+    conflict_keys = {
+        key
+        for key, sides in sides_by_session.items()
+        if "long" in sides and "short" in sides
+    }
+    if not conflict_keys:
+        return bundles
+
+    out: list[CandidateBundle] = []
+    for bundle in bundles:
+        key = (
+            str(bundle.candidate.get("strategy_group_id") or ""),
+            str(bundle.candidate.get("symbol") or ""),
+            int(bundle.signal.get("trigger_candle_close_time_ms") or 0),
+        )
+        if key in conflict_keys:
+            out.append(
+                replace(
+                    bundle,
+                    blockers=tuple(
+                        _dedupe([*bundle.blockers, "same_session_opposite_side_conflict"])
+                    ),
+                )
+            )
+        else:
+            out.append(bundle)
+    return out
 
 
 def _candidate_blockers(

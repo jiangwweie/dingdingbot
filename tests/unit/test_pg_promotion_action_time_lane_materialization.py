@@ -369,6 +369,27 @@ def test_multiple_fresh_candidates_select_one_by_strategy_priority(pg_control_co
     assert statuses == {"MPG-001": "arbitration_won", "SOR-001": "arbitration_lost"}
 
 
+def test_same_session_opposite_side_conflict_blocks_real_submit_lane(pg_control_connection):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "short")
+
+    payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "promotion_candidates_blocked"
+    assert "same_session_opposite_side_conflict" in payload["blockers"]
+    assert _count(pg_control_connection, "brc_promotion_candidates") == 2
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+    rows = pg_control_connection.execute(
+        text("SELECT status, blockers FROM brc_promotion_candidates")
+    ).mappings()
+    for row in rows:
+        assert row["status"] == "blocked"
+        assert "same_session_opposite_side_conflict" in json.loads(row["blockers"])
+
+
 def test_db_rejects_replay_as_fresh_live_signal(pg_control_connection):
     row = _candidate_runtime_row(pg_control_connection, "SOR-001", "ETHUSDT", "long")
     with pytest.raises(sa.exc.IntegrityError):
