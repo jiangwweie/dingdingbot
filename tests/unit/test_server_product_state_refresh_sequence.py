@@ -52,7 +52,7 @@ def test_server_product_state_refresh_sequence_records_optional_failure(tmp_path
     assert report["summary"]["failed_optional_step_count"] == 1
     assert report["summary"]["failed_required_step_count"] == 0
     assert report["summary"]["final_goal_status_attempted"] is True
-    assert calls[-1][1] == "scripts/build_strategygroup_runtime_goal_status.py"
+    assert calls[-1][1] == "scripts/publish_runtime_control_current_projections.py"
     command_names = [command[1] for command in calls]
     assert "scripts/materialize_candidate_pool_action_time_lane.py" not in command_names
     assert "scripts/build_strategygroup_runtime_safety_state.py" not in command_names
@@ -63,6 +63,7 @@ def test_server_product_state_refresh_sequence_records_optional_failure(tmp_path
     assert "scripts/materialize_ticket_bound_runtime_safety_state.py" in command_names
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" in command_names
     assert "scripts/build_runtime_signal_watcher_readiness_pack.py" in command_names
+    assert "scripts/publish_runtime_control_current_projections.py" in command_names
     assert (tmp_path / "sequence.json").exists()
 
 
@@ -92,6 +93,7 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
         "scripts/build_single_lane_task_packet.py",
         "scripts/materialize_pg_promotion_action_time_lane.py",
         "scripts/build_strategygroup_runtime_goal_status.py",
+        "scripts/publish_runtime_control_current_projections.py",
         "scripts/materialize_action_time_ticket.py",
         "scripts/materialize_action_time_finalgate_preflight.py",
         "scripts/materialize_action_time_operation_layer_handoff.py",
@@ -106,12 +108,18 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
     assert control_builder_calls
     for command in control_builder_calls:
         assert "--require-database-url" in command
-        assert "--daily-table-json" not in command
-        assert "--candidate-pool-json" not in command
+        if command[1] != "scripts/publish_runtime_control_current_projections.py":
+            assert "--daily-table-json" not in command
+            assert "--candidate-pool-json" not in command
+            assert "--goal-status-json" not in command
         assert "--runtime-active-monitor-json" not in command
         assert "--live-facts-json" not in command
         if command[1] == "scripts/materialize_ticket_bound_post_submit_closure.py":
             assert "--latest-submitted" in command
+        if command[1] == "scripts/publish_runtime_control_current_projections.py":
+            assert "--candidate-pool-json" in command
+            assert "--daily-table-json" in command
+            assert "--goal-status-json" in command
     for command in calls:
         assert "--collect-live-facts-before-refresh" not in command
         assert "--live-facts-output" not in command
@@ -178,6 +186,47 @@ def test_server_product_state_refresh_sequence_fails_on_required_step_but_contin
         if step["status"] == "skipped_after_required_failure"
     ]
     assert "build_goal_status" in skipped_names
+
+
+def test_server_product_state_refresh_sequence_fails_closed_on_projection_publish_failure(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        if any(
+            item.endswith("publish_runtime_control_current_projections.py")
+            for item in command
+        ):
+            return module.CommandResult(
+                returncode=1,
+                stdout="",
+                stderr="current projection publish failed",
+            )
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        runner=runner,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_failed"
+    assert report["summary"]["failed_required_step_count"] == 1
+    assert report["summary"]["final_goal_status_attempted"] is True
+    assert report["summary"]["blocked_by_required_step"] == (
+        "publish_runtime_control_current_projections"
+    )
+    assert calls[-1][1] == "scripts/publish_runtime_control_current_projections.py"
+    assert any(
+        step["name"] == "build_goal_status" and step["status"] == "passed"
+        for step in report["step_results"]
+    )
 
 
 def test_server_product_state_refresh_sequence_omits_legacy_candidate_pool_materializer(

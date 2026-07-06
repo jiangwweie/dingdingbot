@@ -539,6 +539,28 @@ def _refresh_steps(
                 str(goal),
             ),
         ),
+        RefreshStep(
+            "publish_runtime_control_current_projections",
+            (
+                python,
+                "scripts/publish_runtime_control_current_projections.py",
+                *pg_required,
+                "--candidate-pool-json",
+                str(candidate_pool),
+                "--daily-table-json",
+                str(daily_table),
+                "--goal-status-json",
+                str(goal),
+                "--report-dir",
+                str(report_dir),
+                "--runtime-monitor-dir",
+                str(runtime_monitor_dir),
+                "--release-manifest",
+                str(release_manifest),
+                "--output-json",
+                str(report_dir / "runtime-control-current-projection-publish.json"),
+            ),
+        ),
     ]
 
 
