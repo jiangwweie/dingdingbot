@@ -125,3 +125,11 @@ def test_publish_current_projections_keeps_one_current_snapshot_per_model(tmp_pa
         }
     finally:
         engine.dispose()
+
+
+def test_publisher_normalizes_asyncpg_dsn_for_direct_cli_use():
+    module = _load_module(SCRIPT_PATH, "publish_runtime_control_current_projections_dsn")
+
+    assert module._normalized_database_url(
+        "postgresql+asyncpg://user:pass@localhost:5432/brc"
+    ) == "postgresql+psycopg://user:pass@localhost:5432/brc"

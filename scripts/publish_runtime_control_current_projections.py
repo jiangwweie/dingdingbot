@@ -35,6 +35,7 @@ from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
 from scripts.build_strategygroup_runtime_goal_status import (  # noqa: E402
     build_goal_status_artifact_from_control_state,
 )
+from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
@@ -52,13 +53,14 @@ SCHEMA = "brc.runtime_control_current_projection_publish.v1"
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    if not args.database_url:
+    database_url = _normalized_database_url(args.database_url)
+    if not database_url:
         print(
             "ERROR: PG_DATABASE_URL is required for current projection publishing",
             file=sys.stderr,
         )
         return 2
-    if not args.database_url.startswith(
+    if not database_url.startswith(
         ("postgresql://", "postgresql+psycopg://")
     ) and not args.allow_non_postgres_for_test:
         print(
@@ -67,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    engine = sa.create_engine(args.database_url)
+    engine = sa.create_engine(database_url)
     try:
         with engine.begin() as conn:
             report = publish_runtime_control_current_projections(
@@ -270,6 +272,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--output-json", type=Path, default=DEFAULT_OUTPUT_JSON)
     parser.add_argument("--json", action="store_true")
     return parser.parse_args(argv)
+
+
+def _normalized_database_url(database_url: str) -> str:
+    return normalize_sync_postgres_dsn(database_url)
 
 
 def _readiness_rows_for_control_state(
