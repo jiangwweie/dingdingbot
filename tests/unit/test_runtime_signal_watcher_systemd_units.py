@@ -132,6 +132,7 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "--report-dir /home/ubuntu/brc-deploy/reports/runtime-signal-watcher" in text
     assert "--runtime-monitor-dir /home/ubuntu/brc-deploy/reports/runtime-monitor" in text
     assert "--env-file /home/ubuntu/brc-deploy/env/live-readonly.env" in text
+    assert "--mode watcher_tick_summary" in text
     assert "/bin/sh -lc" not in text
     assert "set -eu;" not in text
     assert "build_strategygroup_runtime_goal_status.py" not in text

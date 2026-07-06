@@ -37,6 +37,13 @@ DEFAULT_REPORT_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-signal-watche
 DEFAULT_RUNTIME_MONITOR_DIR = Path("/home/ubuntu/brc-deploy/reports/runtime-monitor")
 DEFAULT_ENV_FILE = Path("/home/ubuntu/brc-deploy/env/live-readonly.env")
 DEFAULT_OUTPUT_JSON = DEFAULT_REPORT_DIR / "server-product-state-refresh-sequence.json"
+REFRESH_MODES = {
+    "watcher_tick_summary",
+    "control_refresh",
+    "action_time",
+    "closure",
+    "diagnostic_full",
+}
 
 
 @dataclass(frozen=True)
@@ -65,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_monitor_dir=Path(args.runtime_monitor_dir),
         env_file=Path(args.env_file),
         output_json=Path(args.output_json),
+        mode=args.mode,
     )
     print(
         json.dumps(
@@ -92,8 +100,11 @@ def run_server_product_state_refresh_sequence(
     runtime_monitor_dir: Path = DEFAULT_RUNTIME_MONITOR_DIR,
     env_file: Path = DEFAULT_ENV_FILE,
     output_json: Path = DEFAULT_OUTPUT_JSON,
+    mode: str = "diagnostic_full",
     runner: Runner | None = None,
 ) -> dict[str, Any]:
+    if mode not in REFRESH_MODES:
+        raise ValueError(f"unsupported refresh mode: {mode}")
     command_env = _command_env_with_sync_pg_dsn(os.environ)
     command_runner = runner or (lambda command: _run_command(command, env=command_env))
     started = datetime.now(timezone.utc).isoformat()
@@ -103,6 +114,7 @@ def run_server_product_state_refresh_sequence(
         report_dir=report_dir,
         runtime_monitor_dir=runtime_monitor_dir,
         env_file=env_file,
+        mode=mode,
     )
     step_results: list[dict[str, Any]] = []
     blocked_by_required_failure = ""
@@ -159,6 +171,11 @@ def run_server_product_state_refresh_sequence(
         result["name"] == "build_goal_status" and result["returncode"] is not None
         for result in step_results
     )
+    attempted_step_names = {
+        str(result["name"])
+        for result in step_results
+        if result["returncode"] is not None
+    }
     report = {
         "schema": "brc.server_product_state_refresh_sequence.v1",
         "scope": "server_product_state_refresh_sequence_non_authority",
@@ -167,6 +184,7 @@ def run_server_product_state_refresh_sequence(
             if not failed_required
             else "server_product_state_refresh_sequence_failed"
         ),
+        "mode": mode,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "started_at_utc": started,
         "summary": {
@@ -183,10 +201,22 @@ def run_server_product_state_refresh_sequence(
         "step_results": step_results,
         "safety_invariants": {
             "calls_finalgate": False,
-            "calls_ticket_bound_finalgate_preflight": True,
-            "calls_ticket_bound_operation_layer_handoff": True,
-            "calls_ticket_bound_runtime_safety_state": True,
-            "calls_ticket_bound_post_submit_closure": True,
+            "calls_ticket_bound_finalgate_preflight": (
+                "materialize_action_time_finalgate_preflight"
+                in attempted_step_names
+            ),
+            "calls_ticket_bound_operation_layer_handoff": (
+                "materialize_action_time_operation_layer_handoff"
+                in attempted_step_names
+            ),
+            "calls_ticket_bound_runtime_safety_state": (
+                "materialize_ticket_bound_runtime_safety_state"
+                in attempted_step_names
+            ),
+            "calls_ticket_bound_post_submit_closure": (
+                "materialize_ticket_bound_post_submit_closure"
+                in attempted_step_names
+            ),
             "calls_operation_layer_submit": False,
             "calls_exchange_write": False,
             "places_order": False,
@@ -209,6 +239,7 @@ def _refresh_steps(
     report_dir: Path,
     runtime_monitor_dir: Path,
     env_file: Path,
+    mode: str,
 ) -> list[RefreshStep]:
     status = report_dir / "latest-status.json"
     public = runtime_monitor_dir / "latest-binance-usdm-public-facts.json"
@@ -243,7 +274,7 @@ def _refresh_steps(
         str(action_time_boundary_md),
     )
 
-    return [
+    steps = [
         RefreshStep(
             "fetch_public_facts",
             (
@@ -562,6 +593,61 @@ def _refresh_steps(
             ),
         ),
     ]
+    return _steps_for_mode(steps, mode=mode)
+
+
+def _steps_for_mode(steps: list[RefreshStep], *, mode: str) -> list[RefreshStep]:
+    if mode == "diagnostic_full":
+        return steps
+    names_by_mode = {
+        "watcher_tick_summary": {
+            "validate_runtime_coverage",
+            "build_readiness_pack_after_materialization",
+        },
+        "control_refresh": {
+            "fetch_public_facts",
+            "build_sor_detector",
+            "build_action_time_boundary_public",
+            "build_mi_trial_admission",
+            "build_brf2_runtime_signal_facts",
+            "validate_runtime_coverage",
+            "build_candidate_pool",
+            "validate_candidate_pool",
+            "build_daily_table",
+            "validate_daily_table",
+            "build_single_lane_task_packet",
+            "validate_single_lane_task_packet",
+            "build_goal_status",
+            "publish_runtime_control_current_projections",
+        },
+        "action_time": {
+            "build_account_safe_facts",
+            "build_action_time_boundary_account",
+            "build_candidate_pool_after_account",
+            "validate_candidate_pool_after_account",
+            "materialize_pg_promotion_action_time_lane",
+            "materialize_action_time_ticket",
+            "materialize_action_time_finalgate_preflight",
+            "materialize_action_time_operation_layer_handoff",
+            "materialize_ticket_bound_runtime_safety_state",
+            "build_candidate_pool_after_materialization",
+            "validate_candidate_pool_after_materialization",
+            "build_readiness_pack_after_materialization",
+            "build_daily_table_after_account",
+            "validate_daily_table_after_account",
+            "build_single_lane_task_packet_after_account",
+            "validate_single_lane_task_packet_after_account",
+            "build_goal_status",
+            "publish_runtime_control_current_projections",
+        },
+        "closure": {
+            "materialize_ticket_bound_post_submit_closure",
+            "build_goal_status",
+            "publish_runtime_control_current_projections",
+        },
+    }
+    allowed_names = names_by_mode[mode]
+    return [step for step in steps if step.name in allowed_names]
 
 
 def _command_env_with_sync_pg_dsn(base_env: Mapping[str, str]) -> dict[str, str]:
@@ -615,6 +701,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--runtime-monitor-dir", default=str(DEFAULT_RUNTIME_MONITOR_DIR))
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE))
     parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
+    parser.add_argument(
+        "--mode",
+        choices=sorted(REFRESH_MODES),
+        default="diagnostic_full",
+        help=(
+            "Refresh mode. watcher_tick_summary is the normal watcher post-step; "
+            "diagnostic_full preserves the legacy full diagnostic sequence."
+        ),
+    )
     return parser.parse_args(argv)
 
 

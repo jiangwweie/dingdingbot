@@ -133,6 +133,7 @@ Owner decisions.
 | Runtime control state DB architecture | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md` |
 | Runtime control state DB table design | `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | Runtime control state mainline file I/O map | `docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md` |
+| PG current projection authority closure | `docs/current/PG_CURRENT_PROJECTION_AUTHORITY_CLOSURE_DESIGN.md` |
 | Strategy governance pipeline DB design | `docs/current/STRATEGY_GOVERNANCE_PIPELINE_DB_DESIGN.md` |
 | WIP limit and stop rules | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` |
 | Stage roadmap and current track plan | `docs/current/MAIN_CONTROL_ROADMAP.md` |

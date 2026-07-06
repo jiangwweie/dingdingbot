@@ -130,6 +130,104 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
     )
 
 
+def test_server_product_state_refresh_sequence_watcher_tick_summary_is_lightweight(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        mode="watcher_tick_summary",
+        runner=runner,
+    )
+
+    command_names = [command[1] for command in calls]
+    assert report["status"] == "server_product_state_refresh_sequence_ready"
+    assert report["mode"] == "watcher_tick_summary"
+    assert command_names == [
+        "scripts/validate_runtime_candidate_universe_coverage.py",
+        "scripts/build_runtime_signal_watcher_readiness_pack.py",
+    ]
+    assert "scripts/build_strategy_live_candidate_pool.py" not in command_names
+    assert "scripts/materialize_action_time_ticket.py" not in command_names
+    assert "scripts/materialize_action_time_finalgate_preflight.py" not in command_names
+    assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
+    assert report["summary"]["final_goal_status_attempted"] is False
+    assert report["safety_invariants"]["calls_ticket_bound_finalgate_preflight"] is False
+    assert report["safety_invariants"]["calls_ticket_bound_operation_layer_handoff"] is False
+    assert report["safety_invariants"]["calls_ticket_bound_runtime_safety_state"] is False
+    assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
+
+
+def test_server_product_state_refresh_sequence_action_time_mode_skips_closure(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        mode="action_time",
+        runner=runner,
+    )
+
+    command_names = [command[1] for command in calls]
+    assert report["status"] == "server_product_state_refresh_sequence_ready"
+    assert "scripts/build_runtime_account_safe_facts.py" in command_names
+    assert "scripts/materialize_action_time_ticket.py" in command_names
+    assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
+    assert "scripts/materialize_ticket_bound_runtime_safety_state.py" in command_names
+    assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
+    assert report["safety_invariants"]["calls_ticket_bound_finalgate_preflight"] is True
+    assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
+
+
+def test_server_product_state_refresh_sequence_closure_mode_skips_control_rebuild(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        report_dir=tmp_path / "reports",
+        runtime_monitor_dir=tmp_path / "runtime-monitor",
+        env_file=tmp_path / "live-readonly.env",
+        output_json=tmp_path / "sequence.json",
+        mode="closure",
+        runner=runner,
+    )
+
+    command_names = [command[1] for command in calls]
+    assert report["status"] == "server_product_state_refresh_sequence_ready"
+    assert "scripts/materialize_ticket_bound_post_submit_closure.py" in command_names
+    assert "scripts/build_strategy_live_candidate_pool.py" not in command_names
+    assert "scripts/materialize_action_time_ticket.py" not in command_names
+    assert command_names[-1] == "scripts/publish_runtime_control_current_projections.py"
+    assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is True
+
+
 def test_server_product_state_refresh_sequence_normalizes_child_pg_dsn():
     module = _load_module()
 
