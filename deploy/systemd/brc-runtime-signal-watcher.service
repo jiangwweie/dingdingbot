@@ -44,3 +44,9 @@ ExecStartPost=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python 
 
 NoNewPrivileges=true
 PrivateTmp=true
+Nice=10
+CPUAccounting=true
+CPUQuota=60%
+IOAccounting=true
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

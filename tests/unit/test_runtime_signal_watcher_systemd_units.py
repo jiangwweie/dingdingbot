@@ -55,6 +55,9 @@ def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin
     assert "Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180" in text
     assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env" in text
     assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env" in text
+    assert "CPUQuota=60%" in text
+    assert "Nice=10" in text
+    assert "IOAccounting=true" in text
     assert "--require-database-url" in text
     assert "--candidate-universe-json" not in text
     assert "latest-strategy-live-candidate-pool.json" not in text
@@ -92,6 +95,15 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     assert "OwnerBoundedExecution" not in text
     assert "withdrawal" not in text
     assert "transfer" not in text
+
+
+def test_signal_watcher_timer_does_not_persistent_catch_up():
+    timer_text = (
+        REPO_ROOT / "deploy" / "systemd" / "brc-runtime-signal-watcher.timer"
+    ).read_text(encoding="utf-8")
+
+    assert "Persistent=false" in timer_text
+    assert "Persistent=true" not in timer_text
 
 
 def test_signal_watcher_dry_run_audit_dropin_is_non_executing():
@@ -223,6 +235,7 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "systemctl daemon-reload" in commands
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "systemctl enable --now" in commands
+    assert "systemctl restart brc-runtime-signal-watcher.timer" not in commands
     assert "systemctl start brc-runtime-monitor.service" in commands
     assert "systemctl disable --now brc-runtime-db-retention.timer" in commands
     assert "systemctl enable --now brc-runtime-db-retention.timer" not in commands
