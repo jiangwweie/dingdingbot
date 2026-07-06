@@ -9,6 +9,7 @@ import pytest
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
 from src.infrastructure.runtime_control_state_repository import (
@@ -267,6 +268,37 @@ def test_pg_backed_runtime_control_state_repository_requires_event_binding(
         repository.read_control_state()
 
 
+@pytest.mark.parametrize(
+    ("candidate_scope_id", "side"),
+    [
+        ("candidate_scope:CPM-RO-001:ETHUSDT:long:CPM-LONG", "short"),
+        ("candidate_scope:MPG-001:OPUSDT:long:MPG-LONG", "short"),
+        ("candidate_scope:MI-001:AVAXUSDT:long:MI-LONG", "short"),
+        ("candidate_scope:BRF2-001:BTCUSDT:short:BRF2-SHORT", "long"),
+    ],
+)
+def test_pg_backed_runtime_control_state_repository_rejects_unsupported_active_side(
+    pg_control_connection,
+    candidate_scope_id: str,
+    side: str,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_strategy_group_candidate_scope
+            SET side = :side
+            WHERE candidate_scope_id = :candidate_scope_id
+            """
+        ),
+        {"candidate_scope_id": candidate_scope_id, "side": side},
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+
+    with pytest.raises(RuntimeControlStateRepositoryError, match="outside active PG event scope"):
+        repository.read_control_state()
+
+
 def test_pg_backed_runtime_control_state_repository_rejects_generic_sor_event_spec(
     pg_control_connection,
 ):
@@ -370,6 +402,64 @@ def test_pg_backed_runtime_control_state_repository_rejects_signal_event_spec_mi
 
     with pytest.raises(RuntimeControlStateRepositoryError, match="mismatches candidate event spec"):
         repository.read_control_state()
+
+
+def test_pg_backed_runtime_control_state_repository_rejects_generic_sor_signal_type(
+    pg_control_connection,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_live_signal_events (
+              signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
+              symbol, side, detector_key, signal_type, source_kind, status,
+              freshness_state, confidence, fact_snapshot_id, reason_codes,
+              signal_payload, event_time_ms, trigger_candle_close_time_ms,
+              observed_at_ms, expires_at_ms, invalidated_at_ms, created_at_ms
+            ) VALUES (
+              'signal:SOR-001:ETHUSDT:long:generic-type',
+              'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
+              'event_spec:SOR-001:SOR-LONG:v1', 'SOR-001', 'ETHUSDT',
+              'long', 'detector:SOR-001:long', 'SOR-GENERIC', 'live_market',
+              'facts_validated', 'fresh', 0.9, 'fact:SOR:generic-type',
+              '[]', '{}', 1770000120000, 1770000120000, 1770000120001,
+              1770000720000, NULL, 1770000120002
+            )
+            """
+        )
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+
+    with pytest.raises(RuntimeControlStateRepositoryError, match="signal_type must equal event_id"):
+        repository.read_control_state()
+
+
+def test_pg_backed_runtime_control_state_repository_rejects_generated_at_as_event_time(
+    pg_control_connection,
+):
+    with pytest.raises(IntegrityError, match="ck_brc_live_signal_no_generated_at_event_time"):
+        pg_control_connection.execute(
+            text(
+                """
+                INSERT INTO brc_live_signal_events (
+                  signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
+                  symbol, side, detector_key, signal_type, source_kind, status,
+                  freshness_state, confidence, fact_snapshot_id, reason_codes,
+                  signal_payload, event_time_ms, trigger_candle_close_time_ms,
+                  observed_at_ms, expires_at_ms, invalidated_at_ms, created_at_ms
+                ) VALUES (
+                  'signal:SOR-001:ETHUSDT:long:generated-at-time',
+                  'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
+                  'event_spec:SOR-001:SOR-LONG:v1', 'SOR-001', 'ETHUSDT',
+                  'long', 'detector:SOR-001:long', 'SOR-LONG', 'live_market',
+                  'facts_validated', 'fresh', 0.9, 'fact:SOR:generated-at-time',
+                  '[]', '{}', 1770000120000, 1770000120000, 1770000120001,
+                  1770000720000, NULL, 1770000120000
+                )
+                """
+            )
+        )
 
 
 def test_pg_backed_runtime_control_state_repository_rejects_lane_without_arbitration_winner(
