@@ -1325,9 +1325,29 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
         or artifact.get("api_prepare_plan")
         or {}
     )
+    status = str(artifact.get("status") or "")
+    signal_input_json = artifact.get("signal_input_json") or plan.get("signal_input_json")
+    prepared_authorization_id = artifact.get("prepared_authorization_id") or plan.get(
+        "prepared_authorization_id"
+    )
+    legacy_diagnostics: dict[str, Any] = {}
+    if status == "blocked":
+        legacy_diagnostics["blockers_retained"] = [
+            str(blocker) for blocker in artifact.get("blockers") or []
+        ]
+        legacy_diagnostics["not_current_readiness"] = True
+        if signal_input_json:
+            legacy_diagnostics["retired_signal_input_ref"] = signal_input_json
+        if prepared_authorization_id:
+            legacy_diagnostics["retired_prepared_authorization_id"] = (
+                prepared_authorization_id
+            )
+        signal_input_json = None
+        prepared_authorization_id = None
+
     return {
         "runtime_instance_id": _runtime_value(runtime, "runtime_instance_id", "runtime_id"),
-        "status": artifact.get("status"),
+        "status": status,
         "symbol": _runtime_value(runtime, "symbol"),
         "side": _runtime_value(runtime, "side"),
         "strategy_family_id": _runtime_value(runtime, "strategy_family_id", "family"),
@@ -1342,10 +1362,9 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
         ),
         "blockers": list(artifact.get("blockers") or []),
         "warnings": list(artifact.get("warnings") or []),
-        "signal_input_json": artifact.get("signal_input_json")
-        or plan.get("signal_input_json"),
-        "prepared_authorization_id": artifact.get("prepared_authorization_id")
-        or plan.get("prepared_authorization_id"),
+        "signal_input_json": signal_input_json,
+        "prepared_authorization_id": prepared_authorization_id,
+        "legacy_diagnostics": legacy_diagnostics,
         "signal_summary": _signal_summary(artifact),
         "prepare_records_created": bool(safety.get("prepare_records_created")),
         "created_records": {
@@ -1485,9 +1504,7 @@ def _build_monitor_artifact(
     for runtime in selected:
         runtime_args = _monitor_args(args, runtime)
         runtime_artifact = builder(runtime_args)
-        runtime_artifact = _downgrade_non_actionable_observation_blockers(
-            runtime_artifact
-        )
+        runtime_artifact = _preserve_legacy_observation_blockers(runtime_artifact)
         runtime_artifact["runtime_instance_id"] = runtime_args.runtime_instance_id
         runtime_artifacts.append(runtime_artifact)
         summaries.append(_summary(runtime, runtime_artifact))
@@ -1600,9 +1617,16 @@ def _next_step(status: str) -> str:
     return "wait_for_next_observation_cycle"
 
 
-def _downgrade_non_actionable_observation_blockers(
+def _preserve_legacy_observation_blockers(
     artifact: dict[str, Any],
 ) -> dict[str, Any]:
+    """Keep legacy observation blockers visible instead of reclassifying them.
+
+    File-era active observation artifacts could expose ``signal_input_json`` and
+    similar fields even when the runtime was blocked. The PG mainline must not
+    turn those legacy fields into current readiness; a blocked artifact remains
+    blocked until the PG signal / promotion / lane / ticket chain advances it.
+    """
     if str(artifact.get("status") or "") != "blocked":
         return artifact
     blockers = [str(blocker) for blocker in artifact.get("blockers") or []]
@@ -1638,61 +1662,24 @@ def _downgrade_non_actionable_observation_blockers(
     ):
         return artifact
 
-    signal_input_json = _artifact_signal_input_json(artifact)
-    if signal_input_json:
-        downgraded = dict(artifact)
-        downgraded["status"] = "waiting_for_signal"
-        downgraded["blockers"] = []
-        downgraded["warnings"] = sorted(
-            {
-                *[str(warning) for warning in artifact.get("warnings") or []],
-                *[
-                    f"legacy_artifact_readiness_ignored:{blocker}"
-                    for blocker in blockers
-                ],
-            }
-        )
-        downgraded["signal_input_json"] = signal_input_json
-        plan = dict(
-            artifact.get("api_prepare_plan")
-            or artifact.get("observation_cycle_plan")
-            or artifact.get("observation_monitor_plan")
-            or {}
-        )
-        plan["next_step"] = "materialize_pg_live_signal_event_before_prepare"
-        plan["signal_input_json"] = signal_input_json
-        plan["not_executed"] = True
-        plan["creates_execution_intent"] = False
-        plan["places_order"] = False
-        plan["calls_order_lifecycle"] = False
-        downgraded["observation_monitor_plan"] = plan
-        downgraded["legacy_artifact_readiness_blockers"] = blockers
-        return downgraded
-
-    downgraded = dict(artifact)
-    downgraded["status"] = "waiting_for_signal"
-    downgraded["blockers"] = []
-    downgraded["warnings"] = sorted(
+    preserved = dict(artifact)
+    preserved["warnings"] = sorted(
         {
             *[str(warning) for warning in artifact.get("warnings") or []],
             *[
-                f"non_actionable_observation_blocker:{blocker}"
+                f"legacy_observation_blocker_preserved:{blocker}"
                 for blocker in blockers
             ],
         }
     )
-    plan = dict(
-        artifact.get("observation_cycle_plan")
-        or artifact.get("observation_monitor_plan")
-        or {}
-    )
-    plan["next_step"] = "continue_waiting_for_strategy_signal"
-    plan["not_executed"] = True
-    plan["places_order"] = False
-    plan["calls_order_lifecycle"] = False
-    downgraded["observation_monitor_plan"] = plan
-    downgraded["non_actionable_observation_blockers"] = blockers
-    return downgraded
+    diagnostics = dict(preserved.get("legacy_diagnostics") or {})
+    diagnostics["blockers_retained"] = blockers
+    diagnostics["not_current_readiness"] = True
+    signal_input_json = _artifact_signal_input_json(artifact)
+    if signal_input_json:
+        diagnostics["retired_signal_input_ref"] = signal_input_json
+    preserved["legacy_diagnostics"] = diagnostics
+    return preserved
 
 
 def _artifact_signal_input_json(artifact: dict[str, Any]) -> str | None:

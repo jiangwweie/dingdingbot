@@ -838,7 +838,7 @@ def test_active_monitor_projects_runtime_profile_boundary_for_runtime_scope(
     )
 
 
-def test_active_monitor_downgrades_non_actionable_historical_observation_blockers(
+def test_active_monitor_preserves_non_actionable_historical_observation_blockers(
     tmp_path,
 ):
     client = _FakeClient(
@@ -890,13 +890,19 @@ def test_active_monitor_downgrades_non_actionable_historical_observation_blocker
         runtime_artifact_builder=builder,
     )
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["blockers"] == []
+    assert packet["status"] == "blocked"
+    assert packet["blockers"] == [
+        "runtime-old-exhausted:runtime_attempts_exhausted",
+        "runtime-old-exhausted:order_candidate_id_or_authorization_id_required",
+    ]
     old_summary = packet["runtime_summaries"][0]
-    assert old_summary["status"] == "waiting_for_signal"
-    assert old_summary["blockers"] == []
+    assert old_summary["status"] == "blocked"
+    assert old_summary["blockers"] == [
+        "runtime_attempts_exhausted",
+        "order_candidate_id_or_authorization_id_required",
+    ]
     assert (
-        "non_actionable_observation_blocker:runtime_attempts_exhausted"
+        "legacy_observation_blocker_preserved:runtime_attempts_exhausted"
         in old_summary["warnings"]
     )
     assert "operator_command_plan" not in packet
@@ -904,7 +910,7 @@ def test_active_monitor_downgrades_non_actionable_historical_observation_blocker
     assert packet["safety_invariants"]["exchange_write_called"] is False
 
 
-def test_active_monitor_downgrades_observe_only_stop_reference_gap(tmp_path):
+def test_active_monitor_preserves_observe_only_stop_reference_gap(tmp_path):
     client = _FakeClient(
         [
             _runtime(
@@ -974,17 +980,23 @@ def test_active_monitor_downgrades_observe_only_stop_reference_gap(tmp_path):
         },
     )
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["blockers"] == []
+    assert packet["status"] == "blocked"
+    assert packet["blockers"] == [
+        "runtime-teq:strategy_stop_reference_unavailable",
+        "runtime-teq:order_candidate_id_or_authorization_id_required",
+    ]
     summary = packet["runtime_summaries"][0]
-    assert summary["status"] == "waiting_for_signal"
-    assert summary["blockers"] == []
+    assert summary["status"] == "blocked"
+    assert summary["blockers"] == [
+        "strategy_stop_reference_unavailable",
+        "order_candidate_id_or_authorization_id_required",
+    ]
     assert (
-        "non_actionable_observation_blocker:strategy_stop_reference_unavailable"
+        "legacy_observation_blocker_preserved:strategy_stop_reference_unavailable"
         in summary["warnings"]
     )
     assert (
-        "non_actionable_observation_blocker:order_candidate_id_or_authorization_id_required"
+        "legacy_observation_blocker_preserved:order_candidate_id_or_authorization_id_required"
         in summary["warnings"]
     )
     assert "operator_command_plan" not in packet
@@ -1230,21 +1242,28 @@ def test_active_monitor_ignores_legacy_signal_input_as_readiness(tmp_path):
         runtime_artifact_builder=builder,
     )
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["blockers"] == []
-    assert packet["observation_monitor_plan"]["signal_input_json"] == str(signal_path)
+    assert packet["status"] == "blocked"
+    assert packet["blockers"] == [
+        "runtime-active-1:order_candidate_id_or_authorization_id_required"
+    ]
+    assert packet["observation_monitor_plan"]["signal_input_json"] is None
     assert packet["observation_monitor_plan"]["next_step"] == (
-        "wait_for_next_observation_cycle"
+        "resolve_runtime_observation_blockers"
     )
     assert packet["observation_monitor_plan"]["creates_execution_intent"] is False
     assert packet["safety_invariants"]["shadow_candidate_created"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
     summary = packet["runtime_summaries"][0]
-    assert summary["status"] == "waiting_for_signal"
-    assert summary["signal_input_json"] == str(signal_path)
-    assert summary["blockers"] == []
+    assert summary["status"] == "blocked"
+    assert summary["signal_input_json"] is None
+    assert summary["legacy_diagnostics"] == {
+        "blockers_retained": ["order_candidate_id_or_authorization_id_required"],
+        "not_current_readiness": True,
+        "retired_signal_input_ref": str(signal_path),
+    }
+    assert summary["blockers"] == ["order_candidate_id_or_authorization_id_required"]
     assert (
-        "legacy_artifact_readiness_ignored:order_candidate_id_or_authorization_id_required"
+        "legacy_observation_blocker_preserved:order_candidate_id_or_authorization_id_required"
         in summary["warnings"]
     )
     assert summary["signal_summary"]["signal_type"] == "would_enter"
