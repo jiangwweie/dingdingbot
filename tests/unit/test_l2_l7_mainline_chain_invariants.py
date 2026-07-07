@@ -36,14 +36,14 @@ MATERIALIZER_CLI_SURFACES = {
         "--now-ms",
         "--json",
     },
-    "scripts/materialize_action_time_ticket.py": {
+    "src/application/action_time/action_time_ticket.py": {
         "--database-url",
         "--require-database-url",
         "--allow-non-postgres-for-test",
         "--now-ms",
         "--json",
     },
-    "scripts/materialize_action_time_finalgate_preflight.py": {
+    "src/application/action_time/finalgate_preflight.py": {
         "--database-url",
         "--require-database-url",
         "--ticket-id",
@@ -51,7 +51,7 @@ MATERIALIZER_CLI_SURFACES = {
         "--json",
         "--allow-non-postgres-for-test",
     },
-    "scripts/materialize_action_time_operation_layer_handoff.py": {
+    "src/application/action_time/operation_layer_handoff.py": {
         "--database-url",
         "--require-database-url",
         "--ticket-id",
@@ -69,7 +69,7 @@ MATERIALIZER_CLI_SURFACES = {
         "--json",
         "--allow-non-postgres-for-test",
     },
-    "scripts/materialize_ticket_bound_protected_submit_attempt.py": {
+    "src/application/action_time/protected_submit_attempt.py": {
         "--database-url",
         "--require-database-url",
         "--ticket-id",
@@ -79,7 +79,7 @@ MATERIALIZER_CLI_SURFACES = {
         "--json",
         "--allow-non-postgres-for-test",
     },
-    "scripts/materialize_ticket_bound_post_submit_closure.py": {
+    "src/application/action_time/post_submit_closure.py": {
         "--database-url",
         "--require-database-url",
         "--protected-submit-attempt-id",
@@ -88,6 +88,14 @@ MATERIALIZER_CLI_SURFACES = {
         "--json",
         "--allow-non-postgres-for-test",
     },
+}
+
+ACTION_TIME_SCRIPT_WRAPPERS = {
+    "scripts/materialize_action_time_ticket.py": "src.application.action_time.action_time_ticket",
+    "scripts/materialize_action_time_finalgate_preflight.py": "src.application.action_time.finalgate_preflight",
+    "scripts/materialize_action_time_operation_layer_handoff.py": "src.application.action_time.operation_layer_handoff",
+    "scripts/materialize_ticket_bound_protected_submit_attempt.py": "src.application.action_time.protected_submit_attempt",
+    "scripts/materialize_ticket_bound_post_submit_closure.py": "src.application.action_time.post_submit_closure",
 }
 
 FORBIDDEN_LOOSE_OR_FILE_ARGS = {
@@ -171,6 +179,16 @@ def test_l2_l7_materializer_cli_surfaces_do_not_accept_json_or_loose_identity() 
 
         assert args == expected_args
         assert not FORBIDDEN_LOOSE_OR_FILE_ARGS.intersection(args)
+
+
+def test_action_time_materializer_scripts_are_thin_application_wrappers() -> None:
+    for rel_path, module_name in ACTION_TIME_SCRIPT_WRAPPERS.items():
+        source = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+
+        assert module_name in source
+        assert "argparse.ArgumentParser" not in source
+        assert "sqlalchemy" not in source
+        assert "PgBackedRuntimeControlStateRepository" not in source
 
 
 def test_l2_l7_production_systemd_has_no_legacy_file_authority_or_builders() -> None:
@@ -374,6 +392,21 @@ def test_owner_console_status_readmodels_do_not_import_artifact_scripts() -> Non
     assert "from scripts import" not in source
     assert "from src.application.readmodels.strategy_group_live_facts_readiness" in source
     assert "from src.application.readmodels.strategygroup_runtime_pilot_status" in source
+
+
+def test_ticket_bound_api_imports_application_action_time_services_not_scripts() -> None:
+    source = (REPO_ROOT / "src/interfaces/api_trading_console.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from scripts.materialize_action_time_finalgate_preflight" not in source
+    assert "from scripts.materialize_action_time_operation_layer_handoff" not in source
+    assert "from scripts.materialize_ticket_bound_protected_submit_attempt" not in source
+    assert "from scripts.materialize_ticket_bound_post_submit_closure" not in source
+    assert "from src.application.action_time.finalgate_preflight" in source
+    assert "from src.application.action_time.operation_layer_handoff" in source
+    assert "from src.application.action_time.protected_submit_attempt" in source
+    assert "from src.application.action_time.post_submit_closure" in source
 
 
 def _parser_args(source: str) -> set[str]:

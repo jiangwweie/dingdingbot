@@ -28,7 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.materialize_action_time_ticket import (  # noqa: E402
+from src.application.action_time.action_time_ticket import (  # noqa: E402
     compute_action_time_ticket_hash,
 )
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402

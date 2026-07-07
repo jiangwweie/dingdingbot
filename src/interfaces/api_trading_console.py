@@ -2306,7 +2306,7 @@ def _run_ticket_bound_action_time_finalgate_preflight(ticket_id: str) -> dict[st
     if not is_sync_postgres_dsn(database_url):
         raise RuntimeError("ticket-bound FinalGate requires PostgreSQL DSN")
 
-    from scripts.materialize_action_time_finalgate_preflight import (
+    from src.application.action_time.finalgate_preflight import (
         materialize_action_time_finalgate_preflight,
     )
 
@@ -2332,7 +2332,7 @@ def _run_ticket_bound_operation_layer_handoff(
     if not is_sync_postgres_dsn(database_url):
         raise RuntimeError("ticket-bound Operation Layer handoff requires PostgreSQL DSN")
 
-    from scripts.materialize_action_time_operation_layer_handoff import (
+    from src.application.action_time.operation_layer_handoff import (
         materialize_action_time_operation_layer_handoff,
     )
 
@@ -2360,7 +2360,7 @@ async def _run_ticket_bound_protected_submit(
     if not is_sync_postgres_dsn(database_url):
         raise RuntimeError("ticket-bound protected submit requires PostgreSQL DSN")
 
-    from scripts.materialize_ticket_bound_protected_submit_attempt import (
+    from src.application.action_time.protected_submit_attempt import (
         SUBMIT_MODE_REAL_GATEWAY_ACTION,
         prepare_ticket_bound_protected_submit_attempt,
         record_ticket_bound_protected_submit_result,
@@ -2403,7 +2403,7 @@ def _run_ticket_bound_post_submit_closure(
     if not is_sync_postgres_dsn(database_url):
         raise RuntimeError("ticket-bound post-submit closure requires PostgreSQL DSN")
 
-    from scripts.materialize_ticket_bound_post_submit_closure import (
+    from src.application.action_time.post_submit_closure import (
         materialize_ticket_bound_post_submit_closure,
     )
 
