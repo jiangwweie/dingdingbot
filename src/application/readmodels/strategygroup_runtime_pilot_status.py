@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an Owner-readable StrategyGroup runtime pilot status artifact.
+"""Build an Owner-readable StrategyGroup runtime pilot status read model.
 
 This is a read-only product layer over StrategyGroup intake, live-facts
 readiness, and runtime signal watcher evidence. It never creates candidates,
@@ -13,7 +13,7 @@ import sys
 import time
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 

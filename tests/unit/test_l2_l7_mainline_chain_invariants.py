@@ -364,6 +364,18 @@ def test_api_observation_cycle_uses_application_signal_input_helper_not_script()
     assert "from src.application.readmodels import runtime_strategy_signal_input" in source
 
 
+def test_owner_console_status_readmodels_do_not_import_artifact_scripts() -> None:
+    source = (REPO_ROOT / "src/application/readmodels/trading_console.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "build_strategy_group_live_facts_readiness_artifact" not in source
+    assert "build_strategygroup_runtime_pilot_status" not in source
+    assert "from scripts import" not in source
+    assert "from src.application.readmodels.strategy_group_live_facts_readiness" in source
+    assert "from src.application.readmodels.strategygroup_runtime_pilot_status" in source
+
+
 def _parser_args(source: str) -> set[str]:
     tree = ast.parse(source)
     args: set[str] = set()

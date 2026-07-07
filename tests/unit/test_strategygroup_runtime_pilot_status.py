@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 
-from scripts.build_strategygroup_runtime_pilot_status import build_status_artifact
+from src.application.readmodels.strategygroup_runtime_pilot_status import (
+    build_status_artifact,
+)
 
 
 def _intake() -> dict:

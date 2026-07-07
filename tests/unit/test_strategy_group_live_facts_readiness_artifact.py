@@ -6,7 +6,8 @@ import sqlite3
 import sqlalchemy as sa
 
 import scripts.build_strategy_group_live_facts_readiness_artifact as readiness_script
-from scripts.build_strategy_group_live_facts_readiness_artifact import (
+import src.application.readmodels.strategy_group_live_facts_readiness as readiness_readmodel
+from src.application.readmodels.strategy_group_live_facts_readiness import (
     build_readiness_artifact,
     build_readiness_artifact_from_pg,
 )
@@ -192,11 +193,13 @@ def test_live_facts_readiness_allows_partial_supported_symbol_availability():
 
 def test_live_facts_readiness_does_not_expose_legacy_packet_builder():
     assert not hasattr(readiness_script, "build_packet")
+    assert not hasattr(readiness_script, "build_readiness_artifact")
+    assert not hasattr(readiness_script, "build_readiness_artifact_from_pg")
 
 
 def test_live_facts_readiness_cli_rejects_live_facts_json(tmp_path):
     try:
-        readiness_script._parse_args(
+        readiness_readmodel._parse_args(
             [
                 "--live-facts-json",
                 str(tmp_path / "live-facts.json"),
@@ -208,6 +211,12 @@ def test_live_facts_readiness_cli_rejects_live_facts_json(tmp_path):
         assert exc.code == 2
     else:
         raise AssertionError("retired live-facts JSON input must be rejected")
+
+
+def test_live_facts_readiness_script_is_thin_cli_wrapper(monkeypatch) -> None:
+    monkeypatch.setattr(readiness_readmodel, "main", lambda argv=None: 7)
+
+    assert readiness_script.main(["--ignored-by-fake-main"]) == 7
 
 
 def test_live_facts_readiness_builds_from_pg_fact_snapshots(tmp_path):

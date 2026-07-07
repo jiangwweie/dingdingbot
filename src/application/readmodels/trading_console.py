@@ -75,13 +75,13 @@ from src.infrastructure.sync_pg_dsn import normalize_sync_postgres_dsn
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
 )
-from scripts.build_strategy_group_live_facts_readiness_artifact import (
+from src.application.readmodels.strategy_group_live_facts_readiness import (
     build_blocked_pg_readiness_artifact as build_strategy_group_blocked_pg_live_facts_artifact,
     build_strategy_group_intake_artifact_from_candidate_pool,
-    build_readiness_artifact_from_database_url as build_strategy_group_live_facts_readiness_artifact_from_database_url,
+    build_readiness_artifact_from_database_url as build_strategy_group_live_facts_readiness_from_database_url,
 )
-from scripts.build_strategygroup_runtime_pilot_status import (
-    build_status_artifact as build_strategygroup_runtime_pilot_status_artifact,
+from src.application.readmodels.strategygroup_runtime_pilot_status import (
+    build_status_artifact as build_runtime_pilot_status_readmodel,
 )
 
 
@@ -2012,7 +2012,7 @@ class TradingConsoleReadModelService:
         )
         try:
             artifact = (
-                build_strategy_group_live_facts_readiness_artifact_from_database_url(
+                build_strategy_group_live_facts_readiness_from_database_url(
                     database_url=database_url,
                     intake_artifact=intake,
                     generated_at_ms=generated_at_ms,
@@ -2068,7 +2068,7 @@ class TradingConsoleReadModelService:
         watcher_response = self.runtime_signal_watcher_status(
             stale_after_seconds=stale_after_seconds,
         )
-        artifact = build_strategygroup_runtime_pilot_status_artifact(
+        artifact = build_runtime_pilot_status_readmodel(
             intake_artifact=intake_response.data,
             live_facts_readiness=live_facts_response.data,
             watcher_status={"data": watcher_response.data},
