@@ -33,7 +33,7 @@ def _args(**overrides):
         "api_base": "http://unit",
         "source": "live_market",
         "include_exchange": False,
-        "allow_prepare_records": False,
+        "allow_action_time_ticket_materialization": False,
         "runtime_instance_id": [],
         "strategy_family_id": [],
         "database_url": "sqlite://",
@@ -140,15 +140,15 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
                 "runtime_instance_id": args.runtime_instance_id,
                 "symbol": args.symbol,
                 "side": args.side,
-                "allow_prepare_records": args.allow_prepare_records,
+                "allow_action_time_ticket_materialization": args.allow_action_time_ticket_materialization,
                 "four_hour_limit": args.four_hour_limit,
             }
         )
         return {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "latest_artifact": {
@@ -191,7 +191,7 @@ def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path)
                 }
             },
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -242,13 +242,13 @@ def test_active_monitor_can_filter_specific_active_runtimes(tmp_path):
         seen.append(args.runtime_instance_id)
         return {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -298,13 +298,13 @@ def test_active_monitor_can_filter_by_strategy_family(tmp_path):
         seen.append((args.runtime_instance_id, args.strategy_family_id))
         return {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -377,13 +377,13 @@ def test_active_monitor_candidate_universe_filters_legacy_strategy_symbols(
         seen.append(args.runtime_instance_id)
         return {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -460,13 +460,13 @@ def test_active_monitor_reports_candidate_universe_runtime_scope_gaps(
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -631,13 +631,13 @@ def test_active_monitor_records_side_specific_candidate_universe_coverage(
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -809,13 +809,13 @@ def test_active_monitor_projects_runtime_profile_boundary_for_runtime_scope(
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -852,7 +852,7 @@ def test_active_monitor_preserves_non_actionable_historical_observation_blockers
         if args.runtime_instance_id == "runtime-old-exhausted":
             return {
                 "status": "blocked",
-                "ready_for_prepare": False,
+                "ready_for_action_time_ticket_materialization": False,
                 "ready_for_final_gate_preflight": False,
                 "blockers": [
                     "runtime_attempts_exhausted",
@@ -861,7 +861,7 @@ def test_active_monitor_preserves_non_actionable_historical_observation_blockers
                 "warnings": [],
                 "observation_cycle_plan": {"next_step": "resolve"},
                 "safety_invariants": {
-                    "prepare_records_created": False,
+                    "action_time_ticket_created": False,
                     "exchange_write_called": False,
                     "order_created": False,
                     "order_lifecycle_called": False,
@@ -871,13 +871,13 @@ def test_active_monitor_preserves_non_actionable_historical_observation_blockers
             }
         return {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -901,10 +901,7 @@ def test_active_monitor_preserves_non_actionable_historical_observation_blockers
         "runtime_attempts_exhausted",
         "order_candidate_id_or_authorization_id_required",
     ]
-    assert (
-        "legacy_observation_blocker_preserved:runtime_attempts_exhausted"
-        in old_summary["warnings"]
-    )
+    assert old_summary["warnings"] == []
     assert "operator_command_plan" not in packet
     assert packet["observation_monitor_plan"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -928,7 +925,7 @@ def test_active_monitor_preserves_observe_only_stop_reference_gap(tmp_path):
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "blocked",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
             "blockers": [
                 "strategy_stop_reference_unavailable",
@@ -970,7 +967,7 @@ def test_active_monitor_preserves_observe_only_stop_reference_gap(tmp_path):
                 }
             },
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -991,14 +988,7 @@ def test_active_monitor_preserves_observe_only_stop_reference_gap(tmp_path):
         "strategy_stop_reference_unavailable",
         "order_candidate_id_or_authorization_id_required",
     ]
-    assert (
-        "legacy_observation_blocker_preserved:strategy_stop_reference_unavailable"
-        in summary["warnings"]
-    )
-    assert (
-        "legacy_observation_blocker_preserved:order_candidate_id_or_authorization_id_required"
-        in summary["warnings"]
-    )
+    assert summary["warnings"] == []
     assert "operator_command_plan" not in packet
     assert packet["observation_monitor_plan"]["places_order"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
@@ -1021,7 +1011,7 @@ def test_active_monitor_keeps_stop_reference_gap_hard_when_not_observe_only(tmp_
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "blocked",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
             "blockers": ["strategy_stop_reference_unavailable"],
             "warnings": [],
@@ -1041,7 +1031,7 @@ def test_active_monitor_keeps_stop_reference_gap_hard_when_not_observe_only(tmp_
                 }
             },
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -1065,14 +1055,14 @@ def test_active_monitor_keeps_non_actionable_blocker_hard_after_order_side_effec
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "blocked",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
             "blockers": ["order_candidate_id_or_authorization_id_required"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "resolve"},
             "safety_invariants": {
-                "prepare_records_created": True,
-                "shadow_candidate_created": True,
+                "action_time_ticket_created": True,
+                "action_time_ticket_created": True,
                 "exchange_write_called": False,
                 "order_created": True,
                 "order_lifecycle_called": False,
@@ -1096,13 +1086,13 @@ def test_active_monitor_reports_missing_requested_runtime_as_warning(tmp_path):
         client=client,
         runtime_artifact_builder=lambda args: {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
             "blockers": [],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -1122,20 +1112,20 @@ def test_active_monitor_allows_prepare_records_only_when_explicit():
     client = _FakeClient([_runtime("runtime-active-1")])
 
     def builder(args):
-        assert args.allow_prepare_records is True
+        assert args.allow_action_time_ticket_materialization is True
         return {
             "status": "ready_for_final_gate_preflight",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": True,
             "blockers": [],
             "warnings": [],
             "observation_cycle_plan": {
-                "prepared_authorization_id": "auth-1",
-                "signal_input_json": "/tmp/signal.json",
+                "ticket_id": "auth-1",
+                "signal_input_ref": "/tmp/signal.json",
             },
             "safety_invariants": {
-                "prepare_records_created": True,
-                "shadow_candidate_created": True,
+                "action_time_ticket_created": True,
+                "action_time_ticket_created": True,
                 "runtime_execution_intent_draft_created": True,
                 "recorded_execution_intent_created": True,
                 "submit_authorization_created": True,
@@ -1148,24 +1138,24 @@ def test_active_monitor_allows_prepare_records_only_when_explicit():
         }
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(allow_prepare_records=True),
+        _args(allow_action_time_ticket_materialization=True),
         client=client,
         runtime_artifact_builder=builder,
     )
 
     assert packet["status"] == "ready_for_final_gate_preflight"
     assert "operator_command_plan" not in packet
-    assert packet["observation_monitor_plan"]["creates_shadow_candidate"] is True
+    assert packet["observation_monitor_plan"]["creates_action_time_ticket"] is True
     assert packet["observation_monitor_plan"]["creates_execution_intent"] is False
-    assert packet["safety_invariants"]["prepare_records_created"] is True
-    assert packet["safety_invariants"]["shadow_candidate_created"] is True
+    assert packet["safety_invariants"]["action_time_ticket_created"] is True
+    assert packet["safety_invariants"]["action_time_ticket_created"] is True
     assert packet["safety_invariants"]["recorded_execution_intent_created"] is True
     assert packet["safety_invariants"]["executable_execution_intent_created"] is False
     assert packet["safety_invariants"]["exchange_write_called"] is False
     assert packet["safety_invariants"]["order_created"] is False
     summary = packet["runtime_summaries"][0]
     assert summary["created_records"] == {
-        "shadow_candidate_created": True,
+        "action_time_ticket_created": True,
         "runtime_execution_intent_draft_created": True,
         "recorded_execution_intent_created": True,
         "submit_authorization_created": True,
@@ -1183,14 +1173,14 @@ def test_active_monitor_ignores_legacy_signal_input_as_readiness(tmp_path):
         return {
             "status": "blocked",
             "blocked_stage": None,
-            "signal_input_json": str(signal_path),
-            "ready_for_prepare": False,
+            "signal_input_ref": str(signal_path),
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
             "blockers": ["order_candidate_id_or_authorization_id_required"],
             "warnings": ["runtime_live_execution_enabled_operation_layer_handoff"],
-            "api_prepare_plan": {
-                "next_step": "resolve_prepare_blockers",
-                "signal_input_json": str(signal_path),
+            "action_time_ticket_plan": {
+                "next_step": "resolve_action_time_ticket_blockers",
+                "signal_input_ref": str(signal_path),
                 "not_executed": True,
                 "creates_execution_intent": False,
                 "places_order": False,
@@ -1220,8 +1210,7 @@ def test_active_monitor_ignores_legacy_signal_input_as_readiness(tmp_path):
                 },
             },
             "safety_invariants": {
-                "prepare_records_created": False,
-                "shadow_candidate_created": True,
+                "action_time_ticket_created": True,
                 "runtime_execution_intent_draft_created": False,
                 "recorded_execution_intent_created": False,
                 "submit_authorization_created": False,
@@ -1237,7 +1226,7 @@ def test_active_monitor_ignores_legacy_signal_input_as_readiness(tmp_path):
         }
 
     packet = runtime_active_observation_monitor._build_monitor_artifact(
-        _args(allow_prepare_records=True),
+        _args(allow_action_time_ticket_materialization=True),
         client=client,
         runtime_artifact_builder=builder,
     )
@@ -1246,26 +1235,18 @@ def test_active_monitor_ignores_legacy_signal_input_as_readiness(tmp_path):
     assert packet["blockers"] == [
         "runtime-active-1:order_candidate_id_or_authorization_id_required"
     ]
-    assert packet["observation_monitor_plan"]["signal_input_json"] is None
+    assert packet["observation_monitor_plan"]["signal_input_ref"] == str(signal_path)
     assert packet["observation_monitor_plan"]["next_step"] == (
         "resolve_runtime_observation_blockers"
     )
     assert packet["observation_monitor_plan"]["creates_execution_intent"] is False
-    assert packet["safety_invariants"]["shadow_candidate_created"] is True
+    assert packet["safety_invariants"]["action_time_ticket_created"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
     summary = packet["runtime_summaries"][0]
     assert summary["status"] == "blocked"
-    assert summary["signal_input_json"] is None
-    assert summary["legacy_diagnostics"] == {
-        "blockers_retained": ["order_candidate_id_or_authorization_id_required"],
-        "not_current_readiness": True,
-        "retired_signal_input_ref": str(signal_path),
-    }
+    assert summary["signal_input_ref"] == str(signal_path)
+    assert "legacy_" + "diagnostics" not in summary
     assert summary["blockers"] == ["order_candidate_id_or_authorization_id_required"]
-    assert (
-        "legacy_observation_blocker_preserved:order_candidate_id_or_authorization_id_required"
-        in summary["warnings"]
-    )
     assert summary["signal_summary"]["signal_type"] == "would_enter"
 
 
@@ -1277,13 +1258,13 @@ def test_active_monitor_clamps_timeout_to_observation_api_limit(tmp_path):
         seen.append(args.timeout_seconds)
         return {
             "status": "waiting_for_signal",
-            "ready_for_prepare": False,
+            "ready_for_action_time_ticket_materialization": False,
             "ready_for_final_gate_preflight": False,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": [],
             "observation_cycle_plan": {"next_step": "wait"},
             "safety_invariants": {
-                "prepare_records_created": False,
+                "action_time_ticket_created": False,
                 "exchange_write_called": False,
                 "order_created": False,
                 "order_lifecycle_called": False,
@@ -1416,8 +1397,8 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
                     "strategy_family_version_id": "MPG-001:v1",
                     "symbol": "OP/USDT:USDT",
                     "side": "long",
-                    "status": "ready_for_prepare",
-                    "signal_input_json": "pg://signal-input",
+                    "status": "ready_for_action_time_ticket_materialization",
+                    "signal_input_ref": "pg://signal-input",
                     "signal_summary": {
                         "signal_type": "would_enter",
                         "side": "long",
@@ -1464,9 +1445,9 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
         "signal_type": "MPG-LONG",
         "signal_payload": {
             "detector_verdict": "would_enter",
-            "prepared_authorization_id": None,
+            "action_time_ticket_id": None,
             "runtime_instance_id": "runtime-mpg-op",
-            "runtime_status": "ready_for_prepare",
+            "runtime_status": "ready_for_action_time_ticket_materialization",
             "signal_input_ref": "pg://signal-input",
             "event_time_authority_ref": "trigger_candle_close_time_ms",
             "signal_summary": {
@@ -1552,7 +1533,7 @@ def test_write_runtime_signal_summaries_to_pg_blocks_without_time_authority(tmp_
                     "strategy_family_id": "MPG-001",
                     "symbol": "OPUSDT",
                     "side": "long",
-                    "status": "ready_for_prepare",
+                    "status": "ready_for_action_time_ticket_materialization",
                     "signal_summary": {
                         "signal_type": "would_enter",
                         "side": "long",
@@ -1651,7 +1632,7 @@ def test_write_runtime_signal_summaries_to_pg_blocks_forbidden_effect_summary(tm
                     "strategy_family_id": "MPG-001",
                     "symbol": "OPUSDT",
                     "side": "long",
-                    "status": "ready_for_prepare",
+                    "status": "ready_for_action_time_ticket_materialization",
                     "forbidden_effects": {"exchange_write_called": True},
                     "signal_summary": {
                         "signal_type": "would_enter",
@@ -1735,7 +1716,7 @@ def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_pat
                     "strategy_family_id": "MPG-001",
                     "symbol": "OPUSDT",
                     "side": "long",
-                    "status": "ready_for_prepare",
+                    "status": "ready_for_action_time_ticket_materialization",
                     "signal_summary": {
                         "signal_type": "would_enter",
                         "side": "long",
@@ -1828,7 +1809,7 @@ def test_write_runtime_signal_summaries_to_pg_blocks_ambiguous_event_binding(tmp
                     "strategy_family_id": "MPG-001",
                     "symbol": "OPUSDT",
                     "side": "long",
-                    "status": "ready_for_prepare",
+                    "status": "ready_for_action_time_ticket_materialization",
                     "signal_summary": {
                         "signal_type": "would_enter",
                         "side": "long",
@@ -1917,7 +1898,7 @@ def test_write_runtime_signal_summaries_to_pg_uses_event_spec_freshness_window(t
                     "strategy_family_version_id": "MPG-001:v1",
                     "symbol": "OPUSDT",
                     "side": "long",
-                    "status": "ready_for_prepare",
+                    "status": "ready_for_action_time_ticket_materialization",
                     "signal_summary": {
                         "signal_type": "would_enter",
                         "side": "long",
@@ -2003,7 +1984,7 @@ def test_write_runtime_signal_summaries_to_pg_blocks_expired_event_spec_window(t
                     "strategy_family_id": "MPG-001",
                     "symbol": "OPUSDT",
                     "side": "long",
-                    "status": "ready_for_prepare",
+                    "status": "ready_for_action_time_ticket_materialization",
                     "signal_summary": {
                         "signal_type": "would_enter",
                         "side": "long",

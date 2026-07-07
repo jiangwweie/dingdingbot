@@ -24,7 +24,7 @@ def _intake() -> dict:
                 },
                 "watcher_scope": {
                     "business_signal_validity": "15-30m",
-                    "shadow_candidate_evidence_freshness_target_seconds": 120,
+                    "action_time_ticket_freshness_target_seconds": 120,
                 },
                 "picker": {"rank": 1, "default_mode": "armed_observation"},
             },
@@ -36,7 +36,7 @@ def _intake() -> dict:
                 "risk_defaults": {"max_notional_per_action_usdt": "8"},
                 "watcher_scope": {
                     "business_signal_validity": "15-30m",
-                    "shadow_candidate_evidence_freshness_target_seconds": 120,
+                    "action_time_ticket_freshness_target_seconds": 120,
                 },
                 "picker": {"rank": 2, "default_mode": "armed_observation"},
             },
@@ -126,7 +126,7 @@ def _watcher_waiting() -> dict:
                 "watcher_status_evidence_status": "ok",
                 "status_packet_status": "legacy_tick_status_must_not_win",
                 "blockers": [
-                    "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+                    "runtime-1:strategy_signal_not_ready_for_action_time_ticket"
                 ],
             },
             "post_signal_resume": {
@@ -175,23 +175,19 @@ def _watcher_waiting() -> dict:
 def _watcher_ready() -> dict:
     watcher = _watcher_waiting()
     watcher["data"]["watcher"]["wakeup_status"] = (
-        "runtime_signal_ready_for_non_executing_prepare"
+        "runtime_signal_ready_for_action_time_ticket"
     )
     watcher["data"]["watcher"]["blockers"] = []
     watcher["data"]["post_signal_resume"]["can_continue_steps_5_8"] = True
     watcher["data"]["post_signal_resume"]["current_gate"] = (
-        "fresh_signal_or_prepared_shadow_ready"
+        "fresh_signal_or_action_time_ticket_ready"
     )
     ready_auto_resume = {
-        "status": "ready_for_non_executing_prepare",
-        "blocked_at": "non_executing_prepare_records",
+        "status": "ready_for_action_time_ticket_materialization",
+        "blocked_at": "action_time_ticket_materialization",
         "blocked_reason": "fresh_strategy_signal_ready",
-        "next_recover_condition": (
-            "shadow_candidate_runtime_grant_authorization_evidence_exists"
-        ),
-        "automatic_recovery_action": (
-            "wait_for_prepare_records_then_rebuild_final_gate_status"
-        ),
+        "next_recover_condition": "pg_action_time_ticket_materialized",
+        "automatic_recovery_action": "materialize_pg_action_time_ticket",
         "authority_mode": "armed_observation_no_real_submit",
         "can_continue_without_owner_chat": True,
         "requires_action_time_final_gate": True,
@@ -218,20 +214,19 @@ def _watcher_prepared() -> dict:
         "can_continue_without_owner_chat": True,
         "requires_action_time_final_gate": True,
         "requires_official_operation_layer": True,
-        "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg",
-        "shadow_candidate_id": "shadow-candidate-1",
-        "prepared_authorization_id": "auth-ready-1",
+        "ticket_id": "ticket-1",
+        "action_time_lane_input_id": "lane-1",
+        "promotion_candidate_id": "promotion-1",
+        "signal_event_id": "signal-mpg",
     }
     watcher["data"]["post_signal_resume"]["post_signal_auto_resume"] = (
         prepared_auto_resume
     )
     watcher["data"]["post_signal_auto_resume"] = prepared_auto_resume
-    watcher["data"]["post_signal_resume"]["prepared_evidence"] = {
-        "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg",
-        "shadow_candidate_id": "shadow-candidate-1",
-        "prepared_authorization_id": "auth-ready-1",
-        "ready_for_action_time_final_gate": True,
-    }
+    watcher["data"]["post_signal_resume"]["ticket_id"] = "ticket-1"
+    watcher["data"]["post_signal_resume"]["action_time_lane_input_id"] = "lane-1"
+    watcher["data"]["post_signal_resume"]["promotion_candidate_id"] = "promotion-1"
+    watcher["data"]["post_signal_resume"]["signal_event_id"] = "signal-mpg"
     return watcher
 
 
@@ -260,7 +255,6 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
         "strategy_family_version_id": "MPG-001-v0",
         "semantics_binding_found": True,
         "evaluator_route_configured": True,
-        "candidate_mode": "shadow_order_candidate_allowed",
         "runtime_confirmation_mode": "runtime_bounded_auto_attempts",
         "blockers": [],
         "non_authority_checkpoint": "continue_to_runtime_scope_alignment",
@@ -309,11 +303,11 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
     assert packet["dual_freshness"]["strategy_signal"] == {
         "status": "missing",
         "freshness_window": "15-30m",
-        "shadow_candidate_evidence_freshness_target_seconds": 120,
+        "action_time_ticket_freshness_target_seconds": 120,
         "source": "runtime_signal_watcher",
         "current_gate": "waiting_for_fresh_strategy_signal",
         "blockers": [
-            "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+            "runtime-1:strategy_signal_not_ready_for_action_time_ticket"
         ],
     }
     assert packet["dual_freshness"]["action_time_facts"]["status"] == (
@@ -359,7 +353,7 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
     assert packet["safety_invariants"]["mutates_pg"] is False
 
 
-def test_pilot_status_marks_fresh_signal_and_ready_facts_as_non_executing_prepare_only():
+def test_pilot_status_marks_fresh_signal_and_ready_facts_as_ticket_pending_only():
     packet = build_status_artifact(
         intake_artifact=_intake(),
         live_facts_readiness=_readiness(mpg_blockers=[]),
@@ -367,7 +361,7 @@ def test_pilot_status_marks_fresh_signal_and_ready_facts_as_non_executing_prepar
         generated_at_ms=1,
     )
 
-    assert packet["status"] == "ready_for_non_executing_prepare"
+    assert packet["status"] == "action_time_ticket_pending"
     assert packet["dual_freshness"]["strategy_signal"]["status"] == "fresh"
     assert packet["dual_freshness"]["action_time_facts"]["status"] == (
         "ready_for_action_time_final_gate"
@@ -382,12 +376,17 @@ def test_pilot_status_marks_fresh_signal_and_ready_facts_as_non_executing_prepar
     assert final_gate["status"] == "not_reached"
     assert operation_layer["status"] == "not_reached"
     assert packet["control_board"]["candidate_row"]["candidate_state"] == (
-        "ready_for_non_executing_prepare"
+        "action_time_ticket_pending"
     )
+    assert packet["action_time_resume"]["status"] == "action_time_ticket_pending"
+    assert packet["action_time_resume"]["next_step"] == "materialize_pg_action_time_ticket"
+    assert packet["action_time_resume"]["allowed_auto_actions"] == [
+        "materialize_pg_action_time_ticket"
+    ]
     assert packet["safety_invariants"]["places_order"] is False
 
 
-def test_pilot_status_promotes_prepared_evidence_to_candidate_row_and_final_gate():
+def test_pilot_status_promotes_action_time_ticket_to_candidate_row_and_final_gate():
     packet = build_status_artifact(
         intake_artifact=_intake(),
         live_facts_readiness=_readiness(mpg_blockers=[]),
@@ -409,18 +408,23 @@ def test_pilot_status_promotes_prepared_evidence_to_candidate_row_and_final_gate
     assert packet["owner_action_item"]["owner_status_checkpoint"] == (
         "none_system_runs_official_finalgate"
     )
-    assert packet["candidate_evidence"] == {
-        "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg",
-        "shadow_candidate_id": "shadow-candidate-1",
-        "prepared_authorization_id": "auth-ready-1",
+    assert packet["action_time_ticket"] == {
+        "signal_input_ref": "pg:brc_live_signal_events",
+        "ticket_id": "ticket-1",
+        "action_time_lane_input_id": "lane-1",
+        "promotion_candidate_id": "promotion-1",
+        "signal_event_id": "signal-mpg",
+        "signal_event_ids": [],
         "ready_for_action_time_final_gate": True,
     }
     candidate = packet["control_board"]["candidate_row"]
-    assert candidate["signal_input_json"] == "pg://runtime-control-state/live-signal-events/signal-mpg"
+    assert candidate["signal_input_ref"] == "pg:brc_live_signal_events"
     assert "fresh_signal_id" not in candidate
-    assert candidate["shadow_candidate_id"] == "shadow-candidate-1"
-    assert candidate["prepared_authorization_id"] == "auth-ready-1"
-    assert candidate["candidate_state"] == "prepared_authorization_ready"
+    assert candidate["ticket_id"] == "ticket-1"
+    assert candidate["action_time_lane_input_id"] == "lane-1"
+    assert candidate["promotion_candidate_id"] == "promotion-1"
+    assert candidate["signal_event_id"] == "signal-mpg"
+    assert candidate["candidate_state"] == "action_time_ticket_ready"
     assert "runtime_grant_status" not in candidate
     assert "authorization_evidence_status" not in candidate
     assert "final_gate_status" not in candidate
@@ -459,9 +463,11 @@ def test_pilot_status_prefers_allowed_action_over_legacy_recovery_text():
     watcher["data"]["action_time_resume"] = {
         "status": "ready_for_action_time_final_gate",
         "next_step": "legacy_next_step_must_not_drive_action",
-        "signal_input_json": "pg://runtime-control-state/live-signal-events/signal-mpg",
-        "shadow_candidate_id": "shadow-candidate-1",
-        "prepared_authorization_id": "auth-ready-1",
+        "signal_input_ref": "pg:brc_live_signal_events",
+        "ticket_id": "ticket-1",
+        "action_time_lane_input_id": "lane-1",
+        "promotion_candidate_id": "promotion-1",
+        "signal_event_id": "signal-mpg",
         "allowed_auto_actions": ["run_official_action_time_final_gate_preflight"],
         "forbidden_auto_actions_until_final_gate_pass": [
             "official_operation_layer_submit",
@@ -570,7 +576,7 @@ def test_pilot_status_blocks_strategy_group_missing_runtime_binding():
             "risk_defaults": {"max_notional_per_action_usdt": "8"},
             "watcher_scope": {
                 "business_signal_validity": "15-30m",
-                "shadow_candidate_evidence_freshness_target_seconds": 120,
+                "action_time_ticket_freshness_target_seconds": 120,
             },
             "picker": {"rank": 99, "default_mode": "armed_observation"},
         }
@@ -820,7 +826,7 @@ def test_pilot_status_accepts_raw_post_signal_resume_pack():
                 "requires_official_operation_layer": True,
             },
             "blockers": [
-                "runtime-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
+                "runtime-1:strategy_signal_not_ready_for_action_time_ticket"
             ],
             "runtime_signal_summaries": [
                 {

@@ -578,7 +578,7 @@ class ScheduledReadonlyObservationRunRequest(BaseModel):
 class RuntimeNextAttemptObservationCycleRequest(BaseModel):
     source: Literal["live_market", "sample"] = "live_market"
     include_exchange: bool = True
-    allow_prepare_records: bool = False
+    allow_action_time_ticket_materialization: bool = False
     symbol: str | None = None
     side: str | None = None
     family: str | None = None
@@ -1351,13 +1351,13 @@ async def runtime_next_attempt_observation_cycle(
     runtime_instance_id: str,
     request: RuntimeNextAttemptObservationCycleRequest,
 ) -> dict[str, Any]:
-    if request.allow_prepare_records:
+    if request.allow_action_time_ticket_materialization:
         raise HTTPException(
             status_code=400,
             detail=(
                 "next-attempt observation API is non-executing; materialize "
                 "PG promotion candidates and Action-Time Ticket after "
-                "ready_for_prepare"
+                "ready_for_action_time_ticket_materialization"
             ),
         )
     try:
@@ -5115,14 +5115,14 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "next_attempt_gate": next_attempt_gate,
             "just_in_time_lifecycle_audit": jit_audit,
             "signal_artifact": None,
-            "prepare_artifact": None,
+            "action_time_ticket": None,
             "blockers": list(next_attempt_gate.get("blockers") or ["next_attempt_gate_blocked"]),
             "warnings": list(next_attempt_gate.get("warnings") or []),
             "observation_cycle_plan": {
                 "next_step": next_attempt_gate.get("required_next_step")
                 or "resolve_next_attempt_gate_blocker",
                 "not_executed": True,
-                "creates_shadow_candidate": False,
+                "creates_action_time_ticket": False,
                 "creates_execution_intent": False,
                 "places_order": False,
                 "calls_order_lifecycle": False,
@@ -5161,7 +5161,7 @@ async def _runtime_next_attempt_observation_cycle_payload(
     signal_artifact = {
         "scope": "runtime_next_attempt_observation_cycle_signal_artifact",
         "status": (
-            "ready_for_shadow_candidate_prepare"
+            "ready_for_action_time_ticket_materialization"
             if evaluation.status
             == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
             else evaluation.status.value
@@ -5202,13 +5202,13 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "next_attempt_gate": next_attempt_gate,
             "just_in_time_lifecycle_audit": jit_audit,
             "signal_artifact": signal_artifact,
-            "prepare_artifact": None,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "action_time_ticket": None,
+            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
             "warnings": list(evaluation.warnings),
             "observation_cycle_plan": {
                 "next_step": "observe_only_or_wait_for_next_closed_bar",
                 "not_executed": True,
-                "creates_shadow_candidate": False,
+                "creates_action_time_ticket": False,
                 "creates_execution_intent": False,
                 "places_order": False,
                 "calls_order_lifecycle": False,
@@ -5218,27 +5218,27 @@ async def _runtime_next_attempt_observation_cycle_payload(
 
     return {
         "scope": "runtime_next_attempt_observation_cycle_api",
-        "status": "ready_for_prepare",
+        "status": "ready_for_action_time_ticket_materialization",
         "runtime_instance_id": runtime_instance_id,
         "owner_action_scope": owner_scope,
         "include_exchange": request.include_exchange,
         "next_attempt_gate": next_attempt_gate,
         "just_in_time_lifecycle_audit": jit_audit,
         "signal_artifact": signal_artifact,
-        "prepare_artifact": None,
+        "action_time_ticket": None,
         "blockers": [],
         "warnings": list(evaluation.warnings),
         "observation_cycle_plan": {
             "next_step": "materialize_pg_promotion_action_time_lane",
-            "api_prepare_endpoint": None,
+            "api_action_time_ticket_endpoint": None,
             "pg_materialization_steps": [
                 "materialize_pg_promotion_action_time_lane",
                 "materialize_action_time_ticket",
             ],
-            "cli_prepare_command_args": [],
+            "cli_action_time_ticket_command_args": [],
             "signal_input_embedded": True,
             "not_executed": True,
-            "creates_shadow_candidate": False,
+            "creates_action_time_ticket": False,
             "creates_execution_intent": False,
             "places_order": False,
             "calls_order_lifecycle": False,
@@ -5285,7 +5285,7 @@ def _runtime_next_attempt_owner_scope(
 def _runtime_next_attempt_observation_safety() -> dict[str, bool]:
     return {
         "api_non_executing": True,
-        "allow_prepare_records": False,
+        "allow_action_time_ticket_materialization": False,
         "local_registration_armed": False,
         "exchange_submit_armed": False,
         "execute_real_submit": False,

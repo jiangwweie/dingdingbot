@@ -48,7 +48,7 @@ OBSERVE_ONLY_REVIEW_BLOCKERS = {
     "strategy_stop_reference_unavailable",
 }
 WAITING_FOR_SIGNAL_BLOCKERS = {
-    "strategy_signal_not_ready_for_shadow_candidate_prepare",
+    "strategy_signal_not_ready_for_action_time_ticket",
 }
 WATCHER_COVERAGE_DETECTOR_KEY = "runtime_active_observation_monitor"
 
@@ -580,8 +580,8 @@ def _live_signal_candidates_from_summaries(
                 if isinstance(row.get("forbidden_effects"), dict)
                 else {},
                 "signal_summary": signal,
-                "signal_input_ref": row.get("signal_input_json"),
-                "prepared_authorization_id": row.get("prepared_authorization_id"),
+                "signal_input_ref": row.get("signal_input_ref"),
+                "action_time_ticket_id": row.get("ticket_id"),
             }
         )
     return candidates
@@ -746,7 +746,7 @@ def _write_live_signal_candidate(
                 "signal_summary": candidate.get("signal_summary") or {},
                 "event_time_authority_ref": "trigger_candle_close_time_ms",
                 "signal_input_ref": candidate.get("signal_input_ref"),
-                "prepared_authorization_id": candidate.get("prepared_authorization_id"),
+                "action_time_ticket_id": candidate.get("action_time_ticket_id"),
                 "source": "runtime_active_observation_monitor",
             },
             ensure_ascii=False,
@@ -1148,7 +1148,9 @@ def _monitor_args(args: argparse.Namespace, runtime: dict[str, Any]) -> argparse
         one_hour_limit=args.one_hour_limit,
         four_hour_limit=args.four_hour_limit,
         timeout_seconds=_effective_observation_timeout_seconds(args),
-        allow_prepare_records=args.allow_prepare_records,
+        allow_action_time_ticket_materialization=(
+            getattr(args, "allow_action_time_ticket_materialization", False)
+        ),
         candidate_id=None,
         context_id=None,
         owner_operator_id=args.owner_operator_id,
@@ -1172,7 +1174,7 @@ def _build_runtime_observation_cycle_artifact(
     body = {
         "source": args.source,
         "include_exchange": bool(args.include_exchange),
-        "allow_prepare_records": False,
+        "allow_action_time_ticket_materialization": False,
         "symbol": args.symbol,
         "side": args.side,
         "family": args.family,
@@ -1213,7 +1215,7 @@ def _build_runtime_observation_cycle_artifact(
             "observation_cycle_plan": {
                 "next_step": "repair_runtime_observation_cycle_api",
                 "not_executed": True,
-                "creates_shadow_candidate": False,
+                "creates_action_time_ticket": False,
                 "creates_execution_intent": False,
                 "places_order": False,
                 "calls_order_lifecycle": False,
@@ -1230,7 +1232,7 @@ def _build_runtime_observation_cycle_artifact(
             "observation_cycle_plan": {
                 "next_step": "repair_runtime_observation_cycle_api",
                 "not_executed": True,
-                "creates_shadow_candidate": False,
+                "creates_action_time_ticket": False,
                 "creates_execution_intent": False,
                 "places_order": False,
                 "calls_order_lifecycle": False,
@@ -1242,9 +1244,8 @@ def _build_runtime_observation_cycle_artifact(
 
 def _non_executing_runtime_observation_safety() -> dict[str, bool]:
     return {
-        "allow_prepare_records": False,
-        "prepare_records_created": False,
-        "shadow_candidate_created": False,
+        "allow_action_time_ticket_materialization": False,
+        "action_time_ticket_created": False,
         "runtime_execution_intent_draft_created": False,
         "recorded_execution_intent_created": False,
         "submit_authorization_created": False,
@@ -1322,28 +1323,10 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
     plan = (
         artifact.get("observation_cycle_plan")
         or artifact.get("observation_monitor_plan")
-        or artifact.get("api_prepare_plan")
         or {}
     )
     status = str(artifact.get("status") or "")
-    signal_input_json = artifact.get("signal_input_json") or plan.get("signal_input_json")
-    prepared_authorization_id = artifact.get("prepared_authorization_id") or plan.get(
-        "prepared_authorization_id"
-    )
-    legacy_diagnostics: dict[str, Any] = {}
-    if status == "blocked":
-        legacy_diagnostics["blockers_retained"] = [
-            str(blocker) for blocker in artifact.get("blockers") or []
-        ]
-        legacy_diagnostics["not_current_readiness"] = True
-        if signal_input_json:
-            legacy_diagnostics["retired_signal_input_ref"] = signal_input_json
-        if prepared_authorization_id:
-            legacy_diagnostics["retired_prepared_authorization_id"] = (
-                prepared_authorization_id
-            )
-        signal_input_json = None
-        prepared_authorization_id = None
+    signal_input_ref = artifact.get("signal_input_ref") or plan.get("signal_input_ref")
 
     return {
         "runtime_instance_id": _runtime_value(runtime, "runtime_instance_id", "runtime_id"),
@@ -1356,19 +1339,20 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
             "strategy_family_version_id",
             "carrier_id",
         ),
-        "ready_for_prepare": artifact.get("ready_for_prepare"),
+        "ready_for_action_time_ticket_materialization": artifact.get(
+            "ready_for_action_time_ticket_materialization"
+        ),
         "ready_for_final_gate_preflight": artifact.get(
             "ready_for_final_gate_preflight"
         ),
         "blockers": list(artifact.get("blockers") or []),
         "warnings": list(artifact.get("warnings") or []),
-        "signal_input_json": signal_input_json,
-        "prepared_authorization_id": prepared_authorization_id,
-        "legacy_diagnostics": legacy_diagnostics,
+        "signal_input_ref": signal_input_ref,
+        "action_time_ticket_id": artifact.get("ticket_id"),
         "signal_summary": _signal_summary(artifact),
-        "prepare_records_created": bool(safety.get("prepare_records_created")),
+        "action_time_ticket_created": bool(safety.get("action_time_ticket_created")),
         "created_records": {
-            "shadow_candidate_created": bool(safety.get("shadow_candidate_created")),
+            "action_time_ticket_created": bool(safety.get("action_time_ticket_created")),
             "runtime_execution_intent_draft_created": bool(
                 safety.get("runtime_execution_intent_draft_created")
             ),
@@ -1398,7 +1382,7 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
 
 def _safety(
     *,
-    allow_prepare_records: bool,
+    allow_action_time_ticket_materialization: bool,
     artifacts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     def any_flag(name: str) -> bool:
@@ -1410,9 +1394,10 @@ def _safety(
     return {
         "uses_official_trading_console_api": True,
         "monitors_active_runtimes": True,
-        "allow_prepare_records": allow_prepare_records,
-        "prepare_records_created": any_flag("prepare_records_created"),
-        "shadow_candidate_created": any_flag("shadow_candidate_created"),
+        "allow_action_time_ticket_materialization": (
+            allow_action_time_ticket_materialization
+        ),
+        "action_time_ticket_created": any_flag("action_time_ticket_created"),
         "runtime_execution_intent_draft_created": any_flag(
             "runtime_execution_intent_draft_created"
         ),
@@ -1444,8 +1429,8 @@ def _overall_status(artifacts: list[dict[str, Any]]) -> str:
         return "no_active_runtimes"
     if "ready_for_final_gate_preflight" in statuses:
         return "ready_for_final_gate_preflight"
-    if "ready_for_prepare" in statuses:
-        return "ready_for_prepare"
+    if "ready_for_action_time_ticket_materialization" in statuses:
+        return "ready_for_action_time_ticket_materialization"
     if statuses == {"waiting_for_signal"}:
         return "waiting_for_signal"
     if "blocked" in statuses:
@@ -1504,7 +1489,6 @@ def _build_monitor_artifact(
     for runtime in selected:
         runtime_args = _monitor_args(args, runtime)
         runtime_artifact = builder(runtime_args)
-        runtime_artifact = _preserve_legacy_observation_blockers(runtime_artifact)
         runtime_artifact["runtime_instance_id"] = runtime_args.runtime_instance_id
         runtime_artifacts.append(runtime_artifact)
         summaries.append(_summary(runtime, runtime_artifact))
@@ -1538,11 +1522,8 @@ def _build_monitor_artifact(
                 f"{row['strategy_group_id']}:{row['symbol']}"
             )
 
-    signal_input_json = _first_summary_text(summaries, "signal_input_json")
-    prepared_authorization_id = _first_summary_text(
-        summaries,
-        "prepared_authorization_id",
-    )
+    signal_input_ref = _first_summary_text(summaries, "signal_input_ref")
+    action_time_ticket_id = _first_summary_text(summaries, "action_time_ticket_id")
 
     return {
         "scope": "runtime_active_observation_monitor",
@@ -1559,7 +1540,9 @@ def _build_monitor_artifact(
             candidate_universe_excluded_runtime_instance_ids
         ),
         "candidate_universe_coverage": candidate_universe_coverage,
-        "allow_prepare_records": args.allow_prepare_records,
+        "allow_action_time_ticket_materialization": (
+            getattr(args, "allow_action_time_ticket_materialization", False)
+        ),
         "max_cycles_per_runtime": args.max_cycles_per_runtime,
         "requested_timeout_seconds": args.timeout_seconds,
         "effective_observation_timeout_seconds": effective_timeout,
@@ -1570,14 +1553,10 @@ def _build_monitor_artifact(
         "observation_monitor_plan": {
             "next_step": _next_step(status),
             "not_executed": True,
-            "signal_input_json": signal_input_json,
-            "prepared_authorization_id": prepared_authorization_id,
-            "creates_shadow_candidate": any(
-                bool(
-                    (artifact.get("safety_invariants") or {}).get(
-                        "prepare_records_created"
-                    )
-                )
+            "signal_input_ref": signal_input_ref,
+            "action_time_ticket_id": action_time_ticket_id,
+            "creates_action_time_ticket": any(
+                bool((artifact.get("safety_invariants") or {}).get("action_time_ticket_created"))
                 for artifact in runtime_artifacts
             ),
             "creates_execution_intent": False,
@@ -1591,7 +1570,9 @@ def _build_monitor_artifact(
             ],
         },
         "safety_invariants": _safety(
-            allow_prepare_records=args.allow_prepare_records,
+            allow_action_time_ticket_materialization=(
+                getattr(args, "allow_action_time_ticket_materialization", False)
+            ),
             artifacts=runtime_artifacts,
         ),
     }
@@ -1607,92 +1588,14 @@ def _first_summary_text(summaries: list[dict[str, Any]], key: str) -> str | None
 
 def _next_step(status: str) -> str:
     if status == "ready_for_final_gate_preflight":
-        return "run_official_final_gate_preflight_for_prepared_authorization"
-    if status == "ready_for_prepare":
-        return "rerun_active_monitor_with_allow_prepare_records_under_standing_authorization"
+        return "run_official_final_gate_preflight_for_action_time_ticket"
+    if status == "ready_for_action_time_ticket_materialization":
+        return "materialize_pg_action_time_ticket"
     if status == "blocked":
         return "resolve_runtime_observation_blockers"
     if status == "no_active_runtimes":
         return "start_or_authorize_a_runtime_before_monitoring"
     return "wait_for_next_observation_cycle"
-
-
-def _preserve_legacy_observation_blockers(
-    artifact: dict[str, Any],
-) -> dict[str, Any]:
-    """Keep legacy observation blockers visible instead of reclassifying them.
-
-    File-era active observation artifacts could expose ``signal_input_json`` and
-    similar fields even when the runtime was blocked. The PG mainline must not
-    turn those legacy fields into current readiness; a blocked artifact remains
-    blocked until the PG signal / promotion / lane / ticket chain advances it.
-    """
-    if str(artifact.get("status") or "") != "blocked":
-        return artifact
-    blockers = [str(blocker) for blocker in artifact.get("blockers") or []]
-    if not blockers:
-        return artifact
-    observation_only = _is_observe_only_review_artifact(artifact)
-    allowed_blockers = set(NON_ACTIONABLE_OBSERVATION_BLOCKERS)
-    if observation_only:
-        allowed_blockers.update(OBSERVE_ONLY_REVIEW_BLOCKERS)
-    if any(blocker not in allowed_blockers for blocker in blockers):
-        return artifact
-    safety = artifact.get("safety_invariants")
-    if not isinstance(safety, dict):
-        safety = {}
-    if any(
-        bool(safety.get(flag))
-        for flag in (
-            "submit_authorization_created",
-            "protection_plan_created",
-            "executable_execution_intent_created",
-            "local_registration_armed",
-            "exchange_submit_armed",
-            "execute_real_submit",
-            "exchange_write_called",
-            "order_created",
-            "order_lifecycle_called",
-            "attempt_counter_mutated",
-            "runtime_budget_mutated",
-            "position_opened",
-            "position_closed",
-            "withdrawal_or_transfer_created",
-        )
-    ):
-        return artifact
-
-    preserved = dict(artifact)
-    preserved["warnings"] = sorted(
-        {
-            *[str(warning) for warning in artifact.get("warnings") or []],
-            *[
-                f"legacy_observation_blocker_preserved:{blocker}"
-                for blocker in blockers
-            ],
-        }
-    )
-    diagnostics = dict(preserved.get("legacy_diagnostics") or {})
-    diagnostics["blockers_retained"] = blockers
-    diagnostics["not_current_readiness"] = True
-    signal_input_json = _artifact_signal_input_json(artifact)
-    if signal_input_json:
-        diagnostics["retired_signal_input_ref"] = signal_input_json
-    preserved["legacy_diagnostics"] = diagnostics
-    return preserved
-
-
-def _artifact_signal_input_json(artifact: dict[str, Any]) -> str | None:
-    for candidate in (
-        artifact.get("signal_input_json"),
-        _nested_get(artifact, ("api_prepare_plan", "signal_input_json")),
-        _nested_get(artifact, ("observation_cycle_plan", "signal_input_json")),
-        _nested_get(artifact, ("observation_monitor_plan", "signal_input_json")),
-    ):
-        text = str(candidate or "").strip()
-        if text:
-            return text
-    return None
 
 
 def _nested_get(value: dict[str, Any], path: tuple[str, ...]) -> Any:
@@ -1724,7 +1627,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--api-base")
     parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")
     parser.add_argument("--include-exchange", action="store_true", default=False)
-    parser.add_argument("--allow-prepare-records", action="store_true", default=False)
+    parser.add_argument(
+        "--allow-action-time-ticket-materialization",
+        action="store_true",
+        default=False,
+    )
     parser.add_argument(
         "--runtime-instance-id",
         action="append",
@@ -1797,7 +1704,7 @@ def main(argv: list[str] | None = None) -> int:
     print(output)
     return 0 if artifact["status"] in {
         "waiting_for_signal",
-        "ready_for_prepare",
+        "ready_for_action_time_ticket_materialization",
         "ready_for_final_gate_preflight",
         "no_active_runtimes",
     } else 2

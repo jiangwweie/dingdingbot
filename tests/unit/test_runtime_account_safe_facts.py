@@ -127,7 +127,7 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
             return {"payload": []}
         raise AssertionError(path)
 
-    monkeypatch.setattr(module, "_request_json", fake_request_json)
+    monkeypatch.setattr(module._impl, "_request_json", fake_request_json)
 
     exit_code = module.main(
         [

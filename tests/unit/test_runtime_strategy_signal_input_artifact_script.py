@@ -177,7 +177,7 @@ def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypa
 def test_signal_input_artifact_readmodel_cli_stdout_is_json_only(monkeypatch, capsys):
     async def fake_build_artifact(args):
         print("noisy market source")
-        return {"status": "ready_for_shadow_candidate_prepare", "ok": True}
+        return {"status": "ready_for_action_time_ticket_materialization", "ok": True}
 
     monkeypatch.setattr(
         runtime_strategy_signal_input,

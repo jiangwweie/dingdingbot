@@ -258,7 +258,11 @@ async def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
     )
     return {
         "scope": "runtime_strategy_signal_input_artifact",
-        "status": "ready_for_shadow_candidate_prepare" if ready else evaluation.status.value,
+        "status": (
+            "ready_for_action_time_ticket_materialization"
+            if ready
+            else evaluation.status.value
+        ),
         "runtime_instance_id": runtime.runtime_instance_id,
         "strategy_family_id": runtime.strategy_family_id,
         "strategy_family_version_id": runtime.strategy_family_version_id,
@@ -284,7 +288,7 @@ async def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
                 else []
             ),
             "not_executed": True,
-            "creates_shadow_candidate": False,
+            "creates_action_time_ticket": False,
             "creates_execution_intent": False,
             "places_order": False,
             "calls_order_lifecycle": False,
@@ -322,7 +326,11 @@ def main() -> int:
     with redirect_stdout(sys.stderr):
         payload = asyncio.run(build_artifact(args))
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str))
-    return 0 if payload["status"] == "ready_for_shadow_candidate_prepare" else 2
+    return (
+        0
+        if payload["status"] == "ready_for_action_time_ticket_materialization"
+        else 2
+    )
 
 
 if __name__ == "__main__":

@@ -53,10 +53,11 @@ RUNTIME_MONITOR_SERVICE_PATH = (
     / "brc-runtime-monitor.service"
 )
 
-def test_signal_watcher_service_allows_non_executing_prepare_without_runtime_pin():
+def test_signal_watcher_service_observes_action_time_ticket_readiness_without_runtime_pin():
     text = SERVICE_PATH.read_text(encoding="utf-8")
 
-    assert "--allow-prepare-records" in text
+    assert "--allow-prepare-records" not in text
+    assert "--allow-action-time-ticket-materialization" not in text
     assert "Environment=BRC_SELECTED_STRATEGY_GROUP_ID=MPG-001" not in text
     assert "Environment=BRC_STRATEGYGROUP_MAX_SYMBOLS=3" in text
     assert "Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180" in text

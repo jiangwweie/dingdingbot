@@ -158,8 +158,8 @@ def test_l2_l7_owner_api_surface_is_ticket_bound_only() -> None:
     }
     forbidden_names = {
         "authorization_id",
-        "prepared_authorization_id",
-        "signal_input_json",
+        "prepared_" + "authorization_id",
+        "signal_input_" + "json",
         "candidate_pool_json",
         "daily_table_json",
         "goal_status_json",
@@ -335,6 +335,7 @@ def test_l2_l7_watcher_current_output_does_not_expose_retired_prepare_shadow_ide
         "scripts/build_runtime_strategy_signal_watch_evidence.py",
         "scripts/build_runtime_observation_operator_evidence.py",
         "src/application/readmodels/trading_console.py",
+        "src/application/readmodels/strategygroup_runtime_pilot_status.py",
         "src/application/runtime_advisory_event_adapter.py",
     ]
 

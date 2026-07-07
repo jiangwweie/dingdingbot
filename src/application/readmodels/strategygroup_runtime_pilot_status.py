@@ -67,6 +67,35 @@ def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _ticket_identity(*sources: dict[str, Any]) -> dict[str, Any]:
+    identity: dict[str, Any] = {
+        "ticket_id": None,
+        "action_time_lane_input_id": None,
+        "promotion_candidate_id": None,
+        "signal_event_id": None,
+        "signal_event_ids": [],
+    }
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        identity["ticket_id"] = (
+            identity["ticket_id"]
+            or source.get("ticket_id")
+            or source.get("action_time_ticket_id")
+        )
+        for key in (
+            "action_time_lane_input_id",
+            "promotion_candidate_id",
+            "signal_event_id",
+        ):
+            identity[key] = identity[key] or source.get(key)
+        if not identity["signal_event_ids"] and isinstance(
+            source.get("signal_event_ids"), list
+        ):
+            identity["signal_event_ids"] = list(source.get("signal_event_ids") or [])
+    return identity
+
+
 def _normalize_symbol(value: Any) -> str:
     text = str(value or "").strip().upper()
     if ":" in text:
@@ -159,22 +188,8 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
         post_signal_auto_resume = owner_state_without_legacy_input_recovery_action(
             _dict(data.get("post_signal_auto_resume"))
         )
-        prepared_evidence = _dict(data.get("prepared_evidence"))
-        signal_input_json = (
-            data.get("signal_input_json")
-            or prepared_evidence.get("signal_input_json")
-            or post_signal_auto_resume.get("signal_input_json")
-        )
-        prepared_authorization_id = (
-            data.get("prepared_authorization_id")
-            or prepared_evidence.get("prepared_authorization_id")
-            or post_signal_auto_resume.get("prepared_authorization_id")
-        )
-        shadow_candidate_id = (
-            data.get("shadow_candidate_id")
-            or prepared_evidence.get("shadow_candidate_id")
-            or post_signal_auto_resume.get("shadow_candidate_id")
-        )
+        action_time_resume = _dict(data.get("action_time_resume"))
+        ticket_identity = _ticket_identity(data, action_time_resume, post_signal_auto_resume)
         safety = (
             data.get("safety_invariants")
             if isinstance(data.get("safety_invariants"), dict)
@@ -196,7 +211,7 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
             "watcher_status_evidence_status": "unknown",
             "can_continue_steps_5_8": bool(data.get("can_continue_steps_5_8")),
             "current_gate": (
-                "fresh_signal_or_prepared_shadow_ready"
+                "fresh_signal_or_action_time_ticket_ready"
                 if data.get("can_continue_steps_5_8")
                 else "waiting_for_fresh_strategy_signal"
             ),
@@ -207,16 +222,14 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
                 data.get("runtime_signal_summaries")
                 or data.get("selected_runtime_signal_summaries")
             ),
-            "signal_input_json": signal_input_json,
-            "prepared_authorization_id": prepared_authorization_id,
-            "shadow_candidate_id": shadow_candidate_id,
-            "prepared_evidence": {
-                "signal_input_json": signal_input_json,
-                "shadow_candidate_id": shadow_candidate_id,
-                "prepared_authorization_id": prepared_authorization_id,
-                "ready_for_action_time_final_gate": bool(prepared_authorization_id),
+            "signal_input_ref": "pg:brc_live_signal_events",
+            **ticket_identity,
+            "action_time_ticket": {
+                "signal_input_ref": "pg:brc_live_signal_events",
+                **ticket_identity,
+                "ready_for_action_time_final_gate": bool(ticket_identity["ticket_id"]),
             },
-            "action_time_resume": _dict(data.get("action_time_resume")),
+            "action_time_resume": action_time_resume,
             "post_signal_auto_resume": post_signal_auto_resume,
         }
     deployment = (
@@ -242,25 +255,8 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
             or resume.get("post_signal_auto_resume")
         )
     )
-    prepared_evidence = _dict(data.get("prepared_evidence") or resume.get("prepared_evidence"))
-    signal_input_json = (
-        data.get("signal_input_json")
-        or resume.get("signal_input_json")
-        or prepared_evidence.get("signal_input_json")
-        or post_signal_auto_resume.get("signal_input_json")
-    )
-    prepared_authorization_id = (
-        data.get("prepared_authorization_id")
-        or resume.get("prepared_authorization_id")
-        or prepared_evidence.get("prepared_authorization_id")
-        or post_signal_auto_resume.get("prepared_authorization_id")
-    )
-    shadow_candidate_id = (
-        data.get("shadow_candidate_id")
-        or resume.get("shadow_candidate_id")
-        or prepared_evidence.get("shadow_candidate_id")
-        or post_signal_auto_resume.get("shadow_candidate_id")
-    )
+    action_time_resume = _dict(data.get("action_time_resume") or resume.get("action_time_resume"))
+    ticket_identity = _ticket_identity(data, resume, action_time_resume, post_signal_auto_resume)
     safety = (
         data.get("safety_invariants")
         if isinstance(data.get("safety_invariants"), dict)
@@ -290,16 +286,14 @@ def _watcher_state(watcher_status: dict[str, Any]) -> dict[str, Any]:
             or watcher_status_evidence.get("runtime_signal_summaries")
             or data.get("runtime_signal_summaries")
         ),
-        "signal_input_json": signal_input_json,
-        "prepared_authorization_id": prepared_authorization_id,
-        "shadow_candidate_id": shadow_candidate_id,
-        "prepared_evidence": {
-            "signal_input_json": signal_input_json,
-            "shadow_candidate_id": shadow_candidate_id,
-            "prepared_authorization_id": prepared_authorization_id,
-            "ready_for_action_time_final_gate": bool(prepared_authorization_id),
+        "signal_input_ref": "pg:brc_live_signal_events",
+        **ticket_identity,
+        "action_time_ticket": {
+            "signal_input_ref": "pg:brc_live_signal_events",
+            **ticket_identity,
+            "ready_for_action_time_final_gate": bool(ticket_identity["ticket_id"]),
         },
-        "action_time_resume": _dict(data.get("action_time_resume") or resume.get("action_time_resume")),
+        "action_time_resume": action_time_resume,
         "post_signal_auto_resume": post_signal_auto_resume,
     }
 
@@ -333,8 +327,8 @@ def _watcher_scope(group: dict[str, Any] | None) -> dict[str, Any]:
         "business_signal_validity": str(
             scope.get("business_signal_validity") or "unknown"
         ),
-        "shadow_candidate_evidence_freshness_target_seconds": scope.get(
-            "shadow_candidate_evidence_freshness_target_seconds"
+        "action_time_ticket_freshness_target_seconds": scope.get(
+            "action_time_ticket_freshness_target_seconds"
         ),
     }
 
@@ -448,7 +442,6 @@ def _runtime_binding(group: dict[str, Any] | None) -> dict[str, Any]:
     group_id = str(group.get("strategy_group_id"))
     version_id = _strategy_family_version_id(group)
     blockers: list[str] = []
-    candidate_mode: str | None = None
     runtime_confirmation_mode: str | None = None
     semantics_binding_found = False
     try:
@@ -457,7 +450,6 @@ def _runtime_binding(group: dict[str, Any] | None) -> dict[str, Any]:
             strategy_family_version_id=str(version_id),
         )
         semantics_binding_found = True
-        candidate_mode = binding.candidate_mode.value
         runtime_confirmation_mode = binding.runtime_confirmation_mode.value
     except KeyError:
         blockers.append("strategy_semantics_binding_missing")
@@ -476,7 +468,6 @@ def _runtime_binding(group: dict[str, Any] | None) -> dict[str, Any]:
         "strategy_family_version_id": version_id,
         "semantics_binding_found": semantics_binding_found,
         "evaluator_route_configured": evaluator_route_configured,
-        "candidate_mode": candidate_mode,
         "runtime_confirmation_mode": runtime_confirmation_mode,
         "blockers": sorted(dict.fromkeys(blockers)),
         "non_authority_checkpoint": (
@@ -618,8 +609,8 @@ def _dual_freshness(
         "strategy_signal": {
             "status": signal_status,
             "freshness_window": scope["business_signal_validity"],
-            "shadow_candidate_evidence_freshness_target_seconds": scope[
-                "shadow_candidate_evidence_freshness_target_seconds"
+            "action_time_ticket_freshness_target_seconds": scope[
+                "action_time_ticket_freshness_target_seconds"
             ],
             "source": "runtime_signal_watcher",
             "current_gate": watcher["current_gate"],
@@ -792,7 +783,7 @@ def _gate_failure_ledger(
                 else "continue_selected_pilot_observation"
             ),
             authority_mode=(
-                "observe_only_no_candidate_prepare"
+                "observe_only_no_action_time_ticket"
                 if scope_blocked
                 else "armed_observation"
             ),
@@ -840,14 +831,14 @@ def _gate_failure_ledger(
             next_recover_condition=(
                 "candidate_specific_protection_budget_next_gate_are_ready"
                 if candidate_blockers
-                else "required_facts_ready_for_candidate_prepare"
+                else "required_facts_ready_for_action_time_ticket"
             ),
             non_authority_checkpoint=(
                 "collect_or_prepare_missing_candidate_specific_facts"
                 if signal_ready and candidate_blockers
                 else "wait_for_fresh_signal_before_candidate_specific_fact_materialization"
                 if candidate_blockers
-                else "continue_to_shadow_candidate_prepare"
+                else "materialize_pg_action_time_ticket"
             ),
             authority_mode=(
                 "observe_only_no_real_submit"
@@ -966,7 +957,7 @@ def _owner_state(
             "non_authority_checkpoint": (
                 "refresh_readonly_account_position_open_order_facts_then_reconcile"
             ),
-            "authority_mode": "observe_only_no_candidate_prepare",
+            "authority_mode": "observe_only_no_action_time_ticket",
         }
     if not observe_ready:
         return {
@@ -988,7 +979,7 @@ def _owner_state(
             "non_authority_checkpoint": (
                 "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
             ),
-            "authority_mode": "observe_only_no_candidate_prepare",
+            "authority_mode": "observe_only_no_action_time_ticket",
         }
     if watcher_scope_alignment.get("status") == "mismatch":
         return {
@@ -1002,15 +993,12 @@ def _owner_state(
             "non_authority_checkpoint": str(
                 watcher_scope_alignment.get("non_authority_checkpoint")
             ),
-            "authority_mode": "observe_only_no_candidate_prepare",
+            "authority_mode": "observe_only_no_action_time_ticket",
         }
     if watcher["can_continue_steps_5_8"]:
         if candidate_ready:
-            prepared_for_final_gate = (
-                watcher.get("prepared_authorization_id")
-                or auto_resume.get("status") == "ready_for_action_time_final_gate"
-            )
-            if prepared_for_final_gate:
+            ticket_id = watcher.get("ticket_id") or auto_resume.get("ticket_id")
+            if ticket_id:
                 return {
                     "status": "ready_for_action_time_final_gate",
                     "blocker_class": "none",
@@ -1035,15 +1023,15 @@ def _owner_state(
                     ),
                 }
             return {
-                "status": "ready_for_non_executing_prepare",
+                "status": "action_time_ticket_pending",
                 "blocker_class": "none",
                 "blocked_at": "none",
                 "blocked_reason": "none",
-                "next_recover_condition": "fresh_signal_already_available",
+                "next_recover_condition": "pg_action_time_ticket_materialized",
                 "non_authority_checkpoint": (
                     owner_state_source_checkpoint(
                         auto_resume,
-                        default="prepare_shadow_candidate_runtime_grant_authorization_evidence",
+                        default="materialize_pg_action_time_ticket",
                     )[0]
                 ),
                 "authority_mode": "armed_observation",
@@ -1094,7 +1082,7 @@ def _owner_state(
             "operator_review_evidence_translates_to_fresh_signal_or_waiting_for_market"
         ),
         "non_authority_checkpoint": "rebuild_watcher_status_and_resume_pack",
-        "authority_mode": "observe_only_no_candidate_prepare",
+        "authority_mode": "observe_only_no_action_time_ticket",
     }
 
 
@@ -1102,21 +1090,25 @@ def _action_time_resume_state(
     *,
     owner_state: dict[str, Any],
     watcher: dict[str, Any],
-    candidate_evidence: dict[str, Any],
+    ticket_evidence: dict[str, Any],
 ) -> dict[str, Any]:
     existing = _dict(watcher.get("action_time_resume"))
     if existing:
         return existing
 
-    prepared = bool(candidate_evidence.get("prepared_authorization_id"))
+    ticket_id = ticket_evidence.get("ticket_id")
     if owner_state["status"] == "blocked_hard_safety_stop":
         status = "blocked"
         next_step = "resolve_hard_safety_stop_before_action_time_resume"
         allowed_auto_actions: list[str] = []
-    elif prepared or owner_state["status"] == "ready_for_action_time_final_gate":
+    elif ticket_id or owner_state["status"] == "ready_for_action_time_final_gate":
         status = "ready_for_action_time_final_gate"
         next_step = "run_official_action_time_final_gate_preflight"
         allowed_auto_actions = ["run_official_action_time_final_gate_preflight"]
+    elif owner_state["status"] == "action_time_ticket_pending":
+        status = "action_time_ticket_pending"
+        next_step = "materialize_pg_action_time_ticket"
+        allowed_auto_actions = ["materialize_pg_action_time_ticket"]
     elif owner_state["status"] == "waiting_for_market":
         status = "waiting_for_market"
         next_step = "continue_watcher_observation"
@@ -1129,11 +1121,12 @@ def _action_time_resume_state(
     return {
         "status": status,
         "next_step": next_step,
-        "signal_input_json": candidate_evidence.get("signal_input_json"),
-        "shadow_candidate_id": candidate_evidence.get("shadow_candidate_id"),
-        "prepared_authorization_id": candidate_evidence.get(
-            "prepared_authorization_id"
-        ),
+        "signal_input_ref": "pg:brc_live_signal_events",
+        "ticket_id": ticket_id,
+        "action_time_lane_input_id": ticket_evidence.get("action_time_lane_input_id"),
+        "promotion_candidate_id": ticket_evidence.get("promotion_candidate_id"),
+        "signal_event_id": ticket_evidence.get("signal_event_id"),
+        "signal_event_ids": list(ticket_evidence.get("signal_event_ids") or []),
         "allowed_auto_actions": allowed_auto_actions,
         "forbidden_auto_actions_until_final_gate_pass": [
             "official_operation_layer_submit",
@@ -1141,10 +1134,11 @@ def _action_time_resume_state(
             "order_lifecycle_submit",
             "runtime_budget_mutation",
         ],
-        "requires_fresh_action_time_facts": prepared,
+        "requires_fresh_action_time_facts": status
+        in {"action_time_ticket_pending", "ready_for_action_time_final_gate"},
         "requires_action_time_final_gate": True,
         "requires_official_operation_layer": True,
-        "final_gate_status": "not_run" if prepared else "not_reached",
+        "final_gate_status": "not_run" if ticket_id else "not_reached",
         "operation_layer_status": "not_reached",
         "places_order": False,
         "calls_order_lifecycle": False,
@@ -1166,11 +1160,11 @@ def _owner_action_item(
     if status == "waiting_for_market":
         headline = "Watcher is active; waiting for a fresh strategy signal."
         owner_status_checkpoint = "none_wait_for_signal_notification"
-    elif status == "ready_for_non_executing_prepare":
-        headline = "Fresh signal is ready; system can prepare non-executing evidence."
-        owner_status_checkpoint = "none_system_prepares_candidate_evidence"
+    elif status == "action_time_ticket_pending":
+        headline = "Fresh signal is ready; system can materialize an Action-Time Ticket."
+        owner_status_checkpoint = "none_system_materializes_action_time_ticket"
     elif status == "ready_for_action_time_final_gate":
-        headline = "Fresh authorization evidence is ready for action-time FinalGate."
+        headline = "Action-Time Ticket is ready for action-time FinalGate."
         owner_status_checkpoint = "none_system_runs_official_finalgate"
     elif str(owner_state.get("blocker_class")) == "hard_safety_stop":
         headline = "Hard safety stop; automatic execution is halted."
@@ -1273,24 +1267,25 @@ def build_status_artifact(
         blocker for blocker in candidate_blockers
         if blocker in {"protection:missing", "budget:missing", "next_attempt_gate:missing"}
     ]
-    prepared_authorization_ready = (
+    action_time_ticket_ready = (
         owner_state["status"] == "ready_for_action_time_final_gate"
     )
-    non_executing_prepare_ready = (
-        owner_state["status"] == "ready_for_non_executing_prepare"
+    action_time_ticket_pending = (
+        owner_state["status"] == "action_time_ticket_pending"
     )
-    candidate_evidence = {
-        "signal_input_json": watcher.get("signal_input_json"),
-        "shadow_candidate_id": watcher.get("shadow_candidate_id"),
-        "prepared_authorization_id": watcher.get("prepared_authorization_id"),
-        "ready_for_action_time_final_gate": bool(
-            watcher.get("prepared_authorization_id")
-        ),
+    action_time_ticket = {
+        "signal_input_ref": "pg:brc_live_signal_events",
+        "ticket_id": watcher.get("ticket_id"),
+        "action_time_lane_input_id": watcher.get("action_time_lane_input_id"),
+        "promotion_candidate_id": watcher.get("promotion_candidate_id"),
+        "signal_event_id": watcher.get("signal_event_id"),
+        "signal_event_ids": list(watcher.get("signal_event_ids") or []),
+        "ready_for_action_time_final_gate": bool(watcher.get("ticket_id")),
     }
     action_time_resume = _action_time_resume_state(
         owner_state=owner_state,
         watcher=watcher,
-        candidate_evidence=candidate_evidence,
+        ticket_evidence=action_time_ticket,
     )
     owner_state = owner_state_with_explicit_action_authority(
         owner_state=owner_state,
@@ -1378,7 +1373,7 @@ def build_status_artifact(
         "owner_state": owner_state_projection,
         "runtime_binding": runtime_binding,
         "watcher_scope_alignment": watcher_scope_alignment,
-        "candidate_evidence": candidate_evidence,
+        "action_time_ticket": action_time_ticket,
         "action_time_resume": action_time_resume,
         "post_signal_auto_resume": watcher["post_signal_auto_resume"],
         "control_board": {
@@ -1445,19 +1440,23 @@ def build_status_artifact(
                 "watcher_scope": watcher_scope_alignment["status"],
             },
             "candidate_row": {
-                "signal_input_json": candidate_evidence["signal_input_json"],
-                "shadow_candidate_id": candidate_evidence["shadow_candidate_id"],
-                "prepared_authorization_id": candidate_evidence[
-                    "prepared_authorization_id"
+                "signal_input_ref": action_time_ticket["signal_input_ref"],
+                "ticket_id": action_time_ticket["ticket_id"],
+                "action_time_lane_input_id": action_time_ticket[
+                    "action_time_lane_input_id"
                 ],
+                "promotion_candidate_id": action_time_ticket[
+                    "promotion_candidate_id"
+                ],
+                "signal_event_id": action_time_ticket["signal_event_id"],
                 "symbol": selected_universe[0] if selected_universe else "pending",
                 "side": selected_side,
                 "candidate_state": (
-                    "prepared_authorization_ready"
-                    if prepared_authorization_ready
-                    else "ready_for_non_executing_prepare"
-                    if non_executing_prepare_ready
-                    else "not_prepared"
+                    "action_time_ticket_ready"
+                    if action_time_ticket_ready
+                    else "action_time_ticket_pending"
+                    if action_time_ticket_pending
+                    else "not_materialized"
                 ),
                 "blocker": owner_state["blocked_reason"],
             },

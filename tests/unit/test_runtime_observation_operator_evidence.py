@@ -34,8 +34,10 @@ def _status_artifact(*, status="waiting_for_signal", signal_type="no_action"):
         "artifact_stale": False,
         "stop_reason": "running",
         "active_runtime_count": 1,
-        "prepared_authorization_id": None,
-        "shadow_candidate_id": None,
+        "ticket_id": None,
+        "action_time_lane_input_id": None,
+        "promotion_candidate_id": None,
+        "signal_event_id": None,
         "runtime_signal_summaries": [
             {
                 "runtime_instance_id": "runtime-1",
@@ -153,7 +155,7 @@ def test_operator_evidence_surfaces_runtime_ready_attention():
 
     evidence = module.build_operator_evidence(
         active_status_artifact=_status_artifact(
-            status="ready_for_prepare",
+            status="ready_for_action_time_ticket_materialization",
             signal_type="would_enter",
         ),
         strategy_preview_artifact=_strategy_preview(),
@@ -162,7 +164,7 @@ def test_operator_evidence_surfaces_runtime_ready_attention():
     assert evidence["status"] == "runtime_signal_attention"
     assert evidence["watch_status"] == "runtime_signal_ready"
     assert evidence["operator_review_plan"]["next_step"] == (
-        "review_runtime_ready_signal_prepare_or_preview_path"
+        "materialize_pg_action_time_ticket"
     )
     assert evidence["safety_invariants"]["order_created"] is False
 
