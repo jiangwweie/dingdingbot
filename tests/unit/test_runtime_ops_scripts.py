@@ -31,13 +31,147 @@ def test_runtime_monitor_env_loader_fills_empty_existing_env(monkeypatch, tmp_pa
 def test_tokyo_ops_health_pg_counts_do_not_expose_dsn_in_command_plan():
     payload = check_tokyo_runtime_ops_health_once.build_payload(execute_local=False)
     row = next(item for item in payload["results"] if item["name"] == "pg_runtime_row_counts")
+    chain_row = next(
+        item for item in payload["results"] if item["name"] == "pg_l2_l7_chain_health"
+    )
     command_text = " ".join(row["command"])
+    chain_command_text = " ".join(chain_row["command"])
 
     assert row["status"] == "planned"
     assert row["command"] == ["internal_sqlalchemy_readonly_row_counts"]
+    assert chain_row["status"] == "planned"
+    assert chain_row["command"] == ["internal_sqlalchemy_readonly_l2_l7_chain_health"]
     assert "psql" not in command_text
+    assert "psql" not in chain_command_text
     assert "PG_DATABASE_URL" not in command_text
+    assert "PG_DATABASE_URL" not in chain_command_text
     assert "DATABASE_URL" not in command_text
+    assert "DATABASE_URL" not in chain_command_text
+
+
+def test_tokyo_ops_l2_l7_summary_accepts_completed_rehearsal_without_open_objects():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [
+                {"strategy_group_id": "CPM-RO-001", "current_count": 4},
+                {"strategy_group_id": "MPG-001", "current_count": 4},
+                {"strategy_group_id": "MI-001", "current_count": 3},
+                {"strategy_group_id": "SOR-001", "current_count": 8},
+                {"strategy_group_id": "BRF2-001", "current_count": 3},
+            ],
+            "recent_counts": {
+                "facts": 26,
+                "signals": 0,
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+                "monitor": 1,
+            },
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {
+                "status": "protected_submit_rehearsal_completed",
+                "fresh_signal_present": True,
+                "ready_for_real_order_action": False,
+                "owner_action_required": False,
+                "blockers": [],
+            },
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {
+                    "calls_finalgate": False,
+                    "calls_operation_layer": False,
+                    "calls_exchange_write": False,
+                    "order_created": False,
+                    "live_profile_changed": False,
+                    "order_sizing_changed": False,
+                },
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+        }
+    )
+
+    assert summary["status"] == "ok"
+    assert summary["issues"] == []
+    assert summary["goal_status"] == "protected_submit_rehearsal_completed"
+    assert summary["open_counts"]["lanes"] == 0
+
+
+def test_tokyo_ops_l2_l7_summary_flags_ready_pseudo_blocker():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {
+                "status": "protected_submit_rehearsal_completed",
+                "blockers": ["candidate_pool_blocker:action_time_preflight_ready:2"],
+            },
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "goal_status_ready_pseudo_blocker" in summary["issues"]
+
+
+def test_tokyo_ops_l2_l7_summary_flags_terminal_status_with_open_objects():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 1,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {
+                "status": "protected_submit_rehearsal_completed",
+                "blockers": [],
+            },
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "terminal_goal_status_with_open_l2_l7_objects" in summary["issues"]
 
 
 def test_runtime_monitor_cli_stdout_is_json_only(monkeypatch, capsys):
