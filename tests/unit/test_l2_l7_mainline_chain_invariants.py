@@ -312,6 +312,48 @@ def test_l2_l7_resume_dispatcher_parser_has_only_pg_ticket_identity_source() -> 
     assert "--output-json" not in _parser_args(dispatcher_source)
 
 
+def test_owner_console_runtime_projection_reads_pg_snapshots_not_script_builders() -> None:
+    source = (
+        REPO_ROOT / "src/application/readmodels/trading_console.py"
+    ).read_text(encoding="utf-8")
+
+    assert "brc_control_read_model_snapshots" in source
+    assert "build_strategy_live_candidate_pool_from_control_state" not in source
+    assert "build_goal_status_artifact_from_control_state" not in source
+    assert "from scripts.build_strategy_live_candidate_pool" not in source
+    assert "from scripts.build_strategygroup_runtime_goal_status" not in source
+
+
+def test_pg_current_projectors_use_application_readmodel_builders_not_script_builders() -> None:
+    checked_paths = [
+        "scripts/publish_runtime_control_current_projections.py",
+        "scripts/run_tokyo_runtime_server_monitor.py",
+        "src/application/readmodels/daily_live_enablement_table.py",
+        "src/application/readmodels/strategy_live_candidate_pool.py",
+        "src/application/readmodels/strategygroup_runtime_goal_status.py",
+    ]
+
+    for rel_path in checked_paths:
+        source = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+
+        assert "from scripts.build_strategy_live_candidate_pool" not in source, rel_path
+        assert "from scripts.build_daily_live_enablement_table" not in source, rel_path
+        assert "from scripts.build_strategygroup_runtime_goal_status" not in source, rel_path
+
+    publisher = (
+        REPO_ROOT / "scripts/publish_runtime_control_current_projections.py"
+    ).read_text(encoding="utf-8")
+    monitor = (REPO_ROOT / "scripts/run_tokyo_runtime_server_monitor.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from src.application.readmodels.strategy_live_candidate_pool" in publisher
+    assert "from src.application.readmodels.daily_live_enablement_table" in publisher
+    assert "from src.application.readmodels.strategygroup_runtime_goal_status" in publisher
+    assert "from src.application.readmodels.strategy_live_candidate_pool" in monitor
+    assert "from src.application.readmodels.strategygroup_runtime_goal_status" in monitor
+
+
 def _parser_args(source: str) -> set[str]:
     tree = ast.parse(source)
     args: set[str] = set()

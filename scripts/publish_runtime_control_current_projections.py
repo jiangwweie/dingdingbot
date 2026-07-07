@@ -25,13 +25,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.build_daily_live_enablement_table import (  # noqa: E402
+from src.application.readmodels.daily_live_enablement_table import (  # noqa: E402
     build_daily_live_enablement_table_from_control_state,
 )
-from scripts.build_strategy_live_candidate_pool import (  # noqa: E402
+from src.application.readmodels.strategy_live_candidate_pool import (  # noqa: E402
     build_strategy_live_candidate_pool_from_control_state,
 )
-from scripts.build_strategygroup_runtime_goal_status import (  # noqa: E402
+from src.application.readmodels.strategygroup_runtime_goal_status import (  # noqa: E402
     build_goal_status_artifact_from_control_state,
 )
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402

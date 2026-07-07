@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import inspect
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -70,6 +71,7 @@ from src.application.readmodels.owner_projection import (
     owner_state_with_explicit_action_authority as _owner_state_with_explicit_action_authority,
     owner_state_without_legacy_input_recovery_action as _owner_state_without_legacy_input_recovery_action,
 )
+from src.infrastructure.sync_pg_dsn import normalize_sync_postgres_dsn
 from src.application.production_strategy_family_admission import (
     build_production_strategy_family_admission_state,
 )
@@ -541,30 +543,23 @@ class TradingConsoleReadModelService:
         try:
             import sqlalchemy as sa
 
-            from scripts.build_strategy_live_candidate_pool import (
-                build_strategy_live_candidate_pool_from_control_state,
-            )
-            from scripts.build_strategygroup_runtime_goal_status import (
-                build_goal_status_artifact_from_control_state,
-            )
-            from src.infrastructure.runtime_control_state_repository import (
-                PgBackedRuntimeControlStateRepository,
-            )
-
-            engine = sa.create_engine(database_url)
+            engine = sa.create_engine(normalize_sync_postgres_dsn(database_url))
             try:
                 with engine.connect() as conn:
-                    control_state = PgBackedRuntimeControlStateRepository(
-                        conn
-                    ).read_control_state()
+                    snapshots = self._read_runtime_control_current_snapshots(conn)
             finally:
                 engine.dispose()
-            candidate_pool = build_strategy_live_candidate_pool_from_control_state(
-                control_state
+            missing = sorted(
+                model_type
+                for model_type in {"candidate_pool", "goal_status"}
+                if model_type not in snapshots
             )
-            goal_status = build_goal_status_artifact_from_control_state(
-                control_state=control_state,
-            )
+            if missing:
+                raise RuntimeError(
+                    "current_projection_snapshots_missing:" + ",".join(missing)
+                )
+            candidate_pool = _as_dict(snapshots["candidate_pool"].get("payload"))
+            goal_status = _as_dict(snapshots["goal_status"].get("payload"))
             self._runtime_control_projection_cache = {
                 "status": "ready",
                 "source_mode": "db_backed",
@@ -574,8 +569,13 @@ class TradingConsoleReadModelService:
                 "candidate_pool": candidate_pool,
                 "goal_status": goal_status,
                 "control_state_watermark": {
-                    "schema": str(control_state.get("schema") or ""),
-                    "table_counts": _as_dict(control_state.get("table_counts")),
+                    "schema": "brc.control_read_model_snapshots.current.v1",
+                    "model_types": sorted(snapshots),
+                    "generated_at_ms_by_model": {
+                        model_type: snapshots[model_type].get("generated_at_ms")
+                        for model_type in sorted(snapshots)
+                    },
+                    "source": "pg:brc_control_read_model_snapshots",
                 },
             }
         except Exception as exc:
@@ -594,6 +594,47 @@ class TradingConsoleReadModelService:
                 },
             }
         return self._runtime_control_projection_cache
+
+    def _read_runtime_control_current_snapshots(
+        self,
+        conn: Any,
+    ) -> dict[str, dict[str, Any]]:
+        import sqlalchemy as sa
+
+        rows = conn.execute(
+            sa.text(
+                """
+                SELECT model_type, payload, source_watermark, input_watermark,
+                       owner_projector, output_path, generated_at_ms, generated_by
+                FROM brc_control_read_model_snapshots
+                WHERE is_current = true
+                  AND model_type IN (
+                    'candidate_pool',
+                    'daily_live_enablement_table',
+                    'goal_status'
+                  )
+                """
+            )
+        ).mappings().all()
+        snapshots: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            model_type = str(row.get("model_type") or "")
+            if not model_type:
+                continue
+            output_path = row.get("output_path")
+            if output_path:
+                raise RuntimeError(
+                    f"current_projection_snapshot_has_output_path:{model_type}"
+                )
+            snapshots[model_type] = {
+                "payload": _json_object(row.get("payload")),
+                "source_watermark": _json_object(row.get("source_watermark")),
+                "input_watermark": _json_object(row.get("input_watermark")),
+                "owner_projector": str(row.get("owner_projector") or ""),
+                "generated_at_ms": row.get("generated_at_ms"),
+                "generated_by": str(row.get("generated_by") or ""),
+            }
+        return snapshots
 
     async def snapshot(
         self,
@@ -3400,6 +3441,15 @@ def _now_ms() -> int:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        decoded = json.loads(value)
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
 
 
 def _runtime_signal_watcher_action_time_resume_from_goal_status(

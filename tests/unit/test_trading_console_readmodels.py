@@ -50,6 +50,9 @@ RUNTIME_CONTROL_MIGRATION_PATH = (
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
 RUNTIME_CONTROL_SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+RUNTIME_CONTROL_PROJECTION_PUBLISH_PATH = (
+    REPO_ROOT / "scripts/publish_runtime_control_current_projections.py"
+)
 
 
 def _load_file_module(path: Path, name: str):
@@ -253,6 +256,7 @@ def _configure_pg_runtime_control_state(
     tmp_path: Path,
     *,
     watcher_covered: bool = False,
+    publish_current_projections: bool = True,
 ) -> Path:
     db_path = tmp_path / "runtime-control-current.db"
     migration = _load_file_module(
@@ -313,6 +317,13 @@ def _configure_pg_runtime_control_state(
                 ),
                 {"now_ms": now_ms, "valid_until_ms": now_ms + 900_000},
             )
+        if publish_current_projections:
+            publisher = _load_file_module(
+                RUNTIME_CONTROL_PROJECTION_PUBLISH_PATH,
+                f"runtime_control_projection_publish_{id(tmp_path)}",
+            )
+            report = publisher.publish_runtime_control_current_projections(conn)
+            assert report["status"] == "current_projections_published"
     engine.dispose()
     monkeypatch.setenv("PG_DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("BRC_ALLOW_NON_POSTGRES_FOR_TEST", "1")
@@ -5769,6 +5780,45 @@ def test_runtime_signal_watcher_status_ignores_resume_pack_legacy_action_text(
         payload["data"],
         sort_keys=True,
     )
+
+
+def test_runtime_signal_watcher_status_does_not_rebuild_missing_pg_snapshots(
+    monkeypatch,
+    tmp_path,
+):
+    _configure_auth(monkeypatch)
+    _patch_deps(monkeypatch, exchange=_FakeExchangeGateway())
+    _configure_pg_runtime_control_state(
+        monkeypatch,
+        tmp_path,
+        watcher_covered=True,
+        publish_current_projections=False,
+    )
+
+    from src.interfaces.api import app
+
+    with TestClient(app) as client:
+        assert _login(client).status_code == 200
+        response = client.get("/api/trading-console/runtime-signal-watcher-status")
+        assert response.status_code == 200
+        payload = response.json()
+
+    assert payload["freshness_status"] == "not_live_connected"
+    assert payload["data"]["deployment_readiness"]["status"] == (
+        "pg_current_projection_unavailable"
+    )
+    assert payload["data"]["deployment_readiness"]["source_mode"] == (
+        "db_backed_required"
+    )
+    assert payload["data"]["source_refs"]["legacy_report_files_read"] is False
+    assert payload["data"]["source_refs"]["legacy_json_fallback"] is False
+    assert payload["blockers"][0]["code"] == (
+        "runtime_signal_watcher_pg_current_projection_unavailable"
+    )
+    assert "current_projection_snapshots_missing" in payload["blockers"][0][
+        "affected_area"
+    ]
+    assert payload["data"]["watcher"]["runtime_signal_summaries"] == []
 
 
 def test_runtime_signal_watcher_projection_helpers_keep_legacy_status_as_evidence():

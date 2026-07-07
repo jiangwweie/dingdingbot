@@ -715,10 +715,10 @@ def build_server_monitor_artifact_from_pg(
     notifier: Notifier | None = None,
     systemd_runner: SystemdRunner | None = None,
 ) -> dict[str, Any]:
-    from scripts.build_strategy_live_candidate_pool import (  # noqa: PLC0415
+    from src.application.readmodels.strategy_live_candidate_pool import (  # noqa: PLC0415
         build_strategy_live_candidate_pool_from_control_state,
     )
-    from scripts.build_strategygroup_runtime_goal_status import (  # noqa: PLC0415
+    from src.application.readmodels.strategygroup_runtime_goal_status import (  # noqa: PLC0415
         build_goal_status_artifact_from_control_state,
     )
 
