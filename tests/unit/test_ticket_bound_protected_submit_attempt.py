@@ -56,6 +56,74 @@ def test_protected_submit_attempt_disabled_smoke_records_ticket_bound_pg_attempt
     )
 
 
+def test_next_protected_submit_attempt_selects_unique_handoff_ready(
+    pg_control_connection,
+):
+    ids = _create_handoff_ready(pg_control_connection)
+    safety_payload = safety.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_layer_handoff_id=ids["operation_layer_handoff_id"],
+        now_ms=NOW_MS + 3000,
+    )
+    assert safety_payload["submit_allowed"] is True
+
+    payload = submit.materialize_next_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+
+    assert payload["status"] == "disabled_smoke_passed"
+    assert payload["ticket_id"] == ids["ticket_id"]
+    assert payload["operation_submit_command_id"] == ids["operation_submit_command_id"]
+    assert payload["exchange_write_called"] is False
+    row = _protected_submit_row(pg_control_connection)
+    assert row["operation_submit_command_id"] == ids["operation_submit_command_id"]
+
+
+def test_next_protected_submit_attempt_noops_without_handoff_ready(
+    pg_control_connection,
+):
+    payload = submit.materialize_next_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+
+    assert payload["status"] == "no_operation_layer_handoff_ready"
+    assert payload["blockers"] == []
+    assert payload["next_action"] == "continue_watcher_observation"
+
+
+def test_next_protected_submit_attempt_ignores_expired_handoff_ticket(
+    pg_control_connection,
+):
+    ids = _create_handoff_ready(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET expires_at_ms = :expires_at_ms
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {
+            "expires_at_ms": NOW_MS - 1,
+            "ticket_id": ids["ticket_id"],
+        },
+    )
+
+    payload = submit.materialize_next_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+
+    assert payload["status"] == "no_operation_layer_handoff_ready"
+    assert payload["blockers"] == []
+
+
 def test_protected_submit_attempt_blocks_without_runtime_safety_snapshot(
     pg_control_connection,
 ):

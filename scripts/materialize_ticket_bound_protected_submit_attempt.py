@@ -175,6 +175,68 @@ def prepare_ticket_bound_protected_submit_attempt(
     )
 
 
+def materialize_next_ticket_bound_protected_submit_attempt(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str = "",
+    operation_submit_command_id: str = "",
+    submit_mode: str = SUBMIT_MODE_DISABLED_SMOKE,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    now_ms = int(now_ms or time.time() * 1000)
+    ticket_id = str(ticket_id or "").strip()
+    operation_submit_command_id = str(operation_submit_command_id or "").strip()
+    if ticket_id or operation_submit_command_id:
+        return prepare_ticket_bound_protected_submit_attempt(
+            conn,
+            ticket_id=ticket_id,
+            operation_submit_command_id=operation_submit_command_id,
+            submit_mode=submit_mode,
+            now_ms=now_ms,
+        )
+
+    try:
+        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+    except RuntimeControlStateRepositoryError as exc:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            blockers=[f"runtime_control_state_invalid:{exc}"],
+            attempt={},
+            next_action="repair_pg_runtime_control_state",
+        )
+
+    selected = _select_next_handoff_for_protected_submit(
+        control_state,
+        now_ms=now_ms,
+    )
+    blockers = list(selected.get("blockers") or [])
+    handoff = _as_dict(selected.get("handoff"))
+    if blockers:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            blockers=blockers,
+            attempt={},
+            next_action="repair_ticket_bound_operation_layer_handoff_uniqueness",
+        )
+    if not handoff:
+        return _result(
+            "no_operation_layer_handoff_ready",
+            now_ms=now_ms,
+            blockers=[],
+            attempt={},
+            next_action="continue_watcher_observation",
+        )
+    return prepare_ticket_bound_protected_submit_attempt(
+        conn,
+        ticket_id=str(handoff.get("ticket_id") or ""),
+        operation_submit_command_id=str(handoff.get("operation_submit_command_id") or ""),
+        submit_mode=submit_mode,
+        now_ms=now_ms,
+    )
+
+
 def record_ticket_bound_protected_submit_result(
     conn: sa.engine.Connection,
     *,
@@ -272,8 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
-    parser.add_argument("--ticket-id", required=True)
-    parser.add_argument("--operation-submit-command-id", required=True)
+    parser.add_argument("--ticket-id", default="")
+    parser.add_argument("--operation-submit-command-id", default="")
     parser.add_argument("--submit-mode", default=SUBMIT_MODE_DISABLED_SMOKE)
     parser.add_argument("--now-ms", type=int, default=None)
     parser.add_argument("--json", action="store_true")
@@ -299,7 +361,7 @@ def main(argv: list[str] | None = None) -> int:
     engine = sa.create_engine(args.database_url)
     try:
         with engine.begin() as conn:
-            report = prepare_ticket_bound_protected_submit_attempt(
+            report = materialize_next_ticket_bound_protected_submit_attempt(
                 conn,
                 ticket_id=args.ticket_id,
                 operation_submit_command_id=args.operation_submit_command_id,
@@ -317,6 +379,47 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(report["status"])
     return 1 if report["status"] == "blocked" else 0
+
+
+def _select_next_handoff_for_protected_submit(
+    control_state: dict[str, Any],
+    *,
+    now_ms: int,
+) -> dict[str, Any]:
+    existing_operation_submit_command_ids = {
+        str(row.get("operation_submit_command_id") or "")
+        for row in _rows(control_state.get("ticket_bound_protected_submit_attempts"))
+        if row.get("operation_submit_command_id")
+    }
+    live_finalgate_ready_ticket_ids = {
+        str(row.get("ticket_id") or "")
+        for row in _rows(control_state.get("action_time_tickets"))
+        if row.get("status") == "finalgate_ready"
+        and int(row.get("expires_at_ms") or 0) > now_ms
+    }
+    ready_handoffs = [
+        row
+        for row in _rows(control_state.get("operation_layer_handoffs"))
+        if row.get("status") == "handoff_ready"
+        and row.get("operation_submit_command_id")
+        and row.get("ticket_id")
+        and str(row.get("ticket_id") or "") in live_finalgate_ready_ticket_ids
+    ]
+    unattempted = [
+        row
+        for row in ready_handoffs
+        if str(row.get("operation_submit_command_id") or "")
+        not in existing_operation_submit_command_ids
+    ]
+    candidates = unattempted or ready_handoffs
+    if len(candidates) > 1:
+        return {
+            "handoff": {},
+            "blockers": ["multiple_ready_operation_layer_handoffs_for_protected_submit"],
+        }
+    if not candidates:
+        return {"handoff": {}, "blockers": []}
+    return {"handoff": candidates[0], "blockers": []}
 
 
 def _select_graph(

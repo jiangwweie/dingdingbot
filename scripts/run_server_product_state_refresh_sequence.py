@@ -5,8 +5,9 @@ The sequence is non-authority from a trading perspective. It refreshes control
 read models, may materialize PG fresh signals into one action-time lane,
 may materialize a PG Action-Time Ticket when a PG real-submit lane is present,
 and may run the ticket-bound non-executing FinalGate preflight and Operation
-Layer handoff, then materialize PG Runtime Safety State and ticket-bound
-post-submit closure state. It does not call
+Layer handoff, then materialize PG Runtime Safety State, a ticket-bound
+disabled-smoke protected submit attempt, and ticket-bound post-submit closure
+state. It does not call
 Operation Layer submit, exchange write APIs, OrderLifecycle, withdrawals,
 transfers, credential mutation, live profile changes, or order sizing changes.
 """
@@ -241,6 +242,10 @@ def run_server_product_state_refresh_sequence(
                 "materialize_ticket_bound_runtime_safety_state"
                 in attempted_step_names
             ),
+            "calls_ticket_bound_protected_submit_attempt": (
+                "materialize_ticket_bound_protected_submit_attempt"
+                in attempted_step_names
+            ),
             "calls_ticket_bound_post_submit_closure": (
                 "materialize_ticket_bound_post_submit_closure"
                 in attempted_step_names
@@ -324,6 +329,7 @@ def _empty_safety_invariants() -> dict[str, bool]:
         "calls_ticket_bound_finalgate_preflight": False,
         "calls_ticket_bound_operation_layer_handoff": False,
         "calls_ticket_bound_runtime_safety_state": False,
+        "calls_ticket_bound_protected_submit_attempt": False,
         "calls_ticket_bound_post_submit_closure": False,
         "calls_operation_layer_handoff": False,
         "calls_operation_layer_submit": False,
@@ -492,6 +498,10 @@ def _action_time_trigger_counts(
                 tickets.c.expires_at_ms <= now,
             ),
         ),
+        "operation_layer_handoffs_ready_without_protected_submit": _ready_handoff_without_protected_submit_count(
+            conn,
+            now_ms=now,
+        ),
     }
 
 
@@ -507,6 +517,46 @@ def _count_where(
     return int(
         conn.execute(sa.select(sa.func.count()).select_from(table).where(predicate))
         .scalar_one()
+        or 0
+    )
+
+
+def _ready_handoff_without_protected_submit_count(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> int:
+    metadata = sa.MetaData()
+    tickets = sa.Table("brc_action_time_tickets", metadata, autoload_with=conn)
+    handoffs = sa.Table("brc_operation_layer_handoffs", metadata, autoload_with=conn)
+    attempts = sa.Table(
+        "brc_ticket_bound_protected_submit_attempts",
+        metadata,
+        autoload_with=conn,
+    )
+    return int(
+        conn.execute(
+            sa.select(sa.func.count())
+            .select_from(
+                handoffs.join(
+                    tickets,
+                    handoffs.c.ticket_id == tickets.c.ticket_id,
+                ).outerjoin(
+                    attempts,
+                    handoffs.c.operation_submit_command_id
+                    == attempts.c.operation_submit_command_id,
+                )
+            )
+            .where(
+                sa.and_(
+                    handoffs.c.status == "handoff_ready",
+                    handoffs.c.operation_submit_command_id.is_not(None),
+                    tickets.c.status == "finalgate_ready",
+                    tickets.c.expires_at_ms > now_ms,
+                    attempts.c.operation_submit_command_id.is_(None),
+                )
+            )
+        ).scalar_one()
         or 0
     )
 
@@ -588,6 +638,16 @@ def _refresh_steps(
             ),
         ),
         RefreshStep(
+            "materialize_ticket_bound_protected_submit_attempt",
+            (
+                python,
+                "scripts/materialize_ticket_bound_protected_submit_attempt.py",
+                *pg_required,
+                "--submit-mode",
+                "disabled_smoke",
+            ),
+        ),
+        RefreshStep(
             "materialize_ticket_bound_post_submit_closure",
             (
                 python,
@@ -622,6 +682,7 @@ def _steps_for_mode(steps: list[RefreshStep], *, mode: str) -> list[RefreshStep]
             "materialize_action_time_finalgate_preflight",
             "materialize_action_time_operation_layer_handoff",
             "materialize_ticket_bound_runtime_safety_state",
+            "materialize_ticket_bound_protected_submit_attempt",
             "publish_runtime_control_current_projections_after_action_time",
         },
         "closure": {

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 import sqlalchemy as sa
@@ -13,29 +12,6 @@ from scripts.runtime_signal_watcher_resume_dispatcher import build_dispatch_arti
 
 def _captured_stdout_artifact(capsys) -> dict:
     return json.loads(capsys.readouterr().out)
-
-
-def _assert_legacy_operation_layer_submit_blocked(artifact: dict) -> None:
-    assert artifact["status"] == "operation_layer_submit_blocked"
-    assert artifact["blocker_class"] == "hard_safety_stop"
-    assert artifact["dispatch_status"] == (
-        "blocked_by_legacy_authorization_operation_layer_submit"
-    )
-    assert "legacy_authorization_operation_layer_submit_retired" in artifact["blockers"]
-    assert "ticket_bound_action_time_submit_required" in artifact["blockers"]
-    assert artifact["operation_layer_submit_result"]["called"] is False
-    assert artifact["operation_layer_submit_result"]["official_operation_layer_submit_called"] is False
-    assert artifact["owner_state"]["next_recover_condition"] == (
-        "ticket_bound_action_time_ticket_and_protected_submit_available"
-    )
-    assert artifact["owner_state"]["non_authority_checkpoint"] == (
-        "materialize_action_time_ticket_and_ticket_bound_operation_layer_handoff"
-    )
-    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
-    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
-    assert artifact["safety_invariants"]["places_order"] is False
-    assert artifact["safety_invariants"]["exchange_write_called"] is False
-    assert artifact["safety_invariants"]["calls_order_lifecycle"] is False
 
 
 def _assert_legacy_finalgate_ready_blocked(artifact: dict) -> None:
@@ -202,46 +178,18 @@ def _finalgate_ready_dispatch_artifact() -> dict:
             },
         },
         "operation_layer_command_plan": {
-            **dispatcher._operation_layer_command_plan(
-                authorization_id="auth-ready-1",
+            "kind": "legacy_authorization_operation_layer_submit",
+            "authorization_id": "auth-ready-1",
+            "official_endpoint_path": (
+                "/api/trading-console/"
+                "runtime-execution-first-real-submit-actions/authorizations/"
+                "auth-ready-1"
             ),
+            "places_order": False,
+            "exchange_write_called": False,
+            "order_lifecycle_called": False,
         },
     }
-
-
-def _operation_layer_ready_report() -> dict:
-    ids = {
-        key: f"{key}-value"
-        for key in dispatcher.OPERATION_LAYER_REQUIRED_EVIDENCE_IDS
-    }
-    ids["authorization_id"] = "auth-ready-1"
-    ids["attempt_reservation_id"] = "runtime-attempt-reservation-auth-ready-1"
-    return {
-        "ids": ids,
-        "blockers": [],
-        "warnings": [],
-        "steps": [],
-    }
-
-
-def _operation_layer_blocked_report() -> dict:
-    report = _operation_layer_ready_report()
-    report["ids"].pop("exchange_submit_action_authorization_id")
-    report["ids"].pop("deployment_readiness_evidence_id")
-    report["blockers"] = [
-        "trusted_submit_fact_snapshot_not_fresh_enough",
-        "persistent_duplicate_submit_lock_required",
-    ]
-    report["warnings"] = ["deployment_readiness_evidence_id_missing"]
-    report["steps"] = [
-        {
-            "name": "preview_local_registration_enablement",
-            "id_summary": {},
-            "blockers": ["local_registration_enablement_decision_not_ready"],
-            "warnings": [],
-        }
-    ]
-    return report
 
 
 def _pg_ticket_identity_db(
@@ -660,57 +608,6 @@ def _assert_ticket_bound_protected_submit_disabled_smoke_passed(
     assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
-def _operation_layer_shadow_boundary_report() -> dict:
-    ids = {
-        "authorization_id": "auth-ready-1",
-        "runtime_instance_id": "runtime-mpg-1",
-        "trusted_submit_fact_snapshot_id": "trusted-facts-1",
-        "submit_idempotency_policy_id": "submit-idempotency-1",
-        "protection_creation_failure_policy_id": "protection-policy-1",
-    }
-    return {
-        "ids": ids,
-        "blockers": [
-            "pre_attempt_evidence_not_ready:"
-            "runtime_execution_enabled_false_current_shadow_boundary",
-            "pre_attempt_evidence_not_ready:runtime_shadow_mode_current_boundary",
-        ],
-        "warnings": [],
-        "steps": [],
-        "safety": {
-            "attempt_counter_mutated": False,
-            "runtime_budget_mutated": False,
-            "exchange_order_submitted": False,
-        },
-    }
-
-
-def _operation_layer_report_with_satisfied_legacy_probe_blocker() -> dict:
-    report = _operation_layer_ready_report()
-    report["ids"]["local_registration_adapter_result_id"] = "local-result-1"
-    report["steps"] = [
-        {
-            "name": "prepare_machine_evidence",
-            "id_summary": {"authorization_id": "auth-ready-1"},
-            "blockers": [
-                "first_real_submit_evidence_unavailable:"
-                "runtimeexecutionorderlifecycleadapterresult_not_found"
-            ],
-            "warnings": [],
-        },
-        {
-            "name": "record_local_order_registration_result",
-            "id_summary": {
-                "adapter_result_id": "local-result-1",
-                "authorization_id": "auth-ready-1",
-            },
-            "blockers": [],
-            "warnings": [],
-        },
-    ]
-    return report
-
-
 def test_dispatcher_waiting_for_market_is_no_action():
     artifact = build_dispatch_artifact(
         resume_pack=_resume_pack(),
@@ -878,7 +775,6 @@ def test_dispatcher_blocks_real_submit_when_unselected_scope_cannot_be_proven():
     artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
         execute_operation_layer_submit=True,
     )
 
@@ -914,7 +810,6 @@ def test_dispatcher_blocks_real_submit_when_unselected_scope_is_ambiguous():
     artifact = build_dispatch_artifact(
         resume_pack=resume,
         source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
         execute_operation_layer_submit=True,
     )
 
@@ -1060,11 +955,10 @@ def test_dispatcher_finalgate_rejects_legacy_action_fallback_without_allowed_act
     assert artifact["command_plan"] is None
 
 
-def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
+def test_dispatcher_reaches_ticket_bound_disabled_smoke_after_finalgate_pass(
     monkeypatch,
 ):
     calls: list[dict] = []
-    prepared: list[tuple[str, dict]] = []
 
     monkeypatch.setattr(
         dispatcher,
@@ -1081,16 +975,6 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
         ),
     )
 
-    def _prepare_evidence(authorization_id, command_plan):
-        prepared.append((authorization_id, command_plan))
-        report = _operation_layer_ready_report()
-        report["safety"] = {
-            "attempt_counter_mutated": True,
-            "runtime_budget_mutated": True,
-            "exchange_order_submitted": False,
-        }
-        return report
-
     artifact = build_dispatch_artifact(
         resume_pack=_with_runtime_summary(
             _resume_pack("ready_for_action_time_final_gate")
@@ -1100,11 +984,8 @@ def test_dispatcher_prepares_operation_layer_evidence_after_finalgate_pass(
         execute_preflight=True,
         execute_operation_layer_submit=True,
         operation_layer_submit_mode="disabled_smoke",
-        operation_layer_evidence_report=_operation_layer_blocked_report(),
-        operation_layer_evidence_preparer=_prepare_evidence,
     )
 
-    assert prepared == []
     _assert_ticket_bound_protected_submit_disabled_smoke_passed(artifact)
     assert len(calls) == 3
     assert calls[0]["method"] == "GET"
@@ -1218,40 +1099,16 @@ def test_dispatcher_blocks_ticket_bound_closed_closure_without_settlement_releas
     assert artifact["safety_invariants"]["post_submit_budget_settlement_called"] is False
 
 
-def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operation_layer(
+def test_dispatcher_blocks_submit_result_identity_mismatch_after_ticket_bound_handoff(
     monkeypatch,
 ):
     calls: list[dict] = []
-    prepared: list[tuple[str, dict]] = []
-    live_enablement_calls: list[dict] = []
 
     monkeypatch.setattr(
         dispatcher,
         "_session_cookie",
         lambda: ("brc_operator_session=fake-session", None),
     )
-
-    def _prepare_evidence(authorization_id, command_plan):
-        prepared.append((authorization_id, command_plan))
-        return (
-            _operation_layer_shadow_boundary_report()
-            if len(prepared) == 1
-            else _operation_layer_ready_report()
-        )
-
-    def _live_enable_runtime(**kwargs):
-        live_enablement_calls.append(kwargs)
-        return {
-            "called": True,
-            "status": "live_runtime_enablement_mutation_applied",
-            "blockers": [],
-            "mutation_applied": True,
-            "runtime_state_mutated": True,
-            "order_created": False,
-            "exchange_called": False,
-            "order_lifecycle_called": False,
-            "withdrawal_or_transfer_created": False,
-        }
 
     monkeypatch.setattr(
         dispatcher,
@@ -1270,13 +1127,8 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
         execute_operation_layer_submit=True,
-        operation_layer_evidence_report=_operation_layer_shadow_boundary_report(),
-        operation_layer_evidence_preparer=_prepare_evidence,
-        runtime_live_enabler=_live_enable_runtime,
     )
 
-    assert prepared == []
-    assert live_enablement_calls == []
     assert artifact["status"] == "operation_layer_submit_failed"
     assert artifact["dispatch_status"] == "ticket_bound_submit_result_identity_mismatch"
     assert artifact["blocker_class"] == "hard_safety_stop"
@@ -1291,596 +1143,13 @@ def test_dispatcher_live_enables_runtime_when_only_shadow_boundary_blocks_operat
     assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
 
 
-def test_runtime_live_enablement_query_omits_missing_optional_evidence_ids(
-    monkeypatch,
-):
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        if kwargs["method"] == "GET":
-            return {
-                "http_status": 200,
-                "error": False,
-                "body": {
-                    "status": "ready_for_live_runtime_enablement_mutation_design",
-                    "blockers": [],
-                    "warnings": [],
-                    "execution_intent_created": False,
-                    "order_created": False,
-                    "exchange_called": False,
-                    "owner_bounded_execution_called": False,
-                    "order_lifecycle_called": False,
-                    "withdrawal_instruction_created": False,
-                    "transfer_instruction_created": False,
-                },
-            }
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "applied",
-                "blockers": [],
-                "warnings": [],
-                "runtime_state_mutated": True,
-                "execution_intent_created": False,
-                "order_created": False,
-                "exchange_called": False,
-                "owner_bounded_execution_called": False,
-                "order_lifecycle_called": False,
-                "withdrawal_instruction_created": False,
-                "transfer_instruction_created": False,
-            },
-        }
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-
-    result = dispatcher._run_runtime_live_enablement(
-        runtime_instance_id="runtime-mpg-1",
-        authorization_id="auth-ready-1",
-        command_plan=dispatcher._operation_layer_command_plan(
-            authorization_id="auth-ready-1",
-        ),
-        evidence_report=_operation_layer_shadow_boundary_report(),
-        timeout_seconds=30,
-    )
-
-    assert result["mutation_applied"] is True
-    preview_query = parse_qs(urlparse(calls[0]["url"]).query)
-    assert "exchange_submit_execution_result_id" not in preview_query
-    assert "runtime_submit_rehearsal_id" not in preview_query
-    assert "deployment_readiness_evidence_id" not in preview_query
-    assert preview_query["trusted_submit_fact_snapshot_id"] == ["trusted-facts-1"]
-    assert calls[1]["method"] == "POST"
-    assert calls[1]["body"]["owner_real_submit_authorization_id"] == "auth-ready-1"
-
-
-def test_dispatcher_blocks_legacy_finalgate_ready_before_operation_layer_evidence_blocker():
+def test_dispatcher_blocks_legacy_finalgate_ready_without_ticket_bound_command_plan():
     artifact = build_dispatch_artifact(
         resume_pack=_finalgate_ready_dispatch_artifact(),
         source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_blocked_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
     )
 
     _assert_legacy_finalgate_ready_blocked(artifact)
-    assert "persistent_duplicate_submit_lock_required" not in artifact["blockers"]
-
-
-def test_dispatcher_blocks_legacy_finalgate_ready_before_operation_layer_evidence_ready():
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-
-
-def test_dispatcher_blocks_real_submit_if_standing_authorization_semantics_regress(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    resume_pack = _finalgate_ready_dispatch_artifact()
-    operation_layer_command_plan = dict(resume_pack["operation_layer_command_plan"])
-    operation_layer_command_plan["standing_authorized_first_real_submit"] = False
-    operation_layer_command_plan["owner_chat_confirmation_required_for_real_submit"] = True
-    operation_layer_command_plan["legacy_owner_confirmation_env_required"] = True
-    resume_pack["operation_layer_command_plan"] = operation_layer_command_plan
-
-    artifact = build_dispatch_artifact(
-        resume_pack=resume_pack,
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-        execute_operation_layer_submit=True,
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-
-
-def test_dispatcher_executes_official_operation_layer_submit_when_ready(monkeypatch):
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "exchange_submit_orders_submitted",
-                "authorization_id": "auth-ready-1",
-                "runtime_instance_id": "runtime-mpg-1",
-                "reservation_id": "runtime-attempt-reservation-auth-ready-1",
-                "execution_mode": "real_gateway_action",
-                "blockers": [],
-                "warnings": [],
-                "exchange_called": True,
-                "exchange_order_submitted": True,
-                "order_lifecycle_submit_called": True,
-                "owner_bounded_execution_called": False,
-                "execution_intent_status_changed": False,
-                "withdrawal_or_transfer_created": False,
-                "submitted_exchange_order_ids": ["ex-entry-1", "ex-stop-1"],
-                "entry_exchange_order_id": "ex-entry-1",
-                "protection_exchange_order_ids": ["ex-stop-1"],
-            },
-        }
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-        execute_operation_layer_submit=True,
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert calls == []
-
-
-def test_dispatcher_executes_operation_layer_disabled_smoke_when_requested(
-    monkeypatch,
-):
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "exchange_submit_execution_disabled",
-                "exchange_submit_execution_enabled": False,
-                "exchange_submit_execution_mode": "disabled",
-                "exchange_called": False,
-                "exchange_order_submitted": False,
-                "order_lifecycle_submit_called": False,
-                "owner_bounded_execution_called": False,
-                "execution_intent_status_changed": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        }
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-        execute_operation_layer_submit=True,
-        operation_layer_submit_mode="disabled_smoke",
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert calls == []
-
-
-def test_dispatcher_executes_post_submit_finalize_after_submit(monkeypatch):
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        if "post-submit-finalize-payloads" in kwargs["url"]:
-            return {
-                "http_status": 200,
-                "error": False,
-                "body": {
-                    "status": "finalized_ready_for_next_attempt",
-                    "authorization_id": "auth-ready-1",
-                    "runtime_instance_id": "runtime-mpg-1",
-                    "exchange_submit_execution_result_id": "submit-result-1",
-                    "post_submit_reconciliation_evidence_id": (
-                        "reconciliation-1"
-                    ),
-                    "submit_outcome_review_id": "review-1",
-                    "post_submit_budget_settlement_id": "settlement-1",
-                    "post_submit_finalize_complete": True,
-                    "post_submit_reconciliation_matched": True,
-                    "post_submit_budget_settled": True,
-                    "submit_outcome_review_recorded": True,
-                    "blockers": [],
-                    "warnings": ["reservation_id_resolved_from_attempt_reservation"],
-                    "next_attempt_gate": {
-                        "status": "ready_for_fresh_signal",
-                        "blockers": [],
-                    },
-                    "exchange_called": False,
-                    "exchange_order_submitted": False,
-                    "order_lifecycle_called": False,
-                    "owner_bounded_execution_called": False,
-                    "withdrawal_or_transfer_created": False,
-                    "position_closed": False,
-                    "order_cancelled": False,
-                    "order_created": False,
-                },
-            }
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "exchange_submit_orders_submitted",
-                "authorization_id": "auth-ready-1",
-                "runtime_instance_id": "runtime-mpg-1",
-                "execution_mode": "real_gateway_action",
-                "blockers": [],
-                "warnings": [],
-                "exchange_called": True,
-                "exchange_order_submitted": True,
-                "order_lifecycle_submit_called": True,
-                "owner_bounded_execution_called": False,
-                "execution_intent_status_changed": False,
-                "withdrawal_or_transfer_created": False,
-                "submitted_exchange_order_ids": ["ex-entry-1", "ex-stop-1"],
-                "entry_exchange_order_id": "ex-entry-1",
-                "protection_exchange_order_ids": ["ex-stop-1"],
-            },
-        }
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-        execute_operation_layer_submit=True,
-        execute_post_submit_finalize=True,
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert "post_submit_finalize_result" not in artifact
-    assert calls == []
-
-
-def test_dispatcher_blocks_incomplete_post_submit_closed_loop(monkeypatch):
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        if "post-submit-finalize-payloads" in kwargs["url"]:
-            return {
-                "http_status": 200,
-                "error": False,
-                "body": {
-                    "status": "finalized_ready_for_next_attempt",
-                    "authorization_id": "auth-ready-1",
-                    "runtime_instance_id": "runtime-mpg-1",
-                    "exchange_submit_execution_result_id": "submit-result-1",
-                    "blockers": [],
-                    "warnings": ["dry_run_missing_closed_loop_evidence"],
-                    "next_attempt_gate": {
-                        "status": "ready_for_fresh_signal",
-                        "blockers": [],
-                    },
-                    "exchange_called": False,
-                    "exchange_order_submitted": False,
-                    "order_lifecycle_called": False,
-                    "owner_bounded_execution_called": False,
-                    "withdrawal_or_transfer_created": False,
-                    "position_closed": False,
-                    "order_cancelled": False,
-                    "order_created": False,
-                },
-            }
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "exchange_submit_orders_submitted",
-                "authorization_id": "auth-ready-1",
-                "runtime_instance_id": "runtime-mpg-1",
-                "execution_mode": "real_gateway_action",
-                "blockers": [],
-                "warnings": [],
-                "exchange_called": True,
-                "exchange_order_submitted": True,
-                "order_lifecycle_submit_called": True,
-                "owner_bounded_execution_called": False,
-                "execution_intent_status_changed": False,
-                "withdrawal_or_transfer_created": False,
-                "submitted_exchange_order_ids": ["ex-entry-1", "ex-stop-1"],
-                "entry_exchange_order_id": "ex-entry-1",
-                "protection_exchange_order_ids": ["ex-stop-1"],
-            },
-        }
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-        execute_operation_layer_submit=True,
-        execute_post_submit_finalize=True,
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert "post_submit_finalize_result" not in artifact
-    assert calls == []
-
-
-def test_dispatcher_blocks_submit_result_identity_mismatch_before_finalize(monkeypatch):
-    calls: list[dict] = []
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**kwargs):
-        calls.append(kwargs)
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "exchange_submit_orders_submitted",
-                "authorization_id": "other-auth",
-                "runtime_instance_id": "runtime-mpg-1",
-                "reservation_id": "runtime-attempt-reservation-auth-ready-1",
-                "execution_mode": "real_gateway_action",
-                "blockers": [],
-                "warnings": [],
-                "exchange_called": True,
-                "exchange_order_submitted": True,
-                "order_lifecycle_submit_called": True,
-                "owner_bounded_execution_called": False,
-                "execution_intent_status_changed": False,
-                "withdrawal_or_transfer_created": False,
-                "submitted_exchange_order_ids": ["ex-entry-1", "ex-stop-1"],
-                "entry_exchange_order_id": "ex-entry-1",
-                "protection_exchange_order_ids": ["ex-stop-1"],
-            },
-        }
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-        execute_operation_layer_submit=True,
-        execute_post_submit_finalize=True,
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert "post_submit_finalize_result" not in artifact
-    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
-    assert artifact["safety_invariants"]["withdrawal_or_transfer_created"] is False
-    assert calls == []
-
-
-def test_dispatcher_blocks_post_submit_finalize_runtime_mismatch(monkeypatch):
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**kwargs):
-        if "post-submit-finalize-payloads" in kwargs["url"]:
-            return {
-                "http_status": 200,
-                "error": False,
-                "body": {
-                    "status": "finalized_ready_for_next_attempt",
-                    "authorization_id": "auth-ready-1",
-                    "runtime_instance_id": "other-runtime",
-                    "exchange_submit_execution_result_id": "submit-result-1",
-                    "submit_outcome_review_id": "review-1",
-                    "post_submit_budget_settlement_id": "settlement-1",
-                    "blockers": [],
-                    "next_attempt_gate": {
-                        "status": "ready_for_fresh_signal",
-                        "blockers": [],
-                    },
-                    "exchange_called": False,
-                    "exchange_order_submitted": False,
-                    "order_lifecycle_called": False,
-                    "owner_bounded_execution_called": False,
-                    "withdrawal_or_transfer_created": False,
-                    "position_closed": False,
-                    "order_cancelled": False,
-                    "order_created": False,
-                },
-            }
-        return {
-            "http_status": 200,
-            "error": False,
-            "body": {
-                "status": "exchange_submit_orders_submitted",
-                "authorization_id": "auth-ready-1",
-                "runtime_instance_id": "runtime-mpg-1",
-                "reservation_id": "runtime-attempt-reservation-auth-ready-1",
-                "execution_mode": "real_gateway_action",
-                "blockers": [],
-                "exchange_called": True,
-                "exchange_order_submitted": True,
-                "order_lifecycle_submit_called": True,
-                "owner_bounded_execution_called": False,
-                "execution_intent_status_changed": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        }
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-        execute_operation_layer_submit=True,
-        execute_post_submit_finalize=True,
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert "post_submit_finalize_result" not in artifact
-    assert artifact["safety_invariants"]["official_post_submit_finalize_called"] is False
-
-
-def test_dispatcher_refuses_operation_layer_submit_without_same_run_finalgate(
-    monkeypatch,
-):
-    called = {"request": False}
-    monkeypatch.setattr(
-        dispatcher,
-        "_session_cookie",
-        lambda: ("brc_operator_session=fake-session", None),
-    )
-
-    def _request_json(**_kwargs):
-        called["request"] = True
-        return {}
-
-    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
-    resume = _finalgate_ready_dispatch_artifact()
-    resume["finalgate_preflight_result"] = {"called": False}
-
-    artifact = build_dispatch_artifact(
-        resume_pack=resume,
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=_operation_layer_ready_report(),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-        execute_operation_layer_submit=True,
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert called["request"] is False
-
-
-def test_dispatcher_blocks_legacy_finalgate_ready_before_stale_authorization_evidence():
-    report = _operation_layer_ready_report()
-    report["ids"]["authorization_id"] = "old-auth-1"
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=report,
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert not any(
-        blocker.startswith("operation_layer_authorization_id_mismatch:")
-        for blocker in artifact["blockers"]
-    )
-
-
-def test_dispatcher_blocks_legacy_finalgate_ready_before_local_registration_probe():
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=(
-            _operation_layer_report_with_satisfied_legacy_probe_blocker()
-        ),
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert "operation_layer_readiness" not in artifact
-
-
-def test_dispatcher_blocks_legacy_finalgate_ready_before_unsatisfied_local_registration_probe():
-    report = _operation_layer_report_with_satisfied_legacy_probe_blocker()
-    report["ids"].pop("local_registration_adapter_result_id")
-
-    artifact = build_dispatch_artifact(
-        resume_pack=_finalgate_ready_dispatch_artifact(),
-        source_path=Path("pg-ticket-dispatch-identity"),
-        operation_layer_evidence_report=report,
-        operation_layer_evidence_report_path=(
-            "pg://runtime-control-state/operation-layer-handoff/evidence"
-        ),
-    )
-
-    _assert_legacy_finalgate_ready_blocked(artifact)
-    assert not any(
-        "runtimeexecutionorderlifecycleadapterresult_not_found" in blocker
-        for blocker in artifact["blockers"]
-    )
-
-
 def test_dispatcher_execute_preflight_blocks_finalgate_failure(monkeypatch):
     monkeypatch.setattr(
         dispatcher,

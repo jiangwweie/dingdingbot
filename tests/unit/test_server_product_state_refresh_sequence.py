@@ -72,6 +72,7 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
         "scripts/materialize_action_time_finalgate_preflight.py",
         "scripts/materialize_action_time_operation_layer_handoff.py",
         "scripts/materialize_ticket_bound_runtime_safety_state.py",
+        "scripts/materialize_ticket_bound_protected_submit_attempt.py",
     }
     control_builder_calls = [
         command
@@ -144,11 +145,13 @@ def test_server_product_state_refresh_sequence_watcher_tick_summary_is_lightweig
     assert "scripts/build_strategy_live_candidate_pool.py" not in command_names
     assert "scripts/materialize_action_time_ticket.py" not in command_names
     assert "scripts/materialize_action_time_finalgate_preflight.py" not in command_names
+    assert "scripts/materialize_ticket_bound_protected_submit_attempt.py" not in command_names
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
     assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["safety_invariants"]["calls_ticket_bound_finalgate_preflight"] is False
     assert report["safety_invariants"]["calls_ticket_bound_operation_layer_handoff"] is False
     assert report["safety_invariants"]["calls_ticket_bound_runtime_safety_state"] is False
+    assert report["safety_invariants"]["calls_ticket_bound_protected_submit_attempt"] is False
     assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
     assert not (tmp_path / "sequence.json").exists()
 
@@ -198,8 +201,10 @@ def test_server_product_state_refresh_sequence_action_time_mode_skips_closure(
     assert "scripts/materialize_action_time_ticket.py" in command_names
     assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
     assert "scripts/materialize_ticket_bound_runtime_safety_state.py" in command_names
+    assert "scripts/materialize_ticket_bound_protected_submit_attempt.py" in command_names
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
     assert report["safety_invariants"]["calls_ticket_bound_finalgate_preflight"] is True
+    assert report["safety_invariants"]["calls_ticket_bound_protected_submit_attempt"] is True
     assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
 
 
@@ -226,6 +231,7 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_skips_witho
                 "open_promotion_candidates": 0,
                 "open_action_time_lane_inputs": 0,
                 "open_action_time_tickets": 0,
+                "operation_layer_handoffs_ready_without_protected_submit": 0,
             },
         },
         runner=runner,
@@ -279,6 +285,12 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
         "scripts/materialize_pg_promotion_action_time_lane.py"
     )
     assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
+    assert "scripts/materialize_ticket_bound_protected_submit_attempt.py" in command_names
+    assert command_names.index(
+        "scripts/materialize_ticket_bound_runtime_safety_state.py"
+    ) < command_names.index(
+        "scripts/materialize_ticket_bound_protected_submit_attempt.py"
+    )
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
 
 
@@ -322,6 +334,7 @@ def test_action_time_trigger_counts_ignore_expired_closed_and_invalidated_rows()
                 "stale_open_action_time_lane_inputs": 0,
                 "open_action_time_tickets": 0,
                 "stale_open_action_time_tickets": 0,
+                "operation_layer_handoffs_ready_without_protected_submit": 0,
             }
 
             _insert_action_time_trigger_rows(conn, now_ms=now_ms, expired=False)
@@ -334,6 +347,7 @@ def test_action_time_trigger_counts_ignore_expired_closed_and_invalidated_rows()
                 "stale_open_action_time_lane_inputs": 0,
                 "open_action_time_tickets": 1,
                 "stale_open_action_time_tickets": 0,
+                "operation_layer_handoffs_ready_without_protected_submit": 0,
             }
     finally:
         engine.dispose()
@@ -355,9 +369,99 @@ def test_action_time_trigger_counts_include_stale_open_rows():
                 "stale_open_action_time_lane_inputs": 1,
                 "open_action_time_tickets": 0,
                 "stale_open_action_time_tickets": 1,
+                "operation_layer_handoffs_ready_without_protected_submit": 0,
             }
     finally:
         engine.dispose()
+
+
+def test_action_time_trigger_counts_include_unattempted_handoff_ready():
+    module = _load_module()
+    engine = _action_time_trigger_engine()
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_action_time_tickets VALUES (
+                        'ticket-1',
+                        'finalgate_ready',
+                        :expires_at_ms
+                    )
+                    """
+                ),
+                {"expires_at_ms": now_ms + 60_000},
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_operation_layer_handoffs VALUES (
+                        'handoff-1',
+                        'ticket-1',
+                        'operation-submit-1',
+                        'handoff_ready'
+                    )
+                    """
+                )
+            )
+            counts = module._action_time_trigger_counts(conn, now_ms=now_ms)
+            assert counts["open_action_time_tickets"] == 1
+            assert counts["operation_layer_handoffs_ready_without_protected_submit"] == 1
+
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_ticket_bound_protected_submit_attempts VALUES (
+                        'protected-submit-1',
+                        'operation-submit-1'
+                    )
+                    """
+                )
+            )
+            counts = module._action_time_trigger_counts(conn, now_ms=now_ms)
+            assert counts["operation_layer_handoffs_ready_without_protected_submit"] == 0
+    finally:
+        engine.dispose()
+
+
+def test_action_time_trigger_counts_ignore_expired_handoff_ready_ticket():
+    module = _load_module()
+    engine = _action_time_trigger_engine()
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_action_time_tickets VALUES (
+                        'ticket-expired',
+                        'finalgate_ready',
+                        :expires_at_ms
+                    )
+                    """
+                ),
+                {"expires_at_ms": now_ms - 1},
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_operation_layer_handoffs VALUES (
+                        'handoff-expired',
+                        'ticket-expired',
+                        'operation-submit-expired',
+                        'handoff_ready'
+                    )
+                    """
+                )
+            )
+
+            counts = module._action_time_trigger_counts(conn, now_ms=now_ms)
+
+    finally:
+        engine.dispose()
+
+    assert counts["operation_layer_handoffs_ready_without_protected_submit"] == 0
 
 
 def test_action_time_trigger_counts_ignore_non_live_fresh_signal():
@@ -393,6 +497,7 @@ def test_action_time_trigger_counts_ignore_non_live_fresh_signal():
         "stale_open_action_time_lane_inputs": 0,
         "open_action_time_tickets": 0,
         "stale_open_action_time_tickets": 0,
+        "operation_layer_handoffs_ready_without_protected_submit": 0,
     }
 
 
@@ -753,6 +858,50 @@ def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_fa
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
+    assert "materialize_ticket_bound_protected_submit_attempt" in skipped_names
+    assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
+
+
+def test_server_product_state_refresh_sequence_fails_closed_on_protected_submit_failure(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        if any(
+            item.endswith("materialize_ticket_bound_protected_submit_attempt.py")
+            for item in command
+        ):
+            return module.CommandResult(
+                returncode=1,
+                stdout="",
+                stderr="ticket-bound protected submit failed",
+            )
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time",
+        runner=runner,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_failed"
+    assert report["summary"]["failed_required_step_count"] == 1
+    assert report["summary"]["current_projection_publish_attempted"] is True
+    assert report["summary"]["blocked_by_required_step"] == (
+        "materialize_ticket_bound_protected_submit_attempt"
+    )
+    assert calls[-1][1] == "scripts/materialize_ticket_bound_protected_submit_attempt.py"
+    assert "--submit-mode" in calls[-1]
+    assert "disabled_smoke" in calls[-1]
+    skipped_names = [
+        step["name"]
+        for step in report["step_results"]
+        if step["status"] == "skipped_after_required_failure"
+    ]
     assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
@@ -891,6 +1040,28 @@ def _action_time_trigger_engine():
                     ticket_id TEXT PRIMARY KEY,
                     status TEXT,
                     expires_at_ms INTEGER
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_operation_layer_handoffs (
+                    operation_layer_handoff_id TEXT PRIMARY KEY,
+                    ticket_id TEXT,
+                    operation_submit_command_id TEXT,
+                    status TEXT
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_ticket_bound_protected_submit_attempts (
+                    protected_submit_attempt_id TEXT PRIMARY KEY,
+                    operation_submit_command_id TEXT
                 )
                 """
             )
