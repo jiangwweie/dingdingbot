@@ -780,7 +780,7 @@ def _pg_replay_live_parity_projection(
                 or readiness.get("watcher_state") == "fresh",
                 "computed": computed,
                 "fresh_signal_present": bool(signal),
-                "event_time_utc": _ms_to_iso(signal.get("observed_at_ms")),
+                "event_time_utc": _ms_to_iso(_signal_event_time_ms(signal)),
                 "failed_facts": failed_facts,
                 "next_action": _pg_next_action(blocker_class),
                 "evidence_source": "pg_runtime_control_state:pretrade_readiness_or_fact_snapshot",
@@ -887,9 +887,11 @@ def _pg_action_time_boundary_projection(
                 "side": str(candidate.get("side") or ""),
                 "event_id": str(event.get("event_id") or ""),
                 "fresh_signal_present": fresh_signal_present,
-                "event_time_utc": _ms_to_iso(signal.get("observed_at_ms")),
-                "fresh_signal_time_utc": _ms_to_iso(signal.get("observed_at_ms")),
-                "latest_candle_close_time_utc": _ms_to_iso(signal.get("observed_at_ms")),
+                "event_time_utc": _ms_to_iso(_signal_event_time_ms(signal)),
+                "fresh_signal_time_utc": _ms_to_iso(_signal_event_time_ms(signal)),
+                "latest_candle_close_time_utc": _ms_to_iso(
+                    _signal_trigger_candle_close_time_ms(signal)
+                ),
                 "action_time_path_ready": path_ready,
                 "first_blocker": first_blocker,
                 "next_action": _pg_next_action(first_blocker),
@@ -1226,6 +1228,14 @@ def _ms_to_iso(value: Any) -> str:
     except (TypeError, ValueError):
         return ""
     return datetime.fromtimestamp(millis / 1000, tz=timezone.utc).isoformat()
+
+
+def _signal_event_time_ms(signal: dict[str, Any]) -> Any:
+    return signal.get("event_time_ms") or signal.get("observed_at_ms")
+
+
+def _signal_trigger_candle_close_time_ms(signal: dict[str, Any]) -> Any:
+    return signal.get("trigger_candle_close_time_ms") or _signal_event_time_ms(signal)
 
 
 def _fact_snapshot_ready(row: dict[str, Any], *, now_ms: int) -> bool:

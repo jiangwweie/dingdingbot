@@ -431,6 +431,77 @@ def test_candidate_pool_builds_from_pg_control_state_seed(pg_control_connection)
     )
 
 
+def test_candidate_pool_pg_signal_times_use_market_event_not_observation_time(
+    pg_control_connection,
+):
+    now_ms = 1770001000000
+    event_time_ms = 1770000120000
+    trigger_candle_close_time_ms = event_time_ms
+    observed_at_ms = 1770000900000
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_live_signal_events (
+              signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
+              symbol, side, detector_key, signal_type, source_kind, status,
+              freshness_state, confidence, fact_snapshot_id, reason_codes,
+              signal_payload, event_time_ms, trigger_candle_close_time_ms,
+              observed_at_ms, expires_at_ms, invalidated_at_ms, created_at_ms
+            ) VALUES (
+              'signal:SOR-001:ETHUSDT:long:market-time-vs-observed-time',
+              'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
+              'event_spec:SOR-001:SOR-LONG:v1', 'SOR-001', 'ETHUSDT',
+              'long', 'detector:SOR-001:long', 'SOR-LONG', 'live_market',
+              'facts_validated', 'fresh', 0.9, 'fact:SOR:market-time',
+              '[]', '{}', :event_time_ms, :trigger_candle_close_time_ms,
+              :observed_at_ms, :expires_at_ms, NULL, :observed_at_ms
+            )
+            """
+        ),
+        {
+            "event_time_ms": event_time_ms,
+            "trigger_candle_close_time_ms": trigger_candle_close_time_ms,
+            "observed_at_ms": observed_at_ms,
+            "expires_at_ms": now_ms + 60_000,
+        },
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
+    control_state = repository.read_control_state()
+    builder = _builder()
+
+    inputs = builder.build_strategy_live_candidate_pool_inputs_from_control_state(
+        control_state,
+        generated_at_utc="2026-07-04T00:00:00+00:00",
+    )
+
+    parity_row = next(
+        row
+        for row in inputs["replay_live_parity"]["per_symbol_mismatch_table"]
+        if row["strategy_group_id"] == "SOR-001"
+        and row["symbol"] == "ETHUSDT"
+        and row["side"] == "long"
+    )
+    action_row = next(
+        row
+        for row in inputs["action_time_boundary"]["strategy_rows"]
+        if row["strategy_group_id"] == "SOR-001"
+        and row["symbol"] == "ETHUSDT"
+        and row["side"] == "long"
+    )
+
+    assert parity_row["event_time_utc"] == builder._ms_to_iso(event_time_ms)
+    assert action_row["event_time_utc"] == builder._ms_to_iso(event_time_ms)
+    assert action_row["fresh_signal_time_utc"] == builder._ms_to_iso(event_time_ms)
+    assert action_row["latest_candle_close_time_utc"] == builder._ms_to_iso(
+        trigger_candle_close_time_ms
+    )
+    assert action_row["fresh_signal_time_utc"] != builder._ms_to_iso(observed_at_ms)
+
+
 def test_candidate_pool_ignores_expired_pg_fresh_signal(pg_control_connection):
     now_ms = 1770001000000
     pg_control_connection.execute(
