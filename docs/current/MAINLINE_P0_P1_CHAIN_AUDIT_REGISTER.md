@@ -49,6 +49,14 @@ live_signal_event
 | **P1** | Server periodic watcher is intentionally non-authority and currently stops at `disabled_smoke` / preflight paths unless submit execution is separately armed | **open by design** | systemd dispatcher drop-in has `--execute-preflight` and does not include `--execute-operation-layer-submit` | Decide controlled production submit arming separately; do not hide it as market wait |
 | **P1** | Real gateway action path is API-bound, not direct sequence-runner-bound | **open by design** | `materialize_ticket_bound_protected_submit_attempt.py` prepares `submit_prepared`; API layer performs gateway call and records result | Keep tests proving mock result identity; only official API path may perform real gateway call |
 
+### Newly Registered Consumer Matrix Findings
+
+| Severity | Finding | Current impact | Evidence | Required direction |
+| --- | --- | --- | --- | --- |
+| **P1** | Owner Console / server monitor current projections still import read-model builders from `scripts/` | Not a file-authority blocker today because the builders read PG control state, but `src` and production monitor are coupled to CLI modules | `src/application/readmodels/trading_console.py`, `scripts/publish_runtime_control_current_projections.py`, and `scripts/run_tokyo_runtime_server_monitor.py` import `build_strategy_live_candidate_pool_from_control_state` / `build_goal_status_artifact_from_control_state` from `scripts/` | Extract PG current projection builders into an application/readmodel module; leave `scripts/` as thin CLI shells only |
+| **P1** | API observation cycle still imports `build_runtime_strategy_signal_input_artifact.py` | Not in the L2-L7 ticket-bound submit path, but API code depends on an artifact-named script module | `src/interfaces/api_trading_console.py` imports `scripts.build_runtime_strategy_signal_input_artifact`; tests prove stdout-only and no packet builder | Extract typed signal-input construction into application service code; archive or keep the script only as a thin CLI wrapper |
+| **P2** | Legacy artifact builder family remains in current `scripts/` and tests | Not invoked by production systemd; can still confuse future agents and reintroduce report-thinking | `build_single_lane_task_packet.py`, `build_strategy_fresh_signal_action_time_boundary.py`, tradeability/candidate/daily table artifact tests and validators remain present | Delete/archive obsolete artifact CLIs after their useful PG projection semantics are moved into current read-model services |
+
 ## Verification Commands
 
 Focused verification:
