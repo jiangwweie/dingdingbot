@@ -43,8 +43,7 @@ from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 
 OWNER_ATTENTION_STATUSES = {
     "blocked_forbidden_effect",
-    "runtime_signal_ready_for_non_executing_prepare",
-    "prepared_shadow_evidence_ready_for_owner_review",
+    "runtime_signal_ready_for_action_time_ticket",
     "operator_evidence_needs_review",
 }
 WAITING_STATUS = "waiting_for_signal"
@@ -196,12 +195,20 @@ def _event_key(
     wakeup_evidence: dict[str, Any],
 ) -> str:
     summary = wakeup_evidence.get("summary") if isinstance(wakeup_evidence.get("summary"), dict) else {}
+    pg_live_signal_events = (
+        status_artifact.get("pg_live_signal_events")
+        if isinstance(status_artifact.get("pg_live_signal_events"), dict)
+        else {}
+    )
+    signal_event_ids = ",".join(
+        sorted(str(item) for item in pg_live_signal_events.get("signal_event_ids") or [])
+    )
     parts = [
         str(wakeup_evidence.get("status") or ""),
         str(operator_evidence.get("status") or ""),
         str(status_artifact.get("latest_status") or ""),
-        str(summary.get("prepared_authorization_id") or ""),
-        str(summary.get("shadow_candidate_id") or ""),
+        signal_event_ids,
+        str(summary.get("runtime_ready_signal_count") or ""),
     ]
     return "|".join(parts)
 
@@ -254,8 +261,8 @@ def _notification_text(
         f"operator: {operator_evidence.get('status')}",
         runtime_count_line,
         f"ready runtime signals: {summary.get('runtime_ready_signal_count')}",
-        f"prepared authorization: {summary.get('prepared_authorization_id') or '-'}",
-        f"shadow candidate: {summary.get('shadow_candidate_id') or '-'}",
+        "pg signal events: "
+        + (", ".join(str(item) for item in (summary.get("signal_event_ids") or [])) or "-"),
         f"next: {summary.get('next_step') or operator_plan.get('next_step') or '-'}",
         f"evidence: {paths.get('wakeup_evidence_ref')}",
     ]
@@ -327,50 +334,6 @@ def _active_observation_signal_input_json(artifact: dict[str, Any]) -> str | Non
     return None
 
 
-def _active_observation_prepared_authorization_id(
-    artifact: dict[str, Any],
-) -> str | None:
-    plan = artifact.get("observation_monitor_plan")
-    if isinstance(plan, dict):
-        text = str(plan.get("prepared_authorization_id") or "").strip()
-        if text:
-            return text
-
-    for item in artifact.get("runtime_summaries") or []:
-        if not isinstance(item, dict):
-            continue
-        for candidate in (
-            item.get("prepared_authorization_id"),
-            _nested_get(item, ("observation_monitor_plan", "prepared_authorization_id")),
-            _nested_get(
-                item,
-                (
-                    "latest_artifact",
-                    "observation_cycle_plan",
-                    "prepared_authorization_id",
-                ),
-            ),
-            _nested_get(
-                item,
-                ("latest_artifact", "prepare_evidence", "ids", "authorization_id"),
-            ),
-            _nested_get(
-                item,
-                (
-                    "latest_artifact",
-                    "prepare_evidence",
-                    "first_real_submit_prepare_report",
-                    "ids",
-                    "authorization_id",
-                ),
-            ),
-        ):
-            text = str(candidate or "").strip()
-            if text:
-                return text
-    return None
-
-
 def _active_observation_runtime_signal_summaries(
     artifact: dict[str, Any],
 ) -> list[dict[str, Any]]:
@@ -393,7 +356,6 @@ def _active_observation_runtime_signal_summaries(
                 "status": item.get("status"),
                 "blockers": list(item.get("blockers") or []),
                 "signal_input_json": item.get("signal_input_json"),
-                "prepared_authorization_id": item.get("prepared_authorization_id"),
                 "signal_summary": item.get("signal_summary") or {},
             }
         )
@@ -449,9 +411,6 @@ def _active_observation_summary(
         "blockers": list(artifact.get("blockers") or []),
         "warnings": list(artifact.get("warnings") or []),
         "signal_input_json": _active_observation_signal_input_json(artifact),
-        "prepared_authorization_id": _active_observation_prepared_authorization_id(
-            artifact
-        ),
         "runtime_signal_summaries": _active_observation_runtime_signal_summaries(
             artifact
         ),
@@ -474,15 +433,15 @@ def _post_signal_auto_resume_plan(
     operator_status = str(operator_evidence.get("status") or "")
     forbidden_effects = list(status_artifact.get("forbidden_effects") or [])
     blockers = [str(item) for item in status_artifact.get("blockers") or []]
-    prepared_authorization_id = status_artifact.get("prepared_authorization_id")
-    shadow_candidate_id = status_artifact.get("shadow_candidate_id")
     signal_input_json = status_artifact.get("signal_input_json")
     summary = _as_dict(wakeup_evidence.get("summary"))
-    prepared_authorization_id = (
-        prepared_authorization_id or summary.get("prepared_authorization_id")
-    )
-    shadow_candidate_id = shadow_candidate_id or summary.get("shadow_candidate_id")
     signal_input_json = signal_input_json or summary.get("signal_input_json")
+    pg_live_signal_events = _as_dict(status_artifact.get("pg_live_signal_events"))
+    signal_event_ids = [
+        str(item)
+        for item in pg_live_signal_events.get("signal_event_ids") or []
+        if str(item or "").strip()
+    ]
 
     base = {
         "source": "runtime_signal_watcher_tick",
@@ -491,9 +450,8 @@ def _post_signal_auto_resume_plan(
         "wakeup_status": wakeup_status,
         "operator_status": operator_status,
         "signal_input_json": signal_input_json,
-        "prepared_authorization_id": prepared_authorization_id,
-        "shadow_candidate_id": shadow_candidate_id,
-        "allow_prepare_records": bool(args.allow_prepare_records),
+        "signal_event_ids": signal_event_ids,
+        "allow_prepare_records": False,
         "requires_action_time_final_gate": True,
         "requires_official_operation_layer": True,
         "places_order": False,
@@ -535,9 +493,8 @@ def _post_signal_auto_resume_plan(
         "ready_for_prepare",
         "ready_for_prepare_records",
         "runtime_signal_ready_for_non_executing_prepare",
-        "prepared_shadow_evidence_ready_for_owner_review",
+        "runtime_signal_ready_for_action_time_ticket",
     }
-    pg_live_signal_events = _as_dict(status_artifact.get("pg_live_signal_events"))
     pg_live_signal_written = int(pg_live_signal_events.get("written_count") or 0) > 0
     pg_signal_materialization_failed = (
         str(pg_live_signal_events.get("status") or "") == "pg_live_signal_events_blocked"
@@ -592,24 +549,19 @@ def _post_signal_auto_resume_plan(
             "creates_execution_intent": False,
         }
     if pg_live_signal_written:
-        non_authority_checkpoint = (
-            "wait_for_prepare_records_then_rebuild_final_gate_status"
-            if args.allow_prepare_records
-            else "rerun_watcher_tick_with_allow_prepare_records"
-        )
         return {
             **base,
-            "status": "ready_for_non_executing_prepare",
-            "blocked_at": "non_executing_prepare_records",
+            "status": "ready_for_action_time_ticket_materialization",
+            "blocked_at": "pg_action_time_ticket",
             "blocked_reason": "pg_fresh_strategy_signal_ready",
             "next_recover_condition": (
-                "shadow_candidate_runtime_grant_authorization_evidence_exists"
+                "pg_action_time_ticket_exists_for_fresh_signal"
             ),
-            "non_authority_checkpoint": non_authority_checkpoint,
+            "non_authority_checkpoint": "materialize_pg_action_time_ticket",
             "checkpoint_source": "runtime_signal_watcher_tick",
             "authority_mode": "armed_observation_no_real_submit",
             "can_continue_without_owner_chat": True,
-            "creates_shadow_candidate": bool(args.allow_prepare_records),
+            "creates_shadow_candidate": False,
             "creates_execution_intent": False,
         }
 
@@ -688,17 +640,13 @@ def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Nam
         status_stale_after_seconds=args.status_stale_after_seconds,
         one_hour_limit=args.one_hour_limit,
         four_hour_limit=args.four_hour_limit,
-        allow_prepare_records=args.allow_prepare_records,
-        allow_arm_preview=args.allow_arm_preview,
-        allow_attempt_policy_prepare=args.allow_attempt_policy_prepare,
-        allow_disabled_smoke=args.allow_disabled_smoke,
-        allow_standing_operation_layer_evidence_prep=(
-            getattr(args, "allow_standing_operation_layer_evidence_prep", False)
-        ),
+        allow_prepare_records=False,
+        allow_arm_preview=False,
+        allow_attempt_policy_prepare=False,
+        allow_disabled_smoke=False,
+        allow_standing_operation_layer_evidence_prep=False,
         include_artifacts=args.include_artifacts,
-        skip_disabled_smoke_prerequisite_probe=(
-            args.skip_disabled_smoke_prerequisite_probe
-        ),
+        skip_disabled_smoke_prerequisite_probe=True,
     )
 
 
@@ -708,7 +656,7 @@ def _monitor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Namesp
         api_base=args.api_base,
         source=args.source,
         include_exchange=False,
-        allow_prepare_records=args.allow_prepare_records,
+        allow_prepare_records=False,
         runtime_instance_id=list(args.runtime_instance_id or []),
         strategy_family_id=list(args.strategy_family_id or []),
         database_url=normalize_sync_postgres_dsn(getattr(args, "database_url", "")),
@@ -779,6 +727,12 @@ def _status_from_loop_artifact(
     forbidden_effects = [
         name
         for name in (
+            "prepare_records_created",
+            "shadow_candidate_created",
+            "runtime_execution_intent_draft_created",
+            "recorded_execution_intent_created",
+            "submit_authorization_created",
+            "protection_plan_created",
             "exchange_write_called",
             "order_created",
             "order_lifecycle_called",
@@ -838,8 +792,6 @@ def _status_from_loop_artifact(
             latest_summary.get("selected_runtime_instance_ids") or []
         ),
         "signal_input_json": latest_summary.get("signal_input_json"),
-        "prepared_authorization_id": latest_summary.get("prepared_authorization_id"),
-        "shadow_candidate_id": latest_summary.get("shadow_candidate_id"),
         "runtime_signal_summaries": _flatten_runtime_signal_summaries(
             latest_summary.get("runtime_signal_summaries")
         ),
@@ -915,7 +867,6 @@ def _flatten_runtime_signal_summaries(rows: Any) -> list[dict[str, Any]]:
                 "side": row.get("side"),
                 "status": row.get("status"),
                 "signal_input_json": row.get("signal_input_json"),
-                "prepared_authorization_id": row.get("prepared_authorization_id"),
                 "evaluation_status": signal.get("evaluation_status"),
                 "signal_type": signal.get("signal_type"),
                 "signal_side": signal.get("side"),
@@ -1201,8 +1152,7 @@ def build_watcher_tick_artifact(
                 auto_resume.get("can_continue_without_owner_chat")
             ),
             "creates_prepare_records": observed_prepare_records_created,
-            "creates_shadow_candidate": observed_shadow_candidate_created
-            or bool(auto_resume.get("creates_shadow_candidate")),
+            "creates_shadow_candidate": False,
             "creates_execution_intent": False,
             "places_order": False,
             "calls_order_lifecycle": False,
@@ -1217,7 +1167,7 @@ def build_watcher_tick_artifact(
         "safety_invariants": {
             "watcher_tick_only": True,
             "uses_existing_active_observation_loop": True,
-            "allow_prepare_records": bool(args.allow_prepare_records),
+            "allow_prepare_records": False,
             "feishu_notification_only": True,
             "post_signal_auto_resume_decision_only": not observed_prepare_records_created,
             "prepare_records_created": observed_prepare_records_created,
@@ -1272,7 +1222,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run one read-only runtime signal watcher tick and optional Feishu notification.",
     )
-    parser.set_defaults(output_dir="memory/runtime-signal-watcher")
+    parser.set_defaults(
+        output_dir="memory/runtime-signal-watcher",
+        allow_prepare_records=False,
+        allow_arm_preview=False,
+        allow_attempt_policy_prepare=False,
+        allow_disabled_smoke=False,
+        allow_standing_operation_layer_evidence_prep=False,
+        skip_disabled_smoke_prerequisite_probe=True,
+    )
     parser.add_argument("--env-file")
     parser.add_argument("--api-base", default="http://127.0.0.1:18080")
     parser.add_argument("--source", choices=["live_market", "sample"], default="live_market")
@@ -1292,24 +1250,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--status-stale-after-seconds", type=float, default=900.0)
     parser.add_argument("--one-hour-limit", type=int, default=25)
     parser.add_argument("--four-hour-limit", type=int, default=25)
-    parser.add_argument("--allow-prepare-records", action="store_true")
-    parser.add_argument("--allow-arm-preview", action="store_true")
-    parser.add_argument("--allow-attempt-policy-prepare", action="store_true")
-    parser.add_argument("--allow-disabled-smoke", action="store_true")
-    parser.add_argument(
-        "--allow-standing-operation-layer-evidence-prep",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--skip-disabled-smoke-prerequisite-probe",
-        action="store_true",
-        default=True,
-    )
-    parser.add_argument(
-        "--run-disabled-smoke-prerequisite-probe",
-        action="store_false",
-        dest="skip_disabled_smoke_prerequisite_probe",
-    )
     parser.add_argument("--include-artifacts", action="store_true")
     parser.add_argument("--notify-no-signal", action="store_true")
     parser.add_argument("--notification-dry-run", action="store_true")

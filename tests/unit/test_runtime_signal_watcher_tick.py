@@ -44,7 +44,14 @@ def _args(tmp_path: Path, **overrides):
     return argparse.Namespace(**defaults)
 
 
-def _summary(status: str = "waiting_for_signal", *, ready: bool = False) -> dict:
+def _summary(
+    status: str = "waiting_for_signal",
+    *,
+    ready: bool = False,
+    pg_signal_ready: bool | None = None,
+) -> dict:
+    if pg_signal_ready is None:
+        pg_signal_ready = ready
     return {
         "iteration": 1,
         "cycle_dir": "cycle-1",
@@ -69,7 +76,7 @@ def _summary(status: str = "waiting_for_signal", *, ready: bool = False) -> dict
         "attempt_counter_mutated": False,
         "runtime_budget_mutated": False,
         "withdrawal_or_transfer_created": False,
-        "blockers": [] if ready else ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+        "blockers": [] if pg_signal_ready else ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
         "warnings": [],
         "prepared_authorization_id": "auth-ready-1" if ready else None,
         "runtime_signal_summaries": [
@@ -81,12 +88,12 @@ def _summary(status: str = "waiting_for_signal", *, ready: bool = False) -> dict
                 "side": "long",
                 "status": status,
                 "signal_summary": {
-                    "evaluation_status": "ready" if ready else "observe_only",
-                    "signal_type": "would_enter" if ready else "no_action",
-                    "side": "long" if ready else None,
-                    "confidence": "0.81" if ready else None,
-                    "reason_codes": ["ready"] if ready else ["no_signal"],
-                    "human_summary": "ready" if ready else "no signal",
+                    "evaluation_status": "ready" if pg_signal_ready else "observe_only",
+                    "signal_type": "would_enter" if pg_signal_ready else "no_action",
+                    "side": "long" if pg_signal_ready else None,
+                    "confidence": "0.81" if pg_signal_ready else None,
+                    "reason_codes": ["ready"] if pg_signal_ready else ["no_signal"],
+                    "human_summary": "ready" if pg_signal_ready else "no signal",
                 },
             }
         ],
@@ -96,7 +103,7 @@ def _summary(status: str = "waiting_for_signal", *, ready: bool = False) -> dict
                 "written_count": 1,
                 "signal_event_ids": ["signal-unit-ready"],
             }
-            if ready
+            if pg_signal_ready
             else {
                 "status": "pg_live_signal_events_noop",
                 "written_count": 0,
@@ -106,16 +113,22 @@ def _summary(status: str = "waiting_for_signal", *, ready: bool = False) -> dict
     }
 
 
-def _fake_supervisor(output_status: str, *, ready: bool = False):
+def _fake_supervisor(
+    output_status: str,
+    *,
+    ready: bool = False,
+    pg_signal_ready: bool | None = None,
+):
     def builder(args):
         output_dir = Path(args.output_dir)
-        latest = _summary(output_status, ready=ready)
+        latest = _summary(output_status, ready=ready, pg_signal_ready=pg_signal_ready)
+        signal_ready = ready or bool(pg_signal_ready)
         loop = {
             "scope": "runtime_signal_watcher_in_memory_observation",
             "status": output_status,
             "stop_reason": (
                 f"status_changed:{output_status}"
-                if ready
+                if signal_ready
                 else "max_iterations_exhausted"
             ),
             "iterations_requested": 1,
@@ -305,7 +318,10 @@ def test_watcher_tick_uses_memory_refs_without_notifying_on_no_signal(tmp_path, 
     assert artifact["safety_invariants"]["order_lifecycle_called"] is False
 
 
-def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monkeypatch):
+def test_watcher_tick_does_not_pass_retired_prepare_preview_flags_to_supervisor(
+    tmp_path,
+    monkeypatch,
+):
     captured = {}
     monkeypatch.setattr(
         runtime_signal_watcher_tick,
@@ -325,7 +341,7 @@ def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monke
                 "strategy_group_would_enter_signal_count": 0,
                 "strategy_group_no_action_signal_count": 1,
             },
-            "runtime_prepare_context": {},
+            "runtime_action_time_context": {},
             "operator_review_plan": {
                 "next_step": "continue_active_runtime_observation",
                 "creates_execution_intent": False,
@@ -345,6 +361,7 @@ def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monke
     )
 
     def supervisor_builder(args):
+        captured["allow_prepare_records"] = args.allow_prepare_records
         captured["allow_arm_preview"] = args.allow_arm_preview
         captured["allow_attempt_policy_prepare"] = args.allow_attempt_policy_prepare
         captured["allow_disabled_smoke"] = args.allow_disabled_smoke
@@ -356,6 +373,7 @@ def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monke
     runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(
             tmp_path,
+            allow_prepare_records=True,
             allow_arm_preview=True,
             allow_attempt_policy_prepare=True,
             allow_disabled_smoke=True,
@@ -365,10 +383,11 @@ def test_watcher_tick_passes_operation_layer_flags_to_supervisor(tmp_path, monke
     )
 
     assert captured == {
-        "allow_arm_preview": True,
-        "allow_attempt_policy_prepare": True,
-        "allow_disabled_smoke": True,
-        "skip_disabled_smoke_prerequisite_probe": False,
+        "allow_prepare_records": False,
+        "allow_arm_preview": False,
+        "allow_attempt_policy_prepare": False,
+        "allow_disabled_smoke": False,
+        "skip_disabled_smoke_prerequisite_probe": True,
     }
 
 
@@ -554,32 +573,33 @@ def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
             feishu_webhook_url="https://example.test/hook",
             feishu_webhook_secret="secret-value",
         ),
-        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", pg_signal_ready=True),
         notifier=notifier,
     )
 
     assert artifact["status"] == "owner_notified"
-    assert artifact["wakeup_status"] == "prepared_shadow_evidence_ready_for_owner_review"
+    assert artifact["wakeup_status"] == "runtime_signal_ready_for_action_time_ticket"
     assert artifact["post_signal_auto_resume"]["status"] == (
-        "ready_for_non_executing_prepare"
+        "ready_for_action_time_ticket_materialization"
     )
     assert artifact["post_signal_auto_resume"]["can_continue_without_owner_chat"] is True
     assert "automatic_recovery_action" not in artifact["post_signal_auto_resume"]
     assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
-        "rerun_watcher_tick_with_allow_prepare_records"
+        "materialize_pg_action_time_ticket"
     )
     assert artifact["notification"]["sent"] is True
     assert calls[0][0] == "https://example.test/hook"
     assert calls[0][1] == "secret-value"
     assert "monitored runtimes: 1" in calls[0][2]["text"]
-    assert "auth-ready-1" in calls[0][2]["text"]
+    assert "signal-unit-ready" in calls[0][2]["text"]
+    assert "auth-ready-1" not in calls[0][2]["text"]
     assert "secret-value" not in json.dumps(artifact)
 
 
 def test_watcher_tick_suppresses_duplicate_ready_event(tmp_path):
     first = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
-        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", pg_signal_ready=True),
         notifier=lambda *items: {"sent": True, "status_code": 200},
     )
     assert first["notification"]["sent"] is True
@@ -587,7 +607,7 @@ def test_watcher_tick_suppresses_duplicate_ready_event(tmp_path):
     calls = []
     second = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
-        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", pg_signal_ready=True),
         notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
     )
 
@@ -615,7 +635,7 @@ def test_watcher_tick_reuses_feishu_webhook_from_env_file(tmp_path, monkeypatch)
 
     artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, env_file=str(env_file)),
-        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", pg_signal_ready=True),
         notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
     )
 
@@ -647,14 +667,14 @@ def test_watcher_tick_auto_resume_can_stop_at_non_executing_prepare_checkpoint(t
     )
 
     assert artifact["post_signal_auto_resume"]["status"] == (
-        "ready_for_non_executing_prepare"
+        "ready_for_action_time_ticket_materialization"
     )
     assert artifact["post_signal_auto_resume"]["blocked_reason"] == (
         "pg_fresh_strategy_signal_ready"
     )
     assert "automatic_recovery_action" not in artifact["post_signal_auto_resume"]
     assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
-        "rerun_watcher_tick_with_allow_prepare_records"
+        "materialize_pg_action_time_ticket"
     )
     assert "operator_command_plan" not in artifact
     assert artifact["watcher_tick_plan"]["can_continue_without_owner_chat"] is True
@@ -817,7 +837,7 @@ def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
         runtime_signal_watcher_tick,
         "build_wakeup_evidence",
         lambda operator: {
-            "status": "runtime_signal_ready_for_non_executing_prepare",
+            "status": "runtime_signal_ready_for_action_time_ticket",
             "summary": {"runtime_ready_signal_count": 1},
             "safety_invariants": {
                 "exchange_write_called": False,
@@ -839,13 +859,13 @@ def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
     )
 
     assert artifact["post_signal_auto_resume"]["status"] == (
-        "ready_for_non_executing_prepare"
+        "ready_for_action_time_ticket_materialization"
     )
     assert artifact["post_signal_auto_resume"]["signal_input_json"] == (
         "pg://runtime-control-state/live-signal-events/signal-sor-btc"
     )
     assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
-        "wait_for_prepare_records_then_rebuild_final_gate_status"
+        "materialize_pg_action_time_ticket"
     )
     assert artifact["watcher_tick_plan"]["places_order"] is False
     assert artifact["watcher_tick_plan"]["calls_order_lifecycle"] is False
@@ -853,7 +873,7 @@ def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
     assert artifact["safety_invariants"]["order_created"] is False
 
 
-def test_watcher_tick_auto_resume_keeps_prepare_records_pg_ticket_only(tmp_path):
+def test_watcher_tick_blocks_retired_prepare_record_side_effects(tmp_path):
     artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(
             tmp_path,
@@ -867,24 +887,12 @@ def test_watcher_tick_auto_resume_keeps_prepare_records_pg_ticket_only(tmp_path)
         notifier=lambda *items: {"sent": True, "status_code": 200},
     )
 
-    assert artifact["post_signal_auto_resume"]["status"] == (
-        "ready_for_non_executing_prepare"
-    )
-    assert artifact["post_signal_auto_resume"]["prepared_authorization_id"] == (
-        "auth-ready-1"
-    )
-    assert "automatic_recovery_action" not in artifact["post_signal_auto_resume"]
-    assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
-        "wait_for_prepare_records_then_rebuild_final_gate_status"
-    )
-    assert "operator_command_plan" not in artifact
-    assert "next_step" not in artifact["watcher_tick_plan"]
-    assert artifact["watcher_tick_plan"]["non_authority_checkpoint"] == (
-        "wait_for_prepare_records_then_rebuild_final_gate_status"
-    )
+    assert artifact["post_signal_auto_resume"]["status"] == "blocked_hard_safety_stop"
+    assert "prepared_authorization_id" not in artifact["post_signal_auto_resume"]
+    assert "shadow_candidate_id" not in artifact["post_signal_auto_resume"]
     assert artifact["watcher_tick_plan"]["not_execution_authority"] is True
     assert artifact["watcher_tick_plan"]["creates_prepare_records"] is True
-    assert artifact["watcher_tick_plan"]["creates_shadow_candidate"] is True
+    assert artifact["watcher_tick_plan"]["creates_shadow_candidate"] is False
     assert artifact["watcher_tick_plan"]["places_order"] is False
     assert artifact["watcher_tick_plan"]["calls_order_lifecycle"] is False
     assert artifact["safety_invariants"]["post_signal_auto_resume_decision_only"] is False
@@ -906,6 +914,7 @@ def test_watcher_tick_auto_resume_keeps_prepare_records_pg_ticket_only(tmp_path)
     ]
     assert artifact["safety_invariants"]["real_submit_requested"] is False
     assert artifact["safety_invariants"]["exchange_write_called"] is False
+    assert "prepare_records_created" in artifact["safety_invariants"]["forbidden_effects"]
 
 
 def test_notification_dry_run_does_not_mark_event_as_notified(tmp_path):
@@ -915,14 +924,14 @@ def test_notification_dry_run_does_not_mark_event_as_notified(tmp_path):
             feishu_webhook_url="https://example.test/hook",
             notification_dry_run=True,
         ),
-        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", pg_signal_ready=True),
     )
     assert first["notification"]["skipped_reason"] == "notification_dry_run"
 
     calls = []
     second = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
-        supervisor_builder=_fake_supervisor("ready_for_prepare", ready=True),
+        supervisor_builder=_fake_supervisor("ready_for_prepare", pg_signal_ready=True),
         notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
     )
 

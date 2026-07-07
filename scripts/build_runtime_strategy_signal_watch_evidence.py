@@ -3,8 +3,8 @@
 
 The evidence combines the ACTIVE runtime observation status artifact with a
 strategy-group read-only preview. It is designed for operator handoff while the
-runtime loop is waiting for a real signal: no PG writes, no shadow candidates,
-no ExecutionIntent, no orders, and no runtime mutation.
+runtime loop is waiting for a real signal: no PG writes, no non-ticket trade
+records, no ExecutionIntent, no orders, and no runtime mutation.
 """
 
 from __future__ import annotations
@@ -60,11 +60,11 @@ def build_watch_evidence(
     next_step = "resolve_signal_watch_forbidden_effects"
     if not forbidden_effects:
         if runtime_ready_for_preflight:
-            status = "runtime_prepare_records_ready_for_preview"
-            next_step = "run_final_gate_arm_preview_and_disabled_smoke_only"
+            status = "runtime_signal_ready_for_action_time_ticket"
+            next_step = "materialize_pg_action_time_ticket"
         elif runtime_ready:
             status = "runtime_signal_ready"
-            next_step = "review_runtime_ready_signal_prepare_path"
+            next_step = "materialize_pg_action_time_ticket"
         elif strategy_would_enter:
             status = "strategy_group_signal_review_available"
             next_step = "review_would_enter_strategy_group_without_execution"
@@ -98,26 +98,26 @@ def build_watch_evidence(
                 "selected_runtime_instance_ids"
             )
             or [],
-            "prepared_authorization_id": active_status_artifact.get(
-                "prepared_authorization_id"
-            ),
         },
         "runtime_signals": runtime_summaries,
         "runtime_ready_signals": runtime_ready,
-        "runtime_prepare_context": {
+        "runtime_action_time_context": {
             "ready_for_prepare_count": len(runtime_ready_for_prepare),
             "ready_for_final_gate_preflight_count": len(runtime_ready_for_preflight),
-            "prepared_authorization_id": active_status_artifact.get(
-                "prepared_authorization_id"
+            "signal_event_ids": list(
+                (
+                    active_status_artifact.get("pg_live_signal_events")
+                    if isinstance(active_status_artifact.get("pg_live_signal_events"), dict)
+                    else {}
+                ).get("signal_event_ids")
+                or []
             ),
-            "shadow_candidate_id": active_status_artifact.get("shadow_candidate_id"),
             "allowed_non_executing_followups": [
-                "create_shadow_signal_evaluation",
-                "create_shadow_order_candidate",
-                "create_prepare_authorization_record",
-                "run_final_gate_preview",
-                "run_arm_preview",
-                "run_disabled_first_real_submit_smoke",
+                "materialize_pg_promotion_action_time_lane",
+                "materialize_action_time_ticket",
+                "run_ticket_bound_finalgate_preflight",
+                "prepare_ticket_bound_operation_layer_handoff",
+                "run_disabled_ticket_bound_protected_submit_smoke",
             ],
             "forbidden_followups": [
                 "create_executable_execution_intent",
@@ -211,13 +211,13 @@ def _allowed_review_checkpoints(status: str) -> list[str]:
     if status == "runtime_signal_ready":
         return [
             "review_runtime_ready_signal",
-            "create_shadow_prepare_records_if_authorized",
+            "materialize_pg_action_time_ticket",
         ]
-    if status == "runtime_prepare_records_ready_for_preview":
+    if status == "runtime_signal_ready_for_action_time_ticket":
         return [
-            "run_final_gate_preview",
-            "run_arm_preview",
-            "run_disabled_first_real_submit_smoke",
+            "materialize_pg_action_time_ticket",
+            "run_ticket_bound_finalgate_preflight",
+            "prepare_ticket_bound_operation_layer_handoff",
         ]
     if status == "strategy_group_signal_review_available":
         return ["review_strategy_group_would_enter_signal_without_execution"]

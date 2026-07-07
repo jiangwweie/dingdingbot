@@ -169,16 +169,18 @@ def test_watch_evidence_surfaces_runtime_ready_prepare_context():
 
     assert artifact["status"] == "runtime_signal_ready"
     assert artifact["checks"]["runtime_ready_signal_count"] == 1
-    assert artifact["runtime_prepare_context"]["ready_for_prepare_count"] == 1
+    assert artifact["runtime_action_time_context"]["ready_for_prepare_count"] == 1
+    assert "prepared_authorization_id" not in artifact["runtime_action_time_context"]
+    assert "shadow_candidate_id" not in artifact["runtime_action_time_context"]
     assert (
         artifact["watch_evidence_plan"]["next_step"]
-        == "review_runtime_ready_signal_prepare_path"
+        == "materialize_pg_action_time_ticket"
     )
     assert artifact["watch_evidence_plan"]["allowed_review_checkpoints"] == [
         "review_runtime_ready_signal",
-        "create_shadow_prepare_records_if_authorized",
+        "materialize_pg_action_time_ticket",
     ]
-    assert "place_exchange_order" in artifact["runtime_prepare_context"]["forbidden_followups"]
+    assert "place_exchange_order" in artifact["runtime_action_time_context"]["forbidden_followups"]
     assert artifact["watch_evidence_plan"]["places_order"] is False
 
 
@@ -195,18 +197,18 @@ def test_watch_evidence_surfaces_prepared_records_preview_only_context():
         strategy_preview_artifact=_strategy_preview(),
     )
 
-    assert artifact["status"] == "runtime_prepare_records_ready_for_preview"
+    assert artifact["status"] == "runtime_signal_ready_for_action_time_ticket"
     assert (
-        artifact["runtime_prepare_context"]["ready_for_final_gate_preflight_count"] == 1
+        artifact["runtime_action_time_context"]["ready_for_final_gate_preflight_count"] == 1
     )
-    assert artifact["runtime_prepare_context"]["prepared_authorization_id"] == "prep-auth-1"
-    assert artifact["runtime_prepare_context"]["shadow_candidate_id"] == "shadow-candidate-1"
+    assert "prepared_authorization_id" not in artifact["runtime_action_time_context"]
+    assert "shadow_candidate_id" not in artifact["runtime_action_time_context"]
     assert artifact["watch_evidence_plan"]["allowed_review_checkpoints"] == [
-        "run_final_gate_preview",
-        "run_arm_preview",
-        "run_disabled_first_real_submit_smoke",
+        "materialize_pg_action_time_ticket",
+        "run_ticket_bound_finalgate_preflight",
+        "prepare_ticket_bound_operation_layer_handoff",
     ]
-    assert "execute_first_real_submit" in artifact["runtime_prepare_context"]["forbidden_followups"]
+    assert "execute_first_real_submit" in artifact["runtime_action_time_context"]["forbidden_followups"]
     assert artifact["watch_evidence_plan"]["creates_execution_intent"] is False
 
 

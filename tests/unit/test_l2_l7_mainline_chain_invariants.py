@@ -317,6 +317,45 @@ def test_l2_l7_production_systemd_keeps_broad_watcher_non_submit_authority() -> 
     assert "--output-json" not in dispatcher_dropin
     assert "--report-dir" not in watcher_service + dispatcher_dropin + action_time_dropin
     assert "--mode action_time_if_needed" in action_time_dropin
+    assert "--allow-prepare-records" not in watcher_service
+    assert "--allow-arm-preview" not in watcher_service
+    assert "--allow-attempt-policy-prepare" not in watcher_service
+    assert "--allow-disabled-smoke" not in watcher_service
+    assert "--allow-standing-operation-layer-evidence-prep" not in watcher_service
+
+
+def test_l2_l7_watcher_current_output_does_not_expose_retired_prepare_shadow_identity() -> None:
+    retired_prepare = "prepared_" + "authorization_id"
+    retired_shadow = "shadow_" + "candidate_id"
+    retired_context = "runtime_" + "prepare_context"
+    retired_status = "prepared_" + "shadow_evidence_ready_for_owner_review"
+    checked_paths = [
+        "scripts/runtime_signal_watcher_tick.py",
+        "scripts/build_runtime_observation_wakeup_evidence.py",
+        "scripts/build_runtime_strategy_signal_watch_evidence.py",
+        "scripts/build_runtime_observation_operator_evidence.py",
+    ]
+
+    for rel_path in checked_paths:
+        source = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+        assert retired_prepare not in source, rel_path
+        assert retired_shadow not in source, rel_path
+        assert retired_context not in source, rel_path
+        assert retired_status not in source, rel_path
+
+
+def test_l2_l7_watcher_tick_parser_does_not_accept_retired_prepare_preview_flags() -> None:
+    source = (REPO_ROOT / "scripts/runtime_signal_watcher_tick.py").read_text(
+        encoding="utf-8"
+    )
+    args = _parser_args(source)
+
+    assert "--allow-prepare-records" not in args
+    assert "--allow-arm-preview" not in args
+    assert "--allow-attempt-policy-prepare" not in args
+    assert "--allow-disabled-smoke" not in args
+    assert "--allow-standing-operation-layer-evidence-prep" not in args
+    assert "--run-disabled-smoke-prerequisite-probe" not in args
 
 
 def test_l2_l7_resume_dispatcher_parser_has_only_pg_ticket_identity_source() -> None:

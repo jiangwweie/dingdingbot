@@ -15,34 +15,22 @@ from typing import Any
 def build_wakeup_evidence(operator_evidence: dict[str, Any]) -> dict[str, Any]:
     safety = _as_dict(operator_evidence.get("safety_invariants"))
     review_plan = _as_dict(operator_evidence.get("operator_review_plan"))
-    prepare_context = _as_dict(operator_evidence.get("runtime_prepare_context"))
+    prepare_context = _as_dict(
+        operator_evidence.get("runtime_action_time_context")
+    )
     active = _as_dict(operator_evidence.get("active_runtime_observation"))
     signal_counts = _as_dict(operator_evidence.get("signal_counts"))
     forbidden_effects = _forbidden_effects(operator_evidence)
 
     ready_count = _int(signal_counts.get("runtime_ready_signal_count"))
-    prepared_authorization_id = _text_or_none(
-        prepare_context.get("prepared_authorization_id")
-        or active.get("prepared_authorization_id")
-    )
-    shadow_candidate_id = _text_or_none(
-        prepare_context.get("shadow_candidate_id")
-        or active.get("shadow_candidate_id")
-    )
-    prepared_evidence_exists = bool(prepared_authorization_id or shadow_candidate_id)
-
     if forbidden_effects:
         status = "blocked_forbidden_effect"
         owner_attention = "immediate_review_required"
         next_step = "stop_and_review_forbidden_observation_effects"
-    elif prepared_evidence_exists:
-        status = "prepared_shadow_evidence_ready_for_owner_review"
-        owner_attention = "review_when_available"
-        next_step = "review_prepared_shadow_evidence_before_first_real_submit_decision"
     elif ready_count > 0:
-        status = "runtime_signal_ready_for_non_executing_prepare"
+        status = "runtime_signal_ready_for_action_time_ticket"
         owner_attention = "review_when_available"
-        next_step = "allow_existing_supervisor_to_create_prepare_records_then_review"
+        next_step = "materialize_pg_action_time_ticket"
     elif operator_evidence.get("status") == "observation_running_no_signal":
         status = "owner_sleep_safe_observation_running"
         owner_attention = "no_owner_action_needed_now"
@@ -79,8 +67,7 @@ def build_wakeup_evidence(operator_evidence: dict[str, Any]) -> dict[str, Any]:
             "strategy_group_no_action_signal_count": _int(
                 signal_counts.get("strategy_group_no_action_signal_count")
             ),
-            "prepared_authorization_id": prepared_authorization_id,
-            "shadow_candidate_id": shadow_candidate_id,
+            "signal_event_ids": list(prepare_context.get("signal_event_ids") or []),
             "next_step": next_step,
         },
         "allowed_while_owner_asleep": _allowed_while_owner_asleep(
@@ -131,26 +118,19 @@ def _allowed_while_owner_asleep(
         return []
     if status == "owner_sleep_safe_observation_running":
         return ["continue_active_runtime_observation"]
-    if status == "runtime_signal_ready_for_non_executing_prepare":
+    if status == "runtime_signal_ready_for_action_time_ticket":
         allowed = list(prepare_context.get("allowed_non_executing_followups") or [])
         return [
             item
             for item in allowed
             if item
             in {
-                "create_shadow_signal_evaluation",
-                "create_shadow_order_candidate",
-                "create_prepare_authorization_record",
-                "run_final_gate_preview",
-                "run_arm_preview",
-                "run_disabled_first_real_submit_smoke",
+                "materialize_pg_promotion_action_time_lane",
+                "materialize_action_time_ticket",
+                "run_ticket_bound_finalgate_preflight",
+                "prepare_ticket_bound_operation_layer_handoff",
+                "run_disabled_ticket_bound_protected_submit_smoke",
             }
-        ]
-    if status == "prepared_shadow_evidence_ready_for_owner_review":
-        return [
-            "run_final_gate_preview",
-            "run_arm_preview",
-            "run_disabled_first_real_submit_smoke",
         ]
     return list(review_plan.get("allowed_review_checkpoints") or [])
 
@@ -190,8 +170,3 @@ def _int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
-
-
-def _text_or_none(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text or None

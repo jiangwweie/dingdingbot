@@ -7,8 +7,9 @@ The evidence joins:
 2. Runtime + strategy signal watch evidence.
 3. No-signal diagnostic evidence when applicable.
 
-It does not write PG rows, resolve runtimes, create shadow candidates, create
-ExecutionIntents, place orders, call OrderLifecycle, or mutate runtime state.
+It does not write PG rows, resolve runtimes, create non-ticket trade records,
+create ExecutionIntents, place orders, call OrderLifecycle, or mutate runtime
+state.
 """
 
 from __future__ import annotations
@@ -52,10 +53,10 @@ def build_operator_evidence(
     if not forbidden_effects:
         if watch_status in {
             "runtime_signal_ready",
-            "runtime_prepare_records_ready_for_preview",
+            "runtime_signal_ready_for_action_time_ticket",
         }:
             status = "runtime_signal_attention"
-            next_step = "review_runtime_ready_signal_prepare_or_preview_path"
+            next_step = "materialize_pg_action_time_ticket"
         elif watch_status == "strategy_group_signal_review_available":
             status = "strategy_group_signal_review_available"
             next_step = "review_strategy_group_would_enter_without_execution"
@@ -80,7 +81,9 @@ def build_operator_evidence(
         "no_action_diagnostics": (
             diagnostic_evidence.get("no_action_diagnostics") or {}
         ),
-        "runtime_prepare_context": watch_evidence.get("runtime_prepare_context") or {},
+        "runtime_action_time_context": (
+            watch_evidence.get("runtime_action_time_context") or {}
+        ),
         "operator_review_plan": {
             "not_execution_authority": True,
             "next_step": next_step,
@@ -138,7 +141,7 @@ def _allowed_review_checkpoints(
         watch_plan = watch_evidence.get("watch_evidence_plan")
         return list(
             (watch_plan or {}).get("allowed_review_checkpoints")
-            or ["review_runtime_ready_signal_prepare_or_preview_path"]
+            or ["materialize_pg_action_time_ticket"]
         )
     if status == "strategy_group_signal_review_available":
         return ["review_strategy_group_would_enter_without_execution"]

@@ -48,16 +48,15 @@ def _operator_evidence(
             "strategy_group_would_enter_signal_count": 0,
             "strategy_group_no_action_signal_count": 8,
         },
-        "runtime_prepare_context": {
+        "runtime_action_time_context": {
             "prepared_authorization_id": prepared_authorization_id,
             "shadow_candidate_id": shadow_candidate_id,
             "allowed_non_executing_followups": [
-                "create_shadow_signal_evaluation",
-                "create_shadow_order_candidate",
-                "create_prepare_authorization_record",
-                "run_final_gate_preview",
-                "run_arm_preview",
-                "run_disabled_first_real_submit_smoke",
+                "materialize_pg_promotion_action_time_lane",
+                "materialize_action_time_ticket",
+                "run_ticket_bound_finalgate_preflight",
+                "prepare_ticket_bound_operation_layer_handoff",
+                "run_disabled_ticket_bound_protected_submit_smoke",
                 "place_exchange_order",
             ],
         },
@@ -104,15 +103,15 @@ def test_wakeup_evidence_surfaces_ready_signal_without_submit_authority():
         _operator_evidence(status="runtime_signal_attention", ready_count=1)
     )
 
-    assert artifact["status"] == "runtime_signal_ready_for_non_executing_prepare"
+    assert artifact["status"] == "runtime_signal_ready_for_action_time_ticket"
     assert artifact["owner_attention"] == "review_when_available"
-    assert "create_shadow_order_candidate" in artifact["allowed_while_owner_asleep"]
-    assert "run_disabled_first_real_submit_smoke" in artifact["allowed_while_owner_asleep"]
+    assert "materialize_action_time_ticket" in artifact["allowed_while_owner_asleep"]
+    assert "run_disabled_ticket_bound_protected_submit_smoke" in artifact["allowed_while_owner_asleep"]
     assert "place_exchange_order" not in artifact["allowed_while_owner_asleep"]
     assert "exchange_order_placement" in artifact["requires_owner_before"]
 
 
-def test_wakeup_evidence_surfaces_prepared_shadow_evidence_for_owner_review():
+def test_wakeup_evidence_ignores_retired_prepare_shadow_identity():
     module = _load_module()
 
     artifact = module.build_wakeup_evidence(
@@ -123,14 +122,9 @@ def test_wakeup_evidence_surfaces_prepared_shadow_evidence_for_owner_review():
         )
     )
 
-    assert artifact["status"] == "prepared_shadow_evidence_ready_for_owner_review"
-    assert artifact["summary"]["prepared_authorization_id"] == "auth-1"
-    assert artifact["summary"]["shadow_candidate_id"] == "candidate-1"
-    assert artifact["allowed_while_owner_asleep"] == [
-        "run_final_gate_preview",
-        "run_arm_preview",
-        "run_disabled_first_real_submit_smoke",
-    ]
+    assert artifact["status"] == "operator_evidence_needs_review"
+    assert "prepared_authorization_id" not in artifact["summary"]
+    assert "shadow_candidate_id" not in artifact["summary"]
 
 
 def test_wakeup_evidence_blocks_forbidden_source_effects():
