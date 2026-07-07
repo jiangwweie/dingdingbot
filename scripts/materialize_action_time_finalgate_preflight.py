@@ -210,6 +210,7 @@ def materialize_next_action_time_finalgate_preflight(
         row
         for row in _rows(control_state.get("action_time_tickets"))
         if row.get("status") in ELIGIBLE_FINALGATE_TICKET_STATUSES
+        and int(row.get("expires_at_ms") or 0) > now_ms
     ]
     if not tickets:
         return _result(

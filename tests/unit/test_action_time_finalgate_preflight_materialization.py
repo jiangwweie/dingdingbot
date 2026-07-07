@@ -93,6 +93,22 @@ def test_finalgate_preflight_selects_single_eligible_ticket(pg_control_connectio
     assert payload["ticket_id"] == ticket_id
 
 
+def test_finalgate_preflight_auto_selector_ignores_expired_ticket(
+    pg_control_connection,
+):
+    ticket_id = _create_ticket(pg_control_connection)
+
+    payload = finalgate.materialize_next_action_time_finalgate_preflight(
+        pg_control_connection,
+        now_ms=NOW_MS + 700_000,
+    )
+
+    assert ticket_id
+    assert payload["status"] == "no_action_time_ticket"
+    assert payload["ticket_id"] is None
+    assert payload["blockers"] == []
+
+
 def test_finalgate_preflight_requires_existing_ticket(pg_control_connection):
     payload = finalgate.materialize_action_time_finalgate_preflight(
         pg_control_connection,

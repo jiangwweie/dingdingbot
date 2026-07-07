@@ -375,42 +375,93 @@ def test_runtime_safety_state_blocks_handoff_command_ticket_mismatch(
     assert _runtime_safety_row(pg_control_connection)["submit_allowed"] in {False, 0}
 
 
-def test_runtime_safety_state_fails_closed_on_multiple_ready_handoffs(
-    pg_control_connection,
-):
-    ids = _create_handoff_ready(pg_control_connection)
-    pg_control_connection.execute(
-        text(
-            """
-            INSERT INTO brc_operation_layer_handoffs (
-              operation_layer_handoff_id, ticket_id, finalgate_pass_id,
-              operation_submit_command_id, action_time_lane_input_id,
-              strategy_group_id, symbol, side, runtime_profile_id, status,
-              blockers, command_plan, authority_boundary, operation_layer_called,
-              exchange_write_called, order_created, order_lifecycle_called,
-              withdrawal_or_transfer_created, live_profile_changed,
-              order_sizing_changed, created_at_ms, updated_at_ms
-            ) VALUES (
-              'operation_layer_handoff:other', 'ticket:other', 'finalgate_pass:other',
-              'operation_submit_command:other', 'lane:other', 'SOR-001', 'ETHUSDT',
-              'long', 'runtime-profile:SOR-001:ETHUSDT:long:v1', 'handoff_ready',
-              '[]', '{}', 'unit multiple handoff guard', false, false, false,
-              false, false, false, false, :created_at_ms, :updated_at_ms
-            )
-            """
-        ),
-        {"created_at_ms": NOW_MS + 10, "updated_at_ms": NOW_MS + 10},
+def test_runtime_safety_selector_fails_closed_on_multiple_current_handoffs():
+    selected = safety._select_handoff(
+        {
+            "action_time_tickets": [
+                {
+                    "ticket_id": "ticket:current-a",
+                    "status": "finalgate_ready",
+                    "expires_at_ms": NOW_MS + 60_000,
+                },
+                {
+                    "ticket_id": "ticket:current-b",
+                    "status": "finalgate_ready",
+                    "expires_at_ms": NOW_MS + 60_000,
+                },
+            ],
+            "operation_layer_handoffs": [
+                {
+                    "operation_layer_handoff_id": "handoff:current-a",
+                    "ticket_id": "ticket:current-a",
+                    "operation_submit_command_id": "operation-submit:current-a",
+                    "status": "handoff_ready",
+                },
+                {
+                    "operation_layer_handoff_id": "handoff:current-b",
+                    "ticket_id": "ticket:current-b",
+                    "operation_submit_command_id": "operation-submit:current-b",
+                    "status": "handoff_ready",
+                },
+            ],
+        },
+        ticket_id="",
+        operation_layer_handoff_id="",
+        now_ms=NOW_MS,
     )
 
-    payload = safety.materialize_ticket_bound_runtime_safety_state(
-        pg_control_connection,
-        now_ms=NOW_MS + 3000,
+    assert selected["handoff"] == {}
+    assert selected["blockers"] == ["multiple_ready_operation_layer_handoffs"]
+
+
+def test_runtime_safety_selector_ignores_handoffs_without_current_ticket():
+    selected = safety._select_handoff(
+        {
+            "action_time_tickets": [
+                {
+                    "ticket_id": "ticket:expired",
+                    "status": "finalgate_ready",
+                    "expires_at_ms": NOW_MS - 1,
+                },
+                {
+                    "ticket_id": "ticket:current",
+                    "status": "finalgate_ready",
+                    "expires_at_ms": NOW_MS + 60_000,
+                },
+                {
+                    "ticket_id": "ticket:closed",
+                    "status": "expired",
+                    "expires_at_ms": NOW_MS + 60_000,
+                },
+            ],
+            "operation_layer_handoffs": [
+                {
+                    "operation_layer_handoff_id": "handoff:expired",
+                    "ticket_id": "ticket:expired",
+                    "operation_submit_command_id": "operation-submit:expired",
+                    "status": "handoff_ready",
+                },
+                {
+                    "operation_layer_handoff_id": "handoff:current",
+                    "ticket_id": "ticket:current",
+                    "operation_submit_command_id": "operation-submit:current",
+                    "status": "handoff_ready",
+                },
+                {
+                    "operation_layer_handoff_id": "handoff:closed",
+                    "ticket_id": "ticket:closed",
+                    "operation_submit_command_id": "operation-submit:closed",
+                    "status": "handoff_ready",
+                },
+            ],
+        },
+        ticket_id="",
+        operation_layer_handoff_id="",
+        now_ms=NOW_MS,
     )
 
-    assert ids["operation_layer_handoff_id"]
-    assert payload["status"] == "blocked"
-    assert payload["blockers"] == ["multiple_ready_operation_layer_handoffs"]
-    assert _runtime_safety_count(pg_control_connection) == 0
+    assert selected["blockers"] == []
+    assert selected["handoff"]["operation_layer_handoff_id"] == "handoff:current"
 
 
 def _create_handoff_ready(conn) -> dict[str, str]:

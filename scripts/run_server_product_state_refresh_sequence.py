@@ -74,11 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "status": report["status"],
+                "effective_mode": report["effective_mode"],
                 "failed_required_step_count": report["summary"][
                     "failed_required_step_count"
                 ],
                 "failed_optional_step_count": report["summary"][
                     "failed_optional_step_count"
+                ],
+                "blocked_by_required_step": report["summary"][
+                    "blocked_by_required_step"
                 ],
             },
             ensure_ascii=False,

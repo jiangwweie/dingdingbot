@@ -84,6 +84,23 @@ def test_operation_layer_handoff_noops_without_finalgate_ready_ticket(
     assert payload["forbidden_effects"]["exchange_write_called"] is False
 
 
+def test_operation_layer_handoff_auto_selector_ignores_expired_finalgate_ticket(
+    pg_control_connection,
+):
+    ticket_id, finalgate_pass_id = _create_finalgate_ready_ticket(pg_control_connection)
+
+    payload = handoff.materialize_next_action_time_operation_layer_handoff(
+        pg_control_connection,
+        now_ms=NOW_MS + 700_000,
+    )
+
+    assert ticket_id
+    assert finalgate_pass_id
+    assert payload["status"] == "no_finalgate_ready_ticket"
+    assert payload["ticket_id"] is None
+    assert payload["blockers"] == []
+
+
 def test_operation_layer_handoff_materializes_from_ticket_and_finalgate_pass(
     pg_control_connection,
 ):

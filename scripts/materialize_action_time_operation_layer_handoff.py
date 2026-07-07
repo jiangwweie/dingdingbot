@@ -130,6 +130,7 @@ def materialize_next_action_time_operation_layer_handoff(
         row
         for row in _rows(control_state.get("action_time_tickets"))
         if row.get("status") == "finalgate_ready"
+        and int(row.get("expires_at_ms") or 0) > now_ms
     ]
     if not tickets:
         return _result(

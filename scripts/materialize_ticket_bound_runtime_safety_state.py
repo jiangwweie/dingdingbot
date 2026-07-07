@@ -83,6 +83,7 @@ def materialize_ticket_bound_runtime_safety_state(
         control_state,
         ticket_id=ticket_id,
         operation_layer_handoff_id=operation_layer_handoff_id,
+        now_ms=now_ms,
     )
     if selection["blockers"]:
         return _result(
@@ -190,6 +191,7 @@ def _select_handoff(
     *,
     ticket_id: str,
     operation_layer_handoff_id: str,
+    now_ms: int,
 ) -> dict[str, Any]:
     rows = [
         row
@@ -203,6 +205,18 @@ def _select_handoff(
             row
             for row in rows
             if row.get("operation_layer_handoff_id") == operation_layer_handoff_id
+        ]
+    if not ticket_id and not operation_layer_handoff_id:
+        current_ticket_ids = {
+            str(row.get("ticket_id") or "")
+            for row in _rows(control_state.get("action_time_tickets"))
+            if row.get("status") == "finalgate_ready"
+            and int(row.get("expires_at_ms") or 0) > now_ms
+        }
+        rows = [
+            row
+            for row in rows
+            if str(row.get("ticket_id") or "") in current_ticket_ids
         ]
     if len(rows) > 1:
         return {
