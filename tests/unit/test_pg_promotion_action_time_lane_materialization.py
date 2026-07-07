@@ -867,6 +867,89 @@ def test_expired_open_real_lane_is_expired_and_does_not_block_new_lane(
     assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 2
 
 
+def test_terminal_attempt_identity_is_not_reopened_for_same_observation(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    first = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    _expire_promotion_and_lane(
+        pg_control_connection,
+        promotion_id=first["promotion_candidate_id"],
+        lane_id=first["action_time_lane_input_id"],
+    )
+
+    second = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS + 2,
+    )
+
+    assert second["status"] == "terminal_action_time_identity_not_reopened"
+    assert (
+        "terminal_promotion_identity_reuse:" + first["promotion_candidate_id"]
+        in second["blockers"]
+    )
+    assert (
+        "terminal_action_time_lane_identity_reuse:"
+        + first["action_time_lane_input_id"]
+        in second["blockers"]
+    )
+
+
+def test_new_signal_observation_creates_new_attempt_identity_after_expiry(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    first = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    _expire_promotion_and_lane(
+        pg_control_connection,
+        promotion_id=first["promotion_candidate_id"],
+        lane_id=first["action_time_lane_input_id"],
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_live_signal_events
+            SET observed_at_ms = :observed_at_ms,
+                expires_at_ms = :expires_at_ms
+            WHERE signal_event_id = :signal_event_id
+            """
+        ),
+        {
+            "observed_at_ms": NOW_MS + 1,
+            "expires_at_ms": NOW_MS + 600_000,
+            "signal_event_id": first["signal_event_id"],
+        },
+    )
+
+    second = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS + 2,
+    )
+
+    assert second["status"] == "promotion_action_time_lane_created"
+    assert second["promotion_candidate_id"] != first["promotion_candidate_id"]
+    assert second["action_time_lane_input_id"] != first["action_time_lane_input_id"]
+    statuses = {
+        row["action_time_lane_input_id"]: row["status"]
+        for row in pg_control_connection.execute(
+            text(
+                """
+                SELECT action_time_lane_input_id, status
+                FROM brc_action_time_lane_inputs
+                """
+            )
+        ).mappings()
+    }
+    assert statuses[first["action_time_lane_input_id"]] == "expired"
+    assert statuses[second["action_time_lane_input_id"]] == "ticket_pending"
+
+
 def test_ticket_created_lane_with_current_ticket_is_not_expired(
     pg_control_connection,
 ):
@@ -1284,6 +1367,46 @@ def _insert_ready_fresh_signal(
             "evidence_ref": public_fact_id,
             "computed_at_ms": NOW_MS - 6_000,
             "valid_until_ms": expires_at_ms,
+        },
+    )
+
+
+def _expire_promotion_and_lane(
+    conn,
+    *,
+    promotion_id: str,
+    lane_id: str,
+) -> None:
+    conn.execute(
+        text(
+            """
+            UPDATE brc_promotion_candidates
+            SET status = 'expired',
+                expires_at_ms = :expired_at_ms,
+                closed_at_ms = :closed_at_ms
+            WHERE promotion_candidate_id = :promotion_id
+            """
+        ),
+        {
+            "promotion_id": promotion_id,
+            "expired_at_ms": NOW_MS - 1,
+            "closed_at_ms": NOW_MS + 1,
+        },
+    )
+    conn.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET status = 'expired',
+                expires_at_ms = :expired_at_ms,
+                closed_at_ms = :closed_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {
+            "lane_id": lane_id,
+            "expired_at_ms": NOW_MS - 1,
+            "closed_at_ms": NOW_MS + 1,
         },
     )
 

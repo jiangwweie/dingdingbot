@@ -283,6 +283,67 @@ def test_materializer_does_not_treat_expired_ticket_as_active(
     ).scalar_one() == 1
 
 
+def test_materializer_creates_new_ticket_for_new_lane_attempt_after_expired_ticket(
+    pg_control_connection,
+):
+    lane_id = _insert_action_time_lane_graph(pg_control_connection)
+    first = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET expires_at_ms = :expires_at_ms
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {
+            "expires_at_ms": NOW_MS - 1,
+            "ticket_id": first["ticket_id"],
+        },
+    )
+    blocked_same_attempt = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET status = 'ticket_pending',
+                created_at_ms = :created_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"lane_id": lane_id, "created_at_ms": NOW_MS + 2},
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_budget_reservations
+            SET status = 'active',
+                ticket_id = NULL
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"lane_id": lane_id},
+    )
+
+    second = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 3,
+    )
+
+    assert blocked_same_attempt["status"] == "action_time_ticket_not_current"
+    assert second["status"] == "action_time_ticket_created"
+    assert second["ticket_id"] != first["ticket_id"]
+    assert pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_action_time_tickets")
+    ).scalar_one() == 2
+
+
 def test_materializer_blocks_missing_candidate_authorization_ref(pg_control_connection):
     _insert_action_time_lane_graph(
         pg_control_connection,

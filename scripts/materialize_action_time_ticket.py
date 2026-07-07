@@ -149,7 +149,10 @@ def materialize_action_time_ticket(
             next_action="run_official_action_time_finalgate",
         )
     non_current_ticket = _non_current_ticket_for_lane(control_state, lane_id)
-    if non_current_ticket:
+    if non_current_ticket and not _is_previous_terminal_ticket_attempt(
+        non_current_ticket,
+        lane=lane,
+    ):
         return _result(
             "action_time_ticket_not_current",
             now_ms=now_ms,
@@ -176,6 +179,27 @@ def materialize_action_time_ticket(
         blockers=[],
         next_action="run_official_action_time_finalgate",
     )
+
+
+def _is_previous_terminal_ticket_attempt(
+    ticket: dict[str, Any],
+    *,
+    lane: dict[str, Any],
+) -> bool:
+    ticket_status = str(ticket.get("status") or "")
+    if ticket_status not in {
+        "expired",
+        "finalgate_rejected",
+        "invalidated",
+        "superseded",
+    }:
+        return False
+    try:
+        ticket_created_at_ms = int(ticket.get("created_at_ms") or 0)
+        lane_created_at_ms = int(lane.get("created_at_ms") or 0)
+    except (TypeError, ValueError):
+        return False
+    return ticket_created_at_ms > 0 and lane_created_at_ms > ticket_created_at_ms
 
 
 def _expire_stale_active_tickets(
@@ -568,7 +592,12 @@ def _build_ticket_bundle(
         int(budget["expires_at_ms"]),
         int(protection["expires_at_ms"]),
     )
-    ticket_id = _stable_id("ticket", lane_id, str(signal["signal_event_id"]))
+    ticket_id = _stable_id(
+        "ticket",
+        lane_id,
+        str(signal["signal_event_id"]),
+        str(lane["created_at_ms"]),
+    )
     created_under_versions_hash = _hash_payload(
         {
             "strategy_group_version_id": event_spec["strategy_group_version_id"],

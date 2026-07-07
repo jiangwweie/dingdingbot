@@ -92,11 +92,15 @@ class CandidateBundle:
 
     @property
     def promotion_candidate_id(self) -> str:
-        return _stable_id("promotion", str(self.signal["signal_event_id"]))
+        return _stable_id(
+            "promotion",
+            str(self.signal["signal_event_id"]),
+            str(self.signal.get("observed_at_ms") or ""),
+        )
 
     @property
     def action_time_lane_input_id(self) -> str:
-        return _stable_id("lane", str(self.signal["signal_event_id"]))
+        return _stable_id("lane", self.promotion_candidate_id)
 
     @property
     def budget_reservation_id(self) -> str:
@@ -203,10 +207,9 @@ def materialize_pg_promotion_action_time_lane(
             )
         )
 
-    for row in promotion_rows:
-        _upsert_row(conn, "brc_promotion_candidates", "promotion_candidate_id", row)
-
     if selected is None:
+        for row in promotion_rows:
+            _upsert_row(conn, "brc_promotion_candidates", "promotion_candidate_id", row)
         return _result(
             "promotion_candidates_blocked",
             now_ms=now_ms,
@@ -221,6 +224,26 @@ def materialize_pg_promotion_action_time_lane(
         )
 
     lane = _lane_row(selected, now_ms=now_ms)
+    terminal_blockers = _terminal_identity_reuse_blockers(
+        conn,
+        promotion_row=next(
+            row
+            for row in promotion_rows
+            if row["promotion_candidate_id"] == selected.promotion_candidate_id
+        ),
+        lane_row=lane,
+    )
+    if terminal_blockers:
+        return _result(
+            "terminal_action_time_identity_not_reopened",
+            now_ms=now_ms,
+            blockers=terminal_blockers,
+            promotion_candidate_count=len(promotion_rows),
+            next_action="wait_for_next_fresh_signal_observation",
+            per_candidate_results=_candidate_results(bundles, selected=None),
+        )
+    for row in promotion_rows:
+        _upsert_row(conn, "brc_promotion_candidates", "promotion_candidate_id", row)
     budget = _budget_row(selected, now_ms=now_ms)
     protection = _protection_row(selected)
     _upsert_row(conn, "brc_action_time_lane_inputs", "action_time_lane_input_id", lane)
@@ -243,6 +266,60 @@ def materialize_pg_promotion_action_time_lane(
         next_action="materialize_action_time_ticket",
         per_candidate_results=_candidate_results(bundles, selected=selected),
     )
+
+
+def _terminal_identity_reuse_blockers(
+    conn: sa.engine.Connection,
+    *,
+    promotion_row: dict[str, Any],
+    lane_row: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    promotion_status = _existing_status(
+        conn,
+        table_name="brc_promotion_candidates",
+        pk_name="promotion_candidate_id",
+        pk_value=str(promotion_row["promotion_candidate_id"]),
+    )
+    if promotion_status in {"expired"} and str(promotion_row.get("status") or "") in {
+        "eligible",
+        "arbitration_pending",
+        "arbitration_won",
+    }:
+        blockers.append(
+            "terminal_promotion_identity_reuse:"
+            + str(promotion_row["promotion_candidate_id"])
+        )
+    lane_status = _existing_status(
+        conn,
+        table_name="brc_action_time_lane_inputs",
+        pk_name="action_time_lane_input_id",
+        pk_value=str(lane_row["action_time_lane_input_id"]),
+    )
+    if (
+        lane_status in {"closed", "expired", "invalidated"}
+        and str(lane_row.get("status") or "") in OPEN_REAL_LANE_STATUSES
+    ):
+        blockers.append(
+            "terminal_action_time_lane_identity_reuse:"
+            + str(lane_row["action_time_lane_input_id"])
+        )
+    return blockers
+
+
+def _existing_status(
+    conn: sa.engine.Connection,
+    *,
+    table_name: str,
+    pk_name: str,
+    pk_value: str,
+) -> str:
+    metadata = sa.MetaData()
+    table = sa.Table(table_name, metadata, autoload_with=conn)
+    row = conn.execute(
+        sa.select(table.c.status).where(table.c[pk_name] == pk_value).limit(1)
+    ).mappings().first()
+    return str(row["status"] or "") if row else ""
 
 
 def _expire_stale_open_promotions(
