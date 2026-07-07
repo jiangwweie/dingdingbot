@@ -1562,6 +1562,108 @@ def test_write_runtime_signal_summaries_to_pg_blocks_without_time_authority(tmp_
     assert live_signal_count == 0
 
 
+def test_write_runtime_signal_summaries_to_pg_blocks_blocked_runtime_summary(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            _seed_live_signal_writer_scope(conn)
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-op",
+                    "strategy_family_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "status": "blocked",
+                    "blockers": ["runtime_observation_cycle_http_500"],
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": "long",
+                        "timestamp_ms": 1000,
+                        "trigger_candle_close_time_ms": 1000,
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            live_signal_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_live_signal_events")
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+    assert result["status"] == "pg_live_signal_events_blocked"
+    assert result["written_count"] == 0
+    assert result["skipped"][0]["blocker"] == "runtime_summary_blocked:blocked"
+    assert result["skipped"][0]["runtime_blockers"] == [
+        "runtime_observation_cycle_http_500"
+    ]
+    assert live_signal_count == 0
+
+
+def test_write_runtime_signal_summaries_to_pg_blocks_forbidden_effect_summary(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            _seed_live_signal_writer_scope(conn)
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-op",
+                    "strategy_family_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "status": "ready_for_prepare",
+                    "forbidden_effects": {"exchange_write_called": True},
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": "long",
+                        "timestamp_ms": 1000,
+                        "trigger_candle_close_time_ms": 1000,
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            live_signal_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_live_signal_events")
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+    assert result["status"] == "pg_live_signal_events_blocked"
+    assert result["written_count"] == 0
+    assert result["skipped"][0]["blocker"] == "runtime_summary_forbidden_effect"
+    assert result["skipped"][0]["forbidden_effects"] == ["exchange_write_called"]
+    assert live_signal_count == 0
+
+
 def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
     engine = sa.create_engine(database_url)
@@ -1988,6 +2090,60 @@ def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
               expires_at_ms INTEGER,
               invalidated_at_ms INTEGER,
               created_at_ms INTEGER
+            )
+            """
+        )
+    )
+
+
+def _seed_live_signal_writer_scope(conn: sa.engine.Connection) -> None:
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_strategy_group_candidate_scope (
+              candidate_scope_id, strategy_group_id, symbol, side,
+              status, observation_scope, priority_rank
+            ) VALUES (
+              'scope-mpg-op-long', 'MPG-001', 'OPUSDT', 'long',
+              'active', 'active_wip', 1
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_candidate_scope_event_bindings (
+              candidate_scope_id, event_spec_id, status, created_at_ms
+            ) VALUES (
+              'scope-mpg-op-long', 'event-mpg-long', 'active', 900
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_strategy_side_event_specs (
+              event_spec_id, event_id, status, time_authority, freshness_window_ms
+            ) VALUES (
+              'event-mpg-long', 'MPG-LONG', 'current',
+              'trigger_candle_close_time_ms', 1000
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_runtime_fact_snapshots (
+              fact_snapshot_id, strategy_group_id, symbol, side,
+              fact_surface, source_kind, computed, satisfied,
+              freshness_state, valid_until_ms, observed_at_ms, created_at_ms
+            ) VALUES (
+              'fact-mpg-op-public', 'MPG-001', 'OPUSDT', 'long',
+              'pretrade_public', 'live_market', 1, 1,
+              'fresh', 301000, 900, 900
             )
             """
         )

@@ -575,6 +575,10 @@ def _live_signal_candidates_from_summaries(
                 "runtime_instance_id": row.get("runtime_instance_id"),
                 "strategy_family_version_id": row.get("strategy_family_version_id"),
                 "runtime_status": row.get("status"),
+                "runtime_blockers": list(row.get("blockers") or []),
+                "forbidden_effects": row.get("forbidden_effects")
+                if isinstance(row.get("forbidden_effects"), dict)
+                else {},
                 "signal_summary": signal,
                 "signal_input_ref": row.get("signal_input_json"),
                 "prepared_authorization_id": row.get("prepared_authorization_id"),
@@ -589,6 +593,32 @@ def _write_live_signal_candidate(
     candidate: dict[str, Any],
     observed_ms: int,
 ) -> dict[str, Any]:
+    runtime_status = str(candidate.get("runtime_status") or "").strip()
+    runtime_blockers = [
+        str(item)
+        for item in candidate.get("runtime_blockers") or []
+        if str(item).strip()
+    ]
+    forbidden_effects = _truthy_forbidden_effects(candidate.get("forbidden_effects"))
+    if runtime_status == "blocked" or runtime_blockers:
+        return {
+            "written": False,
+            "blocker": f"runtime_summary_blocked:{runtime_status or 'unknown'}",
+            "runtime_blockers": runtime_blockers,
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+        }
+    if forbidden_effects:
+        return {
+            "written": False,
+            "blocker": "runtime_summary_forbidden_effect",
+            "forbidden_effects": forbidden_effects,
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+        }
+
     scope = _active_candidate_scope_event(conn, candidate=candidate)
     if scope.get("blocker"):
         return {
@@ -903,6 +933,12 @@ def _int_or_zero(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _truthy_forbidden_effects(value: Any) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    return sorted(str(key) for key, flag in value.items() if bool(flag))
 
 
 def _replace_current_watcher_runtime_coverage(
