@@ -561,12 +561,12 @@ def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
     assert artifact["status"] == "owner_notified"
     assert artifact["wakeup_status"] == "prepared_shadow_evidence_ready_for_owner_review"
     assert artifact["post_signal_auto_resume"]["status"] == (
-        "ready_for_action_time_final_gate"
+        "ready_for_non_executing_prepare"
     )
     assert artifact["post_signal_auto_resume"]["can_continue_without_owner_chat"] is True
     assert "automatic_recovery_action" not in artifact["post_signal_auto_resume"]
     assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
-        "run_official_action_time_final_gate_preflight"
+        "rerun_watcher_tick_with_allow_prepare_records"
     )
     assert artifact["notification"]["sent"] is True
     assert calls[0][0] == "https://example.test/hook"
@@ -650,7 +650,7 @@ def test_watcher_tick_auto_resume_can_stop_at_non_executing_prepare_checkpoint(t
         "ready_for_non_executing_prepare"
     )
     assert artifact["post_signal_auto_resume"]["blocked_reason"] == (
-        "fresh_strategy_signal_ready"
+        "pg_fresh_strategy_signal_ready"
     )
     assert "automatic_recovery_action" not in artifact["post_signal_auto_resume"]
     assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
@@ -853,7 +853,7 @@ def test_watcher_tick_keeps_fresh_signal_prepare_when_status_has_chain_blockers(
     assert artifact["safety_invariants"]["order_created"] is False
 
 
-def test_watcher_tick_auto_resume_reaches_final_gate_checkpoint_after_prepare_records(tmp_path):
+def test_watcher_tick_auto_resume_keeps_prepare_records_pg_ticket_only(tmp_path):
     artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(
             tmp_path,
@@ -868,19 +868,19 @@ def test_watcher_tick_auto_resume_reaches_final_gate_checkpoint_after_prepare_re
     )
 
     assert artifact["post_signal_auto_resume"]["status"] == (
-        "ready_for_action_time_final_gate"
+        "ready_for_non_executing_prepare"
     )
     assert artifact["post_signal_auto_resume"]["prepared_authorization_id"] == (
         "auth-ready-1"
     )
     assert "automatic_recovery_action" not in artifact["post_signal_auto_resume"]
     assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
-        "run_official_action_time_final_gate_preflight"
+        "wait_for_prepare_records_then_rebuild_final_gate_status"
     )
     assert "operator_command_plan" not in artifact
     assert "next_step" not in artifact["watcher_tick_plan"]
     assert artifact["watcher_tick_plan"]["non_authority_checkpoint"] == (
-        "run_official_action_time_final_gate_preflight"
+        "wait_for_prepare_records_then_rebuild_final_gate_status"
     )
     assert artifact["watcher_tick_plan"]["not_execution_authority"] is True
     assert artifact["watcher_tick_plan"]["creates_prepare_records"] is True

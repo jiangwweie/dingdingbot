@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -120,6 +121,87 @@ def test_publish_current_projections_keeps_one_current_snapshot_per_model(tmp_pa
             "daily_live_enablement_table": 1,
             "goal_status": 1,
         }
+    finally:
+        engine.dispose()
+
+
+def test_publish_current_projections_uses_bounded_current_control_state(
+    tmp_path: Path,
+):
+    module = _load_module(
+        SCRIPT_PATH,
+        "publish_runtime_control_current_projections_bounded_read",
+    )
+    engine = _seeded_engine()
+    try:
+        with engine.begin() as conn:
+            for index in range(150):
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_projection_runs (
+                          projection_run_id, model_type, owner_projector,
+                          code_version, source_mode, projection_target,
+                          input_watermark, source_priority,
+                          legacy_diagnostics_read,
+                          legacy_diagnostics_affected_current,
+                          started_at_ms, finished_at_ms, status, error_detail
+                        ) VALUES (
+                          :projection_run_id, 'candidate_pool',
+                          'pg_candidate_pool_projector', 'old',
+                          'db_backed', 'production_current', '{}', '[]',
+                          false, false, :started_at_ms, :finished_at_ms,
+                          'succeeded', NULL
+                        )
+                        """
+                    ),
+                    {
+                        "projection_run_id": f"historical-projection:{index}",
+                        "started_at_ms": 1_000 + index,
+                        "finished_at_ms": 1_000 + index,
+                    },
+                )
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_control_read_model_snapshots (
+                          snapshot_id, model_type, payload, source_watermark,
+                          owner_projector, input_watermark, output_path,
+                          is_current, generated_at_ms, generated_by
+                        ) VALUES (
+                          :snapshot_id, 'candidate_pool', '{}', '{}',
+                          'pg_candidate_pool_projector', '{}', NULL,
+                          false, :generated_at_ms, 'historical-test'
+                        )
+                        """
+                    ),
+                    {
+                        "snapshot_id": f"historical-snapshot:{index}",
+                        "generated_at_ms": 1_000 + index,
+                    },
+                )
+
+            module.publish_runtime_control_current_projections(conn)
+            watermark_raw = conn.execute(
+                sa.text(
+                    """
+                    SELECT input_watermark
+                    FROM brc_projection_runs
+                    WHERE projection_run_id LIKE 'projection:candidate_pool:%'
+                    ORDER BY finished_at_ms DESC
+                    LIMIT 1
+                    """
+                )
+            ).scalar_one()
+
+        watermark = (
+            json.loads(watermark_raw)
+            if isinstance(watermark_raw, str)
+            else dict(watermark_raw)
+        )
+        table_counts = watermark["table_counts"]
+        assert table_counts["projection_runs"] == 100
+        assert table_counts["control_read_model_snapshots"] == 0
     finally:
         engine.dispose()
 

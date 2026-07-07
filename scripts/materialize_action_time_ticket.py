@@ -36,6 +36,8 @@ if str(REPO_ROOT) not in sys.path:
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
+    is_current_action_time_lane,
+    is_current_action_time_ticket,
 )
 
 
@@ -114,8 +116,12 @@ def materialize_action_time_ticket(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
+    _expire_stale_active_tickets(conn, now_ms=now_ms)
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_control_state()
     except RuntimeControlStateRepositoryError as exc:
         return _blocked([f"runtime_control_state_invalid:{exc}"], now_ms=now_ms)
 
@@ -142,6 +148,19 @@ def materialize_action_time_ticket(
             blockers=[],
             next_action="run_official_action_time_finalgate",
         )
+    non_current_ticket = _non_current_ticket_for_lane(control_state, lane_id)
+    if non_current_ticket:
+        return _result(
+            "action_time_ticket_not_current",
+            now_ms=now_ms,
+            ticket=non_current_ticket,
+            lane=lane,
+            blockers=[
+                "action_time_ticket_not_current_cleanup_required:"
+                + str(non_current_ticket.get("ticket_id") or "")
+            ],
+            next_action="review_or_close_non_current_action_time_ticket",
+        )
 
     try:
         bundle = _build_ticket_bundle(control_state, lane=lane, now_ms=now_ms)
@@ -156,6 +175,139 @@ def materialize_action_time_ticket(
         lane=lane,
         blockers=[],
         next_action="run_official_action_time_finalgate",
+    )
+
+
+def _expire_stale_active_tickets(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> int:
+    expired_rows = [
+        dict(row)
+        for row in conn.execute(
+            text(
+                """
+                SELECT ticket_id, action_time_lane_input_id, status
+                FROM brc_action_time_tickets
+                WHERE status IN ('created', 'preflight_pending', 'finalgate_ready')
+                  AND expires_at_ms IS NOT NULL
+                  AND expires_at_ms <= :now_ms
+                """
+            ),
+            {"now_ms": now_ms},
+        ).mappings()
+    ]
+    if not expired_rows:
+        return 0
+    conn.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET status = 'expired'
+            WHERE status IN ('created', 'preflight_pending', 'finalgate_ready')
+              AND expires_at_ms IS NOT NULL
+              AND expires_at_ms <= :now_ms
+            """
+        ),
+        {"now_ms": now_ms},
+    )
+    for row in expired_rows:
+        ticket_id = str(row["ticket_id"])
+        lane_id = str(row["action_time_lane_input_id"])
+        from_status = str(row["status"])
+        _insert_state_transition_event(
+            conn,
+            state_table="brc_action_time_tickets",
+            entity_id=ticket_id,
+            from_status=from_status,
+            to_status="expired",
+            transition_reason="action_time_ticket_expired_before_materialization",
+            trigger_ref="materialize_action_time_ticket",
+            writer="materialize_action_time_ticket",
+            now_ms=now_ms,
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_action_time_ticket_events (
+                  ticket_event_id, ticket_id, action_time_lane_input_id, from_status,
+                  to_status, transition_reason, trigger_ref, writer, event_payload,
+                  occurred_at_ms, created_at_ms
+                ) VALUES (
+                  :ticket_event_id, :ticket_id, :action_time_lane_input_id,
+                  :from_status, 'expired',
+                  'action_time_ticket_expired_before_materialization',
+                  'materialize_action_time_ticket', 'materialize_action_time_ticket',
+                  :event_payload, :occurred_at_ms, :created_at_ms
+                )
+                """
+            ),
+            {
+                "ticket_event_id": _stable_id(
+                    "ticket_event",
+                    ticket_id,
+                    "expired",
+                    str(now_ms),
+                ),
+                "ticket_id": ticket_id,
+                "action_time_lane_input_id": lane_id,
+                "from_status": from_status,
+                "event_payload": json.dumps(
+                    {
+                        "reason": "expires_at_ms_lte_now_ms",
+                        "now_ms": now_ms,
+                    },
+                    sort_keys=True,
+                ),
+                "occurred_at_ms": now_ms,
+                "created_at_ms": now_ms,
+            },
+        )
+    return len(expired_rows)
+
+
+def _insert_state_transition_event(
+    conn: sa.engine.Connection,
+    *,
+    state_table: str,
+    entity_id: str,
+    from_status: str,
+    to_status: str,
+    transition_reason: str,
+    trigger_ref: str,
+    writer: str,
+    now_ms: int,
+) -> None:
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_state_transition_events (
+              transition_event_id, state_table, entity_id, from_status,
+              to_status, transition_reason, trigger_ref, writer, occurred_at_ms
+            ) VALUES (
+              :transition_event_id, :state_table, :entity_id, :from_status,
+              :to_status, :transition_reason, :trigger_ref, :writer, :occurred_at_ms
+            )
+            """
+        ),
+        {
+            "transition_event_id": _stable_id(
+                "state_transition",
+                state_table,
+                entity_id,
+                to_status,
+                str(now_ms),
+            ),
+            "state_table": state_table,
+            "entity_id": entity_id,
+            "from_status": from_status,
+            "to_status": to_status,
+            "transition_reason": transition_reason,
+            "trigger_ref": trigger_ref,
+            "writer": writer,
+            "occurred_at_ms": now_ms,
+        },
     )
 
 
@@ -203,11 +355,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _open_real_submit_lanes(control_state: dict[str, Any]) -> list[dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
     return [
         row
         for row in _rows(control_state.get("action_time_lane_inputs"))
-        if row.get("lane_scope") == "real_submit_candidate"
-        and row.get("status") in OPEN_REAL_LANE_STATUSES
+        if is_current_action_time_lane(row, now_ms)
     ]
 
 
@@ -215,15 +367,40 @@ def _active_ticket_for_lane(
     control_state: dict[str, Any],
     lane_id: str,
 ) -> dict[str, Any] | None:
+    now_ms = _control_state_now_ms(control_state)
     tickets = [
         row
         for row in _rows(control_state.get("action_time_tickets"))
         if row.get("action_time_lane_input_id") == lane_id
-        and row.get("status") in ACTIVE_TICKET_STATUSES
+        and is_current_action_time_ticket(row, now_ms)
     ]
     if not tickets:
         return None
     return sorted(tickets, key=lambda row: int(row.get("created_at_ms") or 0))[-1]
+
+
+def _non_current_ticket_for_lane(
+    control_state: dict[str, Any],
+    lane_id: str,
+) -> dict[str, Any] | None:
+    tickets = [
+        row
+        for row in _rows(control_state.get("action_time_tickets"))
+        if row.get("action_time_lane_input_id") == lane_id
+    ]
+    if not tickets:
+        return None
+    return sorted(tickets, key=lambda row: int(row.get("created_at_ms") or 0))[-1]
+
+
+def _control_state_now_ms(control_state: dict[str, Any]) -> int:
+    try:
+        value = int(control_state.get("read_now_ms") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value > 0:
+        return value
+    return int(time.time() * 1000)
 
 
 def _build_ticket_bundle(

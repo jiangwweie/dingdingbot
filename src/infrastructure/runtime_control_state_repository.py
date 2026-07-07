@@ -7,6 +7,7 @@ archive provenance and must not be exposed through this current repository.
 from __future__ import annotations
 
 from decimal import Decimal
+import time
 from typing import Any
 
 import sqlalchemy as sa
@@ -64,103 +65,6 @@ REQUIRED_PRODUCTION_PROJECTIONS = {
     "tradeability_decision",
 }
 
-EXPECTED_ACTIVE_EVENT_SPECS: dict[str, dict[str, Any]] = {
-    "event_spec:CPM-RO-001:CPM-LONG:v1": {
-        "strategy_group_id": "CPM-RO-001",
-        "event_id": "CPM-LONG",
-        "side": "long",
-        "timeframe": "1h",
-        "time_authority": "trigger_candle_close_time_ms",
-        "protection_ref_type": "pullback_low_reference",
-        "required_facts": {
-            "htf_trend_intact",
-            "reclaim_confirmed",
-            "pullback_low_reference",
-        },
-        "disable_facts": set(),
-    },
-    "event_spec:MPG-001:MPG-LONG:v1": {
-        "strategy_group_id": "MPG-001",
-        "event_id": "MPG-LONG",
-        "side": "long",
-        "timeframe": "1h",
-        "time_authority": "trigger_candle_close_time_ms",
-        "protection_ref_type": "momentum_floor_reference",
-        "required_facts": {
-            "momentum_persistence_confirmed",
-            "leader_strength_confirmed",
-            "momentum_floor_reference",
-        },
-        "disable_facts": set(),
-    },
-    "event_spec:MI-001:MI-LONG:v1": {
-        "strategy_group_id": "MI-001",
-        "event_id": "MI-LONG",
-        "side": "long",
-        "timeframe": "1h",
-        "time_authority": "trigger_candle_close_time_ms",
-        "protection_ref_type": "impulse_invalidation_reference",
-        "required_facts": {
-            "impulse_confirmed",
-            "relative_strength_confirmed",
-            "impulse_invalidation_reference",
-        },
-        "disable_facts": set(),
-    },
-    "event_spec:SOR-001:SOR-LONG:v1": {
-        "strategy_group_id": "SOR-001",
-        "event_id": "SOR-LONG",
-        "side": "long",
-        "timeframe": "15m",
-        "time_authority": "trigger_candle_close_time_ms",
-        "protection_ref_type": "opening_range_low_reference",
-        "required_facts": {
-            "opening_range_defined",
-            "breakout_confirmed",
-            "opening_range_low_reference",
-        },
-        "disable_facts": set(),
-    },
-    "event_spec:SOR-001:SOR-SHORT:v1": {
-        "strategy_group_id": "SOR-001",
-        "event_id": "SOR-SHORT",
-        "side": "short",
-        "timeframe": "15m",
-        "time_authority": "trigger_candle_close_time_ms",
-        "protection_ref_type": "opening_range_high_reference",
-        "required_facts": {
-            "opening_range_defined",
-            "breakdown_confirmed",
-            "opening_range_high_reference",
-        },
-        "disable_facts": set(),
-    },
-    "event_spec:BRF2-001:BRF2-SHORT:v1": {
-        "strategy_group_id": "BRF2-001",
-        "event_id": "BRF2-SHORT",
-        "side": "short",
-        "timeframe": "1h",
-        "time_authority": "trigger_candle_close_time_ms",
-        "protection_ref_type": "rally_high_reference",
-        "required_facts": {
-            "rally_failure_confirmed",
-            "short_side_not_disabled",
-            "rally_high_reference",
-        },
-        "disable_facts": {"strong_uptrend_disable"},
-    },
-}
-EXPECTED_ACTIVE_SCOPE_KEYS = {
-    (
-        spec["strategy_group_id"],
-        spec["side"],
-        spec["event_id"],
-    )
-    for spec in EXPECTED_ACTIVE_EVENT_SPECS.values()
-}
-ACTIVE_RUNTIME_STRATEGY_GROUP_IDS = {
-    str(spec["strategy_group_id"]) for spec in EXPECTED_ACTIVE_EVENT_SPECS.values()
-}
 OPEN_REAL_LANE_STATUSES = {
     "opened",
     "facts_refreshing",
@@ -178,6 +82,7 @@ class PgBackedRuntimeControlStateRepository:
         *,
         source_mode: str = "db_backed",
         projection_target: str = "production_current",
+        now_ms: int | None = None,
     ) -> None:
         if source_mode != "db_backed":
             raise RuntimeControlStateRepositoryError(
@@ -190,6 +95,7 @@ class PgBackedRuntimeControlStateRepository:
         self.conn = conn
         self.source_mode = source_mode
         self.projection_target = projection_target
+        self.now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
 
     def read_control_state(self) -> dict[str, Any]:
         self._require_tables()
@@ -207,6 +113,29 @@ class PgBackedRuntimeControlStateRepository:
             "schema": "brc.runtime_control_state_repository.v1",
             "source_mode": self.source_mode,
             "projection_target": self.projection_target,
+            "read_now_ms": self.now_ms,
+            "table_counts": {key: len(value) for key, value in rows.items()},
+            **rows,
+        }
+
+    def read_monitor_control_state(self) -> dict[str, Any]:
+        self._require_tables()
+        rows = {
+            key: self._read_rows(table_name, monitor_bounded=True, logical_key=key)
+            for key, table_name in CONTROL_STATE_TABLES.items()
+        }
+        self._validate_projection_ownership(rows)
+        self._validate_active_event_semantics(rows)
+        self._validate_candidate_scope_event_bindings(rows)
+        self._validate_runtime_scope_bindings(rows)
+        self._validate_live_signal_events(rows)
+        self._validate_promotion_and_lane_identity(rows)
+        return {
+            "schema": "brc.runtime_control_state_repository.v1",
+            "source_mode": self.source_mode,
+            "projection_target": self.projection_target,
+            "read_profile": "monitor_bounded_current",
+            "read_now_ms": self.now_ms,
             "table_counts": {key: len(value) for key, value in rows.items()},
             **rows,
         }
@@ -224,11 +153,24 @@ class PgBackedRuntimeControlStateRepository:
                 "PG runtime control-state tables missing: " + ", ".join(sorted(missing))
             )
 
-    def _read_rows(self, table_name: str) -> list[dict[str, Any]]:
+    def _read_rows(
+        self,
+        table_name: str,
+        *,
+        monitor_bounded: bool = False,
+        logical_key: str = "",
+    ) -> list[dict[str, Any]]:
         metadata = sa.MetaData()
         table = sa.Table(table_name, metadata, autoload_with=self.conn)
         order_by = list(table.primary_key.columns)
         statement = sa.select(table)
+        if monitor_bounded:
+            statement = _monitor_bounded_statement(
+                statement,
+                table,
+                logical_key,
+                now_ms=self.now_ms,
+            )
         if order_by:
             statement = statement.order_by(*order_by)
         return [
@@ -299,17 +241,6 @@ class PgBackedRuntimeControlStateRepository:
         }
         if not active_candidates:
             raise RuntimeControlStateRepositoryError("active candidate scope is empty")
-        for candidate_id, candidate in active_candidates.items():
-            event_id = str(_as_dict(candidate.get("metadata")).get("event_id") or "")
-            key = (
-                str(candidate.get("strategy_group_id") or ""),
-                str(candidate.get("side") or ""),
-                event_id,
-            )
-            if key not in EXPECTED_ACTIVE_SCOPE_KEYS:
-                raise RuntimeControlStateRepositoryError(
-                    f"{candidate_id} is outside active PG event scope"
-                )
 
         current_events = {
             str(row["event_spec_id"]): row
@@ -349,6 +280,12 @@ class PgBackedRuntimeControlStateRepository:
                 if binding.get("symbol") != candidate.get("symbol"):
                     raise RuntimeControlStateRepositoryError(
                         f"{binding.get('binding_id')} mismatches candidate symbol"
+                    )
+                event_id = str(event.get("event_id") or "")
+                candidate_event_id = str(_as_dict(candidate.get("metadata")).get("event_id") or "")
+                if candidate_event_id and candidate_event_id != event_id:
+                    raise RuntimeControlStateRepositoryError(
+                        f"{candidate_id} metadata event_id mismatches current event spec"
                     )
 
     def _validate_runtime_scope_bindings(
@@ -404,28 +341,15 @@ class PgBackedRuntimeControlStateRepository:
             for row in rows["strategy_side_event_specs"]
             if row.get("status") == "current"
         }
-        expected_ids = set(EXPECTED_ACTIVE_EVENT_SPECS)
-        actual_ids = set(current_events)
-        missing = expected_ids - actual_ids
-        extra = {
-            event_spec_id
-            for event_spec_id in actual_ids - expected_ids
-            if str(current_events[event_spec_id].get("strategy_group_id") or "")
-            in ACTIVE_RUNTIME_STRATEGY_GROUP_IDS
+        current_versions = {
+            str(row.get("strategy_group_version_id") or ""): row
+            for row in rows["strategy_group_versions"]
+            if row.get("status") == "current"
         }
-        if missing or extra:
-            details = []
-            if missing:
-                details.append("missing=" + ",".join(sorted(missing)))
-            if extra:
-                details.append("unexpected=" + ",".join(sorted(extra)))
-            raise RuntimeControlStateRepositoryError(
-                "current PG event specs do not match active contract: "
-                + "; ".join(details)
-            )
-
-        for event_spec_id, expected in EXPECTED_ACTIVE_EVENT_SPECS.items():
-            event = current_events[event_spec_id]
+        if not current_events:
+            raise RuntimeControlStateRepositoryError("current PG event specs are empty")
+        seen_event_keys: set[tuple[str, str, str]] = set()
+        for event_spec_id, event in current_events.items():
             for key in (
                 "strategy_group_id",
                 "event_id",
@@ -434,10 +358,51 @@ class PgBackedRuntimeControlStateRepository:
                 "time_authority",
                 "protection_ref_type",
             ):
-                if str(event.get(key) or "") != str(expected[key]):
+                if not str(event.get(key) or ""):
                     raise RuntimeControlStateRepositoryError(
-                        f"{event_spec_id} mismatches {key}"
+                        f"{event_spec_id} missing {key}"
                     )
+            if event.get("side") not in {"long", "short"}:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} has invalid side"
+                )
+            version = current_versions.get(str(event.get("strategy_group_version_id") or ""))
+            if not version:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} has no current StrategyGroup version"
+                )
+            if str(version.get("strategy_group_id") or "") != str(
+                event.get("strategy_group_id") or ""
+            ):
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} mismatches StrategyGroup version"
+                )
+            if event.get("side") not in _as_list(version.get("supported_sides")):
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} side is not supported by StrategyGroup version"
+                )
+            if event.get("timeframe") not in _as_list(version.get("supported_timeframes")):
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} timeframe is not supported by StrategyGroup version"
+                )
+            if not _event_id_matches_side(
+                strategy_group_id=str(event.get("strategy_group_id") or ""),
+                event_id=str(event.get("event_id") or ""),
+                side=str(event.get("side") or ""),
+            ):
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} event_id is not side-specific"
+                )
+            event_key = (
+                str(event.get("strategy_group_id") or ""),
+                str(event.get("side") or ""),
+                str(event.get("event_id") or ""),
+            )
+            if event_key in seen_event_keys:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} duplicates current event identity"
+                )
+            seen_event_keys.add(event_key)
             if str(event.get("event_spec_version") or "") != "v1":
                 raise RuntimeControlStateRepositoryError(
                     f"{event_spec_id} must use event_spec_version=v1"
@@ -469,7 +434,38 @@ class PgBackedRuntimeControlStateRepository:
             )
             for row in rows["required_fact_contracts"]
         }
-        for event_spec_id, expected in EXPECTED_ACTIVE_EVENT_SPECS.items():
+        required_manifest_by_event: dict[tuple[str, str], set[str]] = {}
+        disable_manifest_by_event: dict[tuple[str, str], set[str]] = {}
+        for row in rows["required_fact_contracts"]:
+            if row.get("required_for_live_submit") is not True:
+                continue
+            payload = _as_dict(row.get("definition_payload"))
+            fact_role = str(payload.get("fact_role") or "required")
+            version_id = str(row.get("strategy_group_version_id") or "")
+            fact_key = str(row.get("fact_key") or "")
+            event_ids = {
+                str(item)
+                for item in payload.get("event_ids", [])
+                if str(item)
+            }
+            if payload.get("event_id"):
+                event_ids.add(str(payload["event_id"]))
+            if not event_ids or not version_id or not fact_key:
+                continue
+            target = (
+                disable_manifest_by_event
+                if fact_role == "disable"
+                else required_manifest_by_event
+            )
+            for event_id in event_ids:
+                target.setdefault((version_id, event_id), set()).add(fact_key)
+        bound_current_event_ids = {
+            str(row.get("event_spec_id") or "")
+            for row in rows["candidate_scope_event_bindings"]
+            if row.get("status") == "active"
+            and str(row.get("event_spec_id") or "") in current_events
+        }
+        for event_spec_id in bound_current_event_ids:
             facts = facts_by_event.get(event_spec_id) or []
             required_keys = {
                 str(row.get("fact_key") or "")
@@ -481,21 +477,37 @@ class PgBackedRuntimeControlStateRepository:
                 for row in facts
                 if row.get("fact_role") == "disable"
             }
-            if required_keys != expected["required_facts"]:
+            if not required_keys:
                 raise RuntimeControlStateRepositoryError(
-                    f"{event_spec_id} required facts mismatch: "
-                    f"expected={sorted(expected['required_facts'])}, "
-                    f"actual={sorted(required_keys)}"
-                )
-            if disable_keys != expected["disable_facts"]:
-                raise RuntimeControlStateRepositoryError(
-                    f"{event_spec_id} disable facts mismatch: "
-                    f"expected={sorted(expected['disable_facts'])}, "
-                    f"actual={sorted(disable_keys)}"
+                    f"{event_spec_id} has no required facts"
                 )
 
             event = current_events[event_spec_id]
+            protection_ref = str(event.get("protection_ref_type") or "")
+            if protection_ref not in required_keys:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} protection_ref_type missing from required facts"
+                )
             version_id = str(event.get("strategy_group_version_id") or "")
+            event_id = str(event.get("event_id") or "")
+            manifest_keys = required_manifest_by_event.get((version_id, event_id)) or set()
+            if not manifest_keys:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} has no RequiredFacts manifest"
+                )
+            if required_keys != manifest_keys:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} RequiredFacts manifest mismatch: "
+                    + _manifest_mismatch_detail(manifest_keys, required_keys)
+                )
+            disable_manifest_keys = (
+                disable_manifest_by_event.get((version_id, event_id)) or set()
+            )
+            if disable_keys != disable_manifest_keys:
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} disable manifest mismatch: "
+                    + _manifest_mismatch_detail(disable_manifest_keys, disable_keys)
+                )
             for fact in facts:
                 fact_key = str(fact.get("fact_key") or "")
                 if not str(fact.get("required_facts_version_id") or "").endswith(":v1"):
@@ -559,7 +571,7 @@ class PgBackedRuntimeControlStateRepository:
             if row.get("status") == "current"
         }
         for signal in rows["live_signal_events"]:
-            if not _is_current_fresh_signal(signal):
+            if not is_current_live_signal(signal, self.now_ms):
                 continue
             signal_id = str(signal.get("signal_event_id") or "")
             candidate_id = str(signal.get("candidate_scope_id") or "")
@@ -631,7 +643,7 @@ class PgBackedRuntimeControlStateRepository:
             row
             for row in rows["promotion_candidates"]
             if row.get("status") == "arbitration_won"
-            and row.get("closed_at_ms") is None
+            and is_current_promotion_candidate(row, self.now_ms)
         ]
         if len(open_winners) > 1:
             raise RuntimeControlStateRepositoryError(
@@ -639,7 +651,7 @@ class PgBackedRuntimeControlStateRepository:
             )
 
         for promotion in rows["promotion_candidates"]:
-            if not _requires_current_promotion_validation(promotion):
+            if not is_current_promotion_candidate(promotion, self.now_ms):
                 continue
             promotion_id = str(promotion.get("promotion_candidate_id") or "")
             signal = signals.get(str(promotion.get("signal_event_id") or ""))
@@ -678,15 +690,14 @@ class PgBackedRuntimeControlStateRepository:
         open_real_lanes = [
             row
             for row in rows["action_time_lane_inputs"]
-            if row.get("lane_scope") == "real_submit_candidate"
-            and row.get("status") in OPEN_REAL_LANE_STATUSES
+            if is_current_action_time_lane(row, self.now_ms)
         ]
         if len(open_real_lanes) > 1:
             raise RuntimeControlStateRepositoryError(
                 "multiple open real-submit action-time lanes"
             )
         for lane in rows["action_time_lane_inputs"]:
-            if not _requires_current_lane_validation(lane):
+            if not is_current_action_time_lane(lane, self.now_ms):
                 continue
             lane_id = str(lane.get("action_time_lane_input_id") or "")
             promotion = promotions.get(str(lane.get("promotion_candidate_id") or ""))
@@ -724,28 +735,169 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _monitor_bounded_statement(
+    statement: sa.sql.Select[Any],
+    table: sa.Table,
+    logical_key: str,
+    *,
+    now_ms: int,
+) -> sa.sql.Select[Any]:
+    columns = table.c
+    if logical_key == "watcher_runtime_coverage" and "is_current" in columns:
+        return statement.where(columns.is_current.is_(True))
+    if logical_key == "runtime_fact_snapshots":
+        statement = statement.where(
+            sa.and_(
+                columns.freshness_state == "fresh",
+                columns.valid_until_ms.is_not(None),
+                columns.valid_until_ms > now_ms,
+            )
+        )
+        if "created_at_ms" in columns:
+            statement = statement.order_by(columns.created_at_ms.desc()).limit(1000)
+        return statement
+    if logical_key == "live_signal_events":
+        statement = statement.where(
+            sa.and_(
+                columns.status == "facts_validated",
+                columns.freshness_state == "fresh",
+                columns.source_kind == "live_market",
+                columns.invalidated_at_ms.is_(None),
+                columns.expires_at_ms.is_not(None),
+                columns.expires_at_ms > now_ms,
+            )
+        )
+        if "observed_at_ms" in columns:
+            statement = statement.order_by(columns.observed_at_ms.desc()).limit(200)
+        return statement
+    if logical_key == "promotion_candidates":
+        return statement.where(
+            sa.and_(
+                columns.status.in_(
+                    ["eligible", "arbitration_pending", "arbitration_won"]
+                ),
+                columns.closed_at_ms.is_(None),
+                columns.expires_at_ms.is_not(None),
+                columns.expires_at_ms > now_ms,
+            )
+        )
+    if logical_key == "action_time_lane_inputs":
+        return statement.where(
+            sa.and_(
+                columns.lane_scope == "real_submit_candidate",
+                columns.status.in_(list(OPEN_REAL_LANE_STATUSES)),
+                columns.closed_at_ms.is_(None),
+                columns.expires_at_ms.is_not(None),
+                columns.expires_at_ms > now_ms,
+            )
+        )
+    if logical_key == "action_time_tickets":
+        return statement.where(
+            sa.and_(
+                sa.or_(
+                    sa.and_(
+                        columns.status.in_(["created", "preflight_pending", "finalgate_ready"]),
+                        columns.expires_at_ms.is_not(None),
+                        columns.expires_at_ms > now_ms,
+                    ),
+                    columns.status == "submitted",
+                ),
+            )
+        )
+    if logical_key == "projection_runs":
+        statement = statement.where(
+            sa.and_(
+                columns.projection_target == "production_current",
+                columns.status == "succeeded",
+            )
+        )
+        if "finished_at_ms" in columns:
+            statement = statement.order_by(columns.finished_at_ms.desc()).limit(100)
+        return statement
+    if logical_key == "control_read_model_snapshots" and "is_current" in columns:
+        statement = statement.where(columns.is_current.is_(True))
+        if "generated_at_ms" in columns:
+            statement = statement.order_by(columns.generated_at_ms.desc()).limit(50)
+        return statement
+    if logical_key == "server_monitor_runs" and "created_at_ms" in columns:
+        return statement.order_by(columns.created_at_ms.desc()).limit(200)
+    return statement
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _is_current_fresh_signal(row: dict[str, Any]) -> bool:
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _manifest_mismatch_detail(
+    expected_keys: set[str],
+    actual_keys: set[str],
+) -> str:
+    missing = sorted(expected_keys - actual_keys)
+    unexpected = sorted(actual_keys - expected_keys)
+    return f"missing={missing}; unexpected={unexpected}"
+
+
+def _event_id_matches_side(
+    *,
+    strategy_group_id: str,
+    event_id: str,
+    side: str,
+) -> bool:
+    if side not in {"long", "short"}:
+        return False
+    strategy_prefix = strategy_group_id.split("-", 1)[0].strip().upper()
+    expected_suffix = side.upper()
+    return bool(strategy_prefix) and event_id == f"{strategy_prefix}-{expected_suffix}"
+
+
+def is_current_live_signal(row: dict[str, Any], now_ms: int) -> bool:
     return (
         row.get("status") == "facts_validated"
         and row.get("freshness_state") == "fresh"
+        and row.get("source_kind") == "live_market"
         and row.get("invalidated_at_ms") is None
+        and row.get("expires_at_ms") is not None
+        and int(row.get("expires_at_ms") or 0) > now_ms
     )
 
 
-def _requires_current_promotion_validation(row: dict[str, Any]) -> bool:
+def is_current_promotion_candidate(row: dict[str, Any], now_ms: int) -> bool:
     return (
         row.get("closed_at_ms") is None
         and row.get("status")
         in {"eligible", "arbitration_pending", "arbitration_won"}
+        and row.get("expires_at_ms") is not None
+        and int(row.get("expires_at_ms") or 0) > now_ms
     )
 
 
-def _requires_current_lane_validation(row: dict[str, Any]) -> bool:
+def is_current_action_time_lane(row: dict[str, Any], now_ms: int) -> bool:
     return (
         row.get("lane_scope") == "real_submit_candidate"
         and row.get("status") in OPEN_REAL_LANE_STATUSES
+        and row.get("closed_at_ms") is None
+        and row.get("expires_at_ms") is not None
+        and int(row.get("expires_at_ms") or 0) > now_ms
+    )
+
+
+def is_current_action_time_ticket(row: dict[str, Any], now_ms: int) -> bool:
+    if row.get("status") == "submitted":
+        return True
+    return (
+        row.get("status") in {"created", "preflight_pending", "finalgate_ready"}
+        and row.get("expires_at_ms") is not None
+        and int(row.get("expires_at_ms") or 0) > now_ms
+    )
+
+
+def is_current_fact_snapshot(row: dict[str, Any], now_ms: int) -> bool:
+    return (
+        row.get("freshness_state") == "fresh"
+        and row.get("valid_until_ms") is not None
+        and int(row.get("valid_until_ms") or 0) > now_ms
     )

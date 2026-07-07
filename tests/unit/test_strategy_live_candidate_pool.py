@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
 from src.infrastructure.runtime_control_state_repository import (
@@ -429,6 +429,99 @@ def test_candidate_pool_builds_from_pg_control_state_seed(pg_control_connection)
         row["server_runtime_coverage"]["state"] == "runtime_profile_scope_missing"
         for row in artifact["symbol_readiness_rows"]
     )
+
+
+def test_candidate_pool_ignores_expired_pg_fresh_signal(pg_control_connection):
+    now_ms = 1770001000000
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_live_signal_events (
+              signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
+              symbol, side, detector_key, signal_type, source_kind, status,
+              freshness_state, confidence, fact_snapshot_id, reason_codes,
+              signal_payload, event_time_ms, trigger_candle_close_time_ms,
+              observed_at_ms, expires_at_ms, invalidated_at_ms, created_at_ms
+            ) VALUES (
+              'signal:SOR-001:ETHUSDT:long:expired-but-marked-fresh',
+              'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
+              'event_spec:SOR-001:SOR-LONG:v1', 'SOR-001', 'ETHUSDT',
+              'long', 'detector:SOR-001:long', 'SOR-LONG', 'live_market',
+              'facts_validated', 'fresh', 0.9, 'fact:SOR:expired',
+              '[]', '{}', 1770000120000, 1770000120000, 1770000120001,
+              :expires_at_ms, NULL, 1770000120002
+            )
+            """
+        ),
+        {"expires_at_ms": now_ms - 1},
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
+    control_state = repository.read_control_state()
+
+    artifact = _builder().build_strategy_live_candidate_pool_from_control_state(
+        control_state,
+        generated_at_utc="2026-07-04T00:00:00+00:00",
+    )
+
+    row = next(
+        item
+        for item in artifact["symbol_readiness_rows"]
+        if item["strategy_group_id"] == "SOR-001"
+        and item["symbol"] == "ETHUSDT"
+        and item["side"] == "long"
+    )
+    assert row["signal_state"] != "fresh"
+    assert artifact["summary"]["fresh_candidate_count"] == 0
+    assert artifact["summary"]["action_time_lane_input_count"] == 0
+
+
+def test_candidate_pool_ignores_expired_open_action_time_lane(pg_control_connection):
+    now_ms = 1770001000000
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_action_time_lane_inputs (
+              action_time_lane_input_id, promotion_candidate_id, strategy_group_id,
+              symbol, side, runtime_profile_id, lane_scope, status,
+              signal_event_id, public_fact_snapshot_id, action_time_fact_snapshot_id,
+              runtime_scope_binding_id, candidate_authorization_ref,
+              runtime_safety_snapshot_id, first_blocker_class, created_at_ms,
+              expires_at_ms, closed_at_ms, authority_boundary
+            ) VALUES (
+              'lane:SOR-001:ETHUSDT:long:expired-open',
+              'promotion:SOR-001:ETHUSDT:long:expired-open',
+              'SOR-001', 'ETHUSDT', 'long', 'owner-runtime-console-v1',
+              'real_submit_candidate', 'ticket_pending',
+              'signal:SOR-001:ETHUSDT:long:expired-open',
+              'fact:SOR-001:ETHUSDT:long:public',
+              'fact:SOR-001:ETHUSDT:long:action-time',
+              'runtime_scope:candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG:owner-runtime-console-v1',
+              'candidate_auth:SOR-001:ETHUSDT:long',
+              NULL, 'action_time_preflight_ready', 1770000900000,
+              :expires_at_ms, NULL,
+              'expired_lane_test; no_finalgate_no_operation_layer_no_exchange_write'
+            )
+            """
+        ),
+        {"expires_at_ms": now_ms - 1},
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
+
+    artifact = _builder().build_strategy_live_candidate_pool_from_control_state(
+        repository.read_control_state(),
+        generated_at_utc="2026-07-04T00:00:00+00:00",
+    )
+
+    assert artifact["action_time_lane_inputs"] == []
+    assert artifact["summary"]["action_time_lane_input_count"] == 0
     assert "market_wait_validated" not in {
         row["first_blocker"] for row in artifact["symbol_readiness_rows"]
     }
@@ -563,6 +656,53 @@ def test_candidate_pool_pg_scope_does_not_refill_from_code_defaults(pg_control_c
         "strategy_group_scopes"
     ]["CPM-RO-001"]["candidate_symbols"] == ["AVAXUSDT", "SOLUSDT", "SUIUSDT"]
     assert _validator().validate_strategy_live_candidate_pool(artifact) == []
+
+
+def test_candidate_pool_rejects_extra_active_strategygroup_without_wip_audit(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+    extra = dict(control_state["candidate_scope"][0])
+    extra.update(
+        {
+            "candidate_scope_id": "candidate_scope:EXTRA-001:ETHUSDT:long:EXTRA-LONG",
+            "strategy_group_id": "EXTRA-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "status": "active",
+        }
+    )
+    control_state["candidate_scope"].append(extra)
+
+    with pytest.raises(ValueError, match="outside WIP replacement audit"):
+        _builder().build_strategy_live_candidate_pool_from_control_state(
+            control_state,
+            generated_at_utc="2026-07-04T00:00:00+00:00",
+        )
+
+
+def test_candidate_pool_rejects_extra_current_event_spec_without_wip_audit(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+    extra = dict(control_state["strategy_side_event_specs"][0])
+    extra.update(
+        {
+            "event_spec_id": "event_spec:EXTRA-001:EXTRA-LONG:v1",
+            "strategy_group_id": "EXTRA-001",
+            "event_id": "EXTRA-LONG",
+            "status": "current",
+        }
+    )
+    control_state["strategy_side_event_specs"].append(extra)
+
+    with pytest.raises(ValueError, match="current event spec outside WIP replacement audit"):
+        _builder().build_strategy_live_candidate_pool_from_control_state(
+            control_state,
+            generated_at_utc="2026-07-04T00:00:00+00:00",
+        )
 
 
 def test_candidate_pool_pg_state_fails_closed_without_runtime_scope(

@@ -34,6 +34,10 @@ from src.application.readmodels.owner_projection import (
     owner_non_authority_checkpoint,
     owner_state_without_legacy_input_recovery_action,
 )
+from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
+    is_current_action_time_lane,
+    is_current_action_time_ticket,
+)
 
 
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
@@ -139,8 +143,9 @@ def _pg_ticket_resume_pack(
     engine = sa.create_engine(normalized)
     try:
         with engine.connect() as conn:
-            rows = _open_pg_ticket_identity_rows(conn)
-            lane_rows = _open_pg_lane_identity_rows(conn)
+            now_ms = int(time.time() * 1000)
+            rows = _open_pg_ticket_identity_rows(conn, now_ms=now_ms)
+            lane_rows = _open_pg_lane_identity_rows(conn, now_ms=now_ms)
     finally:
         engine.dispose()
     source_path = Path("pg://runtime-control-state/action-time-ticket")
@@ -242,7 +247,11 @@ def _pg_ticket_resume_pack(
     }, source_path
 
 
-def _open_pg_ticket_identity_rows(conn: sa.engine.Connection) -> list[dict[str, Any]]:
+def _open_pg_ticket_identity_rows(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> list[dict[str, Any]]:
     metadata = sa.MetaData()
     tickets = sa.Table("brc_action_time_tickets", metadata, autoload_with=conn)
     lanes = sa.Table("brc_action_time_lane_inputs", metadata, autoload_with=conn)
@@ -257,13 +266,18 @@ def _open_pg_ticket_identity_rows(conn: sa.engine.Connection) -> list[dict[str, 
             tickets.c.side,
             tickets.c.runtime_profile_id,
             tickets.c.status.label("ticket_status"),
+            tickets.c.expires_at_ms.label("ticket_expires_at_ms"),
+            tickets.c.created_at_ms.label("ticket_created_at_ms"),
             lanes.c.promotion_candidate_id.label("lane_promotion_candidate_id"),
             lanes.c.signal_event_id.label("lane_signal_event_id"),
             lanes.c.strategy_group_id.label("lane_strategy_group_id"),
             lanes.c.symbol.label("lane_symbol"),
             lanes.c.side.label("lane_side"),
             lanes.c.runtime_profile_id.label("lane_runtime_profile_id"),
+            lanes.c.lane_scope.label("lane_scope"),
             lanes.c.status.label("lane_status"),
+            lanes.c.expires_at_ms.label("lane_expires_at_ms"),
+            lanes.c.closed_at_ms.label("lane_closed_at_ms"),
         )
         .select_from(
             tickets.join(
@@ -273,19 +287,30 @@ def _open_pg_ticket_identity_rows(conn: sa.engine.Connection) -> list[dict[str, 
             )
         )
         .where(tickets.c.status.in_(sorted(OPEN_PG_TICKET_STATUSES)))
+        .where(tickets.c.expires_at_ms.is_not(None))
+        .where(tickets.c.expires_at_ms > now_ms)
         .where(lanes.c.lane_scope == "real_submit_candidate")
         .where(lanes.c.status.in_(sorted(OPEN_PG_LANE_STATUSES)))
+        .where(lanes.c.closed_at_ms.is_(None))
+        .where(lanes.c.expires_at_ms.is_not(None))
+        .where(lanes.c.expires_at_ms > now_ms)
         .order_by(tickets.c.created_at_ms.asc(), tickets.c.ticket_id.asc())
     )
     rows: list[dict[str, Any]] = []
     for row in conn.execute(statement).mappings():
         item = dict(row)
+        if not _joined_ticket_and_lane_are_current(item, now_ms=now_ms):
+            continue
         item["identity_mismatch_fields"] = _pg_ticket_identity_mismatch_fields(item)
         rows.append(item)
     return rows
 
 
-def _open_pg_lane_identity_rows(conn: sa.engine.Connection) -> list[dict[str, Any]]:
+def _open_pg_lane_identity_rows(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> list[dict[str, Any]]:
     metadata = sa.MetaData()
     lanes = sa.Table("brc_action_time_lane_inputs", metadata, autoload_with=conn)
     statement = (
@@ -297,13 +322,48 @@ def _open_pg_lane_identity_rows(conn: sa.engine.Connection) -> list[dict[str, An
             lanes.c.symbol,
             lanes.c.side,
             lanes.c.runtime_profile_id,
+            lanes.c.lane_scope,
             lanes.c.status.label("lane_status"),
+            lanes.c.expires_at_ms.label("lane_expires_at_ms"),
+            lanes.c.closed_at_ms.label("lane_closed_at_ms"),
         )
         .where(lanes.c.lane_scope == "real_submit_candidate")
         .where(lanes.c.status.in_(sorted(OPEN_PG_LANE_STATUSES)))
+        .where(lanes.c.closed_at_ms.is_(None))
+        .where(lanes.c.expires_at_ms.is_not(None))
+        .where(lanes.c.expires_at_ms > now_ms)
         .order_by(lanes.c.created_at_ms.asc(), lanes.c.action_time_lane_input_id.asc())
     )
-    return [dict(row) for row in conn.execute(statement).mappings()]
+    return [
+        item
+        for item in (dict(row) for row in conn.execute(statement).mappings())
+        if _joined_lane_is_current(item, now_ms=now_ms)
+    ]
+
+
+def _joined_ticket_and_lane_are_current(
+    row: dict[str, Any],
+    *,
+    now_ms: int,
+) -> bool:
+    ticket = {
+        "status": row.get("ticket_status"),
+        "expires_at_ms": row.get("ticket_expires_at_ms"),
+    }
+    return is_current_action_time_ticket(
+        ticket,
+        now_ms,
+    ) and _joined_lane_is_current(row, now_ms=now_ms)
+
+
+def _joined_lane_is_current(row: dict[str, Any], *, now_ms: int) -> bool:
+    lane = {
+        "lane_scope": row.get("lane_scope"),
+        "status": row.get("lane_status"),
+        "expires_at_ms": row.get("lane_expires_at_ms"),
+        "closed_at_ms": row.get("lane_closed_at_ms"),
+    }
+    return is_current_action_time_lane(lane, now_ms)
 
 
 def _pg_ticket_identity_mismatch_fields(row: dict[str, Any]) -> list[str]:

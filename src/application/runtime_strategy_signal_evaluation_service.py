@@ -388,6 +388,7 @@ class _MI001RuntimeReferenceEvaluator:
             playbook_id=signal_input.playbook_id,
             symbol=signal_input.symbol,
             timestamp_ms=signal_input.timestamp_ms,
+            trigger_candle_close_time_ms=signal_input.trigger_candle_close_time_ms,
             timeframe=signal_input.primary_timeframe,
             signal_type=signal_type,
             side=side,

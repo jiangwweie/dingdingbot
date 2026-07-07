@@ -79,6 +79,7 @@ def _signal_input() -> StrategyFamilySignalInput:
         binding_id="bind-001",
         symbol="BTC/USDT:USDT",
         timestamp_ms=1770000000200,
+        trigger_candle_close_time_ms=1770000000200,
         primary_timeframe="4h",
         context_timeframes=["1d", "1h"],
         market_snapshot=_market_snapshot(),
@@ -160,6 +161,7 @@ def test_can_construct_would_enter_signal_output():
         playbook_id="TF-001",
         symbol="BTC/USDT:USDT",
         timestamp_ms=1770000000400,
+        trigger_candle_close_time_ms=1770000000400,
         timeframe="4h",
         signal_type=SignalType.WOULD_ENTER,
         side=SignalSide.LONG,
@@ -187,9 +189,29 @@ def test_can_construct_would_enter_signal_output():
     assert output.side == SignalSide.LONG
     assert output.reason_codes == ["trend_follow_through", "atr_context_available"]
     assert output.input_refs.evaluation_ref == "eval-001"
+    assert output.time_authority == "trigger_candle_close_time_ms"
+    assert output.trigger_candle_close_time_ms == 1770000000400
+    assert output.model_dump(mode="json")["trigger_candle_close_time_ms"] == 1770000000400
     assert output.review_plan.review_required is True
     assert output.not_order is True
     assert output.not_execution_intent is True
+
+
+def test_would_enter_signal_output_requires_trigger_candle_close_time():
+    with pytest.raises(ValueError, match="trigger_candle_close_time_ms"):
+        StrategyFamilySignalOutput(
+            signal_id="sig-enter-missing-time",
+            evaluation_id="eval-001",
+            strategy_family_id="tf",
+            strategy_family_version_id="tf-v1",
+            symbol="BTC/USDT:USDT",
+            timestamp_ms=1770000000450,
+            timeframe="4h",
+            signal_type=SignalType.WOULD_ENTER,
+            side=SignalSide.LONG,
+            reason_codes=["missing_time_authority"],
+            input_refs=_input_refs(),
+        )
 
 
 @pytest.mark.parametrize(
@@ -217,6 +239,7 @@ def test_signal_output_rejects_forbidden_execution_order_fields(field_name: str)
             strategy_family_version_id="tf-v1",
             symbol="BTC/USDT:USDT",
             timestamp_ms=1770000000500,
+            trigger_candle_close_time_ms=1770000000500,
             timeframe="4h",
             signal_type=SignalType.WOULD_ENTER,
             side=SignalSide.LONG,
@@ -234,6 +257,7 @@ def test_high_confidence_does_not_authorize_execution():
         strategy_family_version_id="tf-v1",
         symbol="BTC/USDT:USDT",
         timestamp_ms=1770000000600,
+        trigger_candle_close_time_ms=1770000000600,
         timeframe="4h",
         signal_type=SignalType.WOULD_ENTER,
         side=SignalSide.SHORT,
@@ -290,6 +314,7 @@ def test_signal_output_serialization_round_trip_preserves_non_execution_flags():
         playbook_id="VB-001",
         symbol="ETH/USDT:USDT",
         timestamp_ms=1770000000900,
+        trigger_candle_close_time_ms=1770000000900,
         timeframe="1h",
         signal_type=SignalType.WOULD_REDUCE,
         side=SignalSide.LONG,

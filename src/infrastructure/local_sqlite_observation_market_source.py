@@ -79,6 +79,7 @@ class LocalSqliteObservationMarketSource:
                 low=Decimal(str(row[3])),
                 close=Decimal(str(row[4])),
                 volume=Decimal(str(row[5])),
+                close_time_ms=int(row[0]) + _timeframe_ms(timeframe) - 1,
             )
             for row in reversed(rows)
         ]
@@ -103,6 +104,7 @@ class LocalSqliteObservationMarketSource:
                 low=min(item.low for item in bucket),
                 close=bucket[-1].close,
                 volume=sum((item.volume for item in bucket), Decimal("0")),
+                close_time_ms=bucket[-1].close_time_ms,
             )
             for bucket in buckets[-limit:]
         ]
@@ -119,3 +121,13 @@ class LocalSqliteObservationMarketSource:
             timeframe=timeframe,
             limit=limit,
         )
+
+
+def _timeframe_ms(timeframe: str) -> int:
+    if timeframe == "1h":
+        return 60 * 60 * 1000
+    if timeframe == "4h":
+        return 4 * 60 * 60 * 1000
+    raise _LocalSqliteObservationDataUnavailable(
+        f"unsupported local observation timeframe: {timeframe}"
+    )

@@ -81,8 +81,8 @@ def publish_runtime_control_current_projections(
 ) -> dict[str, Any]:
     started_ms = int(time.time() * 1000)
     generated = datetime.now(timezone.utc).isoformat()
-    repository = PgBackedRuntimeControlStateRepository(conn)
-    control_state = repository.read_control_state()
+    repository = PgBackedRuntimeControlStateRepository(conn, now_ms=started_ms)
+    control_state = repository.read_monitor_control_state()
     projection_control_state = {
         **control_state,
         # Build the new current readiness projection from base facts/scope,

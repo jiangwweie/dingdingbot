@@ -34,6 +34,8 @@ from src.domain.runtime_readiness_state import (  # noqa: E402
 )
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
+    is_current_fact_snapshot,
+    is_current_live_signal,
 )
 from scripts.strategygroup_non_executing_projection import (  # noqa: E402
     recursive_true_key_paths,
@@ -707,8 +709,11 @@ def _current_pretrade_readiness_by_lane(
 def _current_fact_snapshot_by_lane(
     control_state: dict[str, Any],
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
     snapshots: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("runtime_fact_snapshots")):
+        if not is_current_fact_snapshot(row, now_ms):
+            continue
         key = _lane_key(row)
         if not all(key):
             continue
@@ -723,13 +728,10 @@ def _current_fact_snapshot_by_lane(
 def _fresh_signal_by_lane(
     control_state: dict[str, Any],
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
     signals: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("live_signal_events")):
-        if row.get("status") != "facts_validated":
-            continue
-        if row.get("freshness_state") != "fresh":
-            continue
-        if row.get("expires_at_ms") is None:
+        if not is_current_live_signal(row, now_ms):
             continue
         key = _lane_key(row)
         current = signals.get(key)
@@ -738,6 +740,16 @@ def _fresh_signal_by_lane(
         ):
             signals[key] = row
     return signals
+
+
+def _control_state_now_ms(control_state: dict[str, Any]) -> int:
+    try:
+        value = int(control_state.get("read_now_ms") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value > 0:
+        return value
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
 
 
 def _current_watcher_coverage_by_lane(

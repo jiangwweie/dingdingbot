@@ -175,6 +175,8 @@ class StrategyFamilySignalInput(StrategyFamilySignalModel):
     binding_id: Optional[str] = Field(default=None, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
     timestamp_ms: int = Field(ge=0)
+    time_authority: Literal["trigger_candle_close_time_ms"] = "trigger_candle_close_time_ms"
+    trigger_candle_close_time_ms: Optional[int] = Field(default=None, ge=0)
     primary_timeframe: str = Field(min_length=1, max_length=32)
     context_timeframes: list[str] = Field(default_factory=list)
     market_snapshot: MarketSnapshot
@@ -212,6 +214,8 @@ class StrategyFamilySignalOutput(StrategyFamilySignalModel):
     playbook_id: Optional[str] = Field(default=None, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
     timestamp_ms: int = Field(ge=0)
+    time_authority: Literal["trigger_candle_close_time_ms"] = "trigger_candle_close_time_ms"
+    trigger_candle_close_time_ms: Optional[int] = Field(default=None, ge=0)
     timeframe: str = Field(min_length=1, max_length=32)
     signal_type: SignalType
     side: SignalSide = SignalSide.NONE
@@ -236,6 +240,11 @@ class StrategyFamilySignalOutput(StrategyFamilySignalModel):
     @model_validator(mode="after")
     def _enforce_signal_invariants(self) -> "StrategyFamilySignalOutput":
         reject_forbidden_execution_fields(self.model_dump(mode="python"), root="signal_output")
+        if (
+            self.signal_type == SignalType.WOULD_ENTER
+            and self.trigger_candle_close_time_ms is None
+        ):
+            raise ValueError("would_enter signal requires trigger_candle_close_time_ms")
         if self.signal_type == SignalType.NO_ACTION and self.side != SignalSide.NONE:
             raise ValueError("no_action signal must use side=none")
         return self

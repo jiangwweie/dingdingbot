@@ -325,6 +325,39 @@ def test_action_time_trigger_counts_ignore_expired_closed_and_invalidated_rows()
         engine.dispose()
 
 
+def test_action_time_trigger_counts_ignore_non_live_fresh_signal():
+    module = _load_module()
+    engine = _action_time_trigger_engine()
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_live_signal_events VALUES (
+                        'signal-replay',
+                        'replay',
+                        'fresh',
+                        'facts_validated',
+                        :expires_at_ms,
+                        NULL
+                    )
+                    """
+                ),
+                {"expires_at_ms": now_ms + 60_000},
+            )
+            counts = module._action_time_trigger_counts(conn, now_ms=now_ms)
+    finally:
+        engine.dispose()
+
+    assert counts == {
+        "fresh_live_signal_events": 0,
+        "open_promotion_candidates": 0,
+        "open_action_time_lane_inputs": 0,
+        "open_action_time_tickets": 0,
+    }
+
+
 def test_server_product_state_refresh_sequence_closure_mode_skips_control_rebuild(
     tmp_path: Path,
 ):
@@ -735,6 +768,7 @@ def _action_time_trigger_engine():
                 """
                 CREATE TABLE brc_live_signal_events (
                     signal_event_id TEXT PRIMARY KEY,
+                    source_kind TEXT,
                     freshness_state TEXT,
                     status TEXT,
                     expires_at_ms INTEGER,
@@ -797,6 +831,7 @@ def _insert_action_time_trigger_rows(
             """
             INSERT INTO brc_live_signal_events VALUES (
                 :id,
+                'live_market',
                 'fresh',
                 'facts_validated',
                 :expires_at_ms,

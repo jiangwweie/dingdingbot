@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -12,8 +13,18 @@ from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
+from scripts import materialize_action_time_finalgate_preflight as finalgate
+from scripts import materialize_action_time_operation_layer_handoff as handoff
 from scripts import materialize_action_time_ticket as ticket_materializer
 from scripts import materialize_pg_promotion_action_time_lane as lane_materializer
+from scripts import materialize_ticket_bound_protected_submit_attempt as protected_submit
+from scripts import materialize_ticket_bound_runtime_safety_state as safety_state
+from scripts import runtime_active_observation_monitor
+from src.domain.strategy_family_signal import (
+    SignalSide,
+    SignalType,
+    StrategyFamilySignalOutput,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -168,6 +179,216 @@ def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_con
     assert ticket_payload["side"] == "long"
 
 
+def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
+    pg_control_connection,
+    monkeypatch,
+):
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        "MPG-001",
+        "OPUSDT",
+        "long",
+        insert_signal=False,
+    )
+
+    class _FakeClient:
+        def request_json(self, method, path, *, query=None, body=None):
+            return {
+                "http_status": 200,
+                "body": [
+                    {
+                        "runtime_instance_id": "runtime:MPG-001:OPUSDT:long",
+                        "strategy_family_id": "MPG-001",
+                        "strategy_family_version_id": "sgv:MPG-001:v1",
+                        "symbol": "OPUSDT",
+                        "side": "long",
+                        "status": "active",
+                    }
+                ],
+            }
+
+    def _args(**overrides):
+        values = {
+            "env_file": None,
+            "api_base": "http://unit",
+            "source": "live_market",
+            "include_exchange": False,
+            "allow_prepare_records": False,
+            "runtime_instance_id": [],
+            "strategy_family_id": [],
+            "database_url": "sqlite://unit",
+            "allow_non_postgres_for_test": True,
+            "max_runtimes": 100,
+            "max_cycles_per_runtime": 1,
+            "interval_seconds": 0.0,
+            "continue_on_blocked": False,
+            "one_hour_limit": 25,
+            "four_hour_limit": 25,
+            "timeout_seconds": 10.0,
+            "playbook_id": None,
+            "include_runtime_artifacts": False,
+            "owner_operator_id": "owner",
+            "owner_confirmation_reference": "owner-authorized-unit",
+            "reason": "unit test",
+        }
+        values.update(overrides)
+        return type("Args", (), values)()
+
+    def _candidate_universe(*, database_url, allow_non_postgres_for_test):
+        return {}, {
+            "source": "pg_runtime_control_state:candidate_scope",
+            "loaded": False,
+            "strategy_group_count": 0,
+            "side_scope": {},
+        }
+
+    def _runtime_artifact_builder(args):
+        trigger_candle_open_time_ms = NOW_MS - 3_630_000
+        trigger_candle_close_time_ms = NOW_MS - 30_000
+        output = StrategyFamilySignalOutput(
+            signal_id="signal:MPG-001:OPUSDT:long:unit",
+            evaluation_id="eval:MPG-001:OPUSDT:long:unit",
+            strategy_family_id="MPG-001",
+            strategy_family_version_id="sgv:MPG-001:v1",
+            symbol="OPUSDT",
+            timestamp_ms=trigger_candle_close_time_ms,
+            trigger_candle_close_time_ms=trigger_candle_close_time_ms,
+            timeframe="1h",
+            signal_type=SignalType.WOULD_ENTER,
+            side=SignalSide.LONG,
+            confidence=Decimal("0.82"),
+            reason_codes=["writer_repository_lane_contract"],
+            human_summary="MPG unit would enter long.",
+            evidence_payload={
+                "trigger_candle_open_time_ms": trigger_candle_open_time_ms,
+                "trigger_candle_close_time_ms": trigger_candle_close_time_ms,
+            },
+        ).model_dump(mode="json")
+        return {
+            "status": "waiting_for_signal",
+            "blockers": [],
+            "warnings": [],
+            "latest_artifact": {
+                "observation_payload": {
+                    "signal_artifact": {
+                        "evaluation_result": {
+                            "status": "observe_only",
+                            "evaluator_id": "MPG001UnitEvaluator",
+                            "can_call_semantic_binding": True,
+                            "semantics_binding_found": True,
+                            "strategy_candidate_mode": "shadow_order_candidate_allowed",
+                            "output": output,
+                        }
+                    }
+                }
+            },
+            "safety_invariants": {
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            },
+        }
+
+    monkeypatch.setattr(
+        runtime_active_observation_monitor,
+        "_read_candidate_universe_from_pg",
+        _candidate_universe,
+    )
+    monitor_payload = runtime_active_observation_monitor._build_monitor_artifact(
+        _args(),
+        client=_FakeClient(),
+        runtime_artifact_builder=_runtime_artifact_builder,
+    )
+    signal_summary = monitor_payload["runtime_summaries"][0]["signal_summary"]
+    assert signal_summary["trigger_candle_close_time_ms"] == NOW_MS - 30_000
+
+    write_payload = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        monitor_payload,
+        database_url="unused://pg-control-test",
+        allow_non_postgres_for_test=True,
+        now_ms=NOW_MS,
+        conn=pg_control_connection,
+    )
+
+    assert write_payload["status"] == "pg_live_signal_events_written"
+    signal_event = pg_control_connection.execute(
+        text(
+            """
+            SELECT event_time_ms, trigger_candle_close_time_ms
+            FROM brc_live_signal_events
+            """
+        )
+    ).mappings().one()
+    assert signal_event["event_time_ms"] == NOW_MS - 30_000
+    assert signal_event["trigger_candle_close_time_ms"] == NOW_MS - 30_000
+    assert signal_event["event_time_ms"] != NOW_MS - 3_630_000
+
+    payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "promotion_action_time_lane_created"
+    assert payload["strategy_group_id"] == "MPG-001"
+    assert payload["symbol"] == "OPUSDT"
+    assert payload["side"] == "long"
+    lane = pg_control_connection.execute(
+        text(
+            """
+            SELECT status, signal_event_id
+            FROM brc_action_time_lane_inputs
+            """
+        )
+    ).mappings().one()
+    assert lane["status"] == "ticket_pending"
+    assert lane["signal_event_id"] in write_payload["signal_event_ids"]
+
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+    assert ticket_payload["status"] == "action_time_ticket_created"
+    assert ticket_payload["action_time_lane_input_id"] == payload["action_time_lane_input_id"]
+
+    finalgate_payload = finalgate.materialize_action_time_finalgate_preflight(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        now_ms=NOW_MS + 2,
+    )
+    assert finalgate_payload["status"] == "finalgate_ready"
+
+    handoff_payload = handoff.materialize_action_time_operation_layer_handoff(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        finalgate_pass_id=str(finalgate_payload["finalgate_pass_id"]),
+        now_ms=NOW_MS + 3,
+    )
+    assert handoff_payload["status"] == "operation_layer_handoff_ready"
+
+    safety_payload = safety_state.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
+        now_ms=NOW_MS + 4,
+    )
+    assert safety_payload["status"] == "runtime_safety_state_ready"
+    assert safety_payload["submit_allowed"] is True
+
+    submit_payload = protected_submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        operation_submit_command_id=str(handoff_payload["operation_submit_command_id"]),
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 5,
+    )
+    assert submit_payload["status"] == "disabled_smoke_passed"
+    assert submit_payload["submit_allowed"] is True
+    assert submit_payload["official_operation_layer_submit_called"] is True
+    assert submit_payload["exchange_write_called"] is False
+    assert submit_payload["order_created"] is False
+    assert submit_payload["order_lifecycle_called"] is False
+
+
 def test_blocks_fresh_signal_without_action_time_facts(pg_control_connection):
     _insert_ready_fresh_signal(
         pg_control_connection,
@@ -312,7 +533,9 @@ def test_existing_open_real_lane_prevents_duplicate(pg_control_connection):
     assert _count(pg_control_connection, "brc_protection_references") == 1
 
 
-def test_expired_open_real_lane_blocks_with_close_action(pg_control_connection):
+def test_expired_open_real_lane_is_expired_and_does_not_block_new_lane(
+    pg_control_connection,
+):
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
     first = lane_materializer.materialize_pg_promotion_action_time_lane(
         pg_control_connection,
@@ -331,17 +554,179 @@ def test_expired_open_real_lane_blocks_with_close_action(pg_control_connection):
             "lane_id": first["action_time_lane_input_id"],
         },
     )
+    _insert_ready_fresh_signal(pg_control_connection, "MPG-001", "OPUSDT", "long")
 
     second = lane_materializer.materialize_pg_promotion_action_time_lane(
         pg_control_connection,
         now_ms=NOW_MS + 1,
     )
 
-    assert second["status"] == "open_action_time_lane_expired"
-    assert second["blockers"] == ["open_action_time_lane_expired_not_closed"]
-    assert second["next_action"] == "expire_or_close_pg_action_time_lane"
-    assert second["action_time_lane_input_id"] == first["action_time_lane_input_id"]
-    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 1
+    assert second["status"] == "promotion_action_time_lane_created"
+    assert second["action_time_lane_input_id"] != first["action_time_lane_input_id"]
+    statuses = {
+        row["action_time_lane_input_id"]: row["status"]
+        for row in pg_control_connection.execute(
+            text(
+                """
+                SELECT action_time_lane_input_id, status
+                FROM brc_action_time_lane_inputs
+                """
+            )
+        ).mappings()
+    }
+    assert statuses[first["action_time_lane_input_id"]] == "expired"
+    assert statuses[second["action_time_lane_input_id"]] == "ticket_pending"
+    transition = pg_control_connection.execute(
+        text(
+            """
+            SELECT state_table, entity_id, from_status, to_status, transition_reason,
+                   writer
+            FROM brc_state_transition_events
+            WHERE entity_id = :lane_id
+            """
+        ),
+        {"lane_id": first["action_time_lane_input_id"]},
+    ).mappings().one()
+    assert transition["state_table"] == "brc_action_time_lane_inputs"
+    assert transition["from_status"] == "ticket_pending"
+    assert transition["to_status"] == "expired"
+    assert transition["transition_reason"] == (
+        "action_time_lane_expired_before_materialization"
+    )
+    assert transition["writer"] == "materialize_pg_promotion_action_time_lane"
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 2
+
+
+def test_ticket_created_lane_with_current_ticket_is_not_expired(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET expires_at_ms = :expires_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {
+            "expires_at_ms": NOW_MS - 1,
+            "lane_id": lane_payload["action_time_lane_input_id"],
+        },
+    )
+
+    transitioned = lane_materializer._expire_stale_open_real_lanes(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+
+    lane = pg_control_connection.execute(
+        text(
+            """
+            SELECT status, closed_at_ms
+            FROM brc_action_time_lane_inputs
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"lane_id": lane_payload["action_time_lane_input_id"]},
+    ).mappings().one()
+    transition_count = pg_control_connection.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM brc_state_transition_events
+            WHERE entity_id = :lane_id
+            """
+        ),
+        {"lane_id": lane_payload["action_time_lane_input_id"]},
+    ).scalar_one()
+    assert ticket_payload["status"] == "action_time_ticket_created"
+    assert transitioned == 0
+    assert lane["status"] == "ticket_created"
+    assert lane["closed_at_ms"] is None
+    assert transition_count == 0
+
+
+def test_ticket_created_lane_with_expired_ticket_is_closed_with_transition(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET expires_at_ms = :expired_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {
+            "expired_at_ms": NOW_MS - 1,
+            "lane_id": lane_payload["action_time_lane_input_id"],
+        },
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET expires_at_ms = :expired_at_ms
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {
+            "expired_at_ms": NOW_MS - 1,
+            "ticket_id": ticket_payload["ticket_id"],
+        },
+    )
+
+    transitioned = lane_materializer._expire_stale_open_real_lanes(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+
+    lane = pg_control_connection.execute(
+        text(
+            """
+            SELECT status, closed_at_ms
+            FROM brc_action_time_lane_inputs
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"lane_id": lane_payload["action_time_lane_input_id"]},
+    ).mappings().one()
+    transition = pg_control_connection.execute(
+        text(
+            """
+            SELECT from_status, to_status, transition_reason
+            FROM brc_state_transition_events
+            WHERE entity_id = :lane_id
+            """
+        ),
+        {"lane_id": lane_payload["action_time_lane_input_id"]},
+    ).mappings().one()
+    assert transitioned == 1
+    assert lane["status"] == "closed"
+    assert lane["closed_at_ms"] == NOW_MS + 1
+    assert transition["from_status"] == "ticket_created"
+    assert transition["to_status"] == "closed"
+    assert transition["transition_reason"] == (
+        "ticket_created_lane_closed_after_ticket_non_current"
+    )
 
 
 def test_multiple_fresh_candidates_select_one_by_strategy_priority(pg_control_connection):
@@ -478,6 +863,7 @@ def _insert_ready_fresh_signal(
     side: str,
     *,
     insert_action_time_fact: bool = True,
+    insert_signal: bool = True,
     fact_values: dict | None = None,
 ) -> None:
     row = _candidate_runtime_row(conn, strategy_group_id, symbol, side)
@@ -500,6 +886,7 @@ def _insert_ready_fresh_signal(
         fact_values=fact_values,
         observed_at_ms=NOW_MS - 20_000,
         valid_until_ms=expires_at_ms,
+        source_kind="live_market",
     )
     if insert_action_time_fact:
         _insert_fact(
@@ -533,12 +920,13 @@ def _insert_ready_fresh_signal(
         observed_at_ms=NOW_MS - 7_000,
         valid_until_ms=expires_at_ms,
     )
-    _insert_signal(
-        conn,
-        row,
-        public_fact_id=public_fact_id,
-        signal_event_id=signal_event_id,
-    )
+    if insert_signal:
+        _insert_signal(
+            conn,
+            row,
+            public_fact_id=public_fact_id,
+            signal_event_id=signal_event_id,
+        )
     conn.execute(
         text(
             """
@@ -700,6 +1088,7 @@ def _insert_fact(
     fact_values: dict,
     observed_at_ms: int,
     valid_until_ms: int,
+    source_kind: str = "unit_test",
 ) -> None:
     conn.execute(
         text(
@@ -711,7 +1100,7 @@ def _insert_fact(
               observed_at_ms, valid_until_ms, created_at_ms
             ) VALUES (
               :fact_snapshot_id, :strategy_group_id, :symbol, :side, :runtime_profile_id,
-              :fact_surface, 'unit_test', :source_ref, true, true, 'fresh',
+              :fact_surface, :source_kind, :source_ref, true, true, 'fresh',
               :failed_facts, :fact_values, 'market_wait_validated',
               :observed_at_ms, :valid_until_ms, :created_at_ms
             )
@@ -724,6 +1113,7 @@ def _insert_fact(
             "side": row["side"],
             "runtime_profile_id": row["runtime_profile_id"],
             "fact_surface": fact_surface,
+            "source_kind": source_kind,
             "source_ref": f"unit:{fact_surface}",
             "failed_facts": _json([]),
             "fact_values": _json(fact_values),

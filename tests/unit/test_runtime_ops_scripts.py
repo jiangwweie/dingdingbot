@@ -4,6 +4,7 @@ import os
 import sys
 from argparse import Namespace
 
+from scripts.ops import check_tokyo_runtime_ops_health_once
 from scripts import create_runtime_closed_trade_review, recover_runtime_exchange_close_projection
 from scripts import runtime_live_position_monitor, runtime_position_exit_plan
 
@@ -25,6 +26,18 @@ def test_runtime_monitor_env_loader_fills_empty_existing_env(monkeypatch, tmp_pa
 
     assert os.environ["PG_DATABASE_URL"] == "postgresql+asyncpg://example"
     assert os.environ["EXCHANGE_API_KEY"] == "key-from-file"
+
+
+def test_tokyo_ops_health_pg_counts_do_not_expose_dsn_in_command_plan():
+    payload = check_tokyo_runtime_ops_health_once.build_payload(execute_local=False)
+    row = next(item for item in payload["results"] if item["name"] == "pg_runtime_row_counts")
+    command_text = " ".join(row["command"])
+
+    assert row["status"] == "planned"
+    assert row["command"] == ["internal_sqlalchemy_readonly_row_counts"]
+    assert "psql" not in command_text
+    assert "PG_DATABASE_URL" not in command_text
+    assert "DATABASE_URL" not in command_text
 
 
 def test_runtime_monitor_cli_stdout_is_json_only(monkeypatch, capsys):

@@ -152,6 +152,7 @@ def _signal_input(
         strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         primary_timeframe="1h",
         context_timeframes=["4h"],
         market_snapshot=MarketSnapshot(
@@ -203,6 +204,7 @@ class _FakeShortEvaluator:
             strategy_family_version_id=signal_input.strategy_family_version_id,
             symbol=signal_input.symbol,
             timestamp_ms=signal_input.timestamp_ms,
+            trigger_candle_close_time_ms=signal_input.trigger_candle_close_time_ms,
             timeframe=signal_input.primary_timeframe,
             signal_type=SignalType.WOULD_ENTER,
             side=SignalSide.SHORT,

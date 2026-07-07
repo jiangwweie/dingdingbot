@@ -204,6 +204,7 @@ def _strategy_output(
         strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         timeframe="1h",
         signal_type=signal_type,
         side=side,

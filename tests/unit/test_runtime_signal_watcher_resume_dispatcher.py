@@ -250,6 +250,9 @@ def _pg_ticket_identity_db(
     lane_count: int = 1,
     ticket_count: int = 1,
     ticket_symbol: str = "ETHUSDT",
+    expired_lane: bool = False,
+    closed_lane: bool = False,
+    expired_ticket: bool = False,
 ) -> str:
     db_path = tmp_path / "runtime-control-state.db"
     engine = sa.create_engine(f"sqlite:///{db_path}")
@@ -268,6 +271,8 @@ def _pg_ticket_identity_db(
                         runtime_profile_id TEXT,
                         lane_scope TEXT,
                         status TEXT,
+                        expires_at_ms INTEGER,
+                        closed_at_ms INTEGER,
                         created_at_ms INTEGER
                     )
                     """
@@ -286,6 +291,7 @@ def _pg_ticket_identity_db(
                         side TEXT,
                         runtime_profile_id TEXT,
                         status TEXT,
+                        expires_at_ms INTEGER,
                         created_at_ms INTEGER
                     )
                     """
@@ -306,6 +312,8 @@ def _pg_ticket_identity_db(
                             runtime_profile_id,
                             lane_scope,
                             status,
+                            expires_at_ms,
+                            closed_at_ms,
                             created_at_ms
                         ) VALUES (
                             :lane_id,
@@ -317,6 +325,8 @@ def _pg_ticket_identity_db(
                             'runtime-profile-v0',
                             'real_submit_candidate',
                             'ticket_created',
+                            :expires_at_ms,
+                            :closed_at_ms,
                             :created_at_ms
                         )
                         """
@@ -325,6 +335,8 @@ def _pg_ticket_identity_db(
                         "lane_id": f"lane-{suffix}",
                         "promotion_id": f"promotion-{suffix}",
                         "signal_id": f"signal-{suffix}",
+                        "expires_at_ms": 1 if expired_lane else 4_102_444_800_000,
+                        "closed_at_ms": 2 if closed_lane else None,
                         "created_at_ms": 1000 + suffix,
                     },
                 )
@@ -343,6 +355,7 @@ def _pg_ticket_identity_db(
                             side,
                             runtime_profile_id,
                             status,
+                            expires_at_ms,
                             created_at_ms
                         ) VALUES (
                             :ticket_id,
@@ -354,6 +367,7 @@ def _pg_ticket_identity_db(
                             'long',
                             'runtime-profile-v0',
                             'created',
+                            :expires_at_ms,
                             :created_at_ms
                         )
                         """
@@ -364,6 +378,7 @@ def _pg_ticket_identity_db(
                         "promotion_id": f"promotion-{suffix}",
                         "signal_id": f"signal-{suffix}",
                         "ticket_symbol": ticket_symbol,
+                        "expires_at_ms": 1 if expired_ticket else 4_102_444_800_000,
                         "created_at_ms": 2000 + suffix,
                     },
                 )
@@ -2174,6 +2189,159 @@ def test_dispatcher_pg_ticket_identity_missing_ticket_for_open_lane_fails_closed
     assert resume_pack["owner_state"]["blocker_class"] == "runtime_data_gap"
     assert resume_pack["blockers"] == ["missing_fact:open_pg_action_time_ticket"]
     assert resume_pack["safety_invariants"]["exchange_write_called"] is False
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"expired_lane": True},
+        {"closed_lane": True},
+    ],
+)
+def test_dispatcher_pg_ticket_identity_ignores_non_current_lane(
+    tmp_path,
+    kwargs,
+):
+    database_url = _pg_ticket_identity_db(
+        tmp_path,
+        lane_count=1,
+        ticket_count=1,
+        **kwargs,
+    )
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["status"] == "waiting_for_market"
+    assert resume_pack["pg_ticket_identity_dispatch_status"] == (
+        "waiting_for_pg_action_time_ticket"
+    )
+    assert resume_pack["blockers"] == []
+
+
+def test_dispatcher_pg_ticket_identity_expired_ticket_for_open_lane_fails_closed(
+    tmp_path,
+):
+    database_url = _pg_ticket_identity_db(
+        tmp_path,
+        lane_count=1,
+        ticket_count=1,
+        expired_ticket=True,
+    )
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["status"] == "blocked"
+    assert resume_pack["pg_ticket_identity_dispatch_status"] == (
+        "blocked_by_missing_pg_ticket_identity"
+    )
+    assert resume_pack["blockers"] == ["missing_fact:open_pg_action_time_ticket"]
+
+
+def test_dispatcher_pg_ticket_identity_filters_historical_rows_before_current_check(
+    tmp_path,
+):
+    database_url = _pg_ticket_identity_db(tmp_path, lane_count=1, ticket_count=1)
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            for suffix in range(2, 102):
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_action_time_lane_inputs (
+                            action_time_lane_input_id,
+                            promotion_candidate_id,
+                            signal_event_id,
+                            strategy_group_id,
+                            symbol,
+                            side,
+                            runtime_profile_id,
+                            lane_scope,
+                            status,
+                            expires_at_ms,
+                            closed_at_ms,
+                            created_at_ms
+                        ) VALUES (
+                            :lane_id,
+                            :promotion_id,
+                            :signal_id,
+                            'SOR-001',
+                            'ETHUSDT',
+                            'long',
+                            'runtime-profile-v0',
+                            'real_submit_candidate',
+                            'ticket_created',
+                            1,
+                            NULL,
+                            :created_at_ms
+                        )
+                        """
+                    ),
+                    {
+                        "lane_id": f"historical-lane-{suffix}",
+                        "promotion_id": f"historical-promotion-{suffix}",
+                        "signal_id": f"historical-signal-{suffix}",
+                        "created_at_ms": suffix,
+                    },
+                )
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_action_time_tickets (
+                            ticket_id,
+                            action_time_lane_input_id,
+                            promotion_candidate_id,
+                            signal_event_id,
+                            strategy_group_id,
+                            symbol,
+                            side,
+                            runtime_profile_id,
+                            status,
+                            expires_at_ms,
+                            created_at_ms
+                        ) VALUES (
+                            :ticket_id,
+                            :lane_id,
+                            :promotion_id,
+                            :signal_id,
+                            'SOR-001',
+                            'ETHUSDT',
+                            'long',
+                            'runtime-profile-v0',
+                            'created',
+                            1,
+                            :created_at_ms
+                        )
+                        """
+                    ),
+                    {
+                        "ticket_id": f"historical-ticket-{suffix}",
+                        "lane_id": f"historical-lane-{suffix}",
+                        "promotion_id": f"historical-promotion-{suffix}",
+                        "signal_id": f"historical-signal-{suffix}",
+                        "created_at_ms": suffix,
+                    },
+                )
+    finally:
+        engine.dispose()
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["status"] == "ready_for_action_time_final_gate"
+    assert resume_pack["scope"] == "pg_ticket_bound_resume_identity"
+    assert resume_pack["ticket_id"] == "ticket-1"
+    assert resume_pack["action_time_ticket_id"] == "ticket-1"
+    assert resume_pack["action_time_lane_input_id"] == "lane-1"
+    assert resume_pack["blockers"] == []
 
 
 def test_dispatcher_pg_ticket_identity_multiple_fails_closed(tmp_path):

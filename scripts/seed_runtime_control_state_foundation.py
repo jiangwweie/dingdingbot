@@ -580,26 +580,50 @@ def _append_required_fact_rows(
     version_id = _strategy_group_version_id(seed.strategy_group_id)
     for fact_key in seed.required_facts:
         fact_contract_id = f"fact_contract:{version_id}:{fact_key}:finalgate"
-        rows["brc_required_fact_contracts"].append(
-            {
-                "fact_contract_id": fact_contract_id,
-                "strategy_group_version_id": version_id,
-                "fact_key": fact_key,
-                "fact_group": _fact_group(fact_key),
-                "required_surface": "finalgate",
-                "source_kind": "derived" if "reference" in fact_key else "watcher",
-                "freshness_ms": seed.freshness_window_ms,
-                "missing_blocker_class": "fact_missing",
-                "failed_blocker_class": "computed_not_satisfied",
-                "required_for_live_submit": True,
-                "definition_payload": {
-                    "event_id": seed.event_id,
-                    "operator": "exists" if "reference" in fact_key else "eq",
-                    "expected_value": None if "reference" in fact_key else True,
-                },
-                "created_at_ms": now_ms,
-            }
+        existing_contract = next(
+            (
+                row
+                for row in rows["brc_required_fact_contracts"]
+                if row["fact_contract_id"] == fact_contract_id
+            ),
+            None,
         )
+        if existing_contract is None:
+            rows["brc_required_fact_contracts"].append(
+                {
+                    "fact_contract_id": fact_contract_id,
+                    "strategy_group_version_id": version_id,
+                    "fact_key": fact_key,
+                    "fact_group": _fact_group(fact_key),
+                    "required_surface": "finalgate",
+                    "source_kind": "derived" if "reference" in fact_key else "watcher",
+                    "freshness_ms": seed.freshness_window_ms,
+                    "missing_blocker_class": "fact_missing",
+                    "failed_blocker_class": "computed_not_satisfied",
+                    "required_for_live_submit": True,
+                    "definition_payload": {
+                        "event_id": seed.event_id,
+                        "event_ids": [seed.event_id],
+                        "fact_role": "required",
+                        "operator": "exists" if "reference" in fact_key else "eq",
+                        "expected_value": None if "reference" in fact_key else True,
+                    },
+                    "created_at_ms": now_ms,
+                },
+            )
+        else:
+            payload = dict(existing_contract["definition_payload"])
+            event_ids = {
+                str(item)
+                for item in payload.get("event_ids", [])
+                if str(item)
+            }
+            if payload.get("event_id"):
+                event_ids.add(str(payload["event_id"]))
+            event_ids.add(seed.event_id)
+            payload["event_ids"] = sorted(event_ids)
+            payload["fact_role"] = str(payload.get("fact_role") or "required")
+            existing_contract["definition_payload"] = payload
         rows["brc_strategy_event_required_facts"].append(
             {
                 "event_required_fact_id": f"event_fact:{event_spec_id}:{fact_key}",
@@ -623,6 +647,30 @@ def _append_required_fact_rows(
             }
         )
     for fact_key in seed.disable_facts:
+        fact_contract_id = f"fact_contract:{version_id}:{fact_key}:finalgate:disable"
+        rows["brc_required_fact_contracts"].append(
+            {
+                "fact_contract_id": fact_contract_id,
+                "strategy_group_version_id": version_id,
+                "fact_key": fact_key,
+                "fact_group": _fact_group(fact_key),
+                "required_surface": "finalgate",
+                "source_kind": "watcher",
+                "freshness_ms": seed.freshness_window_ms,
+                "missing_blocker_class": "fact_missing",
+                "failed_blocker_class": "strategy_disabled",
+                "required_for_live_submit": True,
+                "definition_payload": {
+                    "event_id": seed.event_id,
+                    "event_ids": [seed.event_id],
+                    "fact_role": "disable",
+                    "operator": "eq",
+                    "expected_value": True,
+                    "disable_on_match": True,
+                },
+                "created_at_ms": now_ms,
+            }
+        )
         rows["brc_strategy_event_required_facts"].append(
             {
                 "event_required_fact_id": f"event_fact:{event_spec_id}:{fact_key}",

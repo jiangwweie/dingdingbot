@@ -224,6 +224,11 @@ def run_server_product_state_refresh_sequence(
         "step_results": step_results,
         "safety_invariants": {
             "calls_finalgate": False,
+            "calls_action_time_finalgate_preflight": (
+                "materialize_action_time_finalgate_preflight"
+                in attempted_step_names
+            ),
+            "calls_finalgate_submit_authority": False,
             "calls_ticket_bound_finalgate_preflight": (
                 "materialize_action_time_finalgate_preflight"
                 in attempted_step_names
@@ -238,6 +243,10 @@ def run_server_product_state_refresh_sequence(
             ),
             "calls_ticket_bound_post_submit_closure": (
                 "materialize_ticket_bound_post_submit_closure"
+                in attempted_step_names
+            ),
+            "calls_operation_layer_handoff": (
+                "materialize_action_time_operation_layer_handoff"
                 in attempted_step_names
             ),
             "calls_operation_layer_submit": False,
@@ -310,10 +319,13 @@ def _empty_refresh_report(
 def _empty_safety_invariants() -> dict[str, bool]:
     return {
         "calls_finalgate": False,
+        "calls_action_time_finalgate_preflight": False,
+        "calls_finalgate_submit_authority": False,
         "calls_ticket_bound_finalgate_preflight": False,
         "calls_ticket_bound_operation_layer_handoff": False,
         "calls_ticket_bound_runtime_safety_state": False,
         "calls_ticket_bound_post_submit_closure": False,
+        "calls_operation_layer_handoff": False,
         "calls_operation_layer_submit": False,
         "calls_exchange_write": False,
         "places_order": False,
@@ -379,6 +391,7 @@ def _action_time_trigger_counts(
             sa.and_(
                 live_signals.c.freshness_state == "fresh",
                 live_signals.c.status == "facts_validated",
+                live_signals.c.source_kind == "live_market",
                 live_signals.c.expires_at_ms.is_not(None),
                 live_signals.c.expires_at_ms > now,
                 live_signals.c.invalidated_at_ms.is_(None),

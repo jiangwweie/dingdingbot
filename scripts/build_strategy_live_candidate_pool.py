@@ -22,6 +22,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
+    is_current_action_time_lane,
+    is_current_fact_snapshot,
+    is_current_live_signal,
 )
 
 from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
@@ -247,12 +250,32 @@ def _candidate_pool_inputs_from_control_state(
             "PG control state missing active candidate scope for: "
             + ", ".join(sorted(missing_strategy_groups))
         )
+    extra_strategy_groups = {
+        str(row.get("strategy_group_id") or "")
+        for row in candidate_rows
+        if str(row.get("strategy_group_id") or "") not in set(WIP_LANES)
+    }
+    if extra_strategy_groups:
+        raise ValueError(
+            "PG control state has active candidate scope outside WIP replacement audit: "
+            + ", ".join(sorted(extra_strategy_groups))
+        )
 
     event_by_id = {
         str(row.get("event_spec_id") or ""): row
         for row in _dict_rows(control_state.get("strategy_side_event_specs"))
         if row.get("status") == "current"
     }
+    extra_event_strategy_groups = {
+        str(row.get("strategy_group_id") or "")
+        for row in event_by_id.values()
+        if str(row.get("strategy_group_id") or "") not in set(WIP_LANES)
+    }
+    if extra_event_strategy_groups:
+        raise ValueError(
+            "PG control state has current event spec outside WIP replacement audit: "
+            + ", ".join(sorted(extra_event_strategy_groups))
+        )
     binding_by_candidate = _active_scope_event_binding_by_candidate(control_state)
     runtime_by_candidate = _active_runtime_scope_by_candidate(control_state)
     policy_by_id = {
@@ -444,9 +467,12 @@ def _current_pretrade_readiness_by_lane(
 def _current_fact_snapshot_by_lane(
     control_state: dict[str, Any],
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
     snapshots: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("runtime_fact_snapshots")):
         if row.get("fact_surface") != "pretrade_public":
+            continue
+        if not is_current_fact_snapshot(row, now_ms):
             continue
         key = _lane_key(row)
         if not all(key):
@@ -462,13 +488,10 @@ def _current_fact_snapshot_by_lane(
 def _fresh_signal_by_lane(
     control_state: dict[str, Any],
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
     signals: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("live_signal_events")):
-        if row.get("status") != "facts_validated":
-            continue
-        if row.get("freshness_state") != "fresh":
-            continue
-        if row.get("expires_at_ms") is None:
+        if not is_current_live_signal(row, now_ms):
             continue
         key = _lane_key(row)
         current = signals.get(key)
@@ -479,15 +502,23 @@ def _fresh_signal_by_lane(
     return signals
 
 
+def _control_state_now_ms(control_state: dict[str, Any]) -> int:
+    try:
+        value = int(control_state.get("read_now_ms") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value > 0:
+        return value
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
 def _open_action_time_lane_by_lane(
     control_state: dict[str, Any],
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
-    open_statuses = {"opened", "facts_refreshing", "ticket_pending", "ticket_created"}
+    now_ms = _control_state_now_ms(control_state)
     lanes: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("action_time_lane_inputs")):
-        if row.get("lane_scope") != "real_submit_candidate":
-            continue
-        if row.get("status") not in open_statuses:
+        if not is_current_action_time_lane(row, now_ms):
             continue
         key = _lane_key(row)
         if key in lanes:

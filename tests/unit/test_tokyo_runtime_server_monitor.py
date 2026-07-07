@@ -19,6 +19,7 @@ MIGRATION_PATH = (
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+PG_TEST_NOW_MS = 1770001000000
 
 
 def _load_module():
@@ -53,6 +54,8 @@ def _pg_args(module, tmp_path: Path):
             "--database-url",
             "sqlite://",
             "--allow-non-postgres-for-test",
+            "--now-ms",
+            str(PG_TEST_NOW_MS),
         ]
     )
 

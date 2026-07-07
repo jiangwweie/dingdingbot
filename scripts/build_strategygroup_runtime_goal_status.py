@@ -24,6 +24,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
+    is_current_action_time_lane,
+    is_current_action_time_ticket,
 )
 
 from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
@@ -100,22 +102,21 @@ def _pg_rows(value: Any) -> list[dict[str, Any]]:
 def _pg_open_action_time_lanes(
     control_state: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    open_statuses = {"opened", "facts_refreshing", "ticket_pending", "ticket_created"}
+    now_ms = _control_state_now_ms(control_state)
     return [
         row
         for row in _pg_rows(control_state.get("action_time_lane_inputs"))
-        if row.get("lane_scope") == "real_submit_candidate"
-        and row.get("status") in open_statuses
+        if is_current_action_time_lane(row, now_ms)
     ]
 
 
 def _pg_active_tickets_by_lane(
     control_state: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    active_statuses = {"created", "preflight_pending", "finalgate_ready", "submitted"}
+    now_ms = _control_state_now_ms(control_state)
     tickets: dict[str, dict[str, Any]] = {}
     for row in _pg_rows(control_state.get("action_time_tickets")):
-        if row.get("status") not in active_statuses:
+        if not is_current_action_time_ticket(row, now_ms):
             continue
         lane_id = str(row.get("action_time_lane_input_id") or "")
         if not lane_id:
@@ -126,6 +127,16 @@ def _pg_active_tickets_by_lane(
         ):
             tickets[lane_id] = row
     return tickets
+
+
+def _control_state_now_ms(control_state: dict[str, Any]) -> int:
+    try:
+        value = int(control_state.get("read_now_ms") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value > 0:
+        return value
+    return int(time.time() * 1000)
 
 
 def _pg_latest_safety_by_lane(

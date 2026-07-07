@@ -9,7 +9,7 @@ from pathlib import Path
 
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
@@ -2239,6 +2239,116 @@ def test_cli_pg_backed_tradeability_decision_reads_seeded_runtime_control_state(
     assert packet["safety_invariants"]["calls_finalgate"] is False
     assert packet["safety_invariants"]["calls_operation_layer"] is False
     assert packet["safety_invariants"]["calls_exchange_write"] is False
+
+
+def test_tradeability_ignores_expired_invalidated_and_non_live_pg_signals(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    database_url = _create_seeded_runtime_control_db(tmp_path / "runtime.db")
+    now_ms = 1770001000000
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _insert_tradeability_signal(
+                conn,
+                suffix="expired",
+                expires_at_ms=now_ms - 1,
+                event_time_ms=1770000900000,
+            )
+            _insert_tradeability_signal(
+                conn,
+                suffix="invalidated",
+                expires_at_ms=now_ms + 600_000,
+                invalidated_at_ms=now_ms - 1,
+                event_time_ms=1770000899000,
+            )
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn, now_ms=now_ms)
+            control_state = repository.read_control_state()
+            non_live_signal = dict(control_state["live_signal_events"][0])
+            non_live_signal.update(
+                {
+                    "signal_event_id": "signal:SOR-001:ETHUSDT:long:replay",
+                    "source_kind": "replay",
+                    "expires_at_ms": now_ms + 600_000,
+                    "invalidated_at_ms": None,
+                }
+            )
+            control_state["live_signal_events"].append(non_live_signal)
+            signal_by_lane = module._fresh_signal_by_lane(control_state)
+            packet = module.build_tradeability_decision_from_control_state(
+                control_state
+            )
+    finally:
+        engine.dispose()
+
+    sor = next(row for row in packet["decision_rows"] if row["strategy_group_id"] == "SOR-001")
+    assert ("SOR-001", "ETHUSDT", "long") not in signal_by_lane
+    assert sor["decision"] != "tradable_now"
+
+
+def _insert_tradeability_signal(
+    conn,
+    *,
+    suffix: str,
+    expires_at_ms: int,
+    event_time_ms: int,
+    source_kind: str = "live_market",
+    invalidated_at_ms: int | None = None,
+) -> None:
+    row = conn.execute(
+        text(
+            """
+            SELECT c.candidate_scope_id, c.strategy_group_id, c.symbol, c.side,
+                   b.event_spec_id, e.event_id
+            FROM brc_strategy_group_candidate_scope c
+            JOIN brc_candidate_scope_event_bindings b
+              ON b.candidate_scope_id = c.candidate_scope_id
+             AND b.status = 'active'
+            JOIN brc_strategy_side_event_specs e
+              ON e.event_spec_id = b.event_spec_id
+             AND e.status = 'current'
+            WHERE c.strategy_group_id = 'SOR-001'
+              AND c.symbol = 'ETHUSDT'
+              AND c.side = 'long'
+            LIMIT 1
+            """
+        )
+    ).mappings().one()
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_live_signal_events (
+              signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
+              symbol, side, detector_key, signal_type, source_kind, status,
+              freshness_state, confidence, fact_snapshot_id, reason_codes,
+              signal_payload, event_time_ms, trigger_candle_close_time_ms,
+              observed_at_ms, expires_at_ms, invalidated_at_ms, created_at_ms
+            ) VALUES (
+              :signal_event_id, :candidate_scope_id, :event_spec_id,
+              :strategy_group_id, :symbol, :side, 'detector:SOR-001:long',
+              :event_id, :source_kind, 'facts_validated', 'fresh', 0.9,
+              :fact_snapshot_id, '[]', '{}', :event_time_ms, :event_time_ms,
+              1770000900001, :expires_at_ms, :invalidated_at_ms, 1770000900002
+            )
+            """
+        ),
+        {
+            "signal_event_id": f"signal:SOR-001:ETHUSDT:long:{suffix}",
+            "candidate_scope_id": row["candidate_scope_id"],
+            "event_spec_id": row["event_spec_id"],
+            "strategy_group_id": row["strategy_group_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+            "event_id": row["event_id"],
+            "source_kind": source_kind,
+            "fact_snapshot_id": f"fact:SOR-001:ETHUSDT:long:{suffix}",
+            "event_time_ms": event_time_ms,
+            "expires_at_ms": expires_at_ms,
+            "invalidated_at_ms": invalidated_at_ms,
+        },
+    )
 
 
 def test_cli_rejects_legacy_file_input_flags(tmp_path: Path) -> None:

@@ -37,6 +37,8 @@ from scripts.build_daily_live_enablement_table import WIP_LANES  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
+    is_current_action_time_lane,
+    is_current_live_signal,
 )
 
 
@@ -115,8 +117,12 @@ def materialize_pg_promotion_action_time_lane(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
+    _expire_stale_open_real_lanes(conn, now_ms=now_ms)
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_control_state()
     except RuntimeControlStateRepositoryError as exc:
         return _result(
             "blocked",
@@ -235,6 +241,191 @@ def materialize_pg_promotion_action_time_lane(
         promotion_candidate_count=len(promotion_rows),
         next_action="materialize_action_time_ticket",
         per_candidate_results=_candidate_results(bundles, selected=selected),
+    )
+
+
+def _expire_stale_open_real_lanes(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> int:
+    expired_rows = [
+        dict(row)
+        for row in conn.execute(
+            sa.text(
+                """
+                SELECT action_time_lane_input_id, status
+                FROM brc_action_time_lane_inputs
+                WHERE lane_scope = 'real_submit_candidate'
+                  AND status IN ('opened', 'facts_refreshing', 'ticket_pending')
+                  AND closed_at_ms IS NULL
+                  AND expires_at_ms IS NOT NULL
+                  AND expires_at_ms <= :now_ms
+                """
+            ),
+            {"now_ms": now_ms},
+        ).mappings()
+    ]
+    if expired_rows:
+        conn.execute(
+            sa.text(
+                """
+                UPDATE brc_action_time_lane_inputs
+                SET status = 'expired',
+                    closed_at_ms = :now_ms,
+                    first_blocker_class = COALESCE(
+                        first_blocker_class,
+                        'expired_open_action_time_lane_cleanup_required'
+                    )
+                WHERE lane_scope = 'real_submit_candidate'
+                  AND status IN ('opened', 'facts_refreshing', 'ticket_pending')
+                  AND closed_at_ms IS NULL
+                  AND expires_at_ms IS NOT NULL
+                  AND expires_at_ms <= :now_ms
+                """
+            ),
+            {"now_ms": now_ms},
+        )
+        for row in expired_rows:
+            _insert_state_transition_event(
+                conn,
+                state_table="brc_action_time_lane_inputs",
+                entity_id=str(row["action_time_lane_input_id"]),
+                from_status=str(row["status"]),
+                to_status="expired",
+                transition_reason="action_time_lane_expired_before_materialization",
+                trigger_ref="materialize_pg_promotion_action_time_lane",
+                writer="materialize_pg_promotion_action_time_lane",
+                now_ms=now_ms,
+            )
+    closed_rows = _close_stale_ticket_created_lanes_without_current_ticket(
+        conn,
+        now_ms=now_ms,
+    )
+    return len(expired_rows) + closed_rows
+
+
+def _close_stale_ticket_created_lanes_without_current_ticket(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> int:
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            sa.text(
+                """
+                SELECT
+                  lane.action_time_lane_input_id,
+                  lane.status AS lane_status,
+                  ticket.ticket_id,
+                  ticket.status AS ticket_status,
+                  ticket.expires_at_ms AS ticket_expires_at_ms
+                FROM brc_action_time_lane_inputs AS lane
+                LEFT JOIN brc_action_time_tickets AS ticket
+                  ON ticket.action_time_lane_input_id = lane.action_time_lane_input_id
+                WHERE lane.lane_scope = 'real_submit_candidate'
+                  AND lane.status = 'ticket_created'
+                  AND lane.closed_at_ms IS NULL
+                  AND lane.expires_at_ms IS NOT NULL
+                  AND lane.expires_at_ms <= :now_ms
+                """
+            ),
+            {"now_ms": now_ms},
+        ).mappings()
+    ]
+    transitioned = 0
+    for row in rows:
+        ticket_status = str(row.get("ticket_status") or "")
+        ticket_expires_at_ms = row.get("ticket_expires_at_ms")
+        if (
+            ticket_status in {"created", "preflight_pending", "finalgate_ready"}
+            and ticket_expires_at_ms is not None
+            and int(ticket_expires_at_ms or 0) > now_ms
+        ):
+            continue
+        to_status = "closed" if row.get("ticket_id") else "invalidated"
+        reason = (
+            "ticket_created_lane_closed_after_ticket_non_current"
+            if to_status == "closed"
+            else "ticket_created_lane_invalidated_missing_ticket"
+        )
+        lane_id = str(row["action_time_lane_input_id"])
+        conn.execute(
+            sa.text(
+                """
+                UPDATE brc_action_time_lane_inputs
+                SET status = :to_status,
+                    closed_at_ms = :now_ms,
+                    first_blocker_class = COALESCE(first_blocker_class, :reason)
+                WHERE action_time_lane_input_id = :lane_id
+                  AND status = 'ticket_created'
+                  AND closed_at_ms IS NULL
+                """
+            ),
+            {
+                "lane_id": lane_id,
+                "to_status": to_status,
+                "now_ms": now_ms,
+                "reason": reason,
+            },
+        )
+        _insert_state_transition_event(
+            conn,
+            state_table="brc_action_time_lane_inputs",
+            entity_id=lane_id,
+            from_status=str(row["lane_status"]),
+            to_status=to_status,
+            transition_reason=reason,
+            trigger_ref="materialize_pg_promotion_action_time_lane",
+            writer="materialize_pg_promotion_action_time_lane",
+            now_ms=now_ms,
+        )
+        transitioned += 1
+    return transitioned
+
+
+def _insert_state_transition_event(
+    conn: sa.engine.Connection,
+    *,
+    state_table: str,
+    entity_id: str,
+    from_status: str,
+    to_status: str,
+    transition_reason: str,
+    trigger_ref: str,
+    writer: str,
+    now_ms: int,
+) -> None:
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_state_transition_events (
+              transition_event_id, state_table, entity_id, from_status,
+              to_status, transition_reason, trigger_ref, writer, occurred_at_ms
+            ) VALUES (
+              :transition_event_id, :state_table, :entity_id, :from_status,
+              :to_status, :transition_reason, :trigger_ref, :writer, :occurred_at_ms
+            )
+            """
+        ),
+        {
+            "transition_event_id": _stable_id(
+                "state_transition",
+                state_table,
+                entity_id,
+                to_status,
+                str(now_ms),
+            ),
+            "state_table": state_table,
+            "entity_id": entity_id,
+            "from_status": from_status,
+            "to_status": to_status,
+            "transition_reason": transition_reason,
+            "trigger_ref": trigger_ref,
+            "writer": writer,
+            "occurred_at_ms": now_ms,
+        },
     )
 
 
@@ -707,13 +898,7 @@ def _fresh_signal_for_candidate(
 ) -> dict[str, Any]:
     rows = []
     for row in _rows(control_state.get("live_signal_events")):
-        if row.get("status") != "facts_validated":
-            continue
-        if row.get("freshness_state") != "fresh":
-            continue
-        if row.get("source_kind") != "live_market":
-            continue
-        if int(row.get("expires_at_ms") or 0) <= now_ms:
+        if not is_current_live_signal(row, now_ms):
             continue
         if str(row.get("candidate_scope_id") or "") != str(candidate.get("candidate_scope_id") or ""):
             continue
@@ -728,12 +913,22 @@ def _fresh_signal_for_candidate(
 
 
 def _open_real_submit_lanes(control_state: dict[str, Any]) -> list[dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
     return [
         row
         for row in _rows(control_state.get("action_time_lane_inputs"))
-        if row.get("lane_scope") == "real_submit_candidate"
-        and row.get("status") in OPEN_REAL_LANE_STATUSES
+        if is_current_action_time_lane(row, now_ms)
     ]
+
+
+def _control_state_now_ms(control_state: dict[str, Any]) -> int:
+    try:
+        value = int(control_state.get("read_now_ms") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value > 0:
+        return value
+    return int(time.time() * 1000)
 
 
 def _active_candidate_rows(control_state: dict[str, Any]) -> list[dict[str, Any]]:

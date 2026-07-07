@@ -110,6 +110,7 @@ def _signal_input(
         strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         primary_timeframe="1h",
         context_timeframes=["4h"],
         market_snapshot=MarketSnapshot(

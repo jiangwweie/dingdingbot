@@ -89,6 +89,7 @@ def _signal_input(
         strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         primary_timeframe="1h",
         context_timeframes=["4h"],
         market_snapshot=MarketSnapshot(
@@ -149,6 +150,7 @@ def _output() -> StrategyFamilySignalOutput:
         strategy_family_version_id="CPM-RO-001-v0",
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         timeframe="1h",
         signal_type=SignalType.WOULD_ENTER,
         side=SignalSide.LONG,
@@ -612,6 +614,7 @@ async def test_strategy_signal_planning_requires_trusted_market_facts_from_requi
         strategy_family_version_id="FCO-001-v0",
         symbol=signal_input.symbol,
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         timeframe="1h",
         signal_type=SignalType.WOULD_ENTER,
         side=SignalSide.LONG,

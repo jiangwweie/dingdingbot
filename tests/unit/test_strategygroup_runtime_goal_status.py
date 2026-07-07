@@ -22,6 +22,7 @@ MIGRATION_PATH = (
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+PG_TEST_NOW_MS = 1770001000000
 
 
 def _load_module(path: Path, name: str):
@@ -491,7 +492,10 @@ def test_goal_status_uses_pg_candidate_pool_without_json_file(
     monkeypatch,
 ) -> None:
     monkeypatch.delenv("PG_DATABASE_URL", raising=False)
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
+    )
 
     packet = goal_status.build_goal_status_artifact_from_control_state(
         control_state=repository.read_control_state(),
@@ -516,7 +520,10 @@ def test_pg_goal_status_uses_pg_current_when_current_is_clear(
 ) -> None:
     _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
+    )
 
     packet = goal_status.build_goal_status_artifact_from_control_state(
         control_state=repository.read_control_state(),
@@ -547,7 +554,10 @@ def test_pg_goal_status_reports_missing_action_time_ticket_for_open_lane(
     _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
     lane_id = _insert_pg_action_time_lane_without_ticket(pg_control_connection)
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
+    )
 
     packet = goal_status.build_goal_status_artifact_from_control_state(
         control_state=repository.read_control_state(),
@@ -587,7 +597,10 @@ def test_pg_goal_status_advances_open_lane_after_action_time_ticket_exists(
     lane_id = _insert_pg_action_time_lane_without_ticket(pg_control_connection)
     _insert_pg_action_time_ticket(pg_control_connection, lane_id)
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
+    )
 
     packet = goal_status.build_goal_status_artifact_from_control_state(
         control_state=repository.read_control_state(),
@@ -615,6 +628,80 @@ def test_pg_goal_status_advances_open_lane_after_action_time_ticket_exists(
     assert packet["ready_for_real_order_action"] is False
 
 
+def test_pg_goal_status_ignores_expired_open_lane(pg_control_connection) -> None:
+    now_ms = 1770002000000
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    lane_id = _insert_pg_action_time_lane_without_ticket(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET expires_at_ms = :expires_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"expires_at_ms": now_ms - 1, "lane_id": lane_id},
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
+    )
+
+    assert packet["evidence"]["pg_action_time_lane_input_count"] == 0
+    assert packet["action_time_ticket_explanation"]["plain_language_stage"] == (
+        "当前没有 action-time lane"
+    )
+    assert lane_id not in json.dumps(packet, ensure_ascii=False)
+
+
+def test_pg_goal_status_ignores_expired_action_time_ticket(
+    pg_control_connection,
+) -> None:
+    now_ms = 1770002000000
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    lane_id = _insert_pg_action_time_lane_without_ticket(pg_control_connection)
+    _insert_pg_action_time_ticket(pg_control_connection, lane_id)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET expires_at_ms = :expires_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"expires_at_ms": now_ms + 600_000, "lane_id": lane_id},
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET expires_at_ms = :expires_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"expires_at_ms": now_ms - 1, "lane_id": lane_id},
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
+    )
+
+    assert packet["evidence"]["pg_action_time_lane_input_count"] == 1
+    assert packet["evidence"]["pg_active_ticket_count"] == 0
+    assert packet["action_time_ticket_explanation"]["active_ticket_ids"] == []
+    assert f"action_time_ticket_missing:{lane_id}" in packet["blockers"]
+
+
 def test_pg_goal_status_blocks_open_lane_with_invalid_runtime_scope_binding(
     tmp_path: Path,
     pg_control_connection,
@@ -631,7 +718,10 @@ def test_pg_goal_status_blocks_open_lane_with_invalid_runtime_scope_binding(
         )
     )
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
+    )
 
     packet = goal_status.build_goal_status_artifact_from_control_state(
         control_state=repository.read_control_state(),

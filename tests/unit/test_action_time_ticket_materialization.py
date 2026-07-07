@@ -11,6 +11,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
 from scripts import materialize_action_time_ticket as ticket_materializer
+from src.infrastructure.runtime_control_state_repository import (
+    PgBackedRuntimeControlStateRepository,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -161,6 +164,122 @@ def test_materializer_is_idempotent_for_existing_active_ticket(pg_control_connec
     ).scalar_one() == 1
     assert pg_control_connection.execute(
         text("SELECT COUNT(*) FROM brc_action_time_ticket_events")
+    ).scalar_one() == 1
+
+
+def test_submitted_ticket_remains_current_pg_identity(pg_control_connection):
+    lane_id = _insert_action_time_lane_graph(pg_control_connection)
+    first = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET status = 'submitted',
+                expires_at_ms = :expires_at_ms
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {
+            "expires_at_ms": NOW_MS - 1,
+            "ticket_id": first["ticket_id"],
+        },
+    )
+    pg_control_connection.commit()
+
+    state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    ).read_control_state()
+
+    tickets = state["action_time_tickets"]
+    assert len(tickets) == 1
+    assert tickets[0]["ticket_id"] == first["ticket_id"]
+    assert tickets[0]["action_time_lane_input_id"] == lane_id
+    assert tickets[0]["status"] == "submitted"
+
+
+def test_materializer_does_not_treat_expired_ticket_as_active(
+    pg_control_connection,
+):
+    lane_id = _insert_action_time_lane_graph(pg_control_connection)
+    first = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET expires_at_ms = :expires_at_ms
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {
+            "expires_at_ms": NOW_MS - 1,
+            "ticket_id": first["ticket_id"],
+        },
+    )
+
+    second = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+
+    assert second["status"] == "action_time_ticket_not_current"
+    assert second["ticket_id"] == first["ticket_id"]
+    assert second["action_time_lane_input_id"] == lane_id
+    assert second["blockers"] == [
+        f"action_time_ticket_not_current_cleanup_required:{first['ticket_id']}"
+    ]
+    assert pg_control_connection.execute(
+        text(
+            """
+            SELECT status
+            FROM brc_action_time_tickets
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": first["ticket_id"]},
+    ).scalar_one() == "expired"
+    transition = pg_control_connection.execute(
+        text(
+            """
+            SELECT state_table, entity_id, from_status, to_status, transition_reason,
+                   writer
+            FROM brc_state_transition_events
+            WHERE entity_id = :ticket_id
+            """
+        ),
+        {"ticket_id": first["ticket_id"]},
+    ).mappings().one()
+    assert transition["state_table"] == "brc_action_time_tickets"
+    assert transition["from_status"] == "created"
+    assert transition["to_status"] == "expired"
+    assert transition["transition_reason"] == (
+        "action_time_ticket_expired_before_materialization"
+    )
+    assert transition["writer"] == "materialize_action_time_ticket"
+    expire_event = pg_control_connection.execute(
+        text(
+            """
+            SELECT from_status, to_status, transition_reason, writer
+            FROM brc_action_time_ticket_events
+            WHERE ticket_id = :ticket_id
+              AND to_status = 'expired'
+            """
+        ),
+        {"ticket_id": first["ticket_id"]},
+    ).mappings().one()
+    assert expire_event["from_status"] == "created"
+    assert expire_event["transition_reason"] == (
+        "action_time_ticket_expired_before_materialization"
+    )
+    assert expire_event["writer"] == "materialize_action_time_ticket"
+    assert pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_action_time_tickets")
     ).scalar_one() == 1
 
 

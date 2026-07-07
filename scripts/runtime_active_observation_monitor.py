@@ -29,6 +29,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
+from scripts.build_daily_live_enablement_table import WIP_LANES  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
@@ -156,6 +157,8 @@ def _candidate_universe_from_control_state(
 ) -> tuple[dict[str, list[str]], dict[str, Any]]:
     universe: dict[str, list[str]] = {}
     side_scope: dict[str, list[str]] = {}
+    wip_lanes = set(WIP_LANES)
+    extra_strategy_groups: set[str] = set()
     for row in control_state.get("candidate_scope") or []:
         if not isinstance(row, dict) or row.get("status") != "active":
             continue
@@ -164,12 +167,20 @@ def _candidate_universe_from_control_state(
         side = _normalize_side(row.get("side"))
         if not strategy_group_id or not symbol or not side:
             continue
+        if strategy_group_id not in wip_lanes:
+            extra_strategy_groups.add(strategy_group_id)
+            continue
         universe.setdefault(strategy_group_id, [])
         if symbol not in universe[strategy_group_id]:
             universe[strategy_group_id].append(symbol)
         side_scope.setdefault(strategy_group_id, [])
         if side not in side_scope[strategy_group_id]:
             side_scope[strategy_group_id].append(side)
+    if extra_strategy_groups:
+        raise ValueError(
+            "PG control state has active candidate scope outside WIP replacement audit: "
+            + ", ".join(sorted(extra_strategy_groups))
+        )
 
     return (
         {
@@ -459,8 +470,9 @@ def write_runtime_signal_summaries_to_pg(
     database_url: str,
     allow_non_postgres_for_test: bool = False,
     now_ms: int | None = None,
+    conn: sa.engine.Connection | None = None,
 ) -> dict[str, Any]:
-    if not database_url:
+    if not database_url and conn is None:
         return {
             "status": "pg_live_signal_events_skipped",
             "reason": "database_url_missing",
@@ -475,12 +487,25 @@ def write_runtime_signal_summaries_to_pg(
             "written_count": 0,
         }
 
-    normalized_url = normalize_sync_postgres_dsn(database_url)
-    if not is_sync_postgres_dsn(normalized_url) and not allow_non_postgres_for_test:
-        raise RuntimeError("PG live signal event write requires PostgreSQL DSN")
     observed_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     written: list[str] = []
     skipped: list[dict[str, Any]] = []
+    if conn is not None:
+        for candidate in candidates:
+            result = _write_live_signal_candidate(
+                conn,
+                candidate=candidate,
+                observed_ms=observed_ms,
+            )
+            if result.get("written") is True:
+                written.append(str(result["signal_event_id"]))
+            else:
+                skipped.append(result)
+        return _pg_live_signal_events_result(written=written, skipped=skipped)
+
+    normalized_url = normalize_sync_postgres_dsn(database_url)
+    if not is_sync_postgres_dsn(normalized_url) and not allow_non_postgres_for_test:
+        raise RuntimeError("PG live signal event write requires PostgreSQL DSN")
     engine = sa.create_engine(normalized_url)
     try:
         with engine.begin() as conn:
@@ -496,6 +521,14 @@ def write_runtime_signal_summaries_to_pg(
                     skipped.append(result)
     finally:
         engine.dispose()
+    return _pg_live_signal_events_result(written=written, skipped=skipped)
+
+
+def _pg_live_signal_events_result(
+    *,
+    written: list[str],
+    skipped: list[dict[str, Any]],
+) -> dict[str, Any]:
     return {
         "status": (
             "pg_live_signal_events_written"
@@ -526,10 +559,7 @@ def _live_signal_candidates_from_summaries(
         strategy_group_id = str(row.get("strategy_family_id") or "").strip()
         symbol = _compact_symbol(row.get("symbol"))
         side = _normalize_side(signal.get("side") or row.get("side"))
-        event_time_ms = _int_or_zero(signal.get("timestamp_ms"))
         if not strategy_group_id or not symbol or side not in {"long", "short"}:
-            continue
-        if event_time_ms <= 0:
             continue
         candidates.append(
             {
@@ -539,7 +569,9 @@ def _live_signal_candidates_from_summaries(
                 "signal_type": "would_enter",
                 "confidence": signal.get("confidence"),
                 "reason_codes": list(signal.get("reason_codes") or []),
-                "event_time_ms": event_time_ms,
+                "trigger_candle_close_time_ms": _int_or_zero(
+                    signal.get("trigger_candle_close_time_ms")
+                ),
                 "runtime_instance_id": row.get("runtime_instance_id"),
                 "strategy_family_version_id": row.get("strategy_family_version_id"),
                 "runtime_status": row.get("status"),
@@ -557,8 +589,16 @@ def _write_live_signal_candidate(
     candidate: dict[str, Any],
     observed_ms: int,
 ) -> dict[str, Any]:
-    event_time_ms = int(candidate["event_time_ms"])
     scope = _active_candidate_scope_event(conn, candidate=candidate)
+    if scope.get("blocker"):
+        return {
+            "written": False,
+            "blocker": str(scope["blocker"]),
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "binding_count": scope.get("binding_count"),
+        }
     if not scope:
         return {
             "written": False,
@@ -576,6 +616,29 @@ def _write_live_signal_candidate(
             "symbol": candidate["symbol"],
             "side": candidate["side"],
             "event_spec_id": scope.get("event_spec_id"),
+        }
+
+    time_authority = str(scope.get("time_authority") or "").strip()
+    if time_authority != "trigger_candle_close_time_ms":
+        return {
+            "written": False,
+            "blocker": "event_spec_time_authority_unsupported",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "event_spec_id": scope.get("event_spec_id"),
+            "time_authority": time_authority,
+        }
+    event_time_ms = _int_or_zero(candidate.get("trigger_candle_close_time_ms"))
+    if event_time_ms <= 0:
+        return {
+            "written": False,
+            "blocker": "signal_event_time_authority_missing",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "event_spec_id": scope.get("event_spec_id"),
+            "time_authority": time_authority,
         }
 
     expires_at_ms = event_time_ms + freshness_window_ms
@@ -609,12 +672,23 @@ def _write_live_signal_candidate(
             "side": candidate["side"],
         }
 
+    event_id = str(scope.get("event_id") or "").strip()
+    if not event_id:
+        return {
+            "written": False,
+            "blocker": "event_spec_event_id_missing",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "event_spec_id": scope.get("event_spec_id"),
+        }
+    detector_verdict = str(candidate["signal_type"])
     signal_event_id = _stable_signal_event_id(
         strategy_group_id=str(candidate["strategy_group_id"]),
         symbol=str(candidate["symbol"]),
         side=str(candidate["side"]),
         event_spec_id=str(scope["event_spec_id"]),
-        signal_type=str(candidate["signal_type"]),
+        signal_type=event_id,
         event_time_ms=event_time_ms,
     )
     created_at_ms = max(observed_ms, event_time_ms + 1)
@@ -626,7 +700,7 @@ def _write_live_signal_candidate(
         "symbol": candidate["symbol"],
         "side": candidate["side"],
         "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
-        "signal_type": candidate["signal_type"],
+        "signal_type": event_id,
         "source_kind": "live_market",
         "status": "facts_validated",
         "freshness_state": "fresh",
@@ -638,7 +712,9 @@ def _write_live_signal_candidate(
                 "runtime_instance_id": candidate.get("runtime_instance_id"),
                 "strategy_family_version_id": candidate.get("strategy_family_version_id"),
                 "runtime_status": candidate.get("runtime_status"),
+                "detector_verdict": detector_verdict,
                 "signal_summary": candidate.get("signal_summary") or {},
+                "event_time_authority_ref": "trigger_candle_close_time_ms",
                 "signal_input_ref": candidate.get("signal_input_ref"),
                 "prepared_authorization_id": candidate.get("prepared_authorization_id"),
                 "source": "runtime_active_observation_monitor",
@@ -667,32 +743,43 @@ def _active_candidate_scope_event(
     *,
     candidate: dict[str, Any],
 ) -> dict[str, Any]:
-    row = conn.execute(
-        sa.text(
-            """
-            SELECT c.candidate_scope_id, b.event_spec_id, e.freshness_window_ms
-            FROM brc_strategy_group_candidate_scope AS c
-            JOIN brc_candidate_scope_event_bindings AS b
-              ON b.candidate_scope_id = c.candidate_scope_id
-             AND b.status = 'active'
-            LEFT JOIN brc_strategy_side_event_specs AS e
-              ON e.event_spec_id = b.event_spec_id
-             AND e.status = 'current'
-            WHERE c.strategy_group_id = :strategy_group_id
-              AND c.symbol = :symbol
-              AND c.side = :side
-              AND c.status = 'active'
-            ORDER BY c.priority_rank ASC, b.created_at_ms DESC
-            LIMIT 1
-            """
-        ),
-        {
-            "strategy_group_id": candidate["strategy_group_id"],
-            "symbol": candidate["symbol"],
-            "side": candidate["side"],
-        },
-    ).mappings().first()
-    return dict(row) if row else {}
+    rows = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT
+                  c.candidate_scope_id,
+                  b.event_spec_id,
+                  e.event_id,
+                  e.time_authority,
+                  e.freshness_window_ms
+                FROM brc_strategy_group_candidate_scope AS c
+                JOIN brc_candidate_scope_event_bindings AS b
+                  ON b.candidate_scope_id = c.candidate_scope_id
+                 AND b.status = 'active'
+                LEFT JOIN brc_strategy_side_event_specs AS e
+                  ON e.event_spec_id = b.event_spec_id
+                 AND e.status = 'current'
+                WHERE c.strategy_group_id = :strategy_group_id
+                  AND c.symbol = :symbol
+                  AND c.side = :side
+                  AND c.status = 'active'
+                ORDER BY c.priority_rank ASC, b.created_at_ms DESC
+                """
+            ),
+            {
+                "strategy_group_id": candidate["strategy_group_id"],
+                "symbol": candidate["symbol"],
+                "side": candidate["side"],
+            },
+        ).mappings()
+    )
+    if len(rows) > 1:
+        return {
+            "blocker": "candidate_scope_event_binding_ambiguous",
+            "binding_count": len(rows),
+        }
+    return dict(rows[0]) if rows else {}
 
 
 def _latest_fresh_public_fact(
@@ -1183,6 +1270,8 @@ def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
         "semantics_binding_found": evaluation.get("semantics_binding_found"),
         "strategy_candidate_mode": evaluation.get("strategy_candidate_mode"),
         "timestamp_ms": output.get("timestamp_ms"),
+        "time_authority": output.get("time_authority"),
+        "trigger_candle_close_time_ms": output.get("trigger_candle_close_time_ms"),
     }
 
 
@@ -1511,37 +1600,34 @@ def _downgrade_non_actionable_observation_blockers(
 
     signal_input_json = _artifact_signal_input_json(artifact)
     if signal_input_json:
-        promoted = dict(artifact)
-        promoted["status"] = "ready_for_prepare"
-        promoted["blockers"] = []
-        promoted["warnings"] = sorted(
+        downgraded = dict(artifact)
+        downgraded["status"] = "waiting_for_signal"
+        downgraded["blockers"] = []
+        downgraded["warnings"] = sorted(
             {
                 *[str(warning) for warning in artifact.get("warnings") or []],
                 *[
-                    f"non_actionable_prepare_blocker:{blocker}"
+                    f"legacy_artifact_readiness_ignored:{blocker}"
                     for blocker in blockers
                 ],
             }
         )
-        promoted["signal_input_json"] = signal_input_json
+        downgraded["signal_input_json"] = signal_input_json
         plan = dict(
             artifact.get("api_prepare_plan")
             or artifact.get("observation_cycle_plan")
             or artifact.get("observation_monitor_plan")
             or {}
         )
-        plan["next_step"] = (
-            plan.get("next_step")
-            or "prepare_fresh_candidate_authorization_evidence"
-        )
+        plan["next_step"] = "materialize_pg_live_signal_event_before_prepare"
         plan["signal_input_json"] = signal_input_json
         plan["not_executed"] = True
         plan["creates_execution_intent"] = False
         plan["places_order"] = False
         plan["calls_order_lifecycle"] = False
-        promoted["observation_monitor_plan"] = plan
-        promoted["non_actionable_observation_blockers"] = blockers
-        return promoted
+        downgraded["observation_monitor_plan"] = plan
+        downgraded["legacy_artifact_readiness_blockers"] = blockers
+        return downgraded
 
     downgraded = dict(artifact)
     downgraded["status"] = "waiting_for_signal"

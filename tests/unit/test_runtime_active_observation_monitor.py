@@ -556,6 +556,32 @@ def test_active_monitor_candidate_universe_from_pg_control_state_seed():
     assert source["side_scope"]["BRF2-001"] == ["short"]
 
 
+def test_active_monitor_rejects_extra_active_strategygroup_without_wip_audit():
+    control_state = {
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "candidate_scope": [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "status": "active",
+            },
+            {
+                "strategy_group_id": "EXTRA-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "status": "active",
+            },
+        ],
+    }
+
+    with pytest.raises(ValueError, match="outside WIP replacement audit"):
+        runtime_active_observation_monitor._candidate_universe_from_control_state(
+            control_state
+        )
+
+
 def test_active_monitor_requires_pg_candidate_universe_when_requested():
     with pytest.raises(RuntimeError, match="PG_DATABASE_URL is required"):
         runtime_active_observation_monitor._candidate_universe_for_args(
@@ -1137,7 +1163,7 @@ def test_active_monitor_allows_prepare_records_only_when_explicit():
     assert summary["forbidden_effects"]["order_lifecycle_called"] is False
 
 
-def test_active_monitor_preserves_signal_input_when_prepare_records_need_candidate_authorization(tmp_path):
+def test_active_monitor_ignores_legacy_signal_input_as_readiness(tmp_path):
     client = _FakeClient([_runtime("runtime-active-1")])
     signal_path = tmp_path / "signal-input.json"
 
@@ -1204,16 +1230,23 @@ def test_active_monitor_preserves_signal_input_when_prepare_records_need_candida
         runtime_artifact_builder=builder,
     )
 
-    assert packet["status"] == "ready_for_prepare"
+    assert packet["status"] == "waiting_for_signal"
     assert packet["blockers"] == []
     assert packet["observation_monitor_plan"]["signal_input_json"] == str(signal_path)
+    assert packet["observation_monitor_plan"]["next_step"] == (
+        "wait_for_next_observation_cycle"
+    )
     assert packet["observation_monitor_plan"]["creates_execution_intent"] is False
     assert packet["safety_invariants"]["shadow_candidate_created"] is True
     assert packet["safety_invariants"]["exchange_write_called"] is False
     summary = packet["runtime_summaries"][0]
-    assert summary["status"] == "ready_for_prepare"
+    assert summary["status"] == "waiting_for_signal"
     assert summary["signal_input_json"] == str(signal_path)
     assert summary["blockers"] == []
+    assert (
+        "legacy_artifact_readiness_ignored:order_candidate_id_or_authorization_id_required"
+        in summary["warnings"]
+    )
     assert summary["signal_summary"]["signal_type"] == "would_enter"
 
 
@@ -1330,9 +1363,9 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
                 sa.text(
                     """
                     INSERT INTO brc_strategy_side_event_specs (
-                      event_spec_id, status, freshness_window_ms
+                      event_spec_id, event_id, status, time_authority, freshness_window_ms
                     ) VALUES (
-                      'event-mpg-long', 'current', 1000
+                      'event-mpg-long', 'MPG-LONG', 'current', 'trigger_candle_close_time_ms', 1000
                     )
                     """
                 )
@@ -1370,6 +1403,7 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
                         "signal_type": "would_enter",
                         "side": "long",
                         "timestamp_ms": 1000,
+                        "trigger_candle_close_time_ms": 1000,
                         "confidence": "0.72",
                         "reason_codes": ["unit_ready"],
                     },
@@ -1391,7 +1425,7 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
                 sa.text(
                     """
                     SELECT strategy_group_id, symbol, side, status, freshness_state,
-                           fact_snapshot_id
+                           fact_snapshot_id, signal_type, signal_payload
                     FROM brc_live_signal_events
                     """
                 )
@@ -1399,14 +1433,133 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
     finally:
         engine.dispose()
 
-    assert dict(row) == {
+    actual = dict(row)
+    actual["signal_payload"] = json.loads(str(actual["signal_payload"]))
+    assert actual == {
         "strategy_group_id": "MPG-001",
         "symbol": "OPUSDT",
         "side": "long",
         "status": "facts_validated",
         "freshness_state": "fresh",
         "fact_snapshot_id": "fact-mpg-op-public",
+        "signal_type": "MPG-LONG",
+        "signal_payload": {
+            "detector_verdict": "would_enter",
+            "prepared_authorization_id": None,
+            "runtime_instance_id": "runtime-mpg-op",
+            "runtime_status": "ready_for_prepare",
+            "signal_input_ref": "pg://signal-input",
+            "event_time_authority_ref": "trigger_candle_close_time_ms",
+            "signal_summary": {
+                "confidence": "0.72",
+                "reason_codes": ["unit_ready"],
+                "side": "long",
+                "signal_type": "would_enter",
+                "timestamp_ms": 1000,
+                "trigger_candle_close_time_ms": 1000,
+            },
+            "source": "runtime_active_observation_monitor",
+            "strategy_family_version_id": "MPG-001:v1",
+        },
     }
+
+
+def test_write_runtime_signal_summaries_to_pg_blocks_without_time_authority(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_group_candidate_scope (
+                      candidate_scope_id, strategy_group_id, symbol, side,
+                      status, observation_scope, priority_rank
+                    ) VALUES (
+                      'scope-mpg-op-long', 'MPG-001', 'OPUSDT', 'long',
+                      'active', 'active_wip', 1
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_candidate_scope_event_bindings (
+                      candidate_scope_id, event_spec_id, status, created_at_ms
+                    ) VALUES (
+                      'scope-mpg-op-long', 'event-mpg-long', 'active', 900
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_side_event_specs (
+                      event_spec_id, event_id, status, time_authority,
+                      freshness_window_ms
+                    ) VALUES (
+                      'event-mpg-long', 'MPG-LONG', 'current',
+                      'trigger_candle_close_time_ms', 1000
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_runtime_fact_snapshots (
+                      fact_snapshot_id, strategy_group_id, symbol, side,
+                      fact_surface, source_kind, computed, satisfied,
+                      freshness_state, valid_until_ms, observed_at_ms, created_at_ms
+                    ) VALUES (
+                      'fact-mpg-op-public', 'MPG-001', 'OPUSDT', 'long',
+                      'pretrade_public', 'live_market', 1, 1,
+                      'fresh', 301000, 900, 900
+                    )
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-op",
+                    "strategy_family_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "status": "ready_for_prepare",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": "long",
+                        "timestamp_ms": 1000,
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            live_signal_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_live_signal_events")
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+    assert result["status"] == "pg_live_signal_events_blocked"
+    assert result["written_count"] == 0
+    assert result["skipped"][0]["blocker"] == "signal_event_time_authority_missing"
+    assert live_signal_count == 0
 
 
 def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_path):
@@ -1443,9 +1596,9 @@ def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_pat
                 sa.text(
                     """
                     INSERT INTO brc_strategy_side_event_specs (
-                      event_spec_id, status, freshness_window_ms
+                      event_spec_id, event_id, status, time_authority, freshness_window_ms
                     ) VALUES (
-                      'event-mpg-long', 'current', 1000
+                      'event-mpg-long', 'MPG-LONG', 'current', 'trigger_candle_close_time_ms', 1000
                     )
                     """
                 )
@@ -1466,6 +1619,7 @@ def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_pat
                         "signal_type": "would_enter",
                         "side": "long",
                         "timestamp_ms": 1000,
+                        "trigger_candle_close_time_ms": 1000,
                     },
                 }
             ]
@@ -1478,6 +1632,100 @@ def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_pat
     assert result["status"] == "pg_live_signal_events_blocked"
     assert result["written_count"] == 0
     assert result["skipped"][0]["blocker"] == "fresh_public_fact_snapshot_missing"
+
+
+def test_write_runtime_signal_summaries_to_pg_blocks_ambiguous_event_binding(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_strategy_group_candidate_scope (
+                      candidate_scope_id, strategy_group_id, symbol, side,
+                      status, observation_scope, priority_rank
+                    ) VALUES (
+                      'scope-mpg-op-long', 'MPG-001', 'OPUSDT', 'long',
+                      'active', 'active_wip', 1
+                    )
+                    """
+                )
+            )
+            for event_spec_id, event_id, created_at_ms in (
+                ("event-mpg-long-a", "MPG-LONG", 900),
+                ("event-mpg-long-b", "MPG-LONG", 901),
+            ):
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_candidate_scope_event_bindings (
+                          candidate_scope_id, event_spec_id, status, created_at_ms
+                        ) VALUES (
+                          'scope-mpg-op-long', :event_spec_id, 'active', :created_at_ms
+                        )
+                        """
+                    ),
+                    {"event_spec_id": event_spec_id, "created_at_ms": created_at_ms},
+                )
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_strategy_side_event_specs (
+                          event_spec_id, event_id, status, time_authority, freshness_window_ms
+                        ) VALUES (
+                          :event_spec_id, :event_id, 'current', 'trigger_candle_close_time_ms', 3600000
+                        )
+                        """
+                    ),
+                    {"event_spec_id": event_spec_id, "event_id": event_id},
+                )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_runtime_fact_snapshots (
+                      fact_snapshot_id, strategy_group_id, symbol, side,
+                      fact_surface, source_kind, computed, satisfied,
+                      freshness_state, valid_until_ms, observed_at_ms, created_at_ms
+                    ) VALUES (
+                      'fact-mpg-op-public', 'MPG-001', 'OPUSDT', 'long',
+                      'pretrade_public', 'live_market', 1, 1,
+                      'fresh', 3601000, 900, 900
+                    )
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-op",
+                    "strategy_family_id": "MPG-001",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "status": "ready_for_prepare",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": "long",
+                        "timestamp_ms": 1000,
+                        "trigger_candle_close_time_ms": 1000,
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+
+    assert result["status"] == "pg_live_signal_events_blocked"
+    assert result["written_count"] == 0
+    assert result["skipped"][0]["blocker"] == "candidate_scope_event_binding_ambiguous"
+    assert result["skipped"][0]["binding_count"] == 2
 
 
 def test_write_runtime_signal_summaries_to_pg_uses_event_spec_freshness_window(tmp_path):
@@ -1514,9 +1762,9 @@ def test_write_runtime_signal_summaries_to_pg_uses_event_spec_freshness_window(t
                 sa.text(
                     """
                     INSERT INTO brc_strategy_side_event_specs (
-                      event_spec_id, status, freshness_window_ms
+                      event_spec_id, event_id, status, time_authority, freshness_window_ms
                     ) VALUES (
-                      'event-mpg-long', 'current', 3600000
+                      'event-mpg-long', 'MPG-LONG', 'current', 'trigger_candle_close_time_ms', 3600000
                     )
                     """
                 )
@@ -1553,6 +1801,7 @@ def test_write_runtime_signal_summaries_to_pg_uses_event_spec_freshness_window(t
                         "signal_type": "would_enter",
                         "side": "long",
                         "timestamp_ms": 1000,
+                        "trigger_candle_close_time_ms": 1000,
                     },
                 }
             ]
@@ -1600,9 +1849,9 @@ def test_write_runtime_signal_summaries_to_pg_blocks_expired_event_spec_window(t
                 sa.text(
                     """
                     INSERT INTO brc_strategy_side_event_specs (
-                      event_spec_id, status, freshness_window_ms
+                      event_spec_id, event_id, status, time_authority, freshness_window_ms
                     ) VALUES (
-                      'event-mpg-long', 'current', 1000
+                      'event-mpg-long', 'MPG-LONG', 'current', 'trigger_candle_close_time_ms', 1000
                     )
                     """
                 )
@@ -1638,6 +1887,7 @@ def test_write_runtime_signal_summaries_to_pg_blocks_expired_event_spec_window(t
                         "signal_type": "would_enter",
                         "side": "long",
                         "timestamp_ms": 1000,
+                        "trigger_candle_close_time_ms": 1000,
                     },
                 }
             ]
@@ -1685,7 +1935,9 @@ def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
             """
             CREATE TABLE brc_strategy_side_event_specs (
               event_spec_id TEXT PRIMARY KEY,
+              event_id TEXT,
               status TEXT,
+              time_authority TEXT,
               freshness_window_ms INTEGER
             )
             """

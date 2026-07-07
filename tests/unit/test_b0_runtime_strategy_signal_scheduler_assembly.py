@@ -49,6 +49,7 @@ def _signal_input(
         strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         primary_timeframe="1h",
         context_timeframes=["4h"],
         market_snapshot=MarketSnapshot(
@@ -98,6 +99,7 @@ def _output(
         strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         timeframe="1h",
         signal_type=signal_type,
         side=SignalSide.LONG if signal_type == SignalType.WOULD_ENTER else SignalSide.NONE,

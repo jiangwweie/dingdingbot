@@ -19,6 +19,7 @@ NOW_MS = 1781000000000
 def _candle(index: int, open_: str, high: str, low: str, close: str) -> SimpleNamespace:
     return SimpleNamespace(
         open_time_ms=NOW_MS - (30 - index) * 3_600_000,
+        close_time_ms=NOW_MS - (30 - index) * 3_600_000 + 3_600_000 - 1,
         open=Decimal(open_),
         high=Decimal(high),
         low=Decimal(low),
@@ -87,9 +88,11 @@ def _runtime() -> StrategyRuntimeInstance:
 
 
 def test_build_btpc_signal_input_uses_runtime_boundary_and_placeholder_account():
+    one_hour = _btpc_1h()
+    latest_close_time_ms = one_hour[-1].close_time_ms
     signal_input = build_runtime_strategy_signal_input_artifact._build_signal_input(
         runtime=_runtime(),
-        one_hour=_btpc_1h(),
+        one_hour=one_hour,
         four_hour=_down_context_4h(),
         source_id="unit_market",
         source_type="unit_read_only",
@@ -101,6 +104,9 @@ def test_build_btpc_signal_input_uses_runtime_boundary_and_placeholder_account()
     assert signal_input.strategy_family_id == "BTPC-001"
     assert signal_input.strategy_family_version_id == "BTPC-001-v0"
     assert signal_input.symbol == "AVAX/USDT:USDT"
+    assert signal_input.timestamp_ms == latest_close_time_ms
+    assert signal_input.trigger_candle_close_time_ms == latest_close_time_ms
+    assert signal_input.market_snapshot.timestamp_ms == latest_close_time_ms
     assert signal_input.trial_constraints_snapshot["attempts_remaining"] == 2
     assert signal_input.trial_constraints_snapshot["max_notional_per_attempt"] == "8"
     assert signal_input.account_facts_snapshot.truth_level == (

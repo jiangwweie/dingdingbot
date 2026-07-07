@@ -66,6 +66,9 @@ def _market_source(args: argparse.Namespace) -> Any:
 def _candle_json(candle: Any) -> dict[str, Any]:
     return {
         "open_time_ms": int(candle.open_time_ms),
+        "close_time_ms": (
+            int(candle.close_time_ms) if getattr(candle, "close_time_ms", None) is not None else None
+        ),
         "open": str(candle.open),
         "high": str(candle.high),
         "low": str(candle.low),
@@ -148,10 +151,14 @@ def _build_signal_input(
     )
 
     latest = one_hour[-1]
+    trigger_candle_close_time_ms = getattr(latest, "close_time_ms", None)
+    if trigger_candle_close_time_ms is None or int(trigger_candle_close_time_ms) <= int(latest.open_time_ms):
+        raise RuntimeError("latest closed candle is missing authoritative close_time_ms")
+    trigger_candle_close_time_ms = int(trigger_candle_close_time_ms)
     atr = _atr(one_hour)
     resolved_evaluation_id = evaluation_id or (
         f"runtime-signal-input:{runtime.runtime_instance_id}:"
-        f"{runtime.strategy_family_id}:{latest.open_time_ms}"
+        f"{runtime.strategy_family_id}:{trigger_candle_close_time_ms}"
     )
     return StrategyFamilySignalInput(
         evaluation_id=resolved_evaluation_id,
@@ -160,12 +167,13 @@ def _build_signal_input(
         playbook_id=playbook_id or runtime.policy_snapshot.playbook_id,
         binding_id=runtime.trial_binding_id,
         symbol=runtime.symbol,
-        timestamp_ms=int(latest.open_time_ms),
+        timestamp_ms=trigger_candle_close_time_ms,
+        trigger_candle_close_time_ms=trigger_candle_close_time_ms,
         primary_timeframe="1h",
         context_timeframes=["4h"],
         market_snapshot=MarketSnapshot(
             symbol=runtime.symbol,
-            timestamp_ms=int(latest.open_time_ms),
+            timestamp_ms=trigger_candle_close_time_ms,
             source=source_id,
             freshness="latest_closed_public_kline"
             if source_type == "live_market_read_only"

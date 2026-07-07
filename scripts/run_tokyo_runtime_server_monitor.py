@@ -27,6 +27,7 @@ import time
 from typing import Any
 import urllib.error
 import urllib.request
+import uuid
 
 import sqlalchemy as sa
 
@@ -81,6 +82,13 @@ class CommandResult:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _utc_now_from_args(args: argparse.Namespace) -> str:
+    now_ms = getattr(args, "now_ms", None)
+    if now_ms is None:
+        return _utc_now()
+    return datetime.fromtimestamp(int(now_ms) / 1000, tz=timezone.utc).isoformat()
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -465,7 +473,7 @@ def _monitor_run_id(now_ms: int, decision: dict[str, Any]) -> str:
             "utf-8"
         )
     ).hexdigest()[:16]
-    return f"server_monitor_run:{now_ms}:{digest}"
+    return f"server_monitor_run:{now_ms}:{digest}:{uuid.uuid4().hex[:12]}"
 
 
 def _pg_notification_row(
@@ -714,8 +722,11 @@ def build_server_monitor_artifact_from_pg(
         build_goal_status_artifact_from_control_state,
     )
 
-    now = _utc_now()
-    repository = PgBackedRuntimeControlStateRepository(conn)
+    now = _utc_now_from_args(args)
+    repository = PgBackedRuntimeControlStateRepository(
+        conn,
+        now_ms=getattr(args, "now_ms", None),
+    )
     systemd = (
         {"checked": False, "ready": True, "rows": [], "blockers": []}
         if args.skip_systemd
@@ -723,7 +734,7 @@ def build_server_monitor_artifact_from_pg(
     )
     source_errors: dict[str, Any] = {}
     try:
-        control_state = repository.read_control_state()
+        control_state = repository.read_monitor_control_state()
         candidate_pool = build_strategy_live_candidate_pool_from_control_state(control_state)
         goal_status = build_goal_status_artifact_from_control_state(
             control_state=control_state,
@@ -851,6 +862,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Allow SQLite/non-PG DSNs only in tests.",
     )
+    parser.add_argument("--now-ms", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if not args.systemd_unit:
         args.systemd_unit = list(DEFAULT_SYSTEMD_UNITS)

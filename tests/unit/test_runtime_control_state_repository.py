@@ -16,6 +16,7 @@ from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
 )
+from scripts import runtime_active_observation_monitor
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -62,7 +63,10 @@ def pg_control_connection():
 def test_pg_backed_runtime_control_state_repository_reads_seeded_state(
     pg_control_connection,
 ):
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
 
     state = repository.read_control_state()
 
@@ -97,6 +101,245 @@ def test_pg_backed_runtime_control_state_repository_reads_seeded_state(
         "squeeze_clear",
         "liquidity_clear",
     ]
+
+
+def test_live_signal_writer_output_is_readable_by_repository(pg_control_connection):
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_runtime_fact_snapshots (
+              fact_snapshot_id, strategy_group_id, symbol, side, runtime_profile_id,
+              fact_surface, source_kind, source_ref, computed, satisfied,
+              freshness_state, failed_facts, fact_values, blocker_class,
+              observed_at_ms, valid_until_ms, created_at_ms
+            ) VALUES (
+              'fact:MPG-001:OPUSDT:long:public:writer-consumer',
+              'MPG-001', 'OPUSDT', 'long', 'owner-runtime-console-v1',
+              'pretrade_public', 'live_market', 'unit-test', 1, 1,
+              'fresh', '[]', '{}', NULL,
+              1770000120000, 1770003720000, 1770000120001
+            )
+            """
+        )
+    )
+    pg_control_connection.commit()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime:MPG-001:OPUSDT:long",
+                    "strategy_family_id": "MPG-001",
+                    "strategy_family_version_id": "sgv:MPG-001:v1",
+                    "symbol": "OPUSDT",
+                    "side": "long",
+                    "status": "ready_for_prepare",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": "long",
+                        "timestamp_ms": 1770000120000,
+                        "trigger_candle_close_time_ms": 1770000120000,
+                        "confidence": "0.82",
+                        "reason_codes": ["writer_consumer_contract"],
+                    },
+                }
+            ]
+        },
+        database_url="unused://repository-test",
+        allow_non_postgres_for_test=True,
+        now_ms=1770000120100,
+        conn=pg_control_connection,
+    )
+
+    assert result["status"] == "pg_live_signal_events_written"
+    state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection
+    ).read_control_state()
+    signal = next(row for row in state["live_signal_events"])
+    payload = signal["signal_payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    assert signal["strategy_group_id"] == "MPG-001"
+    assert signal["symbol"] == "OPUSDT"
+    assert signal["side"] == "long"
+    assert signal["signal_type"] == "MPG-LONG"
+    assert payload["detector_verdict"] == "would_enter"
+
+
+def test_repository_monitor_read_profile_bounds_high_growth_tables(pg_control_connection):
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_watcher_runtime_coverage (
+              runtime_coverage_id, strategy_group_id, symbol, side, detector_key,
+              runtime_profile_id, coverage_state, liveness_state,
+              last_tick_at_ms, valid_until_ms, is_current, created_at_ms
+            ) VALUES (
+              'coverage:historical:MPG-001:OPUSDT:long', 'MPG-001', 'OPUSDT',
+              'long', 'detector:MPG-001:long', 'owner-runtime-console-v1',
+              'covered', 'healthy', 1770000000000, 1770003600000, 0,
+              1770000000000
+            )
+            """
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_live_signal_events (
+              signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
+              symbol, side, detector_key, signal_type, source_kind, status,
+              freshness_state, confidence, fact_snapshot_id, reason_codes,
+              signal_payload, event_time_ms, trigger_candle_close_time_ms,
+              observed_at_ms, expires_at_ms, invalidated_at_ms, created_at_ms
+            ) VALUES (
+              'signal:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
+              'event_spec:SOR-001:SOR-LONG:v1', 'SOR-001', 'ETHUSDT',
+              'long', 'detector:SOR-001:long', 'SOR-LONG', 'live_market',
+              'facts_validated', 'fresh', 0.9, 'fact:SOR:expired-monitor',
+              '[]', '{}', 1770000120000, 1770000120000, 1770000120001,
+              1770000120002, NULL, 1770000120003
+            )
+            """
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_pretrade_readiness_rows (
+              readiness_row_id, candidate_scope_id, strategy_group_id, symbol, side,
+              readiness_state, detector_state, watcher_state, public_facts_state,
+              signal_lifecycle_status, signal_freshness_state, risk_state,
+              scope_state, promotion_state, first_blocker_class,
+              first_blocker_detail, next_action,
+              stop_condition, evidence_ref, source_watermark, computed_at_ms,
+              valid_until_ms
+            ) VALUES (
+              'readiness:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
+              'SOR-001', 'ETHUSDT', 'long', 'ready', 'attached', 'healthy',
+              'satisfied', 'facts_validated', 'fresh', 'acceptable',
+              'live_submit_allowed', 'action_time_lane',
+              'action_time_preflight_ready', 'expired_monitor_bound',
+              'materialize_ticket',
+              'ticket_created_or_lane_expires', 'fact:SOR:expired-monitor',
+              'unit', 1770000120003, 1770000120004
+            )
+            """
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_promotion_candidates (
+              promotion_candidate_id, signal_event_id, readiness_row_id,
+              strategy_group_id, symbol, side, promotion_scope, status,
+              scope_state, risk_state, facts_snapshot_id, blockers,
+              arbitration_rank, created_at_ms, expires_at_ms, closed_at_ms,
+              authority_boundary
+            ) VALUES (
+              'promotion:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'signal:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'readiness:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'SOR-001', 'ETHUSDT', 'long', 'live_submit_candidate',
+              'arbitration_won', 'live_submit_allowed', 'acceptable',
+              'fact:SOR:expired-monitor', '[]', 1, 1770000120004,
+              1770000120005, NULL,
+              'expired_pg_current_object_test; no_finalgate_no_operation_layer_no_exchange_write'
+            )
+            """
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_action_time_lane_inputs (
+              action_time_lane_input_id, promotion_candidate_id, strategy_group_id,
+              symbol, side, runtime_profile_id, lane_scope, status,
+              signal_event_id, public_fact_snapshot_id, action_time_fact_snapshot_id,
+              runtime_scope_binding_id, candidate_authorization_ref,
+              runtime_safety_snapshot_id, first_blocker_class, created_at_ms,
+              expires_at_ms, closed_at_ms, authority_boundary
+            ) VALUES (
+              'lane:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'promotion:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'SOR-001', 'ETHUSDT', 'long', 'owner-runtime-console-v1',
+              'real_submit_candidate', 'ticket_created',
+              'signal:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'fact:SOR:expired-monitor', 'fact:SOR:expired-action-monitor',
+              'runtime_scope:candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG:owner-runtime-console-v1',
+              'ticket:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              NULL, 'action_time_preflight_ready', 1770000120006,
+              1770000120007, NULL,
+              'expired_pg_current_object_test; no_finalgate_no_operation_layer_no_exchange_write'
+            )
+            """
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_action_time_tickets (
+              ticket_id, action_time_lane_input_id, promotion_candidate_id,
+              signal_event_id, event_spec_id, event_spec_version_id,
+              candidate_scope_id, runtime_scope_binding_id, strategy_group_id,
+              strategy_group_version_id, symbol, exchange_instrument_id, side,
+              event_id, event_time_ms, trigger_candle_close_time_ms,
+              runtime_profile_id, public_fact_snapshot_id,
+              action_time_fact_snapshot_id, account_safe_fact_snapshot_id,
+              account_mode_snapshot_id, budget_reservation_id, protection_ref_id,
+              execution_policy_id, execution_policy_version, owner_policy_version,
+              sizing_policy_version, protection_policy_version, target_notional,
+              leverage, expires_at_ms, status, authority_boundary, ticket_hash,
+              created_under_versions_hash, created_at_ms
+            ) VALUES (
+              'ticket:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'lane:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'promotion:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'signal:SOR-001:ETHUSDT:long:expired-monitor-bound',
+              'event_spec:SOR-001:SOR-LONG:v1',
+              'event_spec_version:SOR-001:SOR-LONG:v1',
+              'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
+              'runtime_scope:candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG:owner-runtime-console-v1',
+              'SOR-001', 'strategy_group_version:SOR-001:v1', 'ETHUSDT',
+              'binance_usdm:ETHUSDT', 'long', 'SOR-LONG',
+              1770000120000, 1770000120000, 'owner-runtime-console-v1',
+              'fact:SOR:expired-monitor', 'fact:SOR:expired-action-monitor',
+              'fact:SOR:expired-account-safe-monitor',
+              'fact:SOR:expired-account-mode-monitor',
+              'budget:SOR:expired-monitor', 'protection:SOR:expired-monitor',
+              'execution_policy:owner-runtime-console-v1',
+              'execution-policy-v1', 'owner-policy-v1', 'sizing-policy-v1',
+              'protection-policy-v1', 100, 1, 1770000120008, 'created',
+              'expired_pg_current_object_test; no_finalgate_no_operation_layer_no_exchange_write',
+              'ticket-hash:expired-monitor-bound',
+              'versions-hash:expired-monitor-bound', 1770000120009
+            )
+            """
+        )
+    )
+    pg_control_connection.commit()
+
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770001000000,
+    )
+    full_state = repository.read_control_state()
+    monitor_state = repository.read_monitor_control_state()
+
+    assert full_state["table_counts"]["watcher_runtime_coverage"] == 1
+    assert full_state["table_counts"]["live_signal_events"] == 1
+    assert full_state["table_counts"]["pretrade_readiness_rows"] == 1
+    assert full_state["table_counts"]["promotion_candidates"] == 1
+    assert full_state["table_counts"]["action_time_lane_inputs"] == 1
+    assert full_state["table_counts"]["action_time_tickets"] == 1
+    assert monitor_state["read_profile"] == "monitor_bounded_current"
+    assert monitor_state["table_counts"]["watcher_runtime_coverage"] == 0
+    assert monitor_state["table_counts"]["live_signal_events"] == 0
+    assert monitor_state["table_counts"]["promotion_candidates"] == 0
+    assert monitor_state["table_counts"]["action_time_lane_inputs"] == 0
+    assert monitor_state["table_counts"]["action_time_tickets"] == 0
 
 
 def test_pg_backed_runtime_control_state_repository_rejects_non_db_modes(
@@ -138,7 +381,10 @@ def test_pg_backed_runtime_control_state_repository_requires_projection_ownershi
 ):
     pg_control_connection.execute(text("DELETE FROM brc_current_projection_ownership"))
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
 
     with pytest.raises(
         RuntimeControlStateRepositoryError,
@@ -159,7 +405,10 @@ def test_pg_backed_runtime_control_state_repository_requires_event_binding(
         )
     )
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
 
     with pytest.raises(RuntimeControlStateRepositoryError, match="has no active event binding"):
         repository.read_control_state()
@@ -190,13 +439,16 @@ def test_pg_backed_runtime_control_state_repository_rejects_unsupported_active_s
         {"candidate_scope_id": candidate_scope_id, "side": side},
     )
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
 
-    with pytest.raises(RuntimeControlStateRepositoryError, match="outside active PG event scope"):
+    with pytest.raises(RuntimeControlStateRepositoryError, match="mismatches candidate side"):
         repository.read_control_state()
 
 
-def test_pg_backed_runtime_control_state_repository_rejects_generic_sor_event_spec(
+def test_pg_backed_runtime_control_state_repository_rejects_generic_current_event_spec(
     pg_control_connection,
 ):
     pg_control_connection.execute(
@@ -217,13 +469,16 @@ def test_pg_backed_runtime_control_state_repository_rejects_generic_sor_event_sp
         )
     )
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
 
-    with pytest.raises(RuntimeControlStateRepositoryError, match="unexpected=.*SOR-GENERIC"):
+    with pytest.raises(RuntimeControlStateRepositoryError, match="event_id is not side-specific"):
         repository.read_control_state()
 
 
-def test_pg_backed_runtime_control_state_repository_allows_support_only_current_event_spec(
+def test_pg_backed_runtime_control_state_repository_rejects_event_without_current_version(
     pg_control_connection,
 ):
     pg_control_connection.execute(
@@ -244,11 +499,16 @@ def test_pg_backed_runtime_control_state_repository_allows_support_only_current_
         )
     )
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
 
-    state = repository.read_control_state()
-
-    assert state["table_counts"]["strategy_side_event_specs"] == 7
+    with pytest.raises(
+        RuntimeControlStateRepositoryError,
+        match="has no current StrategyGroup version",
+    ):
+        repository.read_control_state()
 
 
 def test_pg_backed_runtime_control_state_repository_requires_hard_required_facts(
@@ -259,14 +519,66 @@ def test_pg_backed_runtime_control_state_repository_requires_hard_required_facts
             """
             DELETE FROM brc_strategy_event_required_facts
             WHERE event_spec_id = 'event_spec:MI-001:MI-LONG:v1'
-              AND fact_key = 'relative_strength_confirmed'
             """
         )
     )
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
 
-    with pytest.raises(RuntimeControlStateRepositoryError, match="MI-LONG.*required facts mismatch"):
+    with pytest.raises(RuntimeControlStateRepositoryError, match="MI-LONG.*no required facts"):
+        repository.read_control_state()
+
+
+def test_pg_backed_runtime_control_state_repository_requires_exact_required_fact_manifest(
+    pg_control_connection,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            DELETE FROM brc_strategy_event_required_facts
+            WHERE event_spec_id = 'event_spec:CPM-RO-001:CPM-LONG:v1'
+              AND fact_key = 'htf_trend_intact'
+            """
+        )
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
+
+    with pytest.raises(
+        RuntimeControlStateRepositoryError,
+        match="CPM-LONG.*RequiredFacts manifest mismatch.*htf_trend_intact",
+    ):
+        repository.read_control_state()
+
+
+def test_pg_backed_runtime_control_state_repository_requires_exact_disable_fact_manifest(
+    pg_control_connection,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            DELETE FROM brc_strategy_event_required_facts
+            WHERE event_spec_id = 'event_spec:BRF2-001:BRF2-SHORT:v1'
+              AND fact_key = 'strong_uptrend_disable'
+            """
+        )
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
+
+    with pytest.raises(
+        RuntimeControlStateRepositoryError,
+        match="BRF2-SHORT.*disable manifest mismatch.*strong_uptrend_disable",
+    ):
         repository.read_control_state()
 
 
@@ -295,7 +607,10 @@ def test_pg_backed_runtime_control_state_repository_rejects_signal_event_spec_mi
         )
     )
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
 
     with pytest.raises(RuntimeControlStateRepositoryError, match="mismatches candidate event spec"):
         repository.read_control_state()
@@ -326,7 +641,10 @@ def test_pg_backed_runtime_control_state_repository_rejects_generic_sor_signal_t
         )
     )
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
 
     with pytest.raises(RuntimeControlStateRepositoryError, match="signal_type must equal event_id"):
         repository.read_control_state()
@@ -454,7 +772,10 @@ def test_pg_backed_runtime_control_state_repository_rejects_lane_without_arbitra
         )
     )
     pg_control_connection.commit()
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120010,
+    )
 
     with pytest.raises(RuntimeControlStateRepositoryError, match="does not reference arbitration_won"):
         repository.read_control_state()

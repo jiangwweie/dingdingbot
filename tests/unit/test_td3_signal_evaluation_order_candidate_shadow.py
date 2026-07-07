@@ -128,6 +128,7 @@ def _strategy_family_signal_output() -> StrategyFamilySignalOutput:
         strategy_family_version_id="version-1",
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         timeframe="1h",
         signal_type=SignalType.WOULD_ENTER,
         side=SignalSide.LONG,

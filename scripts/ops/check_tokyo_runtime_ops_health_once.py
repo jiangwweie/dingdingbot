@@ -10,13 +10,30 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from pathlib import Path
 import shutil
 import subprocess
+import sys
 from typing import Any
+
+import sqlalchemy as sa
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
 
 
 SCHEMA = "brc.ops.tokyo_runtime_ops_health_once.v1"
 LOW_PRIORITY_PREFIX = ("timeout", "3s", "ionice", "-c3", "nice", "-n", "19")
+PG_ROW_COUNT_TABLES = (
+    "brc_runtime_fact_snapshots",
+    "brc_watcher_runtime_coverage",
+    "brc_server_monitor_runs",
+)
 
 COMMANDS = (
     ("disk_df", ("df", "-h")),
@@ -76,6 +93,7 @@ def build_payload(*, execute_local: bool) -> dict[str, Any]:
                 "stderr_tail": completed.stderr[-2000:],
             }
         )
+    results.append(_pg_runtime_row_counts_result(execute_local=execute_local))
     statuses = {row["status"] for row in results}
     status = "ok"
     if "warn" in statuses or "missing_binary" in statuses:
@@ -88,8 +106,50 @@ def build_payload(*, execute_local: bool) -> dict[str, Any]:
         "checks": {
             "no_pg_runtime_truth_write": True,
             "no_trade_runtime_mutation": True,
+            "pg_row_count_check_is_readonly": True,
+            "pg_retention_apply_not_run": True,
             "readonly_commands_only": True,
         },
+    }
+
+
+def _pg_runtime_row_counts_result(*, execute_local: bool) -> dict[str, Any]:
+    base = {
+        "name": "pg_runtime_row_counts",
+        "command": ["internal_sqlalchemy_readonly_row_counts"],
+    }
+    if not execute_local:
+        return {**base, "status": "planned"}
+    raw_dsn = os.environ.get("PG_DATABASE_URL") or os.environ.get("DATABASE_URL") or ""
+    if not raw_dsn:
+        return {**base, "status": "warn", "stderr_tail": "PG_DATABASE_URL missing"}
+    database_url = normalize_sync_postgres_dsn(raw_dsn)
+    if not is_sync_postgres_dsn(database_url):
+        return {**base, "status": "warn", "stderr_tail": "PG DSN is not sync PostgreSQL"}
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            counts = {
+                table_name: int(
+                    conn.execute(sa.text(f"SELECT count(*) FROM {table_name}")).scalar_one()
+                )
+                for table_name in PG_ROW_COUNT_TABLES
+            }
+    except Exception as exc:
+        return {
+            **base,
+            "status": "warn",
+            "stderr_tail": f"{type(exc).__name__}: {exc}",
+        }
+    finally:
+        engine.dispose()
+    return {
+        **base,
+        "status": "ok",
+        "stdout_tail": "\n".join(
+            f"{table_name}={count}" for table_name, count in counts.items()
+        ),
+        "stderr_tail": "",
     }
 
 

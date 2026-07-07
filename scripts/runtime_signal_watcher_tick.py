@@ -531,39 +531,21 @@ def _post_signal_auto_resume_plan(
             "creates_execution_intent": False,
         }
 
-    if prepared_authorization_id:
-        return {
-            **base,
-            "status": "ready_for_action_time_final_gate",
-            "blocked_at": "FinalGate",
-            "blocked_reason": "action_time_final_gate_not_run_yet",
-            "next_recover_condition": (
-                "official_final_gate_preflight_passes_with_current_facts"
-            ),
-            "non_authority_checkpoint": "run_official_action_time_final_gate_preflight",
-            "checkpoint_source": "runtime_signal_watcher_tick",
-            "downgrade_mode": "no_real_submit_until_final_gate_pass",
-            "can_continue_without_owner_chat": True,
-            "creates_shadow_candidate": bool(
-                shadow_candidate_id or prepared_authorization_id
-            ),
-            "creates_execution_intent": False,
-        }
-
     ready_prepare_statuses = {
         "ready_for_prepare",
         "ready_for_prepare_records",
         "runtime_signal_ready_for_non_executing_prepare",
         "prepared_shadow_evidence_ready_for_owner_review",
     }
-    legacy_ready_for_prepare = (
-        latest_status in ready_prepare_statuses
-        or wakeup_status in ready_prepare_statuses
-        or bool(signal_input_json)
-    )
     pg_live_signal_events = _as_dict(status_artifact.get("pg_live_signal_events"))
     pg_live_signal_written = int(pg_live_signal_events.get("written_count") or 0) > 0
-    if legacy_ready_for_prepare and not pg_live_signal_written:
+    pg_signal_materialization_failed = (
+        str(pg_live_signal_events.get("status") or "") == "pg_live_signal_events_blocked"
+    )
+    artifact_reports_ready = (
+        latest_status in ready_prepare_statuses or wakeup_status in ready_prepare_statuses
+    )
+    if pg_signal_materialization_failed and not pg_live_signal_written:
         if _pg_live_signal_events_only_expired(pg_live_signal_events):
             return {
                 **base,
@@ -595,9 +577,21 @@ def _post_signal_auto_resume_plan(
             "creates_shadow_candidate": False,
             "creates_execution_intent": False,
         }
-    if (
-        legacy_ready_for_prepare
-    ):
+    if artifact_reports_ready and not pg_live_signal_written:
+        return {
+            **base,
+            "status": "blocked_observation_evidence",
+            "blocked_at": "pg_live_signal_event",
+            "blocked_reason": "pg_live_signal_event_not_materialized",
+            "next_recover_condition": "fresh_strategy_signal_is_materialized_in_pg_live_signal_events",
+            "non_authority_checkpoint": "materialize_pg_live_signal_event",
+            "checkpoint_source": "runtime_signal_watcher_tick",
+            "downgrade_mode": "observe_only_no_candidate_prepare",
+            "can_continue_without_owner_chat": False,
+            "creates_shadow_candidate": False,
+            "creates_execution_intent": False,
+        }
+    if pg_live_signal_written:
         non_authority_checkpoint = (
             "wait_for_prepare_records_then_rebuild_final_gate_status"
             if args.allow_prepare_records
@@ -607,7 +601,7 @@ def _post_signal_auto_resume_plan(
             **base,
             "status": "ready_for_non_executing_prepare",
             "blocked_at": "non_executing_prepare_records",
-            "blocked_reason": "fresh_strategy_signal_ready",
+            "blocked_reason": "pg_fresh_strategy_signal_ready",
             "next_recover_condition": (
                 "shadow_candidate_runtime_grant_authorization_evidence_exists"
             ),
