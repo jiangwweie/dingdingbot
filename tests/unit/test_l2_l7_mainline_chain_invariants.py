@@ -398,6 +398,27 @@ def test_owner_console_status_readmodels_do_not_import_artifact_scripts() -> Non
     assert "from src.application.readmodels.strategygroup_runtime_pilot_status" in source
 
 
+def test_l2_l7_current_sources_do_not_reintroduce_retired_authority_key() -> None:
+    forbidden_key = "down" + "grade_mode"
+    forbidden_word = "down" + "grade_to_observation"
+    checked_roots = [
+        REPO_ROOT / "scripts",
+        REPO_ROOT / "src/application/readmodels",
+        REPO_ROOT / "deploy/systemd",
+        REPO_ROOT / "docs/current",
+    ]
+    skipped_suffixes = {".pyc", ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".gz"}
+
+    for root in checked_roots:
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix in skipped_suffixes:
+                continue
+            rel_path = path.relative_to(REPO_ROOT).as_posix()
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            assert forbidden_key not in text, rel_path
+            assert forbidden_word not in text, rel_path
+
+
 def test_ticket_bound_api_imports_application_action_time_services_not_scripts() -> None:
     source = (REPO_ROOT / "src/interfaces/api_trading_console.py").read_text(
         encoding="utf-8"

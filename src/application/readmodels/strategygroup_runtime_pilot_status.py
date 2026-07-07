@@ -645,7 +645,7 @@ def _gate_row(
     blocked_reason: str,
     next_recover_condition: str,
     non_authority_checkpoint: str,
-    downgrade_mode: str,
+    authority_mode: str,
     hard_stop: bool = False,
     blockers: list[Any] | None = None,
 ) -> dict[str, Any]:
@@ -657,7 +657,7 @@ def _gate_row(
         "blocked_reason": blocked_reason,
         "next_recover_condition": next_recover_condition,
         "non_authority_checkpoint": non_authority_checkpoint,
-        "downgrade_mode": downgrade_mode,
+        "authority_mode": authority_mode,
         "hard_stop": hard_stop,
         "owner_visible": status not in {"ready"},
         "blockers": list(blockers or []),
@@ -707,7 +707,7 @@ def _gate_failure_ledger(
     owner_reason = str(owner_state["blocked_reason"])
     owner_recover = str(owner_state["next_recover_condition"])
     owner_action = _owner_checkpoint(owner_state)
-    owner_downgrade = str(owner_state["downgrade_mode"])
+    owner_authority = str(owner_state["authority_mode"])
 
     return [
         _gate_row(
@@ -726,7 +726,7 @@ def _gate_failure_ledger(
             non_authority_checkpoint=(
                 owner_action if no_group else "continue_selected_pilot_observation"
             ),
-            downgrade_mode=owner_downgrade if no_group else "armed_observation",
+            authority_mode=owner_authority if no_group else "armed_observation",
             blockers=[],
         ),
         _gate_row(
@@ -745,8 +745,8 @@ def _gate_failure_ledger(
                 if account_blocked
                 else "continue_selected_pilot_observation"
             ),
-            downgrade_mode=(
-                owner_downgrade if account_blocked else "armed_observation"
+            authority_mode=(
+                owner_authority if account_blocked else "armed_observation"
             ),
             blockers=[],
         ),
@@ -766,8 +766,8 @@ def _gate_failure_ledger(
                 if binding_blocked
                 else "continue_selected_pilot_observation"
             ),
-            downgrade_mode=(
-                owner_downgrade if binding_blocked else "armed_observation"
+            authority_mode=(
+                owner_authority if binding_blocked else "armed_observation"
             ),
             blockers=runtime_binding.get("blockers") or [],
         ),
@@ -791,7 +791,7 @@ def _gate_failure_ledger(
                 if scope_blocked
                 else "continue_selected_pilot_observation"
             ),
-            downgrade_mode=(
+            authority_mode=(
                 "observe_only_no_candidate_prepare"
                 if scope_blocked
                 else "armed_observation"
@@ -823,7 +823,7 @@ def _gate_failure_ledger(
             non_authority_checkpoint=(
                 "continue_to_required_facts_readiness" if signal_ready else owner_action
             ),
-            downgrade_mode="armed_observation" if signal_ready else owner_downgrade,
+            authority_mode="armed_observation" if signal_ready else owner_authority,
             hard_stop=hard_safety_stop,
             blockers=watcher["blockers"],
         ),
@@ -849,7 +849,7 @@ def _gate_failure_ledger(
                 if candidate_blockers
                 else "continue_to_shadow_candidate_prepare"
             ),
-            downgrade_mode=(
+            authority_mode=(
                 "observe_only_no_real_submit"
                 if candidate_blockers
                 else "armed_observation"
@@ -876,8 +876,8 @@ def _gate_failure_ledger(
                 if ready_for_final_gate
                 else "stop_before_action_time_final_gate_until_candidate_chain_exists"
             ),
-            downgrade_mode=(
-                owner_downgrade if ready_for_final_gate else "no_real_submit"
+            authority_mode=(
+                owner_authority if ready_for_final_gate else "no_real_submit"
             ),
             hard_stop=True,
         ),
@@ -889,7 +889,7 @@ def _gate_failure_ledger(
             blocked_reason="official_operation_layer_requires_final_gate_pass",
             next_recover_condition="action_time_final_gate_passes_with_current_facts",
             non_authority_checkpoint="stop_before_gateway_action_until_final_gate_passes",
-            downgrade_mode="no_real_submit",
+            authority_mode="no_real_submit",
             hard_stop=True,
         ),
     ]
@@ -918,7 +918,7 @@ def _owner_state(
                 "pg_current_candidate_scope_projection_contains_at_least_one_group"
             ),
             "non_authority_checkpoint": "publish_pg_current_strategy_group_intake_projection",
-            "downgrade_mode": "no_runtime_observation",
+            "authority_mode": "no_runtime_observation",
         }
     if runtime_binding.get("status") != "configured":
         return {
@@ -935,7 +935,7 @@ def _owner_state(
             "non_authority_checkpoint": str(
                 runtime_binding.get("non_authority_checkpoint")
             ),
-            "downgrade_mode": "observe_only_no_runtime_evaluation",
+            "authority_mode": "observe_only_no_runtime_evaluation",
         }
     if watcher["unsafe_flags"]:
         return {
@@ -947,7 +947,7 @@ def _owner_state(
                 "forbidden_effect_flags_are_absent_in_current_evidence"
             ),
             "non_authority_checkpoint": "stop_resume_path_and_investigate_watcher_evidence",
-            "downgrade_mode": "manual_review_only",
+            "authority_mode": "manual_review_only",
         }
     if fact_summary["active_position_blocked"] or fact_summary["open_order_blocked"]:
         reason = (
@@ -966,7 +966,7 @@ def _owner_state(
             "non_authority_checkpoint": (
                 "refresh_readonly_account_position_open_order_facts_then_reconcile"
             ),
-            "downgrade_mode": "observe_only_no_candidate_prepare",
+            "authority_mode": "observe_only_no_candidate_prepare",
         }
     if not observe_ready:
         return {
@@ -976,7 +976,7 @@ def _owner_state(
             "blocked_reason": "selected_strategy_group_is_not_observe_ready",
             "next_recover_condition": "exchange_rules_are_ready_for_selected_universe",
             "non_authority_checkpoint": "refresh_readonly_exchange_rules_for_selected_symbols",
-            "downgrade_mode": "no_runtime_observation",
+            "authority_mode": "no_runtime_observation",
         }
     if watcher["deployment_status"] in {"evidence_missing", "evidence_stale", "unknown"}:
         return {
@@ -988,7 +988,7 @@ def _owner_state(
             "non_authority_checkpoint": (
                 "run_or_wait_for_next_watcher_tick_and_rebuild_readiness_pack"
             ),
-            "downgrade_mode": "observe_only_no_candidate_prepare",
+            "authority_mode": "observe_only_no_candidate_prepare",
         }
     if watcher_scope_alignment.get("status") == "mismatch":
         return {
@@ -1002,7 +1002,7 @@ def _owner_state(
             "non_authority_checkpoint": str(
                 watcher_scope_alignment.get("non_authority_checkpoint")
             ),
-            "downgrade_mode": "observe_only_no_candidate_prepare",
+            "authority_mode": "observe_only_no_candidate_prepare",
         }
     if watcher["can_continue_steps_5_8"]:
         if candidate_ready:
@@ -1029,8 +1029,8 @@ def _owner_state(
                             default="run_official_action_time_final_gate_preflight",
                         )[0]
                     ),
-                    "downgrade_mode": (
-                        auto_resume.get("downgrade_mode")
+                    "authority_mode": (
+                        auto_resume.get("authority_mode")
                         or "no_real_submit_until_final_gate_pass"
                     ),
                 }
@@ -1046,7 +1046,7 @@ def _owner_state(
                         default="prepare_shadow_candidate_runtime_grant_authorization_evidence",
                     )[0]
                 ),
-                "downgrade_mode": "armed_observation",
+                "authority_mode": "armed_observation",
             }
         return {
             "status": "blocked_missing_fact",
@@ -1058,7 +1058,7 @@ def _owner_state(
             ),
             "next_recover_condition": "protection_budget_next_attempt_gate_and_account_facts_pass",
             "non_authority_checkpoint": "collect_or_prepare_missing_candidate_specific_facts",
-            "downgrade_mode": "observe_only_no_real_submit",
+            "authority_mode": "observe_only_no_real_submit",
         }
     if _has_no_signal_blocker(watcher["blockers"]) or watcher["wakeup_status"] in {
         "operator_evidence_needs_review",
@@ -1083,7 +1083,7 @@ def _owner_state(
                     default="continue_watcher_observation_and_notify_on_material_change",
                 )[0]
             ),
-            "downgrade_mode": auto_resume.get("downgrade_mode") or "observe_only",
+            "authority_mode": auto_resume.get("authority_mode") or "observe_only",
         }
     return {
         "status": "blocked_operator_review",
@@ -1094,7 +1094,7 @@ def _owner_state(
             "operator_review_evidence_translates_to_fresh_signal_or_waiting_for_market"
         ),
         "non_authority_checkpoint": "rebuild_watcher_status_and_resume_pack",
-        "downgrade_mode": "observe_only_no_candidate_prepare",
+        "authority_mode": "observe_only_no_candidate_prepare",
     }
 
 
@@ -1192,7 +1192,7 @@ def _owner_action_item(
         ),
         "non_authority_checkpoint": non_authority_checkpoint,
         "checkpoint_source": "owner_state",
-        "downgrade_mode": str(owner_state.get("downgrade_mode") or "unknown"),
+        "authority_mode": str(owner_state.get("authority_mode") or "unknown"),
         "owner_status_checkpoint": owner_status_checkpoint,
         "can_continue_without_owner_chat": bool(
             owner_state.get("can_continue_without_owner_chat")

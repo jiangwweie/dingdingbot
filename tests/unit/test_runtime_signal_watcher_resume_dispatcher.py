@@ -1187,7 +1187,7 @@ def test_dispatcher_execute_preflight_blocks_finalgate_failure(monkeypatch):
     assert artifact["dispatch_status"] == "blocked_by_action_time_finalgate"
     assert "active_position_conflict" in artifact["blockers"]
     assert artifact["owner_state"]["blocked_at"] == "FinalGate"
-    assert artifact["owner_state"]["downgrade_mode"] == "observe_only_no_submit"
+    assert artifact["owner_state"]["authority_mode"] == "observe_only_no_submit"
     assert artifact["operation_layer_command_plan"] is None
     assert artifact["safety_invariants"]["places_order"] is False
 

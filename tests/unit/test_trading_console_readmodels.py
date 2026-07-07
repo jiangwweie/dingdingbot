@@ -5616,7 +5616,7 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
                 "run_official_action_time_final_gate_preflight"
             ),
             "checkpoint_source": "runtime_signal_watcher_tick",
-            "downgrade_mode": "no_real_submit_until_final_gate_pass",
+            "authority_mode": "no_real_submit_until_final_gate_pass",
             "can_continue_without_owner_chat": True,
             "requires_action_time_final_gate": True,
             "requires_official_operation_layer": True,
@@ -5668,7 +5668,7 @@ def test_runtime_signal_watcher_status_returns_resume_pack_boundary(monkeypatch,
     assert payload["data"]["owner_state"]["non_authority_checkpoint"] == (
         "repair_pg_pretrade_readiness_projection"
     )
-    assert payload["data"]["owner_state"]["downgrade_mode"] == "no_legacy_file_fallback"
+    assert payload["data"]["owner_state"]["authority_mode"] == "no_legacy_file_fallback"
     assert payload["data"]["why_not_executable"] == [
         "candidate_pool_blocker:detector_not_attached:22"
     ]
@@ -5698,7 +5698,7 @@ def test_runtime_signal_watcher_status_ignores_resume_pack_legacy_action_text(
             "official_final_gate_preflight_passes_with_current_facts"
         ),
         "automatic_recovery_action": "legacy_recovery_text_must_not_drive_action",
-        "downgrade_mode": "no_real_submit_until_final_gate_pass",
+        "authority_mode": "no_real_submit_until_final_gate_pass",
         "can_continue_without_owner_chat": True,
         "requires_action_time_final_gate": True,
         "requires_official_operation_layer": True,
@@ -5962,7 +5962,7 @@ def test_runtime_signal_watcher_status_normalizes_waiting_resume_pack(
             "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
         ),
         "automatic_recovery_action": "continue_watcher_observation",
-        "downgrade_mode": "observe_only",
+        "authority_mode": "observe_only",
         "can_continue_without_owner_chat": True,
         "requires_action_time_final_gate": True,
         "requires_official_operation_layer": True,
@@ -6220,7 +6220,7 @@ def test_strategygroup_runtime_pilot_status_ignores_legacy_report_waiting_state(
                 "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
             ),
             "automatic_recovery_action": "continue_watcher_observation",
-            "downgrade_mode": "observe_only",
+            "authority_mode": "observe_only",
             "can_continue_without_owner_chat": True,
             "requires_action_time_final_gate": True,
             "requires_official_operation_layer": True,
@@ -6254,7 +6254,7 @@ def test_strategygroup_runtime_pilot_status_ignores_legacy_report_waiting_state(
         "db_backed_required",
     }
     assert payload["data"]["action_time_resume"]["legacy_json_fallback"] is False
-    assert payload["data"]["post_signal_auto_resume"]["downgrade_mode"] in {
+    assert payload["data"]["post_signal_auto_resume"]["authority_mode"] in {
         "no_legacy_file_fallback",
         "observe_only_no_candidate_prepare",
     }
@@ -6974,7 +6974,7 @@ def test_strategygroup_runtime_pilot_status_ignores_legacy_report_scope_mismatch
                 "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
             ),
             "automatic_recovery_action": "continue_watcher_observation",
-            "downgrade_mode": "observe_only",
+            "authority_mode": "observe_only",
             "can_continue_without_owner_chat": True,
             "requires_action_time_final_gate": True,
             "requires_official_operation_layer": True,

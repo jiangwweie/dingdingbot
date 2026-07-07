@@ -71,7 +71,7 @@ def test_live_facts_readiness_allows_observation_when_candidate_facts_missing():
         "observe_ready_candidate_prerequisites_missing"
     )
     assert artifact["owner_state"]["blocked_at"] == "candidate_prepare_facts"
-    assert artifact["owner_state"]["downgrade_mode"] == (
+    assert artifact["owner_state"]["authority_mode"] == (
         "observe_only_until_candidate_prerequisites_ready"
     )
     assert "automatic_recovery_action" not in artifact["owner_state"]
@@ -134,7 +134,7 @@ def test_live_facts_readiness_blocks_observation_when_exchange_rules_missing():
     assert artifact["counts"]["observe_ready"] == 0
     assert artifact["operator_path"]["can_continue_observation"] is False
     assert artifact["owner_state"]["blocked_at"] == "live_fact_readiness"
-    assert artifact["owner_state"]["downgrade_mode"] == "not_observing"
+    assert artifact["owner_state"]["authority_mode"] == "not_observing"
     assert "automatic_recovery_action" not in artifact["owner_state"]
     assert artifact["owner_state"]["non_authority_checkpoint"] == (
         "refresh_strategy_group_live_facts_readonly"

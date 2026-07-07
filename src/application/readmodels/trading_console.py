@@ -130,7 +130,7 @@ def _runtime_signal_watcher_owner_state(
             "blocked_reason": blocked_reason,
             "next_recover_condition": "forbidden_effect_flags_are_absent_in_current_evidence",
             "non_authority_checkpoint": non_authority_checkpoint,
-            "downgrade_mode": "manual_review_only",
+            "authority_mode": "manual_review_only",
         }
     elif missing:
         blocked_at = "runtime_signal_watcher_evidence"
@@ -143,7 +143,7 @@ def _runtime_signal_watcher_owner_state(
             "blocked_reason": blocked_reason,
             "next_recover_condition": "watcher_evidence_files_are_present",
             "non_authority_checkpoint": non_authority_checkpoint,
-            "downgrade_mode": "observe_only_no_candidate_prepare",
+            "authority_mode": "observe_only_no_candidate_prepare",
         }
     elif stale:
         blocked_at = "runtime_signal_watcher_evidence"
@@ -156,7 +156,7 @@ def _runtime_signal_watcher_owner_state(
             "blocked_reason": blocked_reason,
             "next_recover_condition": "watcher_evidence_files_are_fresh",
             "non_authority_checkpoint": non_authority_checkpoint,
-            "downgrade_mode": "observe_only_no_candidate_prepare",
+            "authority_mode": "observe_only_no_candidate_prepare",
         }
     else:
         status = str(post_signal_auto_resume.get("status") or "")
@@ -200,8 +200,8 @@ def _runtime_signal_watcher_owner_state(
             ),
             "non_authority_checkpoint": non_authority_checkpoint,
             "checkpoint_source": checkpoint_source,
-            "downgrade_mode": str(
-                post_signal_auto_resume.get("downgrade_mode")
+            "authority_mode": str(
+                post_signal_auto_resume.get("authority_mode")
                 or ("armed_observation" if can_resume_steps_5_8 else "observe_only")
             ),
         }
@@ -3556,7 +3556,7 @@ def _runtime_signal_watcher_auto_resume_from_goal_status(
             "next_recover_condition": next_checkpoint,
             "non_authority_checkpoint": next_checkpoint,
             "checkpoint_source": "pg_goal_status_current",
-            "downgrade_mode": "no_legacy_file_fallback",
+            "authority_mode": "no_legacy_file_fallback",
             "can_continue_without_owner_chat": (
                 projection_ready and goal_status.get("owner_action_required") is not True
             ),
@@ -3613,7 +3613,7 @@ def _runtime_signal_watcher_owner_state_from_goal_status(
         "next_recover_condition": next_checkpoint,
         "non_authority_checkpoint": next_checkpoint,
         "checkpoint_source": "pg_goal_status_current",
-        "downgrade_mode": "no_legacy_file_fallback",
+        "authority_mode": "no_legacy_file_fallback",
         "can_continue_without_owner_chat": (
             projection_ready and goal_status.get("owner_action_required") is not True
         ),

@@ -140,7 +140,7 @@ def _watcher_waiting() -> dict:
                         "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
                     ),
                     "automatic_recovery_action": "continue_watcher_observation",
-                    "downgrade_mode": "observe_only",
+                    "authority_mode": "observe_only",
                     "can_continue_without_owner_chat": True,
                     "requires_action_time_final_gate": True,
                     "requires_official_operation_layer": True,
@@ -154,7 +154,7 @@ def _watcher_waiting() -> dict:
                     "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
                 ),
                 "automatic_recovery_action": "continue_watcher_observation",
-                "downgrade_mode": "observe_only",
+                "authority_mode": "observe_only",
                 "can_continue_without_owner_chat": True,
                 "requires_action_time_final_gate": True,
                 "requires_official_operation_layer": True,
@@ -192,7 +192,7 @@ def _watcher_ready() -> dict:
         "automatic_recovery_action": (
             "wait_for_prepare_records_then_rebuild_final_gate_status"
         ),
-        "downgrade_mode": "armed_observation_no_real_submit",
+        "authority_mode": "armed_observation_no_real_submit",
         "can_continue_without_owner_chat": True,
         "requires_action_time_final_gate": True,
         "requires_official_operation_layer": True,
@@ -214,7 +214,7 @@ def _watcher_prepared() -> dict:
             "official_final_gate_preflight_passes_with_current_facts"
         ),
         "automatic_recovery_action": "run_official_action_time_final_gate_preflight",
-        "downgrade_mode": "no_real_submit_until_final_gate_pass",
+        "authority_mode": "no_real_submit_until_final_gate_pass",
         "can_continue_without_owner_chat": True,
         "requires_action_time_final_gate": True,
         "requires_official_operation_layer": True,
@@ -286,7 +286,7 @@ def test_pilot_status_defaults_to_mpg_and_waits_for_market_without_hiding_progre
         ),
         "non_authority_checkpoint": "continue_watcher_observation",
         "checkpoint_source": "owner_state",
-        "downgrade_mode": "observe_only",
+        "authority_mode": "observe_only",
         "owner_status_checkpoint": "none_wait_for_signal_notification",
         "can_continue_without_owner_chat": True,
         "requires_action_time_final_gate": True,
@@ -814,7 +814,7 @@ def test_pilot_status_accepts_raw_post_signal_resume_pack():
                     "runtime_signal_watcher_observes_a_fresh_signal_for_selected_scope"
                 ),
                 "automatic_recovery_action": "continue_watcher_observation",
-                "downgrade_mode": "observe_only",
+                "authority_mode": "observe_only",
                 "can_continue_without_owner_chat": True,
                 "requires_action_time_final_gate": True,
                 "requires_official_operation_layer": True,

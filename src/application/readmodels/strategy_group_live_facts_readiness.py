@@ -239,7 +239,7 @@ def _owner_state(
             "next_recover_condition": "pg_current_candidate_scope_projection_exists",
             "non_authority_checkpoint": "publish_pg_current_strategy_group_intake_projection",
             "checkpoint_source": "owner_state",
-            "downgrade_mode": "not_selected",
+            "authority_mode": "not_selected",
         }
     if armed_ready_count > 0:
         return {
@@ -249,7 +249,7 @@ def _owner_state(
             "next_recover_condition": "fresh_strategy_signal_arrives",
             "non_authority_checkpoint": "continue_watcher_observation",
             "checkpoint_source": "owner_state",
-            "downgrade_mode": "none",
+            "authority_mode": "none",
         }
     if observe_ready_count > 0:
         return {
@@ -263,7 +263,7 @@ def _owner_state(
                 "continue_observation_and_prepare_candidate_prerequisite_facts"
             ),
             "checkpoint_source": "owner_state",
-            "downgrade_mode": "observe_only_until_candidate_prerequisites_ready",
+            "authority_mode": "observe_only_until_candidate_prerequisites_ready",
         }
     return {
         "status": "blocked",
@@ -272,7 +272,7 @@ def _owner_state(
         "next_recover_condition": "exchange_account_position_open_order_facts_are_ready",
         "non_authority_checkpoint": "refresh_strategy_group_live_facts_readonly",
         "checkpoint_source": "owner_state",
-        "downgrade_mode": "not_observing",
+        "authority_mode": "not_observing",
     }
 
 

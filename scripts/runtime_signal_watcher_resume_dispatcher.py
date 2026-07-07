@@ -397,7 +397,7 @@ def _blocked_pg_ticket_resume_pack(
             "blocked_at": "pg_action_time_ticket_identity",
             "blocked_reason": blockers[0] if blockers else dispatch_status,
             "non_authority_checkpoint": "materialize_action_time_ticket",
-            "downgrade_mode": "continue_watcher_observation_no_submit",
+            "authority_mode": "continue_watcher_observation_no_submit",
             "owner_action_required": False,
         },
         "safety_invariants": {
@@ -1007,7 +1007,7 @@ def _owner_state_for_operation_layer_handoff(
             "blocked_reason": "none",
             "next_recover_condition": "ticket_bound_protected_submit_adapter_ready",
             "non_authority_checkpoint": "prepare_ticket_bound_protected_submit",
-            "downgrade_mode": "none",
+            "authority_mode": "none",
             "operation_layer_handoff_status": body.get("status"),
         }
     return {
@@ -1017,7 +1017,7 @@ def _owner_state_for_operation_layer_handoff(
         "blocked_reason": blockers[0] if blockers else dispatch_status,
         "next_recover_condition": "ticket_bound_operation_layer_handoff_ready",
         "non_authority_checkpoint": "retry_ticket_bound_operation_layer_handoff",
-        "downgrade_mode": "continue_watcher_observation_no_submit",
+        "authority_mode": "continue_watcher_observation_no_submit",
         "operation_layer_handoff_status": body.get("status"),
     }
 
@@ -1068,7 +1068,7 @@ def build_dispatch_artifact(
                 "blocked_at": "file_authority_retired",
                 "blocked_reason": f"retired_file_authority_scope:{retired_scope}",
                 "non_authority_checkpoint": "materialize_pg_action_time_ticket",
-                "downgrade_mode": "continue_watcher_observation_no_submit",
+                "authority_mode": "continue_watcher_observation_no_submit",
             },
             status="blocked",
             blocker_class="hard_safety_stop",
@@ -1149,7 +1149,7 @@ def build_dispatch_artifact(
                     "pg_promotion_candidate_and_action_time_ticket_materialized"
                 ),
                 "non_authority_checkpoint": "materialize_pg_action_time_ticket",
-                "downgrade_mode": "continue_watcher_observation_no_submit",
+                "authority_mode": "continue_watcher_observation_no_submit",
             },
             status="blocked",
             blocker_class="hard_safety_stop",
@@ -1178,7 +1178,7 @@ def build_dispatch_artifact(
                 "blocked_at": "file_authority_retired",
                 "blocked_reason": "fresh_authorization_handoff_file_path_retired",
                 "non_authority_checkpoint": "materialize_pg_action_time_ticket",
-                "downgrade_mode": "continue_watcher_observation_no_submit",
+                "authority_mode": "continue_watcher_observation_no_submit",
             },
             status="blocked",
             blocker_class="hard_safety_stop",
@@ -1212,7 +1212,7 @@ def build_dispatch_artifact(
                 "blocked_at": "selected_strategygroup_scope",
                 "blocked_reason": ",".join(selected_scope_blockers),
                 "non_authority_checkpoint": "review_selected_strategygroup_scope",
-                "downgrade_mode": "continue_watcher_observation_no_submit",
+                "authority_mode": "continue_watcher_observation_no_submit",
             },
             status="blocked",
             blocker_class="hard_safety_stop",
@@ -2438,7 +2438,7 @@ def _dispatch_artifact_from_ticket_bound_post_submit_closure(
         "blocked_reason": ",".join(blockers),
         "non_authority_checkpoint": body.get("next_action")
         or "run_ticket_bound_post_submit_reconciliation",
-        "downgrade_mode": "halt_new_entries_until_post_submit_settled",
+        "authority_mode": "halt_new_entries_until_post_submit_settled",
         "checkpoint_source": "ticket_bound_post_submit_closure",
     }
     if status == "settled":
@@ -2569,7 +2569,7 @@ def _owner_state_for_operation_layer_submit(
             "blocked_reason": "none",
             "next_recover_condition": "post_submit_finalize_reconciliation_budget_settlement",
             "non_authority_checkpoint": POST_SUBMIT_FINALIZE_ACTION,
-            "downgrade_mode": "none",
+            "authority_mode": "none",
             "exchange_submit_execution_status": body.get("status"),
         }
     if status == "operation_layer_disabled_smoke_passed":
@@ -2580,7 +2580,7 @@ def _owner_state_for_operation_layer_submit(
             "blocked_reason": "none",
             "next_recover_condition": "fresh_strategy_signal_or_real_gateway_action",
             "non_authority_checkpoint": CONTINUE_ACTION,
-            "downgrade_mode": "none",
+            "authority_mode": "none",
             "exchange_submit_execution_status": body.get("status"),
         }
     if status == "operation_layer_submit_failed":
@@ -2595,7 +2595,7 @@ def _owner_state_for_operation_layer_submit(
             "non_authority_checkpoint": (
                 "run_post_submit_reconciliation_and_protection_failure_policy"
             ),
-            "downgrade_mode": "halt_new_entries_until_reconciled",
+            "authority_mode": "halt_new_entries_until_reconciled",
             "exchange_submit_execution_status": body.get("status"),
         }
     if dispatch_status == "blocked_by_legacy_authorization_operation_layer_submit":
@@ -2610,7 +2610,7 @@ def _owner_state_for_operation_layer_submit(
             "non_authority_checkpoint": (
                 "materialize_action_time_ticket_and_ticket_bound_operation_layer_handoff"
             ),
-            "downgrade_mode": "continue_watcher_observation_no_submit",
+            "authority_mode": "continue_watcher_observation_no_submit",
             "exchange_submit_execution_status": body.get("status"),
         }
     return {
@@ -2622,7 +2622,7 @@ def _owner_state_for_operation_layer_submit(
         "non_authority_checkpoint": (
             "refresh_operation_layer_evidence_and_rerun_action_time_finalgate"
         ),
-        "downgrade_mode": "continue_watcher_observation_no_submit",
+        "authority_mode": "continue_watcher_observation_no_submit",
         "exchange_submit_execution_status": body.get("status"),
     }
 
@@ -2644,7 +2644,7 @@ def _owner_state_for_preflight(
             "non_authority_checkpoint": (
                 TICKET_BOUND_OPERATION_LAYER_HANDOFF_ACTION
             ),
-            "downgrade_mode": "none",
+            "authority_mode": "none",
         }
     if dispatch_status in {
         "blocked_by_operator_session_unavailable",
@@ -2657,7 +2657,7 @@ def _owner_state_for_preflight(
             "blocked_reason": dispatch_status,
             "next_recover_condition": "operator_session_available_for_local_official_preflight",
             "non_authority_checkpoint": "restore_operator_session_or_local_session_signing",
-            "downgrade_mode": "continue_watcher_observation_no_submit",
+            "authority_mode": "continue_watcher_observation_no_submit",
         }
     if dispatch_status == "blocked_by_action_time_finalgate":
         return {
@@ -2666,8 +2666,8 @@ def _owner_state_for_preflight(
             "blocked_at": "FinalGate",
             "blocked_reason": blockers[0] if blockers else "action_time_finalgate_blocked",
             "next_recover_condition": "fresh_action_time_facts_pass_finalgate",
-            "non_authority_checkpoint": "refresh_action_time_facts_or_downgrade_to_observation",
-            "downgrade_mode": "observe_only_no_submit",
+            "non_authority_checkpoint": "refresh_action_time_facts_or_return_to_observation",
+            "authority_mode": "observe_only_no_submit",
         }
     if dispatch_status == "blocked_by_missing_ticket_bound_operation_layer_handoff":
         return {
@@ -2681,7 +2681,7 @@ def _owner_state_for_preflight(
             "non_authority_checkpoint": (
                 "implement_ticket_bound_operation_layer_handoff"
             ),
-            "downgrade_mode": "continue_watcher_observation_no_submit",
+            "authority_mode": "continue_watcher_observation_no_submit",
         }
     if dispatch_status == "blocked_by_legacy_finalgate_authorization_without_ticket":
         return {
@@ -2693,7 +2693,7 @@ def _owner_state_for_preflight(
                 "pg_action_time_ticket_and_ticket_bound_finalgate_materialized"
             ),
             "non_authority_checkpoint": "materialize_pg_action_time_ticket",
-            "downgrade_mode": "continue_watcher_observation_no_submit",
+            "authority_mode": "continue_watcher_observation_no_submit",
         }
     return {
         "status": "blocked",
@@ -2702,7 +2702,7 @@ def _owner_state_for_preflight(
         "blocked_reason": blockers[0] if blockers else dispatch_status,
         "next_recover_condition": "preflight_blocker_resolved",
         "non_authority_checkpoint": "retry_official_action_time_finalgate_preflight_after_repair",
-        "downgrade_mode": "continue_watcher_observation_no_submit",
+        "authority_mode": "continue_watcher_observation_no_submit",
     }
 
 
