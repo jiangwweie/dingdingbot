@@ -334,6 +334,8 @@ def test_l2_l7_watcher_current_output_does_not_expose_retired_prepare_shadow_ide
         "scripts/build_runtime_observation_wakeup_evidence.py",
         "scripts/build_runtime_strategy_signal_watch_evidence.py",
         "scripts/build_runtime_observation_operator_evidence.py",
+        "src/application/readmodels/trading_console.py",
+        "src/application/runtime_advisory_event_adapter.py",
     ]
 
     for rel_path in checked_paths:

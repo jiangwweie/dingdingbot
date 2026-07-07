@@ -38,9 +38,8 @@ WATCHER_NOISE_STATUSES = {
 
 WATCHER_SIGNAL_STATUSES = {
     "runtime_signal_ready",
-    "runtime_signal_ready_for_non_executing_prepare",
-    "runtime_prepare_records_ready_for_preview",
-    "prepared_shadow_evidence_ready_for_owner_review",
+    "runtime_signal_ready_for_action_time_ticket",
+    "ready_for_action_time_ticket_materialization",
     "operator_evidence_needs_review",
     "ready_for_final_gate_preflight",
 }

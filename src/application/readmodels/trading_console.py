@@ -93,8 +93,9 @@ OPEN_ORDER_STATUSES = {"OPEN", "PARTIALLY_FILLED", "open", "partially_filled"}
 PROTECTION_ROLES = {"SL", "TP1", "TP2", "TP3", "TP4", "TP5"}
 TERMINAL_INTENT_STATUSES = {"blocked", "failed", "completed"}
 SIGNAL_WATCHER_RESUME_READY_STATUSES = {
-    "runtime_signal_ready_for_non_executing_prepare",
-    "prepared_shadow_evidence_ready_for_owner_review",
+    "runtime_signal_ready_for_action_time_ticket",
+    "ready_for_action_time_ticket_materialization",
+    "ready_for_action_time_final_gate",
 }
 SIGNAL_WATCHER_UNSAFE_FLAGS = {
     "exchange_write_called",
@@ -173,7 +174,7 @@ def _runtime_signal_watcher_owner_state(
         non_authority_checkpoint, checkpoint_source = _owner_state_source_checkpoint(
             post_signal_auto_resume,
             default=(
-                "continue_to_non_executing_prepare"
+                "materialize_pg_action_time_ticket"
                 if can_resume_steps_5_8
                 else "continue_watcher_observation"
             ),
@@ -240,14 +241,70 @@ def _runtime_signal_watcher_action_time_resume(
 ) -> dict[str, Any]:
     existing = resume_pack.get("action_time_resume")
     if isinstance(existing, dict) and existing:
-        return existing
+        existing_ticket_id = (
+            existing.get("ticket_id")
+            or existing.get("action_time_ticket_id")
+            or resume_pack.get("ticket_id")
+            or resume_pack.get("action_time_ticket_id")
+        )
+        return {
+            "status": str(existing.get("status") or "blocked"),
+            "next_step": str(existing.get("next_step") or "repair_pg_current_projection"),
+            "signal_input_ref": "pg:brc_live_signal_events",
+            "ticket_id": existing_ticket_id,
+            "action_time_lane_input_id": (
+                existing.get("action_time_lane_input_id")
+                or resume_pack.get("action_time_lane_input_id")
+            ),
+            "promotion_candidate_id": (
+                existing.get("promotion_candidate_id")
+                or resume_pack.get("promotion_candidate_id")
+            ),
+            "signal_event_id": existing.get("signal_event_id") or resume_pack.get("signal_event_id"),
+            "allowed_auto_actions": list(existing.get("allowed_auto_actions") or []),
+            "forbidden_auto_actions_until_final_gate_pass": list(
+                existing.get("forbidden_auto_actions_until_final_gate_pass") or []
+            ),
+            "requires_fresh_action_time_facts": bool(
+                existing.get("requires_fresh_action_time_facts")
+            ),
+            "requires_action_time_final_gate": bool(
+                existing.get("requires_action_time_final_gate")
+            ),
+            "requires_official_operation_layer": bool(
+                existing.get("requires_official_operation_layer")
+            ),
+            "final_gate_status": str(existing.get("final_gate_status") or "not_reached"),
+            "operation_layer_status": str(
+                existing.get("operation_layer_status") or "not_reached"
+            ),
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "withdrawal_or_transfer_requested": False,
+        }
 
-    if can_resume_steps_5_8 or post_signal_auto_resume.get("prepared_authorization_id"):
+    ticket_id = (
+        resume_pack.get("ticket_id")
+        or resume_pack.get("action_time_ticket_id")
+        or post_signal_auto_resume.get("ticket_id")
+        or post_signal_auto_resume.get("action_time_ticket_id")
+    )
+    signal_event_ids = list(post_signal_auto_resume.get("signal_event_ids") or [])
+    post_signal_status = str(post_signal_auto_resume.get("status") or "")
+
+    if can_resume_steps_5_8 or ticket_id:
         status = "ready_for_action_time_final_gate"
         next_step = "run_official_action_time_final_gate_preflight"
         allowed_auto_actions = ["run_official_action_time_final_gate_preflight"]
         requires_fresh_action_time_facts = True
         final_gate_status = "not_run"
+    elif post_signal_status == "ready_for_action_time_ticket_materialization":
+        status = "action_time_ticket_pending"
+        next_step = "materialize_pg_action_time_ticket"
+        allowed_auto_actions = ["materialize_pg_action_time_ticket"]
+        requires_fresh_action_time_facts = True
+        final_gate_status = "not_reached"
     elif post_signal_auto_resume.get("status") == "waiting_for_market":
         status = "waiting_for_market"
         next_step = "continue_watcher_observation"
@@ -264,9 +321,12 @@ def _runtime_signal_watcher_action_time_resume(
     return {
         "status": status,
         "next_step": next_step,
-        "signal_input_json": resume_pack.get("signal_input_json"),
-        "shadow_candidate_id": resume_pack.get("shadow_candidate_id"),
-        "prepared_authorization_id": resume_pack.get("prepared_authorization_id"),
+        "signal_input_ref": "pg:brc_live_signal_events",
+        "ticket_id": ticket_id,
+        "action_time_lane_input_id": resume_pack.get("action_time_lane_input_id"),
+        "promotion_candidate_id": resume_pack.get("promotion_candidate_id"),
+        "signal_event_id": resume_pack.get("signal_event_id"),
+        "signal_event_ids": signal_event_ids,
         "allowed_auto_actions": allowed_auto_actions,
         "forbidden_auto_actions_until_final_gate_pass": [
             "official_operation_layer_submit",
@@ -3502,8 +3562,6 @@ def _runtime_signal_watcher_action_time_resume_from_goal_status(
         "status": resume_status,
         "next_step": next_step,
         "signal_input_ref": "pg:brc_live_signal_events",
-        "shadow_candidate_id": None,
-        "prepared_authorization_id": None,
         "allowed_auto_actions": allowed_auto_actions,
         "forbidden_auto_actions_until_final_gate_pass": [
             "official_operation_layer_submit",
@@ -7648,7 +7706,7 @@ def _owner_console_strategy_owner_label(item: dict[str, Any]) -> str:
         signal_state in {"no_signal", "waiting_for_fresh_signal", "waiting_for_market"}
         or runtime_state in {"waiting_for_market", "waiting_for_signal"}
         or blocked_reason == "no_fresh_strategy_signal"
-        or "strategy_signal_not_ready_for_shadow_candidate_prepare" in blocked_reason
+        or blocked_reason.startswith("strategy_signal_not_ready")
     ):
         return "等待机会"
     if runtime_state in {"observing", "armed_observation"}:
@@ -7826,19 +7884,22 @@ def _owner_console_operation_audit_source(
         if isinstance(runtime.get("post_signal_auto_resume"), dict)
         else {}
     )
-    prepared_authorization_id = action_time_resume.get("prepared_authorization_id")
-    shadow_candidate_id = action_time_resume.get("shadow_candidate_id")
+    ticket_id = (
+        action_time_resume.get("ticket_id")
+        or action_time_resume.get("action_time_ticket_id")
+    )
     status = str(
         action_time_resume.get("status")
         or post_signal_resume.get("status")
         or runtime.get("status")
         or ""
     )
-    if not prepared_authorization_id and not shadow_candidate_id and status in {
+    if not ticket_id and status in {
         "waiting_for_market",
         "watching_no_signal",
         "ready_for_armed_observation",
         "strategy_group_live_facts_ready_for_armed_observation",
+        "action_time_ticket_pending",
         "",
     }:
         return _owner_console_detail_source(
@@ -7846,16 +7907,15 @@ def _owner_console_operation_audit_source(
             owner_label="暂无审计动作",
             reason="no_operation_action_in_current_cycle",
             summary={
-                "shadow_candidate_id": None,
-                "prepared_authorization_id": None,
+                "ticket_id": None,
                 "operation_layer_reached": False,
             },
         )
-    if prepared_authorization_id or shadow_candidate_id:
+    if ticket_id:
         return _owner_console_detail_source(
             status="ready_nonempty",
             owner_label="有审计记录",
-            reason="candidate_or_authorization_evidence_present",
+            reason="action_time_ticket_present",
         )
     return _owner_console_detail_source(
         status="degraded",
@@ -8428,7 +8488,7 @@ def _owner_console_waiting_for_market(
         str(item)
         for item in list(runtime.get("blockers") or []) + list(watcher.get("blockers") or [])
     )
-    return "strategy_signal_not_ready_for_shadow_candidate_prepare" in blocker_text
+    return "strategy_signal_not_ready" in blocker_text
 
 
 def _mapping_value(mapping: dict[str, Any], *keys: str) -> Optional[str]:
