@@ -113,6 +113,7 @@ def run_server_product_state_refresh_sequence(
     command_runner = runner or (lambda command: _run_command(command, env=command_env))
     started = datetime.now(timezone.utc).isoformat()
     effective_mode = mode
+    action_time_sequence_now_ms: int | None = None
     trigger_state: dict[str, Any] | None = None
     if mode == "action_time_if_needed":
         trigger_state = (
@@ -138,12 +139,16 @@ def run_server_product_state_refresh_sequence(
                 action_time_trigger=trigger_state,
             )
             return report
+        action_time_sequence_now_ms = int(trigger_state.get("now_ms") or _now_ms())
         effective_mode = "action_time"
+    elif mode == "action_time":
+        action_time_sequence_now_ms = _now_ms()
     steps = _refresh_steps(
         python=python,
         api_base=api_base,
         env_file=env_file,
         mode=effective_mode,
+        action_time_sequence_now_ms=action_time_sequence_now_ms,
     )
     step_results: list[dict[str, Any]] = []
     blocked_by_required_failure = ""
@@ -216,6 +221,7 @@ def run_server_product_state_refresh_sequence(
         ),
         "mode": mode,
         "effective_mode": effective_mode,
+        "action_time_sequence_now_ms": action_time_sequence_now_ms,
         "action_time_trigger": trigger_state,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "started_at_utc": started,
@@ -597,8 +603,14 @@ def _refresh_steps(
     api_base: str,
     env_file: Path,
     mode: str,
+    action_time_sequence_now_ms: int | None = None,
 ) -> list[RefreshStep]:
     pg_required = ("--require-database-url",)
+    action_time_now_args = (
+        ("--now-ms", str(action_time_sequence_now_ms))
+        if action_time_sequence_now_ms is not None
+        else ()
+    )
 
     steps = [
         RefreshStep(
@@ -617,6 +629,7 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_fact_snapshots.py",
                 *pg_required,
+                *action_time_now_args,
             ),
         ),
         RefreshStep(
@@ -633,6 +646,7 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_pg_promotion_action_time_lane.py",
                 *pg_required,
+                *action_time_now_args,
             ),
         ),
         RefreshStep(
@@ -641,6 +655,7 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_ticket.py",
                 *pg_required,
+                *action_time_now_args,
             ),
         ),
         RefreshStep(
@@ -649,6 +664,7 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_finalgate_preflight.py",
                 *pg_required,
+                *action_time_now_args,
             ),
         ),
         RefreshStep(
@@ -657,6 +673,7 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_operation_layer_handoff.py",
                 *pg_required,
+                *action_time_now_args,
             ),
         ),
         RefreshStep(
@@ -665,6 +682,7 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_ticket_bound_runtime_safety_state.py",
                 *pg_required,
+                *action_time_now_args,
             ),
         ),
         RefreshStep(
@@ -673,6 +691,7 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_ticket_bound_protected_submit_attempt.py",
                 *pg_required,
+                *action_time_now_args,
                 "--submit-mode",
                 "disabled_smoke",
             ),

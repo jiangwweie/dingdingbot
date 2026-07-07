@@ -250,6 +250,7 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
 ):
     module = _load_module()
     calls: list[tuple[str, ...]] = []
+    sequence_now_ms = 1_783_438_000_000
 
     def runner(command: tuple[str, ...]):
         calls.append(command)
@@ -263,6 +264,7 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
             "status": "triggered",
             "triggered": True,
             "blocker": "",
+            "now_ms": sequence_now_ms,
             "counts": {
                 "fresh_live_signal_events": 1,
                 "open_promotion_candidates": 0,
@@ -277,6 +279,7 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
     assert report["status"] == "server_product_state_refresh_sequence_ready"
     assert report["mode"] == "action_time_if_needed"
     assert report["effective_mode"] == "action_time"
+    assert report["action_time_sequence_now_ms"] == sequence_now_ms
     assert "scripts/materialize_action_time_ticket.py" in command_names
     assert command_names.index("scripts/materialize_action_time_fact_snapshots.py") < command_names.index(
         "scripts/publish_runtime_control_current_projections.py"
@@ -292,6 +295,62 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
         "scripts/materialize_ticket_bound_protected_submit_attempt.py"
     )
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
+
+
+def test_server_product_state_refresh_sequence_pins_action_time_materializers_to_one_batch_time(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+    sequence_now_ms = 1_783_438_101_132
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time_if_needed",
+        action_time_trigger_state={
+            "status": "triggered",
+            "triggered": True,
+            "blocker": "",
+            "now_ms": sequence_now_ms,
+            "counts": {
+                "fresh_live_signal_events": 1,
+                "open_promotion_candidates": 0,
+                "open_action_time_lane_inputs": 0,
+                "open_action_time_tickets": 0,
+                "operation_layer_handoffs_ready_without_protected_submit": 0,
+            },
+        },
+        runner=runner,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_ready"
+    materializer_names = {
+        "scripts/materialize_action_time_fact_snapshots.py",
+        "scripts/materialize_pg_promotion_action_time_lane.py",
+        "scripts/materialize_action_time_ticket.py",
+        "scripts/materialize_action_time_finalgate_preflight.py",
+        "scripts/materialize_action_time_operation_layer_handoff.py",
+        "scripts/materialize_ticket_bound_runtime_safety_state.py",
+        "scripts/materialize_ticket_bound_protected_submit_attempt.py",
+    }
+    materializer_calls = [
+        command for command in calls if command[1] in materializer_names
+    ]
+    assert len(materializer_calls) == len(materializer_names)
+    for command in materializer_calls:
+        now_index = command.index("--now-ms")
+        assert command[now_index + 1] == str(sequence_now_ms)
+    for command in calls:
+        if command[1] in {
+            "scripts/build_runtime_account_safe_facts.py",
+            "scripts/publish_runtime_control_current_projections.py",
+        }:
+            assert "--now-ms" not in command
 
 
 def test_server_product_state_refresh_sequence_action_time_if_needed_fails_closed_on_pg_gap(
