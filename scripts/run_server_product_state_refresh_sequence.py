@@ -394,7 +394,8 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
         }
     engine = sa.create_engine(database_url)
     try:
-        with engine.connect() as conn:
+        with engine.begin() as conn:
+            expiry_counts = _expire_stale_action_time_objects(conn, now_ms=now_ms)
             counts = _action_time_trigger_counts(conn, now_ms=now_ms)
     except Exception as exc:  # noqa: BLE001 - fail closed on PG current read errors.
         return {
@@ -405,14 +406,126 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
         }
     finally:
         engine.dispose()
-    triggered = any(count > 0 for count in counts.values())
+    triggered = any(count > 0 for count in counts.values()) or any(
+        count > 0 for count in expiry_counts.values()
+    )
     return {
         "status": "triggered" if triggered else "not_triggered",
         "triggered": triggered,
         "blocker": "",
         "now_ms": now_ms,
         "counts": counts,
+        "expiry_counts": expiry_counts,
     }
+
+
+def _expire_stale_action_time_objects(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> dict[str, int]:
+    metadata = sa.MetaData()
+    inspector = sa.inspect(conn)
+    counts = {
+        "expired_live_signal_events": 0,
+        "expired_promotion_candidates": 0,
+        "expired_action_time_lane_inputs": 0,
+        "expired_action_time_tickets": 0,
+        "expired_budget_reservations": 0,
+    }
+
+    if inspector.has_table("brc_live_signal_events"):
+        live_signals = sa.Table(
+            "brc_live_signal_events",
+            metadata,
+            autoload_with=conn,
+        )
+        result = conn.execute(
+            live_signals.update()
+            .where(live_signals.c.status == "facts_validated")
+            .where(live_signals.c.freshness_state == "fresh")
+            .where(live_signals.c.expires_at_ms.is_not(None))
+            .where(live_signals.c.expires_at_ms <= now_ms)
+            .where(live_signals.c.invalidated_at_ms.is_(None))
+            .values(
+                status="stale",
+                freshness_state="expired",
+                invalidated_at_ms=now_ms,
+            )
+        )
+        counts["expired_live_signal_events"] = int(result.rowcount or 0)
+
+    if inspector.has_table("brc_promotion_candidates"):
+        promotions = sa.Table(
+            "brc_promotion_candidates",
+            metadata,
+            autoload_with=conn,
+        )
+        result = conn.execute(
+            promotions.update()
+            .where(
+                promotions.c.status.in_(
+                    ["eligible", "arbitration_pending", "arbitration_won"]
+                )
+            )
+            .where(promotions.c.expires_at_ms.is_not(None))
+            .where(promotions.c.expires_at_ms <= now_ms)
+            .where(promotions.c.closed_at_ms.is_(None))
+            .values(status="expired", closed_at_ms=now_ms)
+        )
+        counts["expired_promotion_candidates"] = int(result.rowcount or 0)
+
+    if inspector.has_table("brc_action_time_lane_inputs"):
+        lanes = sa.Table(
+            "brc_action_time_lane_inputs",
+            metadata,
+            autoload_with=conn,
+        )
+        result = conn.execute(
+            lanes.update()
+            .where(lanes.c.lane_scope == "real_submit_candidate")
+            .where(
+                lanes.c.status.in_(
+                    ["opened", "facts_refreshing", "ticket_pending", "ticket_created"]
+                )
+            )
+            .where(lanes.c.expires_at_ms.is_not(None))
+            .where(lanes.c.expires_at_ms <= now_ms)
+            .where(lanes.c.closed_at_ms.is_(None))
+            .values(status="expired", closed_at_ms=now_ms)
+        )
+        counts["expired_action_time_lane_inputs"] = int(result.rowcount or 0)
+
+    if inspector.has_table("brc_action_time_tickets"):
+        tickets = sa.Table("brc_action_time_tickets", metadata, autoload_with=conn)
+        result = conn.execute(
+            tickets.update()
+            .where(tickets.c.status.in_(["created", "preflight_pending", "finalgate_ready"]))
+            .where(tickets.c.expires_at_ms.is_not(None))
+            .where(tickets.c.expires_at_ms <= now_ms)
+            .values(status="expired")
+        )
+        counts["expired_action_time_tickets"] = int(result.rowcount or 0)
+
+    if inspector.has_table("brc_budget_reservations"):
+        budget_reservations = sa.Table(
+            "brc_budget_reservations",
+            metadata,
+            autoload_with=conn,
+        )
+        result = conn.execute(
+            budget_reservations.update()
+            .where(budget_reservations.c.status == "active")
+            .where(budget_reservations.c.expires_at_ms.is_not(None))
+            .where(budget_reservations.c.expires_at_ms <= now_ms)
+            .values(
+                status="expired",
+                release_reason="action_time_object_expired",
+            )
+        )
+        counts["expired_budget_reservations"] = int(result.rowcount or 0)
+
+    return counts
 
 
 def _action_time_trigger_counts(

@@ -436,6 +436,56 @@ def test_action_time_trigger_counts_include_stale_open_rows():
         engine.dispose()
 
 
+def test_expire_stale_action_time_objects_closes_pg_current_rows():
+    module = _load_module()
+    engine = _action_time_trigger_engine()
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            _insert_stale_open_action_time_trigger_rows(conn, now_ms=now_ms)
+
+            expiry_counts = module._expire_stale_action_time_objects(
+                conn,
+                now_ms=now_ms,
+            )
+            counts = module._action_time_trigger_counts(conn, now_ms=now_ms)
+
+            assert expiry_counts == {
+                "expired_live_signal_events": 1,
+                "expired_promotion_candidates": 1,
+                "expired_action_time_lane_inputs": 1,
+                "expired_action_time_tickets": 1,
+                "expired_budget_reservations": 0,
+            }
+            assert counts == {
+                "fresh_live_signal_events": 0,
+                "open_promotion_candidates": 0,
+                "stale_open_promotion_candidates": 0,
+                "open_action_time_lane_inputs": 0,
+                "stale_open_action_time_lane_inputs": 0,
+                "open_action_time_tickets": 0,
+                "stale_open_action_time_tickets": 0,
+                "operation_layer_handoffs_ready_without_protected_submit": 0,
+            }
+            assert conn.execute(
+                sa.text(
+                    "SELECT status, freshness_state, invalidated_at_ms "
+                    "FROM brc_live_signal_events"
+                )
+            ).first() == ("stale", "expired", now_ms)
+            assert conn.execute(
+                sa.text("SELECT status, closed_at_ms FROM brc_promotion_candidates")
+            ).first() == ("expired", now_ms)
+            assert conn.execute(
+                sa.text("SELECT status, closed_at_ms FROM brc_action_time_lane_inputs")
+            ).first() == ("expired", now_ms)
+            assert conn.execute(
+                sa.text("SELECT status FROM brc_action_time_tickets")
+            ).scalar_one() == "expired"
+    finally:
+        engine.dispose()
+
+
 def test_action_time_trigger_counts_include_unattempted_handoff_ready():
     module = _load_module()
     engine = _action_time_trigger_engine()
