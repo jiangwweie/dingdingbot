@@ -5859,6 +5859,45 @@ def test_runtime_signal_watcher_projection_helpers_keep_legacy_status_as_evidenc
     assert safety["mutates_pg"] is False
 
 
+def test_runtime_signal_summaries_preserve_candidate_pool_market_signal_time():
+    from src.application.readmodels.trading_console import _pg_runtime_signal_summaries
+
+    summaries = _pg_runtime_signal_summaries(
+        {
+            "action_time_lane_inputs": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "ETHUSDT",
+                    "side": "long",
+                    "status": "ready_for_finalgate_preflight",
+                    "fresh_signal_timestamp_utc": "2026-07-03T12:00:00+00:00",
+                    "fresh_signal_timestamp_source": "action_row:fresh_signal_time_utc",
+                    "event_time_utc": "2026-07-03T12:00:00+00:00",
+                    "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
+                    "latest_candle_close_time_utc": "2026-07-03T12:00:00+00:00",
+                    "observed_at_ms": 1770000900000,
+                }
+            ]
+        }
+    )
+
+    assert summaries == [
+        {
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "status": "ready_for_finalgate_preflight",
+            "source": "pg_projection:action_time_lane_inputs",
+            "fresh_signal_timestamp_utc": "2026-07-03T12:00:00+00:00",
+            "fresh_signal_timestamp_source": "action_row:fresh_signal_time_utc",
+            "event_time_utc": "2026-07-03T12:00:00+00:00",
+            "fresh_signal_time_utc": "2026-07-03T12:00:00+00:00",
+            "latest_candle_close_time_utc": "2026-07-03T12:00:00+00:00",
+        }
+    ]
+    assert "observed_at_ms" not in summaries[0]
+
+
 def test_runtime_signal_watcher_status_ignores_legacy_tick_status_packet_status(
     monkeypatch, tmp_path
 ):

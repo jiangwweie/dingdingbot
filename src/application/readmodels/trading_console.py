@@ -3632,17 +3632,25 @@ def _pg_runtime_signal_summaries(candidate_pool: dict[str, Any]) -> list[dict[st
         for row in rows[:20]:
             if not isinstance(row, dict):
                 continue
-            summaries.append(
-                {
-                    "strategy_group_id": row.get("strategy_group_id"),
-                    "symbol": row.get("symbol"),
-                    "side": row.get("side"),
-                    "status": row.get("status")
-                    or row.get("readiness_state")
-                    or row.get("first_blocker"),
-                    "source": f"pg_projection:{key}",
-                }
-            )
+            summary = {
+                "strategy_group_id": row.get("strategy_group_id"),
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "status": row.get("status")
+                or row.get("readiness_state")
+                or row.get("first_blocker"),
+                "source": f"pg_projection:{key}",
+            }
+            for time_key in (
+                "fresh_signal_timestamp_utc",
+                "fresh_signal_timestamp_source",
+                "event_time_utc",
+                "fresh_signal_time_utc",
+                "latest_candle_close_time_utc",
+            ):
+                if row.get(time_key):
+                    summary[time_key] = row.get(time_key)
+            summaries.append(summary)
     return summaries
 
 
