@@ -13,13 +13,13 @@ from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
-from scripts import materialize_action_time_finalgate_preflight as finalgate
-from scripts import materialize_action_time_operation_layer_handoff as handoff
-from scripts import materialize_action_time_fact_snapshots as fact_materializer
-from scripts import materialize_action_time_ticket as ticket_materializer
-from scripts import materialize_pg_promotion_action_time_lane as lane_materializer
-from scripts import materialize_ticket_bound_protected_submit_attempt as protected_submit
-from scripts import materialize_ticket_bound_runtime_safety_state as safety_state
+from src.application.action_time import finalgate_preflight as finalgate
+from src.application.action_time import operation_layer_handoff as handoff
+from src.application.action_time import fact_snapshots as fact_materializer
+from src.application.action_time import action_time_ticket as ticket_materializer
+from src.application.action_time import promotion_action_time_lane as lane_materializer
+from src.application.action_time import protected_submit_attempt as protected_submit
+from src.application.action_time import runtime_safety_state as safety_state
 from scripts import publish_runtime_control_current_projections as publisher
 from scripts import runtime_active_observation_monitor
 from src.domain.strategy_family_signal import (

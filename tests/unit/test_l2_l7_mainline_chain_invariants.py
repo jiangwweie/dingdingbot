@@ -22,14 +22,14 @@ PRODUCTION_SYSTEMD_FILES = [
 ]
 
 MATERIALIZER_CLI_SURFACES = {
-    "scripts/materialize_action_time_fact_snapshots.py": {
+    "src/application/action_time/fact_snapshots.py": {
         "--database-url",
         "--require-database-url",
         "--allow-non-postgres-for-test",
         "--now-ms",
         "--json",
     },
-    "scripts/materialize_pg_promotion_action_time_lane.py": {
+    "src/application/action_time/promotion_action_time_lane.py": {
         "--database-url",
         "--require-database-url",
         "--allow-non-postgres-for-test",
@@ -60,7 +60,7 @@ MATERIALIZER_CLI_SURFACES = {
         "--json",
         "--allow-non-postgres-for-test",
     },
-    "scripts/materialize_ticket_bound_runtime_safety_state.py": {
+    "src/application/action_time/runtime_safety_state.py": {
         "--database-url",
         "--require-database-url",
         "--ticket-id",
@@ -91,9 +91,13 @@ MATERIALIZER_CLI_SURFACES = {
 }
 
 ACTION_TIME_SCRIPT_WRAPPERS = {
+    "scripts/build_runtime_account_safe_facts.py": "src.application.action_time.account_safe_facts",
+    "scripts/materialize_action_time_fact_snapshots.py": "src.application.action_time.fact_snapshots",
+    "scripts/materialize_pg_promotion_action_time_lane.py": "src.application.action_time.promotion_action_time_lane",
     "scripts/materialize_action_time_ticket.py": "src.application.action_time.action_time_ticket",
     "scripts/materialize_action_time_finalgate_preflight.py": "src.application.action_time.finalgate_preflight",
     "scripts/materialize_action_time_operation_layer_handoff.py": "src.application.action_time.operation_layer_handoff",
+    "scripts/materialize_ticket_bound_runtime_safety_state.py": "src.application.action_time.runtime_safety_state",
     "scripts/materialize_ticket_bound_protected_submit_attempt.py": "src.application.action_time.protected_submit_attempt",
     "scripts/materialize_ticket_bound_post_submit_closure.py": "src.application.action_time.post_submit_closure",
 }

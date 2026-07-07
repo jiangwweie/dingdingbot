@@ -12,10 +12,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
-from scripts import materialize_action_time_finalgate_preflight as finalgate
-from scripts import materialize_action_time_operation_layer_handoff as handoff
-from scripts import materialize_action_time_ticket as ticket_materializer
-from scripts import materialize_ticket_bound_runtime_safety_state as safety
+from src.application.action_time import finalgate_preflight as finalgate
+from src.application.action_time import operation_layer_handoff as handoff
+from src.application.action_time import action_time_ticket as ticket_materializer
+from src.application.action_time import runtime_safety_state as safety
 from tests.unit.test_action_time_ticket_materialization import (
     NOW_MS,
     _insert_action_time_lane_graph,
