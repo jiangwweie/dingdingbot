@@ -95,7 +95,6 @@ class CandidateBundle:
         return _stable_id(
             "promotion",
             str(self.signal["signal_event_id"]),
-            str(self.signal.get("observed_at_ms") or ""),
         )
 
     @property
@@ -275,6 +274,12 @@ def _terminal_identity_reuse_blockers(
     lane_row: dict[str, Any],
 ) -> list[str]:
     blockers: list[str] = []
+    blockers.extend(
+        _signal_progression_reuse_blockers(
+            conn,
+            signal_event_id=str(lane_row.get("signal_event_id") or ""),
+        )
+    )
     promotion_status = _existing_status(
         conn,
         table_name="brc_promotion_candidates",
@@ -304,6 +309,60 @@ def _terminal_identity_reuse_blockers(
             "terminal_action_time_lane_identity_reuse:"
             + str(lane_row["action_time_lane_input_id"])
         )
+    return blockers
+
+
+def _signal_progression_reuse_blockers(
+    conn: sa.engine.Connection,
+    *,
+    signal_event_id: str,
+) -> list[str]:
+    signal_event_id = str(signal_event_id or "").strip()
+    if not signal_event_id:
+        return ["signal_event_id_missing_for_action_time_identity"]
+
+    checks = [
+        (
+            "brc_action_time_lane_inputs",
+            "signal_event_already_has_action_time_lane",
+            """
+            SELECT action_time_lane_input_id AS entity_id
+            FROM brc_action_time_lane_inputs
+            WHERE signal_event_id = :signal_event_id
+            LIMIT 1
+            """,
+        ),
+        (
+            "brc_action_time_tickets",
+            "signal_event_already_has_action_time_ticket",
+            """
+            SELECT ticket_id AS entity_id
+            FROM brc_action_time_tickets
+            WHERE signal_event_id = :signal_event_id
+            LIMIT 1
+            """,
+        ),
+        (
+            "brc_ticket_bound_protected_submit_attempts",
+            "signal_event_already_has_protected_submit_attempt",
+            """
+            SELECT attempt.protected_submit_attempt_id AS entity_id
+            FROM brc_ticket_bound_protected_submit_attempts AS attempt
+            JOIN brc_action_time_tickets AS ticket
+              ON ticket.ticket_id = attempt.ticket_id
+            WHERE ticket.signal_event_id = :signal_event_id
+            LIMIT 1
+            """,
+        ),
+    ]
+    blockers: list[str] = []
+    for _table_name, blocker_prefix, sql in checks:
+        row = conn.execute(
+            sa.text(sql),
+            {"signal_event_id": signal_event_id},
+        ).mappings().first()
+        if row:
+            blockers.append(f"{blocker_prefix}:{signal_event_id}:{row['entity_id']}")
     return blockers
 
 

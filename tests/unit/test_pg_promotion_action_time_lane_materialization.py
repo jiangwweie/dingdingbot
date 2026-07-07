@@ -275,6 +275,120 @@ def test_materializes_action_time_facts_projection_lane_and_ticket_from_raw_sign
     assert submit_payload["order_created"] is False
 
 
+def test_same_signal_is_not_reopened_after_disabled_smoke_completion(
+    pg_control_connection,
+) -> None:
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+    finalgate_payload = finalgate.materialize_action_time_finalgate_preflight(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        now_ms=NOW_MS + 2,
+    )
+    handoff_payload = handoff.materialize_action_time_operation_layer_handoff(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        finalgate_pass_id=str(finalgate_payload["finalgate_pass_id"]),
+        now_ms=NOW_MS + 3,
+    )
+    safety_payload = safety_state.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
+        now_ms=NOW_MS + 4,
+    )
+    assert safety_payload["submit_allowed"] is True
+    submit_payload = protected_submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        operation_submit_command_id=str(handoff_payload["operation_submit_command_id"]),
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 5,
+    )
+    assert submit_payload["status"] == "disabled_smoke_passed"
+
+    signal_event_id = str(lane_payload["signal_event_id"])
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET expires_at_ms = :expired_at_ms
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": str(ticket_payload["ticket_id"]), "expired_at_ms": NOW_MS + 10},
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET expires_at_ms = :expired_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {
+            "lane_id": str(lane_payload["action_time_lane_input_id"]),
+            "expired_at_ms": NOW_MS + 10,
+        },
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_live_signal_events
+            SET observed_at_ms = :observed_at_ms,
+                expires_at_ms = :expires_at_ms
+            WHERE signal_event_id = :signal_event_id
+            """
+        ),
+        {
+            "signal_event_id": signal_event_id,
+            "observed_at_ms": NOW_MS + 20,
+            "expires_at_ms": NOW_MS + 600_000,
+        },
+    )
+
+    reopened = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS + 100,
+    )
+
+    assert reopened["status"] == "terminal_action_time_identity_not_reopened"
+    assert any(
+        blocker.startswith(f"signal_event_already_has_action_time_lane:{signal_event_id}")
+        for blocker in reopened["blockers"]
+    )
+    assert any(
+        blocker.startswith(f"signal_event_already_has_action_time_ticket:{signal_event_id}")
+        for blocker in reopened["blockers"]
+    )
+    assert any(
+        blocker.startswith(
+            f"signal_event_already_has_protected_submit_attempt:{signal_event_id}"
+        )
+        for blocker in reopened["blockers"]
+    )
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 1
+    assert (
+        pg_control_connection.execute(
+            text("SELECT COUNT(*) FROM brc_action_time_tickets")
+        ).scalar_one()
+        == 1
+    )
+    assert (
+        pg_control_connection.execute(
+            text("SELECT COUNT(*) FROM brc_ticket_bound_protected_submit_attempts")
+        ).scalar_one()
+        == 1
+    )
+
+
 @pytest.mark.parametrize(
     ("strategy_group_id", "symbol", "side"),
     [
@@ -898,7 +1012,7 @@ def test_terminal_attempt_identity_is_not_reopened_for_same_observation(
     )
 
 
-def test_new_signal_observation_creates_new_attempt_identity_after_expiry(
+def test_same_signal_observation_update_does_not_reopen_after_expiry(
     pg_control_connection,
 ):
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
@@ -932,7 +1046,73 @@ def test_new_signal_observation_creates_new_attempt_identity_after_expiry(
         now_ms=NOW_MS + 2,
     )
 
+    assert second["status"] == "terminal_action_time_identity_not_reopened"
+    assert any(
+        blocker.startswith(
+            "signal_event_already_has_action_time_lane:" + first["signal_event_id"]
+        )
+        for blocker in second["blockers"]
+    )
+    statuses = {
+        row["action_time_lane_input_id"]: row["status"]
+        for row in pg_control_connection.execute(
+            text(
+                """
+                SELECT action_time_lane_input_id, status
+                FROM brc_action_time_lane_inputs
+                """
+            )
+        ).mappings()
+    }
+    assert statuses[first["action_time_lane_input_id"]] == "expired"
+    assert len(statuses) == 1
+
+
+def test_new_signal_event_id_creates_new_attempt_identity_after_expiry(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    first = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    _expire_promotion_and_lane(
+        pg_control_connection,
+        promotion_id=first["promotion_candidate_id"],
+        lane_id=first["action_time_lane_input_id"],
+    )
+    row = _candidate_runtime_row(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    _insert_signal(
+        pg_control_connection,
+        row,
+        public_fact_id="fact:SOR-001:ETHUSDT:long:unit:public",
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit:next-event",
+        created_at_ms=NOW_MS + 1,
+        event_time_ms=NOW_MS - 30_000,
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_live_signal_events
+            SET observed_at_ms = :observed_at_ms,
+                expires_at_ms = :expires_at_ms
+            WHERE signal_event_id = :signal_event_id
+            """
+        ),
+        {
+            "observed_at_ms": NOW_MS + 1,
+            "expires_at_ms": NOW_MS + 600_000,
+            "signal_event_id": "signal:SOR-001:ETHUSDT:long:unit:next-event",
+        },
+    )
+
+    second = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS + 2,
+    )
+
     assert second["status"] == "promotion_action_time_lane_created"
+    assert second["signal_event_id"] == "signal:SOR-001:ETHUSDT:long:unit:next-event"
     assert second["promotion_candidate_id"] != first["promotion_candidate_id"]
     assert second["action_time_lane_input_id"] != first["action_time_lane_input_id"]
     statuses = {
@@ -1483,6 +1663,7 @@ def _insert_signal(
     signal_event_id: str,
     source_kind: str = "live_market",
     created_at_ms: int = NOW_MS - 54_000,
+    event_time_ms: int = NOW_MS - 60_000,
 ) -> None:
     conn.execute(
         text(
@@ -1518,11 +1699,11 @@ def _insert_signal(
             "signal_payload": _json(
                 {
                     "time_authority": "trigger_candle_close_time_ms",
-                    "trigger_candle_close_time_ms": NOW_MS - 60_000,
+                    "trigger_candle_close_time_ms": event_time_ms,
                 }
             ),
-            "event_time_ms": NOW_MS - 60_000,
-            "trigger_candle_close_time_ms": NOW_MS - 60_000,
+            "event_time_ms": event_time_ms,
+            "trigger_candle_close_time_ms": event_time_ms,
             "observed_at_ms": NOW_MS - 55_000,
             "expires_at_ms": NOW_MS + 600_000,
             "created_at_ms": created_at_ms,
