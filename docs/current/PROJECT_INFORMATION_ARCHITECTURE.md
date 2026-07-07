@@ -121,6 +121,7 @@ Owner decisions.
 | Daily Live Enablement management table | `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` |
 | Pre-Trade Runtime and Candidate Pool | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
 | L1-L9 full-chain audit and optimization review | `docs/current/L1_L9_SYSTEM_REVIEW_AND_OPTIMIZATION_AUDIT.md` |
+| Mainline P0/P1 chain audit register | `docs/current/MAINLINE_P0_P1_CHAIN_AUDIT_REGISTER.md` |
 | Runtime terminology and Owner explanation governance | `docs/current/RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` |
 | Owner Explanation Read Model contract | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | Active StrategyGroup semantics review and optimization plan | `docs/current/ACTIVE_STRATEGYGROUP_SEMANTICS_REVIEW_AND_OPTIMIZATION_PLAN.md` |

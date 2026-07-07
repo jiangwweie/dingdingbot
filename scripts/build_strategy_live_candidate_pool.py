@@ -99,6 +99,11 @@ ACTION_TIME_INPUT_BLOCKERS = {
     "hard_safety_stop",
     "replay_live_rule_mismatch",
 }
+ACTION_TIME_CURRENT_ONLY_BLOCKERS = {
+    "action_time_boundary_not_reproduced",
+    "action_time_preflight_ready",
+    "private_action_time_facts_required",
+}
 P0_P1_ITEMS = (
     ("P0", "five_strategy_candidate_pool_control_surface"),
     ("P0", "mpg_watcher_closure"),
@@ -753,12 +758,13 @@ def _pg_replay_live_parity_projection(
             )
             if str(item or "")
         ]
-        blocker_class = str(
-            readiness.get("first_blocker_class")
-            or facts.get("blocker_class")
-            or ("market_wait_validated" if computed and satisfied else "")
-            or ("computed_not_satisfied" if computed and failed_facts else "")
-            or "detector_not_attached"
+        blocker_class = _pg_replay_live_blocker_class(
+            readiness=readiness,
+            facts=facts,
+            signal=signal,
+            computed=computed,
+            satisfied=satisfied,
+            failed_facts=failed_facts,
         )
         rows.append(
             {
@@ -782,6 +788,35 @@ def _pg_replay_live_parity_projection(
         "status": "replay_live_parity_audit_ready",
         "per_symbol_mismatch_table": rows,
     }
+
+
+def _pg_replay_live_blocker_class(
+    *,
+    readiness: dict[str, Any],
+    facts: dict[str, Any],
+    signal: dict[str, Any],
+    computed: bool,
+    satisfied: bool,
+    failed_facts: list[str],
+) -> str:
+    readiness_blocker = str(readiness.get("first_blocker_class") or "")
+    fact_blocker = str(facts.get("blocker_class") or "")
+    current_signal_present = bool(signal)
+    if readiness_blocker and (
+        current_signal_present
+        or readiness_blocker not in ACTION_TIME_CURRENT_ONLY_BLOCKERS
+    ):
+        return readiness_blocker
+    if fact_blocker and (
+        current_signal_present
+        or fact_blocker not in ACTION_TIME_CURRENT_ONLY_BLOCKERS
+    ):
+        return fact_blocker
+    if computed and satisfied:
+        return "market_wait_validated"
+    if computed and failed_facts:
+        return "computed_not_satisfied"
+    return "detector_not_attached"
 
 
 def _pg_action_time_boundary_projection(

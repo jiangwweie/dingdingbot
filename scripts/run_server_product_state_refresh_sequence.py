@@ -84,6 +84,12 @@ def main(argv: list[str] | None = None) -> int:
                 "blocked_by_required_step": report["summary"][
                     "blocked_by_required_step"
                 ],
+                "blocked_required_stdout_tail": report["summary"][
+                    "blocked_required_stdout_tail"
+                ],
+                "blocked_required_stderr_tail": report["summary"][
+                    "blocked_required_stderr_tail"
+                ],
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -225,6 +231,16 @@ def run_server_product_state_refresh_sequence(
                 not current_projection_publish_attempted
             ),
             "blocked_by_required_step": blocked_by_required_failure,
+            "blocked_required_stdout_tail": (
+                str(failed_required[0].get("stdout_tail") or "")
+                if failed_required
+                else ""
+            ),
+            "blocked_required_stderr_tail": (
+                str(failed_required[0].get("stderr_tail") or "")
+                if failed_required
+                else ""
+            ),
         },
         "step_results": step_results,
         "safety_invariants": {
@@ -317,6 +333,16 @@ def _empty_refresh_report(
             "blocked_by_required_step": (
                 "pg_action_time_trigger_state"
                 if failed
+                else ""
+            ),
+            "blocked_required_stdout_tail": (
+                str(step_results[0].get("stdout_tail") or "")
+                if step_results
+                else ""
+            ),
+            "blocked_required_stderr_tail": (
+                str(step_results[0].get("stderr_tail") or "")
+                if step_results
                 else ""
             ),
         },

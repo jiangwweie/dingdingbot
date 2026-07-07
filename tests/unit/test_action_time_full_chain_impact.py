@@ -15,6 +15,7 @@ from scripts import materialize_action_time_finalgate_preflight as finalgate
 from scripts import materialize_action_time_operation_layer_handoff as handoff
 from scripts import materialize_action_time_ticket as ticket_materializer
 from scripts import materialize_pg_promotion_action_time_lane as lane_materializer
+from scripts import materialize_ticket_bound_post_submit_closure as post_submit_closure
 from scripts import materialize_ticket_bound_protected_submit_attempt as protected_submit
 from scripts import materialize_ticket_bound_runtime_safety_state as safety_state
 from scripts import publish_runtime_control_current_projections as publisher
@@ -129,93 +130,18 @@ def test_each_active_candidate_scope_reaches_disabled_smoke_from_raw_pg_input(
     symbol: str,
     side: str,
 ):
-    _insert_ready_fresh_signal(
+    payloads = _run_raw_pg_input_to_runtime_safety(
         pg_control_connection,
-        strategy_group_id,
-        symbol,
-        side,
-        insert_action_time_fact=False,
-        insert_signal=False,
-    )
-    signal_payload = _write_monitor_signal_summary_to_pg(
-        pg_control_connection,
+        monkeypatch,
         strategy_group_id=strategy_group_id,
         symbol=symbol,
         side=side,
     )
-    assert signal_payload["status"] == "pg_live_signal_events_written"
-    assert signal_payload["written_count"] == 1
-    pg_control_connection.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
-
-    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
-        pg_control_connection,
-        now_ms=NOW_MS,
-    )
-    assert fact_payload["status"] == "action_time_fact_snapshots_materialized"
-    assert fact_payload["materialized_count"] == 1
-    assert fact_payload["blocked_count"] == 0
-
-    monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
-    projection_payload = publisher.publish_runtime_control_current_projections(
-        pg_control_connection,
-    )
-    assert projection_payload["status"] == "current_projections_published"
-
-    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
-        pg_control_connection,
-        now_ms=NOW_MS + 1,
-    )
-    assert lane_payload["status"] == "promotion_action_time_lane_created"
-    assert lane_payload["strategy_group_id"] == strategy_group_id
-    assert lane_payload["symbol"] == symbol
-    assert lane_payload["side"] == side
-    assert lane_payload["forbidden_effects"] == lane_materializer.FORBIDDEN_EFFECTS
-
-    ticket_payload = ticket_materializer.materialize_action_time_ticket(
-        pg_control_connection,
-        now_ms=NOW_MS + 2,
-    )
-    assert ticket_payload["status"] == "action_time_ticket_created"
-    assert ticket_payload["strategy_group_id"] == strategy_group_id
-    assert ticket_payload["symbol"] == symbol
-    assert ticket_payload["side"] == side
-    assert ticket_payload["forbidden_effects"] == ticket_materializer.FORBIDDEN_EFFECTS
-
-    finalgate_payload = finalgate.materialize_action_time_finalgate_preflight(
-        pg_control_connection,
-        ticket_id=str(ticket_payload["ticket_id"]),
-        now_ms=NOW_MS + 3,
-    )
-    assert finalgate_payload["status"] == "finalgate_ready"
-    assert finalgate_payload["ticket_id"] == ticket_payload["ticket_id"]
-    assert finalgate_payload["forbidden_effects"] == finalgate.FORBIDDEN_EFFECTS
-
-    handoff_payload = handoff.materialize_action_time_operation_layer_handoff(
-        pg_control_connection,
-        ticket_id=str(ticket_payload["ticket_id"]),
-        finalgate_pass_id=str(finalgate_payload["finalgate_pass_id"]),
-        now_ms=NOW_MS + 4,
-    )
-    assert handoff_payload["status"] == "operation_layer_handoff_ready"
-    assert handoff_payload["ticket_id"] == ticket_payload["ticket_id"]
-    assert handoff_payload["finalgate_pass_id"] == finalgate_payload["finalgate_pass_id"]
-    assert handoff_payload["forbidden_effects"] == handoff.FORBIDDEN_EFFECTS
-
-    safety_payload = safety_state.materialize_ticket_bound_runtime_safety_state(
-        pg_control_connection,
-        ticket_id=str(ticket_payload["ticket_id"]),
-        operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
-        now_ms=NOW_MS + 5,
-    )
-    assert safety_payload["status"] == "runtime_safety_state_ready"
-    assert safety_payload["submit_allowed"] is True
-    assert safety_payload["blockers"] == []
-    assert safety_payload["forbidden_effects"] == safety_state.FORBIDDEN_EFFECTS
 
     submit_payload = protected_submit.prepare_ticket_bound_protected_submit_attempt(
         pg_control_connection,
-        ticket_id=str(ticket_payload["ticket_id"]),
-        operation_submit_command_id=str(handoff_payload["operation_submit_command_id"]),
+        ticket_id=str(payloads["ticket"]["ticket_id"]),
+        operation_submit_command_id=str(payloads["handoff"]["operation_submit_command_id"]),
         submit_mode="disabled_smoke",
         now_ms=NOW_MS + 6,
     )
@@ -234,6 +160,80 @@ def test_each_active_candidate_scope_reaches_disabled_smoke_from_raw_pg_input(
     assert _count(pg_control_connection, "brc_operation_layer_handoffs") == 1
     assert _count(pg_control_connection, "brc_runtime_safety_state_snapshots") == 1
     assert _count(pg_control_connection, "brc_ticket_bound_protected_submit_attempts") == 1
+
+
+@pytest.mark.parametrize(
+    ("strategy_group_id", "symbol", "side"),
+    ACTIVE_CANDIDATE_SCOPES,
+)
+def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_raw_pg_input(
+    pg_control_connection,
+    monkeypatch,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+):
+    payloads = _run_raw_pg_input_to_runtime_safety(
+        pg_control_connection,
+        monkeypatch,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+    )
+
+    prepared = protected_submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=str(payloads["ticket"]["ticket_id"]),
+        operation_submit_command_id=str(payloads["handoff"]["operation_submit_command_id"]),
+        submit_mode="real_gateway_action",
+        now_ms=NOW_MS + 6,
+    )
+    assert prepared["status"] == "submit_prepared"
+    assert prepared["submit_allowed"] is True
+    assert prepared["exchange_write_called"] is False
+    assert prepared["order_created"] is False
+    assert prepared["order_lifecycle_called"] is False
+
+    submitted = protected_submit.record_ticket_bound_protected_submit_result(
+        pg_control_connection,
+        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+        submit_result=_mock_exchange_submit_result(prepared),
+        now_ms=NOW_MS + 7,
+    )
+    assert submitted["status"] == "submitted"
+    assert submitted["blockers"] == []
+    assert submitted["exchange_write_called"] is True
+    assert submitted["order_created"] is True
+    assert submitted["order_lifecycle_called"] is True
+
+    closure_payload = post_submit_closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+        now_ms=NOW_MS + 8,
+    )
+    assert closure_payload["status"] == "reconciliation_pending"
+    assert closure_payload["ticket_id"] == payloads["ticket"]["ticket_id"]
+    assert closure_payload["operation_submit_command_id"] == (
+        payloads["handoff"]["operation_submit_command_id"]
+    )
+    assert closure_payload["first_blocker"] == "post_submit_reconciliation_fact_missing"
+    assert closure_payload["exchange_write_called"] is False
+    assert closure_payload["order_created"] is False
+    assert closure_payload["order_lifecycle_called"] is False
+
+    assert _status(
+        pg_control_connection,
+        "brc_action_time_tickets",
+        "ticket_id",
+        str(payloads["ticket"]["ticket_id"]),
+    ) == "submitted"
+    assert _status(
+        pg_control_connection,
+        "brc_operation_layer_handoffs",
+        "operation_layer_handoff_id",
+        str(payloads["handoff"]["operation_layer_handoff_id"]),
+    ) == "submitted"
+    assert _count(pg_control_connection, "brc_ticket_bound_post_submit_closures") == 1
 
 
 def test_unsupported_side_is_not_created_by_seed(pg_control_connection):
@@ -263,9 +263,155 @@ def _count(conn, table_name: str) -> int:
         "brc_operation_layer_handoffs",
         "brc_promotion_candidates",
         "brc_runtime_safety_state_snapshots",
+        "brc_ticket_bound_post_submit_closures",
         "brc_ticket_bound_protected_submit_attempts",
     }
     return conn.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one()
+
+
+def _status(conn, table_name: str, id_column: str, id_value: str) -> str:
+    assert table_name in {
+        "brc_action_time_tickets",
+        "brc_operation_layer_handoffs",
+    }
+    assert id_column in {"ticket_id", "operation_layer_handoff_id"}
+    return conn.execute(
+        text(
+            f"""
+            SELECT status
+            FROM {table_name}
+            WHERE {id_column} = :id_value
+            """
+        ),
+        {"id_value": id_value},
+    ).scalar_one()
+
+
+def _run_raw_pg_input_to_runtime_safety(
+    conn,
+    monkeypatch,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> dict[str, dict]:
+    _insert_ready_fresh_signal(
+        conn,
+        strategy_group_id,
+        symbol,
+        side,
+        insert_action_time_fact=False,
+        insert_signal=False,
+    )
+    signal_payload = _write_monitor_signal_summary_to_pg(
+        conn,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+    )
+    assert signal_payload["status"] == "pg_live_signal_events_written"
+    assert signal_payload["written_count"] == 1
+    conn.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
+
+    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
+        conn,
+        now_ms=NOW_MS,
+    )
+    assert fact_payload["status"] == "action_time_fact_snapshots_materialized"
+    assert fact_payload["materialized_count"] == 1
+    assert fact_payload["blocked_count"] == 0
+
+    monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
+    projection_payload = publisher.publish_runtime_control_current_projections(conn)
+    assert projection_payload["status"] == "current_projections_published"
+
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        conn,
+        now_ms=NOW_MS + 1,
+    )
+    assert lane_payload["status"] == "promotion_action_time_lane_created"
+    assert lane_payload["strategy_group_id"] == strategy_group_id
+    assert lane_payload["symbol"] == symbol
+    assert lane_payload["side"] == side
+    assert lane_payload["forbidden_effects"] == lane_materializer.FORBIDDEN_EFFECTS
+
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        conn,
+        now_ms=NOW_MS + 2,
+    )
+    assert ticket_payload["status"] == "action_time_ticket_created"
+    assert ticket_payload["strategy_group_id"] == strategy_group_id
+    assert ticket_payload["symbol"] == symbol
+    assert ticket_payload["side"] == side
+    assert ticket_payload["forbidden_effects"] == ticket_materializer.FORBIDDEN_EFFECTS
+
+    finalgate_payload = finalgate.materialize_action_time_finalgate_preflight(
+        conn,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        now_ms=NOW_MS + 3,
+    )
+    assert finalgate_payload["status"] == "finalgate_ready"
+    assert finalgate_payload["ticket_id"] == ticket_payload["ticket_id"]
+    assert finalgate_payload["forbidden_effects"] == finalgate.FORBIDDEN_EFFECTS
+
+    handoff_payload = handoff.materialize_action_time_operation_layer_handoff(
+        conn,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        finalgate_pass_id=str(finalgate_payload["finalgate_pass_id"]),
+        now_ms=NOW_MS + 4,
+    )
+    assert handoff_payload["status"] == "operation_layer_handoff_ready"
+    assert handoff_payload["ticket_id"] == ticket_payload["ticket_id"]
+    assert handoff_payload["finalgate_pass_id"] == finalgate_payload["finalgate_pass_id"]
+    assert handoff_payload["forbidden_effects"] == handoff.FORBIDDEN_EFFECTS
+
+    safety_payload = safety_state.materialize_ticket_bound_runtime_safety_state(
+        conn,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
+        now_ms=NOW_MS + 5,
+    )
+    assert safety_payload["status"] == "runtime_safety_state_ready"
+    assert safety_payload["submit_allowed"] is True
+    assert safety_payload["blockers"] == []
+    assert safety_payload["forbidden_effects"] == safety_state.FORBIDDEN_EFFECTS
+
+    return {
+        "signal": signal_payload,
+        "fact": fact_payload,
+        "projection": projection_payload,
+        "lane": lane_payload,
+        "ticket": ticket_payload,
+        "finalgate": finalgate_payload,
+        "handoff": handoff_payload,
+        "safety": safety_payload,
+    }
+
+
+def _mock_exchange_submit_result(prepared: dict) -> dict:
+    return {
+        "status": "exchange_submit_orders_submitted",
+        "ticket_id": prepared["ticket_id"],
+        "operation_submit_command_id": prepared["operation_submit_command_id"],
+        "strategy_group_id": prepared["strategy_group_id"],
+        "symbol": prepared["symbol"],
+        "side": prepared["side"],
+        "exchange_write_called": True,
+        "order_created": True,
+        "order_lifecycle_called": True,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+        "submitted_orders": [
+            {
+                "local_order_id": order["local_order_id"],
+                "exchange_order_id": f"mock-exchange-{order['order_role'].lower()}",
+                "order_role": order["order_role"],
+                "reduce_only": order.get("reduce_only") is True,
+            }
+            for order in prepared["submit_request"]["orders"]
+        ],
+    }
 
 
 def _write_monitor_signal_summary_to_pg(

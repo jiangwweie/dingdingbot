@@ -315,6 +315,8 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_fails_close
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
     assert report["summary"]["blocked_by_required_step"] == "pg_action_time_trigger_state"
+    assert report["summary"]["blocked_required_stdout_tail"] == ""
+    assert report["summary"]["blocked_required_stderr_tail"] == "missing_fact:PG_DATABASE_URL"
     assert report["step_results"][0]["name"] == "pg_action_time_trigger_state"
 
 
@@ -893,6 +895,10 @@ def test_server_product_state_refresh_sequence_fails_closed_on_protected_submit_
     assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_ticket_bound_protected_submit_attempt"
+    )
+    assert report["summary"]["blocked_required_stdout_tail"] == ""
+    assert report["summary"]["blocked_required_stderr_tail"] == (
+        "ticket-bound protected submit failed"
     )
     assert calls[-1][1] == "scripts/materialize_ticket_bound_protected_submit_attempt.py"
     assert "--submit-mode" in calls[-1]

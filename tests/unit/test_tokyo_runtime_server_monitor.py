@@ -266,6 +266,105 @@ def _insert_pg_action_time_lane_without_ticket(conn) -> str:
     return lane_id
 
 
+def _insert_pg_stale_action_time_readiness_without_current_signal(conn) -> None:
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_runtime_fact_snapshots (
+              fact_snapshot_id,
+              strategy_group_id,
+              symbol,
+              side,
+              runtime_profile_id,
+              fact_surface,
+              source_kind,
+              source_ref,
+              computed,
+              satisfied,
+              freshness_state,
+              failed_facts,
+              fact_values,
+              blocker_class,
+              observed_at_ms,
+              valid_until_ms,
+              created_at_ms
+            ) VALUES (
+              'fact:SOR-001:ETHUSDT:long:public:stale-action-time-boundary',
+              'SOR-001',
+              'ETHUSDT',
+              'long',
+              'owner-runtime-console-v1',
+              'pretrade_public',
+              'watcher',
+              'pg_test:stale-action-time-boundary',
+              true,
+              true,
+              'fresh',
+              '[]',
+              '{"market_condition_satisfied": true}',
+              NULL,
+              1770000999000,
+              1770004600000,
+              1770000999000
+            )
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_pretrade_readiness_rows (
+              readiness_row_id,
+              candidate_scope_id,
+              strategy_group_id,
+              symbol,
+              side,
+              readiness_state,
+              detector_state,
+              watcher_state,
+              public_facts_state,
+              signal_lifecycle_status,
+              signal_freshness_state,
+              risk_state,
+              scope_state,
+              promotion_state,
+              first_blocker_class,
+              first_blocker_detail,
+              next_action,
+              stop_condition,
+              evidence_ref,
+              source_watermark,
+              computed_at_ms,
+              valid_until_ms
+            ) VALUES (
+              'readiness:SOR-001:ETHUSDT:long:stale-action-time-boundary',
+              'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
+              'SOR-001',
+              'ETHUSDT',
+              'long',
+              'ready',
+              'attached',
+              'healthy',
+              'satisfied',
+              'none',
+              'absent',
+              'acceptable',
+              'live_submit_allowed',
+              'idle',
+              'action_time_boundary_not_reproduced',
+              'previous action-time diagnostic survived after the signal expired',
+              'repair_non_executing_action_time_rehearsal_path',
+              'fresh_signal_required_before_action_time_boundary',
+              'pg_test:stale-action-time-boundary',
+              'unit',
+              1770000999000,
+              1770004600000
+            )
+            """
+        )
+    )
+
+
 @pytest.mark.parametrize(
     "flag,value",
     [
@@ -404,6 +503,38 @@ def test_pg_healthy_waiting_is_quiet_and_uses_pg_dedupe(
             assert conn.execute(
                 text("SELECT COUNT(*) FROM brc_server_monitor_runs")
             ).scalar_one() == 1
+            assert conn.execute(
+                text("SELECT COUNT(*) FROM brc_server_monitor_notifications")
+            ).scalar_one() == 0
+    finally:
+        engine.dispose()
+
+
+def test_pg_stale_action_time_boundary_without_current_signal_is_quiet(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    engine = _seed_pg_engine()
+    try:
+        with engine.begin() as conn:
+            _insert_pg_coverage_and_unsatisfied_facts(conn)
+            _insert_pg_stale_action_time_readiness_without_current_signal(conn)
+            calls: list[dict] = []
+
+            artifact = module.build_server_monitor_artifact(
+                _pg_args(module, tmp_path),
+                pg_conn=conn,
+                notifier=lambda *args: calls.append({"args": args}) or {"sent": True},
+            )
+
+            assert artifact["source_mode"] == "db_backed"
+            assert artifact["status"] == "healthy_waiting_quiet"
+            assert artifact["decision"]["decision"] == "quiet"
+            assert artifact["decision"]["blocker_class"] == "none"
+            assert artifact["decision"]["reasons"] == []
+            assert artifact["notification"]["attempted"] is False
+            assert artifact["notification"]["skipped_reason"] == "healthy_waiting_quiet"
+            assert calls == []
             assert conn.execute(
                 text("SELECT COUNT(*) FROM brc_server_monitor_notifications")
             ).scalar_one() == 0
