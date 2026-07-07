@@ -317,8 +317,11 @@ def test_action_time_trigger_counts_ignore_expired_closed_and_invalidated_rows()
             assert counts == {
                 "fresh_live_signal_events": 0,
                 "open_promotion_candidates": 0,
+                "stale_open_promotion_candidates": 0,
                 "open_action_time_lane_inputs": 0,
+                "stale_open_action_time_lane_inputs": 0,
                 "open_action_time_tickets": 0,
+                "stale_open_action_time_tickets": 0,
             }
 
             _insert_action_time_trigger_rows(conn, now_ms=now_ms, expired=False)
@@ -326,8 +329,32 @@ def test_action_time_trigger_counts_ignore_expired_closed_and_invalidated_rows()
             assert counts == {
                 "fresh_live_signal_events": 1,
                 "open_promotion_candidates": 1,
+                "stale_open_promotion_candidates": 0,
                 "open_action_time_lane_inputs": 1,
+                "stale_open_action_time_lane_inputs": 0,
                 "open_action_time_tickets": 1,
+                "stale_open_action_time_tickets": 0,
+            }
+    finally:
+        engine.dispose()
+
+
+def test_action_time_trigger_counts_include_stale_open_rows():
+    module = _load_module()
+    engine = _action_time_trigger_engine()
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            _insert_stale_open_action_time_trigger_rows(conn, now_ms=now_ms)
+            counts = module._action_time_trigger_counts(conn, now_ms=now_ms)
+            assert counts == {
+                "fresh_live_signal_events": 0,
+                "open_promotion_candidates": 0,
+                "stale_open_promotion_candidates": 1,
+                "open_action_time_lane_inputs": 0,
+                "stale_open_action_time_lane_inputs": 1,
+                "open_action_time_tickets": 0,
+                "stale_open_action_time_tickets": 1,
             }
     finally:
         engine.dispose()
@@ -361,8 +388,11 @@ def test_action_time_trigger_counts_ignore_non_live_fresh_signal():
     assert counts == {
         "fresh_live_signal_events": 0,
         "open_promotion_candidates": 0,
+        "stale_open_promotion_candidates": 0,
         "open_action_time_lane_inputs": 0,
+        "stale_open_action_time_lane_inputs": 0,
         "open_action_time_tickets": 0,
+        "stale_open_action_time_tickets": 0,
     }
 
 
@@ -937,13 +967,76 @@ def _insert_action_time_trigger_rows(
             """
             INSERT INTO brc_action_time_tickets VALUES (
                 :id,
-                'created',
+                :status,
                 :expires_at_ms
             )
             """
         ),
         {
             "id": f"ticket-{suffix}",
+            "status": "expired" if expired else "created",
             "expires_at_ms": expires_at_ms,
         },
+    )
+
+
+def _insert_stale_open_action_time_trigger_rows(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> None:
+    expires_at_ms = now_ms - 1
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_live_signal_events VALUES (
+                'stale-open-signal',
+                'live_market',
+                'fresh',
+                'facts_validated',
+                :expires_at_ms,
+                NULL
+            )
+            """
+        ),
+        {"expires_at_ms": expires_at_ms},
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_promotion_candidates VALUES (
+                'stale-open-promotion',
+                'arbitration_won',
+                :expires_at_ms,
+                NULL
+            )
+            """
+        ),
+        {"expires_at_ms": expires_at_ms},
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_action_time_lane_inputs VALUES (
+                'stale-open-lane',
+                'real_submit_candidate',
+                'ticket_pending',
+                :expires_at_ms,
+                NULL
+            )
+            """
+        ),
+        {"expires_at_ms": expires_at_ms},
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_action_time_tickets VALUES (
+                'stale-open-ticket',
+                'finalgate_ready',
+                :expires_at_ms
+            )
+            """
+        ),
+        {"expires_at_ms": expires_at_ms},
     )

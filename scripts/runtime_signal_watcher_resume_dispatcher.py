@@ -2465,6 +2465,18 @@ def _execute_ticket_bound_operation_layer_handoff(
             handoff_plan=handoff_plan,
             handoff_result=handoff_result,
         )
+    if not _operation_layer_handoff_passed(response.get("body")):
+        blockers = _operation_layer_handoff_blockers(response.get("body"))
+        return _dispatch_artifact_from_operation_layer_handoff(
+            artifact=artifact,
+            status="blocked",
+            blocker_class=_operation_layer_blocker_class(blockers, []),
+            dispatch_status="blocked_by_ticket_bound_operation_layer_handoff",
+            blockers=blockers or ["operation_layer_handoff_not_ready"],
+            preflight_result=preflight_result,
+            handoff_plan=handoff_plan,
+            handoff_result=handoff_result,
+        )
     identity_blockers = _operation_layer_handoff_identity_blockers(
         expected_ticket_id=ticket_id,
         expected_finalgate_pass_id=finalgate_pass_id,
@@ -2477,18 +2489,6 @@ def _execute_ticket_bound_operation_layer_handoff(
             blocker_class=_operation_layer_blocker_class(identity_blockers, []),
             dispatch_status="blocked_by_ticket_bound_operation_layer_handoff_identity",
             blockers=identity_blockers,
-            preflight_result=preflight_result,
-            handoff_plan=handoff_plan,
-            handoff_result=handoff_result,
-        )
-    if not _operation_layer_handoff_passed(response.get("body")):
-        blockers = _operation_layer_handoff_blockers(response.get("body"))
-        return _dispatch_artifact_from_operation_layer_handoff(
-            artifact=artifact,
-            status="blocked",
-            blocker_class=_operation_layer_blocker_class(blockers, []),
-            dispatch_status="blocked_by_ticket_bound_operation_layer_handoff",
-            blockers=blockers or ["operation_layer_handoff_not_ready"],
             preflight_result=preflight_result,
             handoff_plan=handoff_plan,
             handoff_result=handoff_result,

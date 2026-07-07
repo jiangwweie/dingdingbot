@@ -412,6 +412,22 @@ def _action_time_trigger_counts(
                 promotions.c.closed_at_ms.is_(None),
             ),
         ),
+        "stale_open_promotion_candidates": _count_where(
+            conn,
+            promotions,
+            sa.and_(
+                promotions.c.status.in_(
+                    [
+                        "eligible",
+                        "arbitration_pending",
+                        "arbitration_won",
+                    ]
+                ),
+                promotions.c.expires_at_ms.is_not(None),
+                promotions.c.expires_at_ms <= now,
+                promotions.c.closed_at_ms.is_(None),
+            ),
+        ),
         "open_action_time_lane_inputs": _count_where(
             conn,
             lanes,
@@ -429,6 +445,24 @@ def _action_time_trigger_counts(
                 lanes.c.closed_at_ms.is_(None),
             ),
         ),
+        "stale_open_action_time_lane_inputs": _count_where(
+            conn,
+            lanes,
+            sa.and_(
+                lanes.c.lane_scope == "real_submit_candidate",
+                lanes.c.status.in_(
+                    [
+                        "opened",
+                        "facts_refreshing",
+                        "ticket_pending",
+                        "ticket_created",
+                    ]
+                ),
+                lanes.c.expires_at_ms.is_not(None),
+                lanes.c.expires_at_ms <= now,
+                lanes.c.closed_at_ms.is_(None),
+            ),
+        ),
         "open_action_time_tickets": _count_where(
             conn,
             tickets,
@@ -441,6 +475,21 @@ def _action_time_trigger_counts(
                     ]
                 ),
                 tickets.c.expires_at_ms > now,
+            ),
+        ),
+        "stale_open_action_time_tickets": _count_where(
+            conn,
+            tickets,
+            sa.and_(
+                tickets.c.status.in_(
+                    [
+                        "created",
+                        "preflight_pending",
+                        "finalgate_ready",
+                    ]
+                ),
+                tickets.c.expires_at_ms.is_not(None),
+                tickets.c.expires_at_ms <= now,
             ),
         ),
     }

@@ -117,6 +117,7 @@ def materialize_pg_promotion_action_time_lane(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
+    _expire_stale_open_promotions(conn, now_ms=now_ms)
     _expire_stale_open_real_lanes(conn, now_ms=now_ms)
     try:
         control_state = PgBackedRuntimeControlStateRepository(
@@ -242,6 +243,58 @@ def materialize_pg_promotion_action_time_lane(
         next_action="materialize_action_time_ticket",
         per_candidate_results=_candidate_results(bundles, selected=selected),
     )
+
+
+def _expire_stale_open_promotions(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> int:
+    expired_rows = [
+        dict(row)
+        for row in conn.execute(
+            sa.text(
+                """
+                SELECT promotion_candidate_id, status
+                FROM brc_promotion_candidates
+                WHERE status IN ('eligible', 'arbitration_pending', 'arbitration_won')
+                  AND closed_at_ms IS NULL
+                  AND expires_at_ms IS NOT NULL
+                  AND expires_at_ms <= :now_ms
+                """
+            ),
+            {"now_ms": now_ms},
+        ).mappings()
+    ]
+    if not expired_rows:
+        return 0
+    conn.execute(
+        sa.text(
+            """
+            UPDATE brc_promotion_candidates
+            SET status = 'expired',
+                closed_at_ms = :now_ms
+            WHERE status IN ('eligible', 'arbitration_pending', 'arbitration_won')
+              AND closed_at_ms IS NULL
+              AND expires_at_ms IS NOT NULL
+              AND expires_at_ms <= :now_ms
+            """
+        ),
+        {"now_ms": now_ms},
+    )
+    for row in expired_rows:
+        _insert_state_transition_event(
+            conn,
+            state_table="brc_promotion_candidates",
+            entity_id=str(row["promotion_candidate_id"]),
+            from_status=str(row["status"]),
+            to_status="expired",
+            transition_reason="promotion_candidate_expired_before_action_time_lane",
+            trigger_ref="materialize_pg_promotion_action_time_lane",
+            writer="materialize_pg_promotion_action_time_lane",
+            now_ms=now_ms,
+        )
+    return len(expired_rows)
 
 
 def _expire_stale_open_real_lanes(

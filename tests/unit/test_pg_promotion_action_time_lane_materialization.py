@@ -999,6 +999,63 @@ def test_ticket_created_lane_with_expired_ticket_is_closed_with_transition(
     )
 
 
+def test_expired_open_promotion_is_closed_with_transition(pg_control_connection):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_promotion_candidates
+            SET expires_at_ms = :expired_at_ms,
+                closed_at_ms = NULL,
+                status = 'arbitration_won'
+            WHERE promotion_candidate_id = :promotion_id
+            """
+        ),
+        {
+            "expired_at_ms": NOW_MS - 1,
+            "promotion_id": payload["promotion_candidate_id"],
+        },
+    )
+
+    transitioned = lane_materializer._expire_stale_open_promotions(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+
+    promotion = pg_control_connection.execute(
+        text(
+            """
+            SELECT status, closed_at_ms
+            FROM brc_promotion_candidates
+            WHERE promotion_candidate_id = :promotion_id
+            """
+        ),
+        {"promotion_id": payload["promotion_candidate_id"]},
+    ).mappings().one()
+    transition = pg_control_connection.execute(
+        text(
+            """
+            SELECT from_status, to_status, transition_reason
+            FROM brc_state_transition_events
+            WHERE entity_id = :promotion_id
+            """
+        ),
+        {"promotion_id": payload["promotion_candidate_id"]},
+    ).mappings().one()
+    assert transitioned == 1
+    assert promotion["status"] == "expired"
+    assert promotion["closed_at_ms"] == NOW_MS + 1
+    assert transition["from_status"] == "arbitration_won"
+    assert transition["to_status"] == "expired"
+    assert transition["transition_reason"] == (
+        "promotion_candidate_expired_before_action_time_lane"
+    )
+
+
 def test_multiple_fresh_candidates_select_one_by_strategy_priority(pg_control_connection):
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
     _insert_ready_fresh_signal(pg_control_connection, "MPG-001", "OPUSDT", "long")

@@ -2138,6 +2138,58 @@ def test_dispatcher_blocks_ticket_bound_handoff_identity_mismatch(monkeypatch):
     assert [call["method"] for call in calls] == ["GET", "POST"]
 
 
+def test_dispatcher_preserves_blocked_ticket_bound_handoff_reason(monkeypatch):
+    calls = []
+    handoff_body = {
+        "status": "blocked",
+        "operation_layer_verdict": "block",
+        "ticket_id": "ticket-ready-1",
+        "finalgate_pass_id": "finalgate-pass-1",
+        "operation_submit_command_id": None,
+        "blockers": ["ticket_expired"],
+        "command_plan": {},
+        "submit_executed": False,
+        "operation_layer_submit_called": False,
+        "order_created": False,
+        "exchange_called": False,
+        "exchange_write_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+    def _request_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "http_status": 200,
+            "error": False,
+            "body": handoff_body if kwargs["method"] == "POST" else _finalgate_ready_body(),
+        }
+
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(dispatcher, "_request_json", _request_json)
+
+    artifact = build_dispatch_artifact(
+        resume_pack=_resume_pack("ready_for_action_time_final_gate"),
+        source_path=Path("pg-ticket-identity"),
+        execute_preflight=True,
+    )
+
+    assert artifact["status"] == "blocked"
+    assert artifact["dispatch_status"] == "blocked_by_ticket_bound_operation_layer_handoff"
+    assert "ticket_expired" in artifact["blockers"]
+    assert "operation_layer_handoff_command_missing:ticket_id" not in artifact["blockers"]
+    assert "operation_layer_handoff_body_missing:finalgate_pass_id" not in artifact["blockers"]
+    assert artifact["operation_layer_command_plan"] is None
+    assert [call["method"] for call in calls] == ["GET", "POST"]
+
+
 def test_dispatcher_blocks_unsafe_resume_flags():
     resume = _resume_pack("ready_for_action_time_final_gate")
     resume["action_time_resume"]["exchange_write_called"] = True
