@@ -7,6 +7,7 @@ from sqlalchemy import text
 from scripts import materialize_ticket_bound_exit_protection_set as exit_protection
 from scripts import materialize_ticket_bound_post_submit_closure as closure
 from scripts import materialize_ticket_bound_protected_submit_attempt as submit
+from scripts import materialize_ticket_bound_runner_protection_adjustment as runner_adjuster
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
@@ -110,6 +111,139 @@ def test_post_submit_closure_is_idempotent(
     assert second["post_submit_closure_id"] == first["post_submit_closure_id"]
 
 
+def test_lifecycle_closure_blocks_without_final_exit_proofs(pg_control_connection):
+    _, prepared = _runner_protected_attempt(pg_control_connection)
+
+    payload = closure.materialize_ticket_bound_lifecycle_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        final_exit_exchange_order_id="",
+        final_position_flat_confirmed=False,
+        reconciliation_evidence_id="",
+        settlement_evidence_id="",
+        review_evidence_id="",
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "final_exit_exchange_order_id_required" in payload["blockers"]
+    assert "final_position_flat_not_confirmed" in payload["blockers"]
+    assert "reconciliation_evidence_id_required" in payload["blockers"]
+    assert "settlement_evidence_id_required" in payload["blockers"]
+    assert "review_evidence_id_required" in payload["blockers"]
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "runner_protected"
+
+
+def test_lifecycle_closure_records_final_exit_reconciliation_settlement_review(
+    pg_control_connection,
+):
+    _, prepared = _runner_protected_attempt(pg_control_connection)
+
+    payload = closure.materialize_ticket_bound_lifecycle_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        final_exit_exchange_order_id="exchange-runner-sl-1",
+        final_exit_role="RUNNER_SL",
+        final_position_flat_confirmed=True,
+        reconciliation_evidence_id="recon-1",
+        settlement_evidence_id="settlement-1",
+        review_evidence_id="review-1",
+        realized_pnl="12.34",
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "closed"
+    assert payload["reconciliation_state"] == "matched"
+    assert payload["settlement_state"] == "released"
+    assert payload["review_state"] == "recorded"
+    assert payload["blockers"] == []
+    assert payload["reconciliation_evidence"]["reconciliation_evidence_id"] == "recon-1"
+    assert payload["settlement_evidence"]["settlement_evidence_id"] == "settlement-1"
+    assert payload["review_evidence"]["review_evidence_id"] == "review-1"
+
+    lifecycle = _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")
+    protection_set = _one(pg_control_connection, "brc_ticket_bound_exit_protection_sets")
+    assert lifecycle["status"] == "lifecycle_closed"
+    assert protection_set["status"] == "closed"
+    assert protection_set["reconciled_with_exchange"] in {True, 1}
+
+    runner_order = pg_control_connection.execute(
+        text(
+            """
+            SELECT *
+            FROM brc_ticket_bound_exit_protection_orders
+            WHERE role = 'RUNNER_SL'
+            """
+        )
+    ).mappings().one()
+    assert runner_order["status"] == "filled"
+
+    events = [
+        row["event_type"]
+        for row in pg_control_connection.execute(
+            text(
+                """
+                SELECT event_type
+                FROM brc_ticket_bound_lifecycle_events
+                ORDER BY created_at_ms, event_type
+                """
+            )
+        ).mappings()
+    ]
+    for event_type in (
+        "final_exit_detected",
+        "reconciliation_matched",
+        "budget_settled",
+        "review_recorded",
+        "lifecycle_closed",
+    ):
+        assert event_type in events
+
+
+def test_lifecycle_closure_is_idempotent(pg_control_connection):
+    _, prepared = _runner_protected_attempt(pg_control_connection)
+    first = closure.materialize_ticket_bound_lifecycle_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        final_exit_exchange_order_id="exchange-runner-sl-1",
+        final_exit_role="RUNNER_SL",
+        final_position_flat_confirmed=True,
+        reconciliation_evidence_id="recon-1",
+        settlement_evidence_id="settlement-1",
+        review_evidence_id="review-1",
+        now_ms=NOW_MS + 9000,
+    )
+    second = closure.materialize_ticket_bound_lifecycle_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        final_exit_exchange_order_id="exchange-runner-sl-1",
+        final_exit_role="RUNNER_SL",
+        final_position_flat_confirmed=True,
+        reconciliation_evidence_id="recon-1",
+        settlement_evidence_id="settlement-1",
+        review_evidence_id="review-1",
+        now_ms=NOW_MS + 10_000,
+    )
+
+    assert first["status"] == "closed"
+    assert second["status"] == "closed"
+    assert second["idempotent_existing_lifecycle_closure"] is True
+    assert (
+        pg_control_connection.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM brc_ticket_bound_lifecycle_events
+                WHERE event_type = 'lifecycle_closed'
+                """
+            )
+        ).scalar_one()
+        == 1
+    )
+
+
 def test_latest_post_submit_closure_noops_without_submitted_attempt(
     pg_control_connection,
 ):
@@ -190,6 +324,40 @@ def _submitted_attempt(
         now_ms=NOW_MS + 5500 + attempt_offset_ms,
     )
     assert protection["status"] == "position_protected"
+    return ids, prepared
+
+
+def _runner_protected_attempt(conn):
+    ids, prepared = _submitted_attempt(conn)
+    set_id = conn.execute(
+        text(
+            """
+            SELECT exit_protection_set_id
+            FROM brc_ticket_bound_exit_protection_sets
+            WHERE protected_submit_attempt_id = :attempt_id
+            """
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).scalar_one()
+    conn.execute(
+        text(
+            """
+            UPDATE brc_ticket_bound_exit_protection_orders
+            SET status = 'filled', updated_at_ms = :updated_at_ms
+            WHERE exit_protection_set_id = :set_id
+              AND role = 'TP1'
+            """
+        ),
+        {"set_id": set_id, "updated_at_ms": NOW_MS + 6500},
+    )
+    runner = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
+        conn,
+        exit_protection_set_id=set_id,
+        runner_sl_exchange_order_id="exchange-runner-sl-1",
+        runner_sl_local_order_id="runner-sl-1",
+        now_ms=NOW_MS + 7000,
+    )
+    assert runner["status"] == "runner_protected"
     return ids, prepared
 
 
@@ -290,3 +458,14 @@ def _closure_row(conn):
     return conn.execute(
         text("SELECT * FROM brc_ticket_bound_post_submit_closures")
     ).mappings().one()
+
+
+def _one(conn, table_name: str):
+    row = conn.execute(text(f"SELECT * FROM {table_name}")).mappings().one()
+    return {key: _maybe_json_value(value) for key, value in dict(row).items()}
+
+
+def _maybe_json_value(value):
+    if isinstance(value, str) and value[:1] in {"[", "{"}:
+        return _json_value(value)
+    return value

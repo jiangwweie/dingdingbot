@@ -39,6 +39,19 @@ AUTHORITY_BOUNDARY = (
     "ticket_bound_post_submit_closure; records reconciliation/settlement/review "
     "state only; no exchange/order/runtime authority"
 )
+PROTECTION_COMPLETE_STATUSES = {"submitted", "reconciled", "runner_protected", "closed"}
+FINAL_EXIT_ROLES = {"SL", "RUNNER_SL", "TP1"}
+FINAL_LIFECYCLE_CLOSABLE_STATUSES = {
+    "position_protected",
+    "tp1_filled",
+    "sl_adjust_pending",
+    "runner_protected",
+    "final_exit_detected",
+    "reconciliation_matched",
+    "budget_settled",
+    "review_recorded",
+    "lifecycle_closed",
+}
 
 
 def materialize_ticket_bound_post_submit_closure(
@@ -191,6 +204,212 @@ def materialize_latest_ticket_bound_post_submit_closure(
     )
 
 
+def materialize_ticket_bound_lifecycle_closure(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+    final_exit_exchange_order_id: str,
+    final_position_flat_confirmed: bool,
+    reconciliation_evidence_id: str,
+    settlement_evidence_id: str,
+    review_evidence_id: str,
+    final_exit_role: str = "RUNNER_SL",
+    realized_pnl: str | Decimal | None = None,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    now_ms = int(now_ms or time.time() * 1000)
+    attempt_id = str(protected_submit_attempt_id or "").strip()
+    if not attempt_id:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            blockers=["protected_submit_attempt_id_required"],
+            closure={},
+            next_action="provide_protected_submit_attempt_id",
+        )
+
+    materialize_ticket_bound_post_submit_closure(
+        conn,
+        protected_submit_attempt_id=attempt_id,
+        now_ms=now_ms,
+    )
+    attempt = _attempt_by_id(conn, attempt_id)
+    closure = _post_submit_closure_for_attempt(conn, attempt_id)
+    if not attempt:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            blockers=["protected_submit_attempt_missing"],
+            closure=closure,
+            next_action="repair_ticket_bound_protected_submit_attempt",
+        )
+
+    protection_set = _exit_protection_set_for_attempt(conn, attempt)
+    lifecycle = _lifecycle_by_ticket(conn, str(attempt.get("ticket_id") or ""))
+    if (
+        closure.get("status") == "closed"
+        and lifecycle.get("status") == "lifecycle_closed"
+        and protection_set.get("status") == "closed"
+    ):
+        return _result(
+            "closed",
+            now_ms=now_ms,
+            blockers=[],
+            closure=closure,
+            next_action="lifecycle_closed",
+            extra={"idempotent_existing_lifecycle_closure": True},
+        )
+    protection_orders = _exit_protection_orders_for_set(
+        conn, str(protection_set.get("exit_protection_set_id") or "")
+    )
+    final_exit_role = str(final_exit_role or "").strip().upper()
+    final_exit_exchange_order_id = str(final_exit_exchange_order_id or "").strip()
+    reconciliation_evidence_id = str(reconciliation_evidence_id or "").strip()
+    settlement_evidence_id = str(settlement_evidence_id or "").strip()
+    review_evidence_id = str(review_evidence_id or "").strip()
+    realized_pnl_decimal = _decimal_or_none(realized_pnl)
+
+    blockers = _attempt_blockers(attempt)
+    blockers.extend(_exit_protection_blockers(conn, attempt))
+    blockers.extend(
+        _lifecycle_closure_blockers(
+            lifecycle=lifecycle,
+            protection_orders=protection_orders,
+            final_exit_role=final_exit_role,
+            final_exit_exchange_order_id=final_exit_exchange_order_id,
+            final_position_flat_confirmed=final_position_flat_confirmed,
+            reconciliation_evidence_id=reconciliation_evidence_id,
+            settlement_evidence_id=settlement_evidence_id,
+            review_evidence_id=review_evidence_id,
+        )
+    )
+    blockers = _dedupe(blockers)
+    if blockers:
+        closure_update = {
+            **closure,
+            "status": "blocked",
+            "protection_state": _protection_state(conn, attempt),
+            "reconciliation_state": "blocked",
+            "settlement_state": "blocked",
+            "review_state": "blocked",
+            "first_blocker": blockers[0],
+            "blockers": blockers,
+            "next_action": "repair_ticket_bound_lifecycle_closure_inputs",
+            "updated_at_ms": now_ms,
+        }
+        _upsert_row(
+            conn,
+            "brc_ticket_bound_post_submit_closures",
+            "post_submit_closure_id",
+            closure_update,
+        )
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            blockers=blockers,
+            closure=closure_update,
+            next_action="repair_ticket_bound_lifecycle_closure_inputs",
+        )
+
+    final_order = _protection_order_by_role_and_exchange_id(
+        protection_orders,
+        role=final_exit_role,
+        exchange_order_id=final_exit_exchange_order_id,
+    )
+    _mark_protection_order_status(conn, final_order, status="filled", now_ms=now_ms)
+    protection_update = {
+        **protection_set,
+        "status": "closed",
+        "reconciled_with_exchange": True,
+        "first_blocker": None,
+        "blockers": [],
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_exit_protection_sets",
+        "exit_protection_set_id",
+        protection_update,
+    )
+    closure_update = {
+        **closure,
+        "status": "closed",
+        "protection_state": "submitted",
+        "reconciliation_state": "matched",
+        "settlement_state": "released",
+        "review_state": "recorded",
+        "first_blocker": None,
+        "blockers": [],
+        "warnings": [],
+        "reconciliation_evidence": {
+            "reconciliation_evidence_id": reconciliation_evidence_id,
+            "final_exit_exchange_order_id": final_exit_exchange_order_id,
+            "final_exit_role": final_exit_role,
+            "final_position_flat_confirmed": True,
+        },
+        "settlement_evidence": {
+            "settlement_evidence_id": settlement_evidence_id,
+            "realized_pnl": str(realized_pnl_decimal)
+            if realized_pnl_decimal is not None
+            else None,
+        },
+        "review_evidence": {"review_evidence_id": review_evidence_id},
+        "next_action": "lifecycle_closed",
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_post_submit_closures",
+        "post_submit_closure_id",
+        closure_update,
+    )
+    lifecycle_update = {
+        **lifecycle,
+        "status": "lifecycle_closed",
+        "first_blocker": None,
+        "blockers": [],
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "lifecycle_run_id",
+        lifecycle_update,
+    )
+    event_payload = {
+        "post_submit_closure_id": closure_update["post_submit_closure_id"],
+        "final_exit_exchange_order_id": final_exit_exchange_order_id,
+        "final_exit_role": final_exit_role,
+        "reconciliation_evidence_id": reconciliation_evidence_id,
+        "settlement_evidence_id": settlement_evidence_id,
+        "review_evidence_id": review_evidence_id,
+        "realized_pnl": str(realized_pnl_decimal)
+        if realized_pnl_decimal is not None
+        else None,
+    }
+    for event_type in (
+        "final_exit_detected",
+        "reconciliation_matched",
+        "budget_settled",
+        "review_recorded",
+        "lifecycle_closed",
+    ):
+        _insert_lifecycle_event(
+            conn,
+            lifecycle_update,
+            event_type,
+            event_payload,
+            now_ms=now_ms,
+        )
+    return _result(
+        "closed",
+        now_ms=now_ms,
+        blockers=[],
+        closure=closure_update,
+        next_action="lifecycle_closed",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
@@ -198,6 +417,14 @@ def main(argv: list[str] | None = None) -> int:
     selector = parser.add_mutually_exclusive_group(required=True)
     selector.add_argument("--protected-submit-attempt-id")
     selector.add_argument("--latest-submitted", action="store_true")
+    parser.add_argument("--close-lifecycle", action="store_true")
+    parser.add_argument("--final-exit-exchange-order-id", default="")
+    parser.add_argument("--final-exit-role", default="RUNNER_SL")
+    parser.add_argument("--final-position-flat-confirmed", action="store_true")
+    parser.add_argument("--reconciliation-evidence-id", default="")
+    parser.add_argument("--settlement-evidence-id", default="")
+    parser.add_argument("--review-evidence-id", default="")
+    parser.add_argument("--realized-pnl", default=None)
     parser.add_argument("--now-ms", type=int, default=None)
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
@@ -222,7 +449,26 @@ def main(argv: list[str] | None = None) -> int:
     engine = sa.create_engine(args.database_url)
     try:
         with engine.begin() as conn:
-            if args.latest_submitted:
+            if args.close_lifecycle:
+                if not args.protected_submit_attempt_id:
+                    print(
+                        "ERROR: --close-lifecycle requires --protected-submit-attempt-id",
+                        file=sys.stderr,
+                    )
+                    return 2
+                report = materialize_ticket_bound_lifecycle_closure(
+                    conn,
+                    protected_submit_attempt_id=args.protected_submit_attempt_id,
+                    final_exit_exchange_order_id=args.final_exit_exchange_order_id,
+                    final_exit_role=args.final_exit_role,
+                    final_position_flat_confirmed=args.final_position_flat_confirmed,
+                    reconciliation_evidence_id=args.reconciliation_evidence_id,
+                    settlement_evidence_id=args.settlement_evidence_id,
+                    review_evidence_id=args.review_evidence_id,
+                    realized_pnl=args.realized_pnl,
+                    now_ms=args.now_ms,
+                )
+            elif args.latest_submitted:
                 report = materialize_latest_ticket_bound_post_submit_closure(
                     conn,
                     now_ms=args.now_ms,
@@ -316,7 +562,7 @@ def _exit_protection_blockers(
     protection_set = _exit_protection_set_for_attempt(conn, attempt)
     if not protection_set:
         return ["ticket_bound_exit_protection_set_missing"]
-    if protection_set.get("status") not in {"submitted", "reconciled"}:
+    if protection_set.get("status") not in PROTECTION_COMPLETE_STATUSES:
         blockers.append(f"exit_protection_set_status:{protection_set.get('status')}")
     if protection_set.get("protection_complete") is not True:
         blockers.append("exit_protection_set_not_complete")
@@ -333,10 +579,168 @@ def _protection_state(conn: sa.engine.Connection, attempt: dict[str, Any]) -> st
         return "missing"
     return (
         "submitted"
-        if protection_set.get("status") in {"submitted", "reconciled"}
+        if protection_set.get("status") in PROTECTION_COMPLETE_STATUSES
         and protection_set.get("protection_complete") is True
         else "missing"
     )
+
+
+def _attempt_by_id(conn: sa.engine.Connection, attempt_id: str) -> dict[str, Any]:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_protected_submit_attempts"):
+        return {}
+    table = _table(conn, "brc_ticket_bound_protected_submit_attempts")
+    row = conn.execute(
+        sa.select(table).where(table.c.protected_submit_attempt_id == attempt_id)
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _post_submit_closure_for_attempt(
+    conn: sa.engine.Connection,
+    attempt_id: str,
+) -> dict[str, Any]:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_post_submit_closures"):
+        return {}
+    table = _table(conn, "brc_ticket_bound_post_submit_closures")
+    row = conn.execute(
+        sa.select(table).where(table.c.protected_submit_attempt_id == attempt_id)
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _lifecycle_by_ticket(conn: sa.engine.Connection, ticket_id: str) -> dict[str, Any]:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_order_lifecycle_runs"):
+        return {}
+    table = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
+    row = conn.execute(
+        sa.select(table).where(table.c.ticket_id == ticket_id)
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _exit_protection_orders_for_set(
+    conn: sa.engine.Connection,
+    exit_protection_set_id: str,
+) -> list[dict[str, Any]]:
+    if not exit_protection_set_id:
+        return []
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exit_protection_orders"):
+        return []
+    table = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    return [
+        dict(row)
+        for row in conn.execute(
+            sa.select(table).where(
+                table.c.exit_protection_set_id == exit_protection_set_id
+            )
+        ).mappings()
+    ]
+
+
+def _lifecycle_closure_blockers(
+    *,
+    lifecycle: dict[str, Any],
+    protection_orders: list[dict[str, Any]],
+    final_exit_role: str,
+    final_exit_exchange_order_id: str,
+    final_position_flat_confirmed: bool,
+    reconciliation_evidence_id: str,
+    settlement_evidence_id: str,
+    review_evidence_id: str,
+) -> list[str]:
+    blockers: list[str] = []
+    if not lifecycle:
+        blockers.append("ticket_bound_lifecycle_run_missing")
+    elif lifecycle.get("status") not in FINAL_LIFECYCLE_CLOSABLE_STATUSES:
+        blockers.append(f"lifecycle_status_not_closable:{lifecycle.get('status')}")
+    if final_exit_role not in FINAL_EXIT_ROLES:
+        blockers.append(f"final_exit_role_invalid:{final_exit_role or 'missing'}")
+    if not final_exit_exchange_order_id:
+        blockers.append("final_exit_exchange_order_id_required")
+    if not final_position_flat_confirmed:
+        blockers.append("final_position_flat_not_confirmed")
+    if not reconciliation_evidence_id:
+        blockers.append("reconciliation_evidence_id_required")
+    if not settlement_evidence_id:
+        blockers.append("settlement_evidence_id_required")
+    if not review_evidence_id:
+        blockers.append("review_evidence_id_required")
+    if final_exit_role == "RUNNER_SL" and lifecycle.get("status") not in {
+        "runner_protected",
+        "final_exit_detected",
+        "reconciliation_matched",
+        "budget_settled",
+        "review_recorded",
+        "lifecycle_closed",
+    }:
+        blockers.append("runner_sl_not_protected_before_final_exit")
+    if final_exit_exchange_order_id and final_exit_role in FINAL_EXIT_ROLES:
+        final_order = _protection_order_by_role_and_exchange_id(
+            protection_orders,
+            role=final_exit_role,
+            exchange_order_id=final_exit_exchange_order_id,
+        )
+        if not final_order:
+            blockers.append("final_exit_order_not_in_ticket_protection_set")
+        elif final_order.get("reduce_only") is not True:
+            blockers.append("final_exit_order_reduce_only_missing")
+    return _dedupe(blockers)
+
+
+def _protection_order_by_role_and_exchange_id(
+    protection_orders: list[dict[str, Any]],
+    *,
+    role: str,
+    exchange_order_id: str,
+) -> dict[str, Any]:
+    for order in protection_orders:
+        if str(order.get("role") or "").upper() != role:
+            continue
+        if str(order.get("exchange_order_id") or "") != exchange_order_id:
+            continue
+        return dict(order)
+    return {}
+
+
+def _mark_protection_order_status(
+    conn: sa.engine.Connection,
+    order: dict[str, Any],
+    *,
+    status: str,
+    now_ms: int,
+) -> None:
+    row = {**order, "status": status, "updated_at_ms": now_ms}
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_exit_protection_orders",
+        "exit_protection_order_id",
+        row,
+    )
+
+
+def _insert_lifecycle_event(
+    conn: sa.engine.Connection,
+    lifecycle: dict[str, Any],
+    event_type: str,
+    payload: dict[str, Any],
+    *,
+    now_ms: int,
+) -> None:
+    event = {
+        "lifecycle_event_id": _stable_id(
+            "ticket_lifecycle_event",
+            str(lifecycle["lifecycle_run_id"]),
+            event_type,
+            str(now_ms),
+        ),
+        "lifecycle_run_id": str(lifecycle["lifecycle_run_id"]),
+        "ticket_id": str(lifecycle["ticket_id"]),
+        "protected_submit_attempt_id": str(lifecycle["protected_submit_attempt_id"]),
+        "event_type": event_type,
+        "event_payload": _json_safe(payload),
+        "created_at_ms": now_ms,
+    }
+    _upsert_row(conn, "brc_ticket_bound_lifecycle_events", "lifecycle_event_id", event)
 
 
 def _exit_protection_set_for_attempt(
@@ -495,6 +899,9 @@ def _result(
         "first_blocker": closure.get("first_blocker") or (blockers[0] if blockers else None),
         "blockers": blockers,
         "submitted_order_refs": closure.get("submitted_order_refs", []),
+        "reconciliation_evidence": closure.get("reconciliation_evidence", {}),
+        "settlement_evidence": closure.get("settlement_evidence", {}),
+        "review_evidence": closure.get("review_evidence", {}),
         "next_action": next_action,
         "authority_boundary": closure.get("authority_boundary", AUTHORITY_BOUNDARY),
         "finalgate_called": closure.get("finalgate_called", False),
@@ -547,6 +954,25 @@ def _as_dict(value: Any) -> dict[str, Any]:
             return {}
         return dict(parsed) if isinstance(parsed, dict) else {}
     return {}
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 def _int_value(value: Any) -> int:

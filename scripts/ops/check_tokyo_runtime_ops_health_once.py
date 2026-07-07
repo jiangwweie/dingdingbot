@@ -46,6 +46,7 @@ L2_L7_CHAIN_TABLES = (
     "brc_ticket_bound_order_lifecycle_runs",
     "brc_ticket_bound_exit_protection_sets",
     "brc_ticket_bound_exit_protection_orders",
+    "brc_ticket_bound_post_submit_closures",
     "brc_goal_status_current",
     "brc_server_monitor_runs",
 )
@@ -284,6 +285,7 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             "lifecycle_runs": "brc_ticket_bound_order_lifecycle_runs",
             "protection_sets": "brc_ticket_bound_exit_protection_sets",
             "protection_orders": "brc_ticket_bound_exit_protection_orders",
+            "post_submit_closures": "brc_ticket_bound_post_submit_closures",
             "monitor": "brc_server_monitor_runs",
         }.items()
     }
@@ -418,6 +420,43 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             )
         ).mappings()
     )
+    lifecycle_closed_without_post_submit_closed = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT l.lifecycle_run_id, l.ticket_id, l.protected_submit_attempt_id,
+                       l.strategy_group_id, l.symbol, l.side, l.updated_at_ms
+                FROM brc_ticket_bound_order_lifecycle_runs AS l
+                LEFT JOIN brc_ticket_bound_post_submit_closures AS c
+                  ON c.protected_submit_attempt_id = l.protected_submit_attempt_id
+                 AND c.status = 'closed'
+                WHERE l.status = 'lifecycle_closed'
+                  AND c.post_submit_closure_id IS NULL
+                ORDER BY l.updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
+    post_submit_closed_without_lifecycle_closed = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT c.post_submit_closure_id, c.ticket_id,
+                       c.protected_submit_attempt_id, c.strategy_group_id,
+                       c.symbol, c.side, c.updated_at_ms,
+                       l.status AS lifecycle_status
+                FROM brc_ticket_bound_post_submit_closures AS c
+                LEFT JOIN brc_ticket_bound_order_lifecycle_runs AS l
+                  ON l.protected_submit_attempt_id = c.protected_submit_attempt_id
+                WHERE c.status = 'closed'
+                  AND COALESCE(l.status, '') <> 'lifecycle_closed'
+                ORDER BY c.updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
     goal = conn.execute(
         sa.text(
             """
@@ -500,6 +539,12 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
         "runner_protected_without_runner_sl": [
             dict(row) for row in runner_protected_without_runner_sl
         ],
+        "lifecycle_closed_without_post_submit_closed": [
+            dict(row) for row in lifecycle_closed_without_post_submit_closed
+        ],
+        "post_submit_closed_without_lifecycle_closed": [
+            dict(row) for row in post_submit_closed_without_lifecycle_closed
+        ],
         "goal": dict(goal or {}),
         "monitor": dict(monitor or {}),
         "unadvanced_fresh_signals": [dict(row) for row in unadvanced_fresh_signals],
@@ -525,6 +570,10 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         issues.append("tp1_filled_without_runner_sl")
     if snapshot.get("runner_protected_without_runner_sl"):
         issues.append("runner_protected_without_runner_sl")
+    if snapshot.get("lifecycle_closed_without_post_submit_closed"):
+        issues.append("lifecycle_closed_without_post_submit_closed")
+    if snapshot.get("post_submit_closed_without_lifecycle_closed"):
+        issues.append("post_submit_closed_without_lifecycle_closed")
 
     goal = snapshot.get("goal") or {}
     blockers = goal.get("blockers") or []
@@ -570,6 +619,12 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
         "runner_protected_without_runner_sl_count": len(
             snapshot.get("runner_protected_without_runner_sl") or []
+        ),
+        "lifecycle_closed_without_post_submit_closed_count": len(
+            snapshot.get("lifecycle_closed_without_post_submit_closed") or []
+        ),
+        "post_submit_closed_without_lifecycle_closed_count": len(
+            snapshot.get("post_submit_closed_without_lifecycle_closed") or []
         ),
         "authority_boundary": {
             "readonly_check": True,

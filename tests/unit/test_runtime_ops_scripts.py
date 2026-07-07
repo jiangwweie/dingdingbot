@@ -303,6 +303,49 @@ def test_tokyo_ops_l2_l7_summary_flags_runner_protected_without_runner_sl():
     assert summary["runner_protected_without_runner_sl_count"] == 1
 
 
+def test_tokyo_ops_l2_l7_summary_flags_lifecycle_closure_projection_mismatch():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {"status": "running", "blockers": []},
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+            "lifecycle_closed_without_post_submit_closed": [
+                {"lifecycle_run_id": "lifecycle-1", "ticket_id": "ticket-1"}
+            ],
+            "post_submit_closed_without_lifecycle_closed": [
+                {
+                    "post_submit_closure_id": "closure-1",
+                    "ticket_id": "ticket-2",
+                    "lifecycle_status": "runner_protected",
+                }
+            ],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "lifecycle_closed_without_post_submit_closed" in summary["issues"]
+    assert "post_submit_closed_without_lifecycle_closed" in summary["issues"]
+    assert summary["lifecycle_closed_without_post_submit_closed_count"] == 1
+    assert summary["post_submit_closed_without_lifecycle_closed_count"] == 1
+
+
 def test_runtime_monitor_cli_stdout_is_json_only(monkeypatch, capsys):
     async def fake_build_artifact(args):
         print("noisy exchange close log")
