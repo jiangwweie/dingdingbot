@@ -38,8 +38,9 @@ review plan.
 | **Exit protection materializer** | `TicketBoundExitProtectionMaterializer` materializes PG lifecycle/protection rows after filled entry proof | It records already-submitted exchange refs; it does not call exchange |
 | **Exit plan** | `RuntimePositionExitPlanService` is non-executing review evidence | It cannot materialize protection orders |
 | **OrderLifecycleService** | Existing callbacks can react to entry/exit fills | Callback capability is not the ticket-bound mainline owner |
-| **ExchangeGateway** | Existing gateway can place and cancel orders | No ticket-bound cancel/replace materializer owns TP1 fill -> SL quantity adjustment |
-| **Impact test** | 22 active scopes reach mock submitted -> exit protection set -> post-submit closure | Test proves entry-fill + SL/TP1 protection set materialization, not runner SL adjustment |
+| **Runner protection adjuster** | `TicketBoundRunnerProtectionAdjuster` materializes PG proof after TP1 fill and a replacement runner SL ref | It records an official-path result; it does not call exchange or cancel/replace itself |
+| **ExchangeGateway** | Existing gateway can place and cancel orders | The runner proof layer must not become a second exchange mutation path |
+| **Impact test** | 22 active scopes reach mock submitted -> exit protection set -> post-submit closure | Test proves entry-fill + SL/TP1 protection set materialization; focused tests prove runner SL proof materialization |
 
 ### Known P0 / P1 Gaps
 
@@ -49,7 +50,7 @@ review plan.
 | **P0** | No **entry fill confirmed** gate before exit protection materialization | Closed by materializer requiring full filled entry status, qty, and average price |
 | **P0** | **TP1** is missing from the protected submit / protection closure truth | Closed by TP1 submit request requirement and closure protection-set requirement |
 | **P0** | `protection_state=submitted` only requires SL | Closed; it now requires PG protection set completeness |
-| **P1** | TP1 fill -> SL quantity adjustment has no ticket-bound owner | Remaining runner can be over-protected or wrongly sized |
+| **P1** | TP1 fill -> SL quantity adjustment has no ticket-bound owner | Closed by PG runner protection proof materializer requiring TP1 fill and replacement runner SL exchange ref |
 | **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Fixes remain local and regress at integration boundaries |
 | **P1** | Action-time TTL is not tested against the full post-submit chain | Fast opportunities may expire before lifecycle proof completes |
 
@@ -64,7 +65,7 @@ review plan.
 | **Protected Submit Attempt** | Submit entry through the official gateway path and record the attempt | Pretend a position is protected before fill/protection proof |
 | **Exit Protection Materializer** | After entry fill, create reduce-only SL and TP1, persist protection set | Expand position, mutate sizing/profile, bypass Operation Layer |
 | **Protection Reconciler** | Compare PG protection set with exchange open orders and local OrderLifecycle | Create new entry orders |
-| **Runner Manager** | React to TP1 fill and update remaining SL via official cancel/replace | Add exposure or invent strategy-side exits |
+| **Runner Protection Adjuster** | React to TP1 fill by recording the official-path replacement runner SL proof in PG | Call exchange directly, add exposure, or invent strategy-side exits |
 | **Post-Submit Closure** | Summarize protection/reconciliation/settlement/review state | Call exchange or mutate order lifecycle |
 | **Owner Read Model** | Explain what happened in plain language | Infer trading permission from raw internals |
 
@@ -245,8 +246,9 @@ The implemented materializer is intentionally **PG-only**:
 - it does not call FinalGate, Operation Layer, OrderLifecycle, exchange,
   live profile, sizing, withdrawal, or transfer paths.
 
-The remaining non-closed lifecycle work is **TP1 fill -> runner SL
-cancel/replace -> final exit -> reconciliation -> settlement -> review**.
+This layer now covers **TP1 fill -> runner SL proof -> runner protected**.
+The remaining non-closed lifecycle work is **final exit -> reconciliation ->
+settlement -> review**.
 
 ### `TicketBoundOrderLifecycleService`
 
@@ -301,11 +303,21 @@ Runs after **TP1 fill**.
 Responsibilities:
 
 1. Confirm TP1 fill.
-2. Compute remaining position qty from local/exchange/position projection.
-3. Cancel old full-size SL through official gateway.
-4. Submit replacement reduce-only SL for remaining runner qty.
-5. Record cancel/replace lifecycle events.
-6. Mark `runner_protected` only after reconciliation.
+2. Load the existing PG protection set and SL/TP1 rows.
+3. If TP1 is filled but **RUNNER_SL** ref is missing, mark
+   `sl_adjust_pending` with `runner_sl_exchange_order_id_required`.
+4. Require an already-created replacement **RUNNER_SL** exchange order ref
+   from the official ticket-bound path.
+5. Record the original SL as replaced and TP1 as filled.
+6. Record runner SL proof and lifecycle events in PG.
+7. Mark `runner_protected` only after the runner SL proof exists.
+
+Forbidden:
+
+- call exchange cancel/replace directly;
+- call FinalGate or Operation Layer;
+- change live profile, sizing, leverage, credentials, withdrawal, or transfer;
+- treat a filled TP1 as protected without a **RUNNER_SL** proof.
 
 ## Failure Matrix
 
@@ -329,7 +341,10 @@ Responsibilities:
 | `test_exit_protection_blocks_before_entry_fill` | No SL/TP1 materialization before entry fill |
 | `test_exit_protection_materializes_sl_and_tp1_after_entry_fill` | Filled entry creates reduce-only SL and TP1 rows |
 | `test_position_not_protected_without_tp1` | SL-only cannot become `position_protected` |
-| `test_tp1_fill_adjusts_runner_sl_via_cancel_replace` | TP1 fill cancels/replaces SL for remaining qty |
+| `test_runner_adjuster_waits_before_tp1_fill` | Runner SL proof cannot materialize before TP1 fill and must not mark lifecycle blocked |
+| `test_runner_adjuster_recovers_from_sl_adjust_pending` | Missing runner SL ref is recoverable after the official ref appears |
+| `test_runner_adjuster_materializes_runner_sl_after_tp1_fill` | TP1 fill plus official runner SL ref marks `runner_protected` |
+| `test_tokyo_ops_l2_l7_summary_flags_tp1_fill_without_runner_sl` | Server health flags TP1 filled without runner SL proof |
 | `test_protection_submit_failure_blocks_new_entries` | Entry fill + failed protection creates hard stop |
 | `test_orphan_exchange_protection_requires_identity_proof` | Exchange orphan protection cannot silently become current truth |
 
@@ -369,10 +384,10 @@ chain_position: action_time_boundary
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scope
 stage: post_submit_order_lifecycle
-first_blocker: ticket_bound_exit_protection_set_missing
-evidence: current protected submit request creates ENTRY + SL only; post-submit closure treats SL-only as submitted protection
-next_action: implement PG ticket-bound exit protection set and materializer after entry fill confirmation
-stop_condition: all active scopes can pass mock entry fill -> SL + TP1 materialized -> position_protected without file authority or exchange bypass
+first_blocker: final_exit_reconciliation_settlement_review_missing
+evidence: PG exit protection set materializer covers ENTRY fill -> SL + TP1 protection; PG runner adjuster covers TP1 fill -> RUNNER_SL proof
+next_action: implement PG lifecycle closure from final exit detection through reconciliation, settlement, and review
+stop_condition: one ticket can pass mock submit -> entry fill -> SL/TP1 protection -> TP1 fill -> runner protected -> final exit -> reconciliation matched -> budget settled -> review recorded without file authority or exchange bypass
 owner_action_required: no
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound gateway path
 ```

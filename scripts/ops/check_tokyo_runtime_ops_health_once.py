@@ -366,8 +366,53 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
                        first_blocker, updated_at_ms
                 FROM brc_ticket_bound_exit_protection_sets
                 WHERE protection_complete = false
-                   OR status NOT IN ('submitted', 'reconciled', 'closed')
+                   OR status NOT IN ('submitted', 'reconciled', 'runner_protected', 'closed')
                 ORDER BY updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
+    tp1_filled_without_runner_sl = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT s.exit_protection_set_id, s.ticket_id,
+                       s.protected_submit_attempt_id, s.strategy_group_id,
+                       s.symbol, s.side, s.status AS set_status,
+                       tp1.status AS tp1_status, tp1.updated_at_ms AS tp1_updated_at_ms
+                FROM brc_ticket_bound_exit_protection_sets AS s
+                JOIN brc_ticket_bound_exit_protection_orders AS tp1
+                  ON tp1.exit_protection_set_id = s.exit_protection_set_id
+                 AND tp1.role = 'TP1'
+                 AND tp1.status = 'filled'
+                LEFT JOIN brc_ticket_bound_exit_protection_orders AS runner_sl
+                  ON runner_sl.exit_protection_set_id = s.exit_protection_set_id
+                 AND runner_sl.role = 'RUNNER_SL'
+                 AND runner_sl.status IN ('submitted', 'open', 'filled')
+                WHERE s.status NOT IN ('runner_protected', 'closed')
+                  AND runner_sl.exit_protection_order_id IS NULL
+                ORDER BY tp1.updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
+    runner_protected_without_runner_sl = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT s.exit_protection_set_id, s.ticket_id,
+                       s.protected_submit_attempt_id, s.strategy_group_id,
+                       s.symbol, s.side, s.status AS set_status, s.updated_at_ms
+                FROM brc_ticket_bound_exit_protection_sets AS s
+                LEFT JOIN brc_ticket_bound_exit_protection_orders AS runner_sl
+                  ON runner_sl.exit_protection_set_id = s.exit_protection_set_id
+                 AND runner_sl.role = 'RUNNER_SL'
+                 AND runner_sl.status IN ('submitted', 'open', 'filled')
+                WHERE s.status = 'runner_protected'
+                  AND runner_sl.exit_protection_order_id IS NULL
+                ORDER BY s.updated_at_ms DESC
                 LIMIT 20
                 """
             )
@@ -449,6 +494,12 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             dict(row) for row in submitted_attempts_without_protection
         ],
         "incomplete_protection_sets": [dict(row) for row in incomplete_protection_sets],
+        "tp1_filled_without_runner_sl": [
+            dict(row) for row in tp1_filled_without_runner_sl
+        ],
+        "runner_protected_without_runner_sl": [
+            dict(row) for row in runner_protected_without_runner_sl
+        ],
         "goal": dict(goal or {}),
         "monitor": dict(monitor or {}),
         "unadvanced_fresh_signals": [dict(row) for row in unadvanced_fresh_signals],
@@ -470,6 +521,10 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         issues.append("submitted_attempt_without_exit_protection_set")
     if snapshot.get("incomplete_protection_sets"):
         issues.append("incomplete_ticket_bound_exit_protection_set")
+    if snapshot.get("tp1_filled_without_runner_sl"):
+        issues.append("tp1_filled_without_runner_sl")
+    if snapshot.get("runner_protected_without_runner_sl"):
+        issues.append("runner_protected_without_runner_sl")
 
     goal = snapshot.get("goal") or {}
     blockers = goal.get("blockers") or []
@@ -509,6 +564,12 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
         "incomplete_protection_set_count": len(
             snapshot.get("incomplete_protection_sets") or []
+        ),
+        "tp1_filled_without_runner_sl_count": len(
+            snapshot.get("tp1_filled_without_runner_sl") or []
+        ),
+        "runner_protected_without_runner_sl_count": len(
+            snapshot.get("runner_protected_without_runner_sl") or []
         ),
         "authority_boundary": {
             "readonly_check": True,

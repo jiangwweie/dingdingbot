@@ -223,6 +223,86 @@ def test_tokyo_ops_l2_l7_summary_flags_terminal_status_with_open_objects():
     assert "terminal_goal_status_with_open_l2_l7_objects" in summary["issues"]
 
 
+def test_tokyo_ops_l2_l7_summary_flags_tp1_fill_without_runner_sl():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {"status": "running", "blockers": []},
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+            "tp1_filled_without_runner_sl": [
+                {
+                    "exit_protection_set_id": "set-1",
+                    "ticket_id": "ticket-1",
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "ETHUSDT",
+                    "side": "long",
+                }
+            ],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "tp1_filled_without_runner_sl" in summary["issues"]
+    assert summary["tp1_filled_without_runner_sl_count"] == 1
+
+
+def test_tokyo_ops_l2_l7_summary_flags_runner_protected_without_runner_sl():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {"status": "running", "blockers": []},
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+            "runner_protected_without_runner_sl": [
+                {
+                    "exit_protection_set_id": "set-1",
+                    "ticket_id": "ticket-1",
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "ETHUSDT",
+                    "side": "long",
+                }
+            ],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "runner_protected_without_runner_sl" in summary["issues"]
+    assert summary["runner_protected_without_runner_sl_count"] == 1
+
+
 def test_runtime_monitor_cli_stdout_is_json_only(monkeypatch, capsys):
     async def fake_build_artifact(args):
         print("noisy exchange close log")
