@@ -480,6 +480,20 @@ def _matrix_by_key(packet: dict) -> dict[str, dict]:
     }
 
 
+def test_pg_non_market_blockers_ignores_action_time_preflight_ready() -> None:
+    candidate_pool = {
+        "symbol_readiness_rows": [
+            {"first_blocker": "action_time_preflight_ready"},
+            {"first_blocker": "computed_not_satisfied"},
+            {"first_blocker": "runtime_profile_scope_missing"},
+        ]
+    }
+
+    assert goal_status._pg_non_market_blockers(candidate_pool) == [
+        "candidate_pool_blocker:runtime_profile_scope_missing:1"
+    ]
+
+
 def test_goal_owner_action_required_does_not_escalate_engineering_gaps() -> None:
     assert goal_status._goal_owner_label("runtime_liveness_degraded") == "处理中"
     assert goal_status._goal_owner_label("missing_fact") == "处理中"

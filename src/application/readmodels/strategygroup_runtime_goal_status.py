@@ -212,6 +212,7 @@ def _pg_blocker_counts(candidate_pool: dict[str, Any]) -> dict[str, int]:
 
 def _pg_non_market_blockers(candidate_pool: dict[str, Any]) -> list[str]:
     market_wait_blockers = {
+        "action_time_preflight_ready",
         "computed_not_satisfied",
         "market_wait_validated",
     }
