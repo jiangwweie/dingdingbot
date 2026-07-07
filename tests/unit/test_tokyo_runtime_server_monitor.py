@@ -11,6 +11,12 @@ from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
+from scripts import materialize_ticket_bound_protected_submit_attempt as submit
+from tests.unit.test_action_time_ticket_materialization import NOW_MS
+from tests.unit.test_ticket_bound_protected_submit_attempt import (
+    _create_ready_protected_submit,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "run_tokyo_runtime_server_monitor.py"
@@ -538,6 +544,51 @@ def test_pg_stale_action_time_boundary_without_current_signal_is_quiet(
             assert conn.execute(
                 text("SELECT COUNT(*) FROM brc_server_monitor_notifications")
             ).scalar_one() == 0
+    finally:
+        engine.dispose()
+
+
+def test_pg_completed_disabled_smoke_attempt_is_quiet_not_boundary_blocked(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    engine = _seed_pg_engine()
+    try:
+        with engine.begin() as conn:
+            ids = _create_ready_protected_submit(conn)
+            prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+                conn,
+                ticket_id=ids["ticket_id"],
+                operation_submit_command_id=ids["operation_submit_command_id"],
+                submit_mode="disabled_smoke",
+                now_ms=NOW_MS + 4000,
+            )
+            args = _pg_args(module, tmp_path)
+            args.now_ms = NOW_MS + 120_000
+            calls: list[dict] = []
+
+            artifact = module.build_server_monitor_artifact(
+                args,
+                pg_conn=conn,
+                notifier=lambda *args: calls.append({"args": args}) or {"sent": True},
+            )
+
+            assert artifact["source_mode"] == "db_backed"
+            assert artifact["decision"]["decision"] == "quiet"
+            assert artifact["decision"]["status"] == (
+                "protected_submit_rehearsal_completed_quiet"
+            )
+            assert artifact["decision"]["blocker_class"] == "none"
+            assert artifact["decision"]["checkpoint"] == "ticket_bound_protected_submit"
+            assert artifact["notification"]["attempted"] is False
+            assert artifact["notification"]["skipped_reason"] == (
+                "protected_submit_rehearsal_completed_quiet"
+            )
+            assert calls == []
+            assert prepared["status"] == "disabled_smoke_passed"
+            assert artifact["source_refs"]["control_state_watermark"]["table_counts"][
+                "ticket_bound_protected_submit_attempts"
+            ] == 1
     finally:
         engine.dispose()
 

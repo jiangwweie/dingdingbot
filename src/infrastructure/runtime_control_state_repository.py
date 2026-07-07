@@ -124,6 +124,7 @@ class PgBackedRuntimeControlStateRepository:
             key: self._read_rows(table_name, monitor_bounded=True, logical_key=key)
             for key, table_name in CONTROL_STATE_TABLES.items()
         }
+        self._retain_monitor_protected_submit_lineage(rows)
         self._validate_projection_ownership(rows)
         self._validate_active_event_semantics(rows)
         self._validate_candidate_scope_event_bindings(rows)
@@ -177,6 +178,125 @@ class PgBackedRuntimeControlStateRepository:
             {key: _json_safe(value) for key, value in row.items()}
             for row in self.conn.execute(statement).mappings()
         ]
+
+    def _read_rows_where_in(
+        self,
+        table_name: str,
+        column_name: str,
+        values: set[str],
+    ) -> list[dict[str, Any]]:
+        if not values:
+            return []
+        metadata = sa.MetaData()
+        table = sa.Table(table_name, metadata, autoload_with=self.conn)
+        if column_name not in table.c:
+            return []
+        statement = sa.select(table).where(table.c[column_name].in_(sorted(values)))
+        return [
+            {key: _json_safe(value) for key, value in row.items()}
+            for row in self.conn.execute(statement).mappings()
+        ]
+
+    def _retain_monitor_protected_submit_lineage(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        attempts = rows.get("ticket_bound_protected_submit_attempts") or []
+        if not attempts:
+            return
+
+        ticket_ids = _texts(row.get("ticket_id") for row in attempts)
+        lane_ids = _texts(row.get("action_time_lane_input_id") for row in attempts)
+        safety_ids = _texts(row.get("runtime_safety_snapshot_id") for row in attempts)
+        handoff_ids = _texts(row.get("operation_layer_handoff_id") for row in attempts)
+
+        self._merge_rows(
+            rows,
+            "runtime_safety_state",
+            "runtime_safety_snapshot_id",
+            self._read_rows_where_in(
+                CONTROL_STATE_TABLES["runtime_safety_state"],
+                "runtime_safety_snapshot_id",
+                safety_ids,
+            ),
+        )
+        self._merge_rows(
+            rows,
+            "operation_layer_handoffs",
+            "operation_layer_handoff_id",
+            self._read_rows_where_in(
+                CONTROL_STATE_TABLES["operation_layer_handoffs"],
+                "operation_layer_handoff_id",
+                handoff_ids,
+            ),
+        )
+
+        ticket_rows = self._read_rows_where_in(
+            CONTROL_STATE_TABLES["action_time_tickets"],
+            "ticket_id",
+            ticket_ids,
+        )
+        self._merge_rows(rows, "action_time_tickets", "ticket_id", ticket_rows)
+        lane_ids.update(_texts(row.get("action_time_lane_input_id") for row in ticket_rows))
+
+        lane_rows = self._read_rows_where_in(
+            CONTROL_STATE_TABLES["action_time_lane_inputs"],
+            "action_time_lane_input_id",
+            lane_ids,
+        )
+        self._merge_rows(
+            rows,
+            "action_time_lane_inputs",
+            "action_time_lane_input_id",
+            lane_rows,
+        )
+
+        promotion_ids = _texts(
+            row.get("promotion_candidate_id") for row in [*ticket_rows, *lane_rows]
+        )
+        signal_ids = _texts(row.get("signal_event_id") for row in [*ticket_rows, *lane_rows])
+        promotion_rows = self._read_rows_where_in(
+            CONTROL_STATE_TABLES["promotion_candidates"],
+            "promotion_candidate_id",
+            promotion_ids,
+        )
+        self._merge_rows(
+            rows,
+            "promotion_candidates",
+            "promotion_candidate_id",
+            promotion_rows,
+        )
+        signal_ids.update(_texts(row.get("signal_event_id") for row in promotion_rows))
+        self._merge_rows(
+            rows,
+            "live_signal_events",
+            "signal_event_id",
+            self._read_rows_where_in(
+                CONTROL_STATE_TABLES["live_signal_events"],
+                "signal_event_id",
+                signal_ids,
+            ),
+        )
+
+    @staticmethod
+    def _merge_rows(
+        rows: dict[str, list[dict[str, Any]]],
+        logical_key: str,
+        id_key: str,
+        additions: list[dict[str, Any]],
+    ) -> None:
+        if not additions:
+            return
+        existing = {
+            str(row.get(id_key) or "")
+            for row in rows.get(logical_key, [])
+            if str(row.get(id_key) or "")
+        }
+        for row in additions:
+            row_id = str(row.get(id_key) or "")
+            if row_id and row_id not in existing:
+                rows.setdefault(logical_key, []).append(row)
+                existing.add(row_id)
 
     def _validate_projection_ownership(self, rows: dict[str, list[dict[str, Any]]]) -> None:
         ownership_rows = rows["current_projection_ownership"]
@@ -735,6 +855,10 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _texts(values: Any) -> set[str]:
+    return {str(value) for value in values if str(value or "")}
+
+
 def _monitor_bounded_statement(
     statement: sa.sql.Select[Any],
     table: sa.Table,
@@ -820,6 +944,8 @@ def _monitor_bounded_statement(
             statement = statement.order_by(columns.generated_at_ms.desc()).limit(50)
         return statement
     if logical_key == "server_monitor_runs" and "created_at_ms" in columns:
+        return statement.order_by(columns.created_at_ms.desc()).limit(200)
+    if logical_key == "ticket_bound_protected_submit_attempts" and "created_at_ms" in columns:
         return statement.order_by(columns.created_at_ms.desc()).limit(200)
     return statement
 

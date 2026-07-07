@@ -356,11 +356,25 @@ def _decision_from_pg_sources(
                 "checkpoint": "server_runtime_monitor",
                 "owner_message": "等待机会，无需操作",
             }
+    elif status == "protected_submit_rehearsal_completed":
+        return {
+            "decision": "quiet",
+            "notify": False,
+            "status": "protected_submit_rehearsal_completed_quiet",
+            "reasons": [],
+            "automation_id": "tokyo-runtime-server-monitor",
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "blocker_class": "none",
+            "checkpoint": "ticket_bound_protected_submit",
+            "owner_message": "已完成非执行提交演练，无需操作",
+        }
     elif status in {
         "fresh_signal_detected",
         "fresh_signal_processing",
         "action_time_finalgate_ready",
         "operation_layer_ready",
+        "real_order_submitted",
     }:
         reasons.append(status)
         if blockers:
@@ -540,7 +554,9 @@ def _apply_pg_notification(
         "source": "pg:brc_server_monitor_notifications",
     }
     if not decision.get("notify"):
-        notification["skipped_reason"] = "healthy_waiting_quiet"
+        notification["skipped_reason"] = str(
+            decision.get("status") or "healthy_waiting_quiet"
+        )
     elif previous_sent and not previous_failed:
         notification["duplicate_suppressed"] = True
         notification["skipped_reason"] = "dedupe_suppressed"

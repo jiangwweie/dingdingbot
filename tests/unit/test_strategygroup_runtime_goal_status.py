@@ -11,8 +11,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
 from scripts import build_strategygroup_runtime_goal_status as goal_status
+from scripts import materialize_ticket_bound_protected_submit_attempt as submit
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
+)
+from tests.unit.test_action_time_ticket_materialization import NOW_MS
+from tests.unit.test_ticket_bound_protected_submit_attempt import (
+    _create_ready_protected_submit,
 )
 
 
@@ -626,6 +631,151 @@ def test_pg_goal_status_advances_open_lane_after_action_time_ticket_exists(
     assert matrix["action_time_ticket"]["status"] == "pass"
     assert matrix["action_time_ticket"]["blocks_real_submit"] is False
     assert packet["ready_for_real_order_action"] is False
+
+
+def test_pg_goal_status_reports_completed_disabled_smoke_after_lane_expires(
+    pg_control_connection,
+) -> None:
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 120_000,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_monitor_control_state(),
+    )
+
+    assert packet["status"] == "protected_submit_rehearsal_completed"
+    assert packet["non_authority_checkpoint"] == "continue_watcher_observation"
+    assert packet["ready_for_real_order_action"] is False
+    assert packet["owner_action_required"] is False
+    assert packet["evidence"]["pg_latest_successful_protected_submit_attempt_id"] == (
+        prepared["protected_submit_attempt_id"]
+    )
+    assert packet["evidence"]["pg_latest_successful_protected_submit_status"] == (
+        "disabled_smoke_passed"
+    )
+    assert not any(
+        "action_time_boundary_not_reproduced" in blocker
+        for blocker in packet["blockers"]
+    )
+    assert packet["action_time_ticket_explanation"][
+        "latest_protected_submit_attempt_id"
+    ] == prepared["protected_submit_attempt_id"]
+    assert packet["action_time_ticket_explanation"][
+        "latest_protected_submit_status"
+    ] == "disabled_smoke_passed"
+    matrix = _matrix_by_key(packet)
+    assert matrix["action_time_ticket"]["status"] == "pass"
+    assert matrix["ticket_bound_protected_submit"]["status"] == "pass"
+    assert matrix["ticket_bound_protected_submit"]["blocks_real_submit"] is False
+
+
+def test_pg_goal_status_newer_lane_supersedes_previous_disabled_smoke_attempt(
+    pg_control_connection,
+) -> None:
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+    attempt_created_at_ms = int(
+        pg_control_connection.execute(
+            text(
+                """
+                SELECT created_at_ms
+                FROM brc_ticket_bound_protected_submit_attempts
+                WHERE protected_submit_attempt_id = :attempt_id
+                """
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        ).scalar_one()
+    )
+    newer_lane_created_at_ms = attempt_created_at_ms + 1000
+    new_lane_id = "lane:SOR-001:ETHUSDT:long:newer-ticket-pending"
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET closed_at_ms = :closed_at_ms,
+                expires_at_ms = :closed_at_ms,
+                lane_scope = 'rehearsal'
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"lane_id": ids["lane_id"], "closed_at_ms": NOW_MS + 4500},
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_action_time_lane_inputs (
+              action_time_lane_input_id, promotion_candidate_id,
+              strategy_group_id, symbol, side, runtime_profile_id,
+              lane_scope, status, signal_event_id, public_fact_snapshot_id,
+              action_time_fact_snapshot_id, runtime_scope_binding_id,
+              candidate_authorization_ref, runtime_safety_snapshot_id,
+              first_blocker_class, created_at_ms, expires_at_ms, closed_at_ms,
+              authority_boundary
+            )
+            SELECT
+              :new_lane_id, promotion_candidate_id,
+              strategy_group_id, symbol, side, runtime_profile_id,
+              'real_submit_candidate', 'ticket_pending', signal_event_id,
+              public_fact_snapshot_id, action_time_fact_snapshot_id,
+              runtime_scope_binding_id, candidate_authorization_ref, NULL,
+              first_blocker_class, :created_at_ms, :expires_at_ms, NULL,
+              authority_boundary
+            FROM brc_action_time_lane_inputs
+            WHERE action_time_lane_input_id = :old_lane_id
+            """
+        ),
+        {
+            "new_lane_id": new_lane_id,
+            "old_lane_id": ids["lane_id"],
+            "created_at_ms": newer_lane_created_at_ms,
+            "expires_at_ms": newer_lane_created_at_ms + 600_000,
+        },
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 120_000,
+    )
+
+    control_state = repository.read_monitor_control_state()
+    assert any(
+        row["action_time_lane_input_id"] == new_lane_id
+        for row in control_state["action_time_lane_inputs"]
+    )
+    assert (
+        goal_status._pg_latest_active_signal_chain_created_at(control_state)
+        == newer_lane_created_at_ms
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=control_state,
+    )
+
+    assert packet["status"] == "fresh_signal_processing"
+    assert packet["non_authority_checkpoint"] == "materialize_action_time_ticket"
+    assert packet["ready_for_real_order_action"] is False
+    assert packet["evidence"]["active_action_time_lane_input_ids"] == [new_lane_id]
+    assert packet["evidence"]["pg_latest_successful_protected_submit_attempt_id"] == ""
+    assert packet["action_time_ticket_explanation"][
+        "latest_protected_submit_attempt_id"
+    ] == ""
 
 
 def test_pg_goal_status_ignores_expired_open_lane(pg_control_connection) -> None:

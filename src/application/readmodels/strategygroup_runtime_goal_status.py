@@ -158,6 +158,50 @@ def _pg_latest_safety_by_lane(
     return snapshots
 
 
+SUCCESSFUL_PROTECTED_SUBMIT_STATUSES = {
+    "disabled_smoke_passed",
+    "submitted",
+}
+
+
+def _pg_latest_successful_protected_submit_attempt(
+    control_state: dict[str, Any],
+) -> dict[str, Any]:
+    attempts = [
+        row
+        for row in _pg_rows(control_state.get("ticket_bound_protected_submit_attempts"))
+        if str(row.get("status") or "") in SUCCESSFUL_PROTECTED_SUBMIT_STATUSES
+    ]
+    if not attempts:
+        return {}
+    return sorted(
+        attempts,
+        key=lambda row: int(row.get("created_at_ms") or 0),
+        reverse=True,
+    )[0]
+
+
+def _created_at_ms(row: dict[str, Any]) -> int:
+    return int(row.get("created_at_ms") or 0)
+
+
+def _pg_latest_active_signal_chain_created_at(control_state: dict[str, Any]) -> int:
+    rows: list[dict[str, Any]] = []
+    rows.extend(_pg_rows(control_state.get("live_signal_events")))
+    rows.extend(_pg_rows(control_state.get("promotion_candidates")))
+    rows.extend(_pg_rows(control_state.get("action_time_lane_inputs")))
+    rows.extend(_pg_rows(control_state.get("action_time_tickets")))
+    active_rows = [
+        row
+        for row in rows
+        if row.get("invalidated_at_ms") in {None, ""}
+        and row.get("closed_at_ms") in {None, ""}
+    ]
+    if not active_rows:
+        return 0
+    return max(_created_at_ms(row) for row in active_rows)
+
+
 def _pg_blocker_counts(candidate_pool: dict[str, Any]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in _pg_rows(candidate_pool.get("symbol_readiness_rows")):
@@ -280,6 +324,7 @@ def _pg_status_tuple(
     open_lanes: list[dict[str, Any]],
     tickets_by_lane: dict[str, dict[str, Any]],
     safety_by_lane: dict[str, dict[str, Any]],
+    latest_successful_protected_submit_attempt: dict[str, Any],
     non_market_blockers: list[str],
     coverage_complete: bool,
     selected_scope_ready: bool,
@@ -296,6 +341,21 @@ def _pg_status_tuple(
             "active_position_resolution",
             "resolve_active_position_or_open_order_conflict",
             "PG runtime safety state 显示存在持仓或挂单冲突",
+        )
+    if latest_successful_protected_submit_attempt:
+        attempt_status = str(
+            latest_successful_protected_submit_attempt.get("status") or ""
+        )
+        if attempt_status == "submitted":
+            return (
+                "real_order_submitted",
+                "monitor_post_submit_lifecycle",
+                "PG ticket-bound protected submit 已通过官方路径提交，等待保护、对账和复盘闭合",
+            )
+        return (
+            "protected_submit_rehearsal_completed",
+            "continue_watcher_observation",
+            "PG ticket-bound protected submit 已完成 disabled-smoke 非执行提交演练，未产生真实订单",
         )
     if real_order_ready:
         return (
@@ -369,6 +429,8 @@ def _plain_language_stage(status: str) -> str:
         "fresh_signal_processing": "正在把信号推进成正式票据",
         "action_time_finalgate_ready": "正式票据已生成，等待最终安全检查",
         "operation_layer_ready": "已到官方执行入口前",
+        "protected_submit_rehearsal_completed": "已完成非执行提交演练",
+        "real_order_submitted": "真实提交已进入后处理",
         "runtime_scope_mismatch": "运行范围不一致",
         "runtime_liveness_degraded": "服务器观察链路不完整",
         "active_position_resolution": "需要先处理持仓或挂单冲突",
@@ -387,6 +449,7 @@ def _plain_language_next_system_action(checkpoint: str) -> str:
         "run_official_action_time_finalgate": "系统使用 ticket 进入官方 FinalGate 检查",
         "refresh_action_time_ticket_or_runtime_safety_state": "系统刷新 ticket 或运行安全状态",
         "call_official_operation_layer_submit_after_action_time_recheck": "系统在最终复核后进入官方执行入口",
+        "monitor_post_submit_lifecycle": "系统继续跟踪保护、对账、结算和复盘",
         "repair_pg_selected_scope_projection": "系统修复 PG 运行范围投影",
         "repair_pg_runtime_coverage_projection": "系统修复服务器观察覆盖投影",
         "repair_pg_pretrade_readiness_projection": "系统修复 pre-trade readiness 投影",
@@ -399,6 +462,8 @@ OWNER_PROCESSING_STATUSES = {
     "fresh_signal_processing",
     "action_time_finalgate_ready",
     "operation_layer_ready",
+    "protected_submit_rehearsal_completed",
+    "real_order_submitted",
     "runtime_liveness_degraded",
     "active_position_resolution",
     "missing_fact",
@@ -431,13 +496,15 @@ def _pg_readiness_matrix(
     open_lanes: list[dict[str, Any]],
     tickets_by_lane: dict[str, dict[str, Any]],
     safety_by_lane: dict[str, dict[str, Any]],
+    latest_successful_protected_submit_attempt: dict[str, Any],
     real_order_ready: bool,
 ) -> list[dict[str, Any]]:
     has_open_lane = bool(open_lanes)
+    protected_submit_completed = bool(latest_successful_protected_submit_attempt)
     active_ticket_present = any(
         str(lane.get("action_time_lane_input_id") or "") in tickets_by_lane
         for lane in open_lanes
-    )
+    ) or protected_submit_completed
     submit_allowed = any(row.get("submit_allowed") is True for row in safety_by_lane.values())
     active_position_conflict = _pg_active_position_conflict(safety_by_lane)
     return [
@@ -461,11 +528,15 @@ def _pg_readiness_matrix(
         ),
         _readiness_item(
             "fresh_signal",
-            "pass" if checks["fresh_signal_present"] else "waiting_for_market",
-            "none" if checks["fresh_signal_present"] else "waiting_for_market",
-            not checks["fresh_signal_present"],
-            "PG 当前存在 fresh signal / action-time lane"
-            if checks["fresh_signal_present"]
+            "pass"
+            if checks["fresh_signal_present"] or protected_submit_completed
+            else "waiting_for_market",
+            "none"
+            if checks["fresh_signal_present"] or protected_submit_completed
+            else "waiting_for_market",
+            not checks["fresh_signal_present"] and not protected_submit_completed,
+            "PG 当前存在 fresh signal / action-time lane 或已完成 ticket-bound submit rehearsal"
+            if checks["fresh_signal_present"] or protected_submit_completed
             else "PG 当前没有 fresh signal",
             "pg_live_signal_events/pg_action_time_lane_inputs",
         ),
@@ -481,11 +552,13 @@ def _pg_readiness_matrix(
         ),
         _readiness_item(
             "candidate_authorization",
-            "pass" if has_open_lane else "waiting_for_market",
-            "none" if has_open_lane else "waiting_for_market",
-            not has_open_lane,
-            "PG action-time lane 已形成" if has_open_lane else "当前没有 promotion 后的 action-time lane",
-            "pg_action_time_lane_inputs",
+            "pass" if has_open_lane or protected_submit_completed else "waiting_for_market",
+            "none" if has_open_lane or protected_submit_completed else "waiting_for_market",
+            not has_open_lane and not protected_submit_completed,
+            "PG action-time lane 已形成或 protected submit attempt 已绑定候选交易"
+            if has_open_lane or protected_submit_completed
+            else "当前没有 promotion 后的 action-time lane",
+            "pg_action_time_lane_inputs/pg_ticket_bound_protected_submit_attempts",
         ),
         _readiness_item(
             "action_time_ticket",
@@ -497,19 +570,47 @@ def _pg_readiness_matrix(
         ),
         _readiness_item(
             "action_time_finalgate",
-            "pass" if status == "operation_layer_ready" else "waiting_for_chain",
-            "none" if status == "operation_layer_ready" else "missing_fact",
-            status != "operation_layer_ready",
-            "FinalGate / runtime safety 已通过" if status == "operation_layer_ready" else "等待 FinalGate / runtime safety 闭合",
+            "pass"
+            if status
+            in {
+                "operation_layer_ready",
+                "protected_submit_rehearsal_completed",
+                "real_order_submitted",
+            }
+            else "waiting_for_chain",
+            "none"
+            if status
+            in {
+                "operation_layer_ready",
+                "protected_submit_rehearsal_completed",
+                "real_order_submitted",
+            }
+            else "missing_fact",
+            status
+            not in {
+                "operation_layer_ready",
+                "protected_submit_rehearsal_completed",
+                "real_order_submitted",
+            },
+            "FinalGate / runtime safety 已通过"
+            if status
+            in {
+                "operation_layer_ready",
+                "protected_submit_rehearsal_completed",
+                "real_order_submitted",
+            }
+            else "等待 FinalGate / runtime safety 闭合",
             "pg_action_time_tickets/pg_runtime_safety_state_snapshots",
         ),
         _readiness_item(
             "official_operation_layer",
-            "pass" if real_order_ready else "waiting_for_chain",
-            "none" if real_order_ready else "missing_fact",
-            not real_order_ready,
-            "PG real submit boundary 已闭合" if real_order_ready else "官方 Operation Layer 仍未开放",
-            "pg_runtime_safety_state_snapshots",
+            "pass" if real_order_ready or protected_submit_completed else "waiting_for_chain",
+            "none" if real_order_ready or protected_submit_completed else "missing_fact",
+            not real_order_ready and not protected_submit_completed,
+            "PG real submit boundary 或 disabled-smoke Operation Layer rehearsal 已闭合"
+            if real_order_ready or protected_submit_completed
+            else "官方 Operation Layer 仍未开放",
+            "pg_runtime_safety_state_snapshots/pg_ticket_bound_protected_submit_attempts",
         ),
         _readiness_item(
             "runtime_order_capable_profile",
@@ -533,23 +634,41 @@ def _pg_readiness_matrix(
         ),
         _readiness_item(
             "protection",
-            "pass" if (not checks["fresh_signal_present"] or submit_allowed) else "waiting_for_chain",
-            "none" if (not checks["fresh_signal_present"] or submit_allowed) else "missing_fact",
-            checks["fresh_signal_present"] and not submit_allowed,
+            "pass"
+            if (not checks["fresh_signal_present"] or submit_allowed or protected_submit_completed)
+            else "waiting_for_chain",
+            "none"
+            if (not checks["fresh_signal_present"] or submit_allowed or protected_submit_completed)
+            else "missing_fact",
+            checks["fresh_signal_present"] and not submit_allowed and not protected_submit_completed,
             "当前无 fresh lane 或 runtime safety 已证明 protection"
-            if (not checks["fresh_signal_present"] or submit_allowed)
+            if (not checks["fresh_signal_present"] or submit_allowed or protected_submit_completed)
             else "等待 runtime safety protection 闭合",
             "pg_runtime_safety_state_snapshots",
         ),
         _readiness_item(
             "budget",
-            "pass" if (not checks["fresh_signal_present"] or submit_allowed) else "waiting_for_chain",
-            "none" if (not checks["fresh_signal_present"] or submit_allowed) else "missing_fact",
-            checks["fresh_signal_present"] and not submit_allowed,
+            "pass"
+            if (not checks["fresh_signal_present"] or submit_allowed or protected_submit_completed)
+            else "waiting_for_chain",
+            "none"
+            if (not checks["fresh_signal_present"] or submit_allowed or protected_submit_completed)
+            else "missing_fact",
+            checks["fresh_signal_present"] and not submit_allowed and not protected_submit_completed,
             "当前无 fresh lane 或 runtime safety 已证明预算边界"
-            if (not checks["fresh_signal_present"] or submit_allowed)
+            if (not checks["fresh_signal_present"] or submit_allowed or protected_submit_completed)
             else "等待 runtime safety 预算边界闭合",
             "pg_runtime_safety_state_snapshots",
+        ),
+        _readiness_item(
+            "ticket_bound_protected_submit",
+            "pass" if protected_submit_completed else "waiting_for_chain",
+            "none" if protected_submit_completed else "missing_fact",
+            checks["fresh_signal_present"] and not protected_submit_completed,
+            "ticket-bound protected submit 已完成"
+            if protected_submit_completed
+            else "等待 ticket-bound protected submit attempt",
+            "pg_ticket_bound_protected_submit_attempts",
         ),
         _readiness_item(
             "duplicate_submit",
@@ -588,6 +707,18 @@ def _build_pg_goal_status_artifact(
     open_lanes = _pg_open_action_time_lanes(control_state)
     tickets_by_lane = _pg_active_tickets_by_lane(control_state)
     safety_by_lane = _pg_latest_safety_by_lane(control_state)
+    latest_successful_protected_submit_attempt = (
+        _pg_latest_successful_protected_submit_attempt(control_state)
+    )
+    latest_active_signal_chain_created_at = _pg_latest_active_signal_chain_created_at(
+        control_state
+    )
+    if (
+        latest_successful_protected_submit_attempt
+        and _created_at_ms(latest_successful_protected_submit_attempt)
+        < latest_active_signal_chain_created_at
+    ):
+        latest_successful_protected_submit_attempt = {}
     non_market_blockers = _pg_non_market_blockers(candidate_pool)
     coverage_complete = _pg_runtime_coverage_complete(candidate_pool)
     selected_scope_ready = _pg_selected_scope_ready(
@@ -603,11 +734,17 @@ def _build_pg_goal_status_artifact(
         tickets_by_lane=tickets_by_lane,
         safety_by_lane=safety_by_lane,
     )
+    real_order_action_available = (
+        real_order_ready and not latest_successful_protected_submit_attempt
+    )
     status, next_checkpoint, owner_detail = _pg_status_tuple(
         candidate_pool=candidate_pool,
         open_lanes=open_lanes,
         tickets_by_lane=tickets_by_lane,
         safety_by_lane=safety_by_lane,
+        latest_successful_protected_submit_attempt=(
+            latest_successful_protected_submit_attempt
+        ),
         non_market_blockers=non_market_blockers,
         coverage_complete=coverage_complete,
         selected_scope_ready=selected_scope_ready,
@@ -631,12 +768,19 @@ def _build_pg_goal_status_artifact(
         "fresh_signal_present": fresh_signal_present,
         "selected_strategygroup_scope_ready": selected_scope_ready,
         "watcher_liveness_healthy": coverage_complete,
-        "ready_for_real_order_action": real_order_ready,
+        "ready_for_real_order_action": real_order_action_available,
         "pg_current_projection": True,
         "legacy_report_dir_read": False,
         "legacy_candidate_pool_json_read": False,
     }
-    blockers = list(non_market_blockers)
+    if latest_successful_protected_submit_attempt:
+        blockers = [
+            blocker
+            for blocker in non_market_blockers
+            if "action_time_boundary_not_reproduced" not in blocker
+        ]
+    else:
+        blockers = list(non_market_blockers)
     if open_lanes:
         missing_ticket_lane_ids = [
             lane_id for lane_id in active_lane_ids if lane_id not in tickets_by_lane
@@ -655,6 +799,9 @@ def _build_pg_goal_status_artifact(
         open_lanes=open_lanes,
         tickets_by_lane=tickets_by_lane,
         safety_by_lane=safety_by_lane,
+        latest_successful_protected_submit_attempt=(
+            latest_successful_protected_submit_attempt
+        ),
         real_order_ready=real_order_ready,
     )
     matrix_submit_blockers = _matrix_submit_blocking_items(readiness_matrix)
@@ -677,7 +824,7 @@ def _build_pg_goal_status_artifact(
         "scope": "strategygroup_runtime_goal_status",
         "generated_at_ms": int(time.time() * 1000),
         "status": status,
-        "ready_for_real_order_action": real_order_ready,
+        "ready_for_real_order_action": real_order_action_available,
         "non_authority_checkpoint": next_checkpoint,
         "plain_language_stage": _plain_language_stage(status),
         "plain_language_reason": owner_detail,
@@ -706,6 +853,15 @@ def _build_pg_goal_status_artifact(
             "pg_action_time_lane_input_count": len(open_lanes),
             "pg_active_ticket_count": len(tickets_by_lane),
             "pg_runtime_safety_snapshot_count": len(safety_by_lane),
+            "pg_latest_successful_protected_submit_attempt_id": str(
+                latest_successful_protected_submit_attempt.get(
+                    "protected_submit_attempt_id"
+                )
+                or ""
+            ),
+            "pg_latest_successful_protected_submit_status": str(
+                latest_successful_protected_submit_attempt.get("status") or ""
+            ),
             "pg_runtime_coverage_complete": coverage_complete,
             "pg_blocker_counts": _pg_blocker_counts(candidate_pool),
             "watcher_liveness_blockers": []
@@ -720,7 +876,7 @@ def _build_pg_goal_status_artifact(
                 "allowed": False,
                 "project_progress_allowed": False,
                 "continue_observation_allowed": not submit_blocker_review_required,
-                "real_submit_allowed": real_order_ready,
+                "real_submit_allowed": real_order_action_available,
                 "non_authority_checkpoint": next_checkpoint,
                 "blocker_keys": submit_blocker_review_keys,
             },
@@ -731,6 +887,9 @@ def _build_pg_goal_status_artifact(
         },
         "action_time_ticket_explanation": {
             "plain_language_stage": (
+                "已完成 ticket-bound protected submit"
+                if latest_successful_protected_submit_attempt
+                else
                 "已有正式候选交易票据"
                 if tickets_by_lane
                 else "尚未生成正式候选交易票据"
@@ -738,6 +897,9 @@ def _build_pg_goal_status_artifact(
                 else "当前没有 action-time lane"
             ),
             "plain_language_reason": (
+                "这笔候选交易已经生成 ticket、通过 runtime safety，并完成 protected submit 的非执行演练"
+                if latest_successful_protected_submit_attempt
+                else
                 "Action-Time Ticket 已锁定策略、币种、方向、事件时间、预算和保护引用"
                 if tickets_by_lane
                 else "当前 lane 还缺 Action-Time Ticket，FinalGate 没有可审对象"
@@ -748,10 +910,19 @@ def _build_pg_goal_status_artifact(
             "active_ticket_ids": [
                 str(row.get("ticket_id") or "") for row in tickets_by_lane.values()
             ],
+            "latest_protected_submit_attempt_id": str(
+                latest_successful_protected_submit_attempt.get(
+                    "protected_submit_attempt_id"
+                )
+                or ""
+            ),
+            "latest_protected_submit_status": str(
+                latest_successful_protected_submit_attempt.get("status") or ""
+            ),
             "decides_trade_authority": False,
         },
         "real_order_boundary": {
-            "ready_for_real_order_action": real_order_ready,
+            "ready_for_real_order_action": real_order_action_available,
             "requires_selected_strategygroup": True,
             "selected_strategygroup_scope_ready": selected_scope_ready,
             "requires_allocated_subaccount_profile_boundary": True,
@@ -765,7 +936,7 @@ def _build_pg_goal_status_artifact(
             "submit_blocker_review_allowed": False,
             "project_progress_allowed": False,
             "continue_observation_allowed": not submit_blocker_review_required,
-            "real_submit_allowed": real_order_ready,
+            "real_submit_allowed": real_order_action_available,
             "submit_blocker_keys": submit_blocker_keys,
         },
         "real_order_readiness_matrix": readiness_matrix,

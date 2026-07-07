@@ -17,6 +17,11 @@ from src.infrastructure.runtime_control_state_repository import (
     RuntimeControlStateRepositoryError,
 )
 from scripts import runtime_active_observation_monitor
+from scripts import materialize_ticket_bound_protected_submit_attempt as submit
+from tests.unit.test_action_time_ticket_materialization import NOW_MS
+from tests.unit.test_ticket_bound_protected_submit_attempt import (
+    _create_ready_protected_submit,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -340,6 +345,38 @@ def test_repository_monitor_read_profile_bounds_high_growth_tables(pg_control_co
     assert monitor_state["table_counts"]["promotion_candidates"] == 0
     assert monitor_state["table_counts"]["action_time_lane_inputs"] == 0
     assert monitor_state["table_counts"]["action_time_tickets"] == 0
+
+
+def test_repository_monitor_read_profile_retains_protected_submit_lineage(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+    pg_control_connection.commit()
+
+    monitor_state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 120_000,
+    ).read_monitor_control_state()
+
+    assert monitor_state["read_profile"] == "monitor_bounded_current"
+    assert monitor_state["table_counts"]["ticket_bound_protected_submit_attempts"] == 1
+    assert monitor_state["table_counts"]["runtime_safety_state"] == 1
+    assert monitor_state["table_counts"]["operation_layer_handoffs"] == 1
+    assert monitor_state["table_counts"]["action_time_tickets"] == 1
+    assert monitor_state["table_counts"]["action_time_lane_inputs"] == 1
+    assert monitor_state["table_counts"]["promotion_candidates"] == 1
+    assert monitor_state["table_counts"]["live_signal_events"] == 1
+    assert monitor_state["ticket_bound_protected_submit_attempts"][0][
+        "protected_submit_attempt_id"
+    ] == prepared["protected_submit_attempt_id"]
+    assert monitor_state["action_time_tickets"][0]["ticket_id"] == ids["ticket_id"]
 
 
 def test_pg_backed_runtime_control_state_repository_rejects_non_db_modes(
