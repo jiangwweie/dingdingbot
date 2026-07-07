@@ -21,7 +21,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from runtime_pg_fact_snapshots import write_account_safe_fact_snapshots  # noqa: E402
+from src.application.action_time.runtime_pg_fact_snapshots import (  # noqa: E402
+    write_account_safe_fact_snapshots,
+)
 from collect_strategy_group_live_facts_readonly import (  # noqa: E402
     DEFAULT_BASE_URL,
     READ_ONLY_ENDPOINTS,

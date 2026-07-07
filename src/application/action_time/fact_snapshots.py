@@ -30,7 +30,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
+from src.infrastructure.sync_pg_dsn import (  # noqa: E402
+    is_sync_postgres_dsn,
+    normalize_sync_postgres_dsn,
+)
 
 
 ACTION_TIME_FACT_SURFACE = "action_time"

@@ -27,7 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.application.readmodels.strategy_live_candidate_pool import (
     build_strategy_live_candidate_pool_from_control_state,
 )
-from scripts.runtime_pg_fact_snapshots import (
+from src.application.action_time.runtime_pg_fact_snapshots import (
     read_latest_account_safe_facts_artifact,
     read_pretrade_public_facts_artifact,
 )
