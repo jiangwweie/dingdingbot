@@ -255,6 +255,59 @@ def test_unsupported_side_is_not_created_by_seed(pg_control_connection):
     assert unsupported_rows == []
 
 
+@pytest.mark.parametrize(
+    ("strategy_group_id", "symbol", "unsupported_side"),
+    [
+        ("BRF2-001", "BTCUSDT", "long"),
+        ("CPM-RO-001", "ETHUSDT", "short"),
+        ("MI-001", "AVAXUSDT", "short"),
+        ("MPG-001", "OPUSDT", "short"),
+    ],
+)
+def test_raw_pg_input_for_unsupported_side_is_rejected_before_signal_creation(
+    pg_control_connection,
+    strategy_group_id: str,
+    symbol: str,
+    unsupported_side: str,
+):
+    _insert_satisfied_public_fact_for_unsupported_side(
+        pg_control_connection,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=unsupported_side,
+    )
+
+    signal_payload = _write_monitor_signal_summary_to_pg(
+        pg_control_connection,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=unsupported_side,
+    )
+
+    assert signal_payload["status"] == "pg_live_signal_events_blocked"
+    assert signal_payload["written_count"] == 0
+    assert signal_payload["signal_event_ids"] == []
+    assert [
+        item["blocker"] for item in signal_payload["skipped"]
+    ] == ["candidate_scope_event_binding_missing"]
+    assert _count(pg_control_connection, "brc_live_signal_events") == 0
+
+    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert fact_payload["status"] == "no_current_fresh_live_signal"
+
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+    assert lane_payload["status"] == "no_fresh_signal"
+    assert _count(pg_control_connection, "brc_promotion_candidates") == 0
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+    assert _count(pg_control_connection, "brc_action_time_tickets") == 0
+
+
 def _count(conn, table_name: str) -> int:
     assert table_name in {
         "brc_action_time_lane_inputs",
@@ -446,6 +499,68 @@ def _write_monitor_signal_summary_to_pg(
         allow_non_postgres_for_test=True,
         now_ms=NOW_MS,
         conn=conn,
+    )
+
+
+def _insert_satisfied_public_fact_for_unsupported_side(
+    conn,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> None:
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_runtime_fact_snapshots (
+              fact_snapshot_id,
+              strategy_group_id,
+              symbol,
+              side,
+              runtime_profile_id,
+              fact_surface,
+              source_kind,
+              source_ref,
+              computed,
+              satisfied,
+              freshness_state,
+              failed_facts,
+              fact_values,
+              blocker_class,
+              observed_at_ms,
+              valid_until_ms,
+              created_at_ms
+            ) VALUES (
+              :fact_snapshot_id,
+              :strategy_group_id,
+              :symbol,
+              :side,
+              'rtp:tiny-live:default',
+              'pretrade_public',
+              'live_market',
+              'constructed_unsupported_side_guard',
+              true,
+              true,
+              'fresh',
+              '[]',
+              '{"opening_range_high_reference": 2000, "opening_range_low_reference": 1800}',
+              'none',
+              :now_ms,
+              :valid_until_ms,
+              :now_ms
+            )
+            """
+        ),
+        {
+            "fact_snapshot_id": (
+                f"fact:unsupported:{strategy_group_id}:{symbol}:{side}"
+            ),
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+            "now_ms": NOW_MS,
+            "valid_until_ms": NOW_MS + 60_000,
+        },
     )
 
 
