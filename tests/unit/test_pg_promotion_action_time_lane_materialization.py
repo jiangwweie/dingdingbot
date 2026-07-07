@@ -275,6 +275,103 @@ def test_materializes_action_time_facts_projection_lane_and_ticket_from_raw_sign
     assert submit_payload["order_created"] is False
 
 
+@pytest.mark.parametrize(
+    ("strategy_group_id", "symbol", "side"),
+    [
+        ("CPM-RO-001", "ETHUSDT", "long"),
+        ("MPG-001", "OPUSDT", "long"),
+        ("MI-001", "AVAXUSDT", "long"),
+        ("SOR-001", "ETHUSDT", "short"),
+        ("BRF2-001", "BTCUSDT", "short"),
+    ],
+)
+def test_all_active_strategygroups_reach_ticket_bound_disabled_smoke_from_raw_signal(
+    pg_control_connection,
+    monkeypatch,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+):
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        strategy_group_id,
+        symbol,
+        side,
+        insert_action_time_fact=False,
+    )
+    pg_control_connection.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
+
+    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert fact_payload["status"] == "action_time_fact_snapshots_materialized"
+    assert fact_payload["materialized_count"] == 1
+    assert fact_payload["blocked_count"] == 0
+
+    monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
+    projection_payload = publisher.publish_runtime_control_current_projections(
+        pg_control_connection,
+    )
+    assert projection_payload["status"] == "current_projections_published"
+
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+    assert lane_payload["status"] == "promotion_action_time_lane_created"
+    assert lane_payload["strategy_group_id"] == strategy_group_id
+    assert lane_payload["symbol"] == symbol
+    assert lane_payload["side"] == side
+
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 2,
+    )
+    assert ticket_payload["status"] == "action_time_ticket_created"
+    assert ticket_payload["strategy_group_id"] == strategy_group_id
+    assert ticket_payload["symbol"] == symbol
+    assert ticket_payload["side"] == side
+
+    finalgate_payload = finalgate.materialize_action_time_finalgate_preflight(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        now_ms=NOW_MS + 3,
+    )
+    assert finalgate_payload["status"] == "finalgate_ready"
+
+    handoff_payload = handoff.materialize_action_time_operation_layer_handoff(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        finalgate_pass_id=str(finalgate_payload["finalgate_pass_id"]),
+        now_ms=NOW_MS + 4,
+    )
+    assert handoff_payload["status"] == "operation_layer_handoff_ready"
+
+    safety_payload = safety_state.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
+        now_ms=NOW_MS + 5,
+    )
+    assert safety_payload["status"] == "runtime_safety_state_ready"
+    assert safety_payload["submit_allowed"] is True
+
+    submit_payload = protected_submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        operation_submit_command_id=str(handoff_payload["operation_submit_command_id"]),
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 6,
+    )
+    assert submit_payload["status"] == "disabled_smoke_passed"
+    assert submit_payload["submit_allowed"] is True
+    assert submit_payload["official_operation_layer_submit_called"] is True
+    assert submit_payload["exchange_write_called"] is False
+    assert submit_payload["order_created"] is False
+    assert submit_payload["order_lifecycle_called"] is False
+
+
 def test_action_time_fact_materializer_blocks_missing_protection_reference(
     pg_control_connection,
 ):

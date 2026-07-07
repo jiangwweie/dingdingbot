@@ -719,7 +719,15 @@ def _candidate_blockers(
         blockers.append("readiness_signal_not_fresh")
     if readiness.get("risk_state") != "acceptable":
         blockers.append(f"risk_state_not_acceptable:{readiness.get('risk_state') or 'missing'}")
-    if readiness.get("scope_state") != "live_submit_allowed":
+    readiness_scope_state = str(readiness.get("scope_state") or "")
+    candidate_scope_state = str(candidate.get("scope_state") or "")
+    if (
+        readiness_scope_state != "live_submit_allowed"
+        and not (
+            candidate_scope_state == "live_submit_allowed"
+            and readiness_scope_state == "conditional_action_time_rehearsal_allowed"
+        )
+    ):
         blockers.append(f"readiness_scope_not_live_submit:{readiness.get('scope_state') or 'missing'}")
     if readiness.get("promotion_state") != "action_time_lane":
         blockers.append(f"readiness_promotion_not_action_time_lane:{readiness.get('promotion_state') or 'missing'}")

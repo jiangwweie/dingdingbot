@@ -357,7 +357,7 @@ def _derive_fact_value(
     source_values: dict[str, Any],
     reason_codes: list[str],
 ) -> Any:
-    if fact.get("disable_on_match") is True:
+    if _truthy(fact.get("disable_on_match")):
         return False
     if key == protection_ref_type:
         return _reference_value_for(key, source_values)
@@ -439,13 +439,42 @@ def _failed_facts(required_facts: list[dict[str, Any]], fact_values: dict[str, A
         if not key or key not in fact_values:
             continue
         satisfied = _fact_condition_satisfied(fact, fact_values)
-        if fact.get("disable_on_match") is True:
-            if satisfied:
+        if _truthy(fact.get("disable_on_match")):
+            if _disable_fact_active(key, fact_values):
                 failed.append(key)
             continue
         if not satisfied:
             failed.append(key)
     return failed
+
+
+def _disable_fact_active(fact_key: str, fact_values: dict[str, Any]) -> bool:
+    observed = _normalized_scalar(fact_values.get(fact_key))
+    if observed is True:
+        return True
+    if observed in (False, None):
+        return False
+    if isinstance(observed, str) and observed.strip().lower() in {
+        "",
+        "unknown",
+        "missing",
+        "null",
+        "false",
+    }:
+        return False
+    if isinstance(observed, (int, float, Decimal)):
+        return _decimal(observed) > Decimal("0")
+    return False
+
+
+def _truthy(value: Any) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, int) and value == 1:
+        return True
+    if isinstance(value, str) and value.strip().lower() in {"true", "1", "yes"}:
+        return True
+    return False
 
 
 def _fact_condition_satisfied(row: dict[str, Any], fact_values: dict[str, Any]) -> bool:
