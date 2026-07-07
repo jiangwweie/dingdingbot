@@ -10,6 +10,7 @@ from src.domain.strategy_runtime import (
     StrategyRuntimeInstance,
     StrategyRuntimeInstanceStatus,
 )
+from src.application.readmodels import runtime_strategy_signal_input
 from scripts import build_runtime_strategy_signal_input_artifact
 
 
@@ -90,7 +91,7 @@ def _runtime() -> StrategyRuntimeInstance:
 def test_build_btpc_signal_input_uses_runtime_boundary_and_placeholder_account():
     one_hour = _btpc_1h()
     latest_close_time_ms = one_hour[-1].close_time_ms
-    signal_input = build_runtime_strategy_signal_input_artifact._build_signal_input(
+    signal_input = runtime_strategy_signal_input.build_signal_input(
         runtime=_runtime(),
         one_hour=one_hour,
         four_hour=_down_context_4h(),
@@ -132,19 +133,19 @@ def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypa
         return _runtime()
 
     monkeypatch.setattr(
-        build_runtime_strategy_signal_input_artifact,
+        runtime_strategy_signal_input,
         "_load_runtime",
         fake_load_runtime,
     )
     monkeypatch.setattr(
-        build_runtime_strategy_signal_input_artifact,
-        "_market_source",
+        runtime_strategy_signal_input,
+        "market_source",
         lambda args: FakeSource(),
     )
     output_path = tmp_path / "signal-input.json"
 
     payload = __import__("asyncio").run(
-        build_runtime_strategy_signal_input_artifact._build_artifact(
+        runtime_strategy_signal_input.build_artifact(
             argparse.Namespace(
                 runtime_instance_id="runtime-btpc-1",
                 env_file=None,
@@ -173,14 +174,14 @@ def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypa
     assert not output_path.exists()
 
 
-def test_signal_input_artifact_cli_stdout_is_json_only(monkeypatch, capsys):
+def test_signal_input_artifact_readmodel_cli_stdout_is_json_only(monkeypatch, capsys):
     async def fake_build_artifact(args):
         print("noisy market source")
         return {"status": "ready_for_shadow_candidate_prepare", "ok": True}
 
     monkeypatch.setattr(
-        build_runtime_strategy_signal_input_artifact,
-        "_build_artifact",
+        runtime_strategy_signal_input,
+        "build_artifact",
         fake_build_artifact,
     )
     monkeypatch.setattr(
@@ -193,7 +194,7 @@ def test_signal_input_artifact_cli_stdout_is_json_only(monkeypatch, capsys):
         ],
     )
 
-    assert build_runtime_strategy_signal_input_artifact.main() == 0
+    assert runtime_strategy_signal_input.main() == 0
 
     captured = capsys.readouterr()
     assert captured.out.startswith("{")
@@ -203,3 +204,11 @@ def test_signal_input_artifact_cli_stdout_is_json_only(monkeypatch, capsys):
 
 def test_signal_input_artifact_module_has_no_packet_builder() -> None:
     assert not hasattr(build_runtime_strategy_signal_input_artifact, "_build_packet")
+    assert not hasattr(build_runtime_strategy_signal_input_artifact, "_build_artifact")
+    assert not hasattr(build_runtime_strategy_signal_input_artifact, "_build_signal_input")
+
+
+def test_signal_input_artifact_script_is_thin_cli_wrapper(monkeypatch) -> None:
+    monkeypatch.setattr(runtime_strategy_signal_input, "main", lambda: 7)
+
+    assert build_runtime_strategy_signal_input_artifact.main() == 7

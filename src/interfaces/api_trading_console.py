@@ -5074,7 +5074,7 @@ async def _runtime_next_attempt_observation_cycle_payload(
     runtime_instance_id: str,
     request: RuntimeNextAttemptObservationCycleRequest,
 ) -> dict[str, Any]:
-    from scripts import build_runtime_strategy_signal_input_artifact as signal_builder
+    from src.application.readmodels import runtime_strategy_signal_input as signal_builder
     from src.application.runtime_strategy_signal_evaluation_service import (
         RuntimeStrategySignalEvaluationService,
         RuntimeStrategySignalEvaluationStatus,
@@ -5130,7 +5130,7 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "safety_invariants": _runtime_next_attempt_observation_safety(),
         }
 
-    source = signal_builder._market_source(
+    source = signal_builder.market_source(
         SimpleNamespace(
             source=request.source,
             timeout_seconds=request.timeout_seconds,
@@ -5147,7 +5147,7 @@ async def _runtime_next_attempt_observation_cycle_payload(
         limit=request.four_hour_limit,
     )
     now_ms = int(time.time() * 1000)
-    signal_input = signal_builder._build_signal_input(
+    signal_input = signal_builder.build_signal_input(
         runtime=runtime,
         one_hour=one_hour,
         four_hour=four_hour,

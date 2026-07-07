@@ -354,6 +354,16 @@ def test_pg_current_projectors_use_application_readmodel_builders_not_script_bui
     assert "from src.application.readmodels.strategygroup_runtime_goal_status" in monitor
 
 
+def test_api_observation_cycle_uses_application_signal_input_helper_not_script() -> None:
+    source = (REPO_ROOT / "src/interfaces/api_trading_console.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "build_runtime_strategy_signal_input_artifact" not in source
+    assert "from scripts import" not in source
+    assert "from src.application.readmodels import runtime_strategy_signal_input" in source
+
+
 def _parser_args(source: str) -> set[str]:
     tree = ast.parse(source)
     args: set[str] = set()
