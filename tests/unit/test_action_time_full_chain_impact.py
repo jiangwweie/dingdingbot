@@ -18,6 +18,7 @@ from scripts import materialize_pg_promotion_action_time_lane as lane_materializ
 from scripts import materialize_ticket_bound_protected_submit_attempt as protected_submit
 from scripts import materialize_ticket_bound_runtime_safety_state as safety_state
 from scripts import publish_runtime_control_current_projections as publisher
+from scripts import runtime_active_observation_monitor
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
     _insert_ready_fresh_signal,
@@ -134,7 +135,16 @@ def test_each_active_candidate_scope_reaches_disabled_smoke_from_raw_pg_input(
         symbol,
         side,
         insert_action_time_fact=False,
+        insert_signal=False,
     )
+    signal_payload = _write_monitor_signal_summary_to_pg(
+        pg_control_connection,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+    )
+    assert signal_payload["status"] == "pg_live_signal_events_written"
+    assert signal_payload["written_count"] == 1
     pg_control_connection.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
 
     fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
@@ -256,6 +266,41 @@ def _count(conn, table_name: str) -> int:
         "brc_ticket_bound_protected_submit_attempts",
     }
     return conn.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one()
+
+
+def _write_monitor_signal_summary_to_pg(
+    conn,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> dict:
+    return runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": f"runtime:{strategy_group_id}:{symbol}:{side}",
+                    "strategy_family_id": strategy_group_id,
+                    "strategy_family_version_id": f"sgv:{strategy_group_id}:v1",
+                    "symbol": symbol,
+                    "side": side,
+                    "status": "waiting_for_signal",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "side": side,
+                        "confidence": "0.90",
+                        "reason_codes": ["constructed_monitor_signal_summary"],
+                        "trigger_candle_close_time_ms": NOW_MS - 60_000,
+                        "time_authority": "trigger_candle_close_time_ms",
+                    },
+                }
+            ],
+        },
+        database_url="unused://pg-control-test",
+        allow_non_postgres_for_test=True,
+        now_ms=NOW_MS,
+        conn=conn,
+    )
 
 
 def _finalgate_ready_event_count(conn) -> int:
