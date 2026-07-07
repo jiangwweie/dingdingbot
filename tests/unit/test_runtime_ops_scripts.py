@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from argparse import Namespace
 
@@ -47,6 +48,54 @@ def test_tokyo_ops_health_pg_counts_do_not_expose_dsn_in_command_plan():
     assert "PG_DATABASE_URL" not in chain_command_text
     assert "DATABASE_URL" not in command_text
     assert "DATABASE_URL" not in chain_command_text
+
+
+def test_tokyo_ops_health_low_priority_du_timeout_is_not_global_warn(monkeypatch):
+    def fake_which(_name):
+        return "/usr/bin/fake"
+
+    def fake_run(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=124 if "du" in command else 0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(check_tokyo_runtime_ops_health_once.shutil, "which", fake_which)
+    monkeypatch.setattr(
+        check_tokyo_runtime_ops_health_once.subprocess, "run", fake_run
+    )
+    monkeypatch.setattr(
+        check_tokyo_runtime_ops_health_once,
+        "_pg_runtime_row_counts_result",
+        lambda *, execute_local: {
+            "name": "pg_runtime_row_counts",
+            "command": ["internal_sqlalchemy_readonly_row_counts"],
+            "status": "ok",
+        },
+    )
+    monkeypatch.setattr(
+        check_tokyo_runtime_ops_health_once,
+        "_pg_l2_l7_chain_health_result",
+        lambda *, execute_local: {
+            "name": "pg_l2_l7_chain_health",
+            "command": ["internal_sqlalchemy_readonly_l2_l7_chain_health"],
+            "status": "ok",
+        },
+    )
+
+    payload = check_tokyo_runtime_ops_health_once.build_payload(execute_local=True)
+
+    timeout_rows = [
+        row for row in payload["results"] if row["status"] == "skipped_timeout"
+    ]
+    assert payload["status"] == "ok"
+    assert {row["name"] for row in timeout_rows} == {
+        "reports_du",
+        "releases_du",
+        "backups_du",
+    }
 
 
 def test_tokyo_ops_l2_l7_summary_accepts_completed_rehearsal_without_open_objects():

@@ -96,11 +96,14 @@ def build_payload(*, execute_local: bool) -> dict[str, Any]:
             check=False,
             timeout=8,
         )
+        status = "ok" if completed.returncode == 0 else "warn"
+        if completed.returncode == 124 and command[: len(LOW_PRIORITY_PREFIX)] == LOW_PRIORITY_PREFIX:
+            status = "skipped_timeout"
         results.append(
             {
                 "name": name,
                 "command": list(command),
-                "status": "ok" if completed.returncode == 0 else "warn",
+                "status": status,
                 "returncode": completed.returncode,
                 "stdout_tail": completed.stdout[-2000:],
                 "stderr_tail": completed.stderr[-2000:],
