@@ -1272,6 +1272,10 @@ def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
         "timestamp_ms": output.get("timestamp_ms"),
         "time_authority": output.get("time_authority"),
         "trigger_candle_close_time_ms": output.get("trigger_candle_close_time_ms"),
+        "signal_snapshot": signal_snapshot,
+        "evidence_payload": output.get("evidence_payload")
+        if isinstance(output.get("evidence_payload"), dict)
+        else {},
     }
 
 

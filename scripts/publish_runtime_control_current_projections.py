@@ -352,7 +352,7 @@ def _readiness_row(
         "detector_state": str(row.get("detector_state") or "unknown"),
         "watcher_state": str(row.get("watcher_state") or "unknown"),
         "public_facts_state": str(public_facts.get("state") or "unknown"),
-        "signal_lifecycle_status": str(row.get("signal_state") or "unknown"),
+        "signal_lifecycle_status": _signal_lifecycle_status(row),
         "signal_freshness_state": (
             "fresh" if str(row.get("signal_state") or "") == "fresh" else "absent"
         ),
@@ -375,7 +375,7 @@ def _readiness_state(row: dict[str, Any]) -> str:
     signal_state = str(row.get("signal_state") or "")
     first_blocker = str(row.get("first_blocker") or "")
     if promotion_state == "action_time_lane":
-        return "action_time_lane_ready"
+        return "action_time_lane"
     if promotion_state == "promotion_candidate":
         return "promotion_candidate"
     if first_blocker == "action_time_preflight_ready":
@@ -385,6 +385,15 @@ def _readiness_state(row: dict[str, Any]) -> str:
     if first_blocker in {"computed_not_satisfied", "market_wait_validated"}:
         return "market_wait"
     return "blocked"
+
+
+def _signal_lifecycle_status(row: dict[str, Any]) -> str:
+    signal_state = str(row.get("signal_state") or "")
+    if signal_state == "fresh":
+        return "facts_validated"
+    if signal_state in {"stale", "expired", "rejected", "superseded", "absent"}:
+        return signal_state
+    return signal_state or "unknown"
 
 
 def _first_blocker_detail(row: dict[str, Any]) -> str:

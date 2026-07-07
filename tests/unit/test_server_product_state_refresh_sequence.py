@@ -65,6 +65,7 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
 
     assert report["status"] == "server_product_state_refresh_sequence_ready"
     control_builder_names = {
+        "scripts/materialize_action_time_fact_snapshots.py",
         "scripts/materialize_pg_promotion_action_time_lane.py",
         "scripts/publish_runtime_control_current_projections.py",
         "scripts/materialize_action_time_ticket.py",
@@ -193,6 +194,7 @@ def test_server_product_state_refresh_sequence_action_time_mode_skips_closure(
     command_names = [command[1] for command in calls]
     assert report["status"] == "server_product_state_refresh_sequence_ready"
     assert "scripts/build_runtime_account_safe_facts.py" in command_names
+    assert "scripts/materialize_action_time_fact_snapshots.py" in command_names
     assert "scripts/materialize_action_time_ticket.py" in command_names
     assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
     assert "scripts/materialize_ticket_bound_runtime_safety_state.py" in command_names
@@ -270,6 +272,12 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
     assert report["mode"] == "action_time_if_needed"
     assert report["effective_mode"] == "action_time"
     assert "scripts/materialize_action_time_ticket.py" in command_names
+    assert command_names.index("scripts/materialize_action_time_fact_snapshots.py") < command_names.index(
+        "scripts/publish_runtime_control_current_projections.py"
+    )
+    assert command_names.index("scripts/publish_runtime_control_current_projections.py") < command_names.index(
+        "scripts/materialize_pg_promotion_action_time_lane.py"
+    )
     assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
 
@@ -432,9 +440,52 @@ def test_server_product_state_refresh_sequence_fails_closed_on_projection_publis
     assert report["summary"]["failed_required_step_count"] == 1
     assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["summary"]["blocked_by_required_step"] == (
-        "publish_runtime_control_current_projections"
+        "publish_runtime_control_current_projections_before_lane"
     )
     assert calls[-1][1] == "scripts/publish_runtime_control_current_projections.py"
+
+
+def test_server_product_state_refresh_sequence_fails_closed_on_action_time_fact_failure(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        if any(
+            item.endswith("materialize_action_time_fact_snapshots.py")
+            for item in command
+        ):
+            return module.CommandResult(
+                returncode=1,
+                stdout="",
+                stderr="action-time fact materialization failed",
+            )
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time",
+        runner=runner,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_failed"
+    assert report["summary"]["failed_required_step_count"] == 1
+    assert report["summary"]["current_projection_publish_attempted"] is False
+    assert report["summary"]["blocked_by_required_step"] == (
+        "materialize_action_time_fact_snapshots"
+    )
+    assert calls[-1][1] == "scripts/materialize_action_time_fact_snapshots.py"
+    skipped_names = [
+        step["name"]
+        for step in report["step_results"]
+        if step["status"] == "skipped_after_required_failure"
+    ]
+    assert "publish_runtime_control_current_projections_before_lane" in skipped_names
+    assert "materialize_pg_promotion_action_time_lane" in skipped_names
+    assert "materialize_action_time_ticket" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_omits_legacy_candidate_pool_materializer(
@@ -500,7 +551,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_pg_lane_materiali
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["current_projection_publish_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_pg_promotion_action_time_lane"
     )
@@ -511,7 +562,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_pg_lane_materiali
         if step["status"] == "skipped_after_required_failure"
     ]
     assert "materialize_action_time_ticket" in skipped_names
-    assert "publish_runtime_control_current_projections" in skipped_names
+    assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_ticket_failure(
@@ -539,7 +590,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_ticket_failure(
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["current_projection_publish_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_action_time_ticket"
     )
@@ -549,7 +600,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_ticket_failure(
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "publish_runtime_control_current_projections" in skipped_names
+    assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_finalgate_failure(
@@ -580,7 +631,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_finalgate_failure
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["current_projection_publish_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_action_time_finalgate_preflight"
     )
@@ -590,7 +641,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_finalgate_failure
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "publish_runtime_control_current_projections" in skipped_names
+    assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_operation_handoff_failure(
@@ -621,7 +672,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_operation_handoff
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["current_projection_publish_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_action_time_operation_layer_handoff"
     )
@@ -631,7 +682,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_operation_handoff
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "publish_runtime_control_current_projections" in skipped_names
+    assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_failure(
@@ -662,7 +713,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_fa
 
     assert report["status"] == "server_product_state_refresh_sequence_failed"
     assert report["summary"]["failed_required_step_count"] == 1
-    assert report["summary"]["current_projection_publish_attempted"] is False
+    assert report["summary"]["current_projection_publish_attempted"] is True
     assert report["summary"]["blocked_by_required_step"] == (
         "materialize_ticket_bound_runtime_safety_state"
     )
@@ -672,7 +723,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_fa
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "publish_runtime_control_current_projections" in skipped_names
+    assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_post_submit_closure_failure(
@@ -714,7 +765,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_post_submit_closu
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "publish_runtime_control_current_projections" in skipped_names
+    assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_requires_account_safe_facts(
@@ -753,7 +804,8 @@ def test_server_product_state_refresh_sequence_requires_account_safe_facts(
         if step["status"] == "skipped_after_required_failure"
     ]
     assert "materialize_action_time_ticket" in skipped_names
-    assert "publish_runtime_control_current_projections" in skipped_names
+    assert "publish_runtime_control_current_projections_before_lane" in skipped_names
+    assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
 def _action_time_trigger_engine():

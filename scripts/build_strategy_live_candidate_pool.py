@@ -284,7 +284,22 @@ def _candidate_pool_inputs_from_control_state(
     }
     strategy_groups = _strategy_group_rows(control_state)
     readiness_by_lane = _current_pretrade_readiness_by_lane(control_state)
-    fact_by_lane = _current_fact_snapshot_by_lane(control_state)
+    fact_by_lane = _current_fact_snapshot_by_lane(
+        control_state,
+        fact_surface="pretrade_public",
+    )
+    action_time_fact_by_lane = _current_fact_snapshot_by_lane(
+        control_state,
+        fact_surface="action_time",
+    )
+    account_safe_fact = _current_global_fact_snapshot(
+        control_state,
+        fact_surface="account_safe",
+    )
+    account_safe_fact_by_lane = _current_fact_snapshot_by_lane(
+        control_state,
+        fact_surface="account_safe",
+    )
     signal_by_lane = _fresh_signal_by_lane(control_state)
     action_lane_by_lane = _open_action_time_lane_by_lane(control_state)
     coverage_by_lane = _current_watcher_coverage_by_lane(control_state)
@@ -333,10 +348,15 @@ def _candidate_pool_inputs_from_control_state(
         ),
         "action_time_boundary": _pg_action_time_boundary_projection(
             generated_at_utc=generated_at_utc,
+            now_ms=_control_state_now_ms(control_state),
             candidate_rows=candidate_rows,
             binding_by_candidate=binding_by_candidate,
             event_by_id=event_by_id,
             readiness_by_lane=readiness_by_lane,
+            public_fact_by_lane=fact_by_lane,
+            action_time_fact_by_lane=action_time_fact_by_lane,
+            account_safe_fact=account_safe_fact,
+            account_safe_fact_by_lane=account_safe_fact_by_lane,
             signal_by_lane=signal_by_lane,
             action_lane_by_lane=action_lane_by_lane,
         ),
@@ -466,11 +486,13 @@ def _current_pretrade_readiness_by_lane(
 
 def _current_fact_snapshot_by_lane(
     control_state: dict[str, Any],
+    *,
+    fact_surface: str,
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
     now_ms = _control_state_now_ms(control_state)
     snapshots: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("runtime_fact_snapshots")):
-        if row.get("fact_surface") != "pretrade_public":
+        if row.get("fact_surface") != fact_surface:
             continue
         if not is_current_fact_snapshot(row, now_ms):
             continue
@@ -483,6 +505,26 @@ def _current_fact_snapshot_by_lane(
         ):
             snapshots[key] = row
     return snapshots
+
+
+def _current_global_fact_snapshot(
+    control_state: dict[str, Any],
+    *,
+    fact_surface: str,
+) -> dict[str, Any]:
+    now_ms = _control_state_now_ms(control_state)
+    rows = [
+        row
+        for row in _dict_rows(control_state.get("runtime_fact_snapshots"))
+        if row.get("fact_surface") == fact_surface
+        and row.get("strategy_group_id") is None
+        and row.get("symbol") is None
+        and row.get("side") is None
+        and is_current_fact_snapshot(row, now_ms)
+    ]
+    if not rows:
+        return {}
+    return sorted(rows, key=lambda row: int(row.get("observed_at_ms") or 0))[-1]
 
 
 def _fresh_signal_by_lane(
@@ -696,11 +738,11 @@ def _pg_replay_live_parity_projection(
         signal = signal_by_lane.get(key, {})
         computed = bool(
             readiness.get("public_facts_state") in {"satisfied", "computed_not_satisfied"}
-            or facts.get("computed") is True
+            or _is_true(facts.get("computed"))
         )
         satisfied = (
             readiness.get("public_facts_state") == "satisfied"
-            or facts.get("satisfied") is True
+            or _is_true(facts.get("satisfied"))
         )
         failed_facts = [
             str(item)
@@ -745,10 +787,15 @@ def _pg_replay_live_parity_projection(
 def _pg_action_time_boundary_projection(
     *,
     generated_at_utc: str,
+    now_ms: int,
     candidate_rows: list[dict[str, Any]],
     binding_by_candidate: dict[str, dict[str, Any]],
     event_by_id: dict[str, dict[str, Any]],
     readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    public_fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    action_time_fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    account_safe_fact: dict[str, Any],
+    account_safe_fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     action_lane_by_lane: dict[tuple[str, str, str], dict[str, Any]],
 ) -> dict[str, Any]:
@@ -759,13 +806,35 @@ def _pg_action_time_boundary_projection(
         binding = binding_by_candidate.get(candidate_scope_id, {})
         event = event_by_id.get(str(binding.get("event_spec_id") or ""), {})
         readiness = readiness_by_lane.get(key, {})
+        public_fact = public_fact_by_lane.get(key, {})
+        action_time_fact = action_time_fact_by_lane.get(key, {})
+        lane_account_safe_fact = account_safe_fact_by_lane.get(key, {})
         signal = signal_by_lane.get(key, {})
         action_lane = action_lane_by_lane.get(key, {})
         fresh_signal_present = bool(signal)
+        public_facts_ready = (
+            readiness.get("public_facts_state") == "satisfied"
+            or _is_true(public_fact.get("satisfied"))
+        )
+        private_action_time_facts_ready = (
+            bool(action_lane.get("action_time_fact_snapshot_id"))
+            or _fact_snapshot_ready(action_time_fact, now_ms=now_ms)
+        )
+        account_values = _as_dict(
+            (account_safe_fact or lane_account_safe_fact).get("fact_values")
+        )
+        active_position_or_open_order_clear = (
+            _is_true(account_values.get("active_position_or_open_order_clear"))
+        )
+        action_time_available_balance = (
+            _is_true(account_values.get("action_time_available_balance"))
+        )
         path_ready = bool(action_lane) or (
             fresh_signal_present
-            and readiness.get("promotion_state")
-            in {"action_time_lane", "promotion_candidate"}
+            and public_facts_ready
+            and private_action_time_facts_ready
+            and active_position_or_open_order_clear
+            and action_time_available_balance
         )
         first_blocker = str(
             action_lane.get("first_blocker_class")
@@ -787,13 +856,17 @@ def _pg_action_time_boundary_projection(
                 "first_blocker": first_blocker,
                 "next_action": _pg_next_action(first_blocker),
                 "required_facts_readiness": {
-                    "public_facts_ready": readiness.get("public_facts_state")
-                    == "satisfied",
-                    "private_action_time_facts_ready": bool(
+                    "public_facts_ready": public_facts_ready,
+                    "private_action_time_facts_ready": private_action_time_facts_ready,
+                    "action_time_fact_snapshot_id": str(
                         action_lane.get("action_time_fact_snapshot_id")
+                        or action_time_fact.get("fact_snapshot_id")
+                        or ""
                     ),
-                    "active_position_or_open_order_clear": False,
-                    "action_time_available_balance": False,
+                    "active_position_or_open_order_clear": (
+                        active_position_or_open_order_clear
+                    ),
+                    "action_time_available_balance": action_time_available_balance,
                 },
             }
         )
@@ -1117,6 +1190,26 @@ def _ms_to_iso(value: Any) -> str:
     return datetime.fromtimestamp(millis / 1000, tz=timezone.utc).isoformat()
 
 
+def _fact_snapshot_ready(row: dict[str, Any], *, now_ms: int) -> bool:
+    return (
+        bool(row)
+        and _is_true(row.get("computed"))
+        and _is_true(row.get("satisfied"))
+        and row.get("freshness_state") == "fresh"
+        and int(row.get("valid_until_ms") or 0) > now_ms
+    )
+
+
+def _is_true(value: Any) -> bool:
+    if value is True:
+        return True
+    if value in {1, "1"}:
+        return True
+    if isinstance(value, str) and value.strip().lower() == "true":
+        return True
+    return False
+
+
 def build_strategy_live_candidate_pool(
     *,
     daily_table: dict[str, Any],
@@ -1405,30 +1498,40 @@ def _symbol_readiness_rows(
             owner_pretrade_authorization=owner_pretrade_authorization,
         )
         for symbol in symbols:
-            parity_row = _matching_symbol_row(parity_rows, strategy_group_id, symbol)
-            if strategy_group_id == "SOR-001":
-                parity_row = _merge_symbol_fact_row(
-                    parity_row,
-                    sor_facts.get(symbol, {}),
-                )
-            if strategy_group_id == "MI-001":
-                parity_row = _merge_symbol_fact_row(
-                    parity_row,
-                    mi_facts.get(symbol, {}),
-                )
-            if strategy_group_id == "BRF2-001":
-                parity_row = _merge_symbol_fact_row(
-                    parity_row,
-                    brf2_facts.get(symbol, {}),
-                )
-            action_row = _matching_symbol_row(action_rows, strategy_group_id, symbol)
-            action_row = {
-                **action_row,
-                "_artifact_generated_at_utc": str(
-                    action_time_boundary.get("generated_at_utc") or ""
-                ),
-            }
             for candidate_side in candidate_sides:
+                parity_row = _matching_symbol_row(
+                    parity_rows,
+                    strategy_group_id,
+                    symbol,
+                    candidate_side,
+                )
+                if strategy_group_id == "SOR-001":
+                    parity_row = _merge_symbol_fact_row(
+                        parity_row,
+                        sor_facts.get(symbol, {}),
+                    )
+                if strategy_group_id == "MI-001":
+                    parity_row = _merge_symbol_fact_row(
+                        parity_row,
+                        mi_facts.get(symbol, {}),
+                    )
+                if strategy_group_id == "BRF2-001":
+                    parity_row = _merge_symbol_fact_row(
+                        parity_row,
+                        brf2_facts.get(symbol, {}),
+                    )
+                action_row = _matching_symbol_row(
+                    action_rows,
+                    strategy_group_id,
+                    symbol,
+                    candidate_side,
+                )
+                action_row = {
+                    **action_row,
+                    "_artifact_generated_at_utc": str(
+                        action_time_boundary.get("generated_at_utc") or ""
+                    ),
+                }
                 runtime_coverage_row = _matching_symbol_row(
                     runtime_coverage_rows,
                     strategy_group_id,
@@ -1985,6 +2088,7 @@ def _matching_symbol_row(
     allow_side_mismatch: bool = False,
 ) -> dict[str, Any]:
     side_mismatch_fallback: dict[str, Any] = {}
+    side_neutral_fallback: dict[str, Any] = {}
     for row in rows:
         if (
             str(row.get("strategy_group_id") or "") == strategy_group_id
@@ -1995,8 +2099,12 @@ def _matching_symbol_row(
                 return row
             if row_side == side:
                 return row
+            if not row_side and not side_neutral_fallback:
+                side_neutral_fallback = row
             if allow_side_mismatch and row_side and not side_mismatch_fallback:
                 side_mismatch_fallback = row
+    if side_neutral_fallback:
+        return side_neutral_fallback
     if side_mismatch_fallback:
         return side_mismatch_fallback
     return {}

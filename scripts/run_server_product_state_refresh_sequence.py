@@ -186,7 +186,7 @@ def run_server_product_state_refresh_sequence(
         if result["status"] == "skipped_after_required_failure"
     ]
     current_projection_publish_attempted = any(
-        result["name"] == "publish_runtime_control_current_projections"
+        str(result["name"]).startswith("publish_runtime_control_current_projections")
         and result["returncode"] is not None
         for result in step_results
     )
@@ -483,6 +483,22 @@ def _refresh_steps(
             ),
         ),
         RefreshStep(
+            "materialize_action_time_fact_snapshots",
+            (
+                python,
+                "scripts/materialize_action_time_fact_snapshots.py",
+                *pg_required,
+            ),
+        ),
+        RefreshStep(
+            "publish_runtime_control_current_projections_before_lane",
+            (
+                python,
+                "scripts/publish_runtime_control_current_projections.py",
+                *pg_required,
+            ),
+        ),
+        RefreshStep(
             "materialize_pg_promotion_action_time_lane",
             (
                 python,
@@ -532,7 +548,7 @@ def _refresh_steps(
             ),
         ),
         RefreshStep(
-            "publish_runtime_control_current_projections",
+            "publish_runtime_control_current_projections_after_action_time",
             (
                 python,
                 "scripts/publish_runtime_control_current_projections.py",
@@ -546,20 +562,22 @@ def _refresh_steps(
 def _steps_for_mode(steps: list[RefreshStep], *, mode: str) -> list[RefreshStep]:
     names_by_mode = {
         "watcher_tick_summary": {
-            "publish_runtime_control_current_projections",
+            "publish_runtime_control_current_projections_after_action_time",
         },
         "action_time": {
             "build_account_safe_facts",
+            "materialize_action_time_fact_snapshots",
+            "publish_runtime_control_current_projections_before_lane",
             "materialize_pg_promotion_action_time_lane",
             "materialize_action_time_ticket",
             "materialize_action_time_finalgate_preflight",
             "materialize_action_time_operation_layer_handoff",
             "materialize_ticket_bound_runtime_safety_state",
-            "publish_runtime_control_current_projections",
+            "publish_runtime_control_current_projections_after_action_time",
         },
         "closure": {
             "materialize_ticket_bound_post_submit_closure",
-            "publish_runtime_control_current_projections",
+            "publish_runtime_control_current_projections_after_action_time",
         },
     }
     allowed_names = names_by_mode[mode]
