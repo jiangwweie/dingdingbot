@@ -20,6 +20,7 @@ from pathlib import Path
 import sys
 import time
 from typing import Any
+from decimal import Decimal, InvalidOperation
 
 import sqlalchemy as sa
 
@@ -93,7 +94,8 @@ def materialize_ticket_bound_post_submit_closure(
         )
 
     blockers = _attempt_blockers(attempt)
-    protection_state = _protection_state(attempt)
+    blockers.extend(_exit_protection_blockers(conn, attempt))
+    protection_state = _protection_state(conn, attempt)
     if protection_state != "submitted":
         blockers.append(f"post_submit_protection_state:{protection_state}")
 
@@ -297,25 +299,102 @@ def _attempt_blockers(attempt: dict[str, Any]) -> list[str]:
         blockers.append("submit_result_order_id_not_in_ticket_request")
     if request_order_ids and submitted_order_ids != request_order_ids:
         blockers.append("submit_result_order_ids_incomplete")
+    if not _entry_fill_confirmed(attempt):
+        blockers.append("entry_fill_not_confirmed")
+    if not _submitted_reduce_only_role(submit_result, "SL"):
+        blockers.append("sl_reduce_only_exchange_order_missing")
+    if not _submitted_reduce_only_role(submit_result, "TP1"):
+        blockers.append("tp1_reduce_only_exchange_order_missing")
     return _dedupe(blockers)
 
 
-def _protection_state(attempt: dict[str, Any]) -> str:
-    submit_result = _as_dict(attempt.get("submit_result"))
-    submitted_orders = [
-        dict(item)
-        for item in submit_result.get("submitted_orders", [])
-        if isinstance(item, dict)
-    ]
-    if not submitted_orders:
-        return "unknown"
-    has_sl = any(
-        str(order.get("order_role") or "").upper() == "SL"
-        and order.get("reduce_only") is True
-        and str(order.get("exchange_order_id") or "").strip()
-        for order in submitted_orders
+def _exit_protection_blockers(
+    conn: sa.engine.Connection,
+    attempt: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    protection_set = _exit_protection_set_for_attempt(conn, attempt)
+    if not protection_set:
+        return ["ticket_bound_exit_protection_set_missing"]
+    if protection_set.get("status") not in {"submitted", "reconciled"}:
+        blockers.append(f"exit_protection_set_status:{protection_set.get('status')}")
+    if protection_set.get("protection_complete") is not True:
+        blockers.append("exit_protection_set_not_complete")
+    if str(protection_set.get("sl_order_id") or "").strip() == "":
+        blockers.append("exit_protection_set_sl_missing")
+    if str(protection_set.get("tp1_order_id") or "").strip() == "":
+        blockers.append("exit_protection_set_tp1_missing")
+    return blockers
+
+
+def _protection_state(conn: sa.engine.Connection, attempt: dict[str, Any]) -> str:
+    protection_set = _exit_protection_set_for_attempt(conn, attempt)
+    if not protection_set:
+        return "missing"
+    return (
+        "submitted"
+        if protection_set.get("status") in {"submitted", "reconciled"}
+        and protection_set.get("protection_complete") is True
+        else "missing"
     )
-    return "submitted" if has_sl else "missing"
+
+
+def _exit_protection_set_for_attempt(
+    conn: sa.engine.Connection,
+    attempt: dict[str, Any],
+) -> dict[str, Any]:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exit_protection_sets"):
+        return {}
+    table = _table(conn, "brc_ticket_bound_exit_protection_sets")
+    row = conn.execute(
+        sa.select(table).where(
+            table.c.protected_submit_attempt_id
+            == str(attempt.get("protected_submit_attempt_id") or "")
+        )
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _entry_fill_confirmed(attempt: dict[str, Any]) -> bool:
+    submit_request = _as_dict(attempt.get("submit_request"))
+    submit_result = _as_dict(attempt.get("submit_result"))
+    entry_request = _order_by_role(submit_request.get("orders", []), "ENTRY")
+    entry_order = _order_by_role(submit_result.get("submitted_orders", []), "ENTRY")
+    if not entry_request or not entry_order:
+        return False
+    if not str(entry_order.get("exchange_order_id") or "").strip():
+        return False
+    if str(entry_order.get("status") or "").strip().lower() != "filled":
+        return False
+    try:
+        requested_qty = Decimal(str(entry_request.get("amount") or "0"))
+        filled_qty = Decimal(str(entry_order.get("filled_qty") or "0"))
+        average_exec_price = Decimal(str(entry_order.get("average_exec_price") or "0"))
+    except (InvalidOperation, ValueError):
+        return False
+    return requested_qty > 0 and filled_qty >= requested_qty and average_exec_price > 0
+
+
+def _order_by_role(orders: Any, role: str) -> dict[str, Any]:
+    expected = role.upper()
+    for order in orders or []:
+        if isinstance(order, dict) and str(order.get("order_role") or "").upper() == expected:
+            return dict(order)
+    return {}
+
+
+def _submitted_reduce_only_role(submit_result: dict[str, Any], role: str) -> bool:
+    expected = role.upper()
+    for order in submit_result.get("submitted_orders", []):
+        if not isinstance(order, dict):
+            continue
+        if str(order.get("order_role") or "").upper() != expected:
+            continue
+        if order.get("reduce_only") is not True:
+            continue
+        if str(order.get("exchange_order_id") or "").strip():
+            return True
+    return False
 
 
 def _closure_row(
@@ -459,7 +538,15 @@ def _rows(value: Any) -> list[dict[str, Any]]:
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _int_value(value: Any) -> int:

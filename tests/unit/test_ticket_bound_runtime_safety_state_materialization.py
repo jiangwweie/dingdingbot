@@ -27,6 +27,10 @@ MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
+LIFECYCLE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-091_create_ticket_bound_order_lifecycle.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -43,6 +47,10 @@ def _load_module(path: Path, name: str):
 @pytest.fixture()
 def pg_control_connection():
     migration = _load_module(MIGRATION_PATH, "migration_086_runtime_safety")
+    lifecycle_migration = _load_module(
+        LIFECYCLE_MIGRATION_PATH,
+        "migration_091_runtime_safety",
+    )
     seed = _load_module(SEED_PATH, "seed_runtime_safety")
     engine = create_engine(
         "sqlite://",
@@ -54,6 +62,12 @@ def pg_control_connection():
         migration.op = Operations(MigrationContext.configure(conn))
         try:
             migration.upgrade()
+            old_lifecycle_op = lifecycle_migration.op
+            lifecycle_migration.op = migration.op
+            try:
+                lifecycle_migration.upgrade()
+            finally:
+                lifecycle_migration.op = old_lifecycle_op
         finally:
             migration.op = old_op
         seed.seed_runtime_control_state_foundation(conn)

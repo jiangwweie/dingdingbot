@@ -348,6 +348,18 @@ def _fact_values(
             missing.append(key)
             continue
         values[key] = resolved
+    for optional_key in (
+        "last_price",
+        "mark_price",
+        "current_price",
+        "entry_price",
+        "take_profit_1",
+        "tp1_price",
+        "tp1_reference_price",
+        "first_take_profit_price",
+    ):
+        if optional_key in source_values and optional_key not in values:
+            values[optional_key] = source_values[optional_key]
     return values, missing
 
 

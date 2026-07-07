@@ -633,6 +633,8 @@ def _insert_action_time_lane_graph(
         "opening_range_defined": True,
         "breakout_confirmed": True,
         "opening_range_low_reference": "1800",
+        "last_price": "2000",
+        "take_profit_1": "2200",
     }
 
     _insert_fact(

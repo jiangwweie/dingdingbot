@@ -258,6 +258,54 @@ async def test_ticket_bound_real_submit_helper_uses_gateway_and_order_lifecycle(
 
 
 @pytest.mark.asyncio
+async def test_ticket_bound_real_submit_helper_ignores_unparseable_filled_qty():
+    gateway = _UnparseableFilledQtyGateway()
+    lifecycle = _FakeOrderLifecycle()
+    report = {
+        "ticket_id": "ticket-1",
+        "operation_submit_command_id": "operation-submit-1",
+        "runtime_safety_snapshot_id": "runtime-safety-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "submit_request": {
+            "ticket_id": "ticket-1",
+            "operation_submit_command_id": "operation-submit-1",
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "direction": "LONG",
+            "exchange_symbol": "ETH/USDT:USDT",
+            "orders": [
+                {
+                    "local_order_id": "entry-1",
+                    "order_role": "ENTRY",
+                    "symbol": "ETH/USDT:USDT",
+                    "gateway_order_type": "market",
+                    "gateway_side": "buy",
+                    "amount": "0.01",
+                    "price": None,
+                    "trigger_price": None,
+                    "reduce_only": False,
+                    "client_order_id": "entry-1",
+                }
+            ],
+        },
+    }
+
+    result = await api_trading_console._submit_ticket_bound_orders(
+        report,
+        gateway=gateway,
+        order_lifecycle_service=lifecycle,
+    )
+
+    assert result["status"] == "exchange_submit_orders_submitted"
+    assert lifecycle.confirmed_order_ids == ["entry-1"]
+    assert lifecycle.filled_order_ids == []
+    assert result["submitted_orders"][0]["filled_qty"] == "not-a-number"
+
+
+@pytest.mark.asyncio
 async def test_ticket_bound_real_submit_helper_marks_gateway_failure_as_exchange_called():
     gateway = _FailingGateway()
     lifecycle = _FakeOrderLifecycle()
@@ -380,11 +428,22 @@ class _FailingGateway:
         )
 
 
+class _UnparseableFilledQtyGateway:
+    async def place_order(self, **kwargs):
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+            filled_qty="not-a-number",
+            average_exec_price="bad-price",
+        )
+
+
 class _FakeOrderLifecycle:
     def __init__(self) -> None:
         self.registered_order_ids: list[str] = []
         self.submitted_order_ids: list[str] = []
         self.confirmed_order_ids: list[str] = []
+        self.filled_order_ids: list[str] = []
 
     async def register_created_order(self, order, *, metadata=None):
         self.registered_order_ids.append(order.id)
@@ -397,3 +456,11 @@ class _FakeOrderLifecycle:
     async def confirm_order(self, order_id: str, exchange_order_id: str | None = None):
         self.confirmed_order_ids.append(order_id)
         return SimpleNamespace(id=order_id, exchange_order_id=exchange_order_id)
+
+    async def update_order_filled(self, order_id: str, *, filled_qty, average_exec_price):
+        self.filled_order_ids.append(order_id)
+        return SimpleNamespace(
+            id=order_id,
+            filled_qty=filled_qty,
+            average_exec_price=average_exec_price,
+        )

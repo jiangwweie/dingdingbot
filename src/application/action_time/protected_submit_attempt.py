@@ -497,6 +497,7 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
     signal = _as_dict(graph.get("signal"))
     protection = _as_dict(graph.get("protection"))
     execution_policy = _as_dict(graph.get("execution_policy"))
+    action_time_fact = _as_dict(graph.get("action_time_fact"))
     if not ticket:
         blockers.append("action_time_ticket_missing")
     if not handoff:
@@ -572,6 +573,8 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
         blockers.append("signal_generated_at_used_as_event_time")
     if int(protection.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("protection_ref_expired")
+    if _tp1_price(action_time_fact=action_time_fact) <= 0:
+        blockers.append("tp1_reference_missing")
     if execution_policy.get("status") != "current":
         blockers.append(f"execution_policy_not_current:{execution_policy.get('status')}")
     return _dedupe(blockers)
@@ -586,10 +589,12 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
         action_time_fact=action_time_fact,
         protection=protection,
     )
+    tp1_price = _tp1_price(action_time_fact=action_time_fact)
     target_notional = _decimal(ticket.get("target_notional"))
-    if price <= 0 or target_notional <= 0:
+    if price <= 0 or target_notional <= 0 or tp1_price <= 0:
         return {}
     amount = target_notional / price
+    tp1_amount = amount / Decimal("2")
     direction = "LONG" if ticket.get("side") == "long" else "SHORT"
     entry_side = "buy" if direction == "LONG" else "sell"
     protection_side = "sell" if direction == "LONG" else "buy"
@@ -600,6 +605,11 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
     )
     protection_order_id = _stable_id(
         "ticket_protection_order",
+        str(ticket["ticket_id"]),
+        str(graph["handoff"]["operation_submit_command_id"]),
+    )
+    tp1_order_id = _stable_id(
+        "ticket_tp1_order",
         str(ticket["ticket_id"]),
         str(graph["handoff"]["operation_submit_command_id"]),
     )
@@ -648,6 +658,20 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
                 "trigger_price": str(protection.get("reference_price")),
                 "reduce_only": True,
                 "client_order_id": protection_order_id,
+            },
+            {
+                "local_order_id": tp1_order_id,
+                "parent_order_id": entry_order_id,
+                "order_role": "TP1",
+                "symbol": symbol,
+                "direction": direction,
+                "gateway_order_type": "limit",
+                "gateway_side": protection_side,
+                "amount": str(tp1_amount),
+                "price": str(tp1_price),
+                "trigger_price": None,
+                "reduce_only": True,
+                "client_order_id": tp1_order_id,
             },
         ],
     }
@@ -927,6 +951,21 @@ def _execution_reference_price(
     return _decimal(protection.get("reference_price"))
 
 
+def _tp1_price(*, action_time_fact: dict[str, Any]) -> Decimal:
+    fact_values = _as_dict(action_time_fact.get("fact_values"))
+    for key in (
+        "take_profit_1",
+        "tp1_price",
+        "tp1_reference_price",
+        "first_take_profit_price",
+    ):
+        if key in fact_values:
+            value = _decimal(fact_values.get(key))
+            if value > 0:
+                return value
+    return Decimal("0")
+
+
 def _gateway_order_type(value: str) -> str:
     normalized = value.strip().lower()
     if normalized in {"market", "limit", "stop_market"}:
@@ -965,7 +1004,15 @@ def _rows(value: Any) -> list[dict[str, Any]]:
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:

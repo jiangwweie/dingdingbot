@@ -45,6 +45,7 @@ def test_protected_submit_attempt_disabled_smoke_records_ticket_bound_pg_attempt
     assert payload["order_lifecycle_called"] is False
     assert payload["submit_request"]["orders"][0]["order_role"] == "ENTRY"
     assert payload["submit_request"]["orders"][1]["order_role"] == "SL"
+    assert payload["submit_request"]["orders"][2]["order_role"] == "TP1"
 
     row = _protected_submit_row(pg_control_connection)
     assert row["status"] == "disabled_smoke_passed"
@@ -175,24 +176,7 @@ def test_protected_submit_real_result_marks_ticket_and_handoff_submitted(
             "withdrawal_or_transfer_created": False,
             "live_profile_changed": False,
             "order_sizing_changed": False,
-            "submitted_orders": [
-                {
-                    "local_order_id": prepared["submit_request"]["orders"][0][
-                        "local_order_id"
-                    ],
-                    "exchange_order_id": "exchange-entry-1",
-                    "order_role": "ENTRY",
-                    "reduce_only": False,
-                },
-                {
-                    "local_order_id": prepared["submit_request"]["orders"][1][
-                        "local_order_id"
-                    ],
-                    "exchange_order_id": "exchange-sl-1",
-                    "order_role": "SL",
-                    "reduce_only": True,
-                },
-            ],
+            "submitted_orders": _submitted_orders(prepared),
         },
         now_ms=NOW_MS + 5000,
     )
@@ -354,24 +338,7 @@ def test_protected_submit_result_requires_identity_fields(
             "withdrawal_or_transfer_created": False,
             "live_profile_changed": False,
             "order_sizing_changed": False,
-            "submitted_orders": [
-                {
-                    "local_order_id": prepared["submit_request"]["orders"][0][
-                        "local_order_id"
-                    ],
-                    "exchange_order_id": "exchange-entry-1",
-                    "order_role": "ENTRY",
-                    "reduce_only": False,
-                },
-                {
-                    "local_order_id": prepared["submit_request"]["orders"][1][
-                        "local_order_id"
-                    ],
-                    "exchange_order_id": "exchange-sl-1",
-                    "order_role": "SL",
-                    "reduce_only": True,
-                },
-            ],
+            "submitted_orders": _submitted_orders(prepared),
         },
         now_ms=NOW_MS + 5000,
     )
@@ -449,24 +416,7 @@ def test_protected_submit_result_forbidden_effect_hard_stops_without_breaking_db
             "withdrawal_or_transfer_created": False,
             "live_profile_changed": True,
             "order_sizing_changed": False,
-            "submitted_orders": [
-                {
-                    "local_order_id": prepared["submit_request"]["orders"][0][
-                        "local_order_id"
-                    ],
-                    "exchange_order_id": "exchange-entry-1",
-                    "order_role": "ENTRY",
-                    "reduce_only": False,
-                },
-                {
-                    "local_order_id": prepared["submit_request"]["orders"][1][
-                        "local_order_id"
-                    ],
-                    "exchange_order_id": "exchange-sl-1",
-                    "order_role": "SL",
-                    "reduce_only": True,
-                },
-            ],
+            "submitted_orders": _submitted_orders(prepared),
         },
         now_ms=NOW_MS + 5000,
     )
@@ -503,6 +453,31 @@ def _status(conn, table: str, id_column: str, id_value: str) -> str:
             {"id_value": id_value},
         ).scalar_one()
     )
+
+
+def _submitted_orders(prepared: dict) -> list[dict]:
+    rows: list[dict] = []
+    for order in prepared["submit_request"]["orders"]:
+        role = order["order_role"]
+        row = {
+            "local_order_id": order["local_order_id"],
+            "exchange_order_id": f"exchange-{role.lower()}-1",
+            "order_role": role,
+            "reduce_only": order.get("reduce_only") is True,
+            "amount": order["amount"],
+            "price": order.get("price") or "",
+            "trigger_price": order.get("trigger_price") or "",
+        }
+        if role == "ENTRY":
+            row.update(
+                {
+                    "status": "FILLED",
+                    "filled_qty": order["amount"],
+                    "average_exec_price": prepared["submit_request"]["reference_price"],
+                }
+            )
+        rows.append(row)
+    return rows
 
 
 def _json_value(value):

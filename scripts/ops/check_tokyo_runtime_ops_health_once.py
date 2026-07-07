@@ -43,6 +43,9 @@ L2_L7_CHAIN_TABLES = (
     "brc_action_time_lane_inputs",
     "brc_action_time_tickets",
     "brc_ticket_bound_protected_submit_attempts",
+    "brc_ticket_bound_order_lifecycle_runs",
+    "brc_ticket_bound_exit_protection_sets",
+    "brc_ticket_bound_exit_protection_orders",
     "brc_goal_status_current",
     "brc_server_monitor_runs",
 )
@@ -278,6 +281,9 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             "lanes": "brc_action_time_lane_inputs",
             "tickets": "brc_action_time_tickets",
             "attempts": "brc_ticket_bound_protected_submit_attempts",
+            "lifecycle_runs": "brc_ticket_bound_order_lifecycle_runs",
+            "protection_sets": "brc_ticket_bound_exit_protection_sets",
+            "protection_orders": "brc_ticket_bound_exit_protection_orders",
             "monitor": "brc_server_monitor_runs",
         }.items()
     }
@@ -333,6 +339,40 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             ).scalar_one()
         ),
     }
+    submitted_attempts_without_protection = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT a.protected_submit_attempt_id, a.ticket_id,
+                       a.strategy_group_id, a.symbol, a.side, a.updated_at_ms
+                FROM brc_ticket_bound_protected_submit_attempts AS a
+                LEFT JOIN brc_ticket_bound_exit_protection_sets AS s
+                  ON s.protected_submit_attempt_id = a.protected_submit_attempt_id
+                 AND s.protection_complete = true
+                WHERE a.status = 'submitted'
+                  AND s.exit_protection_set_id IS NULL
+                ORDER BY a.updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
+    incomplete_protection_sets = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT exit_protection_set_id, ticket_id, protected_submit_attempt_id,
+                       strategy_group_id, symbol, side, status, protection_complete,
+                       first_blocker, updated_at_ms
+                FROM brc_ticket_bound_exit_protection_sets
+                WHERE protection_complete = false
+                   OR status NOT IN ('submitted', 'reconciled', 'closed')
+                ORDER BY updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
     goal = conn.execute(
         sa.text(
             """
@@ -405,6 +445,10 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
         "coverage_by_group": [dict(row) for row in coverage_by_group],
         "recent_counts": recent_counts,
         "open_counts": open_counts,
+        "submitted_attempts_without_protection": [
+            dict(row) for row in submitted_attempts_without_protection
+        ],
+        "incomplete_protection_sets": [dict(row) for row in incomplete_protection_sets],
         "goal": dict(goal or {}),
         "monitor": dict(monitor or {}),
         "unadvanced_fresh_signals": [dict(row) for row in unadvanced_fresh_signals],
@@ -422,6 +466,10 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         issues.append("fresh_signal_without_promotion_lane_or_ticket")
     if snapshot.get("recent_duplicate_lanes"):
         issues.append("recent_duplicate_action_time_lane_for_same_signal")
+    if snapshot.get("submitted_attempts_without_protection"):
+        issues.append("submitted_attempt_without_exit_protection_set")
+    if snapshot.get("incomplete_protection_sets"):
+        issues.append("incomplete_ticket_bound_exit_protection_set")
 
     goal = snapshot.get("goal") or {}
     blockers = goal.get("blockers") or []
@@ -456,6 +504,12 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "server_monitor_blocker_classes": monitor.get("blocker_classes") or [],
         "unadvanced_fresh_signal_count": len(snapshot.get("unadvanced_fresh_signals") or []),
         "recent_duplicate_lane_count": len(snapshot.get("recent_duplicate_lanes") or []),
+        "submitted_attempt_without_protection_count": len(
+            snapshot.get("submitted_attempts_without_protection") or []
+        ),
+        "incomplete_protection_set_count": len(
+            snapshot.get("incomplete_protection_sets") or []
+        ),
         "authority_boundary": {
             "readonly_check": True,
             "calls_finalgate": False,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from typing import Any, Literal, Optional
 
@@ -2615,10 +2615,32 @@ async def _submit_ticket_bound_orders(
                 local_order_id,
                 exchange_order_id=exchange_order_id,
             )
-            await order_lifecycle_service.confirm_order(
-                local_order_id,
-                exchange_order_id=exchange_order_id,
-            )
+            filled_qty = getattr(placement_result, "filled_qty", None)
+            average_exec_price = getattr(placement_result, "average_exec_price", None)
+            parsed_filled_qty = _decimal_or_zero(filled_qty)
+            if (
+                str(getattr(placement_result, "status", "")).split(".")[-1].lower()
+                == "filled"
+                or parsed_filled_qty > Decimal("0")
+            ):
+                await order_lifecycle_service.update_order_filled(
+                    local_order_id,
+                    filled_qty=parsed_filled_qty if parsed_filled_qty > 0 else amount,
+                    average_exec_price=Decimal(
+                        str(
+                            average_exec_price
+                            or order_request.get("price")
+                            or order_request.get("trigger_price")
+                            or submit_request.get("reference_price")
+                            or "0"
+                        )
+                    ),
+                )
+            else:
+                await order_lifecycle_service.confirm_order(
+                    local_order_id,
+                    exchange_order_id=exchange_order_id,
+                )
         except Exception as exc:
             return _ticket_bound_submit_blocked_result(
                 report,
@@ -2638,6 +2660,14 @@ async def _submit_ticket_bound_orders(
                 "exchange_order_id": exchange_order_id,
                 "order_role": str(order_role.value),
                 "reduce_only": order_request.get("reduce_only") is True,
+                "amount": str(order_request.get("amount") or ""),
+                "price": str(order_request.get("price") or ""),
+                "trigger_price": str(order_request.get("trigger_price") or ""),
+                "status": str(getattr(placement_result, "status", "")).split(".")[-1],
+                "filled_qty": str(getattr(placement_result, "filled_qty", "") or ""),
+                "average_exec_price": str(
+                    getattr(placement_result, "average_exec_price", "") or ""
+                ),
             }
         )
 
@@ -2734,6 +2764,15 @@ def _optional_decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
         return None
     return Decimal(str(value))
+
+
+def _decimal_or_zero(value: Any) -> Decimal:
+    if value is None or value == "":
+        return Decimal("0")
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
 
 
 def _ticket_bound_finalgate_api_body(report: dict[str, Any]) -> dict[str, Any]:

@@ -15,6 +15,7 @@ from scripts import materialize_action_time_finalgate_preflight as finalgate
 from scripts import materialize_action_time_operation_layer_handoff as handoff
 from scripts import materialize_action_time_ticket as ticket_materializer
 from scripts import materialize_pg_promotion_action_time_lane as lane_materializer
+from scripts import materialize_ticket_bound_exit_protection_set as exit_protection
 from scripts import materialize_ticket_bound_post_submit_closure as post_submit_closure
 from scripts import materialize_ticket_bound_protected_submit_attempt as protected_submit
 from scripts import materialize_ticket_bound_runtime_safety_state as safety_state
@@ -30,6 +31,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+LIFECYCLE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-091_create_ticket_bound_order_lifecycle.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
@@ -72,6 +77,10 @@ def _load_module(path: Path, name: str):
 @pytest.fixture()
 def pg_control_connection():
     migration = _load_module(MIGRATION_PATH, "migration_086_action_time_full_chain")
+    lifecycle_migration = _load_module(
+        LIFECYCLE_MIGRATION_PATH,
+        "migration_091_action_time_full_chain",
+    )
     seed = _load_module(SEED_PATH, "seed_action_time_full_chain")
     engine = create_engine(
         "sqlite://",
@@ -83,6 +92,12 @@ def pg_control_connection():
         migration.op = Operations(MigrationContext.configure(conn))
         try:
             migration.upgrade()
+            old_lifecycle_op = lifecycle_migration.op
+            lifecycle_migration.op = migration.op
+            try:
+                lifecycle_migration.upgrade()
+            finally:
+                lifecycle_migration.op = old_lifecycle_op
         finally:
             migration.op = old_op
         seed.seed_runtime_control_state_foundation(conn)
@@ -206,10 +221,19 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
     assert submitted["order_created"] is True
     assert submitted["order_lifecycle_called"] is True
 
-    closure_payload = post_submit_closure.materialize_ticket_bound_post_submit_closure(
+    protection_payload = exit_protection.materialize_ticket_bound_exit_protection_set(
         pg_control_connection,
         protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
         now_ms=NOW_MS + 8,
+    )
+    assert protection_payload["status"] == "position_protected"
+    assert protection_payload["protection_complete"] is True
+    assert protection_payload["blockers"] == []
+
+    closure_payload = post_submit_closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+        now_ms=NOW_MS + 9,
     )
     assert closure_payload["status"] == "reconciliation_pending"
     assert closure_payload["ticket_id"] == payloads["ticket"]["ticket_id"]
@@ -234,6 +258,9 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
         str(payloads["handoff"]["operation_layer_handoff_id"]),
     ) == "submitted"
     assert _count(pg_control_connection, "brc_ticket_bound_post_submit_closures") == 1
+    assert _count(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs") == 1
+    assert _count(pg_control_connection, "brc_ticket_bound_exit_protection_sets") == 1
+    assert _count(pg_control_connection, "brc_ticket_bound_exit_protection_orders") == 2
 
 
 def test_unsupported_side_is_not_created_by_seed(pg_control_connection):
@@ -316,6 +343,9 @@ def _count(conn, table_name: str) -> int:
         "brc_operation_layer_handoffs",
         "brc_promotion_candidates",
         "brc_runtime_safety_state_snapshots",
+        "brc_ticket_bound_exit_protection_orders",
+        "brc_ticket_bound_exit_protection_sets",
+        "brc_ticket_bound_order_lifecycle_runs",
         "brc_ticket_bound_post_submit_closures",
         "brc_ticket_bound_protected_submit_attempts",
     }
@@ -456,15 +486,32 @@ def _mock_exchange_submit_result(prepared: dict) -> dict:
         "live_profile_changed": False,
         "order_sizing_changed": False,
         "submitted_orders": [
-            {
-                "local_order_id": order["local_order_id"],
-                "exchange_order_id": f"mock-exchange-{order['order_role'].lower()}",
-                "order_role": order["order_role"],
-                "reduce_only": order.get("reduce_only") is True,
-            }
+            _mock_submitted_order(prepared, order)
             for order in prepared["submit_request"]["orders"]
         ],
     }
+
+
+def _mock_submitted_order(prepared: dict, order: dict) -> dict:
+    role = order["order_role"]
+    row = {
+        "local_order_id": order["local_order_id"],
+        "exchange_order_id": f"mock-exchange-{role.lower()}",
+        "order_role": role,
+        "reduce_only": order.get("reduce_only") is True,
+        "amount": order["amount"],
+        "price": order.get("price") or "",
+        "trigger_price": order.get("trigger_price") or "",
+    }
+    if role == "ENTRY":
+        row.update(
+            {
+                "status": "FILLED",
+                "filled_qty": order["amount"],
+                "average_exec_price": prepared["submit_request"]["reference_price"],
+            }
+        )
+    return row
 
 
 def _write_monitor_signal_summary_to_pg(
