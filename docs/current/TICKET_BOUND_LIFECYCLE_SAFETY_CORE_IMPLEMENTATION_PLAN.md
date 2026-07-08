@@ -79,7 +79,8 @@ core:
 | Full-chain simulation | `full_chain_simulation_harness` runs constructed PG input through signal, lane, ticket, safety, protected submit, protection, runner command, runner proof, final closure | It uses mock exchange result and does not grant live exchange authority |
 | Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed` | Official recovery execution is still separate |
 | Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers | It consumes already-fetched facts and does not call exchange APIs |
-| Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for old SL cancel / RUNNER_SL submit | The actual exchange mutation must still be performed only by the official operation path |
+| Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for old SL cancel / RUNNER_SL submit | Command rows are intent/result records, not proof of runner protection |
+| Runner mutation executor | `runner_mutation_executor` consumes a prepared PG command, calls injected gateway cancel/place, and records the PG result | Executor is mockable locally and still cannot call FinalGate, change profile/sizing, or use file authority |
 | Ops health | Tokyo ops health reads exact lifecycle attention states and runner commands without runner proof | It remains readonly and non-mutating |
 
 ## Target Core
@@ -299,6 +300,19 @@ Acceptance:
 | RUNNER_SL is official | New exchange ref is produced by official path |
 | Reconciliation closes it | `runner_protected` only after exchange/PG refs match |
 
+Implementation status:
+
+1. **Implemented**: `runner_mutation_command` prepares one PG command per
+   `exit_protection_set_id`.
+2. **Implemented**: `runner_mutation_executor` executes prepared commands
+   through an injected gateway and records success/failure results.
+3. **Implemented**: full-chain simulation uses a mock runner mutation gateway,
+   so every active StrategyGroup/symbol/side scope exercises cancel old SL and
+   submit RUNNER_SL locally.
+4. **Remaining production integration**: wire the executor into the deployed
+   ticket-bound Operation Layer scheduler/API only after local acceptance and
+   explicit Owner deploy approval.
+
 ### Batch 5: Final Closure
 
 Goal: make final exit, reconciliation, settlement, and review close one
@@ -320,7 +334,7 @@ Acceptance:
 | Full-chain impact | Every active StrategyGroup event spec can reach mocked lifecycle closure |
 | Submit recovery | ENTRY reject, timeout, local write failure, partial fill, protection reject |
 | Protection reconciliation | Missing SL, missing TP1, wrong side, wrong qty, orphan order, flat-with-live-protection |
-| Runner mutation | TP1 filled with missing runner SL, successful official runner SL, runner reconciliation mismatch |
+| Runner mutation | TP1 filled with missing runner SL, cancel failure, RUNNER_SL submit failure, successful official runner SL, runner reconciliation mismatch |
 | Closure | final exit proof missing, flat proof missing, settlement missing, review missing, happy closure |
 | Ops health | active lifecycle blockers surface in readonly health checks without exchange writes |
 

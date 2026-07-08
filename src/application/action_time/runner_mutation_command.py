@@ -246,7 +246,11 @@ def _command_row(
 
 
 def _result_blockers(result_payload: dict[str, Any]) -> list[str]:
-    blockers: list[str] = []
+    blockers: list[str] = [
+        str(blocker)
+        for blocker in result_payload.get("blockers") or []
+        if str(blocker)
+    ]
     if result_payload.get("old_sl_cancelled") is not True:
         blockers.append("old_sl_cancel_not_confirmed")
     if not str(result_payload.get("runner_sl_exchange_order_id") or "").strip():

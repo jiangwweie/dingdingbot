@@ -38,7 +38,8 @@ review plan.
 | **Exit protection materializer** | `TicketBoundExitProtectionMaterializer` materializes PG lifecycle/protection rows after filled entry proof | It is a PG proof layer over submitted refs; it is not the official mutation owner |
 | **Exit plan** | `RuntimePositionExitPlanService` is non-executing review evidence | It cannot materialize protection orders |
 | **OrderLifecycleService** | Existing callbacks can react to entry/exit fills | Callback capability is not the ticket-bound mainline owner |
-| **Runner protection adjuster** | `TicketBoundRunnerProtectionAdjuster` materializes PG proof after TP1 fill and a replacement runner SL ref | It records an official-path result; official cancel/replace/submit runner mutation is still a separate gap |
+| **Runner protection adjuster** | `TicketBoundRunnerProtectionAdjuster` materializes PG proof after TP1 fill and a replacement runner SL ref | It records proof only after a runner SL exchange ref exists |
+| **Runner mutation executor** | `TicketBoundRunnerMutationExecutor` consumes a prepared PG command, cancels the old full-size SL through an injected gateway, submits RUNNER_SL, and records the PG result | It cannot call FinalGate, change profile/sizing, or use repo files as authority |
 | **Lifecycle closure materializer** | `materialize_ticket_bound_lifecycle_closure` closes PG lifecycle after final exit, reconciliation, settlement, and review proofs | It requires proof IDs and flat-position confirmation; it summarizes closure and does not discover exchange truth by itself |
 | **ExchangeGateway** | Existing gateway can place and cancel orders | The runner proof layer must not become a second exchange mutation path |
 | **Impact test** | 22 active scopes reach mock submitted -> exit protection set -> post-submit closure | Test proves entry-fill + SL/TP1 protection set materialization; focused tests prove runner SL and final closure materialization |
@@ -469,11 +470,12 @@ authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchang
 6. **Implemented proof layer**: add runner SL proof adjuster for TP1 fill.
 7. **Implemented proof layer**: add PG proof closure for final exit -> reconciliation ->
    settlement -> review.
-8. **Open P0**: implement Lifecycle Safety Core full-chain harness.
-9. **Open P0**: implement sequential submit failure recovery states.
-10. **Open P0**: implement exchange protection reconciler.
-11. **Open P0**: implement official runner mutation path through the
-    ticket-bound Operation Layer.
+8. **Implemented**: implement Lifecycle Safety Core full-chain harness.
+9. **Implemented**: implement sequential submit failure recovery states.
+10. **Implemented**: implement exchange protection reconciler.
+11. **Implemented locally**: implement official runner mutation executor for
+    the ticket-bound Operation Layer handoff; production wiring remains behind
+    explicit deploy approval.
 12. **Deploy gate**: run read-only health checks plus non-trading mock
     lifecycle acceptance before any real order opportunity is allowed to rely on
     the new chain.

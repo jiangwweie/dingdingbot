@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+import asyncio
 import json
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import sqlalchemy as sa
@@ -24,6 +26,7 @@ from src.application.action_time import post_submit_closure
 from src.application.action_time import promotion_action_time_lane
 from src.application.action_time import protected_submit_attempt
 from src.application.action_time import runner_mutation_command
+from src.application.action_time import runner_mutation_executor
 from src.application.action_time import runner_protection_adjuster
 from src.application.action_time import runtime_safety_state
 
@@ -152,21 +155,13 @@ def run_ticket_bound_full_chain_simulation(
             now_ms=now_ms + 11,
         )
     )
-    runner_command_result_payload = (
-        runner_mutation_command.record_ticket_bound_runner_mutation_result(
+    runner_command_result_payload = asyncio.run(
+        runner_mutation_executor.execute_ticket_bound_runner_mutation_command(
             conn,
             runner_mutation_command_id=str(
                 runner_command_payload["runner_mutation_command_id"]
             ),
-            result_payload={
-                "old_sl_cancelled": True,
-                "runner_sl_submitted": True,
-                "runner_sl_exchange_order_id": "mock-exchange-runner-sl",
-                "exchange_write_called": True,
-                "withdrawal_or_transfer_created": False,
-                "live_profile_changed": False,
-                "order_sizing_changed": False,
-            },
+            gateway=_MockRunnerMutationGateway(),
             now_ms=now_ms + 12,
         )
     )
@@ -175,11 +170,15 @@ def run_ticket_bound_full_chain_simulation(
             conn,
             exit_protection_set_id=set_id,
             runner_sl_exchange_order_id=str(
-                runner_command_result_payload["command"]["result_payload"][
+                runner_command_result_payload["result_payload"][
                     "runner_sl_exchange_order_id"
                 ]
             ),
-            runner_sl_local_order_id="mock-runner-sl",
+            runner_sl_local_order_id=str(
+                runner_command_result_payload["result_payload"][
+                    "runner_sl_local_order_id"
+                ]
+            ),
             now_ms=now_ms + 13,
         )
     )
@@ -229,9 +228,32 @@ def run_ticket_bound_full_chain_simulation(
             "calls_operation_layer": False,
             "calls_exchange_write": False,
             "uses_mock_exchange_result": True,
+            "uses_mock_runner_mutation_gateway": True,
             "uses_repo_json_or_md_authority": False,
         },
     }
+
+
+class _MockRunnerMutationGateway:
+    def __init__(self) -> None:
+        self.cancel_calls: list[dict[str, Any]] = []
+        self.place_calls: list[dict[str, Any]] = []
+
+    async def cancel_order(self, **kwargs: Any) -> SimpleNamespace:
+        self.cancel_calls.append(dict(kwargs))
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id=str(kwargs.get("exchange_order_id") or ""),
+            status="CANCELED",
+        )
+
+    async def place_order(self, **kwargs: Any) -> SimpleNamespace:
+        self.place_calls.append(dict(kwargs))
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id="mock-exchange-runner-sl",
+            status="OPEN",
+        )
 
 
 def _insert_constructed_raw_input(
