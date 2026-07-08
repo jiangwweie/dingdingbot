@@ -96,7 +96,7 @@ def materialize_ticket_bound_post_submit_closure(
         "protected_submit_attempt_id",
         attempt_id,
     )
-    if existing:
+    if existing and str(existing.get("status") or "") != "blocked":
         return _result_from_existing(existing, now_ms=now_ms)
 
     attempt = _row_by_id(

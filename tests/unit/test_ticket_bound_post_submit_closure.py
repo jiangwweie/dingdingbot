@@ -91,6 +91,40 @@ def test_post_submit_closure_blocks_without_exit_protection_set(
     assert "ticket_bound_exit_protection_set_missing" in payload["blockers"]
 
 
+def test_post_submit_closure_refreshes_blocked_after_protection_set_materialized(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _record_submitted_attempt(pg_control_connection, ids)
+    blocked = closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+
+    protection = exit_protection.materialize_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 7000,
+    )
+    refreshed = closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 8000,
+    )
+
+    assert blocked["status"] == "blocked"
+    assert "ticket_bound_exit_protection_set_missing" in blocked["blockers"]
+    assert protection["status"] == "position_protected"
+    assert refreshed["status"] == "reconciliation_pending"
+    assert refreshed["protection_state"] == "submitted"
+    assert refreshed["blockers"] == ["post_submit_reconciliation_fact_missing"]
+    assert "idempotent_existing_closure" not in refreshed
+    row = _closure_row(pg_control_connection)
+    assert row["status"] == "reconciliation_pending"
+    assert _json_value(row["blockers"]) == ["post_submit_reconciliation_fact_missing"]
+
+
 def test_post_submit_closure_is_idempotent(
     pg_control_connection,
 ):
