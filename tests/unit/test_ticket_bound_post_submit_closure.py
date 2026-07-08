@@ -202,6 +202,47 @@ def test_lifecycle_closure_records_final_exit_reconciliation_settlement_review(
         assert event_type in events
 
 
+def test_ticket_expiry_after_submit_does_not_block_post_submit_lifecycle(
+    pg_control_connection,
+):
+    ids, prepared = _runner_protected_attempt(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET expires_at_ms = :expires_at_ms
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": ids["ticket_id"], "expires_at_ms": NOW_MS - 1},
+    )
+
+    pending = closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 20_000,
+    )
+    final = closure.materialize_ticket_bound_lifecycle_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        final_exit_exchange_order_id="exchange-runner-sl-1",
+        final_exit_role="RUNNER_SL",
+        final_position_flat_confirmed=True,
+        reconciliation_evidence_id="recon-after-ticket-expiry",
+        settlement_evidence_id="settlement-after-ticket-expiry",
+        review_evidence_id="review-after-ticket-expiry",
+        now_ms=NOW_MS + 21_000,
+    )
+
+    assert pending["status"] == "reconciliation_pending"
+    assert "ticket_expired" not in pending["blockers"]
+    assert final["status"] == "closed"
+    assert final["blockers"] == []
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "lifecycle_closed"
+
+
 def test_lifecycle_closure_is_idempotent(pg_control_connection):
     _, prepared = _runner_protected_attempt(pg_control_connection)
     first = closure.materialize_ticket_bound_lifecycle_closure(

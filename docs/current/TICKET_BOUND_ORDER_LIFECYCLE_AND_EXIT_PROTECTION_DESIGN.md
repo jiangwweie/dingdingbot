@@ -56,7 +56,7 @@ review plan.
 | **P0** | Exchange truth is not yet the current authority for protection completeness | Locally implemented by `protection_reconciler` over caller-provided exchange snapshots; production exchange read adapter wiring remains behind explicit deploy approval |
 | **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Locally implemented by exact lifecycle classification plus `protection_recovery_command` for missing SL/TP1 recovery; production scheduling/API wiring remains behind explicit deploy approval |
 | **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Partially represented by PG materializers and lifecycle events; target closure is the Lifecycle Safety Core implementation plan |
-| **P1** | Action-time TTL is not tested against the full post-submit chain | Fast opportunities may expire before lifecycle proof completes |
+| **P1** | Action-time TTL behavior across the full post-submit chain | Closed locally: expired tickets still block new submit attempts, while already-submitted ticket-bound lifecycles can continue protection, runner, and final closure |
 
 ## Target Architecture
 

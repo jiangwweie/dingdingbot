@@ -351,6 +351,7 @@ Acceptance:
 | Protection reconciliation | Missing SL, missing TP1, wrong side, wrong qty, orphan order, flat-with-live-protection |
 | Runner mutation | TP1 filled with missing runner SL, cancel failure, RUNNER_SL submit failure, successful official runner SL, runner reconciliation mismatch |
 | Closure | final exit proof missing, flat proof missing, settlement missing, review missing, happy closure |
+| Action-time TTL | Expired ticket blocks new submit; already-submitted ticket continues post-submit lifecycle to closure |
 | Ops health | active lifecycle blockers surface in readonly health checks without exchange writes |
 
 ## Runtime Cadence And Performance
