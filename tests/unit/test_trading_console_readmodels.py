@@ -960,6 +960,7 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
         "/api/trading-console/runtime-operation-layer-handoffs/tickets/{ticket_id}/finalgate-passes/{finalgate_pass_id}",
         "/api/trading-console/runtime-protected-submits/tickets/{ticket_id}/operation-submit-commands/{operation_submit_command_id}",
         "/api/trading-console/runtime-post-submit-closures/protected-submit-attempts/{protected_submit_attempt_id}",
+        "/api/trading-console/runtime-ticket-bound-lifecycle-maintenance",
     }
     routes = [
         route for route in router.routes

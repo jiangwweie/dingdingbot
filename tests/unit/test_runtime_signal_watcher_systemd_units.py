@@ -52,6 +52,18 @@ RUNTIME_MONITOR_SERVICE_PATH = (
     / "systemd"
     / "brc-runtime-monitor.service"
 )
+TICKET_LIFECYCLE_MAINTENANCE_SERVICE_PATH = (
+    REPO_ROOT
+    / "deploy"
+    / "systemd"
+    / "brc-ticket-lifecycle-maintenance.service"
+)
+TICKET_LIFECYCLE_MAINTENANCE_TIMER_PATH = (
+    REPO_ROOT
+    / "deploy"
+    / "systemd"
+    / "brc-ticket-lifecycle-maintenance.timer"
+)
 
 def test_signal_watcher_service_observes_action_time_ticket_readiness_without_runtime_pin():
     text = SERVICE_PATH.read_text(encoding="utf-8")
@@ -194,6 +206,26 @@ def test_runtime_db_retention_systemd_units_are_not_shipped():
     assert not (REPO_ROOT / "deploy" / "systemd" / "brc-runtime-db-retention.timer").exists()
 
 
+def test_ticket_lifecycle_maintenance_timer_is_bounded_and_report_free():
+    service_text = TICKET_LIFECYCLE_MAINTENANCE_SERVICE_PATH.read_text(encoding="utf-8")
+    timer_text = TICKET_LIFECYCLE_MAINTENANCE_TIMER_PATH.read_text(encoding="utf-8")
+
+    assert "run_ticket_bound_lifecycle_maintenance_once.py" in service_text
+    assert "--require-database-url" in service_text
+    assert "--fetch-exchange-snapshot" in service_text
+    assert "--allow-exchange-mutation" in service_text
+    assert "EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env" in service_text
+    assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env" in service_text
+    assert "--report-dir" not in service_text
+    assert "--output-json" not in service_text
+    assert "ReadWritePaths=" not in service_text
+    assert "TimeoutStartSec=25s" in service_text
+    assert "CPUQuota=40%" in service_text
+    assert "OnUnitActiveSec=30s" in timer_text
+    assert "Persistent=false" in timer_text
+    assert "Persistent=true" not in timer_text
+
+
 def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     from scripts.plan_tokyo_runtime_governance_git_deploy import (
         _plan_phases,
@@ -244,6 +276,8 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "brc-runtime-monitor.service" in commands
     assert "brc-runtime-monitor.timer" in commands
+    assert "brc-ticket-lifecycle-maintenance.service" in commands
+    assert "brc-ticket-lifecycle-maintenance.timer" in commands
     assert "90-resume-dispatcher-after-refresh.conf" in commands
     assert "40-resume-dispatcher.conf" in commands
     assert "60-dry-run-audit-chain.conf" in commands
@@ -263,6 +297,8 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "systemctl enable brc-runtime-signal-watcher.timer" in commands
     assert "systemctl restart brc-runtime-signal-watcher.timer" not in commands
     assert "systemctl start brc-runtime-monitor.service" in commands
+    assert "systemctl enable --now brc-ticket-lifecycle-maintenance.timer" in commands
+    assert "systemctl restart brc-ticket-lifecycle-maintenance.timer" in commands
     assert "systemctl disable --now brc-runtime-db-retention.timer" in commands
     assert "systemctl enable --now brc-runtime-db-retention.timer" not in commands
     assert "tokyo-deploy-channel-status.json" not in commands

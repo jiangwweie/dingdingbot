@@ -82,9 +82,9 @@ def test_migration_revision_chain_is_single_head_after_slimming():
         if down_revision is None
     )
 
-    assert len(revisions) == 90
+    assert len(revisions) == 98
     assert roots == ["001"]
-    assert heads == ["090"]
+    assert heads == ["098"]
     assert missing_down_revisions == {}
 
 

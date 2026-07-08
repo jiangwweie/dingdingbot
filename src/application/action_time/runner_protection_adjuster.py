@@ -302,7 +302,12 @@ def _blockers(
     blockers: list[str] = []
     if protection_set.get("protection_complete") is not True:
         blockers.append("exit_protection_set_not_complete")
-    if protection_set.get("status") not in {"submitted", "reconciled", "runner_protected"}:
+    if protection_set.get("status") not in {
+        "submitted",
+        "reconciled",
+        "runner_mutation_pending",
+        "runner_protected",
+    }:
         blockers.append(f"exit_protection_set_status:{protection_set.get('status')}")
     if not lifecycle:
         blockers.append("lifecycle_run_missing")

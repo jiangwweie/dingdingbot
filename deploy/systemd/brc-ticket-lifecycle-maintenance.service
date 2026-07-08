@@ -1,0 +1,31 @@
+[Unit]
+Description=BRC ticket-bound lifecycle maintenance
+Wants=network-online.target
+After=network-online.target brc-owner-console-backend.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/brc-deploy/app/current
+EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
+EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env
+EnvironmentFile=-/home/ubuntu/brc-deploy/env/ticket-lifecycle-maintenance.env
+ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/run_ticket_bound_lifecycle_maintenance_once.py \
+  --require-database-url \
+  --fetch-exchange-snapshot \
+  --allow-exchange-mutation \
+  --max-lifecycle-scopes 4 \
+  --max-actions-per-scope 16 \
+  --snapshot-timeout-seconds 8
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+Nice=10
+CPUAccounting=true
+CPUQuota=40%
+IOAccounting=true
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+TimeoutStartSec=25s

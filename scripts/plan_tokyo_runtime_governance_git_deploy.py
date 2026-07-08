@@ -50,6 +50,12 @@ DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.servic
 DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME = "brc-runtime-signal-watcher.timer"
 DEFAULT_RUNTIME_MONITOR_SERVICE_NAME = "brc-runtime-monitor.service"
 DEFAULT_RUNTIME_MONITOR_TIMER_NAME = "brc-runtime-monitor.timer"
+DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME = (
+    "brc-ticket-lifecycle-maintenance.service"
+)
+DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME = (
+    "brc-ticket-lifecycle-maintenance.timer"
+)
 RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service"
 )
@@ -58,6 +64,12 @@ RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH = (
 )
 RUNTIME_MONITOR_SERVICE_REPO_PATH = "deploy/systemd/brc-runtime-monitor.service"
 RUNTIME_MONITOR_TIMER_REPO_PATH = "deploy/systemd/brc-runtime-monitor.timer"
+TICKET_LIFECYCLE_MAINTENANCE_SERVICE_REPO_PATH = (
+    "deploy/systemd/brc-ticket-lifecycle-maintenance.service"
+)
+TICKET_LIFECYCLE_MAINTENANCE_TIMER_REPO_PATH = (
+    "deploy/systemd/brc-ticket-lifecycle-maintenance.timer"
+)
 RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf"
 )
@@ -694,6 +706,12 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_SERVICE_NAME}"
     )
     runtime_monitor_timer_path = f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_TIMER_NAME}"
+    ticket_lifecycle_maintenance_service_path = (
+        f"{service_dir}/{DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME}"
+    )
+    ticket_lifecycle_maintenance_timer_path = (
+        f"{service_dir}/{DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME}"
+    )
     stale_runtime_db_retention_service_path = (
         f"{service_dir}/brc-runtime-db-retention.service"
     )
@@ -734,6 +752,14 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
     release_runtime_monitor_timer_path = (
         f"{remote_release_path.rstrip('/')}/{RUNTIME_MONITOR_TIMER_REPO_PATH}"
     )
+    release_ticket_lifecycle_maintenance_service_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{TICKET_LIFECYCLE_MAINTENANCE_SERVICE_REPO_PATH}"
+    )
+    release_ticket_lifecycle_maintenance_timer_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{TICKET_LIFECYCLE_MAINTENANCE_TIMER_REPO_PATH}"
+    )
     release_dropin_path = (
         f"{remote_release_path.rstrip('/')}/"
         f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
@@ -752,6 +778,8 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"test -f {q(release_timer_path)}; "
         f"test -f {q(release_runtime_monitor_service_path)}; "
         f"test -f {q(release_runtime_monitor_timer_path)}; "
+        f"test -f {q(release_ticket_lifecycle_maintenance_service_path)}; "
+        f"test -f {q(release_ticket_lifecycle_maintenance_timer_path)}; "
         f"test -f {q(release_dropin_path)}; "
         f"test -f {q(release_product_state_dropin_path)}; "
         f"test -f {q(release_action_time_dropin_path)}; "
@@ -759,7 +787,9 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
         f"sudo -n cp {q(release_runtime_monitor_service_path)} {q(runtime_monitor_service_path)}; "
         f"sudo -n cp {q(release_runtime_monitor_timer_path)} {q(runtime_monitor_timer_path)}; "
-        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)} {q(runtime_monitor_service_path)} {q(runtime_monitor_timer_path)}; "
+        f"sudo -n cp {q(release_ticket_lifecycle_maintenance_service_path)} {q(ticket_lifecycle_maintenance_service_path)}; "
+        f"sudo -n cp {q(release_ticket_lifecycle_maintenance_timer_path)} {q(ticket_lifecycle_maintenance_timer_path)}; "
+        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)} {q(runtime_monitor_service_path)} {q(runtime_monitor_timer_path)} {q(ticket_lifecycle_maintenance_service_path)} {q(ticket_lifecycle_maintenance_timer_path)}; "
         f"sudo -n mkdir -p {q(service_dropin_dir)}; "
         f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
         f"sudo -n cp {q(release_product_state_dropin_path)} {q(product_state_dropin_path)}; "
@@ -777,11 +807,15 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         "sudo -n systemctl daemon-reload; "
         f"sudo -n systemctl enable {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl enable --now {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
         f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl restart {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
         f"sudo -n systemctl start {q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)}; "
         f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
-        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}"
+        f"sudo -n systemctl is-enabled {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}"
     )
 
 
