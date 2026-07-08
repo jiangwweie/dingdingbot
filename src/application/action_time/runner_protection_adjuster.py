@@ -96,14 +96,32 @@ def materialize_ticket_bound_runner_protection_adjustment(
         runner_exchange_id=runner_exchange_id
         or str(existing_runner.get("exchange_order_id") or ""),
     )
-    if runner_exchange_id and not existing_runner:
+    existing_runner_exchange_id = str(existing_runner.get("exchange_order_id") or "")
+    if (
+        existing_runner
+        and runner_exchange_id
+        and runner_exchange_id != existing_runner_exchange_id
+    ):
+        blockers.append("runner_sl_exchange_order_id_mismatch")
+    if existing_runner and str(existing_runner.get("status") or "") in {
+        "submitted",
+        "open",
+        "filled",
+    }:
+        blockers.extend(
+            _runner_mutation_result_blockers(
+                runner_result=runner_result,
+                runner_exchange_id=existing_runner_exchange_id,
+            )
+        )
+    elif runner_exchange_id and not existing_runner:
         blockers.extend(
             _runner_mutation_result_blockers(
                 runner_result=runner_result,
                 runner_exchange_id=runner_exchange_id,
             )
         )
-        blockers = _dedupe(blockers)
+    blockers = _dedupe(blockers)
     classification = classify_runner_protection_adjustment(
         blockers=blockers,
         tp1_waiting=_waiting_for_tp1_fill(blockers),

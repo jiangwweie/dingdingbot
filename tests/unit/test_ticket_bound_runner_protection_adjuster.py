@@ -186,6 +186,27 @@ def test_runner_adjuster_blocks_runner_sl_ref_without_official_mutation_result(
     ] == "runner_mutation_failed"
 
 
+def test_runner_adjuster_blocks_existing_runner_sl_without_official_mutation_result(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    _mark_tp1_filled(pg_control_connection, set_id)
+    _insert_unproven_runner_sl(pg_control_connection, set_id)
+
+    payload = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        runner_sl_exchange_order_id="",
+        now_ms=NOW_MS + 7000,
+    )
+
+    assert payload["status"] == "runner_mutation_failed"
+    assert "runner_mutation_result_missing" in payload["blockers"]
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "runner_mutation_failed"
+
+
 def test_runner_adjuster_is_idempotent_after_runner_sl_exists(pg_control_connection):
     set_id = _materialized_exit_protection_set(pg_control_connection)
     _mark_tp1_filled(pg_control_connection, set_id)
@@ -285,6 +306,58 @@ def _mark_tp1_filled(conn, set_id: str) -> None:
             """
         ),
         {"set_id": set_id, "updated_at_ms": NOW_MS + 6500},
+    )
+
+
+def _insert_unproven_runner_sl(conn, set_id: str) -> None:
+    protection_set = conn.execute(
+        text(
+            """
+            SELECT *
+            FROM brc_ticket_bound_exit_protection_sets
+            WHERE exit_protection_set_id = :set_id
+            """
+        ),
+        {"set_id": set_id},
+    ).mappings().one()
+    sl_order = conn.execute(
+        text(
+            """
+            SELECT *
+            FROM brc_ticket_bound_exit_protection_orders
+            WHERE exit_protection_set_id = :set_id
+              AND role = 'SL'
+            """
+        ),
+        {"set_id": set_id},
+    ).mappings().one()
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_ticket_bound_exit_protection_orders (
+              exit_protection_order_id, exit_protection_set_id, ticket_id, role,
+              local_order_id, exchange_order_id, status, order_type, side, qty,
+              price, trigger_price, reduce_only, replaces_exit_protection_order_id,
+              created_at_ms, updated_at_ms
+            ) VALUES (
+              'unproven-runner-order', :set_id, :ticket_id, 'RUNNER_SL',
+              'unproven-runner-local', 'exchange-runner-unproven', 'submitted',
+              'STOP_MARKET', :side, :qty, NULL, :trigger_price, 1,
+              :replaces_exit_protection_order_id, :now_ms, :now_ms
+            )
+            """
+        ),
+        {
+            "set_id": set_id,
+            "ticket_id": protection_set["ticket_id"],
+            "side": sl_order["side"],
+            "qty": protection_set["runner_qty"],
+            "trigger_price": sl_order["trigger_price"],
+            "replaces_exit_protection_order_id": sl_order[
+                "exit_protection_order_id"
+            ],
+            "now_ms": NOW_MS + 6900,
+        },
     )
 
 
