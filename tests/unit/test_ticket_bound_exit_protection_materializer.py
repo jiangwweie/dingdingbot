@@ -50,6 +50,39 @@ def test_exit_protection_materializes_sl_and_tp1_after_entry_fill(
     assert roles == {"SL", "TP1"}
 
 
+def test_exit_protection_accepts_temporary_tiny_live_submit_mode(
+    pg_control_connection,
+):
+    ids, prepared = _submitted_attempt(
+        pg_control_connection,
+        submit_mode="temp_tiny_live_protected_submit",
+    )
+
+    payload = exit_protection.materialize_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 7000,
+    )
+
+    assert payload["status"] == "position_protected"
+    assert payload["blockers"] == []
+    protection_set = _one(pg_control_connection, "brc_ticket_bound_exit_protection_sets")
+    assert protection_set["status"] == "submitted"
+    assert protection_set["sl_order_id"]
+    assert protection_set["tp1_order_id"]
+    attempt_mode = pg_control_connection.execute(
+        text(
+            """
+            SELECT submit_mode
+            FROM brc_ticket_bound_protected_submit_attempts
+            WHERE protected_submit_attempt_id = :attempt_id
+            """
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).scalar_one()
+    assert attempt_mode == "temp_tiny_live_protected_submit"
+
+
 def test_exit_protection_blocks_before_entry_fill(
     pg_control_connection,
 ):
@@ -154,9 +187,9 @@ def test_exit_protection_blocks_without_tp1(
     assert "tp1_exchange_order_missing" in payload["blockers"]
 
 
-def _submitted_attempt(conn):
+def _submitted_attempt(conn, *, submit_mode: str = "real_gateway_action"):
     ids = _create_ready_protected_submit(conn)
-    prepared = _submitted_attempt_with_orders(conn, ids)
+    prepared = _submitted_attempt_with_orders(conn, ids, submit_mode=submit_mode)
     return ids, prepared
 
 
@@ -164,13 +197,14 @@ def _submitted_attempt_with_orders(
     conn,
     ids: dict[str, str],
     *,
+    submit_mode: str = "real_gateway_action",
     submitted_orders_mutator=None,
 ) -> dict:
     prepared = submit.prepare_ticket_bound_protected_submit_attempt(
         conn,
         ticket_id=ids["ticket_id"],
         operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
+        submit_mode=submit_mode,
         now_ms=NOW_MS + 4000,
     )
     submitted_orders = _submitted_orders(prepared)

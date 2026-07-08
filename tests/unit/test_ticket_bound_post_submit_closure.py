@@ -49,6 +49,40 @@ def test_post_submit_closure_records_reconciliation_pending_after_submitted_atte
     assert len(_json_value(row["submitted_order_refs"])) == 3
 
 
+def test_post_submit_closure_accepts_temporary_tiny_live_submit_mode(
+    pg_control_connection,
+):
+    ids, prepared = _submitted_attempt(
+        pg_control_connection,
+        submit_mode="temp_tiny_live_protected_submit",
+    )
+
+    payload = closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 7000,
+    )
+
+    assert payload["status"] == "reconciliation_pending"
+    assert payload["ticket_id"] == ids["ticket_id"]
+    assert payload["operation_submit_command_id"] == ids["operation_submit_command_id"]
+    assert payload["protection_state"] == "submitted"
+    assert payload["blockers"] == ["post_submit_reconciliation_fact_missing"]
+    row = _closure_row(pg_control_connection)
+    assert row["protected_submit_attempt_id"] == prepared["protected_submit_attempt_id"]
+    attempt_mode = pg_control_connection.execute(
+        text(
+            """
+            SELECT submit_mode
+            FROM brc_ticket_bound_protected_submit_attempts
+            WHERE protected_submit_attempt_id = :attempt_id
+            """
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).scalar_one()
+    assert attempt_mode == "temp_tiny_live_protected_submit"
+
+
 def test_post_submit_closure_blocks_when_attempt_not_submitted(
     pg_control_connection,
 ):
@@ -315,9 +349,15 @@ def _submitted_attempt(
     conn,
     *,
     attempt_offset_ms: int = 0,
+    submit_mode: str = "real_gateway_action",
 ):
     ids = _create_ready_protected_submit(conn)
-    prepared = _record_submitted_attempt(conn, ids, attempt_offset_ms=attempt_offset_ms)
+    prepared = _record_submitted_attempt(
+        conn,
+        ids,
+        attempt_offset_ms=attempt_offset_ms,
+        submit_mode=submit_mode,
+    )
     protection = exit_protection.materialize_ticket_bound_exit_protection_set(
         conn,
         protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
@@ -366,12 +406,13 @@ def _record_submitted_attempt(
     ids: dict[str, str],
     *,
     attempt_offset_ms: int = 0,
+    submit_mode: str = "real_gateway_action",
 ) -> dict:
     prepared = submit.prepare_ticket_bound_protected_submit_attempt(
         conn,
         ticket_id=ids["ticket_id"],
         operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
+        submit_mode=submit_mode,
         now_ms=NOW_MS + 4000 + attempt_offset_ms,
     )
     submit.record_ticket_bound_protected_submit_result(
