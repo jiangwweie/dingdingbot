@@ -52,6 +52,17 @@ RUNTIME_MONITOR_SERVICE_PATH = (
     / "systemd"
     / "brc-runtime-monitor.service"
 )
+TEMP_TINY_LIVE_MARKER_PATHS = (
+    DROPIN_PATH,
+    REPO_ROOT / "scripts" / "runtime_signal_watcher_resume_dispatcher.py",
+    REPO_ROOT / "src" / "application" / "action_time" / "protected_submit_attempt.py",
+    REPO_ROOT / "src" / "application" / "action_time" / "exit_protection_materializer.py",
+    REPO_ROOT / "src" / "application" / "action_time" / "post_submit_closure.py",
+    REPO_ROOT
+    / "migrations"
+    / "versions"
+    / "2026-07-08-094_allow_temporary_tiny_live_protected_submit.py",
+)
 
 def test_signal_watcher_service_observes_action_time_ticket_readiness_without_runtime_pin():
     text = SERVICE_PATH.read_text(encoding="utf-8")
@@ -112,6 +123,17 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     assert "OwnerBoundedExecution" not in text
     assert "withdrawal" not in text
     assert "transfer" not in text
+
+
+def test_temporary_tiny_live_submit_aperture_has_removal_markers():
+    for path in TEMP_TINY_LIVE_MARKER_PATHS:
+        text = path.read_text(encoding="utf-8")
+        assert "temp_tiny_live_protected_submit" in text, path
+        assert (
+            "TEMPORARY(L2-L9-closure)" in text
+            or "TODO(L2-L9-closure)" in text
+            or "temporary" in text.lower()
+        ), path
 
 
 def test_signal_watcher_timer_does_not_persistent_catch_up():
