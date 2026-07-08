@@ -170,6 +170,118 @@ async def test_runner_mutation_executor_non_prepared_command_does_not_call_excha
     assert gateway.place_calls == []
 
 
+@pytest.mark.asyncio
+async def test_runner_mutation_executor_blocks_stale_closed_lifecycle_without_exchange(
+    pg_control_connection,
+):
+    prepared = _prepared_command(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_ticket_bound_order_lifecycle_runs
+            SET status = 'lifecycle_closed', updated_at_ms = :updated_at_ms
+            """
+        ),
+        {"updated_at_ms": NOW_MS + 7500},
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_ticket_bound_exit_protection_sets
+            SET status = 'closed', updated_at_ms = :updated_at_ms
+            """
+        ),
+        {"updated_at_ms": NOW_MS + 7500},
+    )
+    gateway = _FakeRunnerMutationGateway()
+
+    payload = await execute_ticket_bound_runner_mutation_command(
+        pg_control_connection,
+        runner_mutation_command_id=prepared["runner_mutation_command_id"],
+        gateway=gateway,
+        now_ms=NOW_MS + 8000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert gateway.cancel_calls == []
+    assert gateway.place_calls == []
+    assert "runner_mutation_stale_lifecycle_status:lifecycle_closed" in payload["blockers"]
+    assert "runner_mutation_stale_protection_set_status:closed" in payload["blockers"]
+    assert _command_status(pg_control_connection) == "failed"
+    assert _lifecycle_status(pg_control_connection) == "lifecycle_closed"
+    assert _protection_set_status(pg_control_connection) == "closed"
+
+
+@pytest.mark.asyncio
+async def test_runner_mutation_executor_blocks_when_runner_sl_already_exists(
+    pg_control_connection,
+):
+    prepared = _prepared_command(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_ticket_bound_exit_protection_orders (
+                exit_protection_order_id,
+                exit_protection_set_id,
+                ticket_id,
+                role,
+                local_order_id,
+                exchange_order_id,
+                status,
+                order_type,
+                side,
+                qty,
+                price,
+                trigger_price,
+                reduce_only,
+                replaces_exit_protection_order_id,
+                created_at_ms,
+                updated_at_ms
+            )
+            VALUES (
+                'runner-order-existing',
+                :set_id,
+                :ticket_id,
+                'RUNNER_SL',
+                'runner-local-existing',
+                'runner-exchange-existing',
+                'submitted',
+                'STOP_MARKET',
+                'sell',
+                '0.5',
+                NULL,
+                '100.0',
+                1,
+                :old_sl_order_id,
+                :created_at_ms,
+                :updated_at_ms
+            )
+            """
+        ),
+        {
+            "set_id": prepared["command"]["exit_protection_set_id"],
+            "ticket_id": prepared["command"]["ticket_id"],
+            "old_sl_order_id": prepared["command"]["old_sl_order_id"],
+            "created_at_ms": NOW_MS + 7500,
+            "updated_at_ms": NOW_MS + 7500,
+        },
+    )
+    gateway = _FakeRunnerMutationGateway()
+
+    payload = await execute_ticket_bound_runner_mutation_command(
+        pg_control_connection,
+        runner_mutation_command_id=prepared["runner_mutation_command_id"],
+        gateway=gateway,
+        now_ms=NOW_MS + 8000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert payload["blockers"] == ["runner_mutation_stale_runner_sl_already_present"]
+    assert gateway.cancel_calls == []
+    assert gateway.place_calls == []
+    assert _command_status(pg_control_connection) == "failed"
+
+
 def _prepared_command(conn) -> dict:
     set_id = _materialized_exit_protection_set(conn)
     _mark_tp1_filled(conn, set_id)

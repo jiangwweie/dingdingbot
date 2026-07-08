@@ -159,6 +159,29 @@ async def execute_ticket_bound_protection_recovery_command(
             blockers=[f"protection_recovery_command_not_prepared:{status or 'missing'}"],
             next_action="repair_protection_recovery_command_status",
         )
+    stale_blockers = _pre_execution_state_blockers(conn, command=command)
+    if stale_blockers:
+        result_payload = _result_payload(
+            command=command,
+            submitted_orders=[],
+            blockers=stale_blockers,
+            exchange_write_called=False,
+            extra={"status": "protection_recovery_pre_execution_blocked"},
+        )
+        updated = _mark_command_failed_only(
+            conn,
+            command=command,
+            blockers=stale_blockers,
+            result_payload=result_payload,
+            now_ms=now_ms,
+        )
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            command=updated,
+            blockers=stale_blockers,
+            next_action="repair_or_reprepare_protection_recovery_command",
+        )
     command_plan = _as_dict(command.get("command_plan"))
     missing_orders = [
         dict(order)
@@ -358,6 +381,52 @@ def _prepare_blockers(
     return _dedupe(blockers)
 
 
+def _pre_execution_state_blockers(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    attempt = _row_by_id(
+        conn,
+        "brc_ticket_bound_protected_submit_attempts",
+        "protected_submit_attempt_id",
+        str(command.get("protected_submit_attempt_id") or ""),
+    )
+    lifecycle = _row_by_id(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "lifecycle_run_id",
+        str(command.get("lifecycle_run_id") or ""),
+    )
+    if not attempt:
+        blockers.append("protection_recovery_stale_attempt_missing")
+    if not lifecycle:
+        blockers.append("protection_recovery_stale_lifecycle_missing")
+    if blockers:
+        return blockers
+    if str(lifecycle.get("status") or "") not in {
+        "protection_missing",
+        "protection_submit_failed",
+    }:
+        blockers.append(
+            "protection_recovery_stale_lifecycle_status:"
+            f"{lifecycle.get('status') or 'missing'}"
+        )
+    if lifecycle.get("entry_fill_confirmed") not in {True, 1}:
+        blockers.append("protection_recovery_stale_entry_fill_not_confirmed")
+    if str(attempt.get("submit_mode") or "") != "real_gateway_action":
+        blockers.append(f"protection_recovery_stale_attempt_mode:{attempt.get('submit_mode')}")
+    if attempt.get("exchange_write_called") is not True:
+        blockers.append("protection_recovery_stale_attempt_exchange_write_not_called")
+    current_missing = _missing_protection_orders(attempt)
+    if not current_missing:
+        blockers.append("protection_recovery_stale_missing_protection_orders_not_found")
+    elif _missing_order_roles(current_missing) != _command_missing_order_roles(command):
+        blockers.append("protection_recovery_stale_missing_order_scope_changed")
+    return _dedupe(blockers)
+
+
 def _missing_protection_orders(attempt: dict[str, Any]) -> list[dict[str, Any]]:
     submit_request = _as_dict(attempt.get("submit_request"))
     submit_result = _as_dict(attempt.get("submit_result"))
@@ -384,6 +453,25 @@ def _missing_protection_orders(attempt: dict[str, Any]) -> list[dict[str, Any]]:
         if request:
             missing.append(dict(request))
     return missing
+
+
+def _missing_order_roles(orders: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(order.get("order_role") or "").upper()
+        for order in orders
+        if str(order.get("order_role") or "")
+    }
+
+
+def _command_missing_order_roles(command: dict[str, Any]) -> set[str]:
+    command_plan = _as_dict(command.get("command_plan"))
+    return _missing_order_roles(
+        [
+            dict(order)
+            for order in command_plan.get("submit_missing_orders", [])
+            if isinstance(order, dict)
+        ]
+    )
 
 
 def _missing_order_blockers(missing_orders: list[dict[str, Any]]) -> list[str]:
@@ -475,6 +563,31 @@ def _record_result(
             result_payload=result_payload,
             now_ms=now_ms,
         )
+    return updated
+
+
+def _mark_command_failed_only(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+    blockers: list[str],
+    result_payload: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    updated = {
+        **command,
+        "status": "failed",
+        "first_blocker": blockers[0] if blockers else "protection_recovery_failed",
+        "blockers": blockers,
+        "result_payload": result_payload,
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_protection_recovery_commands",
+        "protection_recovery_command_id",
+        updated,
+    )
     return updated
 
 

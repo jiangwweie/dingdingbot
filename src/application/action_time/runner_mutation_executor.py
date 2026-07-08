@@ -81,6 +81,33 @@ async def execute_ticket_bound_runner_mutation_command(
             next_action="repair_runner_mutation_command_status",
         )
 
+    stale_blockers = _pre_execution_state_blockers(conn, command=command)
+    if stale_blockers:
+        result_payload = _base_result_payload(
+            command=command,
+            old_sl_cancelled=False,
+            runner_sl_submitted=False,
+            runner_sl_exchange_order_id="",
+            blockers=stale_blockers,
+            exchange_write_called=False,
+            extra={"status": "runner_mutation_pre_execution_blocked"},
+        )
+        updated = _mark_command_failed(
+            conn,
+            command=command,
+            blockers=stale_blockers,
+            result_payload=result_payload,
+            now_ms=now_ms,
+        )
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            command=updated,
+            result_payload=result_payload,
+            blockers=stale_blockers,
+            next_action="repair_or_reprepare_runner_mutation_command",
+        )
+
     command_plan = _as_dict(command.get("command_plan"))
     blockers = _command_plan_blockers(command=command, command_plan=command_plan)
     if blockers:
@@ -272,6 +299,109 @@ async def execute_ticket_bound_runner_mutation_command(
     )
 
 
+def _pre_execution_state_blockers(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    set_id = str(command.get("exit_protection_set_id") or "")
+    protection_set = _row_by_id(
+        conn,
+        "brc_ticket_bound_exit_protection_sets",
+        "exit_protection_set_id",
+        set_id,
+    )
+    lifecycle = _row_by_id(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "ticket_id",
+        str(command.get("ticket_id") or ""),
+    )
+    orders = _orders_for_set(conn, set_id)
+    sl_order = _role_order(orders, "SL")
+    tp1_order = _role_order(orders, "TP1")
+    runner_order = _role_order(orders, "RUNNER_SL")
+
+    if not protection_set:
+        blockers.append("runner_mutation_stale_exit_protection_set_missing")
+    else:
+        if protection_set.get("protection_complete") is not True:
+            blockers.append("runner_mutation_stale_exit_protection_set_not_complete")
+        if str(protection_set.get("status") or "") not in {
+            "submitted",
+            "reconciled",
+            "runner_mutation_pending",
+        }:
+            blockers.append(
+                "runner_mutation_stale_protection_set_status:"
+                f"{protection_set.get('status') or 'missing'}"
+            )
+    if not lifecycle:
+        blockers.append("runner_mutation_stale_lifecycle_missing")
+    elif str(lifecycle.get("status") or "") != "runner_mutation_pending":
+        blockers.append(
+            "runner_mutation_stale_lifecycle_status:"
+            f"{lifecycle.get('status') or 'missing'}"
+        )
+    if not sl_order:
+        blockers.append("runner_mutation_stale_old_sl_missing")
+    else:
+        if str(sl_order.get("exchange_order_id") or "") != str(
+            command.get("old_sl_exchange_order_id") or ""
+        ):
+            blockers.append("runner_mutation_stale_old_sl_exchange_id_mismatch")
+        if str(sl_order.get("status") or "").lower() not in {
+            "submitted",
+            "open",
+            "partially_filled",
+        }:
+            blockers.append(
+                "runner_mutation_stale_old_sl_status:"
+                f"{sl_order.get('status') or 'missing'}"
+            )
+    if not tp1_order:
+        blockers.append("runner_mutation_stale_tp1_missing")
+    else:
+        if str(tp1_order.get("exchange_order_id") or "") != str(
+            command.get("tp1_exchange_order_id") or ""
+        ):
+            blockers.append("runner_mutation_stale_tp1_exchange_id_mismatch")
+        if str(tp1_order.get("status") or "").lower() != "filled":
+            blockers.append(
+                "runner_mutation_stale_tp1_status:"
+                f"{tp1_order.get('status') or 'missing'}"
+            )
+    if runner_order:
+        blockers.append("runner_mutation_stale_runner_sl_already_present")
+    return _dedupe(blockers)
+
+
+def _mark_command_failed(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+    blockers: list[str],
+    result_payload: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    updated = {
+        **command,
+        "status": "failed",
+        "first_blocker": blockers[0] if blockers else "runner_mutation_failed",
+        "blockers": blockers,
+        "result_payload": result_payload,
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_runner_mutation_commands",
+        "runner_mutation_command_id",
+        updated,
+    )
+    return updated
+
+
 def _command_plan_blockers(
     *,
     command: dict[str, Any],
@@ -358,6 +488,31 @@ def _exchange_order_id(result: Any) -> str:
     return str(getattr(result, "exchange_order_id", None) or "").strip()
 
 
+def _orders_for_set(
+    conn: sa.engine.Connection,
+    exit_protection_set_id: str,
+) -> list[dict[str, Any]]:
+    if not exit_protection_set_id:
+        return []
+    table = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    return [
+        dict(row)
+        for row in conn.execute(
+            sa.select(table).where(
+                table.c.exit_protection_set_id == exit_protection_set_id
+            )
+        ).mappings()
+    ]
+
+
+def _role_order(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
+    expected = role.upper()
+    for order in orders:
+        if str(order.get("role") or "").upper() == expected:
+            return dict(order)
+    return {}
+
+
 def _runner_client_order_id(command_id: str) -> str:
     return f"{command_id}:runner-sl"
 
@@ -377,6 +532,29 @@ def _row_by_id(
 
 def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:
     return sa.Table(table_name, sa.MetaData(), autoload_with=conn)
+
+
+def _upsert_row(
+    conn: sa.engine.Connection,
+    table_name: str,
+    id_column: str,
+    row: dict[str, Any],
+) -> None:
+    table = _table(conn, table_name)
+    values = {
+        column.name: row.get(column.name)
+        for column in table.columns
+        if column.name in row
+    }
+    existing = conn.execute(
+        sa.select(table.c[id_column]).where(table.c[id_column] == values[id_column])
+    ).first()
+    if existing:
+        conn.execute(
+            table.update().where(table.c[id_column] == values[id_column]).values(**values)
+        )
+    else:
+        conn.execute(table.insert().values(**values))
 
 
 def _result(
