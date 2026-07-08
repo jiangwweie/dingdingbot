@@ -78,7 +78,7 @@ core:
 | --- | --- | --- |
 | Full-chain simulation | `full_chain_simulation_harness` runs constructed PG input through signal, lane, ticket, safety, protected submit, protection, runner command, runner proof, final closure | It uses mock exchange result and does not grant live exchange authority |
 | Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed`; `protection_recovery_command` prepares and executes missing SL/TP1 recovery locally through an injected gateway | Production scheduling/API wiring remains behind explicit Owner deploy approval |
-| Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers; linked SL/TP1 must match exchange existence, reduce-only flag, side, and bounded qty | It consumes already-fetched facts and does not call exchange APIs |
+| Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers; linked SL/TP1/RUNNER_SL must match exchange existence, reduce-only flag, side, and bounded qty | It consumes already-fetched facts and does not call exchange APIs |
 | Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for old SL cancel / RUNNER_SL submit | Command rows are intent/result records, not proof of runner protection |
 | Runner mutation executor | `runner_mutation_executor` consumes a prepared PG command, calls injected gateway cancel/place, and records the PG result | Executor is mockable locally and still cannot call FinalGate, change profile/sizing, or use file authority |
 | Ops health | Tokyo ops health reads exact lifecycle attention states and runner commands without runner proof | It remains readonly and non-mutating |
@@ -208,6 +208,8 @@ read-only service results, not repo/output/report files.
 | Open SL qty exceeds current remaining position beyond step tolerance | `protection_reconciliation_mismatch` |
 | TP1 filled and old full-size SL still open | `runner_mutation_pending` or `runner_reconciliation_mismatch` |
 | TP1 filled and RUNNER_SL missing | `runner_mutation_pending` |
+| RUNNER_SL exists but old full-size SL remains open | `runner_reconciliation_mismatch` |
+| RUNNER_SL exists and old SL is gone | `runner_protected` |
 | Position flat and protection still open | `position_closed_protection_live` |
 | Position open and no valid SL exists | `protection_missing` |
 

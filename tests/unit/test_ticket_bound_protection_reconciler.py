@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
+from scripts import materialize_ticket_bound_runner_protection_adjustment as runner_adjuster
 from src.application.action_time.protection_reconciler import (
     reconcile_ticket_bound_exit_protection_set,
 )
@@ -143,6 +144,54 @@ def test_protection_reconciler_flags_tp1_fill_without_runner_sl(pg_control_conne
     assert _lifecycle_status(pg_control_connection) == "runner_mutation_pending"
 
 
+def test_protection_reconciler_accepts_runner_sl_after_old_sl_cancelled(
+    pg_control_connection,
+):
+    set_id = _materialized_runner_protection(pg_control_connection)
+    snapshot = _snapshot(pg_control_connection, set_id, omit_roles={"SL", "TP1"})
+    snapshot["recent_fills"] = [{"exchange_order_id": "exchange-tp1-1"}]
+    snapshot["position"]["qty"] = "0.25"
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "runner_protected"
+    assert payload["blockers"] == []
+    assert _lifecycle_status(pg_control_connection) == "runner_protected"
+    protection_set = _one(
+        pg_control_connection,
+        "brc_ticket_bound_exit_protection_sets",
+        "exit_protection_set_id",
+        set_id,
+    )
+    assert protection_set["status"] == "runner_protected"
+    assert protection_set["reconciled_with_exchange"] in {True, 1}
+
+
+def test_protection_reconciler_flags_old_sl_still_live_after_runner_mutation(
+    pg_control_connection,
+):
+    set_id = _materialized_runner_protection(pg_control_connection)
+    snapshot = _snapshot(pg_control_connection, set_id, omit_roles={"TP1"})
+    snapshot["recent_fills"] = [{"exchange_order_id": "exchange-tp1-1"}]
+    snapshot["position"]["qty"] = "0.25"
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "runner_reconciliation_mismatch"
+    assert "old_sl_still_live_after_runner_mutation" in payload["blockers"]
+    assert _lifecycle_status(pg_control_connection) == "runner_reconciliation_mismatch"
+
+
 def test_protection_reconciler_flags_flat_position_with_live_protection(
     pg_control_connection,
 ):
@@ -160,6 +209,20 @@ def test_protection_reconciler_flags_flat_position_with_live_protection(
     assert payload["status"] == "position_closed_protection_live"
     assert "position_flat_with_live_protection_orders" in payload["blockers"]
     assert _lifecycle_status(pg_control_connection) == "position_closed_protection_live"
+
+
+def _materialized_runner_protection(conn) -> str:
+    set_id = _materialized_exit_protection_set(conn)
+    _mark_tp1_filled(conn, set_id)
+    payload = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
+        conn,
+        exit_protection_set_id=set_id,
+        runner_sl_exchange_order_id="exchange-runner-sl-1",
+        runner_sl_local_order_id="runner-sl-1",
+        now_ms=NOW_MS + 8000,
+    )
+    assert payload["status"] == "runner_protected"
+    return set_id
 
 
 def _snapshot(conn, set_id: str, *, omit_roles: set[str] | None = None) -> dict:

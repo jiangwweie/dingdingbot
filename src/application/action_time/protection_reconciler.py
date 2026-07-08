@@ -88,9 +88,10 @@ def reconcile_ticket_bound_exit_protection_set(
         str(tp1_order.get("status") or "").lower() == "filled"
         or _exchange_order_filled(tp1_order, recent_fills)
     )
+    active_sl_order = runner_order if runner_order else sl_order
     classification = classify_protection_reconciliation(
         position_qty=position.get("qty") or position.get("position_qty"),
-        has_valid_sl=_has_valid_exchange_protection(sl_order, open_orders),
+        has_valid_sl=_has_valid_exchange_protection(active_sl_order, open_orders),
         has_valid_tp1=tp1_filled or _has_valid_exchange_protection(tp1_order, open_orders),
         has_runner_sl=_has_valid_exchange_protection(runner_order, open_orders),
         tp1_filled=tp1_filled,
@@ -104,14 +105,20 @@ def reconcile_ticket_bound_exit_protection_set(
         recent_fills=recent_fills,
         position=position,
         tp1_filled=tp1_filled,
+        active_sl_order=active_sl_order,
+        old_sl_order=sl_order,
+        runner_order=runner_order,
         classification_blockers=list(classification.blockers),
     )
     if blockers != list(classification.blockers):
         classification = classify_protection_reconciliation(
             position_qty=position.get("qty") or position.get("position_qty"),
             has_valid_sl=False
-            if "sl_exchange_order_missing" in blockers
-            else _has_valid_exchange_protection(sl_order, open_orders),
+            if any(
+                blocker in blockers
+                for blocker in ("sl_exchange_order_missing", "runner_sl_exchange_order_missing")
+            )
+            else _has_valid_exchange_protection(active_sl_order, open_orders),
             has_valid_tp1=False
             if "tp1_exchange_order_missing" in blockers
             else tp1_filled or _has_valid_exchange_protection(tp1_order, open_orders),
@@ -127,8 +134,15 @@ def reconcile_ticket_bound_exit_protection_set(
     if any(blocker == "exchange_protection_order_not_linked_to_pg" for blocker in blockers):
         status = "tp1_or_sl_orphaned"
         next_action = "prove_or_cancel_orphan_protection_order"
+    elif "old_sl_still_live_after_runner_mutation" in blockers:
+        status = "runner_reconciliation_mismatch"
+        next_action = "cancel_old_sl_or_reconcile_runner_protection"
     elif any(blocker.endswith("_exchange_order_missing") for blocker in blockers):
-        status = "protection_reconciliation_mismatch"
+        status = (
+            "runner_reconciliation_mismatch"
+            if any(blocker.startswith("runner_sl_") for blocker in blockers)
+            else "protection_reconciliation_mismatch"
+        )
         next_action = "run_exchange_protection_reconciler"
     elif any(
         blocker.endswith("_side_mismatch")
@@ -136,15 +150,21 @@ def reconcile_ticket_bound_exit_protection_set(
         or blocker.endswith("_qty_exceeds_position")
         for blocker in blockers
     ):
-        status = "protection_reconciliation_mismatch"
+        status = (
+            "runner_reconciliation_mismatch"
+            if any(blocker.startswith("runner_sl_") for blocker in blockers)
+            else "protection_reconciliation_mismatch"
+        )
         next_action = "run_exchange_protection_reconciler"
     if blockers and status == "position_protected":
         status = "protection_reconciliation_mismatch"
         next_action = "run_exchange_protection_reconciler"
+    success_status = "runner_protected" if runner_order else "position_protected"
+    success_set_status = "runner_protected" if runner_order else "reconciled"
     first_blocker = blockers[0] if blockers else None
     protection_update = {
         **protection_set,
-        "status": "reconciled" if not blockers else status,
+        "status": success_set_status if not blockers else status,
         "reconciled_with_exchange": not blockers,
         "first_blocker": first_blocker,
         "blockers": blockers,
@@ -152,7 +172,7 @@ def reconcile_ticket_bound_exit_protection_set(
     }
     lifecycle_update = {
         **lifecycle,
-        "status": "position_protected" if not blockers else status,
+        "status": success_status if not blockers else status,
         "first_blocker": first_blocker,
         "blockers": blockers,
         "updated_at_ms": now_ms,
@@ -184,7 +204,7 @@ def reconcile_ticket_bound_exit_protection_set(
             now_ms=now_ms,
         )
     return _result(
-        "reconciled" if not blockers else status,
+        success_set_status if not blockers else status,
         now_ms=now_ms,
         blockers=blockers,
         protection_set=protection_update,
@@ -200,6 +220,9 @@ def _additional_blockers(
     recent_fills: list[dict[str, Any]],
     position: dict[str, Any],
     tp1_filled: bool,
+    active_sl_order: dict[str, Any],
+    old_sl_order: dict[str, Any],
+    runner_order: dict[str, Any],
     classification_blockers: list[str],
 ) -> list[str]:
     blockers = list(classification_blockers)
@@ -208,27 +231,29 @@ def _additional_blockers(
         for order in orders
         if order.get("exchange_order_id")
     }
-    for role in ("SL", "TP1"):
-        pg_order = _role_order(orders, role)
+    for role, pg_order in (("SL", active_sl_order), ("TP1", _role_order(orders, "TP1"))):
+        label = "runner_sl" if role == "SL" and pg_order == runner_order else role.lower()
         if role == "TP1" and _exchange_order_filled(pg_order, recent_fills):
             continue
         if not pg_order:
             continue
         exchange_order = _exchange_order_by_id(open_orders, pg_order)
         if not exchange_order:
-            blockers.append(f"{role.lower()}_exchange_order_missing")
+            blockers.append(f"{label}_exchange_order_missing")
             continue
         if exchange_order.get("reduce_only") is not True:
-            blockers.append(f"{role.lower()}_reduce_only_missing")
+            blockers.append(f"{label}_reduce_only_missing")
         if not _exchange_order_side_matches_pg(exchange_order, pg_order):
-            blockers.append(f"{role.lower()}_side_mismatch")
+            blockers.append(f"{label}_side_mismatch")
         if _exchange_order_qty_exceeds_position(
             exchange_order,
             position=position,
             role=role,
             tp1_filled=tp1_filled,
         ):
-            blockers.append(f"{role.lower()}_qty_exceeds_position")
+            blockers.append(f"{label}_qty_exceeds_position")
+    if runner_order and _exchange_order_by_id(open_orders, old_sl_order):
+        blockers.append("old_sl_still_live_after_runner_mutation")
     for exchange_order in open_orders:
         exchange_order_id = str(exchange_order.get("exchange_order_id") or "")
         if exchange_order.get("reduce_only") is True and exchange_order_id:
