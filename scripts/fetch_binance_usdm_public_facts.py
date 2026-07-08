@@ -40,6 +40,9 @@ from pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E4
 SCHEMA = "brc.binance_usdm_public_facts.v1"
 BASE_URL = "https://fapi.binance.com"
 DEFAULT_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT")
+STATUS_READY = "binance_usdm_public_facts_ready"
+STATUS_PARTIAL = "binance_usdm_public_facts_partial"
+STATUS_UNAVAILABLE = "binance_usdm_public_facts_unavailable"
 PUBLIC_FACT_KEYS = (
     "exchange_contract_exists",
     "mark_price_fresh",
@@ -139,12 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return (
-        0
-        if artifact["status"]
-        == "binance_usdm_public_facts_ready"
-        else 2
-    )
+    return _exit_code_for_status(str(artifact["status"]))
 
 
 def build_public_facts(
@@ -167,10 +165,10 @@ def build_public_facts(
     for symbol in symbols:
         rows.append(_symbol_row(symbol, symbol_rows.get(symbol, {}), errors, generated_dt))
     ready_count = sum(row["public_facts_ready"] is True for row in rows)
-    status = (
-        "binance_usdm_public_facts_ready"
-        if ready_count == len(symbols) and not errors
-        else "binance_usdm_public_facts_unavailable"
+    status = _artifact_status(
+        ready_count=ready_count,
+        symbol_count=len(symbols),
+        errors=errors,
     )
     return {
         "schema": SCHEMA,
@@ -391,7 +389,7 @@ def _unavailable_artifact(symbols: list[str], error: str) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
         "scope": "binance_usdm_public_readonly_facts",
-        "status": "binance_usdm_public_facts_unavailable",
+        "status": STATUS_UNAVAILABLE,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": {
             "venue": "binance_usdm",
@@ -454,10 +452,10 @@ def _build_from_prefetched(symbols: list[str], raw: dict[str, Any]) -> dict[str,
     return {
         "schema": SCHEMA,
         "scope": "binance_usdm_public_readonly_facts",
-        "status": (
-            "binance_usdm_public_facts_ready"
-            if ready_count == len(symbols)
-            else "binance_usdm_public_facts_unavailable"
+        "status": _artifact_status(
+            ready_count=ready_count,
+            symbol_count=len(symbols),
+            errors=errors,
         ),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "source": {
@@ -569,6 +567,25 @@ def _symbol_row_from_payload(
             "contract_type": exchange_symbol.get("contractType"),
         },
     }
+
+
+def _artifact_status(
+    *,
+    ready_count: int,
+    symbol_count: int,
+    errors: list[str],
+) -> str:
+    if errors or symbol_count <= 0 or ready_count <= 0:
+        return STATUS_UNAVAILABLE
+    if ready_count == symbol_count:
+        return STATUS_READY
+    return STATUS_PARTIAL
+
+
+def _exit_code_for_status(status: str) -> int:
+    # Partial means the public source is reachable and PG has per-symbol
+    # fail-closed facts. It must not stop the whole watcher tick.
+    return 0 if status in {STATUS_READY, STATUS_PARTIAL} else 2
 
 
 def _fetch_json(path: str, errors: list[str]) -> dict[str, Any]:
