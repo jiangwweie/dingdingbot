@@ -111,7 +111,8 @@ idempotent client order id
 | **Audit complete** | `docs/current/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
 | **Gateway readiness method gap closed** | Runtime gateway readiness now requires lifecycle methods, not only `place_order` |
 | **Recent fills wrapper added** | `ExchangeGateway.fetch_my_trades` is available as a read-only capability |
-| **Remaining first blocker** | `orphan_protection_cleanup_command_not_first_class` |
+| **Remaining first blocker** | `full_chain_failure_matrix_not_complete` after local orphan protection cleanup command implementation |
+| **Orphan protection cleanup command** | Implemented locally on the P0-1 branch through migration `098`, `orphan_protection_cleanup_command`, and focused tests; deploy remains Owner-approved |
 
 ### P0-1 Ticket-Bound Lifecycle Safety Core
 

@@ -40,9 +40,10 @@ review plan.
 | **OrderLifecycleService** | Existing callbacks can react to entry/exit fills | Callback capability is not the ticket-bound mainline owner |
 | **Runner protection adjuster** | `TicketBoundRunnerProtectionAdjuster` materializes PG proof after TP1 fill and a replacement runner SL ref | It records proof only after a runner SL exchange ref exists |
 | **Runner mutation executor** | `TicketBoundRunnerMutationExecutor` consumes a prepared PG command, cancels the old full-size SL through an injected gateway, submits RUNNER_SL, and records the PG result | It cannot call FinalGate, change profile/sizing, or use repo files as authority |
+| **Orphan protection cleanup command** | Local branch adds `brc_ticket_bound_orphan_protection_cleanup_commands` and `orphan_protection_cleanup_command` for flat-position live-protection cleanup | It cancels only PG-linked reduce-only protection refs after `position_closed_protection_live`; exchange-only unknown orders remain blocked |
 | **Lifecycle closure materializer** | `materialize_ticket_bound_lifecycle_closure` closes PG lifecycle after final exit, reconciliation, settlement, and review proofs | It requires proof IDs and flat-position confirmation; it summarizes closure and does not discover exchange truth by itself |
 | **ExchangeGateway** | Existing gateway can place and cancel orders | The runner proof layer must not become a second exchange mutation path |
-| **Deploy status** | Lifecycle-safety-core repair is deployed on Tokyo at `4f813a16e32930fefb67590283d041b1fead207f` with PG `alembic=097` | Deployment proves code/migration acceptance, not a live market outcome |
+| **Deploy status** | Lifecycle-safety-core repair is deployed on Tokyo at `4f813a16e32930fefb67590283d041b1fead207f` with PG `alembic=097`; orphan cleanup command is local branch work with migration `098` | Deployment proves code/migration acceptance, not a live market outcome |
 | **Impact test** | Active scopes reach mock submitted -> exit protection set -> runner/final closure coverage | Test proves entry-fill + SL/TP1 protection set materialization; focused tests prove runner SL and final closure materialization |
 
 ### Known P0 / P1 Gaps
@@ -56,6 +57,7 @@ review plan.
 | **P0** | TP1 fill -> official SL cancel/replace and RUNNER_SL submit is not one closed ticket-bound mutation path | Code-covered and deployed by `runner_mutation_command` and `runner_mutation_executor`; next acceptance is real-signal/live-ticket observation |
 | **P0** | Exchange truth is not yet the current authority for protection completeness | Code-covered and deployed by `protection_reconciler` over caller-provided exchange snapshots; next acceptance is official exchange snapshot wiring/capability audit |
 | **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Code-covered and deployed by exact lifecycle classification plus `protection_recovery_command`; next acceptance is official scheduling/API path audit |
+| **P1** | Flat position with PG-linked live protection had no first-class cleanup command | Closed locally by migration `098` and `orphan_protection_cleanup_command`; deploy remains Owner-approved |
 | **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Closed in code by the Lifecycle Safety Core materializers, full-chain harness, recovery commands, protection reconciler, runner mutation executor, and final closure; live outcome proof waits for a future real ticket |
 | **P1** | Action-time TTL behavior across the full post-submit chain | Closed locally: expired tickets still block new submit attempts, while already-submitted ticket-bound lifecycles can continue protection, runner, and final closure |
 

@@ -51,6 +51,10 @@ PROTECTION_RECOVERY_COMMAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-08-096_create_ticket_bound_protection_recovery_commands.py"
 )
+ORPHAN_PROTECTION_CLEANUP_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-098_create_ticket_bound_orphan_protection_cleanup_commands.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -128,6 +132,20 @@ def pg_control_connection():
                                 protection_recovery_command_migration.op = migration.op
                                 try:
                                     protection_recovery_command_migration.upgrade()
+                                    orphan_cleanup_command_migration = _load_module(
+                                        ORPHAN_PROTECTION_CLEANUP_COMMAND_MIGRATION_PATH,
+                                        "migration_098_runtime_safety",
+                                    )
+                                    old_orphan_cleanup_op = (
+                                        orphan_cleanup_command_migration.op
+                                    )
+                                    orphan_cleanup_command_migration.op = migration.op
+                                    try:
+                                        orphan_cleanup_command_migration.upgrade()
+                                    finally:
+                                        orphan_cleanup_command_migration.op = (
+                                            old_orphan_cleanup_op
+                                        )
                                 finally:
                                     protection_recovery_command_migration.op = (
                                         old_protection_recovery_op

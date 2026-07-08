@@ -251,7 +251,8 @@ Current result:
 | **Audit completed** | `docs/current/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
 | **Submit/cancel/read/fill capabilities mapped** | Capability matrix covers ENTRY, SL, TP1, RUNNER_SL, cancel old SL, open orders, order query, positions, account, recent fills, and client order id |
 | **Gateway readiness method set widened** | Runtime exchange gateway readiness now requires lifecycle methods |
-| **Remaining first blocker** | `orphan_protection_cleanup_command_not_first_class` |
+| **Remaining first blocker** | `full_chain_failure_matrix_not_complete` after local orphan protection cleanup command implementation |
+| **Orphan protection cleanup command** | Implemented locally by `brc_ticket_bound_orphan_protection_cleanup_commands` and `orphan_protection_cleanup_command`; it cancels only linked ticket-bound reduce-only protection refs after `position_closed_protection_live` |
 
 Required capability map:
 
@@ -465,7 +466,7 @@ symbol: active candidate scope
 stage: lifecycle_safety_core_deployed_and_waiting_for_real_signal
 first_blocker: no_recent_fresh_signal_for_real_lifecycle_acceptance
 evidence: Tokyo release head 4f813a16, PG alembic 097, postdeploy acceptance passed, lifecycle safety core repair deployed, and latest server health showed no recent signal/promotion/lane/ticket/attempt
-next_action: implement orphan protection cleanup command design or proceed to P0-1 invariant hardening with this blocker explicitly tracked; strengthen harness around two golden paths plus failure matrix while watcher/monitor continue readonly observation
+next_action: review and merge the orphan protection cleanup command branch, then strengthen harness around two golden paths plus failure matrix while watcher/monitor continue readonly observation
 stop_condition: one future real ticket proves entry, protection, TP1, runner, final exit, reconciliation, settlement, and live outcome, or stops at one exact lifecycle hard blocker
 owner_action_required: no for current observation; yes before future deployment or authority expansion
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound path

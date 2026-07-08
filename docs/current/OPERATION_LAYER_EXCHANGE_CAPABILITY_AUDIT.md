@@ -61,7 +61,8 @@ decisions from repo/output/report files.
 | **watch order updates** | Supported by `gateway.watch_orders` | Runtime order watch / global callback | symbol, exchange order id | recovery marker via pending recovery orders |
 | **clientOrderId idempotency** | Partially supported | `ExchangeGateway._build_ccxt_order_params` sends `clientOrderId`; submit request uses stable local order ids | local order id / client order id | duplicate guard depends on PG submit attempt and exchange lookup |
 | **modify/amend order** | Not implemented as direct amend | Current runner mutation uses cancel + new | old SL ref, RUNNER_SL request | unsupported direct amend must use cancel+new or fail closed |
-| **orphan protection cancel** | Not implemented as a generic automated command | Reconciler can detect orphan/flat-live-protection; cancellation command remains future controlled operation | orphan identity proof | `tp1_or_sl_orphaned`, `position_closed_protection_live` |
+| **linked orphan protection cancel** | Implemented locally as ticket-bound cleanup command | Reconciler detects flat-live-protection; cleanup command cancels only PG-linked reduce-only protection refs | `ticket_id`, `exit_protection_set_id`, linked protection order refs | `position_closed_protection_live`, cleanup failure blocker |
+| **exchange-only unknown orphan cancel** | Not implemented | Exchange-only unknown orders require stronger identity proof and remain blocked | explicit orphan identity proof | `tp1_or_sl_orphaned` |
 
 ## Official Entry Point Map
 
@@ -121,7 +122,8 @@ decisions from repo/output/report files.
 | Gap | Severity | Impact | Next action |
 | --- | --- | --- | --- |
 | **No direct amend/modify order capability** | P1 | Runner mutation must use cancel+new; old SL cancelled before RUNNER_SL failure can create temporary unprotected state | Keep cancel+new failure mapping; consider exchange-specific amend only after official capability proof |
-| **Orphan protection cancel is detected but not a first-class official cleanup command** | P1 | Flat position can retain live reduce-only orders until manual or future command cleanup | Add explicit ticket/orphan-bound cleanup command after reconciler identity proof |
+| **Linked orphan protection cleanup was not first-class** | Closed locally | Flat position with PG-linked live reduce-only orders can now produce a ticket-bound cleanup command | Review, merge, and deploy only with Owner approval |
+| **Exchange-only unknown orphan cleanup is not first-class** | P1 | Unknown exchange-only reduce-only orders cannot be auto-canceled without stronger identity proof | Keep blocked until explicit orphan identity proof exists |
 | **Recent fills depend on `fetch_my_trades` availability and exchange permissions** | P1 | Final exit / outcome ledger can be blocked if account trade history read is unavailable | Validate in server capability audit and map failure to `final_exit_unknown` |
 | **Legacy execution-intent real submit path still exists** | P1 | It can confuse readiness interpretation if treated as current ticket-bound path | Keep current planning anchored to PG Action-Time Ticket and ticket-bound protected submit |
 
@@ -140,7 +142,8 @@ query account: supported
 query recent fills: supported through fetch_my_trades wrapper
 clientOrderId: supported through stable local order ids, but retry semantics still require exchange lookup
 modify/amend: not implemented; use cancel+new
-orphan cleanup cancel: not yet first-class command
+linked orphan cleanup cancel: implemented locally through ticket-bound cleanup command
+exchange-only unknown orphan cleanup cancel: not implemented
 ```
 
 ## Runtime Cadence And Performance
@@ -172,9 +175,9 @@ chain_position: action_time_back_half_capability_audit
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scopes
 stage: operation_layer_exchange_capability_audit_complete
-first_blocker: orphan_protection_cleanup_command_not_first_class
+first_blocker: full_chain_failure_matrix_not_complete
 evidence: ExchangeGateway and ticket-bound APIs expose submit/cancel/read/fill capabilities; readiness method set now covers lifecycle methods; direct amend remains unsupported and cancel+new is the official runner path
-next_action: proceed to P0-1 lifecycle invariant hardening and P0-2 failure-matrix harness; add orphan protection cleanup command before treating flat-with-live-protection as fully recoverable
+next_action: review and merge linked orphan protection cleanup command, then proceed to P0-2 failure-matrix harness and keep exchange-only unknown orphan cleanup blocked pending stronger identity proof
 stop_condition: next real ticket proves ENTRY, SL, TP1, RUNNER_SL, reconciliation, final exit, settlement, and live outcome, or stops at one exact lifecycle hard blocker
 owner_action_required: no
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write during audit / no live profile or sizing mutation
