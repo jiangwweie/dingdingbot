@@ -134,6 +134,32 @@ async def test_protection_recovery_submit_failure_stays_hard_stopped(
 
 
 @pytest.mark.asyncio
+async def test_protection_recovery_rejects_canceled_place_result(
+    pg_control_connection,
+):
+    prepared = _failed_attempt_after_tp1_submit_failure(pg_control_connection)
+    command = prepare_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+    gateway = _FakeRecoveryGateway(place_status="CANCELED")
+
+    executed = await execute_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protection_recovery_command_id=command["protection_recovery_command_id"],
+        gateway=gateway,
+        now_ms=NOW_MS + 7000,
+    )
+
+    assert executed["status"] == "failed"
+    assert executed["blockers"] == ["protection_recovery_submit_not_confirmed:TP1"]
+    assert _attempt_status(pg_control_connection) == "submit_failed"
+    assert _lifecycle_status(pg_control_connection) == "protection_submit_failed"
+    assert _recovery_command_status(pg_control_connection) == "failed"
+
+
+@pytest.mark.asyncio
 async def test_protection_recovery_sl_failure_updates_latest_lifecycle_blocker(
     pg_control_connection,
 ):
@@ -188,6 +214,58 @@ async def test_partial_protection_recovery_updates_lifecycle_to_narrower_blocker
     assert _lifecycle_status(pg_control_connection) == "protection_submit_failed"
     assert _submit_result_roles(pg_control_connection) == {"ENTRY", "SL"}
     assert _recovery_command_status(pg_control_connection) == "failed"
+
+
+@pytest.mark.asyncio
+async def test_failed_partial_protection_recovery_can_refresh_remaining_scope(
+    pg_control_connection,
+):
+    prepared = _failed_attempt_after_sl_submit_failure(pg_control_connection)
+    command = prepare_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+    first_gateway = _FakeRecoveryGateway(fail_on_call=2)
+    first = await execute_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protection_recovery_command_id=command["protection_recovery_command_id"],
+        gateway=first_gateway,
+        now_ms=NOW_MS + 7000,
+    )
+
+    refreshed = prepare_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 8000,
+    )
+    second_gateway = _FakeRecoveryGateway()
+    second = await execute_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protection_recovery_command_id=refreshed["protection_recovery_command_id"],
+        gateway=second_gateway,
+        now_ms=NOW_MS + 9000,
+    )
+    proof = exit_protection.materialize_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 10_000,
+    )
+
+    assert first["status"] == "failed"
+    assert refreshed["status"] == "prepared"
+    assert refreshed["refreshed_failed_protection_recovery_command"] is True
+    assert [
+        order["order_role"]
+        for order in refreshed["command"]["command_plan"]["submit_missing_orders"]
+    ] == ["TP1"]
+    assert second["status"] == "result_recorded"
+    assert len(second_gateway.place_calls) == 1
+    assert second_gateway.place_calls[0]["order_type"] == "limit"
+    assert proof["status"] == "position_protected"
+    assert _attempt_status(pg_control_connection) == "submitted"
+    assert _lifecycle_status(pg_control_connection) == "position_protected"
+    assert _submit_result_roles(pg_control_connection) == {"ENTRY", "SL", "TP1"}
 
 
 @pytest.mark.asyncio
@@ -377,9 +455,11 @@ class _FakeRecoveryGateway:
         *,
         place_success: bool = True,
         fail_on_call: int | None = None,
+        place_status: str = "OPEN",
     ) -> None:
         self.place_success = place_success
         self.fail_on_call = fail_on_call
+        self.place_status = place_status
         self.place_calls: list[dict] = []
 
     async def place_order(self, **kwargs):
@@ -392,5 +472,5 @@ class _FakeRecoveryGateway:
         return SimpleNamespace(
             is_success=True,
             exchange_order_id=f"exchange-recovered-{kwargs['client_order_id']}",
-            status="OPEN",
+            status=self.place_status,
         )

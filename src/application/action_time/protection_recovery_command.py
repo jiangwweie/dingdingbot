@@ -50,8 +50,17 @@ def prepare_ticket_bound_protection_recovery_command(
         attempt_id,
     )
     if existing:
+        existing_status = str(existing.get("status") or "blocked")
+        if existing_status == "failed":
+            refreshed = _refresh_failed_recovery_command(
+                conn,
+                existing=existing,
+                now_ms=now_ms,
+            )
+            if refreshed:
+                return refreshed
         return _result(
-            str(existing.get("status") or "blocked"),
+            existing_status,
             now_ms=now_ms,
             command=existing,
             blockers=_json_list(existing.get("blockers")),
@@ -264,7 +273,7 @@ async def execute_ticket_bound_protection_recovery_command(
                 blockers=blockers,
                 next_action="repair_protection_recovery_or_flatten",
             )
-        if not _operation_succeeded(placement_result) or not _exchange_order_id(
+        if not _place_operation_succeeded(placement_result) or not _exchange_order_id(
             placement_result
         ):
             blockers = [
@@ -530,6 +539,69 @@ def _command_row(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
+
+
+def _refresh_failed_recovery_command(
+    conn: sa.engine.Connection,
+    *,
+    existing: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any] | None:
+    attempt = _row_by_id(
+        conn,
+        "brc_ticket_bound_protected_submit_attempts",
+        "protected_submit_attempt_id",
+        str(existing.get("protected_submit_attempt_id") or ""),
+    )
+    lifecycle = _row_by_id(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "protected_submit_attempt_id",
+        str(existing.get("protected_submit_attempt_id") or ""),
+    )
+    blockers = _prepare_blockers(attempt=attempt, lifecycle=lifecycle)
+    if blockers:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            command=existing,
+            blockers=blockers,
+            next_action="repair_protection_recovery_inputs",
+        )
+    missing_orders = _missing_protection_orders(attempt)
+    blockers = _missing_order_blockers(missing_orders)
+    if blockers:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            command=existing,
+            blockers=blockers,
+            next_action="repair_ticket_bound_submit_request_before_recovery",
+        )
+    refreshed = {
+        **_command_row(
+            attempt=attempt,
+            lifecycle=lifecycle,
+            missing_orders=missing_orders,
+            now_ms=now_ms,
+        ),
+        "protection_recovery_command_id": existing["protection_recovery_command_id"],
+        "created_at_ms": existing.get("created_at_ms") or now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_protection_recovery_commands",
+        "protection_recovery_command_id",
+        refreshed,
+    )
+    return _result(
+        "prepared",
+        now_ms=now_ms,
+        command=refreshed,
+        blockers=[],
+        next_action="execute_ticket_bound_protection_recovery_command",
+        extra={"refreshed_failed_protection_recovery_command": True},
+    )
 
 
 def _record_result(
@@ -882,11 +954,13 @@ def _result_payload(
     return payload
 
 
-def _operation_succeeded(result: Any) -> bool:
+def _place_operation_succeeded(result: Any) -> bool:
     if getattr(result, "is_success", None) is False:
         return False
     status = str(getattr(result, "status", "") or "").upper()
-    if status in {"REJECTED", "EXPIRED"}:
+    if status in {"REJECTED", "EXPIRED", "CANCELED", "CANCELLED", "FAILED"}:
+        return False
+    if status and status not in {"OPEN", "SUBMITTED", "PENDING", "CREATED", "NEW", "ACCEPTED"}:
         return False
     if getattr(result, "error_code", None) or getattr(result, "error_message", None):
         return False

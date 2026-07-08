@@ -168,7 +168,7 @@ async def execute_ticket_bound_runner_mutation_command(
             blockers=blockers,
             next_action="repair_runner_mutation_or_flatten",
         )
-    if not _operation_succeeded(cancel_result):
+    if not _cancel_operation_succeeded(cancel_result):
         blockers = [
             getattr(cancel_result, "error_message", None)
             or getattr(cancel_result, "error_code", None)
@@ -237,7 +237,7 @@ async def execute_ticket_bound_runner_mutation_command(
             blockers=blockers,
             next_action="repair_runner_mutation_or_flatten",
         )
-    if not _operation_succeeded(placement_result) or not _exchange_order_id(
+    if not _place_operation_succeeded(placement_result) or not _exchange_order_id(
         placement_result
     ):
         blockers = [
@@ -463,21 +463,34 @@ def _base_result_payload(
     return payload
 
 
-def _operation_succeeded(result: Any) -> bool:
+def _cancel_operation_succeeded(result: Any) -> bool:
     is_success = getattr(result, "is_success", None)
     if is_success is False:
         return False
     status = str(getattr(result, "status", "") or "").upper()
-    if status in {"REJECTED", "EXPIRED"}:
+    allowed_statuses = {"CANCELED", "CANCELLED"}
+    if status in {"REJECTED", "EXPIRED", "FAILED"}:
         return False
-    if is_success is None and status not in {
-        "CANCELED",
-        "CANCELLED",
-        "OPEN",
-        "SUBMITTED",
-        "PENDING",
-        "CREATED",
-    }:
+    if is_success is None and status not in allowed_statuses:
+        return False
+    if status and status not in allowed_statuses:
+        return False
+    if getattr(result, "error_code", None) or getattr(result, "error_message", None):
+        return False
+    return True
+
+
+def _place_operation_succeeded(result: Any) -> bool:
+    is_success = getattr(result, "is_success", None)
+    if is_success is False:
+        return False
+    status = str(getattr(result, "status", "") or "").upper()
+    allowed_statuses = {"OPEN", "SUBMITTED", "PENDING", "CREATED", "NEW", "ACCEPTED"}
+    if status in {"REJECTED", "EXPIRED", "FAILED", "CANCELED", "CANCELLED"}:
+        return False
+    if is_success is None and status not in allowed_statuses:
+        return False
+    if status and status not in allowed_statuses:
         return False
     if getattr(result, "error_code", None) or getattr(result, "error_message", None):
         return False

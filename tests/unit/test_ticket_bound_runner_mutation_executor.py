@@ -122,6 +122,33 @@ async def test_runner_mutation_executor_runner_submit_failure_records_failed_res
 
 
 @pytest.mark.asyncio
+async def test_runner_mutation_executor_rejects_canceled_runner_place_result(
+    pg_control_connection,
+):
+    prepared = _prepared_command(pg_control_connection)
+    gateway = _FakeRunnerMutationGateway(place_status="CANCELED")
+
+    payload = await execute_ticket_bound_runner_mutation_command(
+        pg_control_connection,
+        runner_mutation_command_id=prepared["runner_mutation_command_id"],
+        gateway=gateway,
+        now_ms=NOW_MS + 8000,
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["blockers"] == ["runner_sl_submit_not_confirmed"]
+    assert payload["result_payload"]["old_sl_cancelled"] is True
+    assert payload["result_payload"]["runner_sl_submitted"] is False
+    assert len(gateway.cancel_calls) == 1
+    assert len(gateway.place_calls) == 1
+    command_blockers = _command_blockers(pg_control_connection)
+    assert command_blockers[0] == "runner_sl_submit_not_confirmed"
+    assert "runner_unprotected_after_old_sl_cancelled" in command_blockers
+    assert _lifecycle_status(pg_control_connection) == "runner_mutation_failed"
+    assert _protection_set_status(pg_control_connection) == "runner_mutation_failed"
+
+
+@pytest.mark.asyncio
 async def test_runner_mutation_executor_missing_command_does_not_call_exchange(
     pg_control_connection,
 ):
@@ -346,9 +373,11 @@ class _FakeRunnerMutationGateway:
         *,
         cancel_success: bool = True,
         place_success: bool = True,
+        place_status: str = "OPEN",
     ) -> None:
         self.cancel_success = cancel_success
         self.place_success = place_success
+        self.place_status = place_status
         self.cancel_calls: list[dict] = []
         self.place_calls: list[dict] = []
 
@@ -375,5 +404,5 @@ class _FakeRunnerMutationGateway:
         return SimpleNamespace(
             is_success=True,
             exchange_order_id=f"exchange-{kwargs['client_order_id']}",
-            status="OPEN",
+            status=self.place_status,
         )
