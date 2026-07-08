@@ -224,6 +224,14 @@ def test_lifecycle_closure_records_final_exit_reconciliation_settlement_review(
     pg_control_connection,
 ):
     _, prepared = _runner_protected_attempt(pg_control_connection)
+    _record_closure_evidence_events(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        reconciliation_evidence_id="recon-1",
+        settlement_evidence_id="settlement-1",
+        review_evidence_id="review-1",
+        now_ms=NOW_MS + 8500,
+    )
 
     payload = closure.materialize_ticket_bound_lifecycle_closure(
         pg_control_connection,
@@ -290,6 +298,14 @@ def test_lifecycle_closure_blocks_when_flat_position_has_live_protection_order(
     pg_control_connection,
 ):
     _, prepared = _runner_protected_attempt(pg_control_connection)
+    _record_closure_evidence_events(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        reconciliation_evidence_id="recon-1",
+        settlement_evidence_id="settlement-1",
+        review_evidence_id="review-1",
+        now_ms=NOW_MS + 8500,
+    )
     pg_control_connection.execute(
         text(
             """
@@ -323,10 +339,48 @@ def test_lifecycle_closure_blocks_when_flat_position_has_live_protection_order(
     ] == "runner_protected"
 
 
+def test_lifecycle_closure_blocks_fake_evidence_ids_without_events(
+    pg_control_connection,
+):
+    _, prepared = _runner_protected_attempt(pg_control_connection)
+
+    payload = closure.materialize_ticket_bound_lifecycle_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        final_exit_exchange_order_id="exchange-runner-sl-1",
+        final_exit_role="RUNNER_SL",
+        final_position_flat_confirmed=True,
+        reconciliation_evidence_id="fake-recon",
+        settlement_evidence_id="fake-settlement",
+        review_evidence_id="fake-review",
+        realized_pnl="12.34",
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "reconciliation_evidence_event_missing" in payload["blockers"]
+    assert "settlement_evidence_event_missing" in payload["blockers"]
+    assert "review_evidence_event_missing" in payload["blockers"]
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "runner_protected"
+    assert _one(pg_control_connection, "brc_ticket_bound_exit_protection_sets")[
+        "status"
+    ] == "runner_protected"
+
+
 def test_ticket_expiry_after_submit_does_not_block_post_submit_lifecycle(
     pg_control_connection,
 ):
     ids, prepared = _runner_protected_attempt(pg_control_connection)
+    _record_closure_evidence_events(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        reconciliation_evidence_id="recon-after-ticket-expiry",
+        settlement_evidence_id="settlement-after-ticket-expiry",
+        review_evidence_id="review-after-ticket-expiry",
+        now_ms=NOW_MS + 20_500,
+    )
     pg_control_connection.execute(
         text(
             """
@@ -366,6 +420,14 @@ def test_ticket_expiry_after_submit_does_not_block_post_submit_lifecycle(
 
 def test_lifecycle_closure_is_idempotent(pg_control_connection):
     _, prepared = _runner_protected_attempt(pg_control_connection)
+    _record_closure_evidence_events(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        reconciliation_evidence_id="recon-1",
+        settlement_evidence_id="settlement-1",
+        review_evidence_id="review-1",
+        now_ms=NOW_MS + 8500,
+    )
     first = closure.materialize_ticket_bound_lifecycle_closure(
         pg_control_connection,
         protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
@@ -566,6 +628,62 @@ def _record_submitted_attempt(
         now_ms=NOW_MS + 5000 + attempt_offset_ms,
     )
     return prepared
+
+
+def _record_closure_evidence_events(
+    conn,
+    *,
+    protected_submit_attempt_id: str,
+    reconciliation_evidence_id: str,
+    settlement_evidence_id: str,
+    review_evidence_id: str,
+    now_ms: int,
+) -> None:
+    lifecycle = conn.execute(
+        text(
+            """
+            SELECT *
+            FROM brc_ticket_bound_order_lifecycle_runs
+            WHERE protected_submit_attempt_id = :attempt_id
+            """
+        ),
+        {"attempt_id": protected_submit_attempt_id},
+    ).mappings().one()
+    specs = (
+        (
+            "reconciliation_matched",
+            {"reconciliation_evidence_id": reconciliation_evidence_id},
+        ),
+        ("budget_settled", {"settlement_evidence_id": settlement_evidence_id}),
+        ("review_recorded", {"review_evidence_id": review_evidence_id}),
+    )
+    for offset, (event_type, payload) in enumerate(specs):
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_ticket_bound_lifecycle_events (
+                  lifecycle_event_id, lifecycle_run_id, ticket_id,
+                  protected_submit_attempt_id, event_type, event_payload, created_at_ms
+                ) VALUES (
+                  :lifecycle_event_id, :lifecycle_run_id, :ticket_id,
+                  :protected_submit_attempt_id, :event_type, :event_payload,
+                  :created_at_ms
+                )
+                """
+            ),
+            {
+                "lifecycle_event_id": (
+                    "test-closure-evidence:"
+                    f"{protected_submit_attempt_id}:{event_type}"
+                ),
+                "lifecycle_run_id": lifecycle["lifecycle_run_id"],
+                "ticket_id": lifecycle["ticket_id"],
+                "protected_submit_attempt_id": protected_submit_attempt_id,
+                "event_type": event_type,
+                "event_payload": json.dumps(payload, sort_keys=True),
+                "created_at_ms": now_ms + offset,
+            },
+        )
 
 
 def _clone_submitted_attempt(

@@ -182,25 +182,36 @@ def run_ticket_bound_full_chain_simulation(
             now_ms=now_ms + 13,
         )
     )
+    reconciliation_evidence_id = (
+        "simulation-recon:"
+        f"{simulation_input.strategy_group_id}:{simulation_input.symbol}:{simulation_input.side}"
+    )
+    settlement_evidence_id = (
+        "simulation-settlement:"
+        f"{simulation_input.strategy_group_id}:{simulation_input.symbol}:{simulation_input.side}"
+    )
+    review_evidence_id = (
+        "simulation-review:"
+        f"{simulation_input.strategy_group_id}:{simulation_input.symbol}:{simulation_input.side}"
+    )
+    _record_simulated_closure_evidence_events(
+        conn,
+        protected_submit_attempt_id=str(prepared_payload["protected_submit_attempt_id"]),
+        reconciliation_evidence_id=reconciliation_evidence_id,
+        settlement_evidence_id=settlement_evidence_id,
+        review_evidence_id=review_evidence_id,
+        now_ms=now_ms + 14,
+    )
     final_payload = post_submit_closure.materialize_ticket_bound_lifecycle_closure(
         conn,
         protected_submit_attempt_id=str(prepared_payload["protected_submit_attempt_id"]),
         final_exit_exchange_order_id="mock-exchange-runner-sl",
         final_exit_role="RUNNER_SL",
         final_position_flat_confirmed=True,
-        reconciliation_evidence_id=(
-            "simulation-recon:"
-            f"{simulation_input.strategy_group_id}:{simulation_input.symbol}:{simulation_input.side}"
-        ),
-        settlement_evidence_id=(
-            "simulation-settlement:"
-            f"{simulation_input.strategy_group_id}:{simulation_input.symbol}:{simulation_input.side}"
-        ),
-        review_evidence_id=(
-            "simulation-review:"
-            f"{simulation_input.strategy_group_id}:{simulation_input.symbol}:{simulation_input.side}"
-        ),
-        now_ms=now_ms + 14,
+        reconciliation_evidence_id=reconciliation_evidence_id,
+        settlement_evidence_id=settlement_evidence_id,
+        review_evidence_id=review_evidence_id,
+        now_ms=now_ms + 15,
     )
 
     return {
@@ -591,6 +602,62 @@ def _mark_tp1_filled(
             "updated_at_ms": now_ms,
         },
     )
+
+
+def _record_simulated_closure_evidence_events(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+    reconciliation_evidence_id: str,
+    settlement_evidence_id: str,
+    review_evidence_id: str,
+    now_ms: int,
+) -> None:
+    lifecycle = conn.execute(
+        sa.text(
+            """
+            SELECT *
+            FROM brc_ticket_bound_order_lifecycle_runs
+            WHERE protected_submit_attempt_id = :attempt_id
+            """
+        ),
+        {"attempt_id": protected_submit_attempt_id},
+    ).mappings().one()
+    specs = (
+        (
+            "reconciliation_matched",
+            {"reconciliation_evidence_id": reconciliation_evidence_id},
+        ),
+        ("budget_settled", {"settlement_evidence_id": settlement_evidence_id}),
+        ("review_recorded", {"review_evidence_id": review_evidence_id}),
+    )
+    for offset, (event_type, payload) in enumerate(specs):
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO brc_ticket_bound_lifecycle_events (
+                  lifecycle_event_id, lifecycle_run_id, ticket_id,
+                  protected_submit_attempt_id, event_type, event_payload, created_at_ms
+                ) VALUES (
+                  :lifecycle_event_id, :lifecycle_run_id, :ticket_id,
+                  :protected_submit_attempt_id, :event_type, :event_payload,
+                  :created_at_ms
+                )
+                """
+            ),
+            {
+                "lifecycle_event_id": (
+                    "simulation-closure-evidence:"
+                    f"{protected_submit_attempt_id}:{event_type}"
+                ),
+                "lifecycle_run_id": lifecycle["lifecycle_run_id"],
+                "ticket_id": lifecycle["ticket_id"],
+                "protected_submit_attempt_id": protected_submit_attempt_id,
+                "event_type": event_type,
+                "event_payload": _json(payload),
+                "created_at_ms": now_ms + offset,
+            },
+        )
 
 
 def _mock_exchange_submit_result(prepared: dict[str, Any]) -> dict[str, Any]:

@@ -212,6 +212,27 @@ def test_protection_reconciler_flags_flat_position_with_live_protection(
     assert _lifecycle_status(pg_control_connection) == "position_closed_protection_live"
 
 
+def test_protection_reconciler_blocks_missing_position_snapshot_without_flat_inference(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    snapshot = _snapshot(pg_control_connection, set_id)
+    snapshot.pop("position")
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "protection_reconciliation_mismatch"
+    assert payload["first_blocker"] == "exchange_position_snapshot_missing"
+    assert "exchange_position_snapshot_missing" in payload["blockers"]
+    assert "position_flat_with_live_protection_orders" not in payload["blockers"]
+    assert _lifecycle_status(pg_control_connection) == "protection_reconciliation_mismatch"
+
+
 def _materialized_runner_protection(conn) -> str:
     set_id = _materialized_exit_protection_set(conn)
     _mark_tp1_filled(conn, set_id)

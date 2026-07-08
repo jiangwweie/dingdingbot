@@ -283,6 +283,7 @@ def materialize_ticket_bound_lifecycle_closure(
     blockers.extend(_exit_protection_blockers(conn, attempt))
     blockers.extend(
         _lifecycle_closure_blockers(
+            conn,
             lifecycle=lifecycle,
             protection_orders=protection_orders,
             final_exit_role=final_exit_role,
@@ -397,13 +398,7 @@ def materialize_ticket_bound_lifecycle_closure(
         if realized_pnl_decimal is not None
         else None,
     }
-    for event_type in (
-        "final_exit_detected",
-        "reconciliation_matched",
-        "budget_settled",
-        "review_recorded",
-        "lifecycle_closed",
-    ):
+    for event_type in ("final_exit_detected", "lifecycle_closed"):
         _insert_lifecycle_event(
             conn,
             lifecycle_update,
@@ -648,6 +643,7 @@ def _exit_protection_orders_for_set(
 
 
 def _lifecycle_closure_blockers(
+    conn: sa.engine.Connection,
     *,
     lifecycle: dict[str, Any],
     protection_orders: list[dict[str, Any]],
@@ -675,6 +671,16 @@ def _lifecycle_closure_blockers(
         blockers.append("settlement_evidence_id_required")
     if not review_evidence_id:
         blockers.append("review_evidence_id_required")
+    if lifecycle:
+        blockers.extend(
+            _closure_evidence_event_blockers(
+                conn,
+                lifecycle=lifecycle,
+                reconciliation_evidence_id=reconciliation_evidence_id,
+                settlement_evidence_id=settlement_evidence_id,
+                review_evidence_id=review_evidence_id,
+            )
+        )
     if final_exit_role == "RUNNER_SL" and lifecycle.get("status") not in {
         "runner_protected",
         "final_exit_detected",
@@ -703,6 +709,77 @@ def _lifecycle_closure_blockers(
             )
         )
     return _dedupe(blockers)
+
+
+def _closure_evidence_event_blockers(
+    conn: sa.engine.Connection,
+    *,
+    lifecycle: dict[str, Any],
+    reconciliation_evidence_id: str,
+    settlement_evidence_id: str,
+    review_evidence_id: str,
+) -> list[str]:
+    blockers: list[str] = []
+    specs = (
+        (
+            "reconciliation_matched",
+            "reconciliation_evidence_id",
+            reconciliation_evidence_id,
+            "reconciliation_evidence_event_missing",
+        ),
+        (
+            "budget_settled",
+            "settlement_evidence_id",
+            settlement_evidence_id,
+            "settlement_evidence_event_missing",
+        ),
+        (
+            "review_recorded",
+            "review_evidence_id",
+            review_evidence_id,
+            "review_evidence_event_missing",
+        ),
+    )
+    for event_type, payload_key, evidence_id, blocker in specs:
+        if not evidence_id:
+            continue
+        if not _lifecycle_event_with_payload(
+            conn,
+            lifecycle=lifecycle,
+            event_type=event_type,
+            payload_key=payload_key,
+            payload_value=evidence_id,
+        ):
+            blockers.append(blocker)
+    return blockers
+
+
+def _lifecycle_event_with_payload(
+    conn: sa.engine.Connection,
+    *,
+    lifecycle: dict[str, Any],
+    event_type: str,
+    payload_key: str,
+    payload_value: str,
+) -> bool:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_lifecycle_events"):
+        return False
+    table = _table(conn, "brc_ticket_bound_lifecycle_events")
+    rows = conn.execute(
+        sa.select(table).where(
+            table.c.lifecycle_run_id == str(lifecycle.get("lifecycle_run_id") or ""),
+            table.c.ticket_id == str(lifecycle.get("ticket_id") or ""),
+            table.c.protected_submit_attempt_id
+            == str(lifecycle.get("protected_submit_attempt_id") or ""),
+            table.c.event_type == event_type,
+        )
+    ).mappings()
+    expected = str(payload_value or "")
+    for row in rows:
+        payload = _as_dict(row.get("event_payload"))
+        if str(payload.get(payload_key) or "") == expected:
+            return True
+    return False
 
 
 def _protection_order_by_role_and_exchange_id(

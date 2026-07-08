@@ -81,7 +81,10 @@ def reconcile_ticket_bound_exit_protection_set(
         for fill in exchange_snapshot.get("recent_fills", [])
         if isinstance(fill, dict)
     ]
-    position = dict(exchange_snapshot.get("position") or {})
+    raw_position = exchange_snapshot.get("position")
+    position_snapshot_missing = not isinstance(raw_position, dict) or not raw_position
+    position = dict(raw_position) if isinstance(raw_position, dict) else {}
+    position_flat = False if position_snapshot_missing else _position_flat(position)
 
     live_protection_orders = _live_protection_orders(open_orders, orders)
     tp1_filled = (
@@ -95,9 +98,12 @@ def reconcile_ticket_bound_exit_protection_set(
         has_valid_tp1=tp1_filled or _has_valid_exchange_protection(tp1_order, open_orders),
         has_runner_sl=_has_valid_exchange_protection(runner_order, open_orders),
         tp1_filled=tp1_filled,
-        position_flat=_position_flat(position),
+        position_flat=position_flat,
         live_protection_orders=live_protection_orders,
     )
+    classification_blockers = (
+        ["exchange_position_snapshot_missing"] if position_snapshot_missing else []
+    ) + list(classification.blockers)
 
     blockers = _additional_blockers(
         orders=orders,
@@ -108,9 +114,9 @@ def reconcile_ticket_bound_exit_protection_set(
         active_sl_order=active_sl_order,
         old_sl_order=sl_order,
         runner_order=runner_order,
-        classification_blockers=list(classification.blockers),
+        classification_blockers=classification_blockers,
     )
-    if blockers != list(classification.blockers):
+    if blockers != classification_blockers:
         classification = classify_protection_reconciliation(
             position_qty=position.get("qty") or position.get("position_qty"),
             has_valid_sl=False
@@ -124,14 +130,25 @@ def reconcile_ticket_bound_exit_protection_set(
             else tp1_filled or _has_valid_exchange_protection(tp1_order, open_orders),
             has_runner_sl=_has_valid_exchange_protection(runner_order, open_orders),
             tp1_filled=tp1_filled,
-            position_flat=_position_flat(position),
+            position_flat=position_flat,
             live_protection_orders=live_protection_orders,
         )
-        blockers = _dedupe(blockers + list(classification.blockers))
+        blockers = _dedupe(
+            blockers
+            + (
+                ["exchange_position_snapshot_missing"]
+                if position_snapshot_missing
+                else []
+            )
+            + list(classification.blockers)
+        )
 
     status = classification.status
     next_action = classification.next_action
-    if any(blocker == "exchange_protection_order_not_linked_to_pg" for blocker in blockers):
+    if "exchange_position_snapshot_missing" in blockers:
+        status = "protection_reconciliation_mismatch"
+        next_action = "refresh_exchange_position_snapshot"
+    elif any(blocker == "exchange_protection_order_not_linked_to_pg" for blocker in blockers):
         status = "tp1_or_sl_orphaned"
         next_action = "prove_or_cancel_orphan_protection_order"
     elif "old_sl_still_live_after_runner_mutation" in blockers:
