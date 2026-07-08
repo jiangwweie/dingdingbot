@@ -175,9 +175,9 @@ chain_position: action_time_back_half_capability_audit
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scopes
 stage: operation_layer_exchange_capability_audit_complete
-first_blocker: full_chain_failure_matrix_not_complete
+first_blocker: production_lifecycle_wiring_and_live_outcome_ledger_not_complete
 evidence: ExchangeGateway and ticket-bound APIs expose submit/cancel/read/fill capabilities; readiness method set now covers lifecycle methods; direct amend remains unsupported and cancel+new is the official runner path
-next_action: review and merge linked orphan protection cleanup command, then proceed to P0-2 failure-matrix harness and keep exchange-only unknown orphan cleanup blocked pending stronger identity proof
+next_action: review and merge local P0-1/P0-2 closure, then implement production lifecycle wiring and Live Outcome Ledger while keeping exchange-only unknown orphan cleanup blocked pending stronger identity proof
 stop_condition: next real ticket proves ENTRY, SL, TP1, RUNNER_SL, reconciliation, final exit, settlement, and live outcome, or stops at one exact lifecycle hard blocker
 owner_action_required: no
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write during audit / no live profile or sizing mutation

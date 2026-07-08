@@ -111,7 +111,7 @@ idempotent client order id
 | **Audit complete** | `docs/current/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
 | **Gateway readiness method gap closed** | Runtime gateway readiness now requires lifecycle methods, not only `place_order` |
 | **Recent fills wrapper added** | `ExchangeGateway.fetch_my_trades` is available as a read-only capability |
-| **Remaining first blocker** | `full_chain_failure_matrix_not_complete` after local orphan protection cleanup command implementation |
+| **Remaining first blocker** | `production_lifecycle_wiring_and_live_outcome_ledger_not_complete` after local P0-2 failure-matrix closure |
 | **Orphan protection cleanup command** | Implemented locally on the P0-1 branch through migration `098`, `orphan_protection_cleanup_command`, and focused tests; deploy remains Owner-approved |
 
 ### P0-1 Ticket-Bound Lifecycle Safety Core
@@ -215,6 +215,14 @@ Golden paths:
 | **No file authority** | Harness uses PG/in-memory typed fixtures, not repo/output/report JSON |
 | **Ticket identity stable** | Each run records StrategyGroup, symbol, side, profile, policy versions, facts, and protection refs |
 | **No lifecycle shortcut** | Harness assertions use lifecycle state machine and hard invariants, not raw success strings |
+
+#### Current Result
+
+| Result | Evidence |
+| --- | --- |
+| **P0-2 closed locally** | `tests/unit/test_action_time_full_chain_impact.py` covers 22 active scopes through mock real submit/closure and 9 failure scenarios through exact lifecycle states |
+| **Failure scenarios covered** | ENTRY accepted / SL failed, SL ok / TP1 failed, entry partial fill, TP1 filled / runner missing, old SL cancel failed, runner submit failed after old SL cancel, PG protected / exchange missing, flat-position live-protection cleanup, duplicate TP1 fill idempotency |
+| **Authority boundary preserved** | Harness asserts no real exchange write and no repo JSON/MD authority |
 
 ### P0-3 Official Runner SL Mutation + Protection Reconciler
 
@@ -447,7 +455,7 @@ symbol: active candidate scopes
 stage: lifecycle_safety_core_deployed_waiting_for_real_signal
 first_blocker: no_recent_fresh_signal_for_real_lifecycle_acceptance
 evidence: dev/origin-dev/Tokyo are aligned on 4f813a16; PG alembic is 097; lifecycle safety core repair is deployed; latest health showed no recent signal/promotion/lane/ticket/attempt
-next_action: run Operation Layer / Exchange Capability Audit, strengthen full-chain harness around two golden paths plus failure matrix, implement Live Outcome Ledger, and keep watcher/monitor readonly observation active
+next_action: review and merge local P0-2 failure-matrix closure, then implement production lifecycle wiring and Live Outcome Ledger while watcher/monitor readonly observation stays active
 stop_condition: future real ticket proves entry, protection, TP1, runner, final exit, reconciliation, settlement, live outcome, and review, or stops at one exact lifecycle hard blocker
 owner_action_required: no
 authority_boundary: no FinalGate bypass, no Operation Layer bypass, no exchange write bypass, no live profile or sizing mutation

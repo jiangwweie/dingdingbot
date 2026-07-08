@@ -71,7 +71,7 @@ design documents and acceptance proof.
 | **Postdeploy acceptance** | Passed; warning only that release identity comes from `.brc-release-manifest.json` because git archive releases have no `.git` directory |
 | **Backend / watcher / monitor** | Active after deploy verification |
 | **Recent market/action events** | No recent signal, promotion, lane, ticket, or attempt after the latest postdeploy health check |
-| **Current first blocker** | `no_recent_fresh_signal` for live action; back-half local engineering first blocker moves to `full_chain_failure_matrix_not_complete` after the orphan protection cleanup command branch |
+| **Current first blocker** | `no_recent_fresh_signal` for live action; back-half local engineering first blocker moves to `production_lifecycle_wiring_and_live_outcome_ledger_not_complete` after local P0-2 failure-matrix closure |
 
 ## Authority Boundary
 

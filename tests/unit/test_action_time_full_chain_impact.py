@@ -20,8 +20,10 @@ from scripts import materialize_ticket_bound_runtime_safety_state as safety_stat
 from scripts import publish_runtime_control_current_projections as publisher
 from scripts import runtime_active_observation_monitor
 from src.application.action_time.full_chain_simulation_harness import (
+    FULL_CHAIN_FAILURE_SCENARIOS,
     FullChainSimulationInput,
     run_ticket_bound_full_chain_simulation,
+    run_ticket_bound_full_chain_failure_scenario,
 )
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
@@ -57,6 +59,10 @@ RUNNER_MUTATION_COMMAND_MIGRATION_PATH = (
 PROTECTION_RECOVERY_COMMAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-08-096_create_ticket_bound_protection_recovery_commands.py"
+)
+ORPHAN_PROTECTION_CLEANUP_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-098_create_ticket_bound_orphan_protection_cleanup_commands.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
@@ -160,6 +166,20 @@ def pg_control_connection():
                                 protection_recovery_command_migration.op = migration.op
                                 try:
                                     protection_recovery_command_migration.upgrade()
+                                    orphan_cleanup_command_migration = _load_module(
+                                        ORPHAN_PROTECTION_CLEANUP_COMMAND_MIGRATION_PATH,
+                                        "migration_098_action_time_full_chain",
+                                    )
+                                    old_orphan_cleanup_op = (
+                                        orphan_cleanup_command_migration.op
+                                    )
+                                    orphan_cleanup_command_migration.op = migration.op
+                                    try:
+                                        orphan_cleanup_command_migration.upgrade()
+                                    finally:
+                                        orphan_cleanup_command_migration.op = (
+                                            old_orphan_cleanup_op
+                                        )
                                 finally:
                                     protection_recovery_command_migration.op = (
                                         old_protection_recovery_op
@@ -399,6 +419,123 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
     ) == "closed"
 
 
+@pytest.mark.parametrize("scenario", FULL_CHAIN_FAILURE_SCENARIOS)
+def test_full_chain_failure_matrix_stops_at_exact_lifecycle_state(
+    pg_control_connection,
+    monkeypatch,
+    scenario: str,
+):
+    monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
+    payloads = run_ticket_bound_full_chain_failure_scenario(
+        pg_control_connection,
+        FullChainSimulationInput(
+            strategy_group_id="SOR-001",
+            symbol="AVAXUSDT",
+            side="short",
+            fact_values={
+                "opening_range_defined": True,
+                "breakdown_confirmed": True,
+                "opening_range_high_reference": "20",
+                "last_price": "18",
+            },
+            now_ms=NOW_MS,
+        ),
+        projection_publisher=publisher.publish_runtime_control_current_projections,
+        scenario=scenario,
+    )
+
+    assert payloads["prepared_submit"]["status"] == "submit_prepared"
+    assert payloads["authority_boundary"]["calls_exchange_write"] is False
+    assert payloads["authority_boundary"]["uses_repo_json_or_md_authority"] is False
+
+    expected = {
+        "entry_accepted_sl_failed": (
+            "protection_missing",
+            ["exchange_submit_failed:sl"],
+            "prepared",
+        ),
+        "sl_ok_tp1_failed": (
+            "protection_submit_failed",
+            ["exchange_submit_failed:tp1"],
+            "prepared",
+        ),
+        "entry_partial_fill": (
+            "entry_partial_fill_unhandled",
+            ["entry_partial_fill"],
+            None,
+        ),
+        "tp1_filled_runner_missing": (
+            "runner_mutation_pending",
+            ["runner_sl_exchange_order_id_required"],
+            None,
+        ),
+        "old_sl_cancel_failed": (
+            "runner_mutation_failed",
+            [
+                "old sl cancel rejected by simulation",
+                "old_sl_cancel_not_confirmed",
+                "runner_sl_exchange_order_id_missing",
+                "runner_sl_submit_not_confirmed",
+            ],
+            None,
+        ),
+        "runner_submit_failed_after_old_sl_cancel": (
+            "runner_mutation_failed",
+            [
+                "runner sl submit rejected by simulation",
+                "runner_sl_exchange_order_id_missing",
+                "runner_sl_submit_not_confirmed",
+                "runner_unprotected_after_old_sl_cancelled",
+            ],
+            None,
+        ),
+        "pg_protected_exchange_missing": (
+            "protection_reconciliation_mismatch",
+            ["open_position_without_valid_sl", "sl_exchange_order_missing"],
+            None,
+        ),
+        "flat_position_live_protection_cleanup": (
+            "reconciliation_matched",
+            [],
+            "result_recorded",
+        ),
+        "duplicate_tp1_fill_idempotent": (
+            "runner_mutation_pending",
+            [],
+            "prepared",
+        ),
+    }
+    expected_lifecycle_status, expected_blockers, expected_aux_status = expected[scenario]
+
+    assert _status(
+        pg_control_connection,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "lifecycle_run_id",
+        _lifecycle_id(pg_control_connection),
+    ) == expected_lifecycle_status
+    assert _lifecycle_blockers(pg_control_connection) == expected_blockers
+
+    if scenario in {"entry_accepted_sl_failed", "sl_ok_tp1_failed"}:
+        assert payloads["recovery_command"]["status"] == expected_aux_status
+    elif scenario == "flat_position_live_protection_cleanup":
+        assert payloads["cleanup_result"]["status"] == expected_aux_status
+        assert _count(
+            pg_control_connection,
+            "brc_ticket_bound_orphan_protection_cleanup_commands",
+        ) == 1
+    elif scenario == "duplicate_tp1_fill_idempotent":
+        assert (
+            payloads["duplicate_runner_mutation_command"][
+                "idempotent_existing_runner_mutation_command"
+            ]
+            is True
+        )
+        assert _count(
+            pg_control_connection,
+            "brc_ticket_bound_runner_mutation_commands",
+        ) == 1
+
+
 def test_unsupported_side_is_not_created_by_seed(pg_control_connection):
     unsupported_rows = pg_control_connection.execute(
         text(
@@ -482,8 +619,10 @@ def _count(conn, table_name: str) -> int:
         "brc_ticket_bound_exit_protection_orders",
         "brc_ticket_bound_exit_protection_sets",
         "brc_ticket_bound_order_lifecycle_runs",
+        "brc_ticket_bound_orphan_protection_cleanup_commands",
         "brc_ticket_bound_post_submit_closures",
         "brc_ticket_bound_protected_submit_attempts",
+        "brc_ticket_bound_runner_mutation_commands",
     }
     return conn.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one()
 
@@ -519,6 +658,18 @@ def _lifecycle_id(conn) -> str:
             text("SELECT lifecycle_run_id FROM brc_ticket_bound_order_lifecycle_runs")
         ).scalar_one()
     )
+
+
+def _lifecycle_blockers(conn) -> list[str]:
+    raw = conn.execute(
+        text("SELECT blockers FROM brc_ticket_bound_order_lifecycle_runs")
+    ).scalar_one()
+    import json
+
+    parsed = raw
+    while isinstance(parsed, str):
+        parsed = json.loads(parsed)
+    return list(parsed)
 
 
 def _post_submit_closure_id(conn) -> str:

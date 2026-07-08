@@ -44,7 +44,7 @@ review plan.
 | **Lifecycle closure materializer** | `materialize_ticket_bound_lifecycle_closure` closes PG lifecycle after final exit, reconciliation, settlement, and review proofs | It requires proof IDs and flat-position confirmation; it summarizes closure and does not discover exchange truth by itself |
 | **ExchangeGateway** | Existing gateway can place and cancel orders | The runner proof layer must not become a second exchange mutation path |
 | **Deploy status** | Lifecycle-safety-core repair is deployed on Tokyo at `4f813a16e32930fefb67590283d041b1fead207f` with PG `alembic=097`; orphan cleanup command is local branch work with migration `098` | Deployment proves code/migration acceptance, not a live market outcome |
-| **Impact test** | Active scopes reach mock submitted -> exit protection set -> runner/final closure coverage | Test proves entry-fill + SL/TP1 protection set materialization; focused tests prove runner SL and final closure materialization |
+| **Impact test** | Active scopes reach mock submitted -> exit protection set -> runner/final closure coverage; local branch also covers 9 full-chain failure scenarios | Test proves entry-fill + SL/TP1 protection set materialization, runner SL, final closure, and exact lifecycle hard stops |
 
 ### Known P0 / P1 Gaps
 
@@ -454,7 +454,7 @@ symbol: active candidate scope
 stage: lifecycle_safety_core_deployed_waiting_for_real_signal
 first_blocker: no_recent_fresh_signal_for_real_lifecycle_acceptance
 evidence: Tokyo release head 4f813a16, PG alembic 097, lifecycle materializers and services cover submitted attempt -> entry fill proof -> SL/TP1 proof -> exchange snapshot reconciliation -> TP1 fill -> official runner mutation command/executor -> runner proof -> final closure proof without file authority
-next_action: run Operation Layer / Exchange Capability Audit, retain full-chain failure-matrix coverage, and observe the next real signal/ticket through server watcher/monitor
+next_action: review and merge local P0-1/P0-2 closure, then wire production lifecycle reads/results and Live Outcome Ledger before using future real tickets as lifecycle outcome proof
 stop_condition: one future real ticket proves ENTRY through SL/TP1/RUNNER_SL/final exit/reconciliation/settlement/review/live outcome or stops at one exact lifecycle hard blocker
 owner_action_required: no for current observation; yes before future deployment or authority expansion
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound gateway path

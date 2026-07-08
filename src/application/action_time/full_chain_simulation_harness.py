@@ -21,9 +21,12 @@ from src.application.action_time import action_time_ticket
 from src.application.action_time import exit_protection_materializer
 from src.application.action_time import fact_snapshots
 from src.application.action_time import finalgate_preflight
+from src.application.action_time import orphan_protection_cleanup_command
 from src.application.action_time import operation_layer_handoff
 from src.application.action_time import post_submit_closure
 from src.application.action_time import promotion_action_time_lane
+from src.application.action_time import protection_reconciler
+from src.application.action_time import protection_recovery_command
 from src.application.action_time import protected_submit_attempt
 from src.application.action_time import runner_mutation_command
 from src.application.action_time import runner_mutation_executor
@@ -54,6 +57,18 @@ ACTIVE_CANDIDATE_SCOPES: tuple[tuple[str, str, str], ...] = (
     ("SOR-001", "AVAXUSDT", "short"),
     ("SOR-001", "BTCUSDT", "long"),
     ("SOR-001", "BTCUSDT", "short"),
+)
+
+FULL_CHAIN_FAILURE_SCENARIOS: tuple[str, ...] = (
+    "entry_accepted_sl_failed",
+    "sl_ok_tp1_failed",
+    "entry_partial_fill",
+    "tp1_filled_runner_missing",
+    "old_sl_cancel_failed",
+    "runner_submit_failed_after_old_sl_cancel",
+    "pg_protected_exchange_missing",
+    "flat_position_live_protection_cleanup",
+    "duplicate_tp1_fill_idempotent",
 )
 
 
@@ -248,10 +263,390 @@ def run_ticket_bound_full_chain_simulation(
     }
 
 
+def run_ticket_bound_full_chain_failure_scenario(
+    conn: sa.engine.Connection,
+    simulation_input: FullChainSimulationInput,
+    *,
+    projection_publisher: Callable[[sa.engine.Connection], dict[str, Any]],
+    scenario: str,
+) -> dict[str, Any]:
+    """Run one constructed full-chain failure scenario without exchange writes."""
+
+    if scenario not in FULL_CHAIN_FAILURE_SCENARIOS:
+        raise ValueError(f"unsupported_full_chain_failure_scenario:{scenario}")
+    now_ms = int(simulation_input.now_ms)
+    context = _prepare_full_chain_submit_context(
+        conn,
+        simulation_input,
+        projection_publisher=projection_publisher,
+    )
+    prepared = context["prepared_submit"]
+
+    if scenario == "entry_accepted_sl_failed":
+        submitted = protected_submit_attempt.record_ticket_bound_protected_submit_result(
+            conn,
+            protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+            submit_result=_mock_exchange_submit_result_for_roles(
+                prepared,
+                roles=("ENTRY",),
+                status="protection_submit_failed",
+                blockers=["exchange_submit_failed:sl"],
+            ),
+            now_ms=now_ms + 20,
+        )
+        recovery = protection_recovery_command.prepare_ticket_bound_protection_recovery_command(
+            conn,
+            protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+            now_ms=now_ms + 21,
+        )
+        return _failure_result(
+            simulation_input,
+            scenario=scenario,
+            context=context,
+            payloads={"submitted": submitted, "recovery_command": recovery},
+        )
+
+    if scenario == "sl_ok_tp1_failed":
+        submitted = protected_submit_attempt.record_ticket_bound_protected_submit_result(
+            conn,
+            protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+            submit_result=_mock_exchange_submit_result_for_roles(
+                prepared,
+                roles=("ENTRY", "SL"),
+                status="protection_submit_failed",
+                blockers=["exchange_submit_failed:tp1"],
+            ),
+            now_ms=now_ms + 20,
+        )
+        recovery = protection_recovery_command.prepare_ticket_bound_protection_recovery_command(
+            conn,
+            protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+            now_ms=now_ms + 21,
+        )
+        return _failure_result(
+            simulation_input,
+            scenario=scenario,
+            context=context,
+            payloads={"submitted": submitted, "recovery_command": recovery},
+        )
+
+    if scenario == "entry_partial_fill":
+        submitted = protected_submit_attempt.record_ticket_bound_protected_submit_result(
+            conn,
+            protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+            submit_result=_mock_exchange_submit_result_for_roles(
+                prepared,
+                roles=("ENTRY",),
+                status="entry_partial_fill",
+                blockers=["entry_partial_fill"],
+                partial_entry_fill=True,
+            ),
+            now_ms=now_ms + 20,
+        )
+        return _failure_result(
+            simulation_input,
+            scenario=scenario,
+            context=context,
+            payloads={"submitted": submitted},
+        )
+
+    submitted = protected_submit_attempt.record_ticket_bound_protected_submit_result(
+        conn,
+        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+        submit_result=_mock_exchange_submit_result(prepared),
+        now_ms=now_ms + 20,
+    )
+    protection = exit_protection_materializer.materialize_ticket_bound_exit_protection_set(
+        conn,
+        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+        now_ms=now_ms + 21,
+    )
+    set_id = str(protection["exit_protection_set_id"])
+
+    if scenario == "pg_protected_exchange_missing":
+        reconciled = protection_reconciler.reconcile_ticket_bound_exit_protection_set(
+            conn,
+            exit_protection_set_id=set_id,
+            exchange_snapshot=_exchange_snapshot_from_pg(
+                conn,
+                exit_protection_set_id=set_id,
+                omit_roles={"SL"},
+                position_qty="1",
+            ),
+            now_ms=now_ms + 22,
+        )
+        return _failure_result(
+            simulation_input,
+            scenario=scenario,
+            context=context,
+            payloads={
+                "submitted": submitted,
+                "protection": protection,
+                "reconciler": reconciled,
+            },
+        )
+
+    if scenario == "flat_position_live_protection_cleanup":
+        reconciled = protection_reconciler.reconcile_ticket_bound_exit_protection_set(
+            conn,
+            exit_protection_set_id=set_id,
+            exchange_snapshot=_exchange_snapshot_from_pg(
+                conn,
+                exit_protection_set_id=set_id,
+                position_qty="0",
+                position_flat=True,
+            ),
+            now_ms=now_ms + 22,
+        )
+        cleanup = (
+            orphan_protection_cleanup_command.prepare_ticket_bound_orphan_protection_cleanup_command(
+                conn,
+                exit_protection_set_id=set_id,
+                now_ms=now_ms + 23,
+            )
+        )
+        cleanup_result = asyncio.run(
+            orphan_protection_cleanup_command.execute_ticket_bound_orphan_protection_cleanup_command(
+                conn,
+                orphan_protection_cleanup_command_id=str(
+                    cleanup["orphan_protection_cleanup_command_id"]
+                ),
+                gateway=_MockCleanupGateway(),
+                now_ms=now_ms + 24,
+            )
+        )
+        return _failure_result(
+            simulation_input,
+            scenario=scenario,
+            context=context,
+            payloads={
+                "submitted": submitted,
+                "protection": protection,
+                "reconciler": reconciled,
+                "cleanup_command": cleanup,
+                "cleanup_result": cleanup_result,
+            },
+        )
+
+    _mark_tp1_filled(conn, exit_protection_set_id=set_id, now_ms=now_ms + 22)
+
+    if scenario == "tp1_filled_runner_missing":
+        runner = runner_protection_adjuster.materialize_ticket_bound_runner_protection_adjustment(
+            conn,
+            exit_protection_set_id=set_id,
+            runner_sl_exchange_order_id="",
+            now_ms=now_ms + 23,
+        )
+        return _failure_result(
+            simulation_input,
+            scenario=scenario,
+            context=context,
+            payloads={
+                "submitted": submitted,
+                "protection": protection,
+                "runner": runner,
+            },
+        )
+
+    command = runner_mutation_command.prepare_ticket_bound_runner_mutation_command(
+        conn,
+        exit_protection_set_id=set_id,
+        now_ms=now_ms + 23,
+    )
+
+    if scenario == "duplicate_tp1_fill_idempotent":
+        _mark_tp1_filled(conn, exit_protection_set_id=set_id, now_ms=now_ms + 24)
+        duplicate_command = runner_mutation_command.prepare_ticket_bound_runner_mutation_command(
+            conn,
+            exit_protection_set_id=set_id,
+            now_ms=now_ms + 25,
+        )
+        return _failure_result(
+            simulation_input,
+            scenario=scenario,
+            context=context,
+            payloads={
+                "submitted": submitted,
+                "protection": protection,
+                "runner_mutation_command": command,
+                "duplicate_runner_mutation_command": duplicate_command,
+            },
+        )
+
+    gateway = (
+        _MockRunnerMutationGateway(cancel_success=False)
+        if scenario == "old_sl_cancel_failed"
+        else _MockRunnerMutationGateway(place_success=False)
+    )
+    runner_result = asyncio.run(
+        runner_mutation_executor.execute_ticket_bound_runner_mutation_command(
+            conn,
+            runner_mutation_command_id=str(command["runner_mutation_command_id"]),
+            gateway=gateway,
+            now_ms=now_ms + 24,
+        )
+    )
+    return _failure_result(
+        simulation_input,
+        scenario=scenario,
+        context=context,
+        payloads={
+            "submitted": submitted,
+            "protection": protection,
+            "runner_mutation_command": command,
+            "runner_mutation_result": runner_result,
+        },
+    )
+
+
+def _prepare_full_chain_submit_context(
+    conn: sa.engine.Connection,
+    simulation_input: FullChainSimulationInput,
+    *,
+    projection_publisher: Callable[[sa.engine.Connection], dict[str, Any]],
+) -> dict[str, Any]:
+    now_ms = int(simulation_input.now_ms)
+    row = _candidate_runtime_row(
+        conn,
+        strategy_group_id=simulation_input.strategy_group_id,
+        symbol=simulation_input.symbol,
+        side=simulation_input.side,
+    )
+    _insert_constructed_raw_input(
+        conn,
+        row=row,
+        fact_values=simulation_input.fact_values or _fact_values(conn, row),
+        now_ms=now_ms,
+    )
+    fact_payload = fact_snapshots.materialize_action_time_fact_snapshots(
+        conn,
+        now_ms=now_ms,
+    )
+    projection_payload = projection_publisher(conn)
+    lane_payload = promotion_action_time_lane.materialize_pg_promotion_action_time_lane(
+        conn,
+        now_ms=now_ms + 1,
+    )
+    ticket_payload = action_time_ticket.materialize_action_time_ticket(
+        conn,
+        now_ms=now_ms + 2,
+    )
+    finalgate_payload = finalgate_preflight.materialize_action_time_finalgate_preflight(
+        conn,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        now_ms=now_ms + 3,
+    )
+    handoff_payload = (
+        operation_layer_handoff.materialize_action_time_operation_layer_handoff(
+            conn,
+            ticket_id=str(ticket_payload["ticket_id"]),
+            finalgate_pass_id=str(finalgate_payload["finalgate_pass_id"]),
+            now_ms=now_ms + 4,
+        )
+    )
+    safety_payload = runtime_safety_state.materialize_ticket_bound_runtime_safety_state(
+        conn,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
+        now_ms=now_ms + 5,
+    )
+    prepared_payload = protected_submit_attempt.prepare_ticket_bound_protected_submit_attempt(
+        conn,
+        ticket_id=str(ticket_payload["ticket_id"]),
+        operation_submit_command_id=str(handoff_payload["operation_submit_command_id"]),
+        submit_mode="real_gateway_action",
+        now_ms=now_ms + 6,
+    )
+    return {
+        "fact": fact_payload,
+        "projection": projection_payload,
+        "lane": lane_payload,
+        "ticket": ticket_payload,
+        "finalgate": finalgate_payload,
+        "handoff": handoff_payload,
+        "safety": safety_payload,
+        "prepared_submit": prepared_payload,
+    }
+
+
+def _failure_result(
+    simulation_input: FullChainSimulationInput,
+    *,
+    scenario: str,
+    context: dict[str, Any],
+    payloads: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema": "brc.ticket_bound_full_chain_failure_scenario.v1",
+        "scenario": scenario,
+        "strategy_group_id": simulation_input.strategy_group_id,
+        "symbol": simulation_input.symbol,
+        "side": simulation_input.side,
+        **context,
+        **payloads,
+        "authority_boundary": {
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "uses_mock_exchange_result": True,
+            "uses_mock_gateway": True,
+            "uses_repo_json_or_md_authority": False,
+        },
+    }
+
+
 class _MockRunnerMutationGateway:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        cancel_success: bool = True,
+        place_success: bool = True,
+    ) -> None:
         self.cancel_calls: list[dict[str, Any]] = []
         self.place_calls: list[dict[str, Any]] = []
+        self.cancel_success = cancel_success
+        self.place_success = place_success
+
+    async def cancel_order(self, **kwargs: Any) -> SimpleNamespace:
+        self.cancel_calls.append(dict(kwargs))
+        if not self.cancel_success:
+            return SimpleNamespace(
+                is_success=False,
+                exchange_order_id=str(kwargs.get("exchange_order_id") or ""),
+                status="REJECTED",
+                error_message="old sl cancel rejected by simulation",
+                error_code=None,
+            )
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id=str(kwargs.get("exchange_order_id") or ""),
+            status="CANCELED",
+            error_message=None,
+            error_code=None,
+        )
+
+    async def place_order(self, **kwargs: Any) -> SimpleNamespace:
+        self.place_calls.append(dict(kwargs))
+        if not self.place_success:
+            return SimpleNamespace(
+                is_success=False,
+                exchange_order_id="",
+                status="REJECTED",
+                error_message="runner sl submit rejected by simulation",
+                error_code=None,
+            )
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id="mock-exchange-runner-sl",
+            status="OPEN",
+            error_message=None,
+            error_code=None,
+        )
+
+
+class _MockCleanupGateway:
+    def __init__(self) -> None:
+        self.cancel_calls: list[dict[str, Any]] = []
 
     async def cancel_order(self, **kwargs: Any) -> SimpleNamespace:
         self.cancel_calls.append(dict(kwargs))
@@ -259,14 +654,8 @@ class _MockRunnerMutationGateway:
             is_success=True,
             exchange_order_id=str(kwargs.get("exchange_order_id") or ""),
             status="CANCELED",
-        )
-
-    async def place_order(self, **kwargs: Any) -> SimpleNamespace:
-        self.place_calls.append(dict(kwargs))
-        return SimpleNamespace(
-            is_success=True,
-            exchange_order_id="mock-exchange-runner-sl",
-            status="OPEN",
+            error_message=None,
+            error_code=None,
         )
 
 
@@ -692,6 +1081,44 @@ def _mock_exchange_submit_result(prepared: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _mock_exchange_submit_result_for_roles(
+    prepared: dict[str, Any],
+    *,
+    roles: tuple[str, ...],
+    status: str,
+    blockers: list[str],
+    partial_entry_fill: bool = False,
+) -> dict[str, Any]:
+    role_set = {role.upper() for role in roles}
+    submitted_orders = [
+        _mock_submitted_order(prepared, order)
+        for order in prepared["submit_request"]["orders"]
+        if str(order["order_role"]).upper() in role_set
+    ]
+    if partial_entry_fill:
+        for order in submitted_orders:
+            if str(order.get("order_role") or "").upper() == "ENTRY":
+                requested = _decimal(order.get("amount"))
+                order["status"] = "PARTIALLY_FILLED"
+                order["filled_qty"] = str(requested / Decimal("2"))
+    return {
+        "status": status,
+        "ticket_id": prepared["ticket_id"],
+        "operation_submit_command_id": prepared["operation_submit_command_id"],
+        "strategy_group_id": prepared["strategy_group_id"],
+        "symbol": prepared["symbol"],
+        "side": prepared["side"],
+        "exchange_write_called": True,
+        "order_created": bool(submitted_orders),
+        "order_lifecycle_called": True,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+        "blockers": blockers,
+        "submitted_orders": submitted_orders,
+    }
+
+
 def _mock_submitted_order(
     prepared: dict[str, Any],
     order: dict[str, Any],
@@ -715,6 +1142,47 @@ def _mock_submitted_order(
             }
         )
     return row
+
+
+def _exchange_snapshot_from_pg(
+    conn: sa.engine.Connection,
+    *,
+    exit_protection_set_id: str,
+    omit_roles: set[str] | None = None,
+    position_qty: str = "1",
+    position_flat: bool = False,
+) -> dict[str, Any]:
+    omit_roles = omit_roles or set()
+    orders = [
+        dict(row)
+        for row in conn.execute(
+            sa.text(
+                """
+                SELECT role, exchange_order_id, qty, side, reduce_only
+                FROM brc_ticket_bound_exit_protection_orders
+                WHERE exit_protection_set_id = :exit_protection_set_id
+                ORDER BY role
+                """
+            ),
+            {"exit_protection_set_id": exit_protection_set_id},
+        ).mappings()
+        if row["role"] not in omit_roles
+    ]
+    return {
+        "snapshot_id": f"simulation-snapshot:{exit_protection_set_id}",
+        "open_orders": [
+            {
+                "exchange_order_id": row["exchange_order_id"],
+                "qty": str(row["qty"]),
+                "side": row["side"],
+                "reduce_only": row["reduce_only"] in {True, 1},
+                "status": "open",
+            }
+            for row in orders
+        ],
+        "recent_fills": [],
+        "position": {"qty": position_qty, "position_flat": position_flat},
+    }
 
 
 def _decimal(value: Any) -> Decimal:
