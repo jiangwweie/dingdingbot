@@ -55,7 +55,7 @@ review plan.
 | **P0** | TP1 fill -> official SL cancel/replace and RUNNER_SL submit is not one closed ticket-bound mutation path | Locally implemented by `runner_mutation_command` and `runner_mutation_executor`; production scheduling/API wiring remains behind explicit deploy approval |
 | **P0** | Exchange truth is not yet the current authority for protection completeness | Locally implemented by `protection_reconciler` over caller-provided exchange snapshots; production exchange read adapter wiring remains behind explicit deploy approval |
 | **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Locally implemented by exact lifecycle classification plus `protection_recovery_command` for missing SL/TP1 recovery; production scheduling/API wiring remains behind explicit deploy approval |
-| **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Partially represented by PG materializers and lifecycle events; target closure is the Lifecycle Safety Core implementation plan |
+| **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Closed locally by the Lifecycle Safety Core materializers, full-chain harness, recovery commands, protection reconciler, runner mutation executor, and final closure; production wiring remains behind explicit deploy approval |
 | **P1** | Action-time TTL behavior across the full post-submit chain | Closed locally: expired tickets still block new submit attempts, while already-submitted ticket-bound lifecycles can continue protection, runner, and final closure |
 
 ## Target Architecture
@@ -449,11 +449,11 @@ chain_position: action_time_boundary
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scope
 stage: ticket_bound_lifecycle_safety_core
-first_blocker: official_runner_mutation_and_exchange_protection_reconciliation_not_complete
-evidence: PG materializers cover submitted attempt -> entry fill proof -> SL/TP1 proof -> runner proof -> closure proof, but official runner mutation and exchange truth reconciliation remain open
-next_action: implement the Lifecycle Safety Core implementation plan: full-chain harness, sequential submit recovery, protection reconciler, official runner mutation, and final closure acceptance
-stop_condition: one ticket can pass mock and real lifecycle proof from ENTRY through SL/TP1/RUNNER_SL/final exit/reconciliation/settlement/review without file authority or exchange bypass
-owner_action_required: no
+first_blocker: production_wiring_and_real_exchange_acceptance_requires_owner_approval
+evidence: PG materializers and local services cover submitted attempt -> entry fill proof -> SL/TP1 proof -> exchange snapshot reconciliation -> TP1 fill -> official runner mutation command/executor -> runner proof -> final closure proof without file authority
+next_action: complete local verification gates and review diff; request Owner approval before Tokyo deploy, server migration, service restart, production wiring, or real exchange acceptance
+stop_condition: one locally mocked ticket proves ENTRY through SL/TP1/RUNNER_SL/final exit/reconciliation/settlement/review; real acceptance starts only after explicit deploy approval
+owner_action_required: yes_for_deploy_and_real_exchange_acceptance_only
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound gateway path
 ```
 

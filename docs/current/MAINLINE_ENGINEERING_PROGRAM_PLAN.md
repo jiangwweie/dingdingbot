@@ -36,8 +36,8 @@ repo MD/JSON/output/report files.
 | **Multi-symbol and side-specific action-time path exists** | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`, `docs/current/MULTI_STRATEGY_MULTI_SYMBOL_MULTI_SIDE_ACTION_TIME_EVOLUTION_DESIGN.md` |
 | **Ticket identity and TP1 are PG-backed** | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | **Initial order lifecycle/protection PG objects exist** | `brc_ticket_bound_*` tables and current ticket-bound materializers |
-| **Runner dynamic management is not fully closed** | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
-| **Exchange protection reconciliation is the next lifecycle safety gap** | `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
+| **Runner dynamic management is locally closed** | `runner_mutation_command`, `runner_mutation_executor`, `runner_protection_adjuster`, and lifecycle tests cover TP1 filled -> old SL cancel -> RUNNER_SL submit -> runner proof |
+| **Exchange protection reconciliation is locally covered** | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots, including missing order, side mismatch, qty mismatch, orphan reduce-only order, TP1-fill runner gap, and flat-position live protection |
 | **Trading quality / capital risk allocation is designed but not implemented** | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 
 ## Program Map

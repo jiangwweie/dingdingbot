@@ -78,7 +78,7 @@ core:
 | --- | --- | --- |
 | Full-chain simulation | `full_chain_simulation_harness` runs constructed PG input through signal, lane, ticket, safety, protected submit, protection, runner command, runner proof, final closure | It uses mock exchange result and does not grant live exchange authority |
 | Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed`; `protection_recovery_command` prepares and executes missing SL/TP1 recovery locally through an injected gateway | Production scheduling/API wiring remains behind explicit Owner deploy approval |
-| Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers | It consumes already-fetched facts and does not call exchange APIs |
+| Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers; linked SL/TP1 must match exchange existence, reduce-only flag, side, and bounded qty | It consumes already-fetched facts and does not call exchange APIs |
 | Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for old SL cancel / RUNNER_SL submit | Command rows are intent/result records, not proof of runner protection |
 | Runner mutation executor | `runner_mutation_executor` consumes a prepared PG command, calls injected gateway cancel/place, and records the PG result | Executor is mockable locally and still cannot call FinalGate, change profile/sizing, or use file authority |
 | Ops health | Tokyo ops health reads exact lifecycle attention states and runner commands without runner proof | It remains readonly and non-mutating |
@@ -384,10 +384,10 @@ chain_position: action_time_boundary
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scope
 stage: ticket_bound_lifecycle_safety_core
-first_blocker: official_runner_mutation_and_exchange_protection_reconciliation_not_complete
-evidence: ENTRY/SL/TP1 submit request and PG proof materializers exist, but official runner mutation and exchange truth reconciliation are not yet one closed lifecycle core
-next_action: implement full-chain harness, then sequential submit recovery, protection reconciler, official runner mutation, and final closure under one state machine
-stop_condition: one mocked and one real ticket can prove entry, protection, TP1, runner, final exit, reconciliation, settlement, and review without file authority or exchange bypass
-owner_action_required: no
+first_blocker: production_wiring_and_real_exchange_acceptance_requires_owner_approval
+evidence: local PG lifecycle safety core covers full-chain simulation, sequential submit recovery, protection reconciliation, runner mutation executor, action-time TTL behavior, and final closure without file authority
+next_action: complete local verification gates and review diff; request Owner approval before Tokyo deploy, server migration, service restart, production wiring, or real exchange acceptance
+stop_condition: one locally mocked ticket proves entry, protection, TP1, runner, final exit, reconciliation, settlement, and review; one real ticket can be accepted only after explicit deploy approval
+owner_action_required: yes_for_deploy_and_real_exchange_acceptance_only
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound path
 ```

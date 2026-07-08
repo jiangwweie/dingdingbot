@@ -54,6 +54,76 @@ def test_protection_reconciler_flags_missing_exchange_sl(pg_control_connection):
     assert _lifecycle_status(pg_control_connection) == "protection_reconciliation_mismatch"
 
 
+def test_protection_reconciler_ignores_unrelated_non_reduce_only_open_order(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    snapshot = _snapshot(pg_control_connection, set_id)
+    snapshot["open_orders"].append(
+        {
+            "exchange_order_id": "exchange-unrelated-entry",
+            "qty": "0.5",
+            "side": "buy",
+            "reduce_only": False,
+            "status": "open",
+        }
+    )
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "reconciled"
+    assert payload["blockers"] == []
+    assert _lifecycle_status(pg_control_connection) == "position_protected"
+
+
+def test_protection_reconciler_flags_linked_protection_side_mismatch(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    snapshot = _snapshot(pg_control_connection, set_id)
+    for order in snapshot["open_orders"]:
+        if order["exchange_order_id"] == "exchange-sl-1":
+            order["side"] = "buy"
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "protection_reconciliation_mismatch"
+    assert "sl_side_mismatch" in payload["blockers"]
+    assert _lifecycle_status(pg_control_connection) == "protection_reconciliation_mismatch"
+
+
+def test_protection_reconciler_flags_linked_protection_qty_exceeds_position(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    snapshot = _snapshot(pg_control_connection, set_id)
+    for order in snapshot["open_orders"]:
+        if order["exchange_order_id"] == "exchange-sl-1":
+            order["qty"] = "9"
+    snapshot["position"]["qty"] = "0.5"
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "protection_reconciliation_mismatch"
+    assert "sl_qty_exceeds_position" in payload["blockers"]
+    assert _lifecycle_status(pg_control_connection) == "protection_reconciliation_mismatch"
+
+
 def test_protection_reconciler_flags_tp1_fill_without_runner_sl(pg_control_connection):
     set_id = _materialized_exit_protection_set(pg_control_connection)
     _mark_tp1_filled(pg_control_connection, set_id)

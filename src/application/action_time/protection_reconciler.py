@@ -102,6 +102,8 @@ def reconcile_ticket_bound_exit_protection_set(
         orders=orders,
         open_orders=open_orders,
         recent_fills=recent_fills,
+        position=position,
+        tp1_filled=tp1_filled,
         classification_blockers=list(classification.blockers),
     )
     if blockers != list(classification.blockers):
@@ -128,7 +130,12 @@ def reconcile_ticket_bound_exit_protection_set(
     elif any(blocker.endswith("_exchange_order_missing") for blocker in blockers):
         status = "protection_reconciliation_mismatch"
         next_action = "run_exchange_protection_reconciler"
-    elif "exchange_protection_reduce_only_missing" in blockers:
+    elif any(
+        blocker.endswith("_side_mismatch")
+        or blocker.endswith("_reduce_only_missing")
+        or blocker.endswith("_qty_exceeds_position")
+        for blocker in blockers
+    ):
         status = "protection_reconciliation_mismatch"
         next_action = "run_exchange_protection_reconciler"
     if blockers and status == "position_protected":
@@ -191,6 +198,8 @@ def _additional_blockers(
     orders: list[dict[str, Any]],
     open_orders: list[dict[str, Any]],
     recent_fills: list[dict[str, Any]],
+    position: dict[str, Any],
+    tp1_filled: bool,
     classification_blockers: list[str],
 ) -> list[str]:
     blockers = list(classification_blockers)
@@ -203,15 +212,28 @@ def _additional_blockers(
         pg_order = _role_order(orders, role)
         if role == "TP1" and _exchange_order_filled(pg_order, recent_fills):
             continue
-        if pg_order and not _exchange_order_by_id(open_orders, pg_order):
+        if not pg_order:
+            continue
+        exchange_order = _exchange_order_by_id(open_orders, pg_order)
+        if not exchange_order:
             blockers.append(f"{role.lower()}_exchange_order_missing")
+            continue
+        if exchange_order.get("reduce_only") is not True:
+            blockers.append(f"{role.lower()}_reduce_only_missing")
+        if not _exchange_order_side_matches_pg(exchange_order, pg_order):
+            blockers.append(f"{role.lower()}_side_mismatch")
+        if _exchange_order_qty_exceeds_position(
+            exchange_order,
+            position=position,
+            role=role,
+            tp1_filled=tp1_filled,
+        ):
+            blockers.append(f"{role.lower()}_qty_exceeds_position")
     for exchange_order in open_orders:
         exchange_order_id = str(exchange_order.get("exchange_order_id") or "")
         if exchange_order.get("reduce_only") is True and exchange_order_id:
             if exchange_order_id not in linked_exchange_ids:
                 blockers.append("exchange_protection_order_not_linked_to_pg")
-        if exchange_order.get("reduce_only") is not True:
-            blockers.append("exchange_protection_reduce_only_missing")
     return _dedupe(blockers)
 
 
@@ -226,7 +248,38 @@ def _has_valid_exchange_protection(
         return False
     if exchange_order.get("reduce_only") is not True:
         return False
+    if not _exchange_order_side_matches_pg(exchange_order, pg_order):
+        return False
     return _decimal(exchange_order.get("qty") or exchange_order.get("amount")) > 0
+
+
+def _exchange_order_side_matches_pg(
+    exchange_order: dict[str, Any],
+    pg_order: dict[str, Any],
+) -> bool:
+    expected = str(pg_order.get("side") or "").strip().lower()
+    observed = str(exchange_order.get("side") or "").strip().lower()
+    return bool(expected and observed and expected == observed)
+
+
+def _exchange_order_qty_exceeds_position(
+    exchange_order: dict[str, Any],
+    *,
+    position: dict[str, Any],
+    role: str,
+    tp1_filled: bool,
+) -> bool:
+    position_qty = abs(_decimal(position.get("qty") or position.get("position_qty")))
+    if position_qty <= 0:
+        return False
+    order_qty = abs(_decimal(exchange_order.get("qty") or exchange_order.get("amount")))
+    if order_qty <= 0:
+        return False
+    if role == "TP1":
+        return order_qty > position_qty
+    if role == "SL" and tp1_filled:
+        return False
+    return order_qty > position_qty
 
 
 def _live_protection_orders(
