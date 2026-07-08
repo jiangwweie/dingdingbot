@@ -81,6 +81,7 @@ core:
 | Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers; linked SL/TP1/RUNNER_SL must match exchange existence, reduce-only flag, side, and bounded qty | It consumes already-fetched facts and does not call exchange APIs |
 | Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for old SL cancel / RUNNER_SL submit | Command rows are intent/result records, not proof of runner protection |
 | Runner mutation executor | `runner_mutation_executor` consumes a prepared PG command, calls injected gateway cancel/place, and records the PG result | Executor is mockable locally and still cannot call FinalGate, change profile/sizing, or use file authority |
+| Runner mutation failure projection | Failed old SL cancel or failed RUNNER_SL submit updates lifecycle and protection set to `runner_mutation_failed`; if old SL was cancelled before RUNNER_SL failed, `runner_unprotected_after_old_sl_cancelled` is added | Failure must not remain hidden in a command row |
 | Ops health | Tokyo ops health reads exact lifecycle attention states and runner commands without runner proof | It remains readonly and non-mutating |
 
 ## Target Core
@@ -228,7 +229,8 @@ updated through reconciliation events, not by silent overwrite.
 | ENTRY filled, SL accepted, TP1 rejected | Position has stop but no TP1 | `protection_submit_failed` | Official recovery command: submit TP1 or mark degraded and block new entries |
 | ENTRY/SL/TP1 all accepted, PG record incomplete | Exchange may be protected, PG cannot prove it | `protection_reconciliation_mismatch` | Reconcile and materialize missing PG rows from exchange truth |
 | TP1 filled, old SL not adjusted | Remaining position may have wrong stop qty | `runner_mutation_pending` | Official runner mutation command |
-| Runner SL submit rejected | Remaining position may be unprotected or overprotected | `runner_mutation_failed` | Retry official runner mutation or flatten recovery |
+| Runner SL submit rejected after old SL cancel | Remaining position may be unprotected | `runner_mutation_failed` with `runner_unprotected_after_old_sl_cancelled` | Retry official runner mutation or flatten recovery |
+| Runner SL submit rejected before old SL cancel | Remaining position may still be overprotected by old SL | `runner_mutation_failed` | Retry official runner mutation or flatten recovery |
 | Final exit filled, protection still open | Residual reduce-only orders may later trigger unexpectedly | `position_closed_protection_live` | Official cleanup cancel command |
 
 ## Implementation Batches

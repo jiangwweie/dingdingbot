@@ -87,6 +87,8 @@ async def test_runner_mutation_executor_cancel_failure_records_failed_result(
     assert _command_blockers(pg_control_connection)[0] == (
         "cancel rejected by test gateway"
     )
+    assert _lifecycle_status(pg_control_connection) == "runner_mutation_failed"
+    assert _protection_set_status(pg_control_connection) == "runner_mutation_failed"
 
 
 @pytest.mark.asyncio
@@ -111,9 +113,12 @@ async def test_runner_mutation_executor_runner_submit_failure_records_failed_res
     assert len(gateway.cancel_calls) == 1
     assert len(gateway.place_calls) == 1
     assert _command_status(pg_control_connection) == "failed"
-    assert _command_blockers(pg_control_connection)[0] == (
-        "runner submit rejected by test gateway"
-    )
+    command_blockers = _command_blockers(pg_control_connection)
+    assert command_blockers[0] == "runner submit rejected by test gateway"
+    assert "runner_unprotected_after_old_sl_cancelled" in command_blockers
+    assert _lifecycle_status(pg_control_connection) == "runner_mutation_failed"
+    assert _protection_set_status(pg_control_connection) == "runner_mutation_failed"
+    assert _lifecycle_blockers(pg_control_connection) == command_blockers
 
 
 @pytest.mark.asyncio
@@ -188,6 +193,33 @@ def _command_status(conn) -> str:
 def _command_blockers(conn) -> list[str]:
     value = conn.execute(
         text("SELECT blockers FROM brc_ticket_bound_runner_mutation_commands")
+    ).scalar_one()
+    if isinstance(value, list):
+        return value
+    import json
+
+    return list(json.loads(value))
+
+
+def _lifecycle_status(conn) -> str:
+    return str(
+        conn.execute(
+            text("SELECT status FROM brc_ticket_bound_order_lifecycle_runs")
+        ).scalar_one()
+    )
+
+
+def _protection_set_status(conn) -> str:
+    return str(
+        conn.execute(
+            text("SELECT status FROM brc_ticket_bound_exit_protection_sets")
+        ).scalar_one()
+    )
+
+
+def _lifecycle_blockers(conn) -> list[str]:
+    value = conn.execute(
+        text("SELECT blockers FROM brc_ticket_bound_order_lifecycle_runs")
     ).scalar_one()
     if isinstance(value, list):
         return value
