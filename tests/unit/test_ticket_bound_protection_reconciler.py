@@ -10,6 +10,7 @@ from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_runner_protection_adjuster import (
     _mark_tp1_filled,
     _materialized_exit_protection_set,
+    _record_official_runner_mutation_result,
 )
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
@@ -214,6 +215,12 @@ def test_protection_reconciler_flags_flat_position_with_live_protection(
 def _materialized_runner_protection(conn) -> str:
     set_id = _materialized_exit_protection_set(conn)
     _mark_tp1_filled(conn, set_id)
+    _record_official_runner_mutation_result(
+        conn,
+        set_id,
+        runner_exchange_id="exchange-runner-sl-1",
+        now_ms=NOW_MS + 7500,
+    )
     payload = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
         conn,
         exit_protection_set_id=set_id,

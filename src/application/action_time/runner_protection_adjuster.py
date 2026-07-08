@@ -86,6 +86,7 @@ def materialize_ticket_bound_runner_protection_adjustment(
     sl_order = _role_order(orders, "SL")
     tp1_order = _role_order(orders, "TP1")
     existing_runner = _role_order(orders, "RUNNER_SL")
+    runner_result = _runner_mutation_result_for_set(conn, set_id)
 
     blockers = _blockers(
         protection_set=protection_set,
@@ -95,6 +96,14 @@ def materialize_ticket_bound_runner_protection_adjustment(
         runner_exchange_id=runner_exchange_id
         or str(existing_runner.get("exchange_order_id") or ""),
     )
+    if runner_exchange_id and not existing_runner:
+        blockers.extend(
+            _runner_mutation_result_blockers(
+                runner_result=runner_result,
+                runner_exchange_id=runner_exchange_id,
+            )
+        )
+        blockers = _dedupe(blockers)
     classification = classify_runner_protection_adjustment(
         blockers=blockers,
         tp1_waiting=_waiting_for_tp1_fill(blockers),
@@ -317,6 +326,51 @@ def _waiting_for_tp1_fill(blockers: list[str]) -> bool:
 
 def _waiting_for_runner_sl_ref(blockers: list[str]) -> bool:
     return blockers == ["runner_sl_exchange_order_id_required"]
+
+
+def _runner_mutation_result_for_set(
+    conn: sa.engine.Connection,
+    exit_protection_set_id: str,
+) -> dict[str, Any]:
+    if not exit_protection_set_id:
+        return {}
+    table = _table(conn, "brc_ticket_bound_runner_mutation_commands")
+    row = conn.execute(
+        sa.select(table).where(table.c.exit_protection_set_id == exit_protection_set_id)
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _runner_mutation_result_blockers(
+    *,
+    runner_result: dict[str, Any],
+    runner_exchange_id: str,
+) -> list[str]:
+    blockers: list[str] = []
+    if not runner_result:
+        return ["runner_mutation_result_missing"]
+    status = str(runner_result.get("status") or "")
+    if status != "result_recorded":
+        blockers.append(f"runner_mutation_result_not_recorded:{status or 'missing'}")
+    result_payload = _as_dict(runner_result.get("result_payload"))
+    if result_payload.get("old_sl_cancelled") is not True:
+        blockers.append("runner_mutation_result_old_sl_not_cancelled")
+    if result_payload.get("runner_sl_submitted") is not True:
+        blockers.append("runner_mutation_result_runner_sl_not_submitted")
+    if result_payload.get("exchange_write_called") is not True:
+        blockers.append("runner_mutation_result_exchange_write_not_confirmed")
+    if str(result_payload.get("runner_sl_exchange_order_id") or "") != runner_exchange_id:
+        blockers.append("runner_mutation_result_runner_sl_exchange_id_mismatch")
+    if result_payload.get("withdrawal_or_transfer_created") not in {False, None, "", 0}:
+        blockers.append("runner_mutation_result_forbidden_effect:withdrawal_or_transfer_created")
+    if result_payload.get("live_profile_changed") not in {False, None, "", 0}:
+        blockers.append("runner_mutation_result_forbidden_effect:live_profile_changed")
+    if result_payload.get("order_sizing_changed") not in {False, None, "", 0}:
+        blockers.append("runner_mutation_result_forbidden_effect:order_sizing_changed")
+    for blocker in result_payload.get("blockers") or []:
+        if str(blocker):
+            blockers.append(f"runner_mutation_result_blocker:{blocker}")
+    return _dedupe(blockers)
 
 
 def _materialize_runner_projection(
@@ -563,6 +617,18 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
     return value
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _stable_id(prefix: str, *parts: str) -> str:

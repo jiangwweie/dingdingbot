@@ -14,6 +14,9 @@ from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _json_value,
     _submitted_orders,
 )
+from tests.unit.test_ticket_bound_runner_protection_adjuster import (
+    _record_official_runner_mutation_result,
+)
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
@@ -511,6 +514,12 @@ def _runner_protected_attempt(conn):
             """
         ),
         {"set_id": set_id, "updated_at_ms": NOW_MS + 6500},
+    )
+    _record_official_runner_mutation_result(
+        conn,
+        set_id,
+        runner_exchange_id="exchange-runner-sl-1",
+        now_ms=NOW_MS + 6900,
     )
     runner = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
         conn,

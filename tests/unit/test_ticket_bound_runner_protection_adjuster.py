@@ -6,6 +6,10 @@ from sqlalchemy import text
 
 from scripts import materialize_ticket_bound_exit_protection_set as exit_protection
 from scripts import materialize_ticket_bound_runner_protection_adjustment as runner_adjuster
+from src.application.action_time.runner_mutation_command import (
+    prepare_ticket_bound_runner_mutation_command,
+    record_ticket_bound_runner_mutation_result,
+)
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_exit_protection_materializer import _submitted_attempt
 from tests.unit.test_ticket_bound_protected_submit_attempt import _json_value
@@ -78,6 +82,12 @@ def test_runner_adjuster_recovers_from_sl_adjust_pending(pg_control_connection):
         runner_sl_exchange_order_id="",
         now_ms=NOW_MS + 7000,
     )
+    _record_official_runner_mutation_result(
+        pg_control_connection,
+        set_id,
+        runner_exchange_id="exchange-runner-sl-1",
+        now_ms=NOW_MS + 7500,
+    )
 
     recovered = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
         pg_control_connection,
@@ -97,6 +107,12 @@ def test_runner_adjuster_recovers_from_sl_adjust_pending(pg_control_connection):
 def test_runner_adjuster_materializes_runner_sl_after_tp1_fill(pg_control_connection):
     set_id = _materialized_exit_protection_set(pg_control_connection)
     _mark_tp1_filled(pg_control_connection, set_id)
+    _record_official_runner_mutation_result(
+        pg_control_connection,
+        set_id,
+        runner_exchange_id="exchange-runner-sl-1",
+        now_ms=NOW_MS + 6900,
+    )
 
     payload = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
         pg_control_connection,
@@ -137,9 +153,48 @@ def test_runner_adjuster_materializes_runner_sl_after_tp1_fill(pg_control_connec
     ] == "runner_protected"
 
 
+def test_runner_adjuster_blocks_runner_sl_ref_without_official_mutation_result(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    _mark_tp1_filled(pg_control_connection, set_id)
+
+    payload = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        runner_sl_exchange_order_id="exchange-runner-sl-1",
+        runner_sl_local_order_id="runner-sl-1",
+        now_ms=NOW_MS + 7000,
+    )
+
+    assert payload["status"] == "runner_mutation_failed"
+    assert "runner_mutation_result_missing" in payload["blockers"]
+    assert (
+        pg_control_connection.execute(
+            text(
+                """
+                SELECT count(*)
+                FROM brc_ticket_bound_exit_protection_orders
+                WHERE role = 'RUNNER_SL'
+                """
+            )
+        ).scalar_one()
+        == 0
+    )
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "runner_mutation_failed"
+
+
 def test_runner_adjuster_is_idempotent_after_runner_sl_exists(pg_control_connection):
     set_id = _materialized_exit_protection_set(pg_control_connection)
     _mark_tp1_filled(pg_control_connection, set_id)
+    _record_official_runner_mutation_result(
+        pg_control_connection,
+        set_id,
+        runner_exchange_id="exchange-runner-sl-1",
+        now_ms=NOW_MS + 6900,
+    )
     first = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
         pg_control_connection,
         exit_protection_set_id=set_id,
@@ -182,6 +237,41 @@ def _materialized_exit_protection_set(conn) -> str:
     )
     assert payload["status"] == "position_protected"
     return str(payload["exit_protection_set_id"])
+
+
+def _record_official_runner_mutation_result(
+    conn,
+    set_id: str,
+    *,
+    runner_exchange_id: str,
+    now_ms: int,
+) -> None:
+    command = prepare_ticket_bound_runner_mutation_command(
+        conn,
+        exit_protection_set_id=set_id,
+        now_ms=now_ms - 100,
+    )
+    assert command["status"] == "prepared"
+    record = record_ticket_bound_runner_mutation_result(
+        conn,
+        runner_mutation_command_id=command["runner_mutation_command_id"],
+        result_payload={
+            "runner_mutation_command_id": command["runner_mutation_command_id"],
+            "exit_protection_set_id": set_id,
+            "ticket_id": command["ticket_id"],
+            "old_sl_exchange_order_id": command["command"]["old_sl_exchange_order_id"],
+            "old_sl_cancelled": True,
+            "runner_sl_submitted": True,
+            "runner_sl_exchange_order_id": runner_exchange_id,
+            "exchange_write_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "blockers": [],
+        },
+        now_ms=now_ms,
+    )
+    assert record["status"] == "result_recorded"
 
 
 def _mark_tp1_filled(conn, set_id: str) -> None:
