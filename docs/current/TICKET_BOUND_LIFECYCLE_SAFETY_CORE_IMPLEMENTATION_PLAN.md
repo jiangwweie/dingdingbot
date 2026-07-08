@@ -77,7 +77,7 @@ core:
 | Area | Current implementation | Remaining boundary |
 | --- | --- | --- |
 | Full-chain simulation | `full_chain_simulation_harness` runs constructed PG input through signal, lane, ticket, safety, protected submit, protection, runner command, runner proof, final closure | It uses mock exchange result and does not grant live exchange authority |
-| Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed`; `protection_recovery_command` prepares and executes missing SL/TP1 recovery locally through an injected gateway | Production scheduling/API wiring remains behind explicit Owner deploy approval |
+| Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed`; `protection_recovery_command` prepares and executes missing SL/TP1 recovery locally through an injected gateway; recovery failures update attempt and lifecycle blockers | Production scheduling/API wiring remains behind explicit Owner deploy approval |
 | Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers; linked SL/TP1/RUNNER_SL must match exchange existence, reduce-only flag, side, and bounded qty | It consumes already-fetched facts and does not call exchange APIs |
 | Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for old SL cancel / RUNNER_SL submit | Command rows are intent/result records, not proof of runner protection |
 | Runner mutation executor | `runner_mutation_executor` consumes a prepared PG command, calls injected gateway cancel/place, and records the PG result | Executor is mockable locally and still cannot call FinalGate, change profile/sizing, or use file authority |
@@ -289,7 +289,10 @@ Implementation status:
 4. **Implemented**: successful recovery repairs the protected submit attempt so
    the existing exit protection materializer can create the canonical SL/TP1
    protection proof set.
-5. **Remaining production integration**: wire recovery executor into deployed
+5. **Implemented**: failed recovery attempts update the protected submit attempt
+   and lifecycle blockers so latest recovery failure does not remain hidden in
+   the recovery command table.
+6. **Remaining production integration**: wire recovery executor into deployed
    Operation Layer scheduling/API only after explicit Owner deploy approval.
 
 ### Batch 3: Protection Reconciler

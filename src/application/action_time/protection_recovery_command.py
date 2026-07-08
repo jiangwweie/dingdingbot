@@ -467,6 +467,14 @@ def _record_result(
         "protection_recovery_command_id",
         updated,
     )
+    if status == "failed":
+        _mark_recovery_failed_without_partial_orders(
+            conn,
+            command=command,
+            blockers=blockers,
+            result_payload=result_payload,
+            now_ms=now_ms,
+        )
     return updated
 
 
@@ -608,6 +616,72 @@ def _merge_partial_recovered_orders_into_attempt(
     )
 
 
+def _mark_recovery_failed_without_partial_orders(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+    blockers: list[str],
+    result_payload: dict[str, Any],
+    now_ms: int,
+) -> None:
+    submitted_orders = [
+        dict(order)
+        for order in result_payload.get("submitted_orders", [])
+        if isinstance(order, dict)
+    ]
+    if submitted_orders:
+        return
+    attempt = _row_by_id(
+        conn,
+        "brc_ticket_bound_protected_submit_attempts",
+        "protected_submit_attempt_id",
+        str(command["protected_submit_attempt_id"]),
+    )
+    if attempt:
+        submit_result = _as_dict(attempt.get("submit_result"))
+        updated_attempt = {
+            **attempt,
+            "status": "submit_failed",
+            "blockers": blockers,
+            "warnings": _dedupe(
+                _json_list(attempt.get("warnings"))
+                + ["protection_recovery_failed_without_partial_orders"]
+            ),
+            "submit_result": {
+                **submit_result,
+                "status": "protection_recovery_failed",
+                "protection_recovery_result": result_payload,
+            },
+            "updated_at_ms": now_ms,
+        }
+        _upsert_row(
+            conn,
+            "brc_ticket_bound_protected_submit_attempts",
+            "protected_submit_attempt_id",
+            updated_attempt,
+        )
+    lifecycle = _row_by_id(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "lifecycle_run_id",
+        str(command["lifecycle_run_id"]),
+    )
+    if lifecycle:
+        updated_lifecycle = {
+            **lifecycle,
+            "status": _recovery_failed_lifecycle_status(lifecycle),
+            "first_blocker": blockers[0] if blockers else None,
+            "blockers": blockers,
+            "updated_at_ms": now_ms,
+        }
+        _upsert_row(
+            conn,
+            "brc_ticket_bound_order_lifecycle_runs",
+            "lifecycle_run_id",
+            updated_lifecycle,
+        )
+
+
 def _update_lifecycle_after_partial_recovery(
     conn: sa.engine.Connection,
     *,
@@ -641,6 +715,13 @@ def _update_lifecycle_after_partial_recovery(
         "lifecycle_run_id",
         updated,
     )
+
+
+def _recovery_failed_lifecycle_status(lifecycle: dict[str, Any]) -> str:
+    current = str(lifecycle.get("status") or "")
+    if current in {"protection_missing", "protection_submit_failed"}:
+        return current
+    return "protection_submit_failed"
 
 
 def _merge_orders(

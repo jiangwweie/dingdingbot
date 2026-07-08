@@ -124,7 +124,43 @@ async def test_protection_recovery_submit_failure_stays_hard_stopped(
     assert executed["blockers"] == ["recovery rejected by test gateway"]
     assert _attempt_status(pg_control_connection) == "submit_failed"
     assert _lifecycle_status(pg_control_connection) == "protection_submit_failed"
+    assert _attempt_blockers(pg_control_connection) == [
+        "recovery rejected by test gateway"
+    ]
+    assert _lifecycle_blockers(pg_control_connection) == [
+        "recovery rejected by test gateway"
+    ]
     assert _recovery_command_status(pg_control_connection) == "failed"
+
+
+@pytest.mark.asyncio
+async def test_protection_recovery_sl_failure_updates_latest_lifecycle_blocker(
+    pg_control_connection,
+):
+    prepared = _failed_attempt_after_sl_submit_failure(pg_control_connection)
+    command = prepare_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+    gateway = _FakeRecoveryGateway(place_success=False)
+
+    executed = await execute_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protection_recovery_command_id=command["protection_recovery_command_id"],
+        gateway=gateway,
+        now_ms=NOW_MS + 7000,
+    )
+
+    assert executed["status"] == "failed"
+    assert _attempt_status(pg_control_connection) == "submit_failed"
+    assert _lifecycle_status(pg_control_connection) == "protection_missing"
+    assert _attempt_blockers(pg_control_connection) == [
+        "recovery rejected by test gateway"
+    ]
+    assert _lifecycle_blockers(pg_control_connection) == [
+        "recovery rejected by test gateway"
+    ]
 
 
 @pytest.mark.asyncio
@@ -253,6 +289,20 @@ def _recovery_command_status(conn) -> str:
             text("SELECT status FROM brc_ticket_bound_protection_recovery_commands")
         ).scalar_one()
     )
+
+
+def _attempt_blockers(conn) -> list[str]:
+    value = conn.execute(
+        text("SELECT blockers FROM brc_ticket_bound_protected_submit_attempts")
+    ).scalar_one()
+    return _json_value(value)
+
+
+def _lifecycle_blockers(conn) -> list[str]:
+    value = conn.execute(
+        text("SELECT blockers FROM brc_ticket_bound_order_lifecycle_runs")
+    ).scalar_one()
+    return _json_value(value)
 
 
 def _protection_order_roles(conn) -> set[str]:
