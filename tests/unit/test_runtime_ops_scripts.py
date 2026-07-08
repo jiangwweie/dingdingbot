@@ -444,6 +444,85 @@ def test_tokyo_ops_l2_l7_summary_flags_runner_mutation_command_without_runner_pr
     assert summary["runner_mutation_command_without_runner_proof_count"] == 1
 
 
+def test_tokyo_ops_l2_l7_summary_flags_invalid_submitted_order_semantics():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {"status": "running", "blockers": []},
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+            "submitted_attempts_with_invalid_order_semantics": [
+                {
+                    "protected_submit_attempt_id": "attempt-1",
+                    "ticket_id": "ticket-1",
+                    "semantic_issues": {
+                        "SL": ["submit_result_sl_terminal_status"],
+                        "TP1": ["submit_result_tp1_price_missing"],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "submitted_attempt_invalid_order_semantics" in summary["issues"]
+    assert summary["submitted_attempt_invalid_order_semantics_count"] == 1
+
+
+def test_tokyo_ops_l2_l7_summary_flags_closed_protection_with_live_orders():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {"status": "running", "blockers": []},
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+            "closed_protection_sets_with_live_orders": [
+                {
+                    "exit_protection_set_id": "set-1",
+                    "ticket_id": "ticket-1",
+                    "live_order_count": 1,
+                }
+            ],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "closed_exit_protection_set_with_live_orders" in summary["issues"]
+    assert summary["closed_protection_set_with_live_order_count"] == 1
+
+
 def test_tokyo_ops_l2_l7_summary_flags_lifecycle_closure_projection_mismatch():
     summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
         {
@@ -485,6 +564,44 @@ def test_tokyo_ops_l2_l7_summary_flags_lifecycle_closure_projection_mismatch():
     assert "post_submit_closed_without_lifecycle_closed" in summary["issues"]
     assert summary["lifecycle_closed_without_post_submit_closed_count"] == 1
     assert summary["post_submit_closed_without_lifecycle_closed_count"] == 1
+
+
+def test_tokyo_ops_l2_l7_summary_flags_closed_without_lifecycle_evidence_events():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {"status": "running", "blockers": []},
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+            "post_submit_closed_without_lifecycle_evidence_events": [
+                {
+                    "post_submit_closure_id": "closure-1",
+                    "ticket_id": "ticket-1",
+                    "protected_submit_attempt_id": "attempt-1",
+                }
+            ],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "post_submit_closed_without_lifecycle_evidence_events" in summary["issues"]
+    assert summary["post_submit_closed_without_lifecycle_evidence_event_count"] == 1
 
 
 def test_runtime_monitor_cli_stdout_is_json_only(monkeypatch, capsys):

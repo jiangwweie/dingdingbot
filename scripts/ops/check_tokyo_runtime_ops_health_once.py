@@ -46,6 +46,7 @@ L2_L7_CHAIN_TABLES = (
     "brc_ticket_bound_order_lifecycle_runs",
     "brc_ticket_bound_exit_protection_sets",
     "brc_ticket_bound_exit_protection_orders",
+    "brc_ticket_bound_lifecycle_events",
     "brc_ticket_bound_runner_mutation_commands",
     "brc_ticket_bound_post_submit_closures",
     "brc_goal_status_current",
@@ -378,6 +379,186 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             )
         ).mappings()
     )
+    submitted_attempts_with_invalid_order_semantics = list(
+        conn.execute(
+            sa.text(
+                """
+                WITH submitted_attempts AS (
+                  SELECT
+                    a.protected_submit_attempt_id,
+                    a.ticket_id,
+                    a.strategy_group_id,
+                    a.symbol,
+                    a.side,
+                    a.updated_at_ms,
+                    a.submit_request,
+                    a.submit_result
+                  FROM brc_ticket_bound_protected_submit_attempts AS a
+                  WHERE a.status = 'submitted'
+                    AND a.submit_result->>'status' = 'exchange_submit_orders_submitted'
+                ),
+                required_roles(role) AS (
+                  VALUES ('ENTRY'), ('SL'), ('TP1')
+                ),
+                role_rows AS (
+                  SELECT
+                    a.protected_submit_attempt_id,
+                    a.ticket_id,
+                    a.strategy_group_id,
+                    a.symbol,
+                    a.side,
+                    a.updated_at_ms,
+                    rr.role,
+                    req.order_json AS request_order,
+                    submitted.order_json AS submitted_order,
+                    COALESCE(
+                      NULLIF(submitted.order_json->>'amount', ''),
+                      NULLIF(req.order_json->>'amount', ''),
+                      ''
+                    ) AS amount_text
+                  FROM submitted_attempts AS a
+                  CROSS JOIN required_roles AS rr
+                  LEFT JOIN LATERAL (
+                    SELECT value AS order_json
+                    FROM jsonb_array_elements(
+                      CASE
+                        WHEN jsonb_typeof(a.submit_request->'orders') = 'array'
+                        THEN a.submit_request->'orders'
+                        ELSE '[]'::jsonb
+                      END
+                    ) AS value
+                    WHERE upper(value->>'order_role') = rr.role
+                    LIMIT 1
+                  ) AS req ON true
+                  LEFT JOIN LATERAL (
+                    SELECT value AS order_json
+                    FROM jsonb_array_elements(
+                      CASE
+                        WHEN jsonb_typeof(a.submit_result->'submitted_orders') = 'array'
+                        THEN a.submit_result->'submitted_orders'
+                        ELSE '[]'::jsonb
+                      END
+                    ) AS value
+                    WHERE upper(value->>'order_role') = rr.role
+                    LIMIT 1
+                  ) AS submitted ON true
+                ),
+                issue_rows AS (
+                  SELECT
+                    protected_submit_attempt_id,
+                    ticket_id,
+                    strategy_group_id,
+                    symbol,
+                    side,
+                    updated_at_ms,
+                    role,
+                    array_remove(ARRAY[
+                      CASE
+                        WHEN request_order IS NULL
+                        THEN 'submit_request_' || lower(role) || '_order_missing'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NULL
+                        THEN 'submit_result_' || lower(role) || '_order_missing'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NOT NULL
+                         AND request_order IS NOT NULL
+                         AND COALESCE(submitted_order->>'local_order_id', '')
+                             <> COALESCE(request_order->>'local_order_id', '')
+                        THEN 'submit_result_' || lower(role) || '_local_order_id_mismatch'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NOT NULL
+                         AND COALESCE(submitted_order->>'exchange_order_id', '') = ''
+                        THEN 'submit_result_' || lower(role) || '_exchange_order_id_missing'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NOT NULL
+                         AND (
+                           amount_text = ''
+                           OR CASE
+                             WHEN amount_text ~ '^[0-9]+(\\.[0-9]+)?$'
+                             THEN amount_text::numeric <= 0
+                             ELSE true
+                           END
+                         )
+                        THEN 'submit_result_' || lower(role) || '_amount_missing'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NOT NULL
+                         AND role = 'ENTRY'
+                         AND COALESCE(submitted_order->>'reduce_only', '') <> 'false'
+                        THEN 'submit_result_entry_reduce_only_invalid'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NOT NULL
+                         AND role = 'ENTRY'
+                         AND lower(COALESCE(submitted_order->>'status', '')) IN (
+                           'canceled', 'cancelled', 'rejected', 'expired', 'failed'
+                         )
+                        THEN 'submit_result_entry_terminal_status'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NOT NULL
+                         AND role IN ('SL', 'TP1')
+                         AND COALESCE(submitted_order->>'reduce_only', '') <> 'true'
+                        THEN 'submit_result_' || lower(role) || '_reduce_only_required'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NOT NULL
+                         AND role IN ('SL', 'TP1')
+                         AND lower(COALESCE(submitted_order->>'status', '')) IN (
+                           'canceled', 'cancelled', 'rejected', 'expired', 'failed'
+                         )
+                        THEN 'submit_result_' || lower(role) || '_terminal_status'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NOT NULL
+                         AND role = 'SL'
+                         AND COALESCE(
+                           NULLIF(submitted_order->>'trigger_price', ''),
+                           NULLIF(request_order->>'trigger_price', ''),
+                           ''
+                         ) = ''
+                        THEN 'submit_result_sl_trigger_price_missing'
+                      END,
+                      CASE
+                        WHEN submitted_order IS NOT NULL
+                         AND role = 'TP1'
+                         AND COALESCE(
+                           NULLIF(submitted_order->>'price', ''),
+                           NULLIF(request_order->>'price', ''),
+                           ''
+                         ) = ''
+                        THEN 'submit_result_tp1_price_missing'
+                      END
+                    ], NULL) AS issues
+                  FROM role_rows
+                )
+                SELECT
+                  protected_submit_attempt_id,
+                  ticket_id,
+                  strategy_group_id,
+                  symbol,
+                  side,
+                  updated_at_ms,
+                  jsonb_object_agg(role, issues) AS semantic_issues
+                FROM issue_rows
+                WHERE cardinality(issues) > 0
+                GROUP BY
+                  protected_submit_attempt_id,
+                  ticket_id,
+                  strategy_group_id,
+                  symbol,
+                  side,
+                  updated_at_ms
+                ORDER BY updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
     incomplete_protection_sets = list(
         conn.execute(
             sa.text(
@@ -389,6 +570,41 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
                 WHERE protection_complete = false
                    OR status NOT IN ('submitted', 'reconciled', 'runner_protected', 'closed')
                 ORDER BY updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
+    closed_protection_sets_with_live_orders = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT
+                  s.exit_protection_set_id,
+                  s.ticket_id,
+                  s.protected_submit_attempt_id,
+                  s.strategy_group_id,
+                  s.symbol,
+                  s.side,
+                  s.updated_at_ms,
+                  count(*) AS live_order_count
+                FROM brc_ticket_bound_exit_protection_sets AS s
+                JOIN brc_ticket_bound_exit_protection_orders AS o
+                  ON o.exit_protection_set_id = s.exit_protection_set_id
+                 AND o.status IN (
+                   'planned', 'submitted', 'open', 'partially_filled',
+                   'cancel_pending', 'replace_pending'
+                 )
+                WHERE s.status = 'closed'
+                GROUP BY
+                  s.exit_protection_set_id,
+                  s.ticket_id,
+                  s.protected_submit_attempt_id,
+                  s.strategy_group_id,
+                  s.symbol,
+                  s.side,
+                  s.updated_at_ms
+                ORDER BY s.updated_at_ms DESC
                 LIMIT 20
                 """
             )
@@ -470,6 +686,55 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
                   ON l.protected_submit_attempt_id = c.protected_submit_attempt_id
                 WHERE c.status = 'closed'
                   AND COALESCE(l.status, '') <> 'lifecycle_closed'
+                ORDER BY c.updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
+    post_submit_closed_without_lifecycle_evidence_events = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT
+                  c.post_submit_closure_id,
+                  c.ticket_id,
+                  c.protected_submit_attempt_id,
+                  c.strategy_group_id,
+                  c.symbol,
+                  c.side,
+                  c.updated_at_ms
+                FROM brc_ticket_bound_post_submit_closures AS c
+                JOIN brc_ticket_bound_order_lifecycle_runs AS l
+                  ON l.protected_submit_attempt_id = c.protected_submit_attempt_id
+                WHERE c.status = 'closed'
+                  AND (
+                    NOT EXISTS (
+                      SELECT 1
+                      FROM brc_ticket_bound_lifecycle_events AS e
+                      WHERE e.lifecycle_run_id = l.lifecycle_run_id
+                        AND e.ticket_id = l.ticket_id
+                        AND e.protected_submit_attempt_id = l.protected_submit_attempt_id
+                        AND e.event_type = 'reconciliation_matched'
+                        AND e.event_payload @> '{"final_position_flat_confirmed": true}'::jsonb
+                    )
+                    OR NOT EXISTS (
+                      SELECT 1
+                      FROM brc_ticket_bound_lifecycle_events AS e
+                      WHERE e.lifecycle_run_id = l.lifecycle_run_id
+                        AND e.ticket_id = l.ticket_id
+                        AND e.protected_submit_attempt_id = l.protected_submit_attempt_id
+                        AND e.event_type = 'budget_settled'
+                    )
+                    OR NOT EXISTS (
+                      SELECT 1
+                      FROM brc_ticket_bound_lifecycle_events AS e
+                      WHERE e.lifecycle_run_id = l.lifecycle_run_id
+                        AND e.ticket_id = l.ticket_id
+                        AND e.protected_submit_attempt_id = l.protected_submit_attempt_id
+                        AND e.event_type = 'review_recorded'
+                    )
+                  )
                 ORDER BY c.updated_at_ms DESC
                 LIMIT 20
                 """
@@ -593,7 +858,13 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
         "submitted_attempts_without_protection": [
             dict(row) for row in submitted_attempts_without_protection
         ],
+        "submitted_attempts_with_invalid_order_semantics": [
+            dict(row) for row in submitted_attempts_with_invalid_order_semantics
+        ],
         "incomplete_protection_sets": [dict(row) for row in incomplete_protection_sets],
+        "closed_protection_sets_with_live_orders": [
+            dict(row) for row in closed_protection_sets_with_live_orders
+        ],
         "tp1_filled_without_runner_sl": [
             dict(row) for row in tp1_filled_without_runner_sl
         ],
@@ -605,6 +876,9 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
         ],
         "post_submit_closed_without_lifecycle_closed": [
             dict(row) for row in post_submit_closed_without_lifecycle_closed
+        ],
+        "post_submit_closed_without_lifecycle_evidence_events": [
+            dict(row) for row in post_submit_closed_without_lifecycle_evidence_events
         ],
         "runner_mutation_commands_without_runner_proof": [
             dict(row) for row in runner_mutation_commands_without_runner_proof
@@ -629,8 +903,12 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         issues.append("recent_duplicate_action_time_lane_for_same_signal")
     if snapshot.get("submitted_attempts_without_protection"):
         issues.append("submitted_attempt_without_exit_protection_set")
+    if snapshot.get("submitted_attempts_with_invalid_order_semantics"):
+        issues.append("submitted_attempt_invalid_order_semantics")
     if snapshot.get("incomplete_protection_sets"):
         issues.append("incomplete_ticket_bound_exit_protection_set")
+    if snapshot.get("closed_protection_sets_with_live_orders"):
+        issues.append("closed_exit_protection_set_with_live_orders")
     if snapshot.get("tp1_filled_without_runner_sl"):
         issues.append("tp1_filled_without_runner_sl")
     if snapshot.get("runner_protected_without_runner_sl"):
@@ -639,6 +917,8 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         issues.append("lifecycle_closed_without_post_submit_closed")
     if snapshot.get("post_submit_closed_without_lifecycle_closed"):
         issues.append("post_submit_closed_without_lifecycle_closed")
+    if snapshot.get("post_submit_closed_without_lifecycle_evidence_events"):
+        issues.append("post_submit_closed_without_lifecycle_evidence_events")
     if snapshot.get("runner_mutation_commands_without_runner_proof"):
         issues.append("runner_mutation_command_without_runner_proof")
     if snapshot.get("lifecycle_attention_rows"):
@@ -685,8 +965,14 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "submitted_attempt_without_protection_count": len(
             snapshot.get("submitted_attempts_without_protection") or []
         ),
+        "submitted_attempt_invalid_order_semantics_count": len(
+            snapshot.get("submitted_attempts_with_invalid_order_semantics") or []
+        ),
         "incomplete_protection_set_count": len(
             snapshot.get("incomplete_protection_sets") or []
+        ),
+        "closed_protection_set_with_live_order_count": len(
+            snapshot.get("closed_protection_sets_with_live_orders") or []
         ),
         "tp1_filled_without_runner_sl_count": len(
             snapshot.get("tp1_filled_without_runner_sl") or []
@@ -699,6 +985,9 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
         "post_submit_closed_without_lifecycle_closed_count": len(
             snapshot.get("post_submit_closed_without_lifecycle_closed") or []
+        ),
+        "post_submit_closed_without_lifecycle_evidence_event_count": len(
+            snapshot.get("post_submit_closed_without_lifecycle_evidence_events") or []
         ),
         "runner_mutation_command_without_runner_proof_count": len(
             snapshot.get("runner_mutation_commands_without_runner_proof") or []
