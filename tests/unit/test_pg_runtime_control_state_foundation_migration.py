@@ -20,6 +20,10 @@ MIGRATION_087_PATH = (
     Path(__file__).resolve().parents[2]
     / "migrations/versions/2026-07-05-087_harden_live_signal_event_time_authority.py"
 )
+MIGRATION_094_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "migrations/versions/2026-07-08-094_allow_temporary_tiny_live_protected_submit.py"
+)
 
 
 def _load_migration(path: Path, name: str):
@@ -43,6 +47,10 @@ def connection():
         MIGRATION_087_PATH,
         "migration_087_live_signal_event_time_authority",
     )
+    migration_094 = _load_migration(
+        MIGRATION_094_PATH,
+        "migration_094_temporary_tiny_live_submit",
+    )
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -51,6 +59,7 @@ def connection():
     with engine.begin() as conn:
         _run_migration(conn, migration_086)
         _run_migration(conn, migration_087)
+        _run_migration(conn, migration_094)
     with engine.connect() as conn:
         yield conn
     engine.dispose()
