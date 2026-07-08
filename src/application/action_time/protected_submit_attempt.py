@@ -846,6 +846,7 @@ def _result_identity_blockers(
             blockers.append("submit_result_order_id_not_in_ticket_request")
         if request_order_ids and submitted_order_ids != request_order_ids:
             blockers.append("submit_result_order_ids_incomplete")
+        blockers.extend(_submitted_order_semantic_blockers(attempt, submit_result))
         for key in ("exchange_write_called", "order_created", "order_lifecycle_called"):
             if submit_result.get(key) is not True:
                 blockers.append(f"submit_result_required_effect_false:{key}")
@@ -853,6 +854,60 @@ def _result_identity_blockers(
         if submit_result.get(key) not in {expected, None, "", 0}:
             blockers.append(f"submit_result_forbidden_effect:{key}")
     return _dedupe(blockers)
+
+
+def _submitted_order_semantic_blockers(
+    attempt: dict[str, Any],
+    submit_result: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    request_orders = [
+        dict(order)
+        for order in _as_dict(attempt.get("submit_request")).get("orders", [])
+        if isinstance(order, dict)
+    ]
+    submitted_orders = [
+        dict(order)
+        for order in submit_result.get("submitted_orders", [])
+        if isinstance(order, dict)
+    ]
+    for role in ("ENTRY", "SL", "TP1"):
+        request_order = _order_by_role(request_orders, role)
+        submitted_order = _order_by_role(submitted_orders, role)
+        if not request_order or not submitted_order:
+            continue
+        if str(submitted_order.get("local_order_id") or "") != str(
+            request_order.get("local_order_id") or ""
+        ):
+            blockers.append(f"submit_result_{role.lower()}_local_order_id_mismatch")
+        if not str(submitted_order.get("exchange_order_id") or "").strip():
+            blockers.append(f"submit_result_{role.lower()}_exchange_order_id_missing")
+        if _decimal(submitted_order.get("amount") or request_order.get("amount")) <= 0:
+            blockers.append(f"submit_result_{role.lower()}_amount_missing")
+        if role == "ENTRY":
+            if submitted_order.get("reduce_only") is not False:
+                blockers.append("submit_result_entry_reduce_only_invalid")
+            if _terminal_order_status(submitted_order):
+                blockers.append("submit_result_entry_terminal_status")
+        else:
+            if submitted_order.get("reduce_only") is not True:
+                blockers.append(f"submit_result_{role.lower()}_reduce_only_required")
+            if _terminal_order_status(submitted_order):
+                blockers.append(f"submit_result_{role.lower()}_terminal_status")
+            if role == "SL" and _decimal(
+                submitted_order.get("trigger_price") or request_order.get("trigger_price")
+            ) <= 0:
+                blockers.append("submit_result_sl_trigger_price_missing")
+            if role == "TP1" and _decimal(
+                submitted_order.get("price") or request_order.get("price")
+            ) <= 0:
+                blockers.append("submit_result_tp1_price_missing")
+    return _dedupe(blockers)
+
+
+def _terminal_order_status(order: dict[str, Any]) -> bool:
+    status = str(order.get("status") or "").strip().lower()
+    return status in {"canceled", "cancelled", "rejected", "expired", "failed"}
 
 
 def _identity_evidence(
