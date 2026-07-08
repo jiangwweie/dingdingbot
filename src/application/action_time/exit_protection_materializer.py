@@ -376,7 +376,7 @@ def _lifecycle_row(
         "status": status,
         "entry_local_order_id": str(entry_order.get("local_order_id") or "") or None,
         "entry_exchange_order_id": str(entry_order.get("exchange_order_id") or "") or None,
-        "entry_fill_confirmed": not blockers,
+        "entry_fill_confirmed": not entry_fill["blockers"],
         "entry_filled_qty": entry_fill["filled_qty"] if entry_fill["filled_qty"] > 0 else None,
         "entry_avg_price": entry_fill["avg_price"] if entry_fill["avg_price"] > 0 else None,
         "exit_protection_set_id": exit_protection_set_id,

@@ -48,8 +48,18 @@ def test_runner_mutation_command_prepares_official_command_after_tp1_fill(
     assert payload["next_action"] == (
         "execute_runner_mutation_through_official_operation_path"
     )
+    assert (
+        payload["command"]["command_plan"]["mutation_plan"]
+        == "submit_new_runner_sl_then_cancel_old"
+    )
     assert payload["command"]["command_plan"]["cancel_old_sl"]["exchange_order_id"]
     assert payload["command"]["command_plan"]["submit_runner_sl"]["reduce_only"] is True
+    assert (
+        payload["command"]["command_plan"]["safety_rules"][
+            "cancel_old_sl_only_after_runner_sl_confirmed"
+        ]
+        is True
+    )
     assert _command_count(pg_control_connection) == 1
     assert _lifecycle_status(pg_control_connection) == "runner_mutation_pending"
 

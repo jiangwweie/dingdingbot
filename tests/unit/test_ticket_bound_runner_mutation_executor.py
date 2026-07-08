@@ -22,7 +22,7 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
 
 
 @pytest.mark.asyncio
-async def test_runner_mutation_executor_cancels_old_sl_and_submits_runner_sl(
+async def test_runner_mutation_executor_submits_runner_sl_before_canceling_old_sl(
     pg_control_connection,
 ):
     prepared = _prepared_command(pg_control_connection)
@@ -40,6 +40,10 @@ async def test_runner_mutation_executor_cancels_old_sl_and_submits_runner_sl(
     assert payload["next_action"] == (
         "materialize_ticket_bound_runner_protection_adjustment"
     )
+    assert gateway.events == [
+        "place_order",
+        "cancel_order",
+    ]
     assert gateway.cancel_calls == [
         {
             "exchange_order_id": prepared["command"]["old_sl_exchange_order_id"],
@@ -80,19 +84,25 @@ async def test_runner_mutation_executor_cancel_failure_records_failed_result(
     assert payload["status"] == "failed"
     assert payload["blockers"] == ["cancel rejected by test gateway"]
     assert payload["result_payload"]["old_sl_cancelled"] is False
-    assert payload["result_payload"]["runner_sl_submitted"] is False
+    assert payload["result_payload"]["runner_sl_submitted"] is True
+    assert payload["result_payload"]["old_sl_cleanup_required"] is True
     assert payload["result_payload"]["exchange_write_called"] is True
-    assert gateway.place_calls == []
+    assert gateway.events == [
+        "place_order",
+        "cancel_order",
+    ]
+    assert len(gateway.place_calls) == 1
     assert _command_status(pg_control_connection) == "failed"
     assert _command_blockers(pg_control_connection)[0] == (
         "cancel rejected by test gateway"
     )
+    assert "old_sl_cancel_not_confirmed" in _command_blockers(pg_control_connection)
     assert _lifecycle_status(pg_control_connection) == "runner_mutation_failed"
     assert _protection_set_status(pg_control_connection) == "runner_mutation_failed"
 
 
 @pytest.mark.asyncio
-async def test_runner_mutation_executor_runner_submit_failure_records_failed_result(
+async def test_runner_mutation_executor_runner_submit_failure_keeps_old_sl_live(
     pg_control_connection,
 ):
     prepared = _prepared_command(pg_control_connection)
@@ -107,15 +117,19 @@ async def test_runner_mutation_executor_runner_submit_failure_records_failed_res
 
     assert payload["status"] == "failed"
     assert payload["blockers"] == ["runner submit rejected by test gateway"]
-    assert payload["result_payload"]["old_sl_cancelled"] is True
+    assert payload["result_payload"]["old_sl_cancelled"] is False
     assert payload["result_payload"]["runner_sl_submitted"] is False
+    assert (
+        payload["result_payload"]["old_sl_remained_live_until_runner_sl_confirmed"]
+        is True
+    )
     assert payload["result_payload"]["exchange_write_called"] is True
-    assert len(gateway.cancel_calls) == 1
+    assert gateway.cancel_calls == []
     assert len(gateway.place_calls) == 1
     assert _command_status(pg_control_connection) == "failed"
     command_blockers = _command_blockers(pg_control_connection)
     assert command_blockers[0] == "runner submit rejected by test gateway"
-    assert "runner_unprotected_after_old_sl_cancelled" in command_blockers
+    assert "runner_unprotected_after_old_sl_cancelled" not in command_blockers
     assert _lifecycle_status(pg_control_connection) == "runner_mutation_failed"
     assert _protection_set_status(pg_control_connection) == "runner_mutation_failed"
     assert _lifecycle_blockers(pg_control_connection) == command_blockers
@@ -137,13 +151,13 @@ async def test_runner_mutation_executor_rejects_canceled_runner_place_result(
 
     assert payload["status"] == "failed"
     assert payload["blockers"] == ["runner_sl_submit_not_confirmed"]
-    assert payload["result_payload"]["old_sl_cancelled"] is True
+    assert payload["result_payload"]["old_sl_cancelled"] is False
     assert payload["result_payload"]["runner_sl_submitted"] is False
-    assert len(gateway.cancel_calls) == 1
+    assert gateway.cancel_calls == []
     assert len(gateway.place_calls) == 1
     command_blockers = _command_blockers(pg_control_connection)
     assert command_blockers[0] == "runner_sl_submit_not_confirmed"
-    assert "runner_unprotected_after_old_sl_cancelled" in command_blockers
+    assert "runner_unprotected_after_old_sl_cancelled" not in command_blockers
     assert _lifecycle_status(pg_control_connection) == "runner_mutation_failed"
     assert _protection_set_status(pg_control_connection) == "runner_mutation_failed"
 
@@ -380,8 +394,10 @@ class _FakeRunnerMutationGateway:
         self.place_status = place_status
         self.cancel_calls: list[dict] = []
         self.place_calls: list[dict] = []
+        self.events: list[str] = []
 
     async def cancel_order(self, **kwargs):
+        self.events.append("cancel_order")
         self.cancel_calls.append(dict(kwargs))
         if not self.cancel_success:
             return SimpleNamespace(
@@ -395,6 +411,7 @@ class _FakeRunnerMutationGateway:
         )
 
     async def place_order(self, **kwargs):
+        self.events.append("place_order")
         self.place_calls.append(dict(kwargs))
         if not self.place_success:
             return SimpleNamespace(

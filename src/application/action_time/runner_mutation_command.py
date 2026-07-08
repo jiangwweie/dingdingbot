@@ -211,7 +211,8 @@ def _command_row(
     )
     runner_qty = _decimal(protection_set.get("runner_qty"))
     command_plan = {
-        "schema": "brc.ticket_bound_runner_mutation_command_plan.v1",
+        "schema": "brc.ticket_bound_runner_mutation_command_plan.v2",
+        "mutation_plan": "submit_new_runner_sl_then_cancel_old",
         "cancel_old_sl": {
             "exchange_order_id": sl_order["exchange_order_id"],
             "local_order_id": sl_order["local_order_id"],
@@ -224,6 +225,11 @@ def _command_row(
             "replaces_exit_protection_order_id": sl_order[
                 "exit_protection_order_id"
             ],
+        },
+        "safety_rules": {
+            "old_sl_must_remain_live_until_runner_sl_confirmed": True,
+            "cancel_old_sl_only_after_runner_sl_confirmed": True,
+            "runner_sl_reduce_only_required": True,
         },
     }
     return {
@@ -258,7 +264,14 @@ def _result_blockers(result_payload: dict[str, Any]) -> list[str]:
         for blocker in result_payload.get("blockers") or []
         if str(blocker)
     ]
-    if result_payload.get("old_sl_cancelled") is not True:
+    if (
+        result_payload.get("old_sl_cancelled") is not True
+        and (
+            result_payload.get("runner_sl_submitted") is True
+            or result_payload.get("old_sl_cleanup_required") is True
+            or result_payload.get("mutation_plan") == "cancel_old_then_submit_runner_sl"
+        )
+    ):
         blockers.append("old_sl_cancel_not_confirmed")
     if not str(result_payload.get("runner_sl_exchange_order_id") or "").strip():
         blockers.append("runner_sl_exchange_order_id_missing")

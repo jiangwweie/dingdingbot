@@ -326,6 +326,38 @@ class RuntimeTicketBoundPostSubmitClosure(BaseModel):
     runtime_budget_mutated: bool = False
 
 
+class RuntimeTicketBoundLifecycleMaintenanceRequest(BaseModel):
+    ticket_id: str | None = None
+    protected_submit_attempt_id: str | None = None
+    exit_protection_set_id: str | None = None
+    exchange_snapshot: dict[str, Any] = Field(default_factory=dict)
+    allow_exchange_mutation: bool = False
+    max_actions: int = Field(default=16, ge=1, le=64)
+
+
+class RuntimeTicketBoundLifecycleMaintenance(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    scope: dict[str, Any] = Field(default_factory=dict)
+    action_count: int = 0
+    actions: list[dict[str, Any]] = Field(default_factory=list)
+    first_blocker: str | None = None
+    blockers: list[str] = Field(default_factory=list)
+    next_action: str
+    allow_exchange_mutation: bool = False
+    exchange_write_called: bool = False
+    finalgate_called: bool = False
+    operation_layer_called: bool = False
+    order_created: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
+    runtime_budget_mutated: bool = False
+    authority_boundary: str
+
+
 class _TradingConsoleLiveReadOnlyGateway:
     """Lazy, per-event-loop read-only exchange adapter for Trading Console GETs."""
 
@@ -2300,6 +2332,22 @@ async def runtime_ticket_bound_post_submit_closure_for_attempt(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@router.post(
+    "/runtime-ticket-bound-lifecycle-maintenance",
+    response_model=RuntimeTicketBoundLifecycleMaintenance,
+)
+async def runtime_ticket_bound_lifecycle_maintenance(
+    request: RuntimeTicketBoundLifecycleMaintenanceRequest,
+) -> RuntimeTicketBoundLifecycleMaintenance:
+    try:
+        report = await _run_ticket_bound_lifecycle_maintenance(request)
+        return RuntimeTicketBoundLifecycleMaintenance(**report)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 def _run_ticket_bound_action_time_finalgate_preflight(ticket_id: str) -> dict[str, Any]:
     database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
     if not database_url:
@@ -2414,6 +2462,42 @@ def _run_ticket_bound_post_submit_closure(
             return materialize_ticket_bound_post_submit_closure(
                 conn,
                 protected_submit_attempt_id=protected_submit_attempt_id,
+            )
+    finally:
+        engine.dispose()
+
+
+async def _run_ticket_bound_lifecycle_maintenance(
+    request: RuntimeTicketBoundLifecycleMaintenanceRequest,
+) -> dict[str, Any]:
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound lifecycle maintenance")
+    if not is_sync_postgres_dsn(database_url):
+        raise RuntimeError("ticket-bound lifecycle maintenance requires PostgreSQL DSN")
+
+    from src.application.action_time.lifecycle_maintenance_service import (
+        run_ticket_bound_lifecycle_maintenance,
+    )
+    from src.interfaces import api as api_module
+
+    gateway = None
+    if request.allow_exchange_mutation:
+        gateway_binding = await _runtime_exchange_submit_gateway_binding(api_module)
+        gateway = gateway_binding.get("gateway")
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            return await run_ticket_bound_lifecycle_maintenance(
+                conn,
+                ticket_id=request.ticket_id or "",
+                protected_submit_attempt_id=request.protected_submit_attempt_id or "",
+                exit_protection_set_id=request.exit_protection_set_id or "",
+                exchange_snapshot=request.exchange_snapshot or None,
+                gateway=gateway,
+                allow_exchange_mutation=request.allow_exchange_mutation,
+                max_actions=request.max_actions,
             )
     finally:
         engine.dispose()

@@ -474,18 +474,15 @@ def test_full_chain_failure_matrix_stops_at_exact_lifecycle_state(
             [
                 "old sl cancel rejected by simulation",
                 "old_sl_cancel_not_confirmed",
-                "runner_sl_exchange_order_id_missing",
-                "runner_sl_submit_not_confirmed",
             ],
             None,
         ),
-        "runner_submit_failed_after_old_sl_cancel": (
+        "runner_submit_failed_before_old_sl_cancel": (
             "runner_mutation_failed",
             [
                 "runner sl submit rejected by simulation",
                 "runner_sl_exchange_order_id_missing",
                 "runner_sl_submit_not_confirmed",
-                "runner_unprotected_after_old_sl_cancelled",
             ],
             None,
         ),

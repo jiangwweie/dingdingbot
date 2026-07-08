@@ -65,7 +65,7 @@ FULL_CHAIN_FAILURE_SCENARIOS: tuple[str, ...] = (
     "entry_partial_fill",
     "tp1_filled_runner_missing",
     "old_sl_cancel_failed",
-    "runner_submit_failed_after_old_sl_cancel",
+    "runner_submit_failed_before_old_sl_cancel",
     "pg_protected_exchange_missing",
     "flat_position_live_protection_cleanup",
     "duplicate_tp1_fill_idempotent",

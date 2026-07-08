@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Execute prepared ticket-bound runner mutation commands.
 
-This module is the application execution bridge for TP1 filled -> old SL
-cancel -> RUNNER_SL submit. It consumes an already prepared PG command row,
-calls an injected gateway, and records the result back to PG. It does not call
+This module is the application execution bridge for TP1 filled -> RUNNER_SL
+submit -> old SL cleanup. It consumes an already prepared PG command row, calls
+an injected gateway, and records the result back to PG. It does not call
 FinalGate, create a new ticket, change profile/sizing, or read repo files.
 """
 
@@ -81,10 +81,13 @@ async def execute_ticket_bound_runner_mutation_command(
             next_action="repair_runner_mutation_command_status",
         )
 
+    command_plan = _as_dict(command.get("command_plan"))
+    mutation_plan = str(command_plan.get("mutation_plan") or "").strip()
     stale_blockers = _pre_execution_state_blockers(conn, command=command)
     if stale_blockers:
         result_payload = _base_result_payload(
             command=command,
+            mutation_plan=mutation_plan,
             old_sl_cancelled=False,
             runner_sl_submitted=False,
             runner_sl_exchange_order_id="",
@@ -108,11 +111,11 @@ async def execute_ticket_bound_runner_mutation_command(
             next_action="repair_or_reprepare_runner_mutation_command",
         )
 
-    command_plan = _as_dict(command.get("command_plan"))
     blockers = _command_plan_blockers(command=command, command_plan=command_plan)
     if blockers:
         result_payload = _base_result_payload(
             command=command,
+            mutation_plan=mutation_plan,
             old_sl_cancelled=False,
             runner_sl_submitted=False,
             runner_sl_exchange_order_id="",
@@ -134,10 +137,188 @@ async def execute_ticket_bound_runner_mutation_command(
             next_action="repair_runner_mutation_or_flatten",
         )
 
-    cancel_plan = _as_dict(command_plan.get("cancel_old_sl"))
     submit_plan = _as_dict(command_plan.get("submit_runner_sl"))
+    cancel_plan = _as_dict(command_plan.get("cancel_old_sl"))
     old_sl_exchange_order_id = str(cancel_plan["exchange_order_id"])
     symbol = str(command["symbol"])
+    client_order_id = _runner_client_order_id(command_id)
+
+    if mutation_plan == "submit_new_runner_sl_then_cancel_old":
+        try:
+            placement_result = await gateway.place_order(
+                symbol=symbol,
+                order_type="stop_market",
+                side=str(submit_plan["side"]),
+                amount=_decimal(submit_plan["qty"]),
+                price=None,
+                trigger_price=_decimal(submit_plan["trigger_price"]),
+                reduce_only=True,
+                client_order_id=client_order_id,
+            )
+        except Exception as exc:
+            blockers = [f"runner_sl_submit_failed:{type(exc).__name__}"]
+            result_payload = _base_result_payload(
+                command=command,
+                mutation_plan=mutation_plan,
+                old_sl_cancelled=False,
+                runner_sl_submitted=False,
+                runner_sl_exchange_order_id="",
+                blockers=blockers,
+                exchange_write_called=True,
+                extra={
+                    "old_sl_remained_live_until_runner_sl_confirmed": True,
+                    "submit_error": str(exc),
+                },
+            )
+            recorded = record_ticket_bound_runner_mutation_result(
+                conn,
+                runner_mutation_command_id=command_id,
+                result_payload=result_payload,
+                now_ms=now_ms,
+            )
+            return _result(
+                "failed",
+                now_ms=now_ms,
+                command=dict(recorded.get("command") or command),
+                result_payload=result_payload,
+                blockers=blockers,
+                next_action="repair_runner_mutation_or_flatten",
+            )
+        if not _place_operation_succeeded(placement_result) or not _exchange_order_id(
+            placement_result
+        ):
+            blockers = [
+                getattr(placement_result, "error_message", None)
+                or getattr(placement_result, "error_code", None)
+                or "runner_sl_submit_not_confirmed"
+            ]
+            result_payload = _base_result_payload(
+                command=command,
+                mutation_plan=mutation_plan,
+                old_sl_cancelled=False,
+                runner_sl_submitted=False,
+                runner_sl_exchange_order_id="",
+                blockers=blockers,
+                exchange_write_called=True,
+                extra={"old_sl_remained_live_until_runner_sl_confirmed": True},
+            )
+            recorded = record_ticket_bound_runner_mutation_result(
+                conn,
+                runner_mutation_command_id=command_id,
+                result_payload=result_payload,
+                now_ms=now_ms,
+            )
+            return _result(
+                "failed",
+                now_ms=now_ms,
+                command=dict(recorded.get("command") or command),
+                result_payload=result_payload,
+                blockers=blockers,
+                next_action="repair_runner_mutation_or_flatten",
+            )
+
+        runner_sl_exchange_order_id = _exchange_order_id(placement_result)
+        try:
+            cancel_result = await gateway.cancel_order(
+                exchange_order_id=old_sl_exchange_order_id,
+                symbol=symbol,
+            )
+        except Exception as exc:
+            blockers = [f"old_sl_cancel_failed:{type(exc).__name__}"]
+            result_payload = _base_result_payload(
+                command=command,
+                mutation_plan=mutation_plan,
+                old_sl_cancelled=False,
+                runner_sl_submitted=True,
+                runner_sl_exchange_order_id=runner_sl_exchange_order_id,
+                blockers=blockers,
+                exchange_write_called=True,
+                extra={
+                    "runner_sl_client_order_id": client_order_id,
+                    "runner_sl_local_order_id": client_order_id,
+                    "old_sl_cleanup_required": True,
+                    "cancel_error": str(exc),
+                },
+            )
+            recorded = record_ticket_bound_runner_mutation_result(
+                conn,
+                runner_mutation_command_id=command_id,
+                result_payload=result_payload,
+                now_ms=now_ms,
+            )
+            return _result(
+                "failed",
+                now_ms=now_ms,
+                command=dict(recorded.get("command") or command),
+                result_payload=result_payload,
+                blockers=blockers,
+                next_action="cleanup_stale_old_sl_after_runner_sl_confirmed",
+            )
+        if not _cancel_operation_succeeded(cancel_result):
+            blockers = [
+                getattr(cancel_result, "error_message", None)
+                or getattr(cancel_result, "error_code", None)
+                or "old_sl_cancel_not_confirmed"
+            ]
+            result_payload = _base_result_payload(
+                command=command,
+                mutation_plan=mutation_plan,
+                old_sl_cancelled=False,
+                runner_sl_submitted=True,
+                runner_sl_exchange_order_id=runner_sl_exchange_order_id,
+                blockers=blockers,
+                exchange_write_called=True,
+                extra={
+                    "runner_sl_client_order_id": client_order_id,
+                    "runner_sl_local_order_id": client_order_id,
+                    "old_sl_cleanup_required": True,
+                },
+            )
+            recorded = record_ticket_bound_runner_mutation_result(
+                conn,
+                runner_mutation_command_id=command_id,
+                result_payload=result_payload,
+                now_ms=now_ms,
+            )
+            return _result(
+                "failed",
+                now_ms=now_ms,
+                command=dict(recorded.get("command") or command),
+                result_payload=result_payload,
+                blockers=blockers,
+                next_action="cleanup_stale_old_sl_after_runner_sl_confirmed",
+            )
+
+        result_payload = _base_result_payload(
+            command=command,
+            mutation_plan=mutation_plan,
+            old_sl_cancelled=True,
+            runner_sl_submitted=True,
+            runner_sl_exchange_order_id=runner_sl_exchange_order_id,
+            blockers=[],
+            exchange_write_called=True,
+            extra={
+                "old_sl_cancel_exchange_order_id": _exchange_order_id(cancel_result)
+                or old_sl_exchange_order_id,
+                "runner_sl_client_order_id": client_order_id,
+                "runner_sl_local_order_id": client_order_id,
+            },
+        )
+        recorded = record_ticket_bound_runner_mutation_result(
+            conn,
+            runner_mutation_command_id=command_id,
+            result_payload=result_payload,
+            now_ms=now_ms,
+        )
+        return _result(
+            "result_recorded",
+            now_ms=now_ms,
+            command=dict(recorded.get("command") or command),
+            result_payload=result_payload,
+            blockers=[],
+            next_action="materialize_ticket_bound_runner_protection_adjustment",
+        )
+
     try:
         cancel_result = await gateway.cancel_order(
             exchange_order_id=old_sl_exchange_order_id,
@@ -147,6 +328,7 @@ async def execute_ticket_bound_runner_mutation_command(
         blockers = [f"old_sl_cancel_failed:{type(exc).__name__}"]
         result_payload = _base_result_payload(
             command=command,
+            mutation_plan=mutation_plan,
             old_sl_cancelled=False,
             runner_sl_submitted=False,
             runner_sl_exchange_order_id="",
@@ -176,6 +358,7 @@ async def execute_ticket_bound_runner_mutation_command(
         ]
         result_payload = _base_result_payload(
             command=command,
+            mutation_plan=mutation_plan,
             old_sl_cancelled=False,
             runner_sl_submitted=False,
             runner_sl_exchange_order_id="",
@@ -197,7 +380,6 @@ async def execute_ticket_bound_runner_mutation_command(
             next_action="repair_runner_mutation_or_flatten",
         )
 
-    client_order_id = _runner_client_order_id(command_id)
     try:
         placement_result = await gateway.place_order(
             symbol=symbol,
@@ -213,6 +395,7 @@ async def execute_ticket_bound_runner_mutation_command(
         blockers = [f"runner_sl_submit_failed:{type(exc).__name__}"]
         result_payload = _base_result_payload(
             command=command,
+            mutation_plan=mutation_plan,
             old_sl_cancelled=True,
             runner_sl_submitted=False,
             runner_sl_exchange_order_id="",
@@ -247,6 +430,7 @@ async def execute_ticket_bound_runner_mutation_command(
         ]
         result_payload = _base_result_payload(
             command=command,
+            mutation_plan=mutation_plan,
             old_sl_cancelled=True,
             runner_sl_submitted=False,
             runner_sl_exchange_order_id="",
@@ -271,6 +455,7 @@ async def execute_ticket_bound_runner_mutation_command(
 
     result_payload = _base_result_payload(
         command=command,
+        mutation_plan=mutation_plan,
         old_sl_cancelled=True,
         runner_sl_submitted=True,
         runner_sl_exchange_order_id=_exchange_order_id(placement_result),
@@ -410,6 +595,14 @@ def _command_plan_blockers(
     blockers: list[str] = []
     cancel_plan = _as_dict(command_plan.get("cancel_old_sl"))
     submit_plan = _as_dict(command_plan.get("submit_runner_sl"))
+    mutation_plan = str(command_plan.get("mutation_plan") or "").strip()
+    if not mutation_plan:
+        blockers.append("runner_mutation_plan_missing")
+    elif mutation_plan not in {
+        "submit_new_runner_sl_then_cancel_old",
+        "cancel_old_then_submit_runner_sl",
+    }:
+        blockers.append(f"runner_mutation_plan_unsupported:{mutation_plan}")
     if not cancel_plan:
         blockers.append("runner_mutation_cancel_plan_missing")
     elif not str(cancel_plan.get("exchange_order_id") or "").strip():
@@ -435,6 +628,7 @@ def _command_plan_blockers(
 def _base_result_payload(
     *,
     command: dict[str, Any],
+    mutation_plan: str,
     old_sl_cancelled: bool,
     runner_sl_submitted: bool,
     runner_sl_exchange_order_id: str,
@@ -447,6 +641,7 @@ def _base_result_payload(
         "runner_mutation_command_id": command.get("runner_mutation_command_id"),
         "exit_protection_set_id": command.get("exit_protection_set_id"),
         "ticket_id": command.get("ticket_id"),
+        "mutation_plan": str(mutation_plan or ""),
         "old_sl_exchange_order_id": command.get("old_sl_exchange_order_id"),
         "old_sl_cancelled": old_sl_cancelled,
         "runner_sl_submitted": runner_sl_submitted,

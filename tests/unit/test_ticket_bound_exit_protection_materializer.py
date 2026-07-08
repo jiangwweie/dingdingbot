@@ -158,9 +158,9 @@ def test_exit_protection_blocks_without_tp1(
 
     assert payload["status"] == "protection_submit_failed"
     assert "tp1_exchange_order_missing" in payload["blockers"]
-    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
-        "status"
-    ] == "protection_submit_failed"
+    lifecycle = _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")
+    assert lifecycle["status"] == "protection_submit_failed"
+    assert lifecycle["entry_fill_confirmed"] in {True, 1}
 
 
 def test_exit_protection_classifies_missing_sl_as_protection_missing(
