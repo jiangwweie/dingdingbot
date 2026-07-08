@@ -2,15 +2,24 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from src.infrastructure.exchange_gateway import ExchangeGateway
 
 
 class _RestExchange:
     def __init__(self, market):
         self.markets = {"BTC/USDT:USDT": market}
+        self.fetch_my_trades_calls = []
 
     def market(self, symbol):
         return self.markets[symbol]
+
+    async def fetch_my_trades(self, symbol, *, limit=50, params=None):
+        self.fetch_my_trades_calls.append(
+            {"symbol": symbol, "limit": limit, "params": params or {}}
+        )
+        return [{"id": "trade-1", "symbol": symbol}]
 
 
 def _gateway_with_market(market):
@@ -61,3 +70,17 @@ def test_get_min_notional_returns_none_when_markets_not_loaded():
     gateway.rest_exchange = type("Rest", (), {"markets": None})()
 
     assert gateway.get_min_notional("BTC/USDT:USDT") is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_my_trades_wrapper_calls_rest_exchange():
+    rest = _RestExchange({"limits": {"cost": {"min": "100"}}})
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.rest_exchange = rest
+
+    trades = await gateway.fetch_my_trades("BTC/USDT:USDT", limit=20)
+
+    assert trades == [{"id": "trade-1", "symbol": "BTC/USDT:USDT"}]
+    assert rest.fetch_my_trades_calls == [
+        {"symbol": "BTC/USDT:USDT", "limit": 20, "params": {}}
+    ]

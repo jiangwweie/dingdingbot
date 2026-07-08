@@ -140,6 +140,7 @@ from src.domain.runtime_execution_exchange_submit_recovery_resolution import (
 )
 from src.domain.runtime_execution_exchange_gateway_readiness import (
     GATEWAY_BINDING_ENABLED_ENV,
+    RUNTIME_EXCHANGE_LIFECYCLE_GATEWAY_METHODS,
     RuntimeExecutionExchangeGatewayReadiness,
 )
 from src.domain.runtime_execution_attempt_reservation import (
@@ -6108,7 +6109,7 @@ def _runtime_exchange_submit_gateway_env_blockers() -> list[str]:
 
 
 def _runtime_exchange_submit_gateway_status(gateway: Any) -> dict[str, Any]:
-    required = ["place_order", "fetch_ticker_price", "get_market_info"]
+    required = RUNTIME_EXCHANGE_LIFECYCLE_GATEWAY_METHODS
     missing = [
         f"runtime_gateway_missing_{name}"
         for name in required

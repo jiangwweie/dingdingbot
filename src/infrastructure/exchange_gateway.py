@@ -1027,6 +1027,29 @@ class ExchangeGateway:
             logger.error(f"获取未完成订单失败：symbol={symbol}, error={e}")
             raise
 
+    async def fetch_my_trades(
+        self,
+        symbol: str,
+        limit: int = 50,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch account trade fills for a symbol.
+
+        Ticket-bound lifecycle close projection uses this as a read-only source
+        for final exit / TP1 / SL fills. It must not submit, cancel, amend,
+        withdraw, or transfer anything.
+        """
+        try:
+            return await self.rest_exchange.fetch_my_trades(
+                symbol,
+                limit=limit,
+                params=params or {},
+            )
+        except Exception as e:
+            logger.error(f"获取成交记录失败：symbol={symbol}, error={e}")
+            raise
+
     async def place_order(
         self,
         symbol: str,

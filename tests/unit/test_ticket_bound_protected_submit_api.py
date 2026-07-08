@@ -103,6 +103,24 @@ def test_ticket_bound_protected_submit_api_signature_has_no_legacy_inputs():
     assert "prepared_authorization_id" not in signature.parameters
 
 
+def test_runtime_exchange_submit_gateway_status_requires_lifecycle_methods():
+    gateway = SimpleNamespace(
+        place_order=lambda **_kwargs: None,
+        fetch_ticker_price=lambda *_args, **_kwargs: None,
+        get_market_info=lambda *_args, **_kwargs: None,
+    )
+
+    status = api_trading_console._runtime_exchange_submit_gateway_status(gateway)
+
+    assert status["status"] == "blocked_methods_missing"
+    assert status["gateway"] is None
+    assert "runtime_gateway_missing_cancel_order" in status["blockers"]
+    assert "runtime_gateway_missing_fetch_open_orders" in status["blockers"]
+    assert "runtime_gateway_missing_fetch_order" in status["blockers"]
+    assert "runtime_gateway_missing_fetch_positions" in status["blockers"]
+    assert "runtime_gateway_missing_fetch_my_trades" in status["blockers"]
+
+
 @pytest.mark.asyncio
 async def test_ticket_bound_post_submit_closure_api_returns_pg_closure_body(
     monkeypatch,

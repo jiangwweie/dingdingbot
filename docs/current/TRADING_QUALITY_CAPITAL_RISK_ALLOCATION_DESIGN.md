@@ -74,6 +74,26 @@ Reference sources:
 
 ## Design Position
 
+### Execution Split
+
+This design is intentionally split into two implementation layers:
+
+| Layer | Priority | Purpose | Must be true before |
+| --- | --- | --- | --- |
+| **Risk Reservation v0** | P1 | Compute and reserve one ticket's loss-at-stop before FinalGate-ready state | Any future real submit uses ticket-bound risk scope |
+| **Advanced Capital Risk Allocation** | P2 | Allocate across StrategyGroups, symbols, sides, clusters, drawdown states, and quality multipliers | Scaling beyond one bounded ticket or changing allocation quality |
+
+`Risk Reservation v0` must not wait for the full portfolio allocation system.
+It is a basic ticket safety fact:
+
+```text
+risk_at_stop = abs(entry_price - stop_price) * quantity
+```
+
+Advanced allocation can remain later because it governs scale, priority, and
+portfolio quality. It must not be used as a reason to postpone the per-ticket
+stop-risk reservation requirement.
+
 ### New Layer
 
 Add a first-class **Trading Quality / Capital Risk Allocation Layer** between

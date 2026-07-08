@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-07-06
+last_verified: 2026-07-08
 ---
 
 # Main Control Roadmap
@@ -49,12 +49,29 @@ design documents and acceptance proof.
 
 | Order | Program | Priority | Primary design surface |
 | --- | --- | --- | --- |
-| 1 | **Full Chain Simulation Harness** | P0 | `docs/current/L1_L9_OPTIMIZATION_EXECUTION_PLAN.md` |
+| 1 | **Operation Layer / Exchange Capability Audit** | P0 | `docs/current/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
 | 2 | **Ticket-Bound Lifecycle Safety Core** | P0 | `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
-| 3 | **Owner Explanation Read Model** | P1 | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
-| 4 | **Performance And Retention Control** | P1 | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
-| 5 | **Capital Risk Allocation** | P2 | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
-| 6 | **Frontend Read Model Integration** | P2 | frontend read-model contracts |
+| 3 | **Full Chain Simulation Harness** | P0 | `docs/current/L1_L9_OPTIMIZATION_EXECUTION_PLAN.md` |
+| 4 | **Official Runner SL Mutation + Protection Reconciler** | P0 | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
+| 5 | **Live Outcome Ledger** | P0/P1 | `docs/current/LIVE_OUTCOME_LEDGER_CONTRACT.md` |
+| 6 | **Risk Reservation v0** | P1 | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
+| 7 | **Owner Explanation Read Model** | P1 | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
+| 8 | **Performance And Retention Control** | P1 | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
+| 9 | **Advanced Capital Risk Allocation** | P2 | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
+| 10 | **Frontend Read Model Integration** | P2 | frontend read-model contracts |
+
+## Current Verified Progress
+
+| Area | Current fact |
+| --- | --- |
+| **Integration branch** | `dev` and `origin/dev` are aligned to `4f813a16e32930fefb67590283d041b1fead207f` |
+| **Tokyo release** | Tokyo current release head is `4f813a16e32930fefb67590283d041b1fead207f` |
+| **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
+| **PG migration** | Tokyo is at `alembic=097` after lifecycle migration repair |
+| **Postdeploy acceptance** | Passed; warning only that release identity comes from `.brc-release-manifest.json` because git archive releases have no `.git` directory |
+| **Backend / watcher / monitor** | Active after deploy verification |
+| **Recent market/action events** | No recent signal, promotion, lane, ticket, or attempt after the latest postdeploy health check |
+| **Current first blocker** | `no_recent_fresh_signal` for live action; back-half engineering first blocker is `orphan_protection_cleanup_command_not_first_class` |
 
 ## Authority Boundary
 
@@ -78,6 +95,8 @@ design documents and acceptance proof.
 | **P0-C** | **Action-time ticket path** | fresh satisfied signal becomes one explicit PG Action-Time Ticket before FinalGate / Operation Layer | ticket identity contains StrategyGroup, symbol, side, profile, policy versions, facts, risk scope |
 | **P0-D** | **Server monitor ownership** | server-side readonly monitor classifies quiet / notify from PG/current state | no production dependency on local heartbeat or local cache |
 | **P0-E** | **Performance and retention** | no-signal ticks stay quiet and bounded in disk / CPU / PG rows | report growth and restart storms are structurally prevented |
+| **P0-F** | **Ticket-bound lifecycle hardening** | post-submit lifecycle state machine, runner mutation, protection reconciliation, and failure recovery remain one safety core | every submitted ticket reaches protected/closed state or one exact lifecycle hard blocker |
+| **P0-G** | **Live outcome ledger** | real tickets become structured result and learning rows | every real ticket has one outcome row or one exact hard-blocked outcome |
 
 ## Active Runtime Loop
 
@@ -151,7 +170,11 @@ The next stable checkpoint is:
 server watcher and monitor run from PG/current state
 -> no-signal tick has bounded writes
 -> fresh signal creates PG promotion / lane / ticket rows
--> Owner Explanation can explain why no trade or why blocked
+-> Action-Time Ticket can continue through lifecycle-safe protected submit
+-> TP1 / runner / final-exit lifecycle states are reconciled against exchange truth
+-> real submitted tickets produce Live Outcome Ledger rows
+-> Risk Reservation v0 records stop-risk before FinalGate-ready state
+-> Owner Explanation can explain why no trade, why blocked, or what happened after submit
 -> old MD/JSON proof-chain readers are deleted or archive-only
 -> validators prevent regression
 ```

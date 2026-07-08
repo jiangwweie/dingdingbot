@@ -42,7 +42,8 @@ review plan.
 | **Runner mutation executor** | `TicketBoundRunnerMutationExecutor` consumes a prepared PG command, cancels the old full-size SL through an injected gateway, submits RUNNER_SL, and records the PG result | It cannot call FinalGate, change profile/sizing, or use repo files as authority |
 | **Lifecycle closure materializer** | `materialize_ticket_bound_lifecycle_closure` closes PG lifecycle after final exit, reconciliation, settlement, and review proofs | It requires proof IDs and flat-position confirmation; it summarizes closure and does not discover exchange truth by itself |
 | **ExchangeGateway** | Existing gateway can place and cancel orders | The runner proof layer must not become a second exchange mutation path |
-| **Impact test** | 22 active scopes reach mock submitted -> exit protection set -> post-submit closure | Test proves entry-fill + SL/TP1 protection set materialization; focused tests prove runner SL and final closure materialization |
+| **Deploy status** | Lifecycle-safety-core repair is deployed on Tokyo at `4f813a16e32930fefb67590283d041b1fead207f` with PG `alembic=097` | Deployment proves code/migration acceptance, not a live market outcome |
+| **Impact test** | Active scopes reach mock submitted -> exit protection set -> runner/final closure coverage | Test proves entry-fill + SL/TP1 protection set materialization; focused tests prove runner SL and final closure materialization |
 
 ### Known P0 / P1 Gaps
 
@@ -52,10 +53,10 @@ review plan.
 | **P0** | No **entry fill confirmed** gate before exit protection materialization | Closed by materializer requiring full filled entry status, qty, and average price |
 | **P0** | **TP1** is missing from the protected submit / protection closure truth | Closed by TP1 submit request requirement and closure protection-set requirement |
 | **P0** | `protection_state=submitted` only requires SL | Closed; it now requires PG protection set completeness |
-| **P0** | TP1 fill -> official SL cancel/replace and RUNNER_SL submit is not one closed ticket-bound mutation path | Locally implemented by `runner_mutation_command` and `runner_mutation_executor`; production scheduling/API wiring remains behind explicit deploy approval |
-| **P0** | Exchange truth is not yet the current authority for protection completeness | Locally implemented by `protection_reconciler` over caller-provided exchange snapshots; production exchange read adapter wiring remains behind explicit deploy approval |
-| **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Locally implemented by exact lifecycle classification plus `protection_recovery_command` for missing SL/TP1 recovery; production scheduling/API wiring remains behind explicit deploy approval |
-| **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Closed locally by the Lifecycle Safety Core materializers, full-chain harness, recovery commands, protection reconciler, runner mutation executor, and final closure; production wiring remains behind explicit deploy approval |
+| **P0** | TP1 fill -> official SL cancel/replace and RUNNER_SL submit is not one closed ticket-bound mutation path | Code-covered and deployed by `runner_mutation_command` and `runner_mutation_executor`; next acceptance is real-signal/live-ticket observation |
+| **P0** | Exchange truth is not yet the current authority for protection completeness | Code-covered and deployed by `protection_reconciler` over caller-provided exchange snapshots; next acceptance is official exchange snapshot wiring/capability audit |
+| **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Code-covered and deployed by exact lifecycle classification plus `protection_recovery_command`; next acceptance is official scheduling/API path audit |
+| **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Closed in code by the Lifecycle Safety Core materializers, full-chain harness, recovery commands, protection reconciler, runner mutation executor, and final closure; live outcome proof waits for a future real ticket |
 | **P1** | Action-time TTL behavior across the full post-submit chain | Closed locally: expired tickets still block new submit attempts, while already-submitted ticket-bound lifecycles can continue protection, runner, and final closure |
 
 ## Target Architecture
@@ -448,12 +449,12 @@ mock submitted
 chain_position: action_time_boundary
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scope
-stage: ticket_bound_lifecycle_safety_core
-first_blocker: production_wiring_and_real_exchange_acceptance_requires_owner_approval
-evidence: PG materializers and local services cover submitted attempt -> entry fill proof -> SL/TP1 proof -> exchange snapshot reconciliation -> TP1 fill -> official runner mutation command/executor -> runner proof -> final closure proof without file authority
-next_action: complete local verification gates and review diff; request Owner approval before Tokyo deploy, server migration, service restart, production wiring, or real exchange acceptance
-stop_condition: one locally mocked ticket proves ENTRY through SL/TP1/RUNNER_SL/final exit/reconciliation/settlement/review; real acceptance starts only after explicit deploy approval
-owner_action_required: yes_for_deploy_and_real_exchange_acceptance_only
+stage: lifecycle_safety_core_deployed_waiting_for_real_signal
+first_blocker: no_recent_fresh_signal_for_real_lifecycle_acceptance
+evidence: Tokyo release head 4f813a16, PG alembic 097, lifecycle materializers and services cover submitted attempt -> entry fill proof -> SL/TP1 proof -> exchange snapshot reconciliation -> TP1 fill -> official runner mutation command/executor -> runner proof -> final closure proof without file authority
+next_action: run Operation Layer / Exchange Capability Audit, retain full-chain failure-matrix coverage, and observe the next real signal/ticket through server watcher/monitor
+stop_condition: one future real ticket proves ENTRY through SL/TP1/RUNNER_SL/final exit/reconciliation/settlement/review/live outcome or stops at one exact lifecycle hard blocker
+owner_action_required: no for current observation; yes before future deployment or authority expansion
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound gateway path
 ```
 
@@ -473,12 +474,10 @@ authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchang
 8. **Implemented**: implement Lifecycle Safety Core full-chain harness.
 9. **Implemented**: implement sequential submit failure recovery states.
 10. **Implemented**: implement exchange protection reconciler.
-11. **Implemented locally**: implement official runner mutation executor for
-    the ticket-bound Operation Layer handoff; production wiring remains behind
-    explicit deploy approval.
-12. **Implemented locally**: implement official missing SL/TP1 protection
-    recovery command and executor; production wiring remains behind explicit
-    deploy approval.
-13. **Deploy gate**: run read-only health checks plus non-trading mock
-    lifecycle acceptance before any real order opportunity is allowed to rely on
-    the new chain.
+11. **Implemented and deployed as lifecycle repair**: implement official runner
+    mutation executor for the ticket-bound Operation Layer handoff.
+12. **Implemented and deployed as lifecycle repair**: implement official missing
+    SL/TP1 protection recovery command and executor.
+13. **Next gate**: run Operation Layer / Exchange Capability Audit and observe
+    the next real ticket through read-only server health plus ticket-bound
+    lifecycle acceptance.

@@ -70,17 +70,21 @@ This plan does not authorize:
 
 ### Current Implementation Progress
 
-As of the 2026-07-08 lifecycle-safety-core branch, the implementation has
-advanced from proof-only protection rows to a broader local lifecycle safety
-core:
+As of the 2026-07-08 lifecycle-safety-core repair deployment, `dev`,
+`origin/dev`, and Tokyo are aligned on
+`4f813a16e32930fefb67590283d041b1fead207f`. Tokyo postdeploy acceptance passed
+and PG is at `alembic=097`.
+
+The implementation has advanced from proof-only protection rows to a broader
+lifecycle safety core:
 
 | Area | Current implementation | Remaining boundary |
 | --- | --- | --- |
-| Full-chain simulation | `full_chain_simulation_harness` runs constructed PG input through signal, lane, ticket, safety, protected submit, protection, runner command, runner proof, final closure | It uses mock exchange result and does not grant live exchange authority |
-| Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed`; `protection_recovery_command` prepares and executes missing SL/TP1 recovery locally through an injected gateway; recovery failures update attempt and lifecycle blockers | Production scheduling/API wiring remains behind explicit Owner deploy approval |
+| Full-chain simulation | `full_chain_simulation_harness` runs constructed PG input through signal, lane, ticket, safety, protected submit, protection, runner command, runner proof, final closure | It uses mock exchange result and does not grant live exchange authority; next harness work should focus on two golden paths plus failure matrix |
+| Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed`; `protection_recovery_command` prepares and executes missing SL/TP1 recovery locally through an injected gateway; recovery failures update attempt and lifecycle blockers | Production scheduling/API activation remains explicit wiring work, not implicit exchange authority |
 | Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers; linked SL/TP1/RUNNER_SL must match exchange existence, reduce-only flag, side, and bounded qty | It consumes already-fetched facts and does not call exchange APIs |
 | Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for old SL cancel / RUNNER_SL submit | Command rows are intent/result records, not proof of runner protection |
-| Runner mutation executor | `runner_mutation_executor` consumes a prepared PG command, calls injected gateway cancel/place, and records the PG result | Executor is mockable locally and still cannot call FinalGate, change profile/sizing, or use file authority |
+| Runner mutation executor | `runner_mutation_executor` consumes a prepared PG command, calls injected gateway cancel/place, and records the PG result | Executor is mockable and still cannot call FinalGate, change profile/sizing, or use file authority |
 | Runner mutation failure projection | Failed old SL cancel or failed RUNNER_SL submit updates lifecycle and protection set to `runner_mutation_failed`; if old SL was cancelled before RUNNER_SL failed, `runner_unprotected_after_old_sl_cancelled` is added | Failure must not remain hidden in a command row |
 | Ops health | Tokyo ops health reads exact lifecycle attention states and runner commands without runner proof | It remains readonly and non-mutating |
 
@@ -235,7 +239,71 @@ updated through reconciliation events, not by silent overwrite.
 
 ## Implementation Batches
 
-### Batch 1: Full Chain Simulation Harness
+### Batch 0: Operation Layer / Exchange Capability Audit
+
+Goal: map the current official exchange capability boundary before further
+production lifecycle automation.
+
+Current result:
+
+| Result | Evidence |
+| --- | --- |
+| **Audit completed** | `docs/current/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
+| **Submit/cancel/read/fill capabilities mapped** | Capability matrix covers ENTRY, SL, TP1, RUNNER_SL, cancel old SL, open orders, order query, positions, account, recent fills, and client order id |
+| **Gateway readiness method set widened** | Runtime exchange gateway readiness now requires lifecycle methods |
+| **Remaining first blocker** | `orphan_protection_cleanup_command_not_first_class` |
+
+Required capability map:
+
+```text
+ENTRY submit
+SL submit
+TP1 submit
+reduce-only support
+query open orders
+query fills
+cancel order
+modify order or cancel+new replacement
+runner SL submit
+position query
+idempotent client order id
+```
+
+Acceptance:
+
+| Requirement | Proof |
+| --- | --- |
+| Capability map exists | Every capability is marked supported, unsupported, or recovery-required |
+| Lifecycle dependencies named | Each lifecycle transition names its needed exchange read/write capability |
+| No hidden fallback | Unsupported capability becomes a lifecycle blocker or explicit recovery path |
+| No authority expansion | Audit itself does not change live profile, sizing, FinalGate, or Operation Layer authority |
+
+### Batch 1: Lifecycle State Machine And Hard Invariants
+
+Goal: keep every implementation and harness assertion bound to one lifecycle
+state model.
+
+Hard invariants:
+
+```text
+entry_filled cannot remain without SL.
+TP1 filled with remaining_qty must require runner protection.
+PG planned protection is not exchange-confirmed protection.
+All SL / TP1 / RUNNER_SL exits must be reduce-only.
+Protection quantity cannot exceed remaining position beyond symbol tolerance.
+Position flat cannot retain live protection orders.
+Exchange truth wins over PG projection, then PG updates through events.
+```
+
+Acceptance:
+
+| Requirement | Proof |
+| --- | --- |
+| State model is single-owner | Services, harness, ops health, and read models use the same lifecycle vocabulary |
+| Invariants are test-covered | Violations fail closed into explicit lifecycle blockers |
+| No proof-only closure | Proof materializers cannot mark protection or closure complete without required exchange/order refs |
+
+### Batch 2: Full Chain Simulation Harness
 
 Goal:
 
@@ -259,12 +327,14 @@ Acceptance:
 
 | Requirement | Proof |
 | --- | --- |
-| Active event specs covered | CPM long, MPG long, MI long, SOR long, SOR short, BRF2 short |
+| Golden paths covered | AVAX short and CPM long |
+| Failure matrix covered | ENTRY accepted / SL failed, TP1 missing, TP1 filled / runner missing, runner submit failed, old SL cancel failed, PG protected / exchange missing, duplicate TP1 fill, partial fill |
+| Active event specs impact-covered | CPM long, MPG long, MI long, SOR long, SOR short, BRF2 short |
 | No exchange write | Mock gateway/evidence only |
 | No file authority | PG or typed in-memory fixtures only |
-| Negative paths included | Missing SL, missing TP1, partial fill, duplicate submit, missing runner SL |
+| No lifecycle shortcut | Assertions use lifecycle states and invariants |
 
-### Batch 2: Sequential Submit Recovery
+### Batch 3: Sequential Submit Recovery
 
 Goal: turn every sequential submit failure into an explicit lifecycle state and
 first blocker.
@@ -295,7 +365,7 @@ Implementation status:
 6. **Remaining production integration**: wire recovery executor into deployed
    Operation Layer scheduling/API only after explicit Owner deploy approval.
 
-### Batch 3: Protection Reconciler
+### Batch 4: Protection Reconciler
 
 Goal: compare PG, OrderLifecycle, and exchange truth for active lifecycle rows.
 
@@ -308,7 +378,7 @@ Acceptance:
 | Qty checked | Protection qty cannot exceed remaining position beyond tolerance |
 | Orphans checked | Exchange-only protection cannot silently become PG truth |
 
-### Batch 4: Official Runner Mutation
+### Batch 5: Official Runner Mutation
 
 Goal: after TP1 fill, use the official ticket-bound operation path to replace
 full-size SL protection with remaining-runner SL protection.
@@ -335,7 +405,7 @@ Implementation status:
    ticket-bound Operation Layer scheduler/API only after local acceptance and
    explicit Owner deploy approval.
 
-### Batch 5: Final Closure
+### Batch 6: Final Closure
 
 Goal: make final exit, reconciliation, settlement, and review close one
 ticket-bound lifecycle.
@@ -392,11 +462,11 @@ Acceptance:
 chain_position: action_time_boundary
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scope
-stage: ticket_bound_lifecycle_safety_core
-first_blocker: production_wiring_and_real_exchange_acceptance_requires_owner_approval
-evidence: local PG lifecycle safety core covers full-chain simulation, sequential submit recovery, protection reconciliation, runner mutation executor, action-time TTL behavior, and final closure without file authority
-next_action: complete local verification gates and review diff; request Owner approval before Tokyo deploy, server migration, service restart, production wiring, or real exchange acceptance
-stop_condition: one locally mocked ticket proves entry, protection, TP1, runner, final exit, reconciliation, settlement, and review; one real ticket can be accepted only after explicit deploy approval
-owner_action_required: yes_for_deploy_and_real_exchange_acceptance_only
+stage: lifecycle_safety_core_deployed_and_waiting_for_real_signal
+first_blocker: no_recent_fresh_signal_for_real_lifecycle_acceptance
+evidence: Tokyo release head 4f813a16, PG alembic 097, postdeploy acceptance passed, lifecycle safety core repair deployed, and latest server health showed no recent signal/promotion/lane/ticket/attempt
+next_action: implement orphan protection cleanup command design or proceed to P0-1 invariant hardening with this blocker explicitly tracked; strengthen harness around two golden paths plus failure matrix while watcher/monitor continue readonly observation
+stop_condition: one future real ticket proves entry, protection, TP1, runner, final exit, reconciliation, settlement, and live outcome, or stops at one exact lifecycle hard blocker
+owner_action_required: no for current observation; yes before future deployment or authority expansion
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound path
 ```
