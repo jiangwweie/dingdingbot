@@ -349,6 +349,56 @@ def test_tokyo_ops_l2_l7_summary_flags_runner_protected_without_runner_sl():
     assert summary["runner_protected_without_runner_sl_count"] == 1
 
 
+def test_tokyo_ops_l2_l7_summary_flags_exact_lifecycle_attention_state():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {"status": "running", "blockers": []},
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+            "submitted_attempts_without_protection": [],
+            "incomplete_protection_sets": [],
+            "tp1_filled_without_runner_sl": [],
+            "runner_protected_without_runner_sl": [],
+            "lifecycle_closed_without_post_submit_closed": [],
+            "post_submit_closed_without_lifecycle_closed": [],
+            "lifecycle_attention_rows": [
+                {
+                    "lifecycle_run_id": "lifecycle-1",
+                    "ticket_id": "ticket-1",
+                    "protected_submit_attempt_id": "attempt-1",
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "AVAXUSDT",
+                    "side": "short",
+                    "status": "runner_mutation_pending",
+                    "first_blocker": "runner_sl_exchange_order_id_required",
+                }
+            ],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "ticket_bound_lifecycle_attention_state" in summary["issues"]
+    assert summary["lifecycle_attention_state_count"] == 1
+    assert summary["lifecycle_attention_statuses"] == ["runner_mutation_pending"]
+
+
 def test_tokyo_ops_l2_l7_summary_flags_lifecycle_closure_projection_mismatch():
     summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
         {

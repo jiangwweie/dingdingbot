@@ -31,6 +31,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
+    classify_exit_protection_materialization,
+)
+
 
 AUTHORITY_BOUNDARY = (
     "ticket_bound_exit_protection_materializer; PG lifecycle/protection set "
@@ -93,12 +97,19 @@ def materialize_ticket_bound_exit_protection_set(
     blockers.extend(entry_fill["blockers"])
     blockers.extend(_exit_order_blockers(sl_order, role="SL"))
     blockers.extend(_exit_order_blockers(tp1_order, role="TP1"))
+    classification = classify_exit_protection_materialization(
+        attempt=attempt,
+        entry_order=entry_order,
+        sl_order=sl_order,
+        tp1_order=tp1_order,
+        blockers=blockers,
+    )
 
     lifecycle = _lifecycle_row(
         attempt,
-        status="blocked" if blockers else "position_protected",
-        first_blocker=_first(blockers),
-        blockers=_dedupe(blockers),
+        status=classification.status,
+        first_blocker=classification.first_blocker,
+        blockers=list(classification.blockers),
         entry_order=entry_order,
         entry_fill=entry_fill,
         exit_protection_set_id=(
@@ -121,19 +132,27 @@ def materialize_ticket_bound_exit_protection_set(
     _insert_event(
         conn,
         lifecycle,
-        "hard_stopped" if blockers else "entry_filled",
-        {"blockers": _dedupe(blockers)} if blockers else {"entry_order": entry_order},
+        classification.event_type,
+        (
+            {
+                "blockers": list(classification.blockers),
+                "lifecycle_status": classification.status,
+                "next_action": classification.next_action,
+            }
+            if classification.blockers
+            else {"entry_order": entry_order}
+        ),
         now_ms=now_ms,
     )
 
-    if blockers:
+    if classification.blockers:
         return _result(
-            "blocked",
+            classification.status,
             now_ms=now_ms,
             lifecycle=lifecycle,
             protection_set={},
-            blockers=_dedupe(blockers),
-            next_action="repair_ticket_bound_exit_protection_inputs",
+            blockers=list(classification.blockers),
+            next_action=classification.next_action,
         )
 
     protection_set = _protection_set_row(

@@ -49,7 +49,7 @@ def test_runner_adjuster_missing_ref_before_tp1_fill_does_not_block(pg_control_c
     ] == "position_protected"
 
 
-def test_runner_adjuster_marks_sl_adjust_pending_without_runner_exchange_ref(
+def test_runner_adjuster_marks_runner_mutation_pending_without_runner_exchange_ref(
     pg_control_connection,
 ):
     set_id = _materialized_exit_protection_set(pg_control_connection)
@@ -62,11 +62,11 @@ def test_runner_adjuster_marks_sl_adjust_pending_without_runner_exchange_ref(
         now_ms=NOW_MS + 7000,
     )
 
-    assert payload["status"] == "sl_adjust_pending"
+    assert payload["status"] == "runner_mutation_pending"
     assert "runner_sl_exchange_order_id_required" in payload["blockers"]
     assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
         "status"
-    ] == "sl_adjust_pending"
+    ] == "runner_mutation_pending"
 
 
 def test_runner_adjuster_recovers_from_sl_adjust_pending(pg_control_connection):
@@ -87,7 +87,7 @@ def test_runner_adjuster_recovers_from_sl_adjust_pending(pg_control_connection):
         now_ms=NOW_MS + 8000,
     )
 
-    assert pending["status"] == "sl_adjust_pending"
+    assert pending["status"] == "runner_mutation_pending"
     assert recovered["status"] == "runner_protected"
     assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
         "status"

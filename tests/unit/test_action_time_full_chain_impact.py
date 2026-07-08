@@ -15,13 +15,14 @@ from scripts import materialize_action_time_finalgate_preflight as finalgate
 from scripts import materialize_action_time_operation_layer_handoff as handoff
 from scripts import materialize_action_time_ticket as ticket_materializer
 from scripts import materialize_pg_promotion_action_time_lane as lane_materializer
-from scripts import materialize_ticket_bound_exit_protection_set as exit_protection
-from scripts import materialize_ticket_bound_post_submit_closure as post_submit_closure
 from scripts import materialize_ticket_bound_protected_submit_attempt as protected_submit
-from scripts import materialize_ticket_bound_runner_protection_adjustment as runner_adjuster
 from scripts import materialize_ticket_bound_runtime_safety_state as safety_state
 from scripts import publish_runtime_control_current_projections as publisher
 from scripts import runtime_active_observation_monitor
+from src.application.action_time.full_chain_simulation_harness import (
+    FullChainSimulationInput,
+    run_ticket_bound_full_chain_simulation,
+)
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
     _insert_ready_fresh_signal,
@@ -44,6 +45,10 @@ RUNNER_LIFECYCLE_MIGRATION_PATH = (
 LIFECYCLE_CLOSURE_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-08-093_extend_ticket_bound_lifecycle_closure.py"
+)
+LIFECYCLE_SAFETY_CORE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-094_extend_ticket_bound_lifecycle_safety_core_statuses.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
@@ -98,6 +103,10 @@ def pg_control_connection():
         LIFECYCLE_CLOSURE_MIGRATION_PATH,
         "migration_093_action_time_full_chain",
     )
+    lifecycle_safety_core_migration = _load_module(
+        LIFECYCLE_SAFETY_CORE_MIGRATION_PATH,
+        "migration_094_action_time_full_chain",
+    )
     seed = _load_module(SEED_PATH, "seed_action_time_full_chain")
     engine = create_engine(
         "sqlite://",
@@ -121,6 +130,12 @@ def pg_control_connection():
                     lifecycle_closure_migration.op = migration.op
                     try:
                         lifecycle_closure_migration.upgrade()
+                        old_safety_core_op = lifecycle_safety_core_migration.op
+                        lifecycle_safety_core_migration.op = migration.op
+                        try:
+                            lifecycle_safety_core_migration.upgrade()
+                        finally:
+                            lifecycle_safety_core_migration.op = old_safety_core_op
                     finally:
                         lifecycle_closure_migration.op = old_closure_op
                 finally:
@@ -296,112 +311,29 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
     symbol: str,
     side: str,
 ):
-    payloads = _run_raw_pg_input_to_runtime_safety(
+    monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
+    payloads = run_ticket_bound_full_chain_simulation(
         pg_control_connection,
-        monkeypatch,
-        strategy_group_id=strategy_group_id,
-        symbol=symbol,
-        side=side,
-    )
-
-    prepared = protected_submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=str(payloads["ticket"]["ticket_id"]),
-        operation_submit_command_id=str(payloads["handoff"]["operation_submit_command_id"]),
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 6,
-    )
-    assert prepared["status"] == "submit_prepared"
-    assert prepared["submit_allowed"] is True
-    assert prepared["exchange_write_called"] is False
-    assert prepared["order_created"] is False
-    assert prepared["order_lifecycle_called"] is False
-
-    submitted = protected_submit.record_ticket_bound_protected_submit_result(
-        pg_control_connection,
-        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
-        submit_result=_mock_exchange_submit_result(prepared),
-        now_ms=NOW_MS + 7,
-    )
-    assert submitted["status"] == "submitted"
-    assert submitted["blockers"] == []
-    assert submitted["exchange_write_called"] is True
-    assert submitted["order_created"] is True
-    assert submitted["order_lifecycle_called"] is True
-
-    protection_payload = exit_protection.materialize_ticket_bound_exit_protection_set(
-        pg_control_connection,
-        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
-        now_ms=NOW_MS + 8,
-    )
-    assert protection_payload["status"] == "position_protected"
-    assert protection_payload["protection_complete"] is True
-    assert protection_payload["blockers"] == []
-
-    closure_payload = post_submit_closure.materialize_ticket_bound_post_submit_closure(
-        pg_control_connection,
-        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
-        now_ms=NOW_MS + 9,
-    )
-    assert closure_payload["status"] == "reconciliation_pending"
-    assert closure_payload["ticket_id"] == payloads["ticket"]["ticket_id"]
-    assert closure_payload["operation_submit_command_id"] == (
-        payloads["handoff"]["operation_submit_command_id"]
-    )
-    assert closure_payload["first_blocker"] == "post_submit_reconciliation_fact_missing"
-    assert closure_payload["exchange_write_called"] is False
-    assert closure_payload["order_created"] is False
-    assert closure_payload["order_lifecycle_called"] is False
-
-    set_id = pg_control_connection.execute(
-        text(
-            """
-            SELECT exit_protection_set_id
-            FROM brc_ticket_bound_exit_protection_sets
-            WHERE protected_submit_attempt_id = :attempt_id
-            """
+        FullChainSimulationInput(
+            strategy_group_id=strategy_group_id,
+            symbol=symbol,
+            side=side,
+            now_ms=NOW_MS,
         ),
-        {"attempt_id": prepared["protected_submit_attempt_id"]},
-    ).scalar_one()
-    pg_control_connection.execute(
-        text(
-            """
-            UPDATE brc_ticket_bound_exit_protection_orders
-            SET status = 'filled', updated_at_ms = :updated_at_ms
-            WHERE exit_protection_set_id = :set_id
-              AND role = 'TP1'
-            """
-        ),
-        {"set_id": set_id, "updated_at_ms": NOW_MS + 10},
+        projection_publisher=publisher.publish_runtime_control_current_projections,
     )
-    runner_payload = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
-        pg_control_connection,
-        exit_protection_set_id=set_id,
-        runner_sl_exchange_order_id="mock-exchange-runner-sl",
-        runner_sl_local_order_id="mock-runner-sl",
-        now_ms=NOW_MS + 11,
-    )
-    assert runner_payload["status"] == "runner_protected"
-    assert runner_payload["blockers"] == []
 
-    final_payload = post_submit_closure.materialize_ticket_bound_lifecycle_closure(
-        pg_control_connection,
-        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
-        final_exit_exchange_order_id="mock-exchange-runner-sl",
-        final_exit_role="RUNNER_SL",
-        final_position_flat_confirmed=True,
-        reconciliation_evidence_id=f"mock-recon:{strategy_group_id}:{symbol}:{side}",
-        settlement_evidence_id=f"mock-settlement:{strategy_group_id}:{symbol}:{side}",
-        review_evidence_id=f"mock-review:{strategy_group_id}:{symbol}:{side}",
-        now_ms=NOW_MS + 12,
-    )
-    assert final_payload["status"] == "closed"
-    assert final_payload["reconciliation_state"] == "matched"
-    assert final_payload["settlement_state"] == "released"
-    assert final_payload["review_state"] == "recorded"
-    assert final_payload["exchange_write_called"] is False
-    assert final_payload["order_created"] is False
-    assert final_payload["order_lifecycle_called"] is False
+    assert payloads["prepared_submit"]["status"] == "submit_prepared"
+    assert payloads["submitted"]["status"] == "submitted"
+    assert payloads["protection"]["status"] == "position_protected"
+    assert payloads["post_submit_pending"]["status"] == "reconciliation_pending"
+    assert payloads["runner"]["status"] == "runner_protected"
+    assert payloads["final"]["status"] == "closed"
+    assert payloads["final"]["reconciliation_state"] == "matched"
+    assert payloads["final"]["settlement_state"] == "released"
+    assert payloads["final"]["review_state"] == "recorded"
+    assert payloads["authority_boundary"]["uses_mock_exchange_result"] is True
+    assert payloads["authority_boundary"]["calls_exchange_write"] is False
 
     assert _status(
         pg_control_connection,
@@ -700,49 +632,6 @@ def _fact_values_for_surface(
     while isinstance(parsed, str):
         parsed = json.loads(parsed)
     return dict(parsed)
-
-
-def _mock_exchange_submit_result(prepared: dict) -> dict:
-    return {
-        "status": "exchange_submit_orders_submitted",
-        "ticket_id": prepared["ticket_id"],
-        "operation_submit_command_id": prepared["operation_submit_command_id"],
-        "strategy_group_id": prepared["strategy_group_id"],
-        "symbol": prepared["symbol"],
-        "side": prepared["side"],
-        "exchange_write_called": True,
-        "order_created": True,
-        "order_lifecycle_called": True,
-        "withdrawal_or_transfer_created": False,
-        "live_profile_changed": False,
-        "order_sizing_changed": False,
-        "submitted_orders": [
-            _mock_submitted_order(prepared, order)
-            for order in prepared["submit_request"]["orders"]
-        ],
-    }
-
-
-def _mock_submitted_order(prepared: dict, order: dict) -> dict:
-    role = order["order_role"]
-    row = {
-        "local_order_id": order["local_order_id"],
-        "exchange_order_id": f"mock-exchange-{role.lower()}",
-        "order_role": role,
-        "reduce_only": order.get("reduce_only") is True,
-        "amount": order["amount"],
-        "price": order.get("price") or "",
-        "trigger_price": order.get("trigger_price") or "",
-    }
-    if role == "ENTRY":
-        row.update(
-            {
-                "status": "FILLED",
-                "filled_qty": order["amount"],
-                "average_exec_price": prepared["submit_request"]["reference_price"],
-            }
-        )
-    return row
 
 
 def _write_monitor_signal_summary_to_pg(

@@ -39,6 +39,10 @@ LIFECYCLE_CLOSURE_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-08-093_extend_ticket_bound_lifecycle_closure.py"
 )
+LIFECYCLE_SAFETY_CORE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-094_extend_ticket_bound_lifecycle_safety_core_statuses.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -67,6 +71,10 @@ def pg_control_connection():
         LIFECYCLE_CLOSURE_MIGRATION_PATH,
         "migration_093_runtime_safety",
     )
+    lifecycle_safety_core_migration = _load_module(
+        LIFECYCLE_SAFETY_CORE_MIGRATION_PATH,
+        "migration_094_runtime_safety",
+    )
     seed = _load_module(SEED_PATH, "seed_runtime_safety")
     engine = create_engine(
         "sqlite://",
@@ -90,6 +98,12 @@ def pg_control_connection():
                     lifecycle_closure_migration.op = migration.op
                     try:
                         lifecycle_closure_migration.upgrade()
+                        old_safety_core_op = lifecycle_safety_core_migration.op
+                        lifecycle_safety_core_migration.op = migration.op
+                        try:
+                            lifecycle_safety_core_migration.upgrade()
+                        finally:
+                            lifecycle_safety_core_migration.op = old_safety_core_op
                     finally:
                         lifecycle_closure_migration.op = old_closure_op
                 finally:

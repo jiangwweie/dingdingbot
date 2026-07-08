@@ -76,10 +76,13 @@ def test_exit_protection_blocks_before_entry_fill(
         now_ms=NOW_MS + 6000,
     )
 
-    assert payload["status"] == "blocked"
+    assert payload["status"] == "entry_fill_pending"
     assert "entry_status_not_filled:new" in payload["blockers"]
     assert "entry_filled_qty_missing" in payload["blockers"]
     assert payload["exit_protection_set_id"] is None
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "entry_fill_pending"
 
 
 def test_exit_protection_blocks_partial_entry_fill(
@@ -106,8 +109,11 @@ def test_exit_protection_blocks_partial_entry_fill(
         now_ms=NOW_MS + 6000,
     )
 
-    assert payload["status"] == "blocked"
+    assert payload["status"] == "entry_partial_fill_unhandled"
     assert "entry_partial_fill_not_lifecycle_ready" in payload["blockers"]
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "entry_partial_fill_unhandled"
 
 
 def test_exit_protection_blocks_without_tp1(
@@ -150,8 +156,58 @@ def test_exit_protection_blocks_without_tp1(
         now_ms=NOW_MS + 6000,
     )
 
-    assert payload["status"] == "blocked"
+    assert payload["status"] == "protection_submit_failed"
     assert "tp1_exchange_order_missing" in payload["blockers"]
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "protection_submit_failed"
+
+
+def test_exit_protection_classifies_missing_sl_as_protection_missing(
+    pg_control_connection,
+):
+    _, prepared = _submitted_attempt(pg_control_connection)
+    row = pg_control_connection.execute(
+        text(
+            """
+            SELECT submit_result
+            FROM brc_ticket_bound_protected_submit_attempts
+            WHERE protected_submit_attempt_id = :attempt_id
+            """
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).scalar_one()
+    submit_result = _json_value(row)
+    submit_result["submitted_orders"] = [
+        order
+        for order in submit_result["submitted_orders"]
+        if order["order_role"] != "SL"
+    ]
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_ticket_bound_protected_submit_attempts
+            SET submit_result = :submit_result
+            WHERE protected_submit_attempt_id = :attempt_id
+            """
+        ),
+        {
+            "attempt_id": prepared["protected_submit_attempt_id"],
+            "submit_result": _json_dumps(submit_result),
+        },
+    )
+
+    payload = exit_protection.materialize_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+
+    assert payload["status"] == "protection_missing"
+    assert "sl_exchange_order_missing" in payload["blockers"]
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "protection_missing"
 
 
 def _submitted_attempt(conn):

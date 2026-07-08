@@ -51,6 +51,23 @@ L2_L7_CHAIN_TABLES = (
     "brc_server_monitor_runs",
 )
 PG_RECENT_WINDOW_MS = 10 * 60 * 1000
+LIFECYCLE_ATTENTION_STATUSES = (
+    "submit_failed",
+    "entry_unknown",
+    "entry_orphaned",
+    "entry_partial_fill_unhandled",
+    "protection_missing",
+    "protection_submit_failed",
+    "protection_reconciliation_mismatch",
+    "tp1_or_sl_orphaned",
+    "runner_mutation_pending",
+    "runner_mutation_failed",
+    "runner_reconciliation_mismatch",
+    "position_closed_protection_live",
+    "final_exit_unknown",
+    "settlement_blocked",
+    "review_blocked",
+)
 
 COMMANDS = (
     ("disk_df", ("df", "-h")),
@@ -457,6 +474,27 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             )
         ).mappings()
     )
+    lifecycle_attention_rows = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT lifecycle_run_id, ticket_id, protected_submit_attempt_id,
+                       strategy_group_id, symbol, side, status, first_blocker,
+                       blockers, updated_at_ms
+                FROM brc_ticket_bound_order_lifecycle_runs
+                WHERE status IN :attention_statuses
+                ORDER BY updated_at_ms DESC
+                LIMIT 20
+                """
+            ).bindparams(
+                sa.bindparam(
+                    "attention_statuses",
+                    expanding=True,
+                )
+            ),
+            {"attention_statuses": LIFECYCLE_ATTENTION_STATUSES},
+        ).mappings()
+    )
     goal = conn.execute(
         sa.text(
             """
@@ -545,6 +583,7 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
         "post_submit_closed_without_lifecycle_closed": [
             dict(row) for row in post_submit_closed_without_lifecycle_closed
         ],
+        "lifecycle_attention_rows": [dict(row) for row in lifecycle_attention_rows],
         "goal": dict(goal or {}),
         "monitor": dict(monitor or {}),
         "unadvanced_fresh_signals": [dict(row) for row in unadvanced_fresh_signals],
@@ -574,6 +613,8 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         issues.append("lifecycle_closed_without_post_submit_closed")
     if snapshot.get("post_submit_closed_without_lifecycle_closed"):
         issues.append("post_submit_closed_without_lifecycle_closed")
+    if snapshot.get("lifecycle_attention_rows"):
+        issues.append("ticket_bound_lifecycle_attention_state")
 
     goal = snapshot.get("goal") or {}
     blockers = goal.get("blockers") or []
@@ -630,6 +671,16 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
         "post_submit_closed_without_lifecycle_closed_count": len(
             snapshot.get("post_submit_closed_without_lifecycle_closed") or []
+        ),
+        "lifecycle_attention_state_count": len(
+            snapshot.get("lifecycle_attention_rows") or []
+        ),
+        "lifecycle_attention_statuses": sorted(
+            {
+                str(row.get("status") or "")
+                for row in snapshot.get("lifecycle_attention_rows") or []
+                if row.get("status")
+            }
         ),
         "authority_boundary": {
             "readonly_check": True,

@@ -26,6 +26,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
+    classify_runner_protection_adjustment,
+)
+
 
 AUTHORITY_BOUNDARY = (
     "ticket_bound_runner_protection_adjuster; PG runner protection proof only; "
@@ -91,6 +95,11 @@ def materialize_ticket_bound_runner_protection_adjustment(
         runner_exchange_id=runner_exchange_id
         or str(existing_runner.get("exchange_order_id") or ""),
     )
+    classification = classify_runner_protection_adjustment(
+        blockers=blockers,
+        tp1_waiting=_waiting_for_tp1_fill(blockers),
+        runner_ref_missing_only=_waiting_for_runner_sl_ref(blockers),
+    )
     if _waiting_for_tp1_fill(blockers):
         return _result(
             "waiting_for_tp1_fill",
@@ -104,33 +113,35 @@ def materialize_ticket_bound_runner_protection_adjustment(
         _mark_lifecycle_status(
             conn,
             lifecycle,
-            status="sl_adjust_pending",
+            status=classification.status,
+            event_type=classification.event_type,
             blockers=blockers,
             now_ms=now_ms,
         )
         return _result(
-            "sl_adjust_pending",
+            classification.status,
             now_ms=now_ms,
             blockers=blockers,
             protection_set=protection_set,
             runner_order={},
-            next_action="provide_official_runner_sl_exchange_ref",
+            next_action=classification.next_action,
         )
     if blockers:
         _mark_lifecycle_status(
             conn,
             lifecycle,
-            status="blocked",
+            status=classification.status,
+            event_type=classification.event_type,
             blockers=blockers,
             now_ms=now_ms,
         )
         return _result(
-            "blocked",
+            classification.status,
             now_ms=now_ms,
             blockers=blockers,
             protection_set=protection_set,
             runner_order={},
-            next_action="repair_ticket_bound_runner_protection_inputs",
+            next_action=classification.next_action,
         )
     if existing_runner and existing_runner.get("status") in {"submitted", "open", "filled"}:
         _materialize_runner_projection(
@@ -272,6 +283,7 @@ def _blockers(
         "position_protected",
         "tp1_filled",
         "sl_adjust_pending",
+        "runner_mutation_pending",
         "runner_protected",
         "blocked",
     }:
@@ -402,6 +414,7 @@ def _mark_lifecycle_status(
     lifecycle: dict[str, Any],
     *,
     status: str,
+    event_type: str,
     blockers: list[str],
     now_ms: int,
 ) -> None:
@@ -415,6 +428,16 @@ def _mark_lifecycle_status(
         "updated_at_ms": now_ms,
     }
     _upsert_row(conn, "brc_ticket_bound_order_lifecycle_runs", "lifecycle_run_id", row)
+    _insert_event(
+        conn,
+        row,
+        event_type,
+        {
+            "blockers": blockers,
+            "lifecycle_status": status,
+        },
+        now_ms,
+    )
 
 
 def _update_order_status(
