@@ -676,6 +676,9 @@ def _lifecycle_closure_blockers(
             _closure_evidence_event_blockers(
                 conn,
                 lifecycle=lifecycle,
+                final_exit_role=final_exit_role,
+                final_exit_exchange_order_id=final_exit_exchange_order_id,
+                final_position_flat_confirmed=final_position_flat_confirmed,
                 reconciliation_evidence_id=reconciliation_evidence_id,
                 settlement_evidence_id=settlement_evidence_id,
                 review_evidence_id=review_evidence_id,
@@ -715,6 +718,9 @@ def _closure_evidence_event_blockers(
     conn: sa.engine.Connection,
     *,
     lifecycle: dict[str, Any],
+    final_exit_role: str,
+    final_exit_exchange_order_id: str,
+    final_position_flat_confirmed: bool,
     reconciliation_evidence_id: str,
     settlement_evidence_id: str,
     review_evidence_id: str,
@@ -747,10 +753,22 @@ def _closure_evidence_event_blockers(
             conn,
             lifecycle=lifecycle,
             event_type=event_type,
-            payload_key=payload_key,
-            payload_value=evidence_id,
+            expected_payload={payload_key: evidence_id},
         ):
             blockers.append(blocker)
+    if final_position_flat_confirmed:
+        if not _lifecycle_event_with_payload(
+            conn,
+            lifecycle=lifecycle,
+            event_type="reconciliation_matched",
+            expected_payload={
+                "reconciliation_evidence_id": reconciliation_evidence_id,
+                "final_exit_exchange_order_id": final_exit_exchange_order_id,
+                "final_exit_role": final_exit_role,
+                "final_position_flat_confirmed": True,
+            },
+        ):
+            blockers.append("final_position_flat_evidence_event_missing")
     return blockers
 
 
@@ -759,8 +777,7 @@ def _lifecycle_event_with_payload(
     *,
     lifecycle: dict[str, Any],
     event_type: str,
-    payload_key: str,
-    payload_value: str,
+    expected_payload: dict[str, Any],
 ) -> bool:
     if not sa.inspect(conn).has_table("brc_ticket_bound_lifecycle_events"):
         return False
@@ -774,12 +791,23 @@ def _lifecycle_event_with_payload(
             table.c.event_type == event_type,
         )
     ).mappings()
-    expected = str(payload_value or "")
     for row in rows:
         payload = _as_dict(row.get("event_payload"))
-        if str(payload.get(payload_key) or "") == expected:
+        if _payload_matches(payload, expected_payload):
             return True
     return False
+
+
+def _payload_matches(payload: dict[str, Any], expected_payload: dict[str, Any]) -> bool:
+    for key, expected_value in expected_payload.items():
+        actual = payload.get(key)
+        if isinstance(expected_value, bool):
+            if actual is not expected_value:
+                return False
+            continue
+        if str(actual or "") != str(expected_value or ""):
+            return False
+    return True
 
 
 def _protection_order_by_role_and_exchange_id(

@@ -197,6 +197,9 @@ def run_ticket_bound_full_chain_simulation(
     _record_simulated_closure_evidence_events(
         conn,
         protected_submit_attempt_id=str(prepared_payload["protected_submit_attempt_id"]),
+        final_exit_exchange_order_id="mock-exchange-runner-sl",
+        final_exit_role="RUNNER_SL",
+        final_position_flat_confirmed=True,
         reconciliation_evidence_id=reconciliation_evidence_id,
         settlement_evidence_id=settlement_evidence_id,
         review_evidence_id=review_evidence_id,
@@ -608,6 +611,9 @@ def _record_simulated_closure_evidence_events(
     conn: sa.engine.Connection,
     *,
     protected_submit_attempt_id: str,
+    final_exit_exchange_order_id: str,
+    final_exit_role: str,
+    final_position_flat_confirmed: bool,
     reconciliation_evidence_id: str,
     settlement_evidence_id: str,
     review_evidence_id: str,
@@ -626,7 +632,12 @@ def _record_simulated_closure_evidence_events(
     specs = (
         (
             "reconciliation_matched",
-            {"reconciliation_evidence_id": reconciliation_evidence_id},
+            {
+                "reconciliation_evidence_id": reconciliation_evidence_id,
+                "final_exit_exchange_order_id": final_exit_exchange_order_id,
+                "final_exit_role": final_exit_role,
+                "final_position_flat_confirmed": final_position_flat_confirmed,
+            },
         ),
         ("budget_settled", {"settlement_evidence_id": settlement_evidence_id}),
         ("review_recorded", {"review_evidence_id": review_evidence_id}),

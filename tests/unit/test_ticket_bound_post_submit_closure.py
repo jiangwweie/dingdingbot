@@ -369,6 +369,40 @@ def test_lifecycle_closure_blocks_fake_evidence_ids_without_events(
     ] == "runner_protected"
 
 
+def test_lifecycle_closure_blocks_flat_position_confirmation_without_event_proof(
+    pg_control_connection,
+):
+    _, prepared = _runner_protected_attempt(pg_control_connection)
+    _record_closure_evidence_events(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        reconciliation_evidence_id="recon-1",
+        settlement_evidence_id="settlement-1",
+        review_evidence_id="review-1",
+        final_position_flat_confirmed=False,
+        now_ms=NOW_MS + 8500,
+    )
+
+    payload = closure.materialize_ticket_bound_lifecycle_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        final_exit_exchange_order_id="exchange-runner-sl-1",
+        final_exit_role="RUNNER_SL",
+        final_position_flat_confirmed=True,
+        reconciliation_evidence_id="recon-1",
+        settlement_evidence_id="settlement-1",
+        review_evidence_id="review-1",
+        realized_pnl="12.34",
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "final_position_flat_evidence_event_missing" in payload["blockers"]
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "runner_protected"
+
+
 def test_ticket_expiry_after_submit_does_not_block_post_submit_lifecycle(
     pg_control_connection,
 ):
@@ -638,6 +672,9 @@ def _record_closure_evidence_events(
     settlement_evidence_id: str,
     review_evidence_id: str,
     now_ms: int,
+    final_exit_exchange_order_id: str = "exchange-runner-sl-1",
+    final_exit_role: str = "RUNNER_SL",
+    final_position_flat_confirmed: bool = True,
 ) -> None:
     lifecycle = conn.execute(
         text(
@@ -652,7 +689,12 @@ def _record_closure_evidence_events(
     specs = (
         (
             "reconciliation_matched",
-            {"reconciliation_evidence_id": reconciliation_evidence_id},
+            {
+                "reconciliation_evidence_id": reconciliation_evidence_id,
+                "final_exit_exchange_order_id": final_exit_exchange_order_id,
+                "final_exit_role": final_exit_role,
+                "final_position_flat_confirmed": final_position_flat_confirmed,
+            },
         ),
         ("budget_settled", {"settlement_evidence_id": settlement_evidence_id}),
         ("review_recorded", {"review_evidence_id": review_evidence_id}),
