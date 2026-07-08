@@ -40,6 +40,22 @@ five active StrategyGroups
 The system must not depend on repo MD/JSON, `output/**`, or report-dir JSON as
 runtime or trading decision sources.
 
+The program-level execution map for the next engineering phase is
+`docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md`. That document is the
+current ordering surface for large workstreams and links each program to its
+design documents and acceptance proof.
+
+## Current Program Order
+
+| Order | Program | Priority | Primary design surface |
+| --- | --- | --- | --- |
+| 1 | **Full Chain Simulation Harness** | P0 | `docs/current/L1_L9_OPTIMIZATION_EXECUTION_PLAN.md` |
+| 2 | **Ticket-Bound Lifecycle Safety Core** | P0 | `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
+| 3 | **Owner Explanation Read Model** | P1 | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
+| 4 | **Performance And Retention Control** | P1 | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
+| 5 | **Capital Risk Allocation** | P2 | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
+| 6 | **Frontend Read Model Integration** | P2 | frontend read-model contracts |
+
 ## Authority Boundary
 
 | Layer | Current authority | Not authority |

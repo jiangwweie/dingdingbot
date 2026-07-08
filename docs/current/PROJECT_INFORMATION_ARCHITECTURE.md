@@ -127,6 +127,7 @@ Owner decisions.
 | Active StrategyGroup semantics review and optimization plan | `docs/current/ACTIVE_STRATEGYGROUP_SEMANTICS_REVIEW_AND_OPTIMIZATION_PLAN.md` |
 | Multi-StrategyGroup multi-symbol multi-side action-time evolution | `docs/current/MULTI_STRATEGY_MULTI_SYMBOL_MULTI_SIDE_ACTION_TIME_EVOLUTION_DESIGN.md` |
 | L1-L9 optimization execution plan | `docs/current/L1_L9_OPTIMIZATION_EXECUTION_PLAN.md` |
+| Mainline engineering program plan | `docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md` |
 | Production runtime monitor ownership | `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` |
 | Tokyo runtime deployment boundary | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` |
 | Repo file source elimination governance | `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md` |
@@ -136,6 +137,8 @@ Owner decisions.
 | Runtime control state mainline file I/O map | `docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md` |
 | PG current projection authority closure | `docs/current/PG_CURRENT_PROJECTION_AUTHORITY_CLOSURE_DESIGN.md` |
 | Ticket-bound order lifecycle and exit protection | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
+| Ticket-bound lifecycle safety core implementation | `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
+| Trading quality capital/risk allocation | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | Strategy governance pipeline DB design | `docs/current/STRATEGY_GOVERNANCE_PIPELINE_DB_DESIGN.md` |
 | WIP limit and stop rules | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` |
 | Stage roadmap and current track plan | `docs/current/MAIN_CONTROL_ROADMAP.md` |
