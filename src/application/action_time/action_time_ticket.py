@@ -573,6 +573,8 @@ def _build_ticket_bundle(
         action_time_fact=action_time_fact,
     )
     blockers.extend(required_fact_blockers)
+    if _tp1_price(action_time_fact=action_time_fact) <= 0:
+        blockers.append("tp1_reference_missing")
     if blockers:
         raise TicketMaterializationBlocked(_dedupe(blockers))
 
@@ -820,6 +822,20 @@ def _disable_fact_unknown(fact_key: str, fact_values: dict[str, Any]) -> bool:
     }:
         return True
     return False
+
+
+def _tp1_price(*, action_time_fact: dict[str, Any]) -> Decimal:
+    fact_values = _as_dict(action_time_fact.get("fact_values"))
+    for key in (
+        "take_profit_1",
+        "tp1_price",
+        "tp1_reference_price",
+        "first_take_profit_price",
+    ):
+        value = _decimal(fact_values.get(key))
+        if value > 0:
+            return value
+    return Decimal("0")
 
 
 def _fact_condition_satisfied(row: dict[str, Any], fact_values: dict[str, Any]) -> bool:

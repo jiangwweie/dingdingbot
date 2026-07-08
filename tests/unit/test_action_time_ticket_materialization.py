@@ -386,6 +386,30 @@ def test_materializer_blocks_missing_protection_ref(pg_control_connection):
     assert _ticket_count(pg_control_connection) == 0
 
 
+def test_materializer_blocks_missing_tp1_reference(pg_control_connection):
+    _insert_action_time_lane_graph(
+        pg_control_connection,
+        strategy_group_id="SOR-001",
+        symbol="AVAXUSDT",
+        side="short",
+        fact_values={
+            "opening_range_defined": True,
+            "breakdown_confirmed": True,
+            "opening_range_high_reference": "20",
+            "last_price": "18",
+        },
+    )
+
+    payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "tp1_reference_missing" in payload["blockers"]
+    assert _ticket_count(pg_control_connection) == 0
+
+
 def test_materializer_blocks_runtime_scope_side_mismatch(pg_control_connection):
     lane_id = _insert_action_time_lane_graph(pg_control_connection)
     pg_control_connection.execute(
@@ -455,6 +479,7 @@ def test_materializer_allows_brf2_ticket_when_disable_fact_is_clear(pg_control_c
             "short_side_not_disabled": True,
             "rally_high_reference": "1800",
             "strong_uptrend_disable": False,
+            "take_profit_1": "1600",
         },
     )
 

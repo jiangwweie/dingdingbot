@@ -593,6 +593,70 @@ def test_pg_completed_disabled_smoke_attempt_is_quiet_not_boundary_blocked(
         engine.dispose()
 
 
+def test_pg_blocked_protected_submit_attempt_notifies_owner(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    engine = _seed_pg_engine()
+    try:
+        with engine.begin() as conn:
+            ids = _create_ready_protected_submit(conn)
+            conn.execute(
+                text(
+                    """
+                    UPDATE brc_runtime_fact_snapshots
+                    SET fact_values = :fact_values
+                    WHERE fact_surface = 'action_time'
+                      AND fact_snapshot_id IN (
+                        SELECT action_time_fact_snapshot_id
+                        FROM brc_action_time_tickets
+                        WHERE ticket_id = :ticket_id
+                      )
+                    """
+                ),
+                {
+                    "ticket_id": ids["ticket_id"],
+                    "fact_values": json.dumps(
+                        {
+                            "opening_range_defined": True,
+                            "breakout_confirmed": True,
+                            "opening_range_low_reference": "1800",
+                            "last_price": "2000",
+                        }
+                    ),
+                },
+            )
+            prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+                conn,
+                ticket_id=ids["ticket_id"],
+                operation_submit_command_id=ids["operation_submit_command_id"],
+                submit_mode="disabled_smoke",
+                now_ms=NOW_MS + 4000,
+            )
+            calls: list[dict] = []
+
+            artifact = module.build_server_monitor_artifact(
+                _pg_args(module, tmp_path),
+                pg_conn=conn,
+                notifier=lambda *args: calls.append({"args": args}) or {"sent": True},
+            )
+
+            assert prepared["status"] == "blocked"
+            assert "tp1_reference_missing" in prepared["blockers"]
+            assert artifact["source_mode"] == "db_backed"
+            assert artifact["decision"]["decision"] == "notify"
+            assert artifact["decision"]["blocker_class"] == "tp1_reference_missing"
+            assert artifact["decision"]["checkpoint"] == (
+                "ticket_bound_protected_submit_attempt"
+            )
+            assert artifact["decision"]["strategy_group_id"] == "SOR-001"
+            assert artifact["decision"]["symbol"] == "ETHUSDT:long"
+            assert artifact["notification"]["attempted"] is True
+            assert calls
+    finally:
+        engine.dispose()
+
+
 def test_pg_runtime_coverage_gap_notifies_without_json_sources(
     tmp_path: Path,
 ) -> None:

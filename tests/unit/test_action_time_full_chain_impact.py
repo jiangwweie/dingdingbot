@@ -207,6 +207,85 @@ def test_each_active_candidate_scope_reaches_disabled_smoke_from_raw_pg_input(
 
 
 @pytest.mark.parametrize(
+    ("strategy_group_id", "symbol", "side", "fact_values", "expected_tp1"),
+    [
+        (
+            "BRF2-001",
+            "AVAXUSDT",
+            "short",
+            {
+                "rally_failure_confirmed": True,
+                "short_side_not_disabled": True,
+                "rally_high_reference": "20",
+                "strong_uptrend_disable": False,
+                "last_price": "18",
+            },
+            "16",
+        ),
+        (
+            "SOR-001",
+            "AVAXUSDT",
+            "short",
+            {
+                "opening_range_defined": True,
+                "breakdown_confirmed": True,
+                "opening_range_high_reference": "20",
+                "last_price": "18",
+            },
+            "16",
+        ),
+    ],
+)
+def test_short_raw_pg_input_derives_tp1_before_protected_submit(
+    pg_control_connection,
+    monkeypatch,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    fact_values: dict,
+    expected_tp1: str,
+):
+    payloads = _run_raw_pg_input_to_runtime_safety(
+        pg_control_connection,
+        monkeypatch,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+        fact_values=fact_values,
+    )
+
+    action_time_values = _fact_values_for_surface(
+        pg_control_connection,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+        fact_surface="action_time",
+    )
+    assert action_time_values["take_profit_1"] == expected_tp1
+    assert action_time_values["tp1_reference_price"] == expected_tp1
+    assert action_time_values["tp1_derivation"] == "entry_to_protection_one_r"
+
+    submit_payload = protected_submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=str(payloads["ticket"]["ticket_id"]),
+        operation_submit_command_id=str(payloads["handoff"]["operation_submit_command_id"]),
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 6,
+    )
+
+    assert submit_payload["status"] == "disabled_smoke_passed"
+    assert submit_payload["blockers"] == []
+    tp1_order = next(
+        order
+        for order in submit_payload["submit_request"]["orders"]
+        if order["order_role"] == "TP1"
+    )
+    assert tp1_order["gateway_side"] == "buy"
+    assert tp1_order["reduce_only"] is True
+    assert tp1_order["price"] == expected_tp1
+
+
+@pytest.mark.parametrize(
     ("strategy_group_id", "symbol", "side"),
     ACTIVE_CANDIDATE_SCOPES,
 )
@@ -491,6 +570,7 @@ def _run_raw_pg_input_to_runtime_safety(
     strategy_group_id: str,
     symbol: str,
     side: str,
+    fact_values: dict | None = None,
 ) -> dict[str, dict]:
     _insert_ready_fresh_signal(
         conn,
@@ -499,6 +579,7 @@ def _run_raw_pg_input_to_runtime_safety(
         side,
         insert_action_time_fact=False,
         insert_signal=False,
+        fact_values=fact_values,
     )
     signal_payload = _write_monitor_signal_summary_to_pg(
         conn,
@@ -583,6 +664,42 @@ def _run_raw_pg_input_to_runtime_safety(
         "handoff": handoff_payload,
         "safety": safety_payload,
     }
+
+
+def _fact_values_for_surface(
+    conn,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    fact_surface: str,
+) -> dict:
+    row = conn.execute(
+        text(
+            """
+            SELECT fact_values
+            FROM brc_runtime_fact_snapshots
+            WHERE strategy_group_id = :strategy_group_id
+              AND symbol = :symbol
+              AND side = :side
+              AND fact_surface = :fact_surface
+            ORDER BY created_at_ms DESC
+            LIMIT 1
+            """
+        ),
+        {
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+            "fact_surface": fact_surface,
+        },
+    ).scalar_one()
+    import json
+
+    parsed = row
+    while isinstance(parsed, str):
+        parsed = json.loads(parsed)
+    return dict(parsed)
 
 
 def _mock_exchange_submit_result(prepared: dict) -> dict:

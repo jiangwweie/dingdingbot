@@ -286,6 +286,115 @@ def _first_pg_focus_row(candidate_pool: dict[str, Any]) -> dict[str, Any]:
     return _as_dict(row)
 
 
+def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
+    completed_attempt_ticket_ids: set[str] = set()
+    for attempt in _pg_rows(control_state.get("ticket_bound_protected_submit_attempts")):
+        blockers = [str(item) for item in _as_list(attempt.get("blockers")) if str(item)]
+        status = str(attempt.get("status") or "")
+        if blockers or status == "blocked":
+            return {
+                "event_type": "protected_submit_attempt_blocked",
+                "strategy_group_id": attempt.get("strategy_group_id"),
+                "symbol": attempt.get("symbol"),
+                "side": attempt.get("side"),
+                "checkpoint": "ticket_bound_protected_submit_attempt",
+                "blocker_class": _first_meaningful_blocker(blockers)
+                if blockers
+                else "protected_submit_attempt_blocked",
+                "reasons": [
+                    "protected_submit_attempt_blocked",
+                    *blockers,
+                    str(attempt.get("protected_submit_attempt_id") or ""),
+                ],
+            }
+        if status in {"disabled_smoke_passed", "submitted"}:
+            ticket_id = str(attempt.get("ticket_id") or "")
+            if ticket_id:
+                completed_attempt_ticket_ids.add(ticket_id)
+    completed_signal_ids: set[str] = set()
+    completed_lane_ids: set[str] = set()
+    completed_promotion_ids: set[str] = set()
+    for ticket in _pg_rows(control_state.get("action_time_tickets")):
+        if str(ticket.get("ticket_id") or "") not in completed_attempt_ticket_ids:
+            continue
+        for source_key, target in (
+            ("signal_event_id", completed_signal_ids),
+            ("action_time_lane_input_id", completed_lane_ids),
+            ("promotion_candidate_id", completed_promotion_ids),
+        ):
+            value = str(ticket.get(source_key) or "")
+            if value:
+                target.add(value)
+    for ticket in _pg_rows(control_state.get("action_time_tickets")):
+        if str(ticket.get("ticket_id") or "") in completed_attempt_ticket_ids:
+            continue
+        status = str(ticket.get("status") or "")
+        if status in {"created", "preflight_pending", "finalgate_ready", "handoff_ready"}:
+            return {
+                "event_type": "action_time_ticket",
+                "strategy_group_id": ticket.get("strategy_group_id"),
+                "symbol": ticket.get("symbol"),
+                "side": ticket.get("side"),
+                "checkpoint": "action_time_ticket",
+                "blocker_class": "action_time_ticket",
+                "reasons": ["action_time_ticket_created", str(ticket.get("ticket_id") or "")],
+            }
+    for lane in _pg_rows(control_state.get("action_time_lane_inputs")):
+        if str(lane.get("action_time_lane_input_id") or "") in completed_lane_ids:
+            continue
+        if str(lane.get("status") or "") in {"ticket_pending", "active"}:
+            return {
+                "event_type": "action_time_lane_input",
+                "strategy_group_id": lane.get("strategy_group_id"),
+                "symbol": lane.get("symbol"),
+                "side": lane.get("side"),
+                "checkpoint": "action_time_lane_input",
+                "blocker_class": "action_time_boundary",
+                "reasons": [
+                    "action_time_lane_input_present",
+                    str(lane.get("action_time_lane_input_id") or ""),
+                ],
+            }
+    for promotion in _pg_rows(control_state.get("promotion_candidates")):
+        if str(promotion.get("promotion_candidate_id") or "") in completed_promotion_ids:
+            continue
+        if str(promotion.get("status") or "") in {
+            "eligible",
+            "arbitration_pending",
+            "arbitration_won",
+        }:
+            return {
+                "event_type": "promotion_candidate",
+                "strategy_group_id": promotion.get("strategy_group_id"),
+                "symbol": promotion.get("symbol"),
+                "side": promotion.get("side"),
+                "checkpoint": "promotion_candidate",
+                "blocker_class": "fresh_signal",
+                "reasons": [
+                    "promotion_candidate_present",
+                    str(promotion.get("promotion_candidate_id") or ""),
+                ],
+            }
+    for signal in _pg_rows(control_state.get("live_signal_events")):
+        if str(signal.get("signal_event_id") or "") in completed_signal_ids:
+            continue
+        if (
+            str(signal.get("source_kind") or "") == "live_market"
+            and str(signal.get("status") or "") == "facts_validated"
+            and str(signal.get("freshness_state") or "") == "fresh"
+        ):
+            return {
+                "event_type": "fresh_signal",
+                "strategy_group_id": signal.get("strategy_group_id"),
+                "symbol": signal.get("symbol"),
+                "side": signal.get("side"),
+                "checkpoint": "live_signal_event",
+                "blocker_class": "fresh_signal",
+                "reasons": ["fresh_signal_detected", str(signal.get("signal_event_id") or "")],
+            }
+    return {}
+
+
 def _first_meaningful_blocker(blockers: list[Any]) -> str:
     for blocker in blockers:
         text = str(blocker or "")
@@ -302,6 +411,7 @@ def _first_meaningful_blocker(blockers: list[Any]) -> str:
 
 def _decision_from_pg_sources(
     *,
+    control_state: dict[str, Any],
     goal_status: dict[str, Any],
     candidate_pool: dict[str, Any],
     systemd: dict[str, Any],
@@ -328,11 +438,33 @@ def _decision_from_pg_sources(
     )
     blocker_class = _first_meaningful_blocker(blockers)
     coverage_complete = _candidate_pool_runtime_coverage_complete(candidate_pool)
+    chain_event = _recent_pg_chain_event(control_state)
 
     if not systemd.get("ready"):
         reasons.extend([str(item) for item in systemd.get("blockers") or []])
         blocker_class = "watcher_or_service_failure"
         checkpoint = "systemd"
+    elif chain_event:
+        event_side = str(chain_event.get("side") or "")
+        event_symbol = str(chain_event.get("symbol") or symbol)
+        return {
+            "decision": "notify",
+            "notify": True,
+            "status": "notify_required",
+            "reasons": _dedupe([str(item) for item in chain_event.get("reasons") or []]),
+            "automation_id": "tokyo-runtime-server-monitor",
+            "strategy_group_id": str(
+                chain_event.get("strategy_group_id") or strategy_group_id
+            ),
+            "symbol": (
+                f"{event_symbol}:{event_side}"
+                if event_side and event_symbol
+                else event_symbol or symbol
+            ),
+            "blocker_class": str(chain_event.get("blocker_class") or "fresh_signal"),
+            "checkpoint": str(chain_event.get("checkpoint") or checkpoint),
+            "owner_message": "检测到交易链路事件，系统已按边界处理",
+        }
 
     if status == "waiting_for_signal":
         if checks.get("watcher_liveness_healthy") is False or not coverage_complete:
@@ -756,6 +888,7 @@ def build_server_monitor_artifact_from_pg(
             control_state=control_state,
         )
         decision = _decision_from_pg_sources(
+            control_state=control_state,
             goal_status=goal_status,
             candidate_pool=candidate_pool,
             systemd=systemd,

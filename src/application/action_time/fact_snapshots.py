@@ -360,6 +360,17 @@ def _fact_values(
     ):
         if optional_key in source_values and optional_key not in values:
             values[optional_key] = source_values[optional_key]
+    if _tp1_reference(values) <= 0:
+        tp1 = _derive_tp1_reference(
+            side=str(signal.get("side") or ""),
+            protection_ref_type=protection_ref_type,
+            fact_values=values,
+            source_values=source_values,
+        )
+        if tp1 > 0:
+            values["take_profit_1"] = _decimal_text(tp1)
+            values["tp1_reference_price"] = _decimal_text(tp1)
+            values["tp1_derivation"] = "entry_to_protection_one_r"
     return values, missing
 
 
@@ -445,6 +456,69 @@ def _reference_value_for(key: str, source_values: dict[str, Any]) -> Any:
         if _positive_decimal(value):
             return value
     return None
+
+
+def _tp1_reference(values: dict[str, Any]) -> Decimal:
+    for key in (
+        "take_profit_1",
+        "tp1_price",
+        "tp1_reference_price",
+        "first_take_profit_price",
+    ):
+        value = _decimal(values.get(key))
+        if value > 0:
+            return value
+    return Decimal("0")
+
+
+def _derive_tp1_reference(
+    *,
+    side: str,
+    protection_ref_type: str,
+    fact_values: dict[str, Any],
+    source_values: dict[str, Any],
+) -> Decimal:
+    entry = _first_positive_decimal(
+        fact_values.get("entry_price"),
+        source_values.get("entry_price"),
+        fact_values.get("last_price"),
+        source_values.get("last_price"),
+        fact_values.get("mark_price"),
+        source_values.get("mark_price"),
+        fact_values.get("current_price"),
+        source_values.get("current_price"),
+        source_values.get("close"),
+        _nested(source_values, "price_action_structure", "latest_close"),
+        _nested(source_values, "candidate_semantics", "entry", "entry_price_reference"),
+        _nested(source_values, "side_event", "trigger_level"),
+        source_values.get("trigger_level"),
+    )
+    protection = _first_positive_decimal(
+        fact_values.get(protection_ref_type),
+        _reference_value_for(protection_ref_type, source_values),
+        _nested(source_values, "candidate_semantics", "protection", "stop_price_reference"),
+    )
+    if entry <= 0 or protection <= 0 or entry == protection:
+        return Decimal("0")
+    normalized_side = side.strip().lower()
+    if normalized_side == "long" and protection < entry:
+        return entry + (entry - protection)
+    if normalized_side == "short" and protection > entry:
+        target = entry - (protection - entry)
+        return target if target > 0 else Decimal("0")
+    return Decimal("0")
+
+
+def _first_positive_decimal(*values: Any) -> Decimal:
+    for value in values:
+        decimal_value = _decimal(value)
+        if decimal_value > 0:
+            return decimal_value
+    return Decimal("0")
+
+
+def _decimal_text(value: Decimal) -> str:
+    return format(value.normalize(), "f")
 
 
 def _failed_facts(required_facts: list[dict[str, Any]], fact_values: dict[str, Any]) -> list[str]:

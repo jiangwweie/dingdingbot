@@ -958,6 +958,8 @@ def _candidate_blockers(
         blockers.append("protection_ref_type_missing")
     elif _decimal(_as_dict(action_time_fact.get("fact_values")).get(protection_ref_type)) <= 0:
         blockers.append(f"protection_reference_fact_missing:{protection_ref_type}")
+    if _tp1_price(action_time_fact=action_time_fact) <= 0:
+        blockers.append("tp1_reference_missing")
 
     if _decimal(policy.get("max_notional")) <= 0:
         blockers.append("policy_max_notional_invalid")
@@ -1084,6 +1086,20 @@ def _protection_row(bundle: CandidateBundle) -> dict[str, Any]:
         "source_fact_snapshot_id": str(bundle.action_time_fact["fact_snapshot_id"]),
         "expires_at_ms": int(bundle.action_time_fact["valid_until_ms"]),
     }
+
+
+def _tp1_price(*, action_time_fact: dict[str, Any]) -> Decimal:
+    fact_values = _as_dict(action_time_fact.get("fact_values"))
+    for key in (
+        "take_profit_1",
+        "tp1_price",
+        "tp1_reference_price",
+        "first_take_profit_price",
+    ):
+        value = _decimal(fact_values.get(key))
+        if value > 0:
+            return value
+    return Decimal("0")
 
 
 def _fresh_signal_for_candidate(
