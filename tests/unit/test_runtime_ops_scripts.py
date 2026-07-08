@@ -399,6 +399,51 @@ def test_tokyo_ops_l2_l7_summary_flags_exact_lifecycle_attention_state():
     assert summary["lifecycle_attention_statuses"] == ["runner_mutation_pending"]
 
 
+def test_tokyo_ops_l2_l7_summary_flags_runner_mutation_command_without_runner_proof():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {},
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {"status": "running", "blockers": []},
+            "monitor": {
+                "status": "quiet",
+                "blocker_classes": ["none"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+            "submitted_attempts_without_protection": [],
+            "incomplete_protection_sets": [],
+            "tp1_filled_without_runner_sl": [],
+            "runner_protected_without_runner_sl": [],
+            "lifecycle_closed_without_post_submit_closed": [],
+            "post_submit_closed_without_lifecycle_closed": [],
+            "runner_mutation_commands_without_runner_proof": [
+                {
+                    "runner_mutation_command_id": "runner-command-1",
+                    "ticket_id": "ticket-1",
+                    "status": "result_recorded",
+                }
+            ],
+            "lifecycle_attention_rows": [],
+        }
+    )
+
+    assert summary["status"] == "warn"
+    assert "runner_mutation_command_without_runner_proof" in summary["issues"]
+    assert summary["runner_mutation_command_without_runner_proof_count"] == 1
+
+
 def test_tokyo_ops_l2_l7_summary_flags_lifecycle_closure_projection_mismatch():
     summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
         {

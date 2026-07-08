@@ -23,6 +23,7 @@ from src.application.action_time import operation_layer_handoff
 from src.application.action_time import post_submit_closure
 from src.application.action_time import promotion_action_time_lane
 from src.application.action_time import protected_submit_attempt
+from src.application.action_time import runner_mutation_command
 from src.application.action_time import runner_protection_adjuster
 from src.application.action_time import runtime_safety_state
 
@@ -144,13 +145,42 @@ def run_ticket_bound_full_chain_simulation(
 
     set_id = str(protection_payload["exit_protection_set_id"])
     _mark_tp1_filled(conn, exit_protection_set_id=set_id, now_ms=now_ms + 10)
+    runner_command_payload = (
+        runner_mutation_command.prepare_ticket_bound_runner_mutation_command(
+            conn,
+            exit_protection_set_id=set_id,
+            now_ms=now_ms + 11,
+        )
+    )
+    runner_command_result_payload = (
+        runner_mutation_command.record_ticket_bound_runner_mutation_result(
+            conn,
+            runner_mutation_command_id=str(
+                runner_command_payload["runner_mutation_command_id"]
+            ),
+            result_payload={
+                "old_sl_cancelled": True,
+                "runner_sl_submitted": True,
+                "runner_sl_exchange_order_id": "mock-exchange-runner-sl",
+                "exchange_write_called": True,
+                "withdrawal_or_transfer_created": False,
+                "live_profile_changed": False,
+                "order_sizing_changed": False,
+            },
+            now_ms=now_ms + 12,
+        )
+    )
     runner_payload = (
         runner_protection_adjuster.materialize_ticket_bound_runner_protection_adjustment(
             conn,
             exit_protection_set_id=set_id,
-            runner_sl_exchange_order_id="mock-exchange-runner-sl",
+            runner_sl_exchange_order_id=str(
+                runner_command_result_payload["command"]["result_payload"][
+                    "runner_sl_exchange_order_id"
+                ]
+            ),
             runner_sl_local_order_id="mock-runner-sl",
-            now_ms=now_ms + 11,
+            now_ms=now_ms + 13,
         )
     )
     final_payload = post_submit_closure.materialize_ticket_bound_lifecycle_closure(
@@ -171,7 +201,7 @@ def run_ticket_bound_full_chain_simulation(
             "simulation-review:"
             f"{simulation_input.strategy_group_id}:{simulation_input.symbol}:{simulation_input.side}"
         ),
-        now_ms=now_ms + 12,
+        now_ms=now_ms + 14,
     )
 
     return {
@@ -190,6 +220,8 @@ def run_ticket_bound_full_chain_simulation(
         "submitted": submitted_payload,
         "protection": protection_payload,
         "post_submit_pending": post_submit_pending_payload,
+        "runner_mutation_command": runner_command_payload,
+        "runner_mutation_result": runner_command_result_payload,
         "runner": runner_payload,
         "final": final_payload,
         "authority_boundary": {

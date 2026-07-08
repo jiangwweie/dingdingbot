@@ -50,6 +50,10 @@ LIFECYCLE_SAFETY_CORE_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-08-094_extend_ticket_bound_lifecycle_safety_core_statuses.py"
 )
+RUNNER_MUTATION_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-095_create_ticket_bound_runner_mutation_commands.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -107,6 +111,10 @@ def pg_control_connection():
         LIFECYCLE_SAFETY_CORE_MIGRATION_PATH,
         "migration_094_action_time_full_chain",
     )
+    runner_mutation_command_migration = _load_module(
+        RUNNER_MUTATION_COMMAND_MIGRATION_PATH,
+        "migration_095_action_time_full_chain",
+    )
     seed = _load_module(SEED_PATH, "seed_action_time_full_chain")
     engine = create_engine(
         "sqlite://",
@@ -134,6 +142,12 @@ def pg_control_connection():
                         lifecycle_safety_core_migration.op = migration.op
                         try:
                             lifecycle_safety_core_migration.upgrade()
+                            old_runner_cmd_op = runner_mutation_command_migration.op
+                            runner_mutation_command_migration.op = migration.op
+                            try:
+                                runner_mutation_command_migration.upgrade()
+                            finally:
+                                runner_mutation_command_migration.op = old_runner_cmd_op
                         finally:
                             lifecycle_safety_core_migration.op = old_safety_core_op
                     finally:
@@ -327,6 +341,8 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
     assert payloads["submitted"]["status"] == "submitted"
     assert payloads["protection"]["status"] == "position_protected"
     assert payloads["post_submit_pending"]["status"] == "reconciliation_pending"
+    assert payloads["runner_mutation_command"]["status"] == "prepared"
+    assert payloads["runner_mutation_result"]["status"] == "result_recorded"
     assert payloads["runner"]["status"] == "runner_protected"
     assert payloads["final"]["status"] == "closed"
     assert payloads["final"]["reconciliation_state"] == "matched"

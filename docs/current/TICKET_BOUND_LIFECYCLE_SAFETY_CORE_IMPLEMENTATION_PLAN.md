@@ -68,6 +68,20 @@ This plan does not authorize:
 | Post-submit closure | Closes PG lifecycle when final exit, reconciliation, settlement, and review refs exist | It summarizes closure; it does not discover exchange truth by itself |
 | Ops health | Can detect TP1 without runner SL, incomplete protection, lifecycle/closure drift | It must become part of the acceptance gate |
 
+### Current Implementation Progress
+
+As of the 2026-07-08 lifecycle-safety-core branch, the implementation has
+advanced from proof-only protection rows to a broader local lifecycle safety
+core:
+
+| Area | Current implementation | Remaining boundary |
+| --- | --- | --- |
+| Full-chain simulation | `full_chain_simulation_harness` runs constructed PG input through signal, lane, ticket, safety, protected submit, protection, runner command, runner proof, final closure | It uses mock exchange result and does not grant live exchange authority |
+| Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed` | Official recovery execution is still separate |
+| Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers | It consumes already-fetched facts and does not call exchange APIs |
+| Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for old SL cancel / RUNNER_SL submit | The actual exchange mutation must still be performed only by the official operation path |
+| Ops health | Tokyo ops health reads exact lifecycle attention states and runner commands without runner proof | It remains readonly and non-mutating |
+
 ## Target Core
 
 ### Single Lifecycle Owner

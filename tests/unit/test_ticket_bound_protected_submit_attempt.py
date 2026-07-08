@@ -385,7 +385,99 @@ def test_protected_submit_result_preserves_gateway_failure_blockers(
 
     assert result["status"] == "submit_failed"
     assert result["blockers"] == ["runtime_exchange_gateway_unavailable"]
+    assert result["next_action"] == "release_or_expire_ticket_scope_after_submit_failure"
+    lifecycle = _lifecycle_row(pg_control_connection)
+    assert lifecycle["status"] == "submit_failed"
+    assert lifecycle["first_blocker"] == "runtime_exchange_gateway_unavailable"
     assert _status(pg_control_connection, "brc_action_time_tickets", "ticket_id", ids["ticket_id"]) == "finalgate_ready"
+
+
+def test_protected_submit_result_materializes_protection_missing_after_sl_failure(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="real_gateway_action",
+        now_ms=NOW_MS + 4000,
+    )
+    entry_order = _submitted_orders(prepared)[0]
+
+    result = submit.record_ticket_bound_protected_submit_result(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        submit_result={
+            "status": "protection_submit_failed",
+            "ticket_id": ids["ticket_id"],
+            "operation_submit_command_id": ids["operation_submit_command_id"],
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "blockers": ["exchange_submit_failed:sl"],
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "submitted_orders": [entry_order],
+        },
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "submit_failed"
+    assert result["next_action"] == "run_official_recovery_submit_sl_or_flatten"
+    lifecycle = _lifecycle_row(pg_control_connection)
+    assert lifecycle["status"] == "protection_missing"
+    assert lifecycle["entry_fill_confirmed"] in {True, 1}
+    assert lifecycle["first_blocker"] == "exchange_submit_failed:sl"
+
+
+def test_protected_submit_result_materializes_protection_submit_failed_after_tp1_failure(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="real_gateway_action",
+        now_ms=NOW_MS + 4000,
+    )
+    entry_order, sl_order, _tp1_order = _submitted_orders(prepared)
+
+    result = submit.record_ticket_bound_protected_submit_result(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        submit_result={
+            "status": "protection_submit_failed",
+            "ticket_id": ids["ticket_id"],
+            "operation_submit_command_id": ids["operation_submit_command_id"],
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "blockers": ["exchange_submit_failed:tp1"],
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "submitted_orders": [entry_order, sl_order],
+        },
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "submit_failed"
+    assert result["next_action"] == (
+        "run_official_recovery_submit_missing_protection_or_flatten"
+    )
+    lifecycle = _lifecycle_row(pg_control_connection)
+    assert lifecycle["status"] == "protection_submit_failed"
+    assert lifecycle["entry_fill_confirmed"] in {True, 1}
+    assert lifecycle["first_blocker"] == "exchange_submit_failed:tp1"
 
 
 def test_protected_submit_result_forbidden_effect_hard_stops_without_breaking_db(
@@ -446,6 +538,13 @@ def _protected_submit_row(conn):
     ).mappings().one()
 
 
+def _lifecycle_row(conn):
+    row = conn.execute(
+        text("SELECT * FROM brc_ticket_bound_order_lifecycle_runs")
+    ).mappings().one()
+    return {key: _json_value(value) for key, value in dict(row).items()}
+
+
 def _status(conn, table: str, id_column: str, id_value: str) -> str:
     return str(
         conn.execute(
@@ -481,6 +580,6 @@ def _submitted_orders(prepared: dict) -> list[dict]:
 
 
 def _json_value(value):
-    if isinstance(value, str):
+    if isinstance(value, str) and value[:1] in {"[", "{"}:
         return json.loads(value)
     return value

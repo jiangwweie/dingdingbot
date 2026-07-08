@@ -118,6 +118,47 @@ def classify_runner_protection_adjustment(
     )
 
 
+def classify_sequential_submit_result(
+    *,
+    attempt: dict[str, Any],
+    submit_result: dict[str, Any],
+    blockers: list[str],
+) -> LifecycleSafetyClassification:
+    normalized = _dedupe(blockers)
+    submitted_orders = [
+        dict(order)
+        for order in submit_result.get("submitted_orders", [])
+        if isinstance(order, dict)
+    ]
+    entry_order = _order_by_role(submitted_orders, "ENTRY")
+    sl_order = _order_by_role(submitted_orders, "SL")
+    tp1_order = _order_by_role(submitted_orders, "TP1")
+    request_orders = [
+        dict(order)
+        for order in _as_dict(attempt.get("submit_request")).get("orders", [])
+        if isinstance(order, dict)
+    ]
+    entry_request = _order_by_role(request_orders, "ENTRY")
+
+    status = _sequential_submit_status(
+        submit_result=submit_result,
+        entry_order=entry_order,
+        sl_order=sl_order,
+        tp1_order=tp1_order,
+        entry_request=entry_request,
+        blockers=normalized,
+    )
+    if not normalized:
+        normalized = [status]
+    return LifecycleSafetyClassification(
+        status=status,
+        event_type=_event_type_for_status(status),
+        next_action=_next_action_for_status(status),
+        first_blocker=normalized[0],
+        blockers=tuple(normalized),
+    )
+
+
 def classify_protection_reconciliation(
     *,
     position_qty: Any,
@@ -200,6 +241,41 @@ def _exit_protection_status(
     return "blocked"
 
 
+def _sequential_submit_status(
+    *,
+    submit_result: dict[str, Any],
+    entry_order: dict[str, Any],
+    sl_order: dict[str, Any],
+    tp1_order: dict[str, Any],
+    entry_request: dict[str, Any],
+    blockers: list[str],
+) -> str:
+    result_status = str(submit_result.get("status") or "").strip()
+    if not submit_result.get("exchange_write_called"):
+        return "submit_failed"
+    if result_status in {"entry_submit_failed", "exchange_submit_failed"} and not entry_order:
+        return "submit_failed"
+    if entry_order and not str(entry_order.get("exchange_order_id") or "").strip():
+        return "entry_orphaned"
+    if entry_order and _entry_partial_fill(entry_order=entry_order, entry_request=entry_request):
+        return "entry_partial_fill_unhandled"
+    if entry_order and _entry_unknown(entry_order):
+        return "entry_unknown"
+    if result_status == "order_lifecycle_update_failed" and entry_order:
+        return "entry_orphaned"
+    if entry_order and not sl_order:
+        return "protection_missing"
+    if entry_order and sl_order and not tp1_order:
+        return "protection_submit_failed"
+    if result_status == "protection_submit_failed":
+        return "protection_submit_failed" if sl_order else "protection_missing"
+    if result_status.endswith("_failed"):
+        return "submit_failed"
+    if blockers:
+        return "submit_failed"
+    return "submit_failed"
+
+
 def _event_type_for_status(status: str) -> str:
     if status == "entry_partial_fill_unhandled":
         return "entry_partial_fill_detected"
@@ -247,6 +323,41 @@ def _next_action_for_status(status: str) -> str:
 
 def _has_prefix(blockers: list[str], prefix: str) -> bool:
     return any(blocker.startswith(prefix) for blocker in blockers)
+
+
+def _order_by_role(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
+    expected = role.upper()
+    for order in orders:
+        if str(order.get("order_role") or "").upper() == expected:
+            return dict(order)
+    return {}
+
+
+def _entry_partial_fill(
+    *,
+    entry_order: dict[str, Any],
+    entry_request: dict[str, Any],
+) -> bool:
+    filled_qty = _decimal(entry_order.get("filled_qty"))
+    requested_qty = _decimal(
+        entry_order.get("amount")
+        if entry_order.get("amount") is not None
+        else entry_request.get("amount")
+    )
+    return filled_qty > 0 and requested_qty > 0 and filled_qty < requested_qty
+
+
+def _entry_unknown(entry_order: dict[str, Any]) -> bool:
+    status = str(entry_order.get("status") or "").strip().lower()
+    if status in {"filled", "closed"}:
+        return False
+    if _decimal(entry_order.get("filled_qty")) > 0:
+        return False
+    return status not in {"new", "open", "submitted", "accepted"}
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _dedupe(items: list[str]) -> list[str]:

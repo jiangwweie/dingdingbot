@@ -34,6 +34,9 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.action_time.action_time_ticket import (  # noqa: E402
     compute_action_time_ticket_hash,
 )
+from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
+    classify_sequential_submit_result,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -315,8 +318,22 @@ def record_ticket_bound_protected_submit_result(
         "protected_submit_attempt_id",
         updated,
     )
+    lifecycle_classification = None
     if status == "submitted":
         _mark_ticket_submitted(conn, updated, now_ms=now_ms)
+    elif not identity_blockers:
+        lifecycle_classification = classify_sequential_submit_result(
+            attempt=updated,
+            submit_result=submit_result,
+            blockers=list(updated["blockers"]),
+        )
+        _materialize_submit_lifecycle_state(
+            conn,
+            attempt=updated,
+            submit_result=submit_result,
+            classification=lifecycle_classification,
+            now_ms=now_ms,
+        )
     return _result(
         status,
         now_ms=now_ms,
@@ -325,7 +342,13 @@ def record_ticket_bound_protected_submit_result(
         next_action=(
             "run_post_submit_reconciliation_settlement_review"
             if status == "submitted"
-            else "repair_ticket_bound_submit_result_identity"
+            else (
+                "repair_ticket_bound_submit_result_identity"
+                if identity_blockers
+                else lifecycle_classification.next_action
+                if lifecycle_classification
+                else "repair_ticket_bound_submit_result_identity"
+            )
         ),
     )
 
@@ -907,6 +930,87 @@ def _mark_ticket_submitted(
     )
 
 
+def _materialize_submit_lifecycle_state(
+    conn: sa.engine.Connection,
+    *,
+    attempt: dict[str, Any],
+    submit_result: dict[str, Any],
+    classification: Any,
+    now_ms: int,
+) -> None:
+    submitted_orders = [
+        dict(order)
+        for order in submit_result.get("submitted_orders", [])
+        if isinstance(order, dict)
+    ]
+    entry_order = _order_by_role(submitted_orders, "ENTRY")
+    row = {
+        "lifecycle_run_id": _stable_id(
+            "ticket_order_lifecycle",
+            str(attempt["ticket_id"]),
+        ),
+        "ticket_id": str(attempt["ticket_id"]),
+        "protected_submit_attempt_id": str(attempt["protected_submit_attempt_id"]),
+        "strategy_group_id": str(attempt["strategy_group_id"]),
+        "symbol": str(attempt["symbol"]),
+        "side": str(attempt["side"]),
+        "runtime_profile_id": str(attempt["runtime_profile_id"]),
+        "status": classification.status,
+        "entry_local_order_id": str(entry_order.get("local_order_id") or "") or None,
+        "entry_exchange_order_id": str(entry_order.get("exchange_order_id") or "")
+        or None,
+        "entry_fill_confirmed": _entry_fully_filled(attempt, entry_order),
+        "entry_filled_qty": (
+            _decimal(entry_order.get("filled_qty"))
+            if _decimal(entry_order.get("filled_qty")) > 0
+            else None
+        ),
+        "entry_avg_price": (
+            _decimal(entry_order.get("average_exec_price"))
+            if _decimal(entry_order.get("average_exec_price")) > 0
+            else None
+        ),
+        "exit_protection_set_id": None,
+        "first_blocker": classification.first_blocker,
+        "blockers": list(classification.blockers),
+        "warnings": [],
+        "authority_boundary": AUTHORITY_BOUNDARY,
+        "created_at_ms": int(attempt.get("created_at_ms") or now_ms),
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "lifecycle_run_id",
+        row,
+    )
+    event = {
+        "lifecycle_event_id": _stable_id(
+            "ticket_lifecycle_event",
+            str(row["lifecycle_run_id"]),
+            str(classification.event_type),
+            str(now_ms),
+        ),
+        "lifecycle_run_id": str(row["lifecycle_run_id"]),
+        "ticket_id": str(row["ticket_id"]),
+        "protected_submit_attempt_id": str(row["protected_submit_attempt_id"]),
+        "event_type": str(classification.event_type),
+        "event_payload": {
+            "submit_result_status": submit_result.get("status"),
+            "lifecycle_status": classification.status,
+            "blockers": list(classification.blockers),
+            "next_action": classification.next_action,
+        },
+        "created_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_lifecycle_events",
+        "lifecycle_event_id",
+        event,
+    )
+
+
 def _result_from_existing(existing: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
     status = str(existing.get("status") or "")
     if status == "submit_prepared":
@@ -973,6 +1077,38 @@ def _gateway_order_type(value: str) -> str:
     if normalized in {"stop-limit", "stop_limit"}:
         return "stop_limit"
     return "market"
+
+
+def _order_by_role(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
+    expected = role.upper()
+    for order in orders:
+        if str(order.get("order_role") or "").upper() == expected:
+            return dict(order)
+    return {}
+
+
+def _entry_fully_filled(attempt: dict[str, Any], entry_order: dict[str, Any]) -> bool:
+    if not entry_order:
+        return False
+    filled_qty = _decimal(entry_order.get("filled_qty"))
+    request_order = _order_by_role(
+        [
+            dict(order)
+            for order in _as_dict(attempt.get("submit_request")).get("orders", [])
+            if isinstance(order, dict)
+        ],
+        "ENTRY",
+    )
+    requested_qty = _decimal(entry_order.get("amount") or request_order.get("amount"))
+    avg_price = _decimal(entry_order.get("average_exec_price"))
+    status = str(entry_order.get("status") or "").strip().lower()
+    return (
+        status == "filled"
+        and filled_qty > 0
+        and requested_qty > 0
+        and filled_qty >= requested_qty
+        and avg_price > 0
+    )
 
 
 def _decimal(value: Any) -> Decimal:

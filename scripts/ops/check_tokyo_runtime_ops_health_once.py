@@ -46,6 +46,7 @@ L2_L7_CHAIN_TABLES = (
     "brc_ticket_bound_order_lifecycle_runs",
     "brc_ticket_bound_exit_protection_sets",
     "brc_ticket_bound_exit_protection_orders",
+    "brc_ticket_bound_runner_mutation_commands",
     "brc_ticket_bound_post_submit_closures",
     "brc_goal_status_current",
     "brc_server_monitor_runs",
@@ -302,6 +303,7 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             "lifecycle_runs": "brc_ticket_bound_order_lifecycle_runs",
             "protection_sets": "brc_ticket_bound_exit_protection_sets",
             "protection_orders": "brc_ticket_bound_exit_protection_orders",
+            "runner_mutation_commands": "brc_ticket_bound_runner_mutation_commands",
             "post_submit_closures": "brc_ticket_bound_post_submit_closures",
             "monitor": "brc_server_monitor_runs",
         }.items()
@@ -474,6 +476,27 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             )
         ).mappings()
     )
+    runner_mutation_commands_without_runner_proof = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT cmd.runner_mutation_command_id, cmd.ticket_id,
+                       cmd.exit_protection_set_id, cmd.protected_submit_attempt_id,
+                       cmd.strategy_group_id, cmd.symbol, cmd.side, cmd.status,
+                       cmd.updated_at_ms
+                FROM brc_ticket_bound_runner_mutation_commands AS cmd
+                LEFT JOIN brc_ticket_bound_exit_protection_orders AS runner_sl
+                  ON runner_sl.exit_protection_set_id = cmd.exit_protection_set_id
+                 AND runner_sl.role = 'RUNNER_SL'
+                 AND runner_sl.status IN ('submitted', 'open', 'filled')
+                WHERE cmd.status IN ('prepared', 'result_recorded')
+                  AND runner_sl.exit_protection_order_id IS NULL
+                ORDER BY cmd.updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
     lifecycle_attention_rows = list(
         conn.execute(
             sa.text(
@@ -583,6 +606,9 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
         "post_submit_closed_without_lifecycle_closed": [
             dict(row) for row in post_submit_closed_without_lifecycle_closed
         ],
+        "runner_mutation_commands_without_runner_proof": [
+            dict(row) for row in runner_mutation_commands_without_runner_proof
+        ],
         "lifecycle_attention_rows": [dict(row) for row in lifecycle_attention_rows],
         "goal": dict(goal or {}),
         "monitor": dict(monitor or {}),
@@ -613,6 +639,8 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         issues.append("lifecycle_closed_without_post_submit_closed")
     if snapshot.get("post_submit_closed_without_lifecycle_closed"):
         issues.append("post_submit_closed_without_lifecycle_closed")
+    if snapshot.get("runner_mutation_commands_without_runner_proof"):
+        issues.append("runner_mutation_command_without_runner_proof")
     if snapshot.get("lifecycle_attention_rows"):
         issues.append("ticket_bound_lifecycle_attention_state")
 
@@ -671,6 +699,9 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
         "post_submit_closed_without_lifecycle_closed_count": len(
             snapshot.get("post_submit_closed_without_lifecycle_closed") or []
+        ),
+        "runner_mutation_command_without_runner_proof_count": len(
+            snapshot.get("runner_mutation_commands_without_runner_proof") or []
         ),
         "lifecycle_attention_state_count": len(
             snapshot.get("lifecycle_attention_rows") or []
