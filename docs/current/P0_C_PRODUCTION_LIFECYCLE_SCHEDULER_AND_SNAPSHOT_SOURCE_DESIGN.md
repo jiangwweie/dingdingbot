@@ -95,6 +95,7 @@ timer.
 | --- | --- |
 | **Timer cadence** | 30 seconds, oneshot, bounded by service timeout |
 | **No active lifecycle** | One PG read pass, zero exchange calls, zero files |
+| **Gateway binding** | Lazy: bind the official exchange gateway only after PG selection finds a lifecycle scope that needs snapshot or mutation |
 | **Max lifecycle scopes per tick** | Default 4 |
 | **Max maintenance actions per scope** | Default 16 |
 | **Exchange call trigger** | Only when a selected lifecycle has a protection set and state needs reconciliation/runner/cleanup |

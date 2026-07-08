@@ -19,7 +19,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.application.action_time.lifecycle_maintenance_scheduler import (  # noqa: E402
+    lifecycle_maintenance_scopes_require_exchange_gateway,
     run_ticket_bound_lifecycle_maintenance_scheduler,
+    select_ticket_bound_lifecycle_maintenance_scopes,
 )
 from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     is_sync_postgres_dsn,
@@ -40,18 +42,32 @@ async def _amain(argv: list[str] | None = None) -> int:
         print("ERROR: lifecycle maintenance scheduler requires PostgreSQL DSN", file=sys.stderr)
         return 2
 
-    gateway = None
-    if args.fetch_exchange_snapshot or args.allow_exchange_mutation:
-        gateway_binding = await _runtime_exchange_gateway_binding()
-        gateway = gateway_binding.get("gateway")
-        if gateway is None:
-            payload = _blocked_gateway_payload(gateway_binding)
-            print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
-            return 1
-
     engine = sa.create_engine(database_url)
+    gateway = None
     try:
         with engine.begin() as conn:
+            scopes = select_ticket_bound_lifecycle_maintenance_scopes(
+                conn,
+                max_lifecycle_scopes=args.max_lifecycle_scopes,
+            )
+            if lifecycle_maintenance_scopes_require_exchange_gateway(
+                scopes,
+                allow_exchange_mutation=args.allow_exchange_mutation,
+                fetch_exchange_snapshot=args.fetch_exchange_snapshot,
+            ):
+                gateway_binding = await _runtime_exchange_gateway_binding()
+                gateway = gateway_binding.get("gateway")
+                if gateway is None:
+                    payload = _blocked_gateway_payload(gateway_binding)
+                    print(
+                        json.dumps(
+                            payload,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            default=str,
+                        )
+                    )
+                    return 1
             payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
                 conn,
                 gateway=gateway,

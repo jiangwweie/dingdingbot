@@ -8,7 +8,9 @@ from src.application.action_time.exchange_snapshot_provider import (
     fetch_ticket_bound_exchange_snapshot,
 )
 from src.application.action_time.lifecycle_maintenance_scheduler import (
+    lifecycle_maintenance_scopes_require_exchange_gateway,
     run_ticket_bound_lifecycle_maintenance_scheduler,
+    select_ticket_bound_lifecycle_maintenance_scopes,
 )
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_runner_protection_adjuster import (
@@ -23,6 +25,10 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
 @pytest.mark.asyncio
 async def test_scheduler_noops_without_maintainable_lifecycle(pg_control_connection):
     gateway = _SchedulerGateway()
+    scopes = select_ticket_bound_lifecycle_maintenance_scopes(
+        pg_control_connection,
+        max_lifecycle_scopes=4,
+    )
 
     payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
         pg_control_connection,
@@ -37,6 +43,15 @@ async def test_scheduler_noops_without_maintainable_lifecycle(pg_control_connect
     assert payload["exchange_read_called"] is False
     assert payload["exchange_write_called"] is False
     assert gateway.events == []
+    assert scopes == []
+    assert (
+        lifecycle_maintenance_scopes_require_exchange_gateway(
+            scopes,
+            allow_exchange_mutation=True,
+            fetch_exchange_snapshot=True,
+        )
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -74,6 +89,10 @@ async def test_scheduler_fetches_snapshot_and_runs_runner_mutation(
 ):
     set_id = _materialized_exit_protection_set(pg_control_connection)
     _mark_tp1_filled(pg_control_connection, set_id)
+    scopes = select_ticket_bound_lifecycle_maintenance_scopes(
+        pg_control_connection,
+        max_lifecycle_scopes=4,
+    )
     gateway = _SchedulerGateway()
 
     payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
@@ -92,6 +111,14 @@ async def test_scheduler_fetches_snapshot_and_runs_runner_mutation(
     assert payload["status"] == "scheduler_complete"
     assert payload["exchange_read_called"] is True
     assert payload["exchange_write_called"] is True
+    assert (
+        lifecycle_maintenance_scopes_require_exchange_gateway(
+            scopes,
+            allow_exchange_mutation=True,
+            fetch_exchange_snapshot=True,
+        )
+        is True
+    )
     assert "exit_protection_reconciled" in actions
     assert actions[-3:] == [
         "runner_mutation_prepared",

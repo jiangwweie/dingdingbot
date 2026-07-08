@@ -57,7 +57,10 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
-    scopes = _select_scopes(conn, max_lifecycle_scopes=max_lifecycle_scopes)
+    scopes = select_ticket_bound_lifecycle_maintenance_scopes(
+        conn,
+        max_lifecycle_scopes=max_lifecycle_scopes,
+    )
     if not scopes:
         return _result(
             "no_maintainable_lifecycle",
@@ -140,7 +143,7 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
     )
 
 
-def _select_scopes(
+def select_ticket_bound_lifecycle_maintenance_scopes(
     conn: sa.engine.Connection,
     *,
     max_lifecycle_scopes: int,
@@ -170,6 +173,26 @@ def _select_scopes(
             }
         )
     return scopes
+
+
+def lifecycle_maintenance_scopes_require_exchange_gateway(
+    scopes: list[dict[str, Any]],
+    *,
+    allow_exchange_mutation: bool,
+    fetch_exchange_snapshot: bool,
+) -> bool:
+    if not scopes:
+        return False
+    if allow_exchange_mutation:
+        return True
+    return bool(
+        fetch_exchange_snapshot
+        and any(
+            scope.get("exit_protection_set_id")
+            and str(scope.get("lifecycle_status") or "") in SNAPSHOT_STATUSES
+            for scope in scopes
+        )
+    )
 
 
 def _current_lifecycle_blockers(
