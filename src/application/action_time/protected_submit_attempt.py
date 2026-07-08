@@ -892,9 +892,52 @@ def _result_identity_blockers(
         for key in ("exchange_write_called", "order_created", "order_lifecycle_called"):
             if submit_result.get(key) is not True:
                 blockers.append(f"submit_result_required_effect_false:{key}")
+        if attempt.get("submit_mode") == SUBMIT_MODE_TEMP_TINY_LIVE_PROTECTED:
+            blockers.extend(
+                _temporary_tiny_live_submit_result_blockers(
+                    submit_request=_as_dict(attempt.get("submit_request")),
+                    submit_result=submit_result,
+                )
+            )
     for key, expected in FORBIDDEN_EFFECTS.items():
         if submit_result.get(key) not in {expected, None, "", 0}:
             blockers.append(f"submit_result_forbidden_effect:{key}")
+    return _dedupe(blockers)
+
+
+def _temporary_tiny_live_submit_result_blockers(
+    *,
+    submit_request: dict[str, Any],
+    submit_result: dict[str, Any],
+) -> list[str]:
+    blockers = _temporary_tiny_live_submit_request_blockers(submit_request)
+    request_orders = {
+        str(order.get("local_order_id") or ""): dict(order)
+        for order in submit_request.get("orders", [])
+        if isinstance(order, dict) and order.get("local_order_id")
+    }
+    submitted_orders = {
+        str(order.get("local_order_id") or ""): dict(order)
+        for order in submit_result.get("submitted_orders", [])
+        if isinstance(order, dict) and order.get("local_order_id")
+    }
+    for local_order_id, request_order in request_orders.items():
+        submitted_order = submitted_orders.get(local_order_id)
+        role = str(request_order.get("order_role") or "unknown")
+        if not submitted_order:
+            blockers.append(f"temporary_tiny_live_submitted_order_missing:{role}")
+            continue
+        if str(submitted_order.get("order_role") or "") != role:
+            blockers.append(f"temporary_tiny_live_submitted_role_mismatch:{role}")
+        expected_reduce_only = request_order.get("reduce_only") is True
+        if submitted_order.get("reduce_only") is not expected_reduce_only:
+            blockers.append(f"temporary_tiny_live_submitted_reduce_only_mismatch:{role}")
+        if role == "SL" and not submitted_order.get("trigger_price"):
+            blockers.append("temporary_tiny_live_submitted_sl_trigger_price_missing")
+        if role == "TP1" and not submitted_order.get("price"):
+            blockers.append("temporary_tiny_live_submitted_tp1_price_missing")
+        if role == "ENTRY" and submitted_order.get("reduce_only") is not False:
+            blockers.append("temporary_tiny_live_submitted_entry_reduce_only_invalid")
     return _dedupe(blockers)
 
 

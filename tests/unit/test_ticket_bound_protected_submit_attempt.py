@@ -261,6 +261,53 @@ def test_temporary_tiny_live_result_can_mark_ticket_submitted(
     assert _status(pg_control_connection, "brc_action_time_tickets", "ticket_id", ids["ticket_id"]) == "submitted"
 
 
+def test_temporary_tiny_live_result_hard_stops_weak_protection_shape(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="temp_tiny_live_protected_submit",
+        now_ms=NOW_MS + 4000,
+    )
+    submitted_orders = []
+    for order in _submitted_orders(prepared):
+        if order["order_role"] == "SL":
+            order = {**order, "reduce_only": False, "trigger_price": ""}
+        if order["order_role"] == "TP1":
+            order = {**order, "price": ""}
+        submitted_orders.append(order)
+
+    result = submit.record_ticket_bound_protected_submit_result(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        submit_result={
+            "status": "exchange_submit_orders_submitted",
+            "ticket_id": ids["ticket_id"],
+            "operation_submit_command_id": ids["operation_submit_command_id"],
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "submitted_orders": submitted_orders,
+        },
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "hard_stopped"
+    assert "temporary_tiny_live_submitted_reduce_only_mismatch:SL" in result["blockers"]
+    assert "temporary_tiny_live_submitted_sl_trigger_price_missing" in result["blockers"]
+    assert "temporary_tiny_live_submitted_tp1_price_missing" in result["blockers"]
+    assert _status(pg_control_connection, "brc_action_time_tickets", "ticket_id", ids["ticket_id"]) == "finalgate_ready"
+
+
 def test_protected_submit_result_identity_mismatch_hard_stops(
     pg_control_connection,
 ):
