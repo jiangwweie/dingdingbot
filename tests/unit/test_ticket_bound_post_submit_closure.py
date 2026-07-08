@@ -202,6 +202,43 @@ def test_lifecycle_closure_records_final_exit_reconciliation_settlement_review(
         assert event_type in events
 
 
+def test_lifecycle_closure_blocks_when_flat_position_has_live_protection_order(
+    pg_control_connection,
+):
+    _, prepared = _runner_protected_attempt(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_ticket_bound_exit_protection_orders
+            SET status = 'submitted'
+            WHERE role = 'SL'
+            """
+        )
+    )
+
+    payload = closure.materialize_ticket_bound_lifecycle_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        final_exit_exchange_order_id="exchange-runner-sl-1",
+        final_exit_role="RUNNER_SL",
+        final_position_flat_confirmed=True,
+        reconciliation_evidence_id="recon-1",
+        settlement_evidence_id="settlement-1",
+        review_evidence_id="review-1",
+        realized_pnl="12.34",
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "position_closed_protection_live:SL" in payload["blockers"]
+    assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
+        "status"
+    ] == "runner_protected"
+    assert _one(pg_control_connection, "brc_ticket_bound_exit_protection_sets")[
+        "status"
+    ] == "runner_protected"
+
+
 def test_ticket_expiry_after_submit_does_not_block_post_submit_lifecycle(
     pg_control_connection,
 ):

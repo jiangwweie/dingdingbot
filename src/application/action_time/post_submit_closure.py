@@ -41,6 +41,14 @@ AUTHORITY_BOUNDARY = (
 )
 PROTECTION_COMPLETE_STATUSES = {"submitted", "reconciled", "runner_protected", "closed"}
 FINAL_EXIT_ROLES = {"SL", "RUNNER_SL", "TP1"}
+LIVE_PROTECTION_ORDER_STATUSES = {
+    "planned",
+    "submitted",
+    "open",
+    "partially_filled",
+    "cancel_pending",
+    "replace_pending",
+}
 FINAL_LIFECYCLE_CLOSABLE_STATUSES = {
     "position_protected",
     "tp1_filled",
@@ -684,6 +692,14 @@ def _lifecycle_closure_blockers(
             blockers.append("final_exit_order_not_in_ticket_protection_set")
         elif final_order.get("reduce_only") is not True:
             blockers.append("final_exit_order_reduce_only_missing")
+    if final_position_flat_confirmed:
+        blockers.extend(
+            _live_protection_order_blockers_after_flat(
+                protection_orders,
+                final_exit_role=final_exit_role,
+                final_exit_exchange_order_id=final_exit_exchange_order_id,
+            )
+        )
     return _dedupe(blockers)
 
 
@@ -700,6 +716,24 @@ def _protection_order_by_role_and_exchange_id(
             continue
         return dict(order)
     return {}
+
+
+def _live_protection_order_blockers_after_flat(
+    protection_orders: list[dict[str, Any]],
+    *,
+    final_exit_role: str,
+    final_exit_exchange_order_id: str,
+) -> list[str]:
+    blockers: list[str] = []
+    for order in protection_orders:
+        role = str(order.get("role") or "").upper()
+        exchange_order_id = str(order.get("exchange_order_id") or "")
+        if role == final_exit_role and exchange_order_id == final_exit_exchange_order_id:
+            continue
+        status = str(order.get("status") or "").strip().lower()
+        if status in LIVE_PROTECTION_ORDER_STATUSES:
+            blockers.append(f"position_closed_protection_live:{role or 'unknown'}")
+    return blockers
 
 
 def _mark_protection_order_status(
