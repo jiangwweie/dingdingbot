@@ -47,6 +47,10 @@ RUNNER_MUTATION_COMMAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-08-095_create_ticket_bound_runner_mutation_commands.py"
 )
+PROTECTION_RECOVERY_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-096_create_ticket_bound_protection_recovery_commands.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -114,6 +118,20 @@ def pg_control_connection():
                             runner_mutation_command_migration.op = migration.op
                             try:
                                 runner_mutation_command_migration.upgrade()
+                                protection_recovery_command_migration = _load_module(
+                                    PROTECTION_RECOVERY_COMMAND_MIGRATION_PATH,
+                                    "migration_096_runtime_safety",
+                                )
+                                old_protection_recovery_op = (
+                                    protection_recovery_command_migration.op
+                                )
+                                protection_recovery_command_migration.op = migration.op
+                                try:
+                                    protection_recovery_command_migration.upgrade()
+                                finally:
+                                    protection_recovery_command_migration.op = (
+                                        old_protection_recovery_op
+                                    )
                             finally:
                                 runner_mutation_command_migration.op = old_runner_cmd_op
                         finally:

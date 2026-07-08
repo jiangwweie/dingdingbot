@@ -77,7 +77,7 @@ core:
 | Area | Current implementation | Remaining boundary |
 | --- | --- | --- |
 | Full-chain simulation | `full_chain_simulation_harness` runs constructed PG input through signal, lane, ticket, safety, protected submit, protection, runner command, runner proof, final closure | It uses mock exchange result and does not grant live exchange authority |
-| Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed` | Official recovery execution is still separate |
+| Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed`; `protection_recovery_command` prepares and executes missing SL/TP1 recovery locally through an injected gateway | Production scheduling/API wiring remains behind explicit Owner deploy approval |
 | Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers | It consumes already-fetched facts and does not call exchange APIs |
 | Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for old SL cancel / RUNNER_SL submit | Command rows are intent/result records, not proof of runner protection |
 | Runner mutation executor | `runner_mutation_executor` consumes a prepared PG command, calls injected gateway cancel/place, and records the PG result | Executor is mockable locally and still cannot call FinalGate, change profile/sizing, or use file authority |
@@ -164,6 +164,7 @@ review_blocked
 | ENTRY submit | Ticket has Runtime Safety State `live_submit_ready` and Operation Layer submit command | `ticket_id`, `finalgate_pass_id`, `operation_submit_command_id` |
 | SL submit | Same ticket-bound protected submit envelope or official recovery command | `ticket_id`, `protected_submit_attempt_id`, `entry_exchange_order_id` |
 | TP1 submit | Same ticket-bound protected submit envelope or official recovery command | `ticket_id`, `protected_submit_attempt_id`, `entry_exchange_order_id` |
+| Protection recovery submit | ENTRY fill confirmed and SL/TP1 missing after sequential submit failure | `ticket_id`, `protected_submit_attempt_id`, `lifecycle_run_id`, `entry_exchange_order_id` |
 | Old SL cancel | TP1 fill confirmed and runner mutation command approved | `ticket_id`, `exit_protection_set_id`, `old_sl_exchange_order_id` |
 | RUNNER_SL submit | TP1 fill confirmed and remaining runner qty positive | `ticket_id`, `exit_protection_set_id`, `tp1_exchange_order_id` |
 | Orphan protection cancel | Position flat or wrong protection proven by reconciler | `ticket_id` or explicit orphan identity proof |
@@ -273,6 +274,20 @@ Acceptance:
 | Partial fill handled | Protection qty cannot be computed from requested qty when fill qty differs |
 | Duplicate submit handled | Existing prepared/submitted attempt blocks new attempt |
 
+Implementation status:
+
+1. **Implemented**: failed protected submit results materialize exact lifecycle
+   states including `protection_missing` and `protection_submit_failed`.
+2. **Implemented**: `protection_recovery_command` prepares one PG recovery
+   command for an ENTRY-filled attempt with missing SL and/or TP1.
+3. **Implemented**: recovery executor submits only missing reduce-only SL/TP1
+   orders through an injected gateway and records success/failure in PG.
+4. **Implemented**: successful recovery repairs the protected submit attempt so
+   the existing exit protection materializer can create the canonical SL/TP1
+   protection proof set.
+5. **Remaining production integration**: wire recovery executor into deployed
+   Operation Layer scheduling/API only after explicit Owner deploy approval.
+
 ### Batch 3: Protection Reconciler
 
 Goal: compare PG, OrderLifecycle, and exchange truth for active lifecycle rows.
@@ -332,7 +347,7 @@ Acceptance:
 | Test family | Required coverage |
 | --- | --- |
 | Full-chain impact | Every active StrategyGroup event spec can reach mocked lifecycle closure |
-| Submit recovery | ENTRY reject, timeout, local write failure, partial fill, protection reject |
+| Submit recovery | ENTRY reject, timeout, local write failure, partial fill, protection reject, missing SL/TP1 recovery success, recovery submit failure |
 | Protection reconciliation | Missing SL, missing TP1, wrong side, wrong qty, orphan order, flat-with-live-protection |
 | Runner mutation | TP1 filled with missing runner SL, cancel failure, RUNNER_SL submit failure, successful official runner SL, runner reconciliation mismatch |
 | Closure | final exit proof missing, flat proof missing, settlement missing, review missing, happy closure |

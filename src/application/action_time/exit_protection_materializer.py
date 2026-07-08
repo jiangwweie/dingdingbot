@@ -93,6 +93,7 @@ def materialize_ticket_bound_exit_protection_set(
     entry_order = _order_by_role(submit_result.get("submitted_orders", []), "ENTRY")
     sl_order = _order_by_role(submit_result.get("submitted_orders", []), "SL")
     tp1_order = _order_by_role(submit_result.get("submitted_orders", []), "TP1")
+    existing_lifecycle = _lifecycle_by_ticket(conn, str(attempt.get("ticket_id") or ""))
     entry_fill = _entry_fill(entry_request=entry_request, entry_order=entry_order)
     blockers.extend(entry_fill["blockers"])
     blockers.extend(_exit_order_blockers(sl_order, role="SL"))
@@ -107,6 +108,7 @@ def materialize_ticket_bound_exit_protection_set(
 
     lifecycle = _lifecycle_row(
         attempt,
+        existing_lifecycle=existing_lifecycle,
         status=classification.status,
         first_blocker=classification.first_blocker,
         blockers=list(classification.blockers),
@@ -353,6 +355,7 @@ def _exit_order_blockers(order: dict[str, Any], *, role: str) -> list[str]:
 def _lifecycle_row(
     attempt: dict[str, Any],
     *,
+    existing_lifecycle: dict[str, Any],
     status: str,
     first_blocker: str | None,
     blockers: list[str],
@@ -362,7 +365,8 @@ def _lifecycle_row(
     now_ms: int,
 ) -> dict[str, Any]:
     return {
-        "lifecycle_run_id": _stable_id("ticket_order_lifecycle", str(attempt["ticket_id"])),
+        "lifecycle_run_id": str(existing_lifecycle.get("lifecycle_run_id") or "")
+        or _stable_id("ticket_order_lifecycle", str(attempt["ticket_id"])),
         "ticket_id": str(attempt["ticket_id"]),
         "protected_submit_attempt_id": str(attempt["protected_submit_attempt_id"]),
         "strategy_group_id": str(attempt["strategy_group_id"]),
@@ -380,7 +384,11 @@ def _lifecycle_row(
         "blockers": blockers,
         "warnings": [],
         "authority_boundary": AUTHORITY_BOUNDARY,
-        "created_at_ms": int(attempt.get("created_at_ms") or now_ms),
+        "created_at_ms": int(
+            existing_lifecycle.get("created_at_ms")
+            or attempt.get("created_at_ms")
+            or now_ms
+        ),
         "updated_at_ms": now_ms,
     }
 

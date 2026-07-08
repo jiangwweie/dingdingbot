@@ -52,9 +52,9 @@ review plan.
 | **P0** | No **entry fill confirmed** gate before exit protection materialization | Closed by materializer requiring full filled entry status, qty, and average price |
 | **P0** | **TP1** is missing from the protected submit / protection closure truth | Closed by TP1 submit request requirement and closure protection-set requirement |
 | **P0** | `protection_state=submitted` only requires SL | Closed; it now requires PG protection set completeness |
-| **P0** | TP1 fill -> official SL cancel/replace and RUNNER_SL submit is not one closed ticket-bound mutation path | Open; PG runner protection proof exists, but the official mutation command and exchange reconciliation remain required |
-| **P0** | Exchange truth is not yet the current authority for protection completeness | Open; PG proof rows exist, but a protection reconciler must compare PG, OrderLifecycle, exchange open orders, fills, and position |
-| **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Open; every partial submit branch must become a current lifecycle blocker and recovery path |
+| **P0** | TP1 fill -> official SL cancel/replace and RUNNER_SL submit is not one closed ticket-bound mutation path | Locally implemented by `runner_mutation_command` and `runner_mutation_executor`; production scheduling/API wiring remains behind explicit deploy approval |
+| **P0** | Exchange truth is not yet the current authority for protection completeness | Locally implemented by `protection_reconciler` over caller-provided exchange snapshots; production exchange read adapter wiring remains behind explicit deploy approval |
+| **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Locally implemented by exact lifecycle classification plus `protection_recovery_command` for missing SL/TP1 recovery; production scheduling/API wiring remains behind explicit deploy approval |
 | **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Partially represented by PG materializers and lifecycle events; target closure is the Lifecycle Safety Core implementation plan |
 | **P1** | Action-time TTL is not tested against the full post-submit chain | Fast opportunities may expire before lifecycle proof completes |
 
@@ -378,7 +378,7 @@ Forbidden:
 | --- | --- | --- |
 | Entry submit failed before fill | Mark attempt failed; no protection materialization | None unless repeated |
 | Entry exchange id missing | Hard stop lifecycle as `entry_unknown` | Notify if unresolved |
-| Entry filled but SL submit failed | Mark `protection_submit_failed`; block new entries; require reduce-only recovery | Owner may review abnormal recovery |
+| Entry filled but SL submit failed | Mark `protection_missing`; block new entries; require reduce-only recovery | Owner may review abnormal recovery |
 | SL submitted but TP1 failed | Mark `protection_submit_failed`; position is not fully protected; block new entries | Owner may review degraded hold/close |
 | TP1 filled but SL adjust failed | Mark `sl_adjust_failed`; block new entries; notify | Owner may review recovery |
 | Position flat but protection orders still open | Cancel/terminalize only through official reduce-only/order-cancel path | Notify if cancel fails |
@@ -476,6 +476,9 @@ authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchang
 11. **Implemented locally**: implement official runner mutation executor for
     the ticket-bound Operation Layer handoff; production wiring remains behind
     explicit deploy approval.
-12. **Deploy gate**: run read-only health checks plus non-trading mock
+12. **Implemented locally**: implement official missing SL/TP1 protection
+    recovery command and executor; production wiring remains behind explicit
+    deploy approval.
+13. **Deploy gate**: run read-only health checks plus non-trading mock
     lifecycle acceptance before any real order opportunity is allowed to rely on
     the new chain.

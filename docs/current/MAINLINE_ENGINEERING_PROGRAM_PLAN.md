@@ -138,7 +138,7 @@ sequential ENTRY / SL / TP1 submit recovery
 
 | Requirement | Acceptance proof |
 | --- | --- |
-| **Sequential failure classified** | ENTRY reject/unknown/orphan/partial, SL failure, TP1 failure, and duplicate submit map to lifecycle states |
+| **Sequential failure classified and recoverable** | ENTRY reject/unknown/orphan/partial, SL failure, TP1 failure, and duplicate submit map to lifecycle states; missing SL/TP1 recovery can be executed locally through an injected gateway |
 | **Protection reconciled** | PG SL/TP1/RUNNER_SL rows match exchange open orders, fills, position, and OrderLifecycle |
 | **Runner mutation official** | Old SL cancel/replace and RUNNER_SL submit go through ticket-bound Operation Layer path |
 | **No invented protection** | Proof rows cannot stand in for missing exchange truth |
@@ -293,9 +293,9 @@ chain_position: daily_live_enablement_status
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scopes
 stage: healthy_waiting_plus_ticket_bound_lifecycle_safety_core
-first_blocker: none for current pre-trade chain; next engineering gap is official runner mutation and exchange protection reconciliation under one Lifecycle Safety Core
-evidence: PG pre-trade/action-time chain exists; ticket-bound proof materializers exist; implementation plan now defines the remaining official mutation/reconciliation/failure-recovery closure
-next_action: implement P0-A full chain simulation harness, then P0-B Ticket-Bound Lifecycle Safety Core
+first_blocker: none for current pre-trade chain; remaining lifecycle gap is production wiring and real exchange-read/write acceptance behind explicit deploy approval
+evidence: PG pre-trade/action-time chain exists; local lifecycle safety core now covers full-chain simulation, sequential submit recovery, protection reconciliation, runner mutation, and final closure without file authority
+next_action: complete local verification gates, review diff, then request Owner approval before any Tokyo deploy or production wiring activation
 stop_condition: each program reaches its acceptance proof without file authority or safety-boundary regression
 owner_action_required: no
 authority_boundary: no FinalGate bypass, no Operation Layer bypass, no exchange write bypass, no live profile or sizing mutation
