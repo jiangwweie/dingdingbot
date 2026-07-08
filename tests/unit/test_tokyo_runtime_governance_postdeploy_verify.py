@@ -37,13 +37,30 @@ def _json_response(payload: dict, status: int = 200):
     )
 
 
-def _runner(*, live_ready: bool = False, generic_post_status: int = 405):
+def _runner(
+    *,
+    live_ready: bool = False,
+    generic_post_status: int = 405,
+    watcher_unit_text: str | None = None,
+):
     module = _load_module()
     manifest = {
         "scope": "tokyo_runtime_governance_release_preparation",
         "generated_at_utc": "2026-06-10T05:07:28Z",
         "local_git": {"head": EXPECTED_HEAD, "short_head": "0c350ca7"},
     }
+    watcher_unit = watcher_unit_text or "\n".join(
+        (
+            "# /etc/systemd/system/brc-runtime-signal-watcher.service",
+            "ExecStart=/usr/bin/python scripts/runtime_signal_watcher_tick.py",
+            "# /etc/systemd/system/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf",
+            "ExecStartPost=/usr/bin/python scripts/runtime_signal_watcher_resume_dispatcher.py "
+            "--identity-source pg_ticket "
+            "--execute-preflight "
+            "--execute-operation-layer-submit "
+            "--operation-layer-submit-mode temp_tiny_live_protected_submit",
+        )
+    )
 
     def runner(command):
         remote = command[-1]
@@ -64,6 +81,8 @@ def _runner(*, live_ready: bool = False, generic_post_status: int = 405):
             return module.CommandResult("70\n", "", 0)
         if "tail -1" in remote:
             return module.CommandResult(LATEST_MIGRATION + "\n", "", 0)
+        if "systemctl cat brc-runtime-signal-watcher.service" in remote:
+            return module.CommandResult(watcher_unit + "\n", "", 0)
         if "/api/health" in remote:
             return module.CommandResult(
                 json.dumps(
@@ -120,6 +139,10 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
     assert report["facts"]["release_identity"]["source"] == "release_manifest"
     assert report["facts"]["release_identity_source"] == "release_manifest"
     assert report["facts"]["current_head"] == EXPECTED_HEAD
+    assert (
+        "--operation-layer-submit-mode temp_tiny_live_protected_submit"
+        in report["facts"]["runtime_signal_watcher_unit"]
+    )
     assert len(report["facts"]["http_checks"]) == 17
     auth_checks = [
         item
@@ -185,6 +208,45 @@ def test_postdeploy_verifier_blocks_live_ready_true_and_unblocked_generic_post()
     blockers = report["checks"]["blockers"]
     assert "health_live_ready_true_after_deploy" in blockers
     assert "http_status_mismatch:trading_console_generic_post_blocked" in blockers
+
+
+def test_postdeploy_verifier_blocks_unexpected_signal_watcher_submit_mode():
+    module = _load_module()
+
+    report = module.build_postdeploy_report(
+        host="tokyo",
+        deploy_root="~/brc-deploy",
+        api_base="http://127.0.0.1:18080",
+        expected_current_head=EXPECTED_HEAD,
+        expected_migration_count=70,
+        expected_latest_migration=LATEST_MIGRATION,
+        connect_timeout_seconds=8,
+        runner=_runner(
+            watcher_unit_text=(
+                "ExecStartPost=/usr/bin/python "
+                "scripts/runtime_signal_watcher_resume_dispatcher.py "
+                "--identity-source pg_ticket "
+                "--execute-operation-layer-submit "
+                "--operation-layer-submit-mode real_gateway_action "
+                "--execute-post-submit-finalize"
+            )
+        ),
+    )
+
+    assert report["status"] == "blocked"
+    blockers = report["checks"]["blockers"]
+    assert (
+        "postdeploy_signal_watcher_required_token_missing:"
+        "--operation-layer-submit-mode temp_tiny_live_protected_submit"
+    ) in blockers
+    assert (
+        "postdeploy_signal_watcher_forbidden_token_present:"
+        "--operation-layer-submit-mode real_gateway_action"
+    ) in blockers
+    assert (
+        "postdeploy_signal_watcher_forbidden_token_present:"
+        "--execute-post-submit-finalize"
+    ) in blockers
 
 
 def test_postdeploy_verifier_blocks_head_and_schema_mismatch():

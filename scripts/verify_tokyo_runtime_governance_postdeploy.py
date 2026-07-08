@@ -119,6 +119,12 @@ def build_postdeploy_report(
             connect_timeout_seconds=connect_timeout_seconds,
             runner=command_runner,
         ),
+        "runtime_signal_watcher_unit": _ssh_text(
+            host,
+            "systemctl cat brc-runtime-signal-watcher.service",
+            connect_timeout_seconds=connect_timeout_seconds,
+            runner=command_runner,
+        ),
         "http_checks": _http_checks(
             host,
             api_base=api_base,
@@ -194,6 +200,24 @@ def evaluate_postdeploy_checks(
     latest_migration = str(facts.get("latest_migration") or "").strip()
     if latest_migration != expected_latest_migration:
         blockers.append("postdeploy_latest_migration_mismatch")
+
+    watcher_unit = str(facts.get("runtime_signal_watcher_unit") or "")
+    if not watcher_unit:
+        blockers.append("postdeploy_signal_watcher_unit_missing")
+    for required_token in (
+        "--identity-source pg_ticket",
+        "--execute-operation-layer-submit",
+        "--operation-layer-submit-mode temp_tiny_live_protected_submit",
+    ):
+        if required_token not in watcher_unit:
+            blockers.append(f"postdeploy_signal_watcher_required_token_missing:{required_token}")
+    for forbidden_token in (
+        "--resume-pack-json",
+        "--operation-layer-submit-mode real_gateway_action",
+        "--execute-post-submit-finalize",
+    ):
+        if forbidden_token in watcher_unit:
+            blockers.append(f"postdeploy_signal_watcher_forbidden_token_present:{forbidden_token}")
 
     http_checks = facts.get("http_checks")
     if not isinstance(http_checks, list):
