@@ -192,6 +192,75 @@ def test_protected_submit_real_result_marks_ticket_and_handoff_submitted(
     ) == "submitted"
 
 
+def test_temporary_tiny_live_protected_submit_prepares_entry_sl_tp1_only(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="temp_tiny_live_protected_submit",
+        now_ms=NOW_MS + 4000,
+    )
+
+    assert prepared["status"] == "submit_prepared"
+    assert prepared["submit_mode"] == "temp_tiny_live_protected_submit"
+    assert prepared["blockers"] == []
+    assert "temporary_tiny_live_submit_mode_remove_after_l2_l9_closure" in prepared[
+        "warnings"
+    ]
+    orders = prepared["submit_request"]["orders"]
+    assert [order["order_role"] for order in orders] == ["ENTRY", "SL", "TP1"]
+    assert orders[0]["gateway_order_type"] == "market"
+    assert orders[0]["reduce_only"] is False
+    assert orders[1]["gateway_order_type"] == "stop_market"
+    assert orders[1]["reduce_only"] is True
+    assert orders[1]["trigger_price"]
+    assert orders[2]["gateway_order_type"] == "limit"
+    assert orders[2]["reduce_only"] is True
+    assert orders[2]["price"]
+
+
+def test_temporary_tiny_live_result_can_mark_ticket_submitted(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="temp_tiny_live_protected_submit",
+        now_ms=NOW_MS + 4000,
+    )
+
+    result = submit.record_ticket_bound_protected_submit_result(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        submit_result={
+            "status": "exchange_submit_orders_submitted",
+            "ticket_id": ids["ticket_id"],
+            "operation_submit_command_id": ids["operation_submit_command_id"],
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "submitted_orders": _submitted_orders(prepared),
+        },
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "submitted"
+    assert result["blockers"] == []
+    assert _status(pg_control_connection, "brc_action_time_tickets", "ticket_id", ids["ticket_id"]) == "submitted"
+
+
 def test_protected_submit_result_identity_mismatch_hard_stops(
     pg_control_connection,
 ):

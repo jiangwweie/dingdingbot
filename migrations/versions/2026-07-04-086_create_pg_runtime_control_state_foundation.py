@@ -1240,7 +1240,8 @@ def upgrade() -> None:
             sa.Column("updated_at_ms", sa.BIGINT(), nullable=False),
             sa.CheckConstraint("side IN ('long', 'short')", name="ck_brc_ticket_submit_side"),
             sa.CheckConstraint(
-                "submit_mode IN ('disabled_smoke', 'real_gateway_action')",
+                "submit_mode IN ('disabled_smoke', 'real_gateway_action', "
+                "'temp_tiny_live_protected_submit')",
                 name="ck_brc_ticket_submit_mode",
             ),
             sa.CheckConstraint(
@@ -1264,7 +1265,8 @@ def upgrade() -> None:
             ),
             sa.CheckConstraint(
                 "status <> 'submitted' OR "
-                "(submit_mode = 'real_gateway_action' "
+                "(submit_mode IN ('real_gateway_action', "
+                "'temp_tiny_live_protected_submit') "
                 "AND submit_allowed = true "
                 "AND official_operation_layer_submit_called = true "
                 "AND exchange_write_called = true "

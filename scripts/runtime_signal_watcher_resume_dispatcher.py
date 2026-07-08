@@ -59,9 +59,11 @@ TICKET_BOUND_OPERATION_LAYER_HANDOFF_ACTION = (
 OPERATION_LAYER_SUBMIT_ACTION = "call_official_operation_layer_submit"
 OPERATION_LAYER_SUBMIT_MODE_REAL = "real_gateway_action"
 OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE = "disabled_smoke"
+OPERATION_LAYER_SUBMIT_MODE_TEMP_TINY_LIVE = "temp_tiny_live_protected_submit"
 OPERATION_LAYER_SUBMIT_MODES = {
     OPERATION_LAYER_SUBMIT_MODE_REAL,
     OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE,
+    OPERATION_LAYER_SUBMIT_MODE_TEMP_TINY_LIVE,
 }
 POST_SUBMIT_FINALIZE_ACTION = "post_submit_finalize_reconciliation_budget_settlement"
 RETIRED_FILE_AUTHORITY_SCOPES = {
@@ -1985,18 +1987,36 @@ def _execute_ticket_bound_protected_submit(
         "error_type": response.get("error_type"),
         "error_message": response.get("error_message"),
         "owner_confirmed_for_first_real_submit_action": (
-            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+            operation_layer_submit_mode
+            in {
+                OPERATION_LAYER_SUBMIT_MODE_REAL,
+                OPERATION_LAYER_SUBMIT_MODE_TEMP_TINY_LIVE,
+            }
         ),
         "standing_authorized_first_real_submit": (
-            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+            operation_layer_submit_mode
+            in {
+                OPERATION_LAYER_SUBMIT_MODE_REAL,
+                OPERATION_LAYER_SUBMIT_MODE_TEMP_TINY_LIVE,
+            }
         ),
         "standing_authorization_scope": "ticket_bound_runtime_safety_state",
         "owner_chat_confirmation_required_for_real_submit": False,
         "legacy_owner_confirmation_env_required": False,
         "standing_authorization_consumed_for_real_submit": (
-            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+            operation_layer_submit_mode
+            in {
+                OPERATION_LAYER_SUBMIT_MODE_REAL,
+                OPERATION_LAYER_SUBMIT_MODE_TEMP_TINY_LIVE,
+            }
         ),
         "operation_layer_submit_mode": operation_layer_submit_mode,
+        "temporary_live_aperture": (
+            "remove_after_l2_l9_closure"
+            if operation_layer_submit_mode
+            == OPERATION_LAYER_SUBMIT_MODE_TEMP_TINY_LIVE
+            else None
+        ),
         "official_operation_layer_submit_called": True,
         "official_operation_layer_endpoint": True,
     }
@@ -2056,7 +2076,10 @@ def _execute_ticket_bound_protected_submit(
             submit_result=submit_result,
         )
 
-    if operation_layer_submit_mode != OPERATION_LAYER_SUBMIT_MODE_REAL:
+    if operation_layer_submit_mode not in {
+        OPERATION_LAYER_SUBMIT_MODE_REAL,
+        OPERATION_LAYER_SUBMIT_MODE_TEMP_TINY_LIVE,
+    }:
         return _dispatch_artifact_from_operation_layer_submit(
             artifact=artifact,
             status="operation_layer_submit_blocked",
@@ -2765,7 +2788,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--execute-operation-layer-submit. real_gateway_action keeps the "
             "existing real-order boundary for ticket-bound protected submit; "
             "disabled_smoke calls the protected submit endpoint in no-exchange "
-            "mode and requires disabled_smoke_passed."
+            "mode and requires disabled_smoke_passed. "
+            "temp_tiny_live_protected_submit is a temporary ENTRY+SL+TP1 live "
+            "aperture and must be removed after L2-L9 closure."
         ),
     )
     parser.add_argument(

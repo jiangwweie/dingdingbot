@@ -1179,3 +1179,20 @@ def test_ticket_bound_protected_submit_attempts_fail_closed(connection):
             "order_sizing_changed": False,
         },
     )
+    connection.execute(
+        text(statement),
+        {
+            "id": "temp-tiny-live-submitted-valid",
+            "command_id": "command-temp-tiny-live-submitted-valid",
+            "submit_mode": "temp_tiny_live_protected_submit",
+            "status": "submitted",
+            "submit_allowed": True,
+            "official_called": True,
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+        },
+    )

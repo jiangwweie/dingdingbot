@@ -41,6 +41,12 @@ AUTHORITY_BOUNDARY = (
 )
 PROTECTION_COMPLETE_STATUSES = {"submitted", "reconciled", "runner_protected", "closed"}
 FINAL_EXIT_ROLES = {"SL", "RUNNER_SL", "TP1"}
+LIVE_EXCHANGE_WRITE_SUBMIT_MODES = {
+    "real_gateway_action",
+    # TODO(L2-L9-closure): remove this temporary mode after the full
+    # post-submit protection/reconciliation/settlement/review chain is closed.
+    "temp_tiny_live_protected_submit",
+}
 FINAL_LIFECYCLE_CLOSABLE_STATUSES = {
     "position_protected",
     "tp1_filled",
@@ -504,7 +510,7 @@ def _attempt_blockers(attempt: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
     if attempt.get("status") != "submitted":
         blockers.append(f"protected_submit_attempt_not_submitted:{attempt.get('status')}")
-    if attempt.get("submit_mode") != "real_gateway_action":
+    if attempt.get("submit_mode") not in LIVE_EXCHANGE_WRITE_SUBMIT_MODES:
         blockers.append(f"protected_submit_attempt_mode_not_real:{attempt.get('submit_mode')}")
     if attempt.get("submit_allowed") is not True:
         blockers.append("protected_submit_attempt_submit_allowed_false")

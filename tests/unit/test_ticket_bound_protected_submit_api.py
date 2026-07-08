@@ -258,6 +258,152 @@ async def test_ticket_bound_real_submit_helper_uses_gateway_and_order_lifecycle(
 
 
 @pytest.mark.asyncio
+async def test_temporary_tiny_live_helper_submits_entry_sl_tp1():
+    gateway = _FakeGateway()
+    lifecycle = _FakeOrderLifecycle()
+    report = {
+        "ticket_id": "ticket-1",
+        "operation_submit_command_id": "operation-submit-1",
+        "runtime_safety_snapshot_id": "runtime-safety-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "submit_mode": "temp_tiny_live_protected_submit",
+        "submit_request": {
+            "ticket_id": "ticket-1",
+            "operation_submit_command_id": "operation-submit-1",
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "direction": "LONG",
+            "exchange_symbol": "ETH/USDT:USDT",
+            "orders": [
+                {
+                    "local_order_id": "entry-1",
+                    "order_role": "ENTRY",
+                    "symbol": "ETH/USDT:USDT",
+                    "gateway_order_type": "market",
+                    "gateway_side": "buy",
+                    "amount": "0.01",
+                    "price": None,
+                    "trigger_price": None,
+                    "reduce_only": False,
+                    "client_order_id": "entry-1",
+                },
+                {
+                    "local_order_id": "sl-1",
+                    "parent_order_id": "entry-1",
+                    "order_role": "SL",
+                    "symbol": "ETH/USDT:USDT",
+                    "gateway_order_type": "stop_market",
+                    "gateway_side": "sell",
+                    "amount": "0.01",
+                    "price": None,
+                    "trigger_price": "1800",
+                    "reduce_only": True,
+                    "client_order_id": "sl-1",
+                },
+                {
+                    "local_order_id": "tp1-1",
+                    "parent_order_id": "entry-1",
+                    "order_role": "TP1",
+                    "symbol": "ETH/USDT:USDT",
+                    "gateway_order_type": "limit",
+                    "gateway_side": "sell",
+                    "amount": "0.005",
+                    "price": "1900",
+                    "trigger_price": None,
+                    "reduce_only": True,
+                    "client_order_id": "tp1-1",
+                },
+            ],
+        },
+    }
+
+    result = await api_trading_console._submit_ticket_bound_orders(
+        report,
+        gateway=gateway,
+        order_lifecycle_service=lifecycle,
+    )
+
+    assert result["status"] == "exchange_submit_orders_submitted"
+    assert [call["client_order_id"] for call in gateway.calls] == [
+        "entry-1",
+        "sl-1",
+        "tp1-1",
+    ]
+    assert [call["reduce_only"] for call in gateway.calls] == [False, True, True]
+    assert result["exchange_write_called"] is True
+    assert result["order_created"] is True
+    assert result["order_lifecycle_called"] is True
+
+
+@pytest.mark.asyncio
+async def test_temporary_tiny_live_helper_blocks_missing_tp1_before_gateway():
+    gateway = _FakeGateway()
+    lifecycle = _FakeOrderLifecycle()
+    report = {
+        "ticket_id": "ticket-1",
+        "operation_submit_command_id": "operation-submit-1",
+        "runtime_safety_snapshot_id": "runtime-safety-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "submit_mode": "temp_tiny_live_protected_submit",
+        "submit_request": {
+            "ticket_id": "ticket-1",
+            "operation_submit_command_id": "operation-submit-1",
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "direction": "LONG",
+            "exchange_symbol": "ETH/USDT:USDT",
+            "orders": [
+                {
+                    "local_order_id": "entry-1",
+                    "order_role": "ENTRY",
+                    "symbol": "ETH/USDT:USDT",
+                    "gateway_order_type": "market",
+                    "gateway_side": "buy",
+                    "amount": "0.01",
+                    "price": None,
+                    "trigger_price": None,
+                    "reduce_only": False,
+                    "client_order_id": "entry-1",
+                },
+                {
+                    "local_order_id": "sl-1",
+                    "parent_order_id": "entry-1",
+                    "order_role": "SL",
+                    "symbol": "ETH/USDT:USDT",
+                    "gateway_order_type": "stop_market",
+                    "gateway_side": "sell",
+                    "amount": "0.01",
+                    "price": None,
+                    "trigger_price": "1800",
+                    "reduce_only": True,
+                    "client_order_id": "sl-1",
+                },
+            ],
+        },
+    }
+
+    result = await api_trading_console._submit_ticket_bound_orders(
+        report,
+        gateway=gateway,
+        order_lifecycle_service=lifecycle,
+    )
+
+    assert result["status"] == "temporary_tiny_live_order_set_invalid"
+    assert "temporary_tiny_live_order_roles_must_be_entry_sl_tp1:ENTRY,SL" in result[
+        "blockers"
+    ]
+    assert result["exchange_write_called"] is False
+    assert gateway.calls == []
+    assert lifecycle.registered_order_ids == []
+
+
+@pytest.mark.asyncio
 async def test_ticket_bound_real_submit_helper_ignores_unparseable_filled_qty():
     gateway = _UnparseableFilledQtyGateway()
     lifecycle = _FakeOrderLifecycle()

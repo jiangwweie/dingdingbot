@@ -995,6 +995,47 @@ def test_dispatcher_reaches_ticket_bound_disabled_smoke_after_finalgate_pass(
     assert "submit_mode=disabled_smoke" in calls[2]["url"]
 
 
+def test_dispatcher_reaches_temporary_tiny_live_submit_after_finalgate_pass(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        _ticket_bound_finalgate_handoff_and_submit_request(
+            calls,
+            submit_body=_protected_submit_submitted_body(
+                submit_mode="temp_tiny_live_protected_submit"
+            ),
+        ),
+    )
+
+    artifact = build_dispatch_artifact(
+        resume_pack=_with_runtime_summary(
+            _resume_pack("ready_for_action_time_final_gate")
+        ),
+        source_path=Path("pg-ticket-identity"),
+        api_base="http://127.0.0.1:18080",
+        execute_preflight=True,
+        execute_operation_layer_submit=True,
+        operation_layer_submit_mode="temp_tiny_live_protected_submit",
+    )
+
+    assert artifact["status"] == "submitted"
+    assert artifact["dispatch_status"] == "ticket_bound_protected_submit_completed"
+    assert artifact["blocker_class"] == "none"
+    assert artifact["safety_invariants"]["places_order"] is True
+    assert artifact["safety_invariants"]["exchange_write_called"] is True
+    assert len(calls) == 3
+    assert "/runtime-protected-submits/tickets/ticket-ready-1/" in calls[2]["url"]
+    assert "submit_mode=temp_tiny_live_protected_submit" in calls[2]["url"]
+
+
 def test_dispatcher_records_ticket_bound_post_submit_closure_after_real_submit(
     monkeypatch,
 ):

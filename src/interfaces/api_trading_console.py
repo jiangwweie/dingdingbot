@@ -2361,7 +2361,9 @@ async def _run_ticket_bound_protected_submit(
         raise RuntimeError("ticket-bound protected submit requires PostgreSQL DSN")
 
     from src.application.action_time.protected_submit_attempt import (
+        LIVE_EXCHANGE_WRITE_SUBMIT_MODES,
         SUBMIT_MODE_REAL_GATEWAY_ACTION,
+        SUBMIT_MODE_TEMP_TINY_LIVE_PROTECTED,
         prepare_ticket_bound_protected_submit_attempt,
         record_ticket_bound_protected_submit_result,
     )
@@ -2377,8 +2379,17 @@ async def _run_ticket_bound_protected_submit(
             )
         if report.get("status") != "submit_prepared":
             return report
-        if submit_mode != SUBMIT_MODE_REAL_GATEWAY_ACTION:
+        if submit_mode not in LIVE_EXCHANGE_WRITE_SUBMIT_MODES:
             return report
+        if submit_mode == SUBMIT_MODE_TEMP_TINY_LIVE_PROTECTED:
+            # TODO(L2-L9-closure): remove this temporary live aperture once the
+            # normal real-submit, protection, reconciliation, settlement, and
+            # review chain is fully closed. Until then it only allows the
+            # ticket-bound ENTRY + SL + TP1 order set prepared by PG.
+            report = {
+                **report,
+                "temporary_live_aperture": "remove_after_l2_l9_closure",
+            }
 
         submit_result = await _execute_ticket_bound_real_gateway_submit(report)
         with engine.begin() as conn:
@@ -2480,6 +2491,16 @@ async def _submit_ticket_bound_orders(
             report,
             status="submit_request_orders_missing",
             blockers=["submit_request_orders_missing"],
+        )
+    temporary_order_blockers = _temporary_tiny_live_submit_order_blockers(
+        report,
+        orders,
+    )
+    if temporary_order_blockers:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="temporary_tiny_live_order_set_invalid",
+            blockers=temporary_order_blockers,
         )
     now_ms = int(time.time() * 1000)
     registered_orders: list[Any] = []
@@ -2688,6 +2709,49 @@ async def _submit_ticket_bound_orders(
         "live_profile_changed": False,
         "order_sizing_changed": False,
     }
+
+
+def _temporary_tiny_live_submit_order_blockers(
+    report: dict[str, Any],
+    orders: list[dict[str, Any]],
+) -> list[str]:
+    """Second exchange-write guard for the temporary ENTRY + SL + TP1 aperture."""
+
+    if str(report.get("submit_mode") or "") != "temp_tiny_live_protected_submit":
+        return []
+    roles = [str(order.get("order_role") or "") for order in orders]
+    blockers: list[str] = []
+    if roles != ["ENTRY", "SL", "TP1"]:
+        return [
+            "temporary_tiny_live_order_roles_must_be_entry_sl_tp1:"
+            + ",".join(roles)
+        ]
+    entry, stop_loss, tp1 = orders
+    if str(entry.get("gateway_order_type") or "") != "market":
+        blockers.append("temporary_tiny_live_entry_must_be_market")
+    if entry.get("reduce_only") is not False:
+        blockers.append("temporary_tiny_live_entry_must_not_be_reduce_only")
+    if str(stop_loss.get("gateway_order_type") or "") != "stop_market":
+        blockers.append("temporary_tiny_live_sl_must_be_stop_market")
+    if stop_loss.get("reduce_only") is not True:
+        blockers.append("temporary_tiny_live_sl_must_be_reduce_only")
+    if not stop_loss.get("trigger_price"):
+        blockers.append("temporary_tiny_live_sl_trigger_price_missing")
+    if str(tp1.get("gateway_order_type") or "") != "limit":
+        blockers.append("temporary_tiny_live_tp1_must_be_limit")
+    if tp1.get("reduce_only") is not True:
+        blockers.append("temporary_tiny_live_tp1_must_be_reduce_only")
+    if not tp1.get("price"):
+        blockers.append("temporary_tiny_live_tp1_price_missing")
+    for child in (stop_loss, tp1):
+        if str(child.get("parent_order_id") or "") != str(
+            entry.get("local_order_id") or ""
+        ):
+            blockers.append(
+                "temporary_tiny_live_child_parent_order_mismatch:"
+                f"{child.get('order_role') or 'unknown'}"
+            )
+    return blockers
 
 
 def _ticket_bound_submit_request_identity_blockers(

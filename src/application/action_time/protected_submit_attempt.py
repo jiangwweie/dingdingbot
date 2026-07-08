@@ -46,7 +46,16 @@ AUTHORITY_BOUNDARY = (
 )
 SUBMIT_MODE_DISABLED_SMOKE = "disabled_smoke"
 SUBMIT_MODE_REAL_GATEWAY_ACTION = "real_gateway_action"
-SUBMIT_MODES = {SUBMIT_MODE_DISABLED_SMOKE, SUBMIT_MODE_REAL_GATEWAY_ACTION}
+SUBMIT_MODE_TEMP_TINY_LIVE_PROTECTED = "temp_tiny_live_protected_submit"
+LIVE_EXCHANGE_WRITE_SUBMIT_MODES = {
+    SUBMIT_MODE_REAL_GATEWAY_ACTION,
+    SUBMIT_MODE_TEMP_TINY_LIVE_PROTECTED,
+}
+SUBMIT_MODES = {
+    SUBMIT_MODE_DISABLED_SMOKE,
+    SUBMIT_MODE_REAL_GATEWAY_ACTION,
+    SUBMIT_MODE_TEMP_TINY_LIVE_PROTECTED,
+}
 FORBIDDEN_EFFECTS = {
     "withdrawal_or_transfer_created": False,
     "live_profile_changed": False,
@@ -121,6 +130,8 @@ def prepare_ticket_bound_protected_submit_attempt(
     submit_request = _submit_request(graph, now_ms=now_ms) if not blockers else {}
     if not submit_request and not blockers:
         blockers.append("ticket_bound_submit_request_unavailable")
+    if submit_mode == SUBMIT_MODE_TEMP_TINY_LIVE_PROTECTED and submit_request:
+        blockers.extend(_temporary_tiny_live_submit_request_blockers(submit_request))
 
     status = "blocked"
     submit_allowed = False
@@ -134,6 +145,10 @@ def prepare_ticket_bound_protected_submit_attempt(
             warnings.append("disabled_smoke_no_exchange_write")
         else:
             status = "submit_prepared"
+            if submit_mode == SUBMIT_MODE_TEMP_TINY_LIVE_PROTECTED:
+                warnings.append(
+                    "temporary_tiny_live_submit_mode_remove_after_l2_l9_closure"
+                )
 
     attempt = _attempt_row(
         graph,
@@ -772,6 +787,59 @@ def _disabled_smoke_result(
     }
 
 
+def _temporary_tiny_live_submit_request_blockers(
+    submit_request: dict[str, Any],
+) -> list[str]:
+    """Restrict the temporary live aperture to ENTRY + SL + TP1 only.
+
+    TODO(L2-L9-closure): delete ``temp_tiny_live_protected_submit`` after the
+    normal real-submit, protection, reconciliation, settlement, and review
+    chain is fully closed. This mode exists only to validate live entry,
+    stop-loss, and TP1 exchange behavior with the smallest protected order set.
+    """
+
+    orders = [
+        dict(item)
+        for item in submit_request.get("orders", [])
+        if isinstance(item, dict)
+    ]
+    blockers: list[str] = []
+    roles = [str(order.get("order_role") or "") for order in orders]
+    if roles != ["ENTRY", "SL", "TP1"]:
+        blockers.append(
+            "temporary_tiny_live_order_roles_must_be_entry_sl_tp1:"
+            + ",".join(roles)
+        )
+        return blockers
+
+    entry, stop_loss, tp1 = orders
+    if entry.get("gateway_order_type") != "market":
+        blockers.append("temporary_tiny_live_entry_must_be_market")
+    if entry.get("reduce_only") is not False:
+        blockers.append("temporary_tiny_live_entry_must_not_be_reduce_only")
+    if stop_loss.get("gateway_order_type") != "stop_market":
+        blockers.append("temporary_tiny_live_sl_must_be_stop_market")
+    if stop_loss.get("reduce_only") is not True:
+        blockers.append("temporary_tiny_live_sl_must_be_reduce_only")
+    if not stop_loss.get("trigger_price"):
+        blockers.append("temporary_tiny_live_sl_trigger_price_missing")
+    if tp1.get("gateway_order_type") != "limit":
+        blockers.append("temporary_tiny_live_tp1_must_be_limit")
+    if tp1.get("reduce_only") is not True:
+        blockers.append("temporary_tiny_live_tp1_must_be_reduce_only")
+    if not tp1.get("price"):
+        blockers.append("temporary_tiny_live_tp1_price_missing")
+    for child in (stop_loss, tp1):
+        if str(child.get("parent_order_id") or "") != str(
+            entry.get("local_order_id") or ""
+        ):
+            blockers.append(
+                "temporary_tiny_live_child_parent_order_mismatch:"
+                f"{child.get('order_role') or 'unknown'}"
+            )
+    return _dedupe(blockers)
+
+
 def _result_identity_blockers(
     attempt: dict[str, Any],
     submit_result: dict[str, Any],
@@ -783,7 +851,7 @@ def _result_identity_blockers(
             "protected_submit_attempt_status_not_submit_prepared:"
             f"{attempt.get('status')}"
         )
-    if attempt.get("submit_mode") != SUBMIT_MODE_REAL_GATEWAY_ACTION:
+    if attempt.get("submit_mode") not in LIVE_EXCHANGE_WRITE_SUBMIT_MODES:
         blockers.append(
             f"protected_submit_attempt_mode_not_real:{attempt.get('submit_mode')}"
         )
