@@ -125,7 +125,7 @@ def test_post_submit_closure_refreshes_blocked_after_protection_set_materialized
     assert _json_value(row["blockers"]) == ["post_submit_reconciliation_fact_missing"]
 
 
-def test_post_submit_closure_is_idempotent(
+def test_post_submit_closure_refreshes_reconciliation_pending_projection(
     pg_control_connection,
 ):
     _, prepared = _submitted_attempt(pg_control_connection)
@@ -141,8 +141,55 @@ def test_post_submit_closure_is_idempotent(
     )
 
     assert second["status"] == first["status"]
-    assert second["idempotent_existing_closure"] is True
+    assert "idempotent_existing_closure" not in second
     assert second["post_submit_closure_id"] == first["post_submit_closure_id"]
+    row = _closure_row(pg_control_connection)
+    assert row["created_at_ms"] == NOW_MS + 6000
+    assert row["updated_at_ms"] == NOW_MS + 7000
+
+
+def test_post_submit_closure_refreshes_pending_after_protection_mismatch(
+    pg_control_connection,
+):
+    _, prepared = _submitted_attempt(pg_control_connection)
+    first = closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+    assert first["status"] == "reconciliation_pending"
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_ticket_bound_exit_protection_sets
+            SET status = 'failed',
+                protection_complete = 0,
+                first_blocker = 'protection_reconciliation_mismatch',
+                blockers = '["protection_reconciliation_mismatch"]',
+                updated_at_ms = :updated_at_ms
+            WHERE protected_submit_attempt_id = :attempt_id
+            """
+        ),
+        {
+            "attempt_id": prepared["protected_submit_attempt_id"],
+            "updated_at_ms": NOW_MS + 6500,
+        },
+    )
+
+    refreshed = closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 7000,
+    )
+
+    assert refreshed["status"] == "blocked"
+    assert "idempotent_existing_closure" not in refreshed
+    assert "exit_protection_set_status:failed" in refreshed["blockers"]
+    assert "exit_protection_set_not_complete" in refreshed["blockers"]
+    row = _closure_row(pg_control_connection)
+    assert row["status"] == "blocked"
+    assert row["created_at_ms"] == NOW_MS + 6000
+    assert row["updated_at_ms"] == NOW_MS + 7000
 
 
 def test_lifecycle_closure_blocks_without_final_exit_proofs(pg_control_connection):
@@ -402,7 +449,7 @@ def test_latest_post_submit_closure_materializes_newest_unclosed_submitted_attem
     ).scalar_one() == 2
 
 
-def test_latest_post_submit_closure_returns_existing_when_all_submitted_closed(
+def test_latest_post_submit_closure_refreshes_existing_nonclosed_projection(
     pg_control_connection,
 ):
     _, prepared = _submitted_attempt(pg_control_connection)
@@ -419,8 +466,11 @@ def test_latest_post_submit_closure_returns_existing_when_all_submitted_closed(
 
     assert payload["status"] == first["status"]
     assert payload["protected_submit_attempt_id"] == prepared["protected_submit_attempt_id"]
-    assert payload["idempotent_existing_closure"] is True
     assert payload["post_submit_closure_id"] == first["post_submit_closure_id"]
+    assert "idempotent_existing_closure" not in payload
+    row = _closure_row(pg_control_connection)
+    assert row["created_at_ms"] == NOW_MS + 6000
+    assert row["updated_at_ms"] == NOW_MS + 7000
 
 
 def _submitted_attempt(
