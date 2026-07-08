@@ -2790,6 +2790,13 @@ def _ticket_bound_submit_blocked_result(
     exchange_write_called: bool = False,
     submitted_orders: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    submitted_orders = submitted_orders or []
+    protection_gap = _temporary_tiny_live_unprotected_position_gap(
+        report,
+        submitted_orders,
+    )
+    if protection_gap:
+        blockers = [*blockers, *protection_gap["blockers"]]
     return {
         "schema": "brc.ticket_bound_protected_submit_result.v1",
         "status": status,
@@ -2799,13 +2806,44 @@ def _ticket_bound_submit_blocked_result(
         "symbol": report.get("symbol"),
         "side": report.get("side"),
         "blockers": blockers,
-        "submitted_orders": submitted_orders or [],
+        "submitted_orders": submitted_orders,
+        "unprotected_position_risk": bool(protection_gap),
+        "protection_gap": protection_gap,
         "exchange_write_called": exchange_write_called,
         "order_created": order_created,
         "order_lifecycle_called": order_lifecycle_called,
         "withdrawal_or_transfer_created": False,
         "live_profile_changed": False,
         "order_sizing_changed": False,
+    }
+
+
+def _temporary_tiny_live_unprotected_position_gap(
+    report: dict[str, Any],
+    submitted_orders: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if str(report.get("submit_mode") or "") != "temp_tiny_live_protected_submit":
+        return {}
+    submitted_roles = {
+        str(order.get("order_role") or "")
+        for order in submitted_orders
+        if isinstance(order, dict)
+    }
+    if "ENTRY" not in submitted_roles:
+        return {}
+    missing_protection = sorted({"SL", "TP1"} - submitted_roles)
+    if not missing_protection:
+        return {}
+    return {
+        "status": "temporary_tiny_live_unprotected_position_risk",
+        "missing_protection_roles": missing_protection,
+        "blockers": [
+            "temporary_tiny_live_unprotected_position_risk:"
+            + ",".join(missing_protection)
+        ],
+        "next_action": (
+            "run_reconciliation_and_manual_or_automated_protection_repair_before_retry"
+        ),
     }
 
 

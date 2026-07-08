@@ -404,6 +404,86 @@ async def test_temporary_tiny_live_helper_blocks_missing_tp1_before_gateway():
 
 
 @pytest.mark.asyncio
+async def test_temporary_tiny_live_helper_marks_unprotected_position_when_sl_fails():
+    gateway = _FailingProtectionGateway(fail_client_order_id="sl-1")
+    lifecycle = _FakeOrderLifecycle()
+    report = {
+        "ticket_id": "ticket-1",
+        "operation_submit_command_id": "operation-submit-1",
+        "runtime_safety_snapshot_id": "runtime-safety-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "submit_mode": "temp_tiny_live_protected_submit",
+        "submit_request": {
+            "ticket_id": "ticket-1",
+            "operation_submit_command_id": "operation-submit-1",
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "direction": "LONG",
+            "exchange_symbol": "ETH/USDT:USDT",
+            "orders": [
+                {
+                    "local_order_id": "entry-1",
+                    "order_role": "ENTRY",
+                    "symbol": "ETH/USDT:USDT",
+                    "gateway_order_type": "market",
+                    "gateway_side": "buy",
+                    "amount": "0.01",
+                    "price": None,
+                    "trigger_price": None,
+                    "reduce_only": False,
+                    "client_order_id": "entry-1",
+                },
+                {
+                    "local_order_id": "sl-1",
+                    "parent_order_id": "entry-1",
+                    "order_role": "SL",
+                    "symbol": "ETH/USDT:USDT",
+                    "gateway_order_type": "stop_market",
+                    "gateway_side": "sell",
+                    "amount": "0.01",
+                    "price": None,
+                    "trigger_price": "1800",
+                    "reduce_only": True,
+                    "client_order_id": "sl-1",
+                },
+                {
+                    "local_order_id": "tp1-1",
+                    "parent_order_id": "entry-1",
+                    "order_role": "TP1",
+                    "symbol": "ETH/USDT:USDT",
+                    "gateway_order_type": "limit",
+                    "gateway_side": "sell",
+                    "amount": "0.005",
+                    "price": "1900",
+                    "trigger_price": None,
+                    "reduce_only": True,
+                    "client_order_id": "tp1-1",
+                },
+            ],
+        },
+    }
+
+    result = await api_trading_console._submit_ticket_bound_orders(
+        report,
+        gateway=gateway,
+        order_lifecycle_service=lifecycle,
+    )
+
+    assert result["status"] == "protection_submit_failed"
+    assert result["unprotected_position_risk"] is True
+    assert result["protection_gap"]["missing_protection_roles"] == ["SL", "TP1"]
+    assert (
+        "temporary_tiny_live_unprotected_position_risk:SL,TP1"
+        in result["blockers"]
+    )
+    assert [order["order_role"] for order in result["submitted_orders"]] == ["ENTRY"]
+    assert [call["client_order_id"] for call in gateway.calls] == ["entry-1", "sl-1"]
+
+
+@pytest.mark.asyncio
 async def test_ticket_bound_real_submit_helper_ignores_unparseable_filled_qty():
     gateway = _UnparseableFilledQtyGateway()
     lifecycle = _FakeOrderLifecycle()
@@ -571,6 +651,28 @@ class _FailingGateway:
             is_success=False,
             error_message="exchange rejected test order",
             error_code="TEST_REJECTED",
+        )
+
+
+class _FailingProtectionGateway:
+    def __init__(self, *, fail_client_order_id: str) -> None:
+        self.fail_client_order_id = fail_client_order_id
+        self.calls: list[dict] = []
+
+    async def place_order(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        if kwargs["client_order_id"] == self.fail_client_order_id:
+            return SimpleNamespace(
+                is_success=False,
+                error_message="protection rejected test order",
+                error_code="TEST_PROTECTION_REJECTED",
+            )
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+            status="FILLED",
+            filled_qty=str(kwargs["amount"]),
+            average_exec_price="1850",
         )
 
 
