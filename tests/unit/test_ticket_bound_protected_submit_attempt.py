@@ -146,6 +146,82 @@ def test_protected_submit_attempt_blocks_without_runtime_safety_snapshot(
     assert row["submit_allowed"] in {False, 0}
 
 
+def test_protected_submit_attempt_refreshes_blocked_after_safety_ready(
+    pg_control_connection,
+):
+    ids = _create_handoff_ready(pg_control_connection)
+
+    blocked = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+    assert blocked["status"] == "blocked"
+    assert blocked["exchange_write_called"] is False
+    assert "runtime_safety_snapshot_missing" in blocked["blockers"]
+
+    safety_payload = safety.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_layer_handoff_id=ids["operation_layer_handoff_id"],
+        now_ms=NOW_MS + 5000,
+    )
+    assert safety_payload["submit_allowed"] is True
+
+    refreshed = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 6000,
+    )
+
+    assert refreshed["status"] == "disabled_smoke_passed"
+    assert refreshed.get("idempotent_existing_attempt") is None
+    assert refreshed["runtime_safety_snapshot_id"] == safety_payload["runtime_safety_snapshot_id"]
+    assert refreshed["submit_allowed"] is True
+    assert refreshed["blockers"] == []
+    row = _protected_submit_row(pg_control_connection)
+    assert row["status"] == "disabled_smoke_passed"
+    assert row["runtime_safety_snapshot_id"] == safety_payload["runtime_safety_snapshot_id"]
+    assert row["created_at_ms"] == NOW_MS + 4000
+    assert row["updated_at_ms"] == NOW_MS + 6000
+
+
+def test_next_protected_submit_attempt_refreshes_existing_blocked_attempt(
+    pg_control_connection,
+):
+    ids = _create_handoff_ready(pg_control_connection)
+    blocked = submit.materialize_next_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+    assert blocked["status"] == "blocked"
+    assert "runtime_safety_snapshot_missing" in blocked["blockers"]
+
+    safety_payload = safety.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_layer_handoff_id=ids["operation_layer_handoff_id"],
+        now_ms=NOW_MS + 5000,
+    )
+    assert safety_payload["submit_allowed"] is True
+
+    refreshed = submit.materialize_next_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 6000,
+    )
+
+    assert refreshed["status"] == "disabled_smoke_passed"
+    assert refreshed.get("idempotent_existing_attempt") is None
+    assert refreshed["operation_submit_command_id"] == ids["operation_submit_command_id"]
+    assert refreshed["runtime_safety_snapshot_id"] == safety_payload["runtime_safety_snapshot_id"]
+
+
 def test_protected_submit_real_result_marks_ticket_and_handoff_submitted(
     pg_control_connection,
 ):

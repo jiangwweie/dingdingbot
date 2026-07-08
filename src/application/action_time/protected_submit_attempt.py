@@ -111,7 +111,7 @@ def prepare_ticket_bound_protected_submit_attempt(
         "operation_submit_command_id",
         operation_submit_command_id,
     )
-    if existing:
+    if existing and not _blocked_attempt_can_refresh(existing):
         return _result_from_existing(existing, now_ms=now_ms)
 
     graph = _select_graph(
@@ -155,6 +155,8 @@ def prepare_ticket_bound_protected_submit_attempt(
         order_lifecycle_called=False,
         now_ms=now_ms,
     )
+    if existing:
+        attempt["created_at_ms"] = int(existing.get("created_at_ms") or now_ms)
     _upsert_row(
         conn,
         "brc_ticket_bound_protected_submit_attempts",
@@ -1031,6 +1033,22 @@ def _result_from_existing(existing: dict[str, Any], *, now_ms: int) -> dict[str,
         attempt=existing,
         next_action=next_action,
         extra={"idempotent_existing_attempt": True},
+    )
+
+
+def _blocked_attempt_can_refresh(existing: dict[str, Any]) -> bool:
+    if str(existing.get("status") or "") != "blocked":
+        return False
+    return not any(
+        existing.get(key) in {True, 1}
+        for key in (
+            "exchange_write_called",
+            "order_created",
+            "order_lifecycle_called",
+            "withdrawal_or_transfer_created",
+            "live_profile_changed",
+            "order_sizing_changed",
+        )
     )
 
 
