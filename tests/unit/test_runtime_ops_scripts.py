@@ -157,6 +157,52 @@ def test_tokyo_ops_l2_l7_summary_accepts_completed_rehearsal_without_open_object
     assert summary["open_counts"]["lanes"] == 0
 
 
+def test_tokyo_ops_l2_l7_summary_accepts_monitor_notify_state():
+    summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
+        {
+            "now_ms": 1770000600000,
+            "since_ms": 1770000000000,
+            "missing_tables": [],
+            "missing_coverage": [],
+            "coverage_by_group": [],
+            "recent_counts": {
+                "facts": 22,
+                "signals": 0,
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+                "monitor": 1,
+            },
+            "open_counts": {
+                "promotions": 0,
+                "lanes": 0,
+                "tickets": 0,
+                "attempts": 0,
+            },
+            "goal": {"status": "waiting_for_signal", "blockers": []},
+            "monitor": {
+                "status": "notify",
+                "blocker_classes": ["tp1_reference_missing"],
+                "forbidden_effects": {},
+            },
+            "unadvanced_fresh_signals": [],
+            "recent_duplicate_lanes": [],
+            "submitted_attempts_without_protection": [],
+            "incomplete_protection_sets": [],
+            "tp1_filled_without_runner_sl": [],
+            "runner_protected_without_runner_sl": [],
+            "lifecycle_closed_without_post_submit_closed": [],
+            "post_submit_closed_without_lifecycle_closed": [],
+        }
+    )
+
+    assert summary["status"] == "ok"
+    assert "server_monitor_status_not_classified" not in summary["issues"]
+    assert summary["server_monitor_status"] == "notify"
+    assert summary["server_monitor_blocker_classes"] == ["tp1_reference_missing"]
+
+
 def test_tokyo_ops_l2_l7_summary_flags_ready_pseudo_blocker():
     summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
         {

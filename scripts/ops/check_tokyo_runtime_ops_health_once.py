@@ -589,7 +589,12 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     forbidden_effects = monitor.get("forbidden_effects") or {}
     if any(bool(value) for value in forbidden_effects.values()):
         issues.append("server_monitor_forbidden_effect_detected")
-    if monitor and monitor.get("status") not in {"quiet", "notify_sent", "notify_suppressed"}:
+    if monitor and monitor.get("status") not in {
+        "quiet",
+        "notify",
+        "notify_sent",
+        "notify_suppressed",
+    }:
         issues.append("server_monitor_status_not_classified")
 
     return {
