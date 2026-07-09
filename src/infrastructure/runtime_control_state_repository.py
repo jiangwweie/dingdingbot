@@ -44,6 +44,7 @@ CONTROL_STATE_TABLES: dict[str, str] = {
     "action_time_ticket_events": "brc_action_time_ticket_events",
     "operation_layer_handoffs": "brc_operation_layer_handoffs",
     "runtime_safety_state": "brc_runtime_safety_state_snapshots",
+    "ticket_bound_submit_mode_decisions": "brc_ticket_bound_submit_mode_decisions",
     "ticket_bound_protected_submit_attempts": (
         "brc_ticket_bound_protected_submit_attempts"
     ),
@@ -206,9 +207,31 @@ class PgBackedRuntimeControlStateRepository:
             return
 
         ticket_ids = _texts(row.get("ticket_id") for row in attempts)
+        ticket_rows = self._read_rows_where_in(
+            CONTROL_STATE_TABLES["action_time_tickets"],
+            "ticket_id",
+            ticket_ids,
+        )
+        current_ticket_ids = {
+            str(row.get("ticket_id") or "")
+            for row in ticket_rows
+            if _is_monitor_current_ticket(row, self.now_ms)
+        }
+        attempts = [
+            row
+            for row in attempts
+            if str(row.get("status") or "") == "submitted"
+            or str(row.get("ticket_id") or "") in current_ticket_ids
+        ]
+        rows["ticket_bound_protected_submit_attempts"] = attempts
+        if not attempts:
+            return
+
+        ticket_ids = _texts(row.get("ticket_id") for row in attempts)
         lane_ids = _texts(row.get("action_time_lane_input_id") for row in attempts)
         safety_ids = _texts(row.get("runtime_safety_snapshot_id") for row in attempts)
         handoff_ids = _texts(row.get("operation_layer_handoff_id") for row in attempts)
+        ticket_rows = [row for row in ticket_rows if str(row.get("ticket_id") or "") in ticket_ids]
 
         self._merge_rows(
             rows,
@@ -231,11 +254,6 @@ class PgBackedRuntimeControlStateRepository:
             ),
         )
 
-        ticket_rows = self._read_rows_where_in(
-            CONTROL_STATE_TABLES["action_time_tickets"],
-            "ticket_id",
-            ticket_ids,
-        )
         self._merge_rows(rows, "action_time_tickets", "ticket_id", ticket_rows)
         lane_ids.update(_texts(row.get("action_time_lane_input_id") for row in ticket_rows))
 
@@ -946,8 +964,19 @@ def _monitor_bounded_statement(
     if logical_key == "server_monitor_runs" and "created_at_ms" in columns:
         return statement.order_by(columns.created_at_ms.desc()).limit(200)
     if logical_key == "ticket_bound_protected_submit_attempts" and "created_at_ms" in columns:
-        return statement.order_by(columns.created_at_ms.desc()).limit(200)
+        return statement.where(
+            columns.status.in_(["blocked", "disabled_smoke_passed", "submitted"])
+        ).order_by(columns.created_at_ms.desc()).limit(200)
     return statement
+
+
+def _is_monitor_current_ticket(row: dict[str, Any], now_ms: int) -> bool:
+    status = str(row.get("status") or "")
+    if status == "submitted":
+        return True
+    if status not in {"created", "preflight_pending", "finalgate_ready"}:
+        return False
+    return int(row.get("expires_at_ms") or 0) > now_ms
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

@@ -157,7 +157,7 @@ def test_tokyo_ops_l2_l7_summary_accepts_completed_rehearsal_without_open_object
     assert summary["open_counts"]["lanes"] == 0
 
 
-def test_tokyo_ops_l2_l7_summary_accepts_monitor_notify_state():
+def test_tokyo_ops_l2_l7_summary_does_not_promote_historical_notify_blocker():
     summary = check_tokyo_runtime_ops_health_once.summarize_l2_l7_chain_snapshot(
         {
             "now_ms": 1770000600000,
@@ -200,7 +200,8 @@ def test_tokyo_ops_l2_l7_summary_accepts_monitor_notify_state():
     assert summary["status"] == "ok"
     assert "server_monitor_status_not_classified" not in summary["issues"]
     assert summary["server_monitor_status"] == "notify"
-    assert summary["server_monitor_blocker_classes"] == ["tp1_reference_missing"]
+    assert summary["server_monitor_blocker_classes"] == []
+    assert summary["server_monitor_raw_blocker_classes"] == ["tp1_reference_missing"]
 
 
 def test_tokyo_ops_l2_l7_summary_flags_ready_pseudo_blocker():

@@ -104,7 +104,9 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     assert "--owner-confirmation-reference" not in text
     assert "--selected-strategy-group-id ${BRC_SELECTED_STRATEGY_GROUP_ID}" not in text
     assert "--execute-preflight" in text
-    assert "--execute-operation-layer-submit" not in text
+    assert "--execute-operation-layer-submit" in text
+    assert "--operation-layer-submit-mode from_submit_mode_decision" in text
+    assert "--production-submit-execution-policy armed" in text
     assert "--operation-layer-submit-mode real_gateway_action" not in text
     assert "--execute-post-submit-finalize" not in text
     assert "OwnerBoundedExecution" not in text

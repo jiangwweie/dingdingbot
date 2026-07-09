@@ -83,6 +83,15 @@ def _load_module(path: Path, name: str):
     return module
 
 
+def _arm_submit_decision_env(monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED", "true")
+
+
 @pytest.fixture()
 def pg_control_connection():
     migration = _load_module(MIGRATION_PATH, "migration_086_action_time_full_chain")
@@ -304,6 +313,16 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
         side=side,
     )
 
+    _arm_submit_decision_env(monkeypatch)
+    decision = protected_submit.materialize_ticket_bound_submit_mode_decision(
+        pg_control_connection,
+        ticket_id=str(payloads["ticket"]["ticket_id"]),
+        operation_submit_command_id=str(payloads["handoff"]["operation_submit_command_id"]),
+        production_submit_execution_policy="armed",
+        now_ms=NOW_MS + 5,
+    )
+    assert decision["decision"] == "real_gateway_action"
+
     prepared = protected_submit.prepare_ticket_bound_protected_submit_attempt(
         pg_control_connection,
         ticket_id=str(payloads["ticket"]["ticket_id"]),
@@ -316,6 +335,7 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
     assert prepared["exchange_write_called"] is False
     assert prepared["order_created"] is False
     assert prepared["order_lifecycle_called"] is False
+    assert prepared["submit_mode_decision_id"] == decision["submit_mode_decision_id"]
 
     submitted = protected_submit.record_ticket_bound_protected_submit_result(
         pg_control_connection,
