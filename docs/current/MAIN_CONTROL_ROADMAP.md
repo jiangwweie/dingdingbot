@@ -49,9 +49,9 @@ design documents and acceptance proof.
 
 | Order | Program | Priority | Primary design surface |
 | --- | --- | --- | --- |
-| 1 | **Operation Layer / Exchange Capability Audit** | P0 | `docs/current/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
+| 1 | **Operation Layer / Exchange Capability Boundary** | P0 | `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
 | 2 | **Ticket-Bound Lifecycle Safety Core** | P0 | `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
-| 3 | **Full Chain Simulation Harness** | P0 | `docs/current/L1_L9_OPTIMIZATION_EXECUTION_PLAN.md` |
+| 3 | **Full Chain Simulation Harness** | P0 | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` and `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | 4 | **Official Runner SL Mutation + Protection Reconciler** | P0 | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | 5 | **Post-Submit First Tick + Recovery Command Matrix** | P0 | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
 | 6 | **Scope Freeze Pre-Submit Gate** | P0 | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |

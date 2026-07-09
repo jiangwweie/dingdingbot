@@ -18,7 +18,7 @@ and DB-backed control-state migration defined in:
 ```text
 docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md
 docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
-docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md
+docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md
 ```
 
 This pipeline design is recorded now so strategy intake does not keep growing

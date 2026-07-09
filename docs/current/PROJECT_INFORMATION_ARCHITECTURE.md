@@ -2,7 +2,7 @@
 title: PROJECT_INFORMATION_ARCHITECTURE
 status: CURRENT
 authority: docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
-last_verified: 2026-07-01
+last_verified: 2026-07-09
 ---
 
 # Project Information Architecture
@@ -111,48 +111,39 @@ Owner decisions.
 
 ## Current Source Map
 
-| Concern | Source |
+`docs/current` contains only current authority contracts and active design
+surfaces. Stage audits, old implementation packets, and absorbed review
+material belong in `docs/archive/**` and must not be treated as current
+authority.
+
+| Concern | Current source |
 | --- | --- |
 | Product objective and Owner role | `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` |
+| Agent constraints and execution boundaries | `docs/current/AI_AGENT_CONSTRAINTS.md` |
+| Stage roadmap and next execution order | `docs/current/MAIN_CONTROL_ROADMAP.md`, `docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md` |
 | Strategy experiment evaluation semantics | `docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md` |
 | Strategy engineering intake filter | `docs/current/STRATEGY_ENGINEERING_INTAKE_CONTRACT.md` |
 | Tradeability Decision semantics | `docs/current/TRADEABILITY_DECISION_CONTRACT.md` |
 | Blocker classification and Live Enablement completion rules | `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` |
 | Daily Live Enablement management table | `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` |
 | Pre-Trade Runtime and Candidate Pool | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
-| L1-L9 full-chain audit and optimization review | `docs/current/L1_L9_SYSTEM_REVIEW_AND_OPTIMIZATION_AUDIT.md` |
-| Mainline P0/P1 chain audit register | `docs/current/MAINLINE_P0_P1_CHAIN_AUDIT_REGISTER.md` |
-| Runtime terminology and Owner explanation governance | `docs/current/RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` |
-| Owner Explanation Read Model contract | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
-| Active StrategyGroup semantics review and optimization plan | `docs/current/ACTIVE_STRATEGYGROUP_SEMANTICS_REVIEW_AND_OPTIMIZATION_PLAN.md` |
-| Multi-StrategyGroup multi-symbol multi-side action-time evolution | `docs/current/MULTI_STRATEGY_MULTI_SYMBOL_MULTI_SIDE_ACTION_TIME_EVOLUTION_DESIGN.md` |
-| L1-L9 optimization execution plan | `docs/current/L1_L9_OPTIMIZATION_EXECUTION_PLAN.md` |
-| Mainline engineering program plan | `docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md` |
+| Runtime terminology and Owner explanation governance | `docs/current/RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | Production runtime monitor ownership | `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` |
 | Tokyo runtime deployment boundary | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` |
-| Repo file source elimination governance | `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md` |
 | Production runtime file I/O elimination | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
-| Runtime control state DB architecture | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md` |
-| Runtime control state DB table design | `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
-| Runtime control state mainline file I/O map | `docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md` |
-| PG current projection authority closure | `docs/current/PG_CURRENT_PROJECTION_AUTHORITY_CLOSURE_DESIGN.md` |
-| Operation Layer exchange capability audit | `docs/current/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
-| Ticket-bound order lifecycle and exit protection | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
-| Ticket-bound lifecycle safety core implementation | `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
+| Runtime control state DB architecture and tables | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
+| Ticket-bound lifecycle and protection | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
 | Post-submit reconciliation and recovery commands | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
 | Live outcome ledger contract | `docs/current/LIVE_OUTCOME_LEDGER_CONTRACT.md` |
 | Trading quality capital/risk allocation | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | Strategy governance pipeline DB design | `docs/current/STRATEGY_GOVERNANCE_PIPELINE_DB_DESIGN.md` |
 | WIP limit and stop rules | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` |
-| Stage roadmap and current track plan | `docs/current/MAIN_CONTROL_ROADMAP.md` |
-| Order-capable experiment profile | `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` |
-| Agent boundaries and goal-mode execution | `docs/current/AI_AGENT_CONSTRAINTS.md` |
 | Owner-facing control board semantics | `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md` |
+| Goal-mode task handoff contract | `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md` |
 | Strategy asset registry contract | `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md` |
 | Strategy asset registry current state | PG strategy registry / strategy version / RequiredFacts projections |
 | StrategyGroup tier and quality current state | PG Owner policy, strategy review, and tradeability projections |
 | Retired StrategyGroup file snapshots | `docs/archive/strategy-group-handoffs-retired-file-sources/` for provenance only |
-| Goal-mode task handoff contract | `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md` |
 | Runtime tier definitions | PG Owner policy / runtime profile projections plus explanatory Markdown |
 | Machine tier mapping | PG Owner policy / runtime profile projections |
 | RequiredFacts classes | PG RequiredFacts/version rows and typed code schema |
@@ -305,8 +296,8 @@ Dynamic StrategyGroup runtime-control state should migrate behind the
 `RuntimeControlStateRepository` boundary defined in
 `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`.
 
-The repo file-source elimination plan is defined in
-`docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md`.
+The production repo/output/report file-authority elimination design is defined
+in `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md`.
 
 The target table design is defined in
 `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md`.

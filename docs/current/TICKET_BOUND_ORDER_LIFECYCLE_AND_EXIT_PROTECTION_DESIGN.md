@@ -1,3 +1,10 @@
+---
+title: TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN
+status: CURRENT_DESIGN
+authority: docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md
+last_verified: 2026-07-09
+---
+
 # Ticket-Bound Order Lifecycle And Exit Protection Design
 
 Last updated: 2026-07-09

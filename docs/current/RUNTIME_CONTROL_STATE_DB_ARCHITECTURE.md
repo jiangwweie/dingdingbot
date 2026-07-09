@@ -35,11 +35,14 @@ five active StrategyGroups
 -> official FinalGate and Operation Layer only after action-time gates pass
 ```
 
-The detailed mainline MD/JSON read/write inventory is maintained in:
+The production file-authority elimination boundary is maintained in:
 
 ```text
-docs/current/RUNTIME_CONTROL_STATE_MAINLINE_FILE_IO_MAP.md
+docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md
 ```
+
+Historical file I/O inventories are archive-only provenance. They must not be
+treated as current runtime authority or required implementation input.
 
 ## Decision
 

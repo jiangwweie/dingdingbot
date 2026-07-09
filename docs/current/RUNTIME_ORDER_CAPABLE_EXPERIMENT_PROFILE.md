@@ -1,3 +1,10 @@
+---
+title: RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE
+status: CURRENT_PROFILE
+authority: docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
+last_verified: 2026-07-09
+---
+
 # Runtime Order-Capable Experiment Profile
 
 Last updated: 2026-06-20

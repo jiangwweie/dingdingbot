@@ -303,7 +303,7 @@ Current result:
 
 | Result | Evidence |
 | --- | --- |
-| **Audit completed** | `docs/current/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
+| **Audit completed and absorbed** | Current lifecycle capability boundary is reflected in this plan and `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`; original audit packet is archived under `docs/archive/2026-07-09-docs-current-consolidation/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
 | **Submit/cancel/read/fill capabilities mapped** | Capability matrix covers ENTRY, SL, TP1, RUNNER_SL, cancel old SL, open orders, order query, positions, account, recent fills, and client order id |
 | **Gateway readiness method set widened** | Runtime exchange gateway readiness now requires lifecycle methods |
 | **Remaining first blocker** | `production_lifecycle_wiring_and_live_outcome_ledger_not_complete` after local P0-2 failure-matrix closure |

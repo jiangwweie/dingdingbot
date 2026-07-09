@@ -1,3 +1,10 @@
+---
+title: STRATEGYGROUP_FILE_SOURCE_RETIREMENT_INDEX
+status: CURRENT_GOVERNANCE_INDEX
+authority: docs/current/strategy-group-handoffs/main-control-handoff-index.md
+last_verified: 2026-07-09
+---
+
 # StrategyGroup File-Source Retirement Index
 
 Status: CURRENT_GOVERNANCE_INDEX

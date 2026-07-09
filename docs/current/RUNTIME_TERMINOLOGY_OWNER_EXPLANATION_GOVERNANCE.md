@@ -38,7 +38,7 @@ expansion.
 | Owner-facing states should use product language such as `running`, `waiting_for_opportunity`, `processing`, and `needs_intervention` | `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` |
 | Internal terms such as FinalGate, Operation Layer, RequiredFacts, candidate, and authorization must not be primary Owner UI labels | `AGENTS.md`, `docs/current/OWNER_RUNTIME_OPERATING_MODEL.md` |
 | PG current state and append-only lineage are the target authority for L2-L7 explanations | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
-| The temporary L2-L7 draft contains a starter glossary, but it is not a durable authority document | `docs/current/L2_L7_PRETRADE_CHAIN_RESET_TEMPORARY_DRAFT.md` |
+| Temporary L2-L7 discussion material has been absorbed into this terminology governance document and must not remain a current authority file | This document |
 
 ## Analysis
 
