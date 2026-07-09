@@ -11,7 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import asyncio
+from contextlib import contextmanager
 import json
+import os
 from types import SimpleNamespace
 from typing import Any, Callable
 
@@ -133,6 +135,18 @@ def run_ticket_bound_full_chain_simulation(
         operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
         now_ms=now_ms + 5,
     )
+    with _mock_submit_decision_env():
+        submit_mode_decision_payload = (
+            protected_submit_attempt.materialize_ticket_bound_submit_mode_decision(
+                conn,
+                ticket_id=str(ticket_payload["ticket_id"]),
+                operation_submit_command_id=str(
+                    handoff_payload["operation_submit_command_id"]
+                ),
+                production_submit_execution_policy="armed",
+                now_ms=now_ms + 5,
+            )
+        )
     prepared_payload = protected_submit_attempt.prepare_ticket_bound_protected_submit_attempt(
         conn,
         ticket_id=str(ticket_payload["ticket_id"]),
@@ -244,6 +258,7 @@ def run_ticket_bound_full_chain_simulation(
         "finalgate": finalgate_payload,
         "handoff": handoff_payload,
         "safety": safety_payload,
+        "submit_mode_decision": submit_mode_decision_payload,
         "prepared_submit": prepared_payload,
         "submitted": submitted_payload,
         "protection": protection_payload,
@@ -550,6 +565,18 @@ def _prepare_full_chain_submit_context(
         operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
         now_ms=now_ms + 5,
     )
+    with _mock_submit_decision_env():
+        submit_mode_decision_payload = (
+            protected_submit_attempt.materialize_ticket_bound_submit_mode_decision(
+                conn,
+                ticket_id=str(ticket_payload["ticket_id"]),
+                operation_submit_command_id=str(
+                    handoff_payload["operation_submit_command_id"]
+                ),
+                production_submit_execution_policy="armed",
+                now_ms=now_ms + 5,
+            )
+        )
     prepared_payload = protected_submit_attempt.prepare_ticket_bound_protected_submit_attempt(
         conn,
         ticket_id=str(ticket_payload["ticket_id"]),
@@ -565,8 +592,32 @@ def _prepare_full_chain_submit_context(
         "finalgate": finalgate_payload,
         "handoff": handoff_payload,
         "safety": safety_payload,
+        "submit_mode_decision": submit_mode_decision_payload,
         "prepared_submit": prepared_payload,
     }
+
+
+@contextmanager
+def _mock_submit_decision_env():
+    values = {
+        "TRADING_ENV": "live",
+        "EXCHANGE_TESTNET": "false",
+        "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
+        "RUNTIME_CONTROL_API_ENABLED": "false",
+        "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+        "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
+    }
+    previous = {key: os.environ.get(key) for key in values}
+    try:
+        for key, value in values.items():
+            os.environ[key] = value
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def _failure_result(

@@ -287,11 +287,20 @@ def _first_pg_focus_row(candidate_pool: dict[str, Any]) -> dict[str, Any]:
 
 
 def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
+    now_ms = int(control_state.get("read_now_ms") or time.time() * 1000)
+    ticket_by_id = {
+        str(row.get("ticket_id") or ""): row
+        for row in _pg_rows(control_state.get("action_time_tickets"))
+        if str(row.get("ticket_id") or "")
+    }
     completed_attempt_ticket_ids: set[str] = set()
     for attempt in _pg_rows(control_state.get("ticket_bound_protected_submit_attempts")):
         blockers = [str(item) for item in _as_list(attempt.get("blockers")) if str(item)]
         status = str(attempt.get("status") or "")
         if blockers or status == "blocked":
+            ticket = ticket_by_id.get(str(attempt.get("ticket_id") or ""), {})
+            if not _is_current_monitor_ticket(ticket, now_ms):
+                continue
             return {
                 "event_type": "protected_submit_attempt_blocked",
                 "strategy_group_id": attempt.get("strategy_group_id"),
@@ -393,6 +402,15 @@ def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
                 "reasons": ["fresh_signal_detected", str(signal.get("signal_event_id") or "")],
             }
     return {}
+
+
+def _is_current_monitor_ticket(ticket: dict[str, Any], now_ms: int) -> bool:
+    status = str(ticket.get("status") or "")
+    if status == "submitted":
+        return True
+    if status not in {"created", "preflight_pending", "finalgate_ready"}:
+        return False
+    return int(ticket.get("expires_at_ms") or 0) > now_ms
 
 
 def _first_meaningful_blocker(blockers: list[Any]) -> str:
@@ -640,6 +658,31 @@ def _pg_notification_row(
     return dict(row) if row else {}
 
 
+def _resolve_pg_notifications(
+    *,
+    conn: sa.engine.Connection,
+    automation_id: str,
+    now_ms: int,
+    reason: str,
+) -> int:
+    table = _table(conn, "brc_server_monitor_notifications")
+    result = conn.execute(
+        table.update()
+        .where(table.c.automation_id == automation_id)
+        .where(table.c.notification_state != "resolved")
+        .values(
+            notification_state="resolved",
+            last_error=None,
+            feishu_response={
+                "resolved": True,
+                "resolution_reason": reason,
+            },
+            updated_at_ms=now_ms,
+        )
+    )
+    return int(result.rowcount or 0)
+
+
 def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:
     metadata = sa.MetaData()
     return sa.Table(table_name, metadata, autoload_with=conn)
@@ -689,6 +732,13 @@ def _apply_pg_notification(
         notification["skipped_reason"] = str(
             decision.get("status") or "healthy_waiting_quiet"
         )
+        resolved_count = _resolve_pg_notifications(
+            conn=conn,
+            automation_id=str(decision.get("automation_id") or ""),
+            now_ms=now_ms,
+            reason=str(decision.get("status") or "quiet"),
+        )
+        notification["resolved_historical_notification_count"] = resolved_count
     elif previous_sent and not previous_failed:
         notification["duplicate_suppressed"] = True
         notification["skipped_reason"] = "dedupe_suppressed"

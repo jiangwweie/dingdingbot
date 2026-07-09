@@ -657,6 +657,165 @@ def test_pg_blocked_protected_submit_attempt_notifies_owner(
         engine.dispose()
 
 
+def test_pg_expired_blocked_attempt_is_quiet_and_resolves_historical_notification(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    engine = _seed_pg_engine()
+    try:
+        with engine.begin() as conn:
+            ids = _create_ready_protected_submit(conn)
+            conn.execute(
+                text(
+                    """
+                    UPDATE brc_runtime_fact_snapshots
+                    SET fact_values = :fact_values
+                    WHERE fact_surface = 'action_time'
+                      AND fact_snapshot_id IN (
+                        SELECT action_time_fact_snapshot_id
+                        FROM brc_action_time_tickets
+                        WHERE ticket_id = :ticket_id
+                      )
+                    """
+                ),
+                {
+                    "ticket_id": ids["ticket_id"],
+                    "fact_values": json.dumps(
+                        {
+                            "opening_range_defined": True,
+                            "breakout_confirmed": True,
+                            "opening_range_low_reference": "1800",
+                            "last_price": "2000",
+                        }
+                    ),
+                },
+            )
+            prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+                conn,
+                ticket_id=ids["ticket_id"],
+                operation_submit_command_id=ids["operation_submit_command_id"],
+                submit_mode="disabled_smoke",
+                now_ms=NOW_MS + 4000,
+            )
+            assert prepared["status"] == "blocked"
+            assert "tp1_reference_missing" in prepared["blockers"]
+
+            conn.execute(
+                text(
+                    """
+                    UPDATE brc_action_time_tickets
+                    SET status = 'expired', expires_at_ms = :expired_at
+                    WHERE ticket_id = :ticket_id
+                    """
+                ),
+                {"ticket_id": ids["ticket_id"], "expired_at": NOW_MS + 5000},
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE brc_action_time_lane_inputs
+                    SET status = 'expired', closed_at_ms = :closed_at
+                    WHERE action_time_lane_input_id = :lane_id
+                    """
+                ),
+                {"lane_id": ids["lane_id"], "closed_at": NOW_MS + 5000},
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE brc_promotion_candidates
+                    SET status = 'expired', closed_at_ms = :closed_at
+                    WHERE promotion_candidate_id = (
+                      SELECT promotion_candidate_id
+                      FROM brc_action_time_tickets
+                      WHERE ticket_id = :ticket_id
+                    )
+                    """
+                ),
+                {"ticket_id": ids["ticket_id"], "closed_at": NOW_MS + 5000},
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE brc_live_signal_events
+                    SET status = 'stale',
+                        freshness_state = 'expired',
+                        invalidated_at_ms = :closed_at
+                    WHERE signal_event_id = (
+                      SELECT signal_event_id
+                      FROM brc_action_time_tickets
+                      WHERE ticket_id = :ticket_id
+                    )
+                    """
+                ),
+                {"ticket_id": ids["ticket_id"], "closed_at": NOW_MS + 5000},
+            )
+            _insert_pg_coverage_and_unsatisfied_facts(conn)
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO brc_server_monitor_notifications (
+                      notification_id, dedupe_key, automation_id,
+                      strategy_group_id, symbol, blocker_class, checkpoint,
+                      notification_state, first_seen_at_ms, last_notified_at_ms,
+                      last_seen_at_ms, send_attempts, last_error,
+                      feishu_response, created_at_ms, updated_at_ms
+                    ) VALUES (
+                      'server_monitor_notification:historical-tp1',
+                      'tokyo-runtime-server-monitor|SOR-001|ETHUSDT:long|tp1_reference_missing|ticket_bound_protected_submit_attempt',
+                      'tokyo-runtime-server-monitor',
+                      'SOR-001',
+                      'ETHUSDT:long',
+                      'tp1_reference_missing',
+                      'ticket_bound_protected_submit_attempt',
+                      'sent',
+                      :seen_at,
+                      :seen_at,
+                      :seen_at,
+                      1,
+                      NULL,
+                      '{}',
+                      :seen_at,
+                      :seen_at
+                    )
+                    """
+                ),
+                {"seen_at": NOW_MS + 4500},
+            )
+
+            args = _pg_args(module, tmp_path)
+            args.now_ms = NOW_MS + 120_000
+            calls: list[dict] = []
+            artifact = module.build_server_monitor_artifact(
+                args,
+                pg_conn=conn,
+                notifier=lambda *args: calls.append({"args": args}) or {"sent": True},
+            )
+
+            assert artifact["decision"]["decision"] == "quiet"
+            assert artifact["decision"]["blocker_class"] == "none"
+            assert artifact["notification"]["attempted"] is False
+            assert artifact["notification"]["resolved_historical_notification_count"] == 1
+            assert calls == []
+            row = conn.execute(
+                text(
+                    """
+                    SELECT notification_state, feishu_response
+                    FROM brc_server_monitor_notifications
+                    WHERE notification_id = 'server_monitor_notification:historical-tp1'
+                    """
+                )
+            ).mappings().one()
+            assert row["notification_state"] == "resolved"
+            response = row["feishu_response"]
+            if isinstance(response, str):
+                response = json.loads(response)
+            assert response["resolved"] is True
+            assert response["resolution_reason"] == artifact["decision"]["status"]
+    finally:
+        engine.dispose()
+
+
 def test_pg_runtime_coverage_gap_notifies_without_json_sources(
     tmp_path: Path,
 ) -> None:

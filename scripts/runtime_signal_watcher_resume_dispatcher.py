@@ -59,9 +59,18 @@ TICKET_BOUND_OPERATION_LAYER_HANDOFF_ACTION = (
 OPERATION_LAYER_SUBMIT_ACTION = "call_official_operation_layer_submit"
 OPERATION_LAYER_SUBMIT_MODE_REAL = "real_gateway_action"
 OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE = "disabled_smoke"
+OPERATION_LAYER_SUBMIT_MODE_DECISION = "from_submit_mode_decision"
 OPERATION_LAYER_SUBMIT_MODES = {
     OPERATION_LAYER_SUBMIT_MODE_REAL,
     OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE,
+    OPERATION_LAYER_SUBMIT_MODE_DECISION,
+}
+PRODUCTION_SUBMIT_EXECUTION_POLICY_ENV = "BRC_PRODUCTION_SUBMIT_EXECUTION_POLICY"
+PRODUCTION_SUBMIT_EXECUTION_POLICY_DISABLED = "disabled"
+PRODUCTION_SUBMIT_EXECUTION_POLICY_ARMED = "armed"
+PRODUCTION_SUBMIT_EXECUTION_POLICIES = {
+    PRODUCTION_SUBMIT_EXECUTION_POLICY_DISABLED,
+    PRODUCTION_SUBMIT_EXECUTION_POLICY_ARMED,
 }
 POST_SUBMIT_FINALIZE_ACTION = "post_submit_finalize_reconciliation_budget_settlement"
 RETIRED_FILE_AUTHORITY_SCOPES = {
@@ -1031,7 +1040,9 @@ def build_dispatch_artifact(
     execute_preflight: bool = False,
     preflight_timeout_seconds: int = 120,
     execute_operation_layer_submit: bool = False,
-    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
+    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_DECISION,
+    database_url: str = "",
+    production_submit_execution_policy: str = PRODUCTION_SUBMIT_EXECUTION_POLICY_DISABLED,
     execute_post_submit_finalize: bool = False,
     selected_strategy_group_id: str | None = None,
 ) -> dict[str, Any]:
@@ -1269,6 +1280,8 @@ def build_dispatch_artifact(
                 timeout_seconds=preflight_timeout_seconds,
                 execute_operation_layer_submit=execute_operation_layer_submit,
                 operation_layer_submit_mode=operation_layer_submit_mode,
+                database_url=database_url,
+                production_submit_execution_policy=production_submit_execution_policy,
                 execute_post_submit_finalize=execute_post_submit_finalize,
             )
 
@@ -1359,6 +1372,8 @@ def build_dispatch_artifact(
             timeout_seconds=preflight_timeout_seconds,
             execute_operation_layer_submit=execute_operation_layer_submit,
             operation_layer_submit_mode=operation_layer_submit_mode,
+            database_url=database_url,
+            production_submit_execution_policy=production_submit_execution_policy,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
@@ -1453,7 +1468,9 @@ def _execute_finalgate_preflight(
     artifact: dict[str, Any],
     timeout_seconds: int,
     execute_operation_layer_submit: bool = False,
-    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_REAL,
+    operation_layer_submit_mode: str = OPERATION_LAYER_SUBMIT_MODE_DECISION,
+    database_url: str = "",
+    production_submit_execution_policy: str = PRODUCTION_SUBMIT_EXECUTION_POLICY_DISABLED,
     execute_post_submit_finalize: bool = False,
 ) -> dict[str, Any]:
     command_plan = _dict(artifact.get("command_plan"))
@@ -1560,6 +1577,8 @@ def _execute_finalgate_preflight(
             timeout_seconds=timeout_seconds,
             execute_operation_layer_submit=execute_operation_layer_submit,
             operation_layer_submit_mode=operation_layer_submit_mode,
+            database_url=database_url,
+            production_submit_execution_policy=production_submit_execution_policy,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
 
@@ -1589,6 +1608,8 @@ def _execute_ticket_bound_operation_layer_handoff(
     timeout_seconds: int,
     execute_operation_layer_submit: bool,
     operation_layer_submit_mode: str,
+    database_url: str,
+    production_submit_execution_policy: str,
     execute_post_submit_finalize: bool,
 ) -> dict[str, Any]:
     preflight_body = _dict(preflight_result.get("body"))
@@ -1740,6 +1761,8 @@ def _execute_ticket_bound_operation_layer_handoff(
             artifact=result,
             timeout_seconds=timeout_seconds,
             operation_layer_submit_mode=operation_layer_submit_mode,
+            database_url=database_url,
+            production_submit_execution_policy=production_submit_execution_policy,
             execute_post_submit_finalize=execute_post_submit_finalize,
         )
     return result
@@ -1912,11 +1935,67 @@ def _ticket_bound_protected_submit_url(
     return api_base + path + "?" + query, path, blockers
 
 
+def _materialize_submit_mode_decision(
+    *,
+    artifact: dict[str, Any],
+    database_url: str,
+    production_submit_execution_policy: str,
+) -> dict[str, Any]:
+    ticket_id = _first_text(artifact.get("ticket_id"))
+    operation_submit_command_id = _first_text(
+        artifact.get("operation_submit_command_id")
+    )
+    blockers: list[str] = []
+    if not ticket_id:
+        blockers.append("ticket_id_missing_for_submit_mode_decision")
+    if not operation_submit_command_id:
+        blockers.append("operation_submit_command_id_missing_for_submit_mode_decision")
+    normalized = normalize_sync_postgres_dsn(database_url)
+    if not normalized:
+        blockers.append("pg_database_url_missing_for_submit_mode_decision")
+    production_submit_execution_policy = str(
+        production_submit_execution_policy or ""
+    ).strip()
+    if production_submit_execution_policy not in PRODUCTION_SUBMIT_EXECUTION_POLICIES:
+        blockers.append(
+            "invalid_production_submit_execution_policy:"
+            f"{production_submit_execution_policy or 'missing'}"
+        )
+    if blockers:
+        return {
+            "schema": "brc.ticket_bound_submit_mode_decision.v1",
+            "status": "blocked",
+            "decision": "blocked",
+            "ticket_id": ticket_id,
+            "operation_submit_command_id": operation_submit_command_id,
+            "first_blocker": blockers[0],
+            "blockers": blockers,
+        }
+
+    from src.application.action_time.protected_submit_attempt import (
+        materialize_ticket_bound_submit_mode_decision,
+    )
+
+    engine = sa.create_engine(normalized)
+    try:
+        with engine.begin() as conn:
+            return materialize_ticket_bound_submit_mode_decision(
+                conn,
+                ticket_id=ticket_id,
+                operation_submit_command_id=operation_submit_command_id,
+                production_submit_execution_policy=production_submit_execution_policy,
+            )
+    finally:
+        engine.dispose()
+
+
 def _execute_ticket_bound_protected_submit(
     *,
     artifact: dict[str, Any],
     timeout_seconds: int,
     operation_layer_submit_mode: str,
+    database_url: str,
+    production_submit_execution_policy: str,
     execute_post_submit_finalize: bool,
 ) -> dict[str, Any]:
     if operation_layer_submit_mode not in OPERATION_LAYER_SUBMIT_MODES:
@@ -1935,9 +2014,68 @@ def _execute_ticket_bound_protected_submit(
                 "error": "invalid_operation_layer_submit_mode",
             },
         )
+    submit_mode_decision: dict[str, Any] = {}
+    resolved_submit_mode = operation_layer_submit_mode
+    if operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_DECISION:
+        submit_mode_decision = _materialize_submit_mode_decision(
+            artifact=artifact,
+            database_url=database_url,
+            production_submit_execution_policy=production_submit_execution_policy,
+        )
+        resolved_submit_mode = str(submit_mode_decision.get("decision") or "blocked")
+        if resolved_submit_mode == "blocked":
+            blockers = [
+                str(item)
+                for item in _list(submit_mode_decision.get("blockers"))
+                if str(item).strip()
+            ]
+            return _dispatch_artifact_from_operation_layer_submit(
+                artifact=artifact,
+                status="operation_layer_submit_blocked",
+                blocker_class=_operation_layer_blocker_class(blockers, []),
+                dispatch_status="blocked_by_submit_mode_decision",
+                blockers=blockers
+                or [
+                    str(
+                        submit_mode_decision.get("first_blocker")
+                        or "submit_mode_decision_blocked"
+                    )
+                ],
+                submit_result={
+                    "called": False,
+                    "http_status": None,
+                    "body": None,
+                    "error": "submit_mode_decision_blocked",
+                    "submit_mode_decision": submit_mode_decision,
+                    "operation_layer_submit_mode": operation_layer_submit_mode,
+                    "resolved_operation_layer_submit_mode": resolved_submit_mode,
+                },
+            )
+        if resolved_submit_mode not in {
+            OPERATION_LAYER_SUBMIT_MODE_REAL,
+            OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE,
+        }:
+            return _dispatch_artifact_from_operation_layer_submit(
+                artifact=artifact,
+                status="operation_layer_submit_blocked",
+                blocker_class="hard_safety_stop",
+                dispatch_status="blocked_by_invalid_submit_mode_decision",
+                blockers=[
+                    f"invalid_submit_mode_decision:{resolved_submit_mode or 'missing'}"
+                ],
+                submit_result={
+                    "called": False,
+                    "http_status": None,
+                    "body": None,
+                    "error": "invalid_submit_mode_decision",
+                    "submit_mode_decision": submit_mode_decision,
+                    "operation_layer_submit_mode": operation_layer_submit_mode,
+                    "resolved_operation_layer_submit_mode": resolved_submit_mode,
+                },
+            )
     url, path, url_blockers = _ticket_bound_protected_submit_url(
         artifact=artifact,
-        submit_mode=operation_layer_submit_mode,
+        submit_mode=resolved_submit_mode,
     )
     if url_blockers:
         return _dispatch_artifact_from_operation_layer_submit(
@@ -1985,18 +2123,20 @@ def _execute_ticket_bound_protected_submit(
         "error_type": response.get("error_type"),
         "error_message": response.get("error_message"),
         "owner_confirmed_for_first_real_submit_action": (
-            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+            resolved_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
         ),
         "standing_authorized_first_real_submit": (
-            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+            resolved_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
         ),
         "standing_authorization_scope": "ticket_bound_runtime_safety_state",
         "owner_chat_confirmation_required_for_real_submit": False,
         "legacy_owner_confirmation_env_required": False,
         "standing_authorization_consumed_for_real_submit": (
-            operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
+            resolved_submit_mode == OPERATION_LAYER_SUBMIT_MODE_REAL
         ),
         "operation_layer_submit_mode": operation_layer_submit_mode,
+        "resolved_operation_layer_submit_mode": resolved_submit_mode,
+        "submit_mode_decision": submit_mode_decision,
         "official_operation_layer_submit_called": True,
         "official_operation_layer_endpoint": True,
     }
@@ -2023,7 +2163,7 @@ def _execute_ticket_bound_protected_submit(
         )
     forbidden_effects = _ticket_bound_submit_forbidden_effects(
         body,
-        submit_mode=operation_layer_submit_mode,
+        submit_mode=resolved_submit_mode,
     )
     if forbidden_effects:
         return _dispatch_artifact_from_operation_layer_submit(
@@ -2034,7 +2174,7 @@ def _execute_ticket_bound_protected_submit(
             blockers=forbidden_effects,
             submit_result=submit_result,
         )
-    if operation_layer_submit_mode == OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE:
+    if resolved_submit_mode == OPERATION_LAYER_SUBMIT_MODE_DISABLED_SMOKE:
         if body.get("status") != "disabled_smoke_passed":
             return _dispatch_artifact_from_operation_layer_submit(
                 artifact=artifact,
@@ -2056,7 +2196,7 @@ def _execute_ticket_bound_protected_submit(
             submit_result=submit_result,
         )
 
-    if operation_layer_submit_mode != OPERATION_LAYER_SUBMIT_MODE_REAL:
+    if resolved_submit_mode != OPERATION_LAYER_SUBMIT_MODE_REAL:
         return _dispatch_artifact_from_operation_layer_submit(
             artifact=artifact,
             status="operation_layer_submit_blocked",
@@ -2759,13 +2899,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--operation-layer-submit-mode",
         choices=sorted(OPERATION_LAYER_SUBMIT_MODES),
-        default=OPERATION_LAYER_SUBMIT_MODE_REAL,
+        default=OPERATION_LAYER_SUBMIT_MODE_DECISION,
         help=(
             "Operation Layer submit mode used with "
-            "--execute-operation-layer-submit. real_gateway_action keeps the "
-            "existing real-order boundary for ticket-bound protected submit; "
-            "disabled_smoke calls the protected submit endpoint in no-exchange "
-            "mode and requires disabled_smoke_passed."
+            "--execute-operation-layer-submit. from_submit_mode_decision "
+            "materializes the PG SubmitModeDecision and uses that explicit "
+            "decision; real_gateway_action is accepted only for already "
+            "decision-bound calls; disabled_smoke calls the protected submit "
+            "endpoint in no-exchange mode and requires disabled_smoke_passed."
+        ),
+    )
+    parser.add_argument(
+        "--production-submit-execution-policy",
+        choices=sorted(PRODUCTION_SUBMIT_EXECUTION_POLICIES),
+        default=os.environ.get(PRODUCTION_SUBMIT_EXECUTION_POLICY_ENV)
+        or PRODUCTION_SUBMIT_EXECUTION_POLICY_DISABLED,
+        help=(
+            "Deployment submit policy consumed only by SubmitModeDecision. "
+            "Production real submit requires armed plus PG safety and gateway "
+            "readiness."
         ),
     )
     parser.add_argument(
@@ -2801,6 +2953,8 @@ def main(argv: list[str] | None = None) -> int:
         preflight_timeout_seconds=args.preflight_timeout_seconds,
         execute_operation_layer_submit=args.execute_operation_layer_submit,
         operation_layer_submit_mode=args.operation_layer_submit_mode,
+        database_url=args.database_url,
+        production_submit_execution_policy=args.production_submit_execution_policy,
         execute_post_submit_finalize=args.execute_post_submit_finalize,
         selected_strategy_group_id=args.selected_strategy_group_id,
     )

@@ -51,6 +51,7 @@ TABLES = (
     "brc_operation_layer_handoffs",
     "brc_state_transition_events",
     "brc_runtime_safety_state_snapshots",
+    "brc_ticket_bound_submit_mode_decisions",
     "brc_ticket_bound_protected_submit_attempts",
     "brc_ticket_bound_post_submit_closures",
     "brc_projection_runs",
@@ -1205,6 +1206,63 @@ def upgrade() -> None:
             ),
         )
 
+    if not _has_table("brc_ticket_bound_submit_mode_decisions"):
+        op.create_table(
+            "brc_ticket_bound_submit_mode_decisions",
+            sa.Column("submit_mode_decision_id", sa.String(192), primary_key=True),
+            sa.Column("ticket_id", sa.String(192), nullable=False),
+            sa.Column("operation_layer_handoff_id", sa.String(192), nullable=False),
+            sa.Column("operation_submit_command_id", sa.String(192), nullable=False),
+            sa.Column("runtime_safety_snapshot_id", sa.String(192), nullable=False),
+            sa.Column("action_time_lane_input_id", sa.String(192), nullable=False),
+            sa.Column("runtime_scope_binding_id", sa.String(160), nullable=False),
+            sa.Column("policy_current_id", sa.String(160), nullable=False),
+            sa.Column("strategy_group_id", sa.String(128), nullable=False),
+            sa.Column("symbol", sa.String(128), nullable=False),
+            sa.Column("side", sa.String(32), nullable=False),
+            sa.Column("runtime_profile_id", sa.String(128), nullable=False),
+            sa.Column("decision", sa.String(64), nullable=False),
+            sa.Column("decision_reason", sa.Text(), nullable=False),
+            sa.Column("first_blocker", sa.Text(), nullable=True),
+            sa.Column("blockers", json_t, nullable=False, server_default="[]"),
+            sa.Column("warnings", json_t, nullable=False, server_default="[]"),
+            sa.Column("evidence_refs", json_t, nullable=False, server_default="{}"),
+            sa.Column("production_submit_execution_policy", sa.String(64), nullable=False),
+            sa.Column("gateway_binding_ready", sa.Boolean(), nullable=False),
+            sa.Column("authority_boundary", sa.Text(), nullable=False),
+            sa.Column("created_at_ms", sa.BIGINT(), nullable=False),
+            sa.Column("expires_at_ms", sa.BIGINT(), nullable=False),
+            sa.Column("updated_at_ms", sa.BIGINT(), nullable=False),
+            sa.CheckConstraint(
+                "side IN ('long', 'short')",
+                name="ck_brc_submit_mode_decision_side",
+            ),
+            sa.CheckConstraint(
+                "decision IN ('blocked', 'disabled_smoke', 'real_gateway_action')",
+                name="ck_brc_submit_mode_decision_value",
+            ),
+            sa.CheckConstraint(
+                "production_submit_execution_policy IN ('disabled', 'armed')",
+                name="ck_brc_submit_mode_decision_deploy_policy",
+            ),
+            sa.CheckConstraint(
+                "decision <> 'real_gateway_action' OR "
+                "(gateway_binding_ready = true "
+                "AND production_submit_execution_policy = 'armed' "
+                "AND (first_blocker IS NULL OR first_blocker = ''))",
+                name="ck_brc_submit_mode_decision_real_ready",
+            ),
+            sa.UniqueConstraint(
+                "operation_submit_command_id",
+                name="uq_brc_submit_mode_decision_command",
+            ),
+        )
+        _create_index(
+            "idx_brc_submit_mode_decision_ticket",
+            "brc_ticket_bound_submit_mode_decisions",
+            ["ticket_id", "decision", "created_at_ms"],
+        )
+
     if not _has_table("brc_ticket_bound_protected_submit_attempts"):
         op.create_table(
             "brc_ticket_bound_protected_submit_attempts",
@@ -1219,6 +1277,7 @@ def upgrade() -> None:
             sa.Column("symbol", sa.String(128), nullable=False),
             sa.Column("side", sa.String(32), nullable=False),
             sa.Column("runtime_profile_id", sa.String(128), nullable=False),
+            sa.Column("submit_mode_decision_id", sa.String(192), nullable=True),
             sa.Column("submit_mode", sa.String(64), nullable=False),
             sa.Column("status", sa.String(64), nullable=False),
             sa.Column("submit_allowed", sa.Boolean(), nullable=False),
@@ -1567,7 +1626,7 @@ def upgrade() -> None:
             sa.Column("created_at_ms", sa.BIGINT(), nullable=False),
             sa.Column("updated_at_ms", sa.BIGINT(), nullable=False),
             sa.CheckConstraint(
-                "notification_state IN ('pending', 'sent', 'failed', 'suppressed', 'retrying')",
+                "notification_state IN ('pending', 'sent', 'failed', 'suppressed', 'retrying', 'resolved')",
                 name="ck_brc_monitor_notify_state",
             ),
             sa.UniqueConstraint("dedupe_key", name="uq_brc_monitor_notify_dedupe"),

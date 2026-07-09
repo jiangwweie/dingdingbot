@@ -102,6 +102,15 @@ def _load_module(path: Path, name: str):
     return module
 
 
+def _arm_submit_decision_env(monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED", "true")
+
+
 @pytest.fixture()
 def pg_control_connection():
     migration = _load_module(MIGRATION_PATH, "migration_086_action_time_full_chain")
@@ -363,6 +372,7 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
     symbol: str,
     side: str,
 ):
+    _arm_submit_decision_env(monkeypatch)
     monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
     payloads = run_ticket_bound_full_chain_simulation(
         pg_control_connection,
@@ -375,7 +385,11 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
         projection_publisher=publisher.publish_runtime_control_current_projections,
     )
 
+    assert payloads["submit_mode_decision"]["decision"] == "real_gateway_action"
     assert payloads["prepared_submit"]["status"] == "submit_prepared"
+    assert payloads["prepared_submit"]["submit_mode_decision_id"] == (
+        payloads["submit_mode_decision"]["submit_mode_decision_id"]
+    )
     assert payloads["submitted"]["status"] == "submitted"
     assert payloads["protection"]["status"] == "position_protected"
     assert payloads["post_submit_pending"]["status"] == "reconciliation_pending"
@@ -425,6 +439,7 @@ def test_full_chain_failure_matrix_stops_at_exact_lifecycle_state(
     monkeypatch,
     scenario: str,
 ):
+    _arm_submit_decision_env(monkeypatch)
     monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
     payloads = run_ticket_bound_full_chain_failure_scenario(
         pg_control_connection,
@@ -444,6 +459,7 @@ def test_full_chain_failure_matrix_stops_at_exact_lifecycle_state(
         scenario=scenario,
     )
 
+    assert payloads["submit_mode_decision"]["decision"] == "real_gateway_action"
     assert payloads["prepared_submit"]["status"] == "submit_prepared"
     assert payloads["authority_boundary"]["calls_exchange_write"] is False
     assert payloads["authority_boundary"]["uses_repo_json_or_md_authority"] is False

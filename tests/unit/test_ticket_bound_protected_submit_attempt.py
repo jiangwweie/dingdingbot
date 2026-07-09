@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from sqlalchemy import text
 
 from scripts import materialize_ticket_bound_protected_submit_attempt as submit
@@ -11,6 +12,16 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     _create_handoff_ready,
     pg_control_connection,
 )
+
+
+@pytest.fixture(autouse=True)
+def runtime_submit_env(monkeypatch):
+    monkeypatch.setenv("TRADING_ENV", "live")
+    monkeypatch.setenv("EXCHANGE_TESTNET", "false")
+    monkeypatch.setenv("BRC_EXECUTION_PERMISSION_MAX", "order_allowed")
+    monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
+    monkeypatch.setenv("RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED", "true")
 
 
 def test_protected_submit_attempt_disabled_smoke_records_ticket_bound_pg_attempt(
@@ -222,18 +233,32 @@ def test_next_protected_submit_attempt_refreshes_existing_blocked_attempt(
     assert refreshed["runtime_safety_snapshot_id"] == safety_payload["runtime_safety_snapshot_id"]
 
 
-def test_protected_submit_real_result_marks_ticket_and_handoff_submitted(
+def test_protected_submit_real_mode_requires_submit_mode_decision(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
 
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+    payload = submit.prepare_ticket_bound_protected_submit_attempt(
         pg_control_connection,
         ticket_id=ids["ticket_id"],
         operation_submit_command_id=ids["operation_submit_command_id"],
         submit_mode="real_gateway_action",
         now_ms=NOW_MS + 4000,
     )
+
+    assert payload["status"] == "blocked"
+    assert "submit_mode_decision_missing_for_real_gateway_action" in payload["blockers"]
+    assert payload["exchange_write_called"] is False
+    assert payload["order_created"] is False
+    assert payload["order_lifecycle_called"] is False
+
+
+def test_protected_submit_real_result_marks_ticket_and_handoff_submitted(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+
+    prepared = _prepare_real_submit(pg_control_connection, ids)
     assert prepared["status"] == "submit_prepared"
 
     result = submit.record_ticket_bound_protected_submit_result(
@@ -272,13 +297,7 @@ def test_protected_submit_result_identity_mismatch_hard_stops(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
 
     result = submit.record_ticket_bound_protected_submit_result(
         pg_control_connection,
@@ -316,13 +335,7 @@ def test_protected_submit_existing_prepared_attempt_blocks_duplicate_submit(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
     assert prepared["status"] == "submit_prepared"
 
     repeated = submit.prepare_ticket_bound_protected_submit_attempt(
@@ -346,13 +359,7 @@ def test_protected_submit_result_requires_complete_ticket_order_set(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
 
     result = submit.record_ticket_bound_protected_submit_result(
         pg_control_connection,
@@ -393,13 +400,7 @@ def test_protected_submit_result_requires_identity_fields(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
 
     result = submit.record_ticket_bound_protected_submit_result(
         pg_control_connection,
@@ -429,13 +430,7 @@ def test_protected_submit_result_rejects_terminal_entry_status(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
     submitted_orders = _submitted_orders(prepared)
     submitted_orders[0]["status"] = "CANCELED"
 
@@ -469,13 +464,7 @@ def test_protected_submit_result_rejects_terminal_protection_order_status(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
     submitted_orders = _submitted_orders(prepared)
     submitted_orders[2]["status"] = "CANCELED"
 
@@ -509,13 +498,7 @@ def test_protected_submit_result_preserves_gateway_failure_blockers(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
 
     result = submit.record_ticket_bound_protected_submit_result(
         pg_control_connection,
@@ -552,13 +535,7 @@ def test_protected_submit_result_materializes_protection_missing_after_sl_failur
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
     entry_order = _submitted_orders(prepared)[0]
 
     result = submit.record_ticket_bound_protected_submit_result(
@@ -595,13 +572,7 @@ def test_protected_submit_result_materializes_protection_submit_failed_after_tp1
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
     entry_order, sl_order, _tp1_order = _submitted_orders(prepared)
 
     result = submit.record_ticket_bound_protected_submit_result(
@@ -640,13 +611,7 @@ def test_protected_submit_result_forbidden_effect_hard_stops_without_breaking_db
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
 
     result = submit.record_ticket_bound_protected_submit_result(
         pg_control_connection,
@@ -686,6 +651,26 @@ def _create_ready_protected_submit(conn) -> dict[str, str]:
     )
     assert safety_payload["submit_allowed"] is True
     return ids
+
+
+def _prepare_real_submit(conn, ids: dict[str, str]) -> dict:
+    decision = submit.materialize_ticket_bound_submit_mode_decision(
+        conn,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        production_submit_execution_policy="armed",
+        now_ms=NOW_MS + 3500,
+    )
+    assert decision["decision"] == "real_gateway_action"
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        conn,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="real_gateway_action",
+        now_ms=NOW_MS + 4000,
+    )
+    assert prepared["submit_mode_decision_id"] == decision["submit_mode_decision_id"]
+    return prepared
 
 
 def _protected_submit_row(conn):

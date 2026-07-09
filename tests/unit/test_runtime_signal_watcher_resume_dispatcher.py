@@ -995,6 +995,61 @@ def test_dispatcher_reaches_ticket_bound_disabled_smoke_after_finalgate_pass(
     assert "submit_mode=disabled_smoke" in calls[2]["url"]
 
 
+def test_dispatcher_blocks_submit_when_pg_submit_mode_decision_blocks(
+    monkeypatch,
+):
+    calls: list[dict] = []
+
+    monkeypatch.setattr(
+        dispatcher,
+        "_session_cookie",
+        lambda: ("brc_operator_session=fake-session", None),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_request_json",
+        _ticket_bound_finalgate_handoff_and_submit_request(
+            calls,
+            submit_body=_protected_submit_submitted_body(),
+        ),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_materialize_submit_mode_decision",
+        lambda **_: {
+            "schema": "brc.ticket_bound_submit_mode_decision.v1",
+            "status": "blocked",
+            "decision": "blocked",
+            "ticket_id": "ticket-ready-1",
+            "operation_submit_command_id": "op-submit-1",
+            "first_blocker": "production_submit_execution_policy_not_armed",
+            "blockers": ["production_submit_execution_policy_not_armed"],
+        },
+    )
+
+    artifact = build_dispatch_artifact(
+        resume_pack=_with_runtime_summary(
+            _resume_pack("ready_for_action_time_final_gate")
+        ),
+        source_path=Path("pg-ticket-identity"),
+        api_base="http://127.0.0.1:18080",
+        execute_preflight=True,
+        execute_operation_layer_submit=True,
+        operation_layer_submit_mode="from_submit_mode_decision",
+        database_url="sqlite://",
+        production_submit_execution_policy="disabled",
+    )
+
+    assert artifact["status"] == "operation_layer_submit_blocked"
+    assert artifact["dispatch_status"] == "blocked_by_submit_mode_decision"
+    assert artifact["blockers"] == ["production_submit_execution_policy_not_armed"]
+    assert len(calls) == 2
+    assert all("/runtime-protected-submits/" not in call["url"] for call in calls)
+    assert artifact["operation_layer_submit_result"]["called"] is False
+    assert artifact["safety_invariants"]["official_operation_layer_submit_called"] is False
+    assert artifact["safety_invariants"]["exchange_write_called"] is False
+
+
 def test_dispatcher_records_ticket_bound_post_submit_closure_after_real_submit(
     monkeypatch,
 ):
@@ -1022,6 +1077,7 @@ def test_dispatcher_records_ticket_bound_post_submit_closure_after_real_submit(
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
         execute_operation_layer_submit=True,
+        operation_layer_submit_mode="real_gateway_action",
         execute_post_submit_finalize=True,
     )
 
@@ -1083,6 +1139,7 @@ def test_dispatcher_blocks_ticket_bound_closed_closure_without_settlement_releas
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
         execute_operation_layer_submit=True,
+        operation_layer_submit_mode="real_gateway_action",
         execute_post_submit_finalize=True,
     )
 
@@ -1127,6 +1184,7 @@ def test_dispatcher_blocks_submit_result_identity_mismatch_after_ticket_bound_ha
         api_base="http://127.0.0.1:18080",
         execute_preflight=True,
         execute_operation_layer_submit=True,
+        operation_layer_submit_mode="real_gateway_action",
     )
 
     assert artifact["status"] == "operation_layer_submit_failed"

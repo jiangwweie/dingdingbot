@@ -158,10 +158,12 @@ def _pg_latest_safety_by_lane(
     return snapshots
 
 
-SUCCESSFUL_PROTECTED_SUBMIT_STATUSES = {
-    "disabled_smoke_passed",
-    "submitted",
-}
+LIVE_SUCCESSFUL_PROTECTED_SUBMIT_STATUSES = {"submitted"}
+REHEARSAL_COMPLETED_PROTECTED_SUBMIT_STATUSES = {"disabled_smoke_passed"}
+COMPLETED_PROTECTED_SUBMIT_STATUSES = (
+    LIVE_SUCCESSFUL_PROTECTED_SUBMIT_STATUSES
+    | REHEARSAL_COMPLETED_PROTECTED_SUBMIT_STATUSES
+)
 
 
 def _pg_latest_successful_protected_submit_attempt(
@@ -170,7 +172,7 @@ def _pg_latest_successful_protected_submit_attempt(
     attempts = [
         row
         for row in _pg_rows(control_state.get("ticket_bound_protected_submit_attempts"))
-        if str(row.get("status") or "") in SUCCESSFUL_PROTECTED_SUBMIT_STATUSES
+        if str(row.get("status") or "") in COMPLETED_PROTECTED_SUBMIT_STATUSES
     ]
     if not attempts:
         return {}

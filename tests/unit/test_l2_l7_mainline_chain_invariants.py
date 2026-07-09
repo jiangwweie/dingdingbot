@@ -321,7 +321,9 @@ def test_l2_l7_production_systemd_keeps_broad_watcher_non_submit_authority() -> 
 
     assert "--identity-source pg_ticket" in dispatcher_dropin
     assert "--execute-preflight" in dispatcher_dropin
-    assert "--execute-operation-layer-submit" not in dispatcher_dropin
+    assert "--execute-operation-layer-submit" in dispatcher_dropin
+    assert "--operation-layer-submit-mode from_submit_mode_decision" in dispatcher_dropin
+    assert "--production-submit-execution-policy armed" in dispatcher_dropin
     assert "--operation-layer-submit-mode real_gateway_action" not in dispatcher_dropin
     assert "--resume-pack-json" not in dispatcher_dropin
     assert "--output-json" not in dispatcher_dropin
@@ -376,7 +378,11 @@ def test_l2_l7_resume_dispatcher_parser_has_only_pg_ticket_identity_source() -> 
 
     assert parsed.identity_source == "pg_ticket"
     assert parsed.execute_operation_layer_submit is False
-    assert parsed.operation_layer_submit_mode == dispatcher.OPERATION_LAYER_SUBMIT_MODE_REAL
+    assert (
+        parsed.operation_layer_submit_mode
+        == dispatcher.OPERATION_LAYER_SUBMIT_MODE_DECISION
+    )
+    assert parsed.production_submit_execution_policy == "disabled"
 
     dispatcher_source = (
         REPO_ROOT / "scripts/runtime_signal_watcher_resume_dispatcher.py"

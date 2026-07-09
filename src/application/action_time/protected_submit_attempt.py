@@ -47,9 +47,23 @@ AUTHORITY_BOUNDARY = (
     "ticket_bound_protected_submit; "
     "requires_pg_runtime_safety_submit_allowed_and_official_operation_layer"
 )
+SUBMIT_MODE_DECISION_AUTHORITY_BOUNDARY = (
+    "ticket_bound_submit_mode_decision; "
+    "requires_owner_policy_runtime_scope_safety_gateway_and_deployment_arming"
+)
 SUBMIT_MODE_DISABLED_SMOKE = "disabled_smoke"
 SUBMIT_MODE_REAL_GATEWAY_ACTION = "real_gateway_action"
 SUBMIT_MODES = {SUBMIT_MODE_DISABLED_SMOKE, SUBMIT_MODE_REAL_GATEWAY_ACTION}
+SUBMIT_MODE_DECISIONS = {
+    "blocked",
+    SUBMIT_MODE_DISABLED_SMOKE,
+    SUBMIT_MODE_REAL_GATEWAY_ACTION,
+}
+PRODUCTION_SUBMIT_EXECUTION_POLICY_ARMED = "armed"
+PRODUCTION_SUBMIT_EXECUTION_POLICIES = {
+    "disabled",
+    PRODUCTION_SUBMIT_EXECUTION_POLICY_ARMED,
+}
 FORBIDDEN_EFFECTS = {
     "withdrawal_or_transfer_created": False,
     "live_profile_changed": False,
@@ -121,6 +135,19 @@ def prepare_ticket_bound_protected_submit_attempt(
     )
     blockers = list(graph["blockers"])
     blockers.extend(_graph_blockers(graph, now_ms=now_ms))
+    submit_mode_decision = _current_submit_mode_decision(
+        control_state,
+        operation_submit_command_id=operation_submit_command_id,
+        now_ms=now_ms,
+    )
+    if submit_mode == SUBMIT_MODE_REAL_GATEWAY_ACTION:
+        blockers.extend(
+            _real_submit_mode_decision_blockers(
+                submit_mode_decision,
+                ticket_id=ticket_id,
+                operation_submit_command_id=operation_submit_command_id,
+            )
+        )
     submit_request = _submit_request(graph, now_ms=now_ms) if not blockers else {}
     if not submit_request and not blockers:
         blockers.append("ticket_bound_submit_request_unavailable")
@@ -149,6 +176,9 @@ def prepare_ticket_bound_protected_submit_attempt(
         submit_result=_disabled_smoke_result(graph, submit_request)
         if status == "disabled_smoke_passed"
         else {},
+        submit_mode_decision_id=str(
+            submit_mode_decision.get("submit_mode_decision_id") or ""
+        ),
         official_operation_layer_submit_called=official_submit_called,
         exchange_write_called=False,
         order_created=False,
@@ -177,6 +207,95 @@ def prepare_ticket_bound_protected_submit_attempt(
                 else "repair_ticket_bound_protected_submit_attempt"
             )
         ),
+        extra={"submit_mode_decision": submit_mode_decision},
+    )
+
+
+def materialize_ticket_bound_submit_mode_decision(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    operation_submit_command_id: str,
+    production_submit_execution_policy: str = "disabled",
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    now_ms = int(now_ms or time.time() * 1000)
+    ticket_id = str(ticket_id or "").strip()
+    operation_submit_command_id = str(operation_submit_command_id or "").strip()
+    production_submit_execution_policy = str(
+        production_submit_execution_policy or ""
+    ).strip()
+    if production_submit_execution_policy not in PRODUCTION_SUBMIT_EXECUTION_POLICIES:
+        production_submit_execution_policy = "disabled"
+    if not ticket_id:
+        return _submit_mode_decision_result(
+            {},
+            now_ms=now_ms,
+            status="blocked",
+            blockers=["ticket_id_required"],
+            next_action="provide_ticket_id",
+        )
+    if not operation_submit_command_id:
+        return _submit_mode_decision_result(
+            {},
+            now_ms=now_ms,
+            status="blocked",
+            blockers=["operation_submit_command_id_required"],
+            next_action="provide_operation_submit_command_id",
+        )
+    try:
+        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+    except RuntimeControlStateRepositoryError as exc:
+        return _submit_mode_decision_result(
+            {},
+            now_ms=now_ms,
+            status="blocked",
+            blockers=[f"runtime_control_state_invalid:{exc}"],
+            next_action="repair_pg_runtime_control_state",
+        )
+
+    graph = _select_graph(
+        control_state,
+        ticket_id=ticket_id,
+        operation_submit_command_id=operation_submit_command_id,
+    )
+    blockers = list(graph["blockers"])
+    blockers.extend(_graph_blockers(graph, now_ms=now_ms))
+    blockers.extend(
+        _submit_mode_authority_blockers(
+            graph,
+            production_submit_execution_policy=production_submit_execution_policy,
+        )
+    )
+    blockers = _dedupe(blockers)
+    decision = SUBMIT_MODE_REAL_GATEWAY_ACTION if not blockers else "blocked"
+    first_blocker = blockers[0] if blockers else ""
+    reason = (
+        "production_live_submit_ready"
+        if decision == SUBMIT_MODE_REAL_GATEWAY_ACTION
+        else first_blocker or "submit_mode_decision_blocked"
+    )
+    row = _submit_mode_decision_row(
+        graph,
+        decision=decision,
+        decision_reason=reason,
+        first_blocker=first_blocker,
+        blockers=blockers,
+        production_submit_execution_policy=production_submit_execution_policy,
+        now_ms=now_ms,
+    )
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_submit_mode_decisions",
+        "submit_mode_decision_id",
+        row,
+    )
+    return _submit_mode_decision_result(
+        row,
+        now_ms=now_ms,
+        status=decision,
+        blockers=blockers,
+        next_action=_submit_mode_decision_next_action(row),
     )
 
 
@@ -470,6 +589,18 @@ def _select_graph(
         "action_time_lane_input_id",
         ticket.get("action_time_lane_input_id") if ticket else "",
     )
+    runtime_scope = _row_by_id(
+        control_state,
+        "runtime_scope_bindings",
+        "runtime_scope_binding_id",
+        ticket.get("runtime_scope_binding_id") if ticket else "",
+    )
+    owner_policy = _row_by_id(
+        control_state,
+        "owner_policy_current",
+        "policy_current_id",
+        runtime_scope.get("policy_current_id") if runtime_scope else "",
+    )
     runtime_safety = _row_by_id(
         control_state,
         "runtime_safety_state",
@@ -505,6 +636,8 @@ def _select_graph(
         "ticket": ticket,
         "handoff": handoff,
         "lane": lane,
+        "runtime_scope": runtime_scope,
+        "owner_policy": owner_policy,
         "runtime_safety": runtime_safety,
         "signal": signal,
         "protection": protection,
@@ -603,6 +736,277 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
     if execution_policy.get("status") != "current":
         blockers.append(f"execution_policy_not_current:{execution_policy.get('status')}")
     return _dedupe(blockers)
+
+
+def _submit_mode_authority_blockers(
+    graph: dict[str, Any],
+    *,
+    production_submit_execution_policy: str,
+) -> list[str]:
+    blockers: list[str] = []
+    ticket = _as_dict(graph.get("ticket"))
+    lane = _as_dict(graph.get("lane"))
+    runtime_scope = _as_dict(graph.get("runtime_scope"))
+    owner_policy = _as_dict(graph.get("owner_policy"))
+    if not runtime_scope:
+        blockers.append("runtime_scope_binding_missing")
+    if not owner_policy:
+        blockers.append("owner_policy_current_missing")
+    if blockers:
+        return blockers
+    if lane.get("lane_scope") != "real_submit_candidate":
+        blockers.append(f"lane_scope_not_real_submit_candidate:{lane.get('lane_scope')}")
+    if runtime_scope.get("status") != "active":
+        blockers.append(f"runtime_scope_status_not_active:{runtime_scope.get('status')}")
+    if runtime_scope.get("live_submit_allowed") is not True:
+        blockers.append("runtime_scope_live_submit_not_allowed")
+    for flag in (
+        "selected_strategygroup_scope",
+        "symbol_side_scope_closed",
+        "notional_leverage_scope_closed",
+    ):
+        if runtime_scope.get(flag) is not True:
+            blockers.append(f"runtime_scope_flag_false:{flag}")
+    for key in ("strategy_group_id", "symbol", "side", "runtime_profile_id"):
+        if str(runtime_scope.get(key) or "") != str(ticket.get(key) or ""):
+            blockers.append(f"runtime_scope_ticket_mismatch:{key}")
+    if owner_policy.get("enabled_state") != "enabled":
+        blockers.append(f"owner_policy_not_enabled:{owner_policy.get('enabled_state')}")
+    if str(owner_policy.get("live_submit_allowed") or "") not in {
+        "scoped",
+        "conditional_hard_gated",
+    }:
+        blockers.append(
+            "owner_policy_live_submit_not_allowed:"
+            f"{owner_policy.get('live_submit_allowed')}"
+        )
+    if production_submit_execution_policy != PRODUCTION_SUBMIT_EXECUTION_POLICY_ARMED:
+        blockers.append("production_submit_execution_policy_not_armed")
+    blockers.extend(_runtime_gateway_binding_env_blockers())
+    return _dedupe(blockers)
+
+
+def _runtime_gateway_binding_env_blockers() -> list[str]:
+    expected = {
+        "TRADING_ENV": "live",
+        "EXCHANGE_TESTNET": "false",
+        "BRC_EXECUTION_PERMISSION_MAX": "order_allowed",
+        "RUNTIME_CONTROL_API_ENABLED": "false",
+        "RUNTIME_TEST_SIGNAL_INJECTION_ENABLED": "false",
+        "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED": "true",
+    }
+    blockers: list[str] = []
+    for key, expected_value in expected.items():
+        actual = os.environ.get(key, "").strip().lower()
+        if actual != expected_value:
+            blockers.append(f"{key.lower()}_not_{expected_value}")
+    return blockers
+
+
+def _current_submit_mode_decision(
+    control_state: dict[str, Any],
+    *,
+    operation_submit_command_id: str,
+    now_ms: int,
+) -> dict[str, Any]:
+    operation_submit_command_id = str(operation_submit_command_id or "").strip()
+    if not operation_submit_command_id:
+        return {}
+    rows = [
+        row
+        for row in _rows(control_state.get("ticket_bound_submit_mode_decisions"))
+        if str(row.get("operation_submit_command_id") or "")
+        == operation_submit_command_id
+        and int(row.get("expires_at_ms") or 0) > now_ms
+    ]
+    if not rows:
+        return {}
+    return sorted(rows, key=lambda row: int(row.get("created_at_ms") or 0), reverse=True)[
+        0
+    ]
+
+
+def _real_submit_mode_decision_blockers(
+    decision: dict[str, Any],
+    *,
+    ticket_id: str,
+    operation_submit_command_id: str,
+) -> list[str]:
+    if not decision:
+        return ["submit_mode_decision_missing_for_real_gateway_action"]
+    blockers: list[str] = []
+    if decision.get("decision") != SUBMIT_MODE_REAL_GATEWAY_ACTION:
+        blockers.append(f"submit_mode_decision_not_real:{decision.get('decision')}")
+    if str(decision.get("ticket_id") or "") != str(ticket_id or ""):
+        blockers.append("submit_mode_decision_ticket_mismatch")
+    if str(decision.get("operation_submit_command_id") or "") != str(
+        operation_submit_command_id or ""
+    ):
+        blockers.append("submit_mode_decision_command_mismatch")
+    if decision.get("blockers"):
+        blockers.append("submit_mode_decision_has_blockers")
+    return _dedupe(blockers)
+
+
+def _submit_mode_decision_row(
+    graph: dict[str, Any],
+    *,
+    decision: str,
+    decision_reason: str,
+    first_blocker: str,
+    blockers: list[str],
+    production_submit_execution_policy: str,
+    now_ms: int,
+) -> dict[str, Any]:
+    ticket = _as_dict(graph.get("ticket"))
+    handoff = _as_dict(graph.get("handoff"))
+    safety = _as_dict(graph.get("runtime_safety"))
+    lane = _as_dict(graph.get("lane"))
+    runtime_scope = _as_dict(graph.get("runtime_scope"))
+    owner_policy = _as_dict(graph.get("owner_policy"))
+    protection = _as_dict(graph.get("protection"))
+    expires_at_ms = _min_positive_ms(
+        [
+            ticket.get("expires_at_ms"),
+            safety.get("valid_until_ms"),
+            protection.get("expires_at_ms"),
+        ],
+        default=now_ms + 300_000,
+    )
+    operation_submit_command_id = str(
+        handoff.get("operation_submit_command_id")
+        or ticket.get("operation_submit_command_id")
+        or ""
+    )
+    return {
+        "submit_mode_decision_id": _stable_id(
+            "submit_mode_decision",
+            operation_submit_command_id,
+        ),
+        "ticket_id": str(ticket.get("ticket_id") or handoff.get("ticket_id") or ""),
+        "operation_layer_handoff_id": str(
+            handoff.get("operation_layer_handoff_id") or ""
+        ),
+        "operation_submit_command_id": operation_submit_command_id,
+        "runtime_safety_snapshot_id": str(
+            safety.get("runtime_safety_snapshot_id") or ""
+        ),
+        "action_time_lane_input_id": str(
+            ticket.get("action_time_lane_input_id")
+            or lane.get("action_time_lane_input_id")
+            or ""
+        ),
+        "runtime_scope_binding_id": str(
+            runtime_scope.get("runtime_scope_binding_id") or ""
+        ),
+        "policy_current_id": str(owner_policy.get("policy_current_id") or ""),
+        "strategy_group_id": str(
+            ticket.get("strategy_group_id") or handoff.get("strategy_group_id") or ""
+        ),
+        "symbol": str(ticket.get("symbol") or handoff.get("symbol") or ""),
+        "side": str(ticket.get("side") or handoff.get("side") or ""),
+        "runtime_profile_id": str(
+            ticket.get("runtime_profile_id") or handoff.get("runtime_profile_id") or ""
+        ),
+        "decision": decision,
+        "decision_reason": decision_reason,
+        "first_blocker": first_blocker,
+        "blockers": blockers,
+        "warnings": [],
+        "evidence_refs": {
+            "ticket_id": ticket.get("ticket_id"),
+            "finalgate_pass_id": handoff.get("finalgate_pass_id"),
+            "operation_layer_handoff_id": handoff.get("operation_layer_handoff_id"),
+            "operation_submit_command_id": operation_submit_command_id,
+            "runtime_safety_snapshot_id": safety.get("runtime_safety_snapshot_id"),
+            "runtime_scope_binding_id": runtime_scope.get("runtime_scope_binding_id"),
+            "policy_current_id": owner_policy.get("policy_current_id"),
+            "protection_ref_id": ticket.get("protection_ref_id"),
+        },
+        "production_submit_execution_policy": production_submit_execution_policy,
+        "gateway_binding_ready": not any(
+            blocker.startswith("runtime_exchange")
+            or blocker.startswith("trading_env_")
+            or blocker.startswith("exchange_testnet_")
+            or blocker.startswith("brc_execution_permission_max_")
+            or blocker.startswith("runtime_control_api_")
+            or blocker.startswith("runtime_test_signal_injection_")
+            for blocker in blockers
+        ),
+        "authority_boundary": SUBMIT_MODE_DECISION_AUTHORITY_BOUNDARY,
+        "created_at_ms": now_ms,
+        "expires_at_ms": expires_at_ms,
+        "updated_at_ms": now_ms,
+    }
+
+
+def _submit_mode_decision_result(
+    decision_row: dict[str, Any],
+    *,
+    now_ms: int,
+    status: str,
+    blockers: list[str],
+    next_action: str,
+) -> dict[str, Any]:
+    return {
+        "schema": "brc.ticket_bound_submit_mode_decision.v1",
+        "status": status,
+        "decision": decision_row.get("decision") or status,
+        "submit_mode_decision_id": decision_row.get("submit_mode_decision_id"),
+        "ticket_id": decision_row.get("ticket_id"),
+        "operation_layer_handoff_id": decision_row.get("operation_layer_handoff_id"),
+        "operation_submit_command_id": decision_row.get(
+            "operation_submit_command_id"
+        ),
+        "runtime_safety_snapshot_id": decision_row.get("runtime_safety_snapshot_id"),
+        "action_time_lane_input_id": decision_row.get("action_time_lane_input_id"),
+        "runtime_scope_binding_id": decision_row.get("runtime_scope_binding_id"),
+        "policy_current_id": decision_row.get("policy_current_id"),
+        "strategy_group_id": decision_row.get("strategy_group_id"),
+        "symbol": decision_row.get("symbol"),
+        "side": decision_row.get("side"),
+        "runtime_profile_id": decision_row.get("runtime_profile_id"),
+        "decision_reason": decision_row.get("decision_reason") or (
+            blockers[0] if blockers else status
+        ),
+        "first_blocker": decision_row.get("first_blocker") or (
+            blockers[0] if blockers else ""
+        ),
+        "blockers": blockers,
+        "warnings": decision_row.get("warnings") or [],
+        "evidence_refs": decision_row.get("evidence_refs") or {},
+        "production_submit_execution_policy": decision_row.get(
+            "production_submit_execution_policy"
+        ),
+        "gateway_binding_ready": decision_row.get("gateway_binding_ready") is True,
+        "next_action": next_action,
+        "authority_boundary": decision_row.get(
+            "authority_boundary",
+            SUBMIT_MODE_DECISION_AUTHORITY_BOUNDARY,
+        ),
+        "observed_at_ms": now_ms,
+    }
+
+
+def _submit_mode_decision_next_action(decision: dict[str, Any]) -> str:
+    value = str(decision.get("decision") or "")
+    if value == SUBMIT_MODE_REAL_GATEWAY_ACTION:
+        return "call_ticket_bound_real_gateway_submit"
+    if value == SUBMIT_MODE_DISABLED_SMOKE:
+        return "run_disabled_smoke_rehearsal"
+    return "repair_ticket_bound_submit_mode_decision"
+
+
+def _min_positive_ms(values: list[Any], *, default: int) -> int:
+    positive: list[int] = []
+    for value in values:
+        try:
+            parsed = int(value or 0)
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            positive.append(parsed)
+    return min(positive) if positive else default
 
 
 def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
@@ -712,6 +1116,7 @@ def _attempt_row(
     warnings: list[str],
     submit_request: dict[str, Any],
     submit_result: dict[str, Any],
+    submit_mode_decision_id: str,
     official_operation_layer_submit_called: bool,
     exchange_write_called: bool,
     order_created: bool,
@@ -741,6 +1146,7 @@ def _attempt_row(
         "symbol": str(ticket.get("symbol") or handoff.get("symbol") or ""),
         "side": str(ticket.get("side") or handoff.get("side") or ""),
         "runtime_profile_id": str(ticket.get("runtime_profile_id") or handoff.get("runtime_profile_id") or ""),
+        "submit_mode_decision_id": submit_mode_decision_id,
         "submit_mode": submit_mode,
         "status": status,
         "submit_allowed": submit_allowed,
@@ -1294,6 +1700,7 @@ def _result(
         "operation_submit_command_id": attempt.get("operation_submit_command_id"),
         "runtime_safety_snapshot_id": attempt.get("runtime_safety_snapshot_id"),
         "action_time_lane_input_id": attempt.get("action_time_lane_input_id"),
+        "submit_mode_decision_id": attempt.get("submit_mode_decision_id"),
         "strategy_group_id": attempt.get("strategy_group_id"),
         "symbol": attempt.get("symbol"),
         "side": attempt.get("side"),

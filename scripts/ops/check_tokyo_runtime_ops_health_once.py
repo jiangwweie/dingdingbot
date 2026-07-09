@@ -945,6 +945,12 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "notify_suppressed",
     }:
         issues.append("server_monitor_status_not_classified")
+    monitor_blocker_classes = _current_monitor_blocker_classes(
+        monitor=monitor,
+        goal=goal,
+        open_counts=snapshot.get("open_counts") or {},
+        issues=issues,
+    )
 
     return {
         "schema": "brc.ops.l2_l7_chain_health_summary.v1",
@@ -959,7 +965,8 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "goal_status": goal.get("status"),
         "goal_blockers": blockers,
         "server_monitor_status": monitor.get("status"),
-        "server_monitor_blocker_classes": monitor.get("blocker_classes") or [],
+        "server_monitor_blocker_classes": monitor_blocker_classes,
+        "server_monitor_raw_blocker_classes": monitor.get("blocker_classes") or [],
         "unadvanced_fresh_signal_count": len(snapshot.get("unadvanced_fresh_signals") or []),
         "recent_duplicate_lane_count": len(snapshot.get("recent_duplicate_lanes") or []),
         "submitted_attempt_without_protection_count": len(
@@ -1010,6 +1017,39 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "mutates_live_profile_or_sizing": False,
         },
     }
+
+
+def _current_monitor_blocker_classes(
+    *,
+    monitor: dict[str, Any],
+    goal: dict[str, Any],
+    open_counts: dict[str, Any],
+    issues: list[str],
+) -> list[Any]:
+    raw = monitor.get("blocker_classes") or []
+    if not raw:
+        return []
+    if monitor.get("status") == "quiet":
+        return []
+    has_open_chain_object = any(int(value or 0) for value in open_counts.values())
+    chain_issues = [
+        issue
+        for issue in issues
+        if issue
+        not in {
+            "server_monitor_status_not_classified",
+            "server_monitor_forbidden_effect_detected",
+        }
+    ]
+    if (
+        monitor.get("status") == "notify"
+        and not has_open_chain_object
+        and not chain_issues
+        and goal.get("status")
+        in {"waiting_for_signal", "protected_submit_rehearsal_completed"}
+    ):
+        return []
+    return raw
 
 
 def _missing_tables(
