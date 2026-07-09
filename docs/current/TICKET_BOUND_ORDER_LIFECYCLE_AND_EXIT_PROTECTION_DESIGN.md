@@ -1,6 +1,6 @@
 # Ticket-Bound Order Lifecycle And Exit Protection Design
 
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 ## Objective
 
@@ -42,10 +42,10 @@ review plan.
 | **Runner mutation executor** | `TicketBoundRunnerMutationExecutor` consumes a prepared PG command, cancels the old full-size SL through an injected gateway, submits RUNNER_SL, and records the PG result | It cannot call FinalGate, change profile/sizing, or use repo files as authority |
 | **Orphan protection cleanup command** | Deployed migration `098` adds `brc_ticket_bound_orphan_protection_cleanup_commands` and `orphan_protection_cleanup_command` for flat-position live-protection cleanup | It cancels only PG-linked reduce-only protection refs after `position_closed_protection_live`; exchange-only unknown orders remain blocked |
 | **Lifecycle closure materializer** | `materialize_ticket_bound_lifecycle_closure` closes PG lifecycle after final exit, reconciliation, settlement, and review proofs | It requires proof IDs and flat-position confirmation; it summarizes closure and does not discover exchange truth by itself |
-| **First post-submit reconciliation tick** | Designed in `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` | Implementation must create current PG reconciliation state immediately after real protected submit result |
-| **Recovery command matrix** | Owner confirmed SL/TP1/runner/retry/freeze defaults on 2026-07-09 | Implementation must map every unsafe lifecycle blocker to one recovery command or hard stop |
+| **First post-submit reconciliation tick** | Deployed in Tokyo release `4b0b8a27` with `brc_ticket_bound_reconciliation_ticks` | It creates current PG reconciliation state immediately after real protected submit result; disabled smoke creates no first tick |
+| **Recovery command matrix** | Deployed in Tokyo release `4b0b8a27` for SL/TP1 degraded recovery, max 3 attempts, and scope freeze writes | Scope freeze rows still need to become pre-submit hard blockers across promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit |
 | **ExchangeGateway** | Existing gateway can place, cancel, and read orders/fills/positions through lifecycle-ready methods | The runner proof layer must not become a second exchange mutation path |
-| **Deploy status** | Submit-mode decision and real-gateway submit-boundary test are deployed on Tokyo at `110e680c5a919043e46a145d9ef4503638473471` with PG `alembic=100` | Deployment proves code/migration acceptance and gateway-boundary reachability, not a live market outcome |
+| **Deploy status** | Post-submit first tick and recovery hardening are deployed on Tokyo at `4b0b8a272814b2458fafc1913f8d7c63219ff321` with PG `alembic=101` | Deployment proves code/migration acceptance and post-submit first-tick readiness, not a live market outcome |
 | **Impact test** | Active scopes reach mock submitted -> exit protection set -> runner/final closure coverage; deployed tests cover 9 full-chain failure scenarios | Test proves entry-fill + SL/TP1 protection set materialization, runner SL, final closure, and exact lifecycle hard stops |
 
 ### Known P0 / P1 Gaps
@@ -59,8 +59,10 @@ review plan.
 | **P0** | TP1 fill -> official SL cancel/replace and RUNNER_SL submit is not one closed ticket-bound mutation path | Code-covered and deployed by `runner_mutation_command` and `runner_mutation_executor`; next acceptance is real-signal/live-ticket observation |
 | **P0** | Exchange truth is not yet the current authority for protection completeness | Code-covered and deployed by `protection_reconciler` over caller-provided exchange snapshots; next acceptance is official exchange snapshot wiring/capability audit |
 | **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Code-covered and deployed by exact lifecycle classification plus `protection_recovery_command`; next acceptance is official scheduling/API path audit |
-| **P0** | First exchange-truth reconciliation tick is not yet materialized immediately after real protected submit result | Design confirmed; implement PG `first_post_submit` tick and deterministic status transitions |
-| **P0** | Recovery commands are not yet guaranteed one-to-one for every unsafe lifecycle blocker | Design confirmed; implement deterministic command matrix, retry limit, and scope freeze |
+| **P0** | First exchange-truth reconciliation tick is not yet materialized immediately after real protected submit result | Closed and deployed by migration `101` and `post_submit_reconciliation_tick` |
+| **P0** | Recovery commands are not yet guaranteed one-to-one for every unsafe lifecycle blocker | Partially closed and deployed for SL/TP1 degraded recovery, retry limit, and scope freeze writes; remaining work is scope freeze pre-submit enforcement and continuous reconciliation |
+| **P0** | Scope freeze rows do not yet block all future pre-submit paths | Active `brc_ticket_bound_scope_freezes` must block matching `strategy_group_id + symbol + side` before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit |
+| **P0** | Reconciliation after first tick is not yet a complete continuous lifecycle cadence | Implement scheduled/event-driven reconciliation ticks until lifecycle closure, exact recovery command, or hard stop |
 | **P1** | Flat position with PG-linked live protection had no first-class cleanup command | Closed and deployed by migration `098` and `orphan_protection_cleanup_command` |
 | **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Closed in code by the Lifecycle Safety Core materializers, full-chain harness, recovery commands, protection reconciler, runner mutation executor, and final closure; live outcome proof waits for a future real ticket |
 | **P1** | Action-time TTL behavior across the full post-submit chain | Closed locally: expired tickets still block new submit attempts, while already-submitted ticket-bound lifecycles can continue protection, runner, and final closure |
@@ -527,10 +529,10 @@ chain_position: action_time_boundary
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scope
 stage: p0_3_p0_4_design_confirmed
-first_blocker: first_tick_and_recovery_command_implementation_pending
-evidence: Tokyo release head 110e680c, PG alembic 100, lifecycle materializers and services cover submitted attempt -> entry fill proof -> SL/TP1 proof -> exchange snapshot reconciliation -> TP1 fill -> official runner mutation command/executor -> runner proof -> final closure proof without file authority; first-tick and recovery-command defaults are confirmed in POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md
-next_action: implement first post-submit reconciliation tick, deterministic recovery commands, retry/freeze rules, scheduler integration, focused tests, deploy, and postdeploy acceptance
-stop_condition: every real protected submit result reaches matched/protected, pending visibility, deterministic recovery command, or one exact hard stop without file authority
+first_blocker: scope_freeze_pre_submit_gate_missing
+evidence: Tokyo release head 4b0b8a27, PG alembic 101, lifecycle materializers and services cover submitted attempt -> entry fill proof -> SL/TP1 proof -> exchange snapshot reconciliation -> TP1 fill -> official runner mutation command/executor -> runner proof -> final closure proof without file authority; first post-submit tick and recovery hardening are deployed; active scope freeze rows still need pre-submit enforcement
+next_action: enforce active scope freezes before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit; then implement Live Outcome Ledger and continuous reconciliation tick
+stop_condition: active brc_ticket_bound_scope_freezes blocks matching StrategyGroup + symbol + side before any new submit path can form
 owner_action_required: no for current observation; yes before future deployment or authority expansion
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound gateway path
 ```

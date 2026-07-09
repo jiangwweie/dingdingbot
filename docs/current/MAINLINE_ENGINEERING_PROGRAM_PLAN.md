@@ -2,7 +2,7 @@
 title: MAINLINE_ENGINEERING_PROGRAM_PLAN
 status: CURRENT_PROGRAM_PLAN
 authority: docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md
-last_verified: 2026-07-08
+last_verified: 2026-07-09
 ---
 
 # Mainline Engineering Program Plan
@@ -30,16 +30,17 @@ repo MD/JSON/output/report files.
 
 | Fact | Current evidence |
 | --- | --- |
-| **dev and Tokyo are aligned on submit-mode and lifecycle wiring** | `dev`, `origin/dev`, and Tokyo release head are `110e680c5a919043e46a145d9ef4503638473471`; Tokyo postdeploy acceptance passed; PG migration is at `alembic=100` |
+| **dev and Tokyo are aligned on post-submit first tick** | `dev`, `origin/dev`, and Tokyo release head are `4b0b8a272814b2458fafc1913f8d7c63219ff321`; Tokyo postdeploy acceptance passed; PG migration is at `alembic=101` |
 | **PG current state is the runtime source** | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | **Repo/output/report files are not runtime authority** | `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md`, `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | **Five StrategyGroups are active WIP** | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`, PG candidate scope seed |
 | **Multi-symbol and side-specific action-time path exists** | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`, `docs/current/MULTI_STRATEGY_MULTI_SYMBOL_MULTI_SIDE_ACTION_TIME_EVOLUTION_DESIGN.md` |
 | **Ticket identity and TP1 are PG-backed** | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | **Initial order lifecycle/protection PG objects exist** | `brc_ticket_bound_*` tables and current ticket-bound materializers |
-| **Runner dynamic management is code-covered and deployed as lifecycle repair** | `runner_mutation_command`, `runner_mutation_executor`, `runner_protection_adjuster`, lifecycle tests, and Tokyo release `110e680c` cover TP1 filled -> RUNNER_SL submit -> old SL cleanup -> runner proof through official-path records |
+| **Runner dynamic management is code-covered and deployed as lifecycle repair** | `runner_mutation_command`, `runner_mutation_executor`, `runner_protection_adjuster`, lifecycle tests, and Tokyo release `4b0b8a27` cover TP1 filled -> RUNNER_SL submit -> old SL cleanup -> runner proof through official-path records |
 | **Exchange protection reconciliation is code-covered and deployed as readonly comparison logic** | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots, including missing order, side mismatch, qty mismatch, orphan reduce-only order, TP1-fill runner gap, and flat-position live protection |
-| **First tick and recovery-command defaults are confirmed** | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` records immediate first tick, 30-second visibility grace, SL emergency recovery, TP1 degraded recovery, runner new-SL-before-old-SL-cancel, max 3 retries, and scope freeze at `strategy_group_id + symbol + side` |
+| **First tick and recovery-command defaults are deployed** | Tokyo release `4b0b8a27` creates `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, max 3 recovery attempts, and scope freeze records at `strategy_group_id + symbol + side` |
+| **Scope freeze is not yet a full pre-submit hard blocker** | Scope freeze rows are written by first tick / reconciler / recovery command paths, but promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit must still reject active frozen scopes before the freeze can be considered fully enforced |
 | **No recent postdeploy signal or ticket exists** | Latest server health after deploy showed `recent signals/promotions/lanes/tickets/attempts = 0`; this is market/no-event state, not a current engineering blocker |
 | **Trading quality / capital risk allocation is designed but not fully implemented** | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`; `risk_at_stop` must be split into an earlier reservation layer before advanced allocation |
 
@@ -51,7 +52,9 @@ repo MD/JSON/output/report files.
 | **P0-1 Ticket-Bound Lifecycle Safety Core** | P0 | Keep lifecycle state machine, hard invariants, sequential submit recovery, runner mutation, exchange protection reconciliation, and closure under one model | `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` | A submitted ticket can prove ENTRY, SL, TP1, RUNNER_SL, final exit, reconciliation, settlement, and review, or stop at one exact lifecycle hard blocker |
 | **P0-2 Full Chain Simulation Harness** | P0 | Verify the lifecycle model with constructed raw inputs, two golden paths, and a failure matrix without real exchange writes | `L1_L9_OPTIMIZATION_EXECUTION_PLAN.md`, `PRE_TRADE_RUNTIME_CONTRACT.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` | AVAX short and CPM long golden paths plus failure matrix prove lifecycle correctness; broader active event specs remain impact coverage |
 | **P0-C Production Lifecycle Wiring** | P0 | Wire existing lifecycle, first reconciliation tick, recovery, runner mutation, reconciler, and cleanup services into production cadence without adding a second lifecycle path | `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `P0_C_PRODUCTION_LIFECYCLE_SCHEDULER_AND_SNAPSHOT_SOURCE_DESIGN.md`, `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` | ENTRY, SL, TP1, RUNNER_SL, final exit, first tick, recovery, cleanup, and reconciliation are event/startup/periodic wired and stop at exact lifecycle blockers |
+| **P0-E Scope Freeze Pre-Submit Gate** | P0 | Turn active scope freezes into hard blockers before any new promotion, lane, ticket, Runtime Safety State, FinalGate preflight, or protected submit can proceed | `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md`, `BLOCKER_CLASSIFICATION_CONTRACT.md`, `PRE_TRADE_RUNTIME_CONTRACT.md` | An active `brc_ticket_bound_scope_freezes` row blocks the exact `strategy_group_id + symbol + side` everywhere before submit and explains the freeze to monitor/read models |
 | **P0-D Live Outcome Ledger** | P0 | Turn real tickets and orders into structured strategy-learning rows without becoming submit authority | `LIVE_OUTCOME_LEDGER_CONTRACT.md`, `STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` | Every real ticket can bind entry, stop, TP1, runner, final exit, fees, funding, PnL, MAE/MFE, R multiple, lifecycle defects, and review decision |
+| **P0-F Continuous Reconciliation Tick** | P0 | Continue exchange-truth reconciliation after the first post-submit tick until lifecycle closure, exact recovery, or hard stop | `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `P0_C_PRODUCTION_LIFECYCLE_SCHEDULER_AND_SNAPSHOT_SOURCE_DESIGN.md` | Scheduled/event-driven ticks refresh open orders, fills, positions, protection refs, runner state, and final exit without creating report files or duplicate lifecycle actions |
 | **P1 Risk Reservation v0** | P1 | Require ticket-level stop-risk estimate and budget reservation before FinalGate-ready state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | `risk_at_stop = abs(entry_price - stop_price) * quantity` is computed and reserved before FinalGate-ready submit |
 | **P1-C Owner Explanation Read Model** | P1 | Make no-trade, signal, ticket, submit, runner, and closure states human-readable | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, `RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` | Owner can see whether the system is waiting, processing, blocked, protected, or closed without decoding internal terms |
 | **P1-D Performance And Retention Control** | P1 | Keep no-signal ticks, monitor runs, PG rows, logs, and reports bounded | `SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md`, `REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md`, `PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` | No recurring report growth; no restart storm; PG/file-authority validators remain clear |
@@ -66,12 +69,29 @@ repo MD/JSON/output/report files.
 | 2 | **P0-1 Ticket-Bound Lifecycle Safety Core** | State machine, invariants, and failure states define what the harness must prove |
 | 3 | **P0-2 Full Chain Simulation Harness** | It verifies the lifecycle model with constructed market/fact/order inputs before waiting for live market events |
 | 4 | **P0-C Production Lifecycle Wiring** | TP1-filled residual position protection and post-entry recovery are the highest post-entry funds-safety risks |
-| 5 | **P0-D Live Outcome Ledger** | Real trade results must become structured learning data, not narrative review only |
-| 6 | **P1 Risk Reservation v0** | A ticket must express max stop loss before FinalGate-ready submit |
-| 7 | **P1-C Owner Explanation Read Model** | The Owner surface must explain the chain without exposing raw internal blockers |
-| 8 | **P1-D Performance And Retention Control** | Server health must remain stable while watcher/monitor run continuously without deleting trade lineage |
-| 9 | **P2-E Advanced Capital Risk Allocation** | Portfolio-level sizing and capital quality should scale only after per-ticket lifecycle mechanics are hard |
-| 10 | **P2-F Frontend Read Model Integration** | Frontend becomes durable only after backend read models are stable |
+| 5 | **P0-E Scope Freeze Pre-Submit Gate** | A frozen scope must stop new promotion / ticket / submit before the same lifecycle defect can recur |
+| 6 | **P0-D Live Outcome Ledger** | Real trade results must become structured learning data, not narrative review only |
+| 7 | **P0-F Continuous Reconciliation Tick** | First tick catches immediate exchange truth; continued ticks are required until closure, recovery, or hard stop |
+| 8 | **P1 Risk Reservation v0** | A ticket must express max stop loss before FinalGate-ready submit |
+| 9 | **P1-C Owner Explanation Read Model** | The Owner surface must explain the chain without exposing raw internal blockers |
+| 10 | **P1-D Performance And Retention Control** | Server health must remain stable while watcher/monitor run continuously without deleting trade lineage |
+| 11 | **P2-F Frontend Read Model Integration** | Frontend becomes durable only after backend read models are stable |
+| 12 | **P2-E Advanced Capital Risk Allocation** | Portfolio-level sizing and capital quality should scale only after per-ticket lifecycle mechanics are hard |
+
+## Current Next Execution Order
+
+This is the authoritative remaining sequence after Tokyo release `4b0b8a27`.
+It supersedes ad hoc task ordering in chat summaries.
+
+| Order | Next work | Priority | Acceptance |
+| --- | --- | --- | --- |
+| 1 | **Scope freeze pre-submit hard blocker** | P0 | Active `brc_ticket_bound_scope_freezes` blocks matching `strategy_group_id + symbol + side` before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit |
+| 2 | **Live Outcome Ledger** | P0 | Every real ticket has one structured outcome row or one exact hard-blocked outcome row |
+| 3 | **Continuous reconciliation tick** | P0 | After first tick, scheduled/event-driven reconciliation continues until lifecycle closure, exact recovery command, or hard stop |
+| 4 | **Risk-at-stop reservation** | P1 | `risk_at_stop = abs(entry_price - stop_price) * quantity` is computed and reserved before FinalGate-ready submit |
+| 5 | **Owner Explanation Read Model** | P1 | Owner can read why the system waited, processed, blocked, protected, recovered, or closed without interpreting internal blocker codes |
+| 6 | **Frontend read-model integration** | P2 | Frontend displays backend-provided explanation/read models only; it does not classify blockers, facts, lanes, tickets, or submit authority |
+| 7 | **Trading quality / capital budget / portfolio risk model** | P2 | Advanced allocation can adjust exposure quality without weakening per-ticket hard safety, stop-risk reservation, or lifecycle reconciliation |
 
 ## Program Details
 
@@ -489,10 +509,10 @@ chain_position: daily_live_enablement_status
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scopes
 stage: p0_3_p0_4_design_confirmed
-first_blocker: first_tick_and_recovery_command_implementation_pending
-evidence: dev/origin-dev/Tokyo are aligned on 110e680c; PG alembic is 100; real gateway submit-boundary test is deployed; first-tick and recovery-command defaults are documented in POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md
-next_action: implement PG first-tick projection, recovery command determinism, scheduler integration, focused tests, deploy, and postdeploy acceptance
-stop_condition: every real protected submit result reaches matched/protected, pending visibility, deterministic recovery command, or one exact hard stop without file authority
+first_blocker: scope_freeze_pre_submit_gate_missing
+evidence: dev/origin-dev/Tokyo are aligned on 4b0b8a27; PG alembic is 101; first post-submit tick, TP1 degraded recovery, retry limit, and scope freeze writes are deployed; active freezes are not yet enforced across every pre-submit consumer
+next_action: implement scope freeze pre-submit hard blocker, then Live Outcome Ledger, continuous reconciliation tick, Risk-at-stop reservation, Owner Explanation Read Model, frontend read-model integration, and trading-quality capital allocation
+stop_condition: active brc_ticket_bound_scope_freezes blocks matching StrategyGroup + symbol + side before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit
 owner_action_required: no
 authority_boundary: no FinalGate bypass, no Operation Layer bypass, no exchange write bypass, no live profile or sizing mutation
 ```
