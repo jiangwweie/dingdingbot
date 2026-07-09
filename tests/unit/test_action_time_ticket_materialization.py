@@ -454,6 +454,28 @@ def test_materializer_blocks_missing_stop_risk_entry_reference(pg_control_connec
     assert _ticket_count(pg_control_connection) == 0
 
 
+def test_materializer_blocks_stop_risk_wrong_side(pg_control_connection):
+    _insert_action_time_lane_graph(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_protection_references
+            SET reference_price = 2200
+            WHERE protection_ref_id = 'protection:SOR-001:ETHUSDT:long:unit'
+            """
+        )
+    )
+
+    payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "risk_reservation_stop_side_not_protective" in payload["blockers"]
+    assert _ticket_count(pg_control_connection) == 0
+
+
 def test_materializer_blocks_runtime_scope_side_mismatch(pg_control_connection):
     lane_id = _insert_action_time_lane_graph(pg_control_connection)
     pg_control_connection.execute(
@@ -699,13 +721,24 @@ def _insert_action_time_lane_graph(
     account_safe_fact_id = f"fact:{strategy_group_id}:{symbol}:{side}:account-safe:unit"
     account_mode_fact_id = f"fact:{strategy_group_id}:{symbol}:{side}:account-mode:unit"
     expires_at_ms = NOW_MS + 600_000
-    fact_values = fact_values or {
-        "opening_range_defined": True,
-        "breakout_confirmed": True,
-        "opening_range_low_reference": "1800",
-        "last_price": "2000",
-        "take_profit_1": "2200",
-    }
+    if row["side"] == "short":
+        default_protection_price = "2000"
+        fact_values = fact_values or {
+            "opening_range_defined": True,
+            "breakdown_confirmed": True,
+            str(row["protection_ref_type"]): default_protection_price,
+            "last_price": "1800",
+            "take_profit_1": "1600",
+        }
+    else:
+        default_protection_price = "1800"
+        fact_values = fact_values or {
+            "opening_range_defined": True,
+            "breakout_confirmed": True,
+            str(row["protection_ref_type"]): default_protection_price,
+            "last_price": "2000",
+            "take_profit_1": "2200",
+        }
 
     _insert_fact(
         conn,
@@ -935,7 +968,7 @@ def _insert_action_time_lane_graph(
                   source_fact_snapshot_id, expires_at_ms
                 ) VALUES (
                   :protection_ref_id, :event_spec_id,
-                  :strategy_group_id, :symbol, :side, :reference_type, 1800,
+                  :strategy_group_id, :symbol, :side, :reference_type, :reference_price,
                   'breakout invalidated below opening range low', 'stop_market',
                   'GTC', 'protection-v1', :source_fact_snapshot_id, :expires_at_ms
                 )
@@ -948,6 +981,7 @@ def _insert_action_time_lane_graph(
                 "symbol": row["symbol"],
                 "side": row["side"],
                 "reference_type": row["protection_ref_type"],
+                "reference_price": default_protection_price,
                 "source_fact_snapshot_id": action_time_fact_id,
                 "expires_at_ms": expires_at_ms,
             },

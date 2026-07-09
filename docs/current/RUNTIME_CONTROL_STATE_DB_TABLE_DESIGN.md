@@ -560,6 +560,8 @@ budget_reservation lineage must match ticket lineage before FinalGate.
 consumed budget_reservation must carry stop-risk reservation before FinalGate,
 Operation Layer handoff, Runtime Safety State, and protected submit.
 risk_at_stop = abs(entry_reference_price - stop_price) * intended_qty.
+long stop_price must be below entry_reference_price.
+short stop_price must be above entry_reference_price.
 ```
 
 Checks and indexes:
@@ -571,6 +573,7 @@ Checks and indexes:
 | `ck_brc_budget_reservations_lineage` | StrategyGroup, symbol, side, profile, notional, leverage, and event refs must match the ticket before FinalGate |
 | `ck_brc_budget_reservations_expiry` | Active reservation requires `expires_at_ms` and cannot be consumed after expiry |
 | `ck_brc_budget_res_stop_risk_positive` | When `risk_at_stop` is present, `entry_reference_price`, `stop_price`, `intended_qty`, and `risk_at_stop` must all be positive |
+| `ck_brc_budget_res_stop_risk_protective_side` | When `risk_at_stop` is present, long stop must be below entry and short stop must be above entry |
 
 ### Protection Reference
 

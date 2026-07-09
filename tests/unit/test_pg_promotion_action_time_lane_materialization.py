@@ -1793,9 +1793,14 @@ def _fact_values(conn, row) -> dict:
             result[key] = fact["expected_value"]
         else:
             result[key] = True
-    result[row["protection_ref_type"]] = "1800"
-    result["last_price"] = "2000"
-    result["take_profit_1"] = "2200" if row["side"] == "long" else "1600"
+    if row["side"] == "short":
+        result[row["protection_ref_type"]] = "2000"
+        result["last_price"] = "1800"
+        result["take_profit_1"] = "1600"
+    else:
+        result[row["protection_ref_type"]] = "1800"
+        result["last_price"] = "2000"
+        result["take_profit_1"] = "2200"
     return result
 
 

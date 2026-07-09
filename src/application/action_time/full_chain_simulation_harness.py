@@ -116,10 +116,20 @@ def run_ticket_bound_full_chain_simulation(
         conn,
         now_ms=now_ms + 2,
     )
+    _require_payload_status(
+        stage="ticket",
+        payload=ticket_payload,
+        expected_status="action_time_ticket_created",
+    )
     finalgate_payload = finalgate_preflight.materialize_action_time_finalgate_preflight(
         conn,
         ticket_id=str(ticket_payload["ticket_id"]),
         now_ms=now_ms + 3,
+    )
+    _require_payload_status(
+        stage="finalgate",
+        payload=finalgate_payload,
+        expected_status="finalgate_ready",
     )
     handoff_payload = (
         operation_layer_handoff.materialize_action_time_operation_layer_handoff(
@@ -129,11 +139,21 @@ def run_ticket_bound_full_chain_simulation(
             now_ms=now_ms + 4,
         )
     )
+    _require_payload_status(
+        stage="operation_layer_handoff",
+        payload=handoff_payload,
+        expected_status="operation_layer_handoff_ready",
+    )
     safety_payload = runtime_safety_state.materialize_ticket_bound_runtime_safety_state(
         conn,
         ticket_id=str(ticket_payload["ticket_id"]),
         operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
         now_ms=now_ms + 5,
+    )
+    _require_payload_status(
+        stage="runtime_safety",
+        payload=safety_payload,
+        expected_status="runtime_safety_state_ready",
     )
     with _mock_submit_decision_env():
         submit_mode_decision_payload = (
@@ -546,10 +566,20 @@ def _prepare_full_chain_submit_context(
         conn,
         now_ms=now_ms + 2,
     )
+    _require_payload_status(
+        stage="ticket",
+        payload=ticket_payload,
+        expected_status="action_time_ticket_created",
+    )
     finalgate_payload = finalgate_preflight.materialize_action_time_finalgate_preflight(
         conn,
         ticket_id=str(ticket_payload["ticket_id"]),
         now_ms=now_ms + 3,
+    )
+    _require_payload_status(
+        stage="finalgate",
+        payload=finalgate_payload,
+        expected_status="finalgate_ready",
     )
     handoff_payload = (
         operation_layer_handoff.materialize_action_time_operation_layer_handoff(
@@ -559,11 +589,21 @@ def _prepare_full_chain_submit_context(
             now_ms=now_ms + 4,
         )
     )
+    _require_payload_status(
+        stage="operation_layer_handoff",
+        payload=handoff_payload,
+        expected_status="operation_layer_handoff_ready",
+    )
     safety_payload = runtime_safety_state.materialize_ticket_bound_runtime_safety_state(
         conn,
         ticket_id=str(ticket_payload["ticket_id"]),
         operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
         now_ms=now_ms + 5,
+    )
+    _require_payload_status(
+        stage="runtime_safety",
+        payload=safety_payload,
+        expected_status="runtime_safety_state_ready",
     )
     with _mock_submit_decision_env():
         submit_mode_decision_payload = (
@@ -644,6 +684,22 @@ def _failure_result(
             "uses_repo_json_or_md_authority": False,
         },
     }
+
+
+def _require_payload_status(
+    *,
+    stage: str,
+    payload: dict[str, Any],
+    expected_status: str,
+) -> None:
+    actual_status = str(payload.get("status") or "")
+    if actual_status == expected_status:
+        return
+    blockers = payload.get("blockers") or payload.get("first_blocker") or []
+    raise RuntimeError(
+        "full_chain_simulation_blocked:"
+        f"{stage}:{actual_status}:expected:{expected_status}:blockers:{blockers}"
+    )
 
 
 class _MockRunnerMutationGateway:
@@ -1019,9 +1075,14 @@ def _fact_values(conn: sa.engine.Connection, row: dict[str, Any]) -> dict[str, A
             result[key] = fact["expected_value"]
         else:
             result[key] = True
-    result[str(row["protection_ref_type"])] = "1800"
-    result["last_price"] = "2000"
-    result["take_profit_1"] = "2200" if row["side"] == "long" else "1600"
+    if row["side"] == "short":
+        result[str(row["protection_ref_type"])] = "2000"
+        result["last_price"] = "1800"
+        result["take_profit_1"] = "1600"
+    else:
+        result[str(row["protection_ref_type"])] = "1800"
+        result["last_price"] = "2000"
+        result["take_profit_1"] = "2200"
     return result
 
 

@@ -34,11 +34,21 @@ def upgrade() -> None:
         "(entry_reference_price > 0 AND stop_price > 0 "
         "AND intended_qty > 0 AND risk_at_stop > 0)",
     )
+    _add_check(
+        "ck_brc_budget_res_stop_risk_protective_side",
+        "risk_at_stop IS NULL OR "
+        "((side = 'long' AND stop_price < entry_reference_price) OR "
+        "(side = 'short' AND stop_price > entry_reference_price))",
+    )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
+        op.execute(
+            f"ALTER TABLE {TABLE_NAME} "
+            "DROP CONSTRAINT IF EXISTS ck_brc_budget_res_stop_risk_protective_side"
+        )
         op.execute(
             f"ALTER TABLE {TABLE_NAME} "
             "DROP CONSTRAINT IF EXISTS ck_brc_budget_res_stop_risk_positive"

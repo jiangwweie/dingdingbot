@@ -33,6 +33,7 @@ def compute_stop_risk_reservation(
         else Decimal("0")
     )
     row = {
+        "side": budget.get("side"),
         "entry_reference_price": entry_reference_price,
         "stop_price": stop_price,
         "intended_qty": intended_qty,
@@ -44,6 +45,9 @@ def compute_stop_risk_reservation(
 
 def budget_stop_risk_blockers(budget: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
+    side = str(budget.get("side") or "").strip().lower()
+    entry_reference_price = _decimal(budget.get("entry_reference_price"))
+    stop_price = _decimal(budget.get("stop_price"))
     if _decimal(budget.get("entry_reference_price")) <= 0:
         blockers.append("risk_reservation_entry_reference_price_missing")
     if _decimal(budget.get("stop_price")) <= 0:
@@ -54,6 +58,13 @@ def budget_stop_risk_blockers(budget: dict[str, Any]) -> list[str]:
         blockers.append("risk_at_stop_invalid")
     if str(budget.get("risk_reservation_basis") or "") != RISK_RESERVATION_BASIS:
         blockers.append("risk_reservation_basis_missing_or_invalid")
+    if entry_reference_price > 0 and stop_price > 0:
+        if side == "long" and stop_price >= entry_reference_price:
+            blockers.append("risk_reservation_stop_side_not_protective")
+        elif side == "short" and stop_price <= entry_reference_price:
+            blockers.append("risk_reservation_stop_side_not_protective")
+        elif side not in {"long", "short"}:
+            blockers.append("risk_reservation_side_missing_or_invalid")
     return blockers
 
 
