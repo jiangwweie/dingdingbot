@@ -249,9 +249,9 @@ def test_l2_l7_refresh_sequence_preserves_state_machine_order_and_light_tick() -
         "materialize_action_time_finalgate_preflight",
         "materialize_action_time_operation_layer_handoff",
         "materialize_ticket_bound_runtime_safety_state",
-        "materialize_ticket_bound_protected_submit_attempt",
         "publish_runtime_control_current_projections_after_action_time",
     ]
+    assert "materialize_ticket_bound_protected_submit_attempt" not in action_time_steps
     assert "materialize_ticket_bound_post_submit_closure" not in action_time_steps
 
     watcher_tick_steps = [

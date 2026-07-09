@@ -72,7 +72,6 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
         "scripts/materialize_action_time_finalgate_preflight.py",
         "scripts/materialize_action_time_operation_layer_handoff.py",
         "scripts/materialize_ticket_bound_runtime_safety_state.py",
-        "scripts/materialize_ticket_bound_protected_submit_attempt.py",
     }
     control_builder_calls = [
         command
@@ -177,7 +176,7 @@ def test_server_product_state_refresh_sequence_default_mode_is_watcher_tick_summ
     ]
 
 
-def test_server_product_state_refresh_sequence_action_time_mode_skips_closure(
+def test_server_product_state_refresh_sequence_action_time_mode_skips_submit_and_closure(
     tmp_path: Path,
 ):
     module = _load_module()
@@ -201,10 +200,10 @@ def test_server_product_state_refresh_sequence_action_time_mode_skips_closure(
     assert "scripts/materialize_action_time_ticket.py" in command_names
     assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
     assert "scripts/materialize_ticket_bound_runtime_safety_state.py" in command_names
-    assert "scripts/materialize_ticket_bound_protected_submit_attempt.py" in command_names
+    assert "scripts/materialize_ticket_bound_protected_submit_attempt.py" not in command_names
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
     assert report["safety_invariants"]["calls_ticket_bound_finalgate_preflight"] is True
-    assert report["safety_invariants"]["calls_ticket_bound_protected_submit_attempt"] is True
+    assert report["safety_invariants"]["calls_ticket_bound_protected_submit_attempt"] is False
     assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
 
 
@@ -288,12 +287,8 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
         "scripts/materialize_pg_promotion_action_time_lane.py"
     )
     assert "scripts/materialize_action_time_finalgate_preflight.py" in command_names
-    assert "scripts/materialize_ticket_bound_protected_submit_attempt.py" in command_names
-    assert command_names.index(
-        "scripts/materialize_ticket_bound_runtime_safety_state.py"
-    ) < command_names.index(
-        "scripts/materialize_ticket_bound_protected_submit_attempt.py"
-    )
+    assert "scripts/materialize_ticket_bound_runtime_safety_state.py" in command_names
+    assert "scripts/materialize_ticket_bound_protected_submit_attempt.py" not in command_names
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
 
 
@@ -336,7 +331,6 @@ def test_server_product_state_refresh_sequence_pins_action_time_materializers_to
         "scripts/materialize_action_time_finalgate_preflight.py",
         "scripts/materialize_action_time_operation_layer_handoff.py",
         "scripts/materialize_ticket_bound_runtime_safety_state.py",
-        "scripts/materialize_ticket_bound_protected_submit_attempt.py",
     }
     materializer_calls = [
         command for command in calls if command[1] in materializer_names
@@ -969,11 +963,10 @@ def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_fa
         for step in report["step_results"]
         if step["status"] == "skipped_after_required_failure"
     ]
-    assert "materialize_ticket_bound_protected_submit_attempt" in skipped_names
     assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
-def test_server_product_state_refresh_sequence_fails_closed_on_protected_submit_failure(
+def test_server_product_state_refresh_sequence_does_not_call_protected_submit_in_action_time(
     tmp_path: Path,
 ):
     module = _load_module()
@@ -985,11 +978,7 @@ def test_server_product_state_refresh_sequence_fails_closed_on_protected_submit_
             item.endswith("materialize_ticket_bound_protected_submit_attempt.py")
             for item in command
         ):
-            return module.CommandResult(
-                returncode=1,
-                stdout="",
-                stderr="ticket-bound protected submit failed",
-            )
+            raise AssertionError("protected submit must be dispatcher-owned")
         return module.CommandResult(returncode=0, stdout="ok", stderr="")
 
     report = module.run_server_product_state_refresh_sequence(
@@ -999,25 +988,13 @@ def test_server_product_state_refresh_sequence_fails_closed_on_protected_submit_
         runner=runner,
     )
 
-    assert report["status"] == "server_product_state_refresh_sequence_failed"
-    assert report["summary"]["failed_required_step_count"] == 1
+    assert report["status"] == "server_product_state_refresh_sequence_ready"
+    assert report["summary"]["failed_required_step_count"] == 0
     assert report["summary"]["current_projection_publish_attempted"] is True
-    assert report["summary"]["blocked_by_required_step"] == (
-        "materialize_ticket_bound_protected_submit_attempt"
+    assert all(
+        command[1] != "scripts/materialize_ticket_bound_protected_submit_attempt.py"
+        for command in calls
     )
-    assert report["summary"]["blocked_required_stdout_tail"] == ""
-    assert report["summary"]["blocked_required_stderr_tail"] == (
-        "ticket-bound protected submit failed"
-    )
-    assert calls[-1][1] == "scripts/materialize_ticket_bound_protected_submit_attempt.py"
-    assert "--submit-mode" in calls[-1]
-    assert "disabled_smoke" in calls[-1]
-    skipped_names = [
-        step["name"]
-        for step in report["step_results"]
-        if step["status"] == "skipped_after_required_failure"
-    ]
-    assert "publish_runtime_control_current_projections_after_action_time" in skipped_names
 
 
 def test_server_product_state_refresh_sequence_fails_closed_on_post_submit_closure_failure(

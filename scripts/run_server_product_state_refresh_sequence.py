@@ -5,11 +5,11 @@ The sequence is non-authority from a trading perspective. It refreshes control
 read models, may materialize PG fresh signals into one action-time lane,
 may materialize a PG Action-Time Ticket when a PG real-submit lane is present,
 and may run the ticket-bound non-executing FinalGate preflight and Operation
-Layer handoff, then materialize PG Runtime Safety State, a ticket-bound
-disabled-smoke protected submit attempt, and ticket-bound post-submit closure
-state. It does not call
-Operation Layer submit, exchange write APIs, OrderLifecycle, withdrawals,
-transfers, credential mutation, live profile changes, or order sizing changes.
+Layer handoff, then materialize PG Runtime Safety State. It does not materialize
+protected submit attempts, call Operation Layer submit, exchange write APIs,
+OrderLifecycle, withdrawals, transfers, credential mutation, live profile
+changes, or order sizing changes. Ticket-bound protected submit belongs to the
+resume dispatcher after PG SubmitModeDecision.
 """
 
 from __future__ import annotations
@@ -799,17 +799,6 @@ def _refresh_steps(
             ),
         ),
         RefreshStep(
-            "materialize_ticket_bound_protected_submit_attempt",
-            (
-                python,
-                "scripts/materialize_ticket_bound_protected_submit_attempt.py",
-                *pg_required,
-                *action_time_now_args,
-                "--submit-mode",
-                "disabled_smoke",
-            ),
-        ),
-        RefreshStep(
             "materialize_ticket_bound_post_submit_closure",
             (
                 python,
@@ -844,7 +833,6 @@ def _steps_for_mode(steps: list[RefreshStep], *, mode: str) -> list[RefreshStep]
             "materialize_action_time_finalgate_preflight",
             "materialize_action_time_operation_layer_handoff",
             "materialize_ticket_bound_runtime_safety_state",
-            "materialize_ticket_bound_protected_submit_attempt",
             "publish_runtime_control_current_projections_after_action_time",
         },
         "closure": {
