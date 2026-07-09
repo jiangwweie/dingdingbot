@@ -34,6 +34,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.application.readmodels.daily_live_enablement_table import WIP_LANES  # noqa: E402
+from src.application.action_time.capital_safety_guard import (  # noqa: E402
+    current_scope_blockers,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -841,6 +844,14 @@ def _candidate_blockers(
     account_id: str,
 ) -> list[str]:
     blockers: list[str] = []
+    blockers.extend(
+        current_scope_blockers(
+            control_state,
+            strategy_group_id=candidate.get("strategy_group_id"),
+            symbol=candidate.get("symbol"),
+            side=candidate.get("side"),
+        )
+    )
     _require_identity_match(blockers, candidate, runtime_scope, "runtime_scope")
     _require_identity_match(blockers, candidate, policy, "policy")
     _require_identity_match(blockers, candidate, event_binding, "event_binding")

@@ -35,6 +35,9 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
 )
+from src.application.action_time.capital_safety_guard import (  # noqa: E402
+    current_scope_blockers,
+)
 from src.application.action_time.action_time_ticket import (  # noqa: E402
     compute_action_time_ticket_hash,
 )
@@ -293,6 +296,14 @@ def _finalgate_blockers(
     now_ms: int,
 ) -> list[str]:
     blockers: list[str] = []
+    blockers.extend(
+        current_scope_blockers(
+            control_state,
+            strategy_group_id=ticket.get("strategy_group_id"),
+            symbol=ticket.get("symbol"),
+            side=ticket.get("side"),
+        )
+    )
     if int(ticket.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("ticket_expired")
     blockers.extend(_ticket_hash_blockers(ticket))

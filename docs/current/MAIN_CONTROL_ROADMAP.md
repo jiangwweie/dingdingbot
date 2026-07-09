@@ -54,9 +54,9 @@ design documents and acceptance proof.
 | 3 | **Full Chain Simulation Harness** | P0 | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` and `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | 4 | **Official Runner SL Mutation + Protection Reconciler** | P0 | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | 5 | **Post-Submit First Tick + Recovery Command Matrix** | P0 | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
-| 6 | **Scope Freeze Pre-Submit Gate** | P0 | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
+| 6 | **P0 Capital Safety Closure** | P0 | `docs/current/P0_CAPITAL_SAFETY_CLOSURE_DESIGN.md` |
 | 7 | **Live Outcome Ledger** | P0/P1 | `docs/current/LIVE_OUTCOME_LEDGER_CONTRACT.md` |
-| 8 | **Continuous Reconciliation Tick** | P0/P1 | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
+| 8 | **Continuous Reconciliation Tick** | P0/P1 | `docs/current/P0_CAPITAL_SAFETY_CLOSURE_DESIGN.md` |
 | 9 | **Risk Reservation v0** | P1 | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 10 | **Owner Explanation Read Model** | P1 | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | 11 | **Performance And Retention Control** | P1 | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
@@ -83,13 +83,14 @@ This is the current remaining order after Tokyo release `4b0b8a27`.
 
 | Order | Work | Priority | Done when |
 | --- | --- | --- | --- |
-| 1 | **Scope freeze pre-submit hard blocker** | P0 | Active scope freeze blocks matching `strategy_group_id + symbol + side` before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit |
-| 2 | **Live Outcome Ledger** | P0 | Every real ticket has one structured outcome row or one exact hard-blocked outcome row |
+| 1 | **P0 Capital Safety Closure design-to-implementation** | P0 | Scope freeze blocks only current-risk scopes; stale no-risk residue becomes cleanup/outcome; continuous reconciliation, deterministic recovery, and Live Outcome Ledger are implemented without file authority |
+| 2 | **Scope freeze pre-submit hard blocker** | P0 | Active real-risk scope freeze blocks matching `strategy_group_id + symbol + side` before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit |
 | 3 | **Continuous reconciliation tick** | P0 | After first tick, scheduled/event-driven reconciliation continues until lifecycle closure, exact recovery command, or hard stop |
-| 4 | **Risk-at-stop reservation** | P1 | Ticket computes and reserves `risk_at_stop = abs(entry_price - stop_price) * quantity` before FinalGate-ready submit |
-| 5 | **Owner Explanation Read Model** | P1 | Owner sees waiting, processing, blocked, protected, recovered, and closed states without decoding internal blocker codes |
-| 6 | **Frontend read-model integration** | P2 | Frontend only displays backend explanation/read models and does not infer blockers, facts, lanes, tickets, or submit authority |
-| 7 | **Trading quality / capital budget / portfolio risk model** | P2 | Advanced allocation improves exposure quality without weakening per-ticket safety, stop-risk reservation, or lifecycle reconciliation |
+| 4 | **Live Outcome Ledger** | P0 | Every real ticket has one structured outcome row or one exact hard-blocked outcome row |
+| 5 | **Risk-at-stop reservation** | P1 | Ticket computes and reserves `risk_at_stop = abs(entry_price - stop_price) * quantity` before FinalGate-ready submit |
+| 6 | **Owner Explanation Read Model** | P1 | Owner sees waiting, processing, blocked, protected, recovered, and closed states without decoding internal blocker codes |
+| 7 | **Frontend read-model integration** | P2 | Frontend only displays backend explanation/read models and does not infer blockers, facts, lanes, tickets, or submit authority |
+| 8 | **Trading quality / capital budget / portfolio risk model** | P2 | Advanced allocation improves exposure quality without weakening per-ticket safety, stop-risk reservation, or lifecycle reconciliation |
 
 ## Authority Boundary
 

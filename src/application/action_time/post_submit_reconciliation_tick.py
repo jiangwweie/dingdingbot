@@ -22,6 +22,9 @@ AUTHORITY_BOUNDARY = (
 VISIBILITY_GRACE_MS = 30_000
 TERMINAL_ATTEMPT_STATUSES = {"blocked", "hard_stopped"}
 FIRST_TICK_KIND = "first_post_submit"
+SCHEDULED_TICK_KIND = "scheduled"
+RECOVERY_CHECK_TICK_KIND = "recovery_check"
+TICK_KINDS = {FIRST_TICK_KIND, SCHEDULED_TICK_KIND, RECOVERY_CHECK_TICK_KIND}
 
 
 def select_ticket_bound_first_reconciliation_tick_scopes(
@@ -42,7 +45,7 @@ def select_ticket_bound_first_reconciliation_tick_scopes(
     )
     scopes: list[dict[str, Any]] = []
     for row in conn.execute(query).mappings():
-        tick = _existing_first_tick(conn, str(row["protected_submit_attempt_id"]))
+        tick = _existing_tick(conn, str(row["protected_submit_attempt_id"]), FIRST_TICK_KIND)
         if tick and not _pending_tick_due(tick, now_ms=now_ms):
             continue
         scopes.append(
@@ -68,8 +71,34 @@ def materialize_ticket_bound_first_reconciliation_tick(
     exchange_snapshot: dict[str, Any] | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
+    return materialize_ticket_bound_reconciliation_tick(
+        conn,
+        protected_submit_attempt_id=protected_submit_attempt_id,
+        tick_kind=FIRST_TICK_KIND,
+        exchange_snapshot=exchange_snapshot,
+        now_ms=now_ms,
+    )
+
+
+def materialize_ticket_bound_reconciliation_tick(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+    tick_kind: str,
+    exchange_snapshot: dict[str, Any] | None = None,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
     attempt_id = str(protected_submit_attempt_id or "").strip()
+    tick_kind = str(tick_kind or "").strip()
+    if tick_kind not in TICK_KINDS:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            tick={},
+            blockers=["reconciliation_tick_kind_invalid"],
+            next_action="provide_supported_reconciliation_tick_kind",
+        )
     if not attempt_id:
         return _result(
             "blocked",
@@ -109,8 +138,8 @@ def materialize_ticket_bound_first_reconciliation_tick(
             next_action="continue_submit_failure_handling",
         )
 
-    existing = _existing_first_tick(conn, attempt_id)
-    if existing and not _pending_tick_due(existing, now_ms=now_ms):
+    existing = _existing_tick(conn, attempt_id, tick_kind)
+    if tick_kind == FIRST_TICK_KIND and existing and not _pending_tick_due(existing, now_ms=now_ms):
         return _result(
             str(existing.get("status") or "matched"),
             now_ms=now_ms,
@@ -160,8 +189,8 @@ def materialize_ticket_bound_first_reconciliation_tick(
         _upsert_scope_freeze(
             conn,
             attempt=attempt,
-            source_kind="first_post_submit_reconciliation_tick",
-            source_id=_tick_id(attempt_id),
+            source_kind=f"{tick_kind}_reconciliation_tick",
+            source_id=_tick_id(attempt_id, tick_kind),
             blockers=blockers,
             now_ms=now_ms,
         )
@@ -208,10 +237,10 @@ def materialize_ticket_bound_first_reconciliation_tick(
         )
 
     tick = {
-        "reconciliation_tick_id": _tick_id(attempt_id),
+        "reconciliation_tick_id": _tick_id(attempt_id, tick_kind),
         "ticket_id": str(attempt["ticket_id"]),
         "protected_submit_attempt_id": attempt_id,
-        "tick_kind": FIRST_TICK_KIND,
+        "tick_kind": tick_kind,
         "status": status,
         "strategy_group_id": str(attempt["strategy_group_id"]),
         "symbol": str(attempt["symbol"]),
@@ -380,12 +409,16 @@ def _snapshot_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _existing_first_tick(conn: sa.engine.Connection, attempt_id: str) -> dict[str, Any]:
+def _existing_tick(
+    conn: sa.engine.Connection,
+    attempt_id: str,
+    tick_kind: str,
+) -> dict[str, Any]:
     table = _table(conn, "brc_ticket_bound_reconciliation_ticks")
     row = conn.execute(
         sa.select(table)
         .where(table.c.protected_submit_attempt_id == attempt_id)
-        .where(table.c.tick_kind == FIRST_TICK_KIND)
+        .where(table.c.tick_kind == tick_kind)
     ).mappings().first()
     return dict(row) if row else {}
 
@@ -492,8 +525,8 @@ def _result(
     }
 
 
-def _tick_id(attempt_id: str) -> str:
-    return _stable_id("ticket_reconciliation_tick", attempt_id, FIRST_TICK_KIND)
+def _tick_id(attempt_id: str, tick_kind: str = FIRST_TICK_KIND) -> str:
+    return _stable_id("ticket_reconciliation_tick", attempt_id, tick_kind)
 
 
 def _stable_id(prefix: str, *parts: str) -> str:

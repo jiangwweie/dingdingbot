@@ -31,6 +31,9 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.action_time.action_time_ticket import (  # noqa: E402
     compute_action_time_ticket_hash,
 )
+from src.application.action_time.capital_safety_guard import (  # noqa: E402
+    current_scope_blockers,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -238,6 +241,15 @@ def _snapshot_row(
     blockers: list[str] = []
     if not ticket:
         blockers.append("action_time_ticket_missing")
+    if ticket:
+        blockers.extend(
+            current_scope_blockers(
+                control_state,
+                strategy_group_id=ticket.get("strategy_group_id"),
+                symbol=ticket.get("symbol"),
+                side=ticket.get("side"),
+            )
+        )
 
     lane = _row_by_id(
         control_state,

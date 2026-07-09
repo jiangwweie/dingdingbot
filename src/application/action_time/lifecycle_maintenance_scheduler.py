@@ -17,6 +17,7 @@ from src.application.action_time.lifecycle_maintenance_service import (
 )
 from src.application.action_time.post_submit_reconciliation_tick import (
     materialize_ticket_bound_first_reconciliation_tick,
+    materialize_ticket_bound_reconciliation_tick,
     select_ticket_bound_first_reconciliation_tick_scopes,
 )
 
@@ -185,6 +186,17 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
         ):
             blockers.append("exchange_snapshot_gateway_required")
 
+        scheduled_tick: dict[str, Any] = {}
+        if exchange_snapshot and scope.get("protected_submit_attempt_id"):
+            scheduled_tick = materialize_ticket_bound_reconciliation_tick(
+                conn,
+                protected_submit_attempt_id=str(scope["protected_submit_attempt_id"]),
+                tick_kind="scheduled",
+                exchange_snapshot=exchange_snapshot,
+                now_ms=now_ms + index + 50,
+            )
+            blockers.extend(_result_blockers(scheduled_tick))
+
         maintenance = await run_ticket_bound_lifecycle_maintenance(
             conn,
             ticket_id=str(scope.get("ticket_id") or ""),
@@ -200,11 +212,45 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
         exchange_write_called = (
             exchange_write_called or maintenance.get("exchange_write_called") is True
         )
+        post_recovery_snapshot_payload: dict[str, Any] = {}
+        recovery_check_tick: dict[str, Any] = {}
+        if (
+            fetch_exchange_snapshot
+            and gateway is not None
+            and scope.get("exit_protection_set_id")
+            and scope.get("protected_submit_attempt_id")
+            and _maintenance_executed_exchange_mutation(maintenance)
+        ):
+            post_recovery_snapshot_payload = await fetch_ticket_bound_exchange_snapshot(
+                conn,
+                exit_protection_set_id=str(scope["exit_protection_set_id"]),
+                gateway=gateway,
+                timeout_seconds=snapshot_timeout_seconds,
+                now_ms=now_ms + index + 125,
+            )
+            exchange_read_called = (
+                exchange_read_called
+                or post_recovery_snapshot_payload.get("exchange_read_called") is True
+            )
+            if post_recovery_snapshot_payload.get("status") == "snapshot_ready":
+                recovery_check_tick = materialize_ticket_bound_reconciliation_tick(
+                    conn,
+                    protected_submit_attempt_id=str(scope["protected_submit_attempt_id"]),
+                    tick_kind="recovery_check",
+                    exchange_snapshot=dict(post_recovery_snapshot_payload.get("snapshot") or {}),
+                    now_ms=now_ms + index + 150,
+                )
+                blockers.extend(_result_blockers(recovery_check_tick))
+            else:
+                blockers.extend(_result_blockers(post_recovery_snapshot_payload))
         runs.append(
             {
                 "scope": scope,
                 "snapshot": _summary(snapshot_payload),
+                "scheduled_tick": _summary(scheduled_tick),
                 "maintenance": _summary(maintenance),
+                "post_recovery_snapshot": _summary(post_recovery_snapshot_payload),
+                "recovery_check_tick": _summary(recovery_check_tick),
                 "actions": list(maintenance.get("actions") or []),
             }
         )
@@ -375,6 +421,15 @@ def _result_blockers(result: dict[str, Any]) -> list[str]:
         for item in (result.get("blockers") or [])
         if str(item or "").strip()
     ]
+
+
+def _maintenance_executed_exchange_mutation(result: dict[str, Any]) -> bool:
+    if result.get("exchange_write_called") is True:
+        return True
+    return any(
+        isinstance(action, dict) and action.get("exchange_write_called") is True
+        for action in result.get("actions") or []
+    )
 
 
 def _json_list(value: Any) -> list[str]:

@@ -49,12 +49,19 @@ CONTROL_STATE_TABLES: dict[str, str] = {
         "brc_ticket_bound_protected_submit_attempts"
     ),
     "ticket_bound_post_submit_closures": "brc_ticket_bound_post_submit_closures",
+    "ticket_bound_scope_freezes": "brc_ticket_bound_scope_freezes",
+    "live_outcome_ledger": "brc_live_outcome_ledger",
     "goal_status_current": "brc_goal_status_current",
     "projection_runs": "brc_projection_runs",
     "current_projection_ownership": "brc_current_projection_ownership",
     "control_read_model_snapshots": "brc_control_read_model_snapshots",
     "server_monitor_runs": "brc_server_monitor_runs",
     "server_monitor_notifications": "brc_server_monitor_notifications",
+}
+
+OPTIONAL_CONTROL_STATE_TABLES = {
+    "ticket_bound_scope_freezes",
+    "live_outcome_ledger",
 }
 
 REQUIRED_PRODUCTION_PROJECTIONS = {
@@ -101,7 +108,10 @@ class PgBackedRuntimeControlStateRepository:
     def read_control_state(self) -> dict[str, Any]:
         self._require_tables()
         rows = {
-            key: self._read_rows(table_name)
+            key: self._read_rows(
+                table_name,
+                optional=key in OPTIONAL_CONTROL_STATE_TABLES,
+            )
             for key, table_name in CONTROL_STATE_TABLES.items()
         }
         self._validate_projection_ownership(rows)
@@ -122,7 +132,12 @@ class PgBackedRuntimeControlStateRepository:
     def read_monitor_control_state(self) -> dict[str, Any]:
         self._require_tables()
         rows = {
-            key: self._read_rows(table_name, monitor_bounded=True, logical_key=key)
+            key: self._read_rows(
+                table_name,
+                monitor_bounded=True,
+                logical_key=key,
+                optional=key in OPTIONAL_CONTROL_STATE_TABLES,
+            )
             for key, table_name in CONTROL_STATE_TABLES.items()
         }
         self._retain_monitor_protected_submit_lineage(rows)
@@ -147,7 +162,8 @@ class PgBackedRuntimeControlStateRepository:
         existing = set(inspector.get_table_names())
         missing = [
             table_name
-            for table_name in CONTROL_STATE_TABLES.values()
+            for key, table_name in CONTROL_STATE_TABLES.items()
+            if key not in OPTIONAL_CONTROL_STATE_TABLES
             if table_name not in existing
         ]
         if missing:
@@ -161,7 +177,10 @@ class PgBackedRuntimeControlStateRepository:
         *,
         monitor_bounded: bool = False,
         logical_key: str = "",
+        optional: bool = False,
     ) -> list[dict[str, Any]]:
+        if optional and not sa.inspect(self.conn).has_table(table_name):
+            return []
         metadata = sa.MetaData()
         table = sa.Table(table_name, metadata, autoload_with=self.conn)
         order_by = list(table.primary_key.columns)

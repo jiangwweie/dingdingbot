@@ -34,6 +34,9 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.action_time.action_time_ticket import (  # noqa: E402
     compute_action_time_ticket_hash,
 )
+from src.application.action_time.capital_safety_guard import (  # noqa: E402
+    current_scope_blockers,
+)
 from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
     classify_sequential_submit_result,
 )
@@ -632,6 +635,7 @@ def _select_graph(
         ticket.get("action_time_fact_snapshot_id") if ticket else "",
     )
     return {
+        "control_state": control_state,
         "blockers": blockers,
         "ticket": ticket,
         "handoff": handoff,
@@ -672,6 +676,14 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
         blockers.append("execution_policy_missing")
     if blockers:
         return _dedupe(blockers)
+    blockers.extend(
+        current_scope_blockers(
+            graph.get("control_state") or {},
+            strategy_group_id=ticket.get("strategy_group_id"),
+            symbol=ticket.get("symbol"),
+            side=ticket.get("side"),
+        )
+    )
 
     if ticket.get("status") != "finalgate_ready":
         blockers.append(f"ticket_status_not_finalgate_ready:{ticket.get('status')}")
@@ -754,6 +766,14 @@ def _submit_mode_authority_blockers(
         blockers.append("owner_policy_current_missing")
     if blockers:
         return blockers
+    blockers.extend(
+        current_scope_blockers(
+            graph.get("control_state") or {},
+            strategy_group_id=ticket.get("strategy_group_id"),
+            symbol=ticket.get("symbol"),
+            side=ticket.get("side"),
+        )
+    )
     if lane.get("lane_scope") != "real_submit_candidate":
         blockers.append(f"lane_scope_not_real_submit_candidate:{lane.get('lane_scope')}")
     if runtime_scope.get("status") != "active":

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import text
 
+from scripts import materialize_ticket_bound_exit_protection_set as exit_protection
 from scripts import materialize_ticket_bound_protected_submit_attempt as submit
 from src.application.action_time.lifecycle_maintenance_scheduler import (
     lifecycle_maintenance_scopes_require_exchange_gateway,
@@ -197,6 +198,56 @@ async def test_scheduler_runs_first_tick_and_prepares_tp1_recovery(pg_control_co
         pg_control_connection,
         max_lifecycle_scopes=4,
     )[0]["lifecycle_status"] == "protection_degraded"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_materializes_scheduled_tick_for_active_lifecycle(
+    pg_control_connection,
+):
+    prepared = _submitted_real_attempt(pg_control_connection)
+    proof = exit_protection.materialize_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+    assert proof["status"] == "position_protected"
+    gateway = _FirstTickGateway(prepared)
+    first_tick = materialize_ticket_bound_first_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        exchange_snapshot=_attempt_snapshot(prepared),
+        now_ms=NOW_MS + 7000,
+    )
+    assert first_tick["status"] == "matched"
+
+    second = await run_ticket_bound_lifecycle_maintenance_scheduler(
+        pg_control_connection,
+        gateway=gateway,
+        allow_exchange_mutation=False,
+        fetch_exchange_snapshot=True,
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert second["exchange_read_called"] is True
+    assert any(
+        run.get("scheduled_tick", {}).get("status") == "matched"
+        for run in second["runs"]
+    )
+    rows = list(
+        pg_control_connection.execute(
+            text(
+                """
+                SELECT tick_kind, status
+                FROM brc_ticket_bound_reconciliation_ticks
+                ORDER BY tick_kind
+                """
+            )
+        ).mappings()
+    )
+    assert {(row["tick_kind"], row["status"]) for row in rows} >= {
+        ("first_post_submit", "matched"),
+        ("scheduled", "matched"),
+    }
 
 
 def _submitted_real_attempt(conn) -> dict:

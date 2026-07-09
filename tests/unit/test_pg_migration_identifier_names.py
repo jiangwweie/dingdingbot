@@ -55,11 +55,13 @@ def test_migration_identifiers_fit_postgres_name_limit():
 def test_migration_revision_chain_is_single_head_after_slimming():
     revisions: dict[str, str] = {}
     down_revisions: dict[str, object] = {}
-    for path in Path("migrations/versions").glob("*.py"):
+    migration_paths = sorted(Path("migrations/versions").glob("*.py"))
+    for path in migration_paths:
         values = _migration_revision_values(path)
         revision = values.get("revision")
         if not isinstance(revision, str):
             continue
+        assert revision not in revisions
         revisions[revision] = path.name
         down_revisions[revision] = values.get("down_revision")
 
@@ -82,9 +84,9 @@ def test_migration_revision_chain_is_single_head_after_slimming():
         if down_revision is None
     )
 
-    assert len(revisions) == 98
+    assert len(revisions) == len(migration_paths)
     assert roots == ["001"]
-    assert heads == ["098"]
+    assert heads == ["102"]
     assert missing_down_revisions == {}
 
 

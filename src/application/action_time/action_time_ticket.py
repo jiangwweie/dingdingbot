@@ -33,6 +33,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.application.action_time.capital_safety_guard import (  # noqa: E402
+    current_scope_blockers,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -435,6 +438,14 @@ def _build_ticket_bundle(
 ) -> dict[str, dict[str, Any]]:
     blockers: list[str] = []
     lane_id = _required_text(lane, "action_time_lane_input_id", blockers)
+    blockers.extend(
+        current_scope_blockers(
+            control_state,
+            strategy_group_id=lane.get("strategy_group_id"),
+            symbol=lane.get("symbol"),
+            side=lane.get("side"),
+        )
+    )
     if lane.get("status") == "ticket_created":
         blockers.append("lane_marked_ticket_created_without_active_ticket")
     if not _required_text(lane, "candidate_authorization_ref", blockers):
