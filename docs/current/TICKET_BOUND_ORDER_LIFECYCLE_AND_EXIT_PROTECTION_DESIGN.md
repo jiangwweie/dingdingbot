@@ -42,8 +42,10 @@ review plan.
 | **Runner mutation executor** | `TicketBoundRunnerMutationExecutor` consumes a prepared PG command, cancels the old full-size SL through an injected gateway, submits RUNNER_SL, and records the PG result | It cannot call FinalGate, change profile/sizing, or use repo files as authority |
 | **Orphan protection cleanup command** | Deployed migration `098` adds `brc_ticket_bound_orphan_protection_cleanup_commands` and `orphan_protection_cleanup_command` for flat-position live-protection cleanup | It cancels only PG-linked reduce-only protection refs after `position_closed_protection_live`; exchange-only unknown orders remain blocked |
 | **Lifecycle closure materializer** | `materialize_ticket_bound_lifecycle_closure` closes PG lifecycle after final exit, reconciliation, settlement, and review proofs | It requires proof IDs and flat-position confirmation; it summarizes closure and does not discover exchange truth by itself |
-| **ExchangeGateway** | Existing gateway can place and cancel orders | The runner proof layer must not become a second exchange mutation path |
-| **Deploy status** | Lifecycle cleanup and failure matrix are deployed on Tokyo at `f8f299f82c6cd9f456189252608bc0effe2cbb6b` with PG `alembic=098` | Deployment proves code/migration acceptance, not a live market outcome |
+| **First post-submit reconciliation tick** | Designed in `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` | Implementation must create current PG reconciliation state immediately after real protected submit result |
+| **Recovery command matrix** | Owner confirmed SL/TP1/runner/retry/freeze defaults on 2026-07-09 | Implementation must map every unsafe lifecycle blocker to one recovery command or hard stop |
+| **ExchangeGateway** | Existing gateway can place, cancel, and read orders/fills/positions through lifecycle-ready methods | The runner proof layer must not become a second exchange mutation path |
+| **Deploy status** | Submit-mode decision and real-gateway submit-boundary test are deployed on Tokyo at `110e680c5a919043e46a145d9ef4503638473471` with PG `alembic=100` | Deployment proves code/migration acceptance and gateway-boundary reachability, not a live market outcome |
 | **Impact test** | Active scopes reach mock submitted -> exit protection set -> runner/final closure coverage; deployed tests cover 9 full-chain failure scenarios | Test proves entry-fill + SL/TP1 protection set materialization, runner SL, final closure, and exact lifecycle hard stops |
 
 ### Known P0 / P1 Gaps
@@ -57,6 +59,8 @@ review plan.
 | **P0** | TP1 fill -> official SL cancel/replace and RUNNER_SL submit is not one closed ticket-bound mutation path | Code-covered and deployed by `runner_mutation_command` and `runner_mutation_executor`; next acceptance is real-signal/live-ticket observation |
 | **P0** | Exchange truth is not yet the current authority for protection completeness | Code-covered and deployed by `protection_reconciler` over caller-provided exchange snapshots; next acceptance is official exchange snapshot wiring/capability audit |
 | **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Code-covered and deployed by exact lifecycle classification plus `protection_recovery_command`; next acceptance is official scheduling/API path audit |
+| **P0** | First exchange-truth reconciliation tick is not yet materialized immediately after real protected submit result | Design confirmed; implement PG `first_post_submit` tick and deterministic status transitions |
+| **P0** | Recovery commands are not yet guaranteed one-to-one for every unsafe lifecycle blocker | Design confirmed; implement deterministic command matrix, retry limit, and scope freeze |
 | **P1** | Flat position with PG-linked live protection had no first-class cleanup command | Closed and deployed by migration `098` and `orphan_protection_cleanup_command` |
 | **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Closed in code by the Lifecycle Safety Core materializers, full-chain harness, recovery commands, protection reconciler, runner mutation executor, and final closure; live outcome proof waits for a future real ticket |
 | **P1** | Action-time TTL behavior across the full post-submit chain | Closed locally: expired tickets still block new submit attempts, while already-submitted ticket-bound lifecycles can continue protection, runner, and final closure |
@@ -440,15 +444,18 @@ Forbidden:
 
 ## Failure Matrix
 
+The recovery-command authority for this matrix is
+`docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md`.
+
 | Failure | System action | Owner action |
 | --- | --- | --- |
 | Entry submit failed before fill | Mark attempt failed; no protection materialization | None unless repeated |
 | Entry exchange id missing | Hard stop lifecycle as `entry_unknown` | Notify if unresolved |
-| Entry filled but SL submit failed | Mark `protection_missing`; block new entries; require reduce-only recovery | Owner may review abnormal recovery |
-| SL submitted but TP1 failed | Mark `protection_submit_failed`; position is not fully protected; block new entries | Owner may review degraded hold/close |
-| TP1 filled but runner mutation failed | Mark `runner_mutation_failed`; block related new entries; keep existing SL when safe or enter official recovery | Owner may review recovery |
+| Entry filled but SL submit failed | Mark `protection_missing`; freeze `strategy_group_id + symbol + side`; prepare `submit_missing_sl` immediately | Owner notified if recovery fails or retry limit is exhausted |
+| SL submitted but TP1 failed | Mark `protection_degraded`; keep SL protection; prepare `submit_missing_tp1`; do not mark protection complete | Owner notified if recovery fails or retry limit is exhausted |
+| TP1 filled but runner mutation failed | Mark `runner_mutation_failed` or `runner_mutation_degraded`; keep existing SL when safe; prepare runner recovery | Owner notified if recovery fails or retry limit is exhausted |
 | Position flat but protection orders still open | Cancel/terminalize only through official reduce-only/order-cancel path | Notify if cancel fails |
-| Exchange has protection but PG lacks refs | Import/reconcile as orphan protection only after identity proof | Notify if identity cannot be proven |
+| Exchange has protection but PG lacks refs | Do not auto-cancel and do not auto-adopt; freeze scope unless PG-linked identity proof exists | Notify if identity cannot be proven |
 | PG says protected but exchange lacks SL/TP1 | Hard stop; mark protection mismatch | Owner notified |
 
 The implementation-level failure matrix, including ENTRY unknown, partial fill,
@@ -474,6 +481,11 @@ branches, is authoritative in
 | `test_tokyo_ops_l2_l7_summary_flags_lifecycle_closure_projection_mismatch` | Server health flags lifecycle/closure projection drift |
 | `test_protection_submit_failure_blocks_new_entries` | Entry fill + failed protection creates hard stop |
 | `test_orphan_exchange_protection_requires_identity_proof` | Exchange orphan protection cannot silently become current truth |
+| `test_first_reconciliation_tick_created_after_real_submit_result` | Real protected submit result creates one `first_post_submit` reconciliation tick |
+| `test_disabled_smoke_does_not_create_first_reconciliation_tick` | Disabled smoke remains rehearsal and creates no exchange-truth tick |
+| `test_entry_filled_missing_sl_prepares_immediate_recovery` | ENTRY filled or open position with missing SL bypasses visibility grace and prepares `submit_missing_sl` |
+| `test_tp1_missing_is_degraded_not_complete` | TP1 missing creates `protection_degraded` and `submit_missing_tp1`, not `protection_complete` |
+| `test_unknown_exchange_only_order_freezes_scope_without_cancel` | Unknown exchange-only order freezes exact scope and does not cancel or adopt the order |
 
 ### Impact Tests
 
@@ -514,11 +526,11 @@ mock submitted
 chain_position: action_time_boundary
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scope
-stage: lifecycle_cleanup_failure_matrix_deployed
-first_blocker: production_lifecycle_wiring_and_live_outcome_ledger_not_complete
-evidence: Tokyo release head f8f299f8, PG alembic 098, lifecycle materializers and services cover submitted attempt -> entry fill proof -> SL/TP1 proof -> exchange snapshot reconciliation -> TP1 fill -> official runner mutation command/executor -> runner proof -> final closure proof without file authority
-next_action: wire production lifecycle reads/results with runner mutation plan safety, then implement Live Outcome Ledger before using future real tickets as lifecycle outcome proof
-stop_condition: one future real ticket proves ENTRY through SL/TP1/RUNNER_SL/final exit/reconciliation/settlement/review/live outcome or stops at one exact lifecycle hard blocker
+stage: p0_3_p0_4_design_confirmed
+first_blocker: first_tick_and_recovery_command_implementation_pending
+evidence: Tokyo release head 110e680c, PG alembic 100, lifecycle materializers and services cover submitted attempt -> entry fill proof -> SL/TP1 proof -> exchange snapshot reconciliation -> TP1 fill -> official runner mutation command/executor -> runner proof -> final closure proof without file authority; first-tick and recovery-command defaults are confirmed in POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md
+next_action: implement first post-submit reconciliation tick, deterministic recovery commands, retry/freeze rules, scheduler integration, focused tests, deploy, and postdeploy acceptance
+stop_condition: every real protected submit result reaches matched/protected, pending visibility, deterministic recovery command, or one exact hard stop without file authority
 owner_action_required: no for current observation; yes before future deployment or authority expansion
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound gateway path
 ```
@@ -543,6 +555,8 @@ authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchang
     mutation executor for the ticket-bound Operation Layer handoff.
 12. **Implemented and deployed as lifecycle repair**: implement official missing
     SL/TP1 protection recovery command and executor.
-13. **Next gate**: run Operation Layer / Exchange Capability Audit and observe
-    the next real ticket through read-only server health plus ticket-bound
-    lifecycle acceptance.
+13. **Designed**: first post-submit reconciliation tick and deterministic
+    recovery command matrix.
+14. **Next gate**: implement first tick, recovery command determinism, scheduler
+    integration, focused tests, deploy, and observe the next real ticket through
+    read-only server health plus ticket-bound lifecycle acceptance.

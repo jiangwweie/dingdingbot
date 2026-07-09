@@ -9,10 +9,15 @@ from typing import Any
 import sqlalchemy as sa
 
 from src.application.action_time.exchange_snapshot_provider import (
+    fetch_ticket_bound_attempt_exchange_snapshot,
     fetch_ticket_bound_exchange_snapshot,
 )
 from src.application.action_time.lifecycle_maintenance_service import (
     run_ticket_bound_lifecycle_maintenance,
+)
+from src.application.action_time.post_submit_reconciliation_tick import (
+    materialize_ticket_bound_first_reconciliation_tick,
+    select_ticket_bound_first_reconciliation_tick_scopes,
 )
 
 
@@ -29,17 +34,21 @@ MAINTAINABLE_LIFECYCLE_STATUSES = {
     "tp1_filled",
     "runner_mutation_pending",
     "protection_missing",
+    "protection_degraded",
     "protection_submit_failed",
     "protection_reconciliation_mismatch",
+    "exchange_orphan_detected",
     "runner_mutation_failed",
     "runner_reconciliation_mismatch",
     "position_closed_protection_live",
 }
 SNAPSHOT_STATUSES = {
     "position_protected",
+    "protection_degraded",
     "tp1_filled",
     "runner_mutation_pending",
     "protection_reconciliation_mismatch",
+    "exchange_orphan_detected",
     "runner_reconciliation_mismatch",
     "position_closed_protection_live",
 }
@@ -57,11 +66,28 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
+    first_tick_scopes = select_ticket_bound_first_reconciliation_tick_scopes(
+        conn,
+        max_scopes=max_lifecycle_scopes,
+        now_ms=now_ms,
+    )
     scopes = select_ticket_bound_lifecycle_maintenance_scopes(
         conn,
         max_lifecycle_scopes=max_lifecycle_scopes,
     )
-    if not scopes:
+    first_tick_attempt_ids = {
+        str(scope.get("protected_submit_attempt_id") or "")
+        for scope in first_tick_scopes
+        if scope.get("protected_submit_attempt_id")
+    }
+    if first_tick_attempt_ids:
+        scopes = [
+            scope
+            for scope in scopes
+            if str(scope.get("protected_submit_attempt_id") or "")
+            not in first_tick_attempt_ids
+        ]
+    if not first_tick_scopes and not scopes:
         return _result(
             "no_maintainable_lifecycle",
             now_ms=now_ms,
@@ -76,6 +102,58 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
     blockers: list[str] = []
     exchange_read_called = False
     exchange_write_called = False
+    for index, scope in enumerate(first_tick_scopes):
+        snapshot_payload: dict[str, Any] = {}
+        exchange_snapshot: dict[str, Any] | None = None
+        if fetch_exchange_snapshot and gateway is not None:
+            snapshot_payload = await fetch_ticket_bound_attempt_exchange_snapshot(
+                conn,
+                protected_submit_attempt_id=str(scope["protected_submit_attempt_id"]),
+                gateway=gateway,
+                timeout_seconds=snapshot_timeout_seconds,
+                now_ms=now_ms + index,
+            )
+            exchange_read_called = (
+                exchange_read_called or snapshot_payload.get("exchange_read_called") is True
+            )
+            if snapshot_payload.get("status") == "snapshot_ready":
+                exchange_snapshot = dict(snapshot_payload.get("snapshot") or {})
+            else:
+                blockers.extend(_result_blockers(snapshot_payload))
+        elif fetch_exchange_snapshot and gateway is None:
+            blockers.append("exchange_snapshot_gateway_required")
+
+        tick = materialize_ticket_bound_first_reconciliation_tick(
+            conn,
+            protected_submit_attempt_id=str(scope["protected_submit_attempt_id"]),
+            exchange_snapshot=exchange_snapshot,
+            now_ms=now_ms + index + 25,
+        )
+        blockers.extend(_result_blockers(tick))
+        maintenance = await run_ticket_bound_lifecycle_maintenance(
+            conn,
+            ticket_id=str(scope.get("ticket_id") or ""),
+            protected_submit_attempt_id=str(scope.get("protected_submit_attempt_id") or ""),
+            exchange_snapshot=exchange_snapshot,
+            gateway=gateway,
+            allow_exchange_mutation=allow_exchange_mutation,
+            max_actions=max_actions_per_scope,
+            now_ms=now_ms + index + 100,
+        )
+        blockers.extend(_result_blockers(maintenance))
+        exchange_write_called = (
+            exchange_write_called or maintenance.get("exchange_write_called") is True
+        )
+        runs.append(
+            {
+                "scope": {**scope, "scheduler_scope_kind": "first_post_submit"},
+                "snapshot": _summary(snapshot_payload),
+                "first_tick": _summary(tick),
+                "maintenance": _summary(maintenance),
+                "actions": list(maintenance.get("actions") or []),
+            }
+        )
+
     for index, scope in enumerate(scopes):
         snapshot_payload: dict[str, Any] = {}
         exchange_snapshot: dict[str, Any] | None = None
@@ -131,11 +209,21 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             }
         )
 
-    blockers = _dedupe(_current_lifecycle_blockers(conn, scopes=scopes) + blockers)
+    refreshed_scopes = select_ticket_bound_lifecycle_maintenance_scopes(
+        conn,
+        max_lifecycle_scopes=max_lifecycle_scopes,
+    )
+    blockers = _dedupe(
+        _current_lifecycle_blockers(conn, scopes=refreshed_scopes) + blockers
+    )
+    selected_scopes = [
+        {**scope, "scheduler_scope_kind": "first_post_submit"}
+        for scope in first_tick_scopes
+    ] + scopes
     return _result(
         "scheduler_blocked" if blockers else "scheduler_complete",
         now_ms=now_ms,
-        scopes=scopes,
+        scopes=selected_scopes,
         runs=runs,
         blockers=blockers,
         exchange_read_called=exchange_read_called,
@@ -183,6 +271,8 @@ def lifecycle_maintenance_scopes_require_exchange_gateway(
 ) -> bool:
     if not scopes:
         return False
+    if any(scope.get("scheduler_scope_kind") == "first_post_submit" for scope in scopes):
+        return bool(fetch_exchange_snapshot)
     if allow_exchange_mutation:
         return True
     return bool(

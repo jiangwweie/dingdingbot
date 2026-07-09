@@ -25,6 +25,7 @@ AUTHORITY_BOUNDARY = (
     "gateway place_order only for missing reduce-only SL/TP1; no FinalGate, "
     "profile, sizing, withdrawal, transfer, or file authority"
 )
+MAX_EXECUTION_ATTEMPTS = 3
 
 
 def prepare_ticket_bound_protection_recovery_command(
@@ -51,7 +52,34 @@ def prepare_ticket_bound_protection_recovery_command(
     )
     if existing:
         existing_status = str(existing.get("status") or "blocked")
+        if existing.get("scope_frozen") in {True, 1}:
+            return _result(
+                "blocked",
+                now_ms=now_ms,
+                command=existing,
+                blockers=_json_list(existing.get("blockers"))
+                or ["protection_recovery_scope_frozen"],
+                next_action="freeze_new_submits_for_scope",
+                extra={"scope_frozen": True},
+            )
         if existing_status == "failed":
+            if int(existing.get("execution_attempt_count") or 0) >= int(
+                existing.get("max_execution_attempts") or MAX_EXECUTION_ATTEMPTS
+            ):
+                frozen = _freeze_recovery_scope(
+                    conn,
+                    command=existing,
+                    blockers=["protection_recovery_retry_limit_exhausted"],
+                    now_ms=now_ms,
+                )
+                return _result(
+                    "blocked",
+                    now_ms=now_ms,
+                    command=frozen,
+                    blockers=["protection_recovery_retry_limit_exhausted"],
+                    next_action="freeze_new_submits_for_scope",
+                    extra={"scope_frozen": True},
+                )
             refreshed = _refresh_failed_recovery_command(
                 conn,
                 existing=existing,
@@ -88,7 +116,7 @@ def prepare_ticket_bound_protection_recovery_command(
             blockers=blockers,
             next_action="repair_protection_recovery_inputs",
         )
-    missing_orders = _missing_protection_orders(attempt)
+    missing_orders = _missing_protection_orders(attempt, lifecycle=lifecycle)
     blockers = _missing_order_blockers(missing_orders)
     if blockers:
         return _result(
@@ -168,6 +196,34 @@ async def execute_ticket_bound_protection_recovery_command(
             blockers=[f"protection_recovery_command_not_prepared:{status or 'missing'}"],
             next_action="repair_protection_recovery_command_status",
         )
+    if command.get("scope_frozen") in {True, 1}:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            command=command,
+            blockers=_json_list(command.get("blockers"))
+            or ["protection_recovery_scope_frozen"],
+            next_action="freeze_new_submits_for_scope",
+            extra={"scope_frozen": True},
+        )
+    if int(command.get("execution_attempt_count") or 0) >= int(
+        command.get("max_execution_attempts") or MAX_EXECUTION_ATTEMPTS
+    ):
+        frozen = _freeze_recovery_scope(
+            conn,
+            command=command,
+            blockers=["protection_recovery_retry_limit_exhausted"],
+            now_ms=now_ms,
+        )
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            command=frozen,
+            blockers=["protection_recovery_retry_limit_exhausted"],
+            next_action="freeze_new_submits_for_scope",
+            extra={"scope_frozen": True},
+        )
+    command = _increment_execution_attempt_count(conn, command=command, now_ms=now_ms)
     stale_blockers = _pre_execution_state_blockers(conn, command=command)
     if stale_blockers:
         result_payload = _result_payload(
@@ -366,6 +422,7 @@ def _prepare_blockers(
         return blockers
     if str(lifecycle.get("status") or "") not in {
         "protection_missing",
+        "protection_degraded",
         "protection_submit_failed",
     }:
         blockers.append(
@@ -385,7 +442,7 @@ def _prepare_blockers(
         blockers.append("attempt_forbidden_effect:live_profile_changed")
     if attempt.get("order_sizing_changed") not in {False, None, "", 0}:
         blockers.append("attempt_forbidden_effect:order_sizing_changed")
-    if not _missing_protection_orders(attempt):
+    if not _missing_protection_orders(attempt, lifecycle=lifecycle):
         blockers.append("missing_protection_orders_not_found")
     return _dedupe(blockers)
 
@@ -416,6 +473,7 @@ def _pre_execution_state_blockers(
         return blockers
     if str(lifecycle.get("status") or "") not in {
         "protection_missing",
+        "protection_degraded",
         "protection_submit_failed",
     }:
         blockers.append(
@@ -428,7 +486,7 @@ def _pre_execution_state_blockers(
         blockers.append(f"protection_recovery_stale_attempt_mode:{attempt.get('submit_mode')}")
     if attempt.get("exchange_write_called") is not True:
         blockers.append("protection_recovery_stale_attempt_exchange_write_not_called")
-    current_missing = _missing_protection_orders(attempt)
+    current_missing = _missing_protection_orders(attempt, lifecycle=lifecycle)
     if not current_missing:
         blockers.append("protection_recovery_stale_missing_protection_orders_not_found")
     elif _missing_order_roles(current_missing) != _command_missing_order_roles(command):
@@ -436,7 +494,11 @@ def _pre_execution_state_blockers(
     return _dedupe(blockers)
 
 
-def _missing_protection_orders(attempt: dict[str, Any]) -> list[dict[str, Any]]:
+def _missing_protection_orders(
+    attempt: dict[str, Any],
+    *,
+    lifecycle: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     submit_request = _as_dict(attempt.get("submit_request"))
     submit_result = _as_dict(attempt.get("submit_result"))
     request_orders = [
@@ -454,14 +516,28 @@ def _missing_protection_orders(attempt: dict[str, Any]) -> list[dict[str, Any]]:
         for order in submitted_orders
         if str(order.get("exchange_order_id") or "").strip()
     }
+    forced_missing_roles = _forced_missing_roles_from_lifecycle(lifecycle or {})
     missing: list[dict[str, Any]] = []
     for role in ("SL", "TP1"):
-        if role in submitted_roles:
+        if role in submitted_roles and role not in forced_missing_roles:
             continue
         request = _order_by_role(request_orders, role)
         if request:
             missing.append(dict(request))
     return missing
+
+
+def _forced_missing_roles_from_lifecycle(lifecycle: dict[str, Any]) -> set[str]:
+    blockers = _json_list(lifecycle.get("blockers"))
+    first_blocker = str(lifecycle.get("first_blocker") or "").strip()
+    if first_blocker:
+        blockers.append(first_blocker)
+    roles: set[str] = set()
+    if any(blocker.startswith("sl_") for blocker in blockers):
+        roles.add("SL")
+    if any(blocker.startswith("tp1_") for blocker in blockers):
+        roles.add("TP1")
+    return roles
 
 
 def _missing_order_roles(orders: list[dict[str, Any]]) -> set[str]:
@@ -535,6 +611,10 @@ def _command_row(
         "blockers": [],
         "command_plan": command_plan,
         "result_payload": {},
+        "execution_attempt_count": 0,
+        "max_execution_attempts": MAX_EXECUTION_ATTEMPTS,
+        "scope_frozen": False,
+        "freeze_scope": {},
         "authority_boundary": AUTHORITY_BOUNDARY,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
@@ -568,7 +648,7 @@ def _refresh_failed_recovery_command(
             blockers=blockers,
             next_action="repair_protection_recovery_inputs",
         )
-    missing_orders = _missing_protection_orders(attempt)
+    missing_orders = _missing_protection_orders(attempt, lifecycle=lifecycle)
     blockers = _missing_order_blockers(missing_orders)
     if blockers:
         return _result(
@@ -587,6 +667,12 @@ def _refresh_failed_recovery_command(
         ),
         "protection_recovery_command_id": existing["protection_recovery_command_id"],
         "created_at_ms": existing.get("created_at_ms") or now_ms,
+        "execution_attempt_count": int(existing.get("execution_attempt_count") or 0),
+        "max_execution_attempts": int(
+            existing.get("max_execution_attempts") or MAX_EXECUTION_ATTEMPTS
+        ),
+        "scope_frozen": existing.get("scope_frozen") in {True, 1},
+        "freeze_scope": _as_dict(existing.get("freeze_scope")),
     }
     _upsert_row(
         conn,
@@ -635,6 +721,98 @@ def _record_result(
             result_payload=result_payload,
             now_ms=now_ms,
         )
+        if int(updated.get("execution_attempt_count") or 0) >= int(
+            updated.get("max_execution_attempts") or MAX_EXECUTION_ATTEMPTS
+        ):
+            updated = _freeze_recovery_scope(
+                conn,
+                command=updated,
+                blockers=["protection_recovery_retry_limit_exhausted"],
+                now_ms=now_ms,
+            )
+    return updated
+
+
+def _increment_execution_attempt_count(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    updated = {
+        **command,
+        "execution_attempt_count": int(command.get("execution_attempt_count") or 0) + 1,
+        "max_execution_attempts": int(
+            command.get("max_execution_attempts") or MAX_EXECUTION_ATTEMPTS
+        ),
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_protection_recovery_commands",
+        "protection_recovery_command_id",
+        updated,
+    )
+    if int(updated.get("execution_attempt_count") or 0) >= int(
+        updated.get("max_execution_attempts") or MAX_EXECUTION_ATTEMPTS
+    ):
+        return _freeze_recovery_scope(
+            conn,
+            command=updated,
+            blockers=["protection_recovery_retry_limit_exhausted"],
+            now_ms=now_ms,
+        )
+    return updated
+
+
+def _freeze_recovery_scope(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+    blockers: list[str],
+    now_ms: int,
+) -> dict[str, Any]:
+    freeze_scope = {
+        "strategy_group_id": str(command["strategy_group_id"]),
+        "symbol": str(command["symbol"]),
+        "side": str(command["side"]),
+    }
+    updated = {
+        **command,
+        "status": "blocked",
+        "first_blocker": blockers[0],
+        "blockers": blockers,
+        "scope_frozen": True,
+        "freeze_scope": freeze_scope,
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_protection_recovery_commands",
+        "protection_recovery_command_id",
+        updated,
+    )
+    freeze_row = {
+        "scope_freeze_id": _stable_id(
+            "ticket_scope_freeze",
+            freeze_scope["strategy_group_id"],
+            freeze_scope["symbol"],
+            freeze_scope["side"],
+            "active",
+        ),
+        **freeze_scope,
+        "status": "active",
+        "source_kind": "protection_recovery_command",
+        "source_id": str(command["protection_recovery_command_id"]),
+        "first_blocker": blockers[0],
+        "blockers": blockers,
+        "freeze_scope": freeze_scope,
+        "next_action": "notify_owner_and_reconcile_recovery_failure",
+        "authority_boundary": AUTHORITY_BOUNDARY,
+        "created_at_ms": now_ms,
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(conn, "brc_ticket_bound_scope_freezes", "scope_freeze_id", freeze_row)
     return updated
 
 
@@ -886,7 +1064,7 @@ def _update_lifecycle_after_partial_recovery(
         for order in submitted_orders
         if str(order.get("exchange_order_id") or "").strip()
     }
-    status = "protection_submit_failed" if "SL" in roles else "protection_missing"
+    status = "protection_degraded" if "SL" in roles else "protection_missing"
     updated = {
         **lifecycle,
         "status": status,
@@ -904,9 +1082,9 @@ def _update_lifecycle_after_partial_recovery(
 
 def _recovery_failed_lifecycle_status(lifecycle: dict[str, Any]) -> str:
     current = str(lifecycle.get("status") or "")
-    if current in {"protection_missing", "protection_submit_failed"}:
+    if current in {"protection_missing", "protection_degraded", "protection_submit_failed"}:
         return current
-    return "protection_submit_failed"
+    return "protection_degraded"
 
 
 def _merge_orders(

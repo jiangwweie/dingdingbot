@@ -16,6 +16,7 @@ The goal is:
 
 ```text
 existing PG ticket-bound lifecycle state
+-> first post-submit reconciliation tick when due
 -> bounded lifecycle maintenance scheduler
 -> exchange snapshot source when needed
 -> ticket-bound maintenance service
@@ -35,6 +36,7 @@ sizing defaults, withdrawals, transfers, or file artifacts.
 | **Runner mutation safety** | Default plan is `submit_new_runner_sl_then_cancel_old` |
 | **Reconciler input** | `protection_reconciler` consumes caller-provided exchange snapshots and does not call exchange directly |
 | **PG truth** | Runtime and lifecycle state live in PG current tables; repo/output/report files are not authority |
+| **First tick and recovery defaults** | Defined in `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
 
 ## Target Components
 
@@ -53,6 +55,8 @@ The scheduler only selects existing PG lifecycle/protection rows.
 | --- | --- |
 | **No lifecycle rows** | Exit with `no_active_lifecycle`; no exchange call |
 | **No open/attention lifecycle rows** | Exit with `no_maintainable_lifecycle`; no exchange call |
+| **real protected submit result without first tick** | Run `first_post_submit` reconciliation tick before routine scheduled maintenance |
+| **pending_visibility within 30 seconds** | Keep exact pending state; do not mark healthy and do not retry exchange mutation |
 | **protection_missing / protection_submit_failed** | Run maintenance; exchange write only if explicitly enabled |
 | **position_protected / submitted / reconciled** | Fetch snapshot and reconcile if a protection set exists |
 | **runner_mutation_pending** | Fetch snapshot, prepare/execute runner mutation when enabled |
@@ -123,6 +127,17 @@ Allowed mutations:
 | **RUNNER_SL submit / old SL cleanup** | Existing exit protection set after TP1 fill |
 | **Linked orphan protection cleanup** | Existing PG-linked reduce-only protection after flat-position proof |
 
+Recovery command policy:
+
+| Rule | Value |
+| --- | --- |
+| **SL missing after ENTRY fill/open position** | Immediate `submit_missing_sl`; no visibility grace |
+| **TP1 missing while SL exists** | `protection_degraded` and `submit_missing_tp1`; never complete protection |
+| **Runner mutation order** | Submit new runner SL, confirm it, then cancel old SL |
+| **Retry limit** | Same command / same ticket / same role max 3 attempts |
+| **Retry exhaustion** | Freeze `strategy_group_id + symbol + side` and notify |
+| **Unknown exchange-only order** | Do not cancel and do not adopt; freeze exact scope |
+
 Forbidden:
 
 - new ENTRY submit;
@@ -143,6 +158,9 @@ Forbidden:
 | **Recovery can run from scheduler** | Unit test proves missing TP1 goes through recovery and returns protected state |
 | **Runner can run from scheduler** | Unit test proves TP1-filled lifecycle submits RUNNER_SL before old SL cleanup |
 | **Cleanup can run from scheduler** | Unit test proves flat-position linked protection cleanup cancels only PG-linked reduce-only refs |
+| **First tick runs before routine maintenance** | Unit test proves a real submit result without first tick creates `first_post_submit` reconciliation before scheduled reconciliation |
+| **Visibility grace is bounded** | Unit test proves temporary exchange invisibility is `pending_visibility` and expires into mismatch/recovery |
+| **Recovery command matrix is deterministic** | Unit tests prove SL missing, TP1 missing, runner SL missing, old SL cancel failure, unknown exchange-only order, and retry exhaustion each map to one command or hard stop |
 | **File authority remains clear** | `scripts/audit_production_runtime_file_io.py` reports zero suspicious runtime file authority and zero frequent report writes |
 | **Output scope remains clear** | `scripts/validate_output_artifact_scope.py --git-status --git-tracked` passes |
 
@@ -152,11 +170,11 @@ Forbidden:
 chain_position: post_submit_lifecycle_wiring
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scopes
-stage: p0_c_scheduler_snapshot_source_design
-first_blocker: implementation_and_tokyo_deploy_acceptance_pending
-evidence: lifecycle maintenance service/API exists locally; scheduler and snapshot source are defined here
-next_action: implement scheduler runner, snapshot provider, systemd oneshot timer, tests, deploy, and Tokyo acceptance
-stop_condition: production runner can maintain existing ticket-bound lifecycle rows or expose one exact current lifecycle blocker without file authority or report growth
+stage: p0_3_p0_4_design_confirmed
+first_blocker: first_tick_and_recovery_command_implementation_pending
+evidence: lifecycle maintenance service/API exists locally; scheduler and snapshot source are defined here; first-tick and recovery-command defaults are confirmed in POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md
+next_action: implement first-tick due selection, scheduler runner, snapshot provider, recovery command determinism, tests, deploy, and Tokyo acceptance
+stop_condition: production runner can maintain existing ticket-bound lifecycle rows, create required first reconciliation ticks, or expose one exact current lifecycle blocker without file authority or report growth
 owner_action_required: no
 authority_boundary: no FinalGate bypass, no Operation Layer bypass, no new ENTRY submit, no live profile/sizing mutation, no withdrawal/transfer
 ```

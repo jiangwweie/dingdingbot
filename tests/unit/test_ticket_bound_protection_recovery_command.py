@@ -14,6 +14,7 @@ from src.application.action_time.protection_recovery_command import (
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
+    _prepare_real_submit,
     _json_value,
     _submitted_orders,
 )
@@ -123,7 +124,7 @@ async def test_protection_recovery_submit_failure_stays_hard_stopped(
     assert executed["status"] == "failed"
     assert executed["blockers"] == ["recovery rejected by test gateway"]
     assert _attempt_status(pg_control_connection) == "submit_failed"
-    assert _lifecycle_status(pg_control_connection) == "protection_submit_failed"
+    assert _lifecycle_status(pg_control_connection) == "protection_degraded"
     assert _attempt_blockers(pg_control_connection) == [
         "recovery rejected by test gateway"
     ]
@@ -155,7 +156,7 @@ async def test_protection_recovery_rejects_canceled_place_result(
     assert executed["status"] == "failed"
     assert executed["blockers"] == ["protection_recovery_submit_not_confirmed:TP1"]
     assert _attempt_status(pg_control_connection) == "submit_failed"
-    assert _lifecycle_status(pg_control_connection) == "protection_submit_failed"
+    assert _lifecycle_status(pg_control_connection) == "protection_degraded"
     assert _recovery_command_status(pg_control_connection) == "failed"
 
 
@@ -211,7 +212,7 @@ async def test_partial_protection_recovery_updates_lifecycle_to_narrower_blocker
     assert executed["status"] == "failed"
     assert len(gateway.place_calls) == 2
     assert _attempt_status(pg_control_connection) == "submit_failed"
-    assert _lifecycle_status(pg_control_connection) == "protection_submit_failed"
+    assert _lifecycle_status(pg_control_connection) == "protection_degraded"
     assert _submit_result_roles(pg_control_connection) == {"ENTRY", "SL"}
     assert _recovery_command_status(pg_control_connection) == "failed"
 
@@ -308,6 +309,45 @@ async def test_protection_recovery_executor_blocks_stale_lifecycle_without_excha
     assert _lifecycle_status(pg_control_connection) == "runner_mutation_pending"
 
 
+@pytest.mark.asyncio
+async def test_protection_recovery_freezes_scope_after_three_failed_attempts(
+    pg_control_connection,
+):
+    prepared = _failed_attempt_after_tp1_submit_failure(pg_control_connection)
+    command = prepare_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+
+    for offset in (7000, 8000, 9000):
+        gateway = _FakeRecoveryGateway(place_success=False)
+        executed = await execute_ticket_bound_protection_recovery_command(
+            pg_control_connection,
+            protection_recovery_command_id=command["protection_recovery_command_id"],
+            gateway=gateway,
+            now_ms=NOW_MS + offset,
+        )
+        command = prepare_ticket_bound_protection_recovery_command(
+            pg_control_connection,
+            protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+            now_ms=NOW_MS + offset + 100,
+        )
+
+    assert executed["status"] == "failed"
+    assert command["status"] == "blocked"
+    assert command["first_blocker"] == "protection_recovery_retry_limit_exhausted"
+    row = _recovery_command_row(pg_control_connection)
+    assert row["execution_attempt_count"] == 3
+    assert row["scope_frozen"] in {True, 1}
+    freeze = pg_control_connection.execute(
+        text("SELECT * FROM brc_ticket_bound_scope_freezes")
+    ).mappings().one()
+    assert freeze["strategy_group_id"] == "SOR-001"
+    assert freeze["symbol"] == "ETHUSDT"
+    assert freeze["side"] == "long"
+
+
 def _failed_attempt_after_sl_submit_failure(conn) -> dict:
     ids, prepared, submitted_orders = _prepared_real_submit(conn)
     entry_order = submitted_orders[0]
@@ -341,22 +381,14 @@ def _failed_attempt_after_tp1_submit_failure(conn) -> dict:
         ),
         now_ms=NOW_MS + 5000,
     )
-    assert result["next_action"] == (
-        "run_official_recovery_submit_missing_protection_or_flatten"
-    )
-    assert _lifecycle_status(conn) == "protection_submit_failed"
+    assert result["next_action"] == "run_official_recovery_submit_missing_tp1"
+    assert _lifecycle_status(conn) == "protection_degraded"
     return prepared
 
 
 def _prepared_real_submit(conn):
     ids = _create_ready_protected_submit(conn)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        conn,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(conn, ids)
     return ids, prepared, _submitted_orders(prepared)
 
 
@@ -414,6 +446,14 @@ def _recovery_command_blockers(conn) -> list[str]:
         text("SELECT blockers FROM brc_ticket_bound_protection_recovery_commands")
     ).scalar_one()
     return _json_value(value)
+
+
+def _recovery_command_row(conn) -> dict:
+    return dict(
+        conn.execute(
+            text("SELECT * FROM brc_ticket_bound_protection_recovery_commands")
+        ).mappings().one()
+    )
 
 
 def _attempt_blockers(conn) -> list[str]:

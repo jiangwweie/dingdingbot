@@ -18,8 +18,10 @@ LIFECYCLE_HARD_STOP_STATUSES = {
     "entry_orphaned",
     "entry_partial_fill_unhandled",
     "protection_missing",
+    "protection_degraded",
     "protection_submit_failed",
     "protection_reconciliation_mismatch",
+    "exchange_orphan_detected",
     "tp1_or_sl_orphaned",
     "runner_mutation_failed",
     "runner_reconciliation_mismatch",
@@ -179,7 +181,7 @@ def classify_protection_reconciliation(
         status = "protection_missing"
     elif open_position and not has_valid_tp1 and not tp1_filled:
         blockers.append("open_position_without_valid_tp1")
-        status = "protection_reconciliation_mismatch"
+        status = "protection_degraded"
     elif tp1_filled and not has_runner_sl:
         blockers.append("tp1_filled_without_runner_sl")
         status = "runner_mutation_pending"
@@ -235,7 +237,7 @@ def _exit_protection_status(
     if sl_missing:
         return "protection_missing"
     if tp1_missing:
-        return "protection_submit_failed"
+        return "protection_degraded"
     if attempt.get("status") == "submitted":
         return "protection_reconciliation_mismatch"
     return "blocked"
@@ -266,9 +268,9 @@ def _sequential_submit_status(
     if entry_order and not sl_order:
         return "protection_missing"
     if entry_order and sl_order and not tp1_order:
-        return "protection_submit_failed"
+        return "protection_degraded"
     if result_status == "protection_submit_failed":
-        return "protection_submit_failed" if sl_order else "protection_missing"
+        return "protection_degraded" if sl_order else "protection_missing"
     if result_status.endswith("_failed"):
         return "submit_failed"
     if blockers:
@@ -284,8 +286,10 @@ def _event_type_for_status(status: str) -> str:
         "entry_unknown",
         "entry_orphaned",
         "protection_missing",
+        "protection_degraded",
         "protection_submit_failed",
         "protection_reconciliation_mismatch",
+        "exchange_orphan_detected",
         "tp1_or_sl_orphaned",
         "runner_mutation_pending",
         "runner_mutation_failed",
@@ -307,8 +311,10 @@ def _next_action_for_status(status: str) -> str:
         "entry_fill_pending": "wait_for_entry_fill_or_reconcile_order_status",
         "entry_partial_fill_unhandled": "reconcile_partial_fill_and_protect_actual_qty",
         "protection_missing": "run_official_recovery_submit_sl_or_flatten",
+        "protection_degraded": "run_official_recovery_submit_missing_tp1",
         "protection_submit_failed": "run_official_recovery_submit_missing_protection_or_flatten",
         "protection_reconciliation_mismatch": "run_exchange_protection_reconciler",
+        "exchange_orphan_detected": "freeze_new_submits_for_scope",
         "tp1_or_sl_orphaned": "prove_or_cancel_orphan_protection_order",
         "runner_mutation_pending": "run_official_runner_mutation_command",
         "runner_mutation_failed": "repair_runner_mutation_or_flatten",

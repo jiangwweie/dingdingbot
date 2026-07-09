@@ -7,6 +7,7 @@ from scripts import materialize_ticket_bound_protected_submit_attempt as submit
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
+    _prepare_real_submit,
     _json_value,
     _submitted_orders,
 )
@@ -156,10 +157,10 @@ def test_exit_protection_blocks_without_tp1(
         now_ms=NOW_MS + 6000,
     )
 
-    assert payload["status"] == "protection_submit_failed"
+    assert payload["status"] == "protection_degraded"
     assert "tp1_exchange_order_missing" in payload["blockers"]
     lifecycle = _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")
-    assert lifecycle["status"] == "protection_submit_failed"
+    assert lifecycle["status"] == "protection_degraded"
     assert lifecycle["entry_fill_confirmed"] in {True, 1}
 
 
@@ -222,13 +223,7 @@ def _submitted_attempt_with_orders(
     *,
     submitted_orders_mutator=None,
 ) -> dict:
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        conn,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(conn, ids)
     submitted_orders = _submitted_orders(prepared)
     if submitted_orders_mutator:
         submitted_orders = submitted_orders_mutator(submitted_orders)

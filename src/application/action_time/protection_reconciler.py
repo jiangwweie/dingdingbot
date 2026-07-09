@@ -148,9 +148,17 @@ def reconcile_ticket_bound_exit_protection_set(
     if "exchange_position_snapshot_missing" in blockers:
         status = "protection_reconciliation_mismatch"
         next_action = "refresh_exchange_position_snapshot"
-    elif any(blocker == "exchange_protection_order_not_linked_to_pg" for blocker in blockers):
-        status = "tp1_or_sl_orphaned"
-        next_action = "prove_or_cancel_orphan_protection_order"
+    elif any(blocker == "exchange_only_unknown_order" for blocker in blockers):
+        status = "exchange_orphan_detected"
+        next_action = "freeze_new_submits_for_scope"
+        _upsert_scope_freeze(
+            conn,
+            protection_set=protection_set,
+            source_kind="exit_protection_reconciler",
+            source_id=set_id,
+            blockers=["exchange_only_unknown_order"],
+            now_ms=now_ms,
+        )
     elif "old_sl_still_live_after_runner_mutation" in blockers:
         status = "runner_reconciliation_mismatch"
         next_action = "cancel_old_sl_or_reconcile_runner_protection"
@@ -158,9 +166,17 @@ def reconcile_ticket_bound_exit_protection_set(
         status = (
             "runner_reconciliation_mismatch"
             if any(blocker.startswith("runner_sl_") for blocker in blockers)
-            else "protection_reconciliation_mismatch"
+            else (
+                "protection_degraded"
+                if any(blocker.startswith("tp1_") for blocker in blockers)
+                else "protection_reconciliation_mismatch"
+            )
         )
-        next_action = "run_exchange_protection_reconciler"
+        next_action = (
+            "submit_missing_tp1"
+            if status == "protection_degraded"
+            else "run_exchange_protection_reconciler"
+        )
     elif any(
         blocker.endswith("_side_mismatch")
         or blocker.endswith("_reduce_only_missing")
@@ -275,7 +291,7 @@ def _additional_blockers(
         exchange_order_id = str(exchange_order.get("exchange_order_id") or "")
         if exchange_order.get("reduce_only") is True and exchange_order_id:
             if exchange_order_id not in linked_exchange_ids:
-                blockers.append("exchange_protection_order_not_linked_to_pg")
+                blockers.append("exchange_only_unknown_order")
     return _dedupe(blockers)
 
 
@@ -430,6 +446,43 @@ def _insert_event(
     _upsert_row(conn, "brc_ticket_bound_lifecycle_events", "lifecycle_event_id", event)
 
 
+def _upsert_scope_freeze(
+    conn: sa.engine.Connection,
+    *,
+    protection_set: dict[str, Any],
+    source_kind: str,
+    source_id: str,
+    blockers: list[str],
+    now_ms: int,
+) -> None:
+    freeze_scope = {
+        "strategy_group_id": str(protection_set["strategy_group_id"]),
+        "symbol": str(protection_set["symbol"]),
+        "side": str(protection_set["side"]),
+    }
+    row = {
+        "scope_freeze_id": _stable_id(
+            "ticket_scope_freeze",
+            freeze_scope["strategy_group_id"],
+            freeze_scope["symbol"],
+            freeze_scope["side"],
+            "active",
+        ),
+        **freeze_scope,
+        "status": "active",
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "first_blocker": blockers[0],
+        "blockers": blockers,
+        "freeze_scope": freeze_scope,
+        "next_action": "notify_owner_and_reconcile_unknown_exchange_order",
+        "authority_boundary": AUTHORITY_BOUNDARY,
+        "created_at_ms": now_ms,
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(conn, "brc_ticket_bound_scope_freezes", "scope_freeze_id", row)
+
+
 def _upsert_row(
     conn: sa.engine.Connection,
     table_name: str,
@@ -490,7 +543,9 @@ def _stable_id(prefix: str, *parts: str) -> str:
 def _event_type_for_status(status: str) -> str:
     if status in {
         "protection_missing",
+        "protection_degraded",
         "protection_reconciliation_mismatch",
+        "exchange_orphan_detected",
         "tp1_or_sl_orphaned",
         "runner_mutation_pending",
         "runner_reconciliation_mismatch",

@@ -139,6 +139,7 @@ Owner decisions.
 | Operation Layer exchange capability audit | `docs/current/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
 | Ticket-bound order lifecycle and exit protection | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | Ticket-bound lifecycle safety core implementation | `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
+| Post-submit reconciliation and recovery commands | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
 | Live outcome ledger contract | `docs/current/LIVE_OUTCOME_LEDGER_CONTRACT.md` |
 | Trading quality capital/risk allocation | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | Strategy governance pipeline DB design | `docs/current/STRATEGY_GOVERNANCE_PIPELINE_DB_DESIGN.md` |

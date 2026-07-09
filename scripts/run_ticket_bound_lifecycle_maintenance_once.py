@@ -23,6 +23,9 @@ from src.application.action_time.lifecycle_maintenance_scheduler import (  # noq
     run_ticket_bound_lifecycle_maintenance_scheduler,
     select_ticket_bound_lifecycle_maintenance_scopes,
 )
+from src.application.action_time.post_submit_reconciliation_tick import (  # noqa: E402
+    select_ticket_bound_first_reconciliation_tick_scopes,
+)
 from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     is_sync_postgres_dsn,
     normalize_sync_postgres_dsn,
@@ -46,12 +49,19 @@ async def _amain(argv: list[str] | None = None) -> int:
     gateway = None
     try:
         with engine.begin() as conn:
+            first_tick_scopes = [
+                {**scope, "scheduler_scope_kind": "first_post_submit"}
+                for scope in select_ticket_bound_first_reconciliation_tick_scopes(
+                    conn,
+                    max_scopes=args.max_lifecycle_scopes,
+                )
+            ]
             scopes = select_ticket_bound_lifecycle_maintenance_scopes(
                 conn,
                 max_lifecycle_scopes=args.max_lifecycle_scopes,
             )
             if lifecycle_maintenance_scopes_require_exchange_gateway(
-                scopes,
+                first_tick_scopes + scopes,
                 allow_exchange_mutation=args.allow_exchange_mutation,
                 fetch_exchange_snapshot=args.fetch_exchange_snapshot,
             ):

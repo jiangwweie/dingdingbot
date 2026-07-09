@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from sqlalchemy import text
@@ -568,7 +569,7 @@ def test_protected_submit_result_materializes_protection_missing_after_sl_failur
     assert lifecycle["first_blocker"] == "exchange_submit_failed:sl"
 
 
-def test_protected_submit_result_materializes_protection_submit_failed_after_tp1_failure(
+def test_protected_submit_result_materializes_protection_degraded_after_tp1_failure(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
@@ -598,11 +599,9 @@ def test_protected_submit_result_materializes_protection_submit_failed_after_tp1
     )
 
     assert result["status"] == "submit_failed"
-    assert result["next_action"] == (
-        "run_official_recovery_submit_missing_protection_or_flatten"
-    )
+    assert result["next_action"] == "run_official_recovery_submit_missing_tp1"
     lifecycle = _lifecycle_row(pg_control_connection)
-    assert lifecycle["status"] == "protection_submit_failed"
+    assert lifecycle["status"] == "protection_degraded"
     assert lifecycle["entry_fill_confirmed"] in {True, 1}
     assert lifecycle["first_blocker"] == "exchange_submit_failed:tp1"
 
@@ -654,6 +653,7 @@ def _create_ready_protected_submit(conn) -> dict[str, str]:
 
 
 def _prepare_real_submit(conn, ids: dict[str, str]) -> dict:
+    _ensure_runtime_submit_env()
     decision = submit.materialize_ticket_bound_submit_mode_decision(
         conn,
         ticket_id=ids["ticket_id"],
@@ -671,6 +671,15 @@ def _prepare_real_submit(conn, ids: dict[str, str]) -> dict:
     )
     assert prepared["submit_mode_decision_id"] == decision["submit_mode_decision_id"]
     return prepared
+
+
+def _ensure_runtime_submit_env() -> None:
+    os.environ["TRADING_ENV"] = "live"
+    os.environ["EXCHANGE_TESTNET"] = "false"
+    os.environ["BRC_EXECUTION_PERMISSION_MAX"] = "order_allowed"
+    os.environ["RUNTIME_CONTROL_API_ENABLED"] = "false"
+    os.environ["RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"] = "false"
+    os.environ["RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED"] = "true"
 
 
 def _protected_submit_row(conn):

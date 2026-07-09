@@ -18,6 +18,13 @@ AUTHORITY_BOUNDARY = (
     "authority"
 )
 
+ATTEMPT_AUTHORITY_BOUNDARY = (
+    "ticket_bound_attempt_exchange_snapshot_provider; read-only gateway "
+    "snapshot for existing ticket-bound protected submit attempt; no submit, "
+    "cancel, amend, FinalGate, Operation Layer, profile, sizing, withdrawal, "
+    "transfer, or file authority"
+)
+
 
 async def fetch_ticket_bound_exchange_snapshot(
     conn: sa.engine.Connection,
@@ -110,6 +117,100 @@ async def fetch_ticket_bound_exchange_snapshot(
         "exchange_read_called": True,
         "exchange_write_called": False,
         "authority_boundary": AUTHORITY_BOUNDARY,
+    }
+
+
+async def fetch_ticket_bound_attempt_exchange_snapshot(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+    gateway: Any,
+    timeout_seconds: float = 8.0,
+    recent_fill_limit: int = 50,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    now_ms = int(now_ms or time.time() * 1000)
+    attempt_id = str(protected_submit_attempt_id or "").strip()
+    if not attempt_id:
+        return _attempt_blocked(
+            now_ms=now_ms,
+            blockers=["protected_submit_attempt_id_required"],
+            attempt={},
+        )
+    attempt = _row_by_id(
+        conn,
+        "brc_ticket_bound_protected_submit_attempts",
+        "protected_submit_attempt_id",
+        attempt_id,
+    )
+    if not attempt:
+        return _attempt_blocked(
+            now_ms=now_ms,
+            blockers=["protected_submit_attempt_missing"],
+            attempt={},
+        )
+    symbol = str(attempt.get("symbol") or "").strip()
+    if not symbol:
+        return _attempt_blocked(
+            now_ms=now_ms,
+            blockers=["protected_submit_attempt_symbol_missing"],
+            attempt=attempt,
+        )
+    method_blockers = _gateway_method_blockers(gateway)
+    if method_blockers:
+        return _attempt_blocked(
+            now_ms=now_ms,
+            blockers=method_blockers,
+            attempt=attempt,
+        )
+
+    try:
+        open_orders, recent_fills, positions = await asyncio.wait_for(
+            asyncio.gather(
+                gateway.fetch_open_orders(symbol),
+                gateway.fetch_my_trades(symbol, limit=recent_fill_limit),
+                gateway.fetch_positions(symbol),
+            ),
+            timeout=timeout_seconds,
+        )
+    except TimeoutError:
+        return _attempt_blocked(
+            now_ms=now_ms,
+            blockers=["exchange_snapshot_fetch_timeout"],
+            attempt=attempt,
+        )
+    except Exception as exc:
+        return _attempt_blocked(
+            now_ms=now_ms,
+            blockers=[f"exchange_snapshot_fetch_failed:{type(exc).__name__}"],
+            attempt=attempt,
+        )
+
+    snapshot = {
+        "snapshot_id": _snapshot_id(attempt_id, now_ms),
+        "source": "official_runtime_exchange_gateway",
+        "exchange_read_called": True,
+        "exchange_write_called": False,
+        "symbol": symbol,
+        "open_orders": [_normalize_open_order(order) for order in open_orders or []],
+        "recent_fills": [_normalize_fill(fill) for fill in recent_fills or []],
+        "position": _normalize_position(symbol, positions or []),
+        "fetched_at_ms": now_ms,
+        "authority_boundary": ATTEMPT_AUTHORITY_BOUNDARY,
+    }
+    return {
+        "schema": "brc.ticket_bound_attempt_exchange_snapshot_provider.v1",
+        "status": "snapshot_ready",
+        "now_ms": now_ms,
+        "ticket_id": attempt.get("ticket_id"),
+        "protected_submit_attempt_id": attempt_id,
+        "symbol": symbol,
+        "first_blocker": None,
+        "blockers": [],
+        "snapshot": snapshot,
+        "exchange_read_called": True,
+        "exchange_write_called": False,
+        "authority_boundary": ATTEMPT_AUTHORITY_BOUNDARY,
     }
 
 
@@ -223,6 +324,28 @@ def _blocked(
         "exchange_read_called": False,
         "exchange_write_called": False,
         "authority_boundary": AUTHORITY_BOUNDARY,
+    }
+
+
+def _attempt_blocked(
+    *,
+    now_ms: int,
+    blockers: list[str],
+    attempt: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema": "brc.ticket_bound_attempt_exchange_snapshot_provider.v1",
+        "status": "blocked",
+        "now_ms": now_ms,
+        "ticket_id": attempt.get("ticket_id"),
+        "protected_submit_attempt_id": attempt.get("protected_submit_attempt_id"),
+        "symbol": attempt.get("symbol"),
+        "first_blocker": blockers[0] if blockers else None,
+        "blockers": blockers,
+        "snapshot": {},
+        "exchange_read_called": False,
+        "exchange_write_called": False,
+        "authority_boundary": ATTEMPT_AUTHORITY_BOUNDARY,
     }
 
 

@@ -30,15 +30,16 @@ repo MD/JSON/output/report files.
 
 | Fact | Current evidence |
 | --- | --- |
-| **dev and Tokyo are aligned on lifecycle cleanup and failure matrix** | `dev`, `origin/dev`, and Tokyo release head are `f8f299f82c6cd9f456189252608bc0effe2cbb6b`; Tokyo postdeploy acceptance passed; PG migration is at `alembic=098` |
+| **dev and Tokyo are aligned on submit-mode and lifecycle wiring** | `dev`, `origin/dev`, and Tokyo release head are `110e680c5a919043e46a145d9ef4503638473471`; Tokyo postdeploy acceptance passed; PG migration is at `alembic=100` |
 | **PG current state is the runtime source** | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | **Repo/output/report files are not runtime authority** | `docs/current/REPO_FILE_SOURCE_ELIMINATION_GOVERNANCE_PLAN.md`, `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | **Five StrategyGroups are active WIP** | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`, PG candidate scope seed |
 | **Multi-symbol and side-specific action-time path exists** | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`, `docs/current/MULTI_STRATEGY_MULTI_SYMBOL_MULTI_SIDE_ACTION_TIME_EVOLUTION_DESIGN.md` |
 | **Ticket identity and TP1 are PG-backed** | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | **Initial order lifecycle/protection PG objects exist** | `brc_ticket_bound_*` tables and current ticket-bound materializers |
-| **Runner dynamic management is code-covered and deployed as lifecycle repair** | `runner_mutation_command`, `runner_mutation_executor`, `runner_protection_adjuster`, lifecycle tests, and Tokyo release `f8f299f8` cover TP1 filled -> RUNNER_SL submit -> old SL cleanup -> runner proof through official-path records |
+| **Runner dynamic management is code-covered and deployed as lifecycle repair** | `runner_mutation_command`, `runner_mutation_executor`, `runner_protection_adjuster`, lifecycle tests, and Tokyo release `110e680c` cover TP1 filled -> RUNNER_SL submit -> old SL cleanup -> runner proof through official-path records |
 | **Exchange protection reconciliation is code-covered and deployed as readonly comparison logic** | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots, including missing order, side mismatch, qty mismatch, orphan reduce-only order, TP1-fill runner gap, and flat-position live protection |
+| **First tick and recovery-command defaults are confirmed** | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` records immediate first tick, 30-second visibility grace, SL emergency recovery, TP1 degraded recovery, runner new-SL-before-old-SL-cancel, max 3 retries, and scope freeze at `strategy_group_id + symbol + side` |
 | **No recent postdeploy signal or ticket exists** | Latest server health after deploy showed `recent signals/promotions/lanes/tickets/attempts = 0`; this is market/no-event state, not a current engineering blocker |
 | **Trading quality / capital risk allocation is designed but not fully implemented** | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`; `risk_at_stop` must be split into an earlier reservation layer before advanced allocation |
 
@@ -47,9 +48,9 @@ repo MD/JSON/output/report files.
 | Program | Priority | Goal | Primary design docs | Main acceptance |
 | --- | --- | --- | --- | --- |
 | **P0-0 Operation Layer / Exchange Capability Audit** | P0 | Confirm the real official-path exchange capabilities that lifecycle, runner, recovery, and reconciliation may rely on | `OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md`, `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` | ENTRY, SL, TP1, reduce-only, query open orders/fills/position, cancel, idempotent client order id, and runner SL capability are explicitly mapped to supported / unsupported / recovery-required |
-| **P0-1 Ticket-Bound Lifecycle Safety Core** | P0 | Keep lifecycle state machine, hard invariants, sequential submit recovery, runner mutation, exchange protection reconciliation, and closure under one model | `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` | A submitted ticket can prove ENTRY, SL, TP1, RUNNER_SL, final exit, reconciliation, settlement, and review, or stop at one exact lifecycle hard blocker |
+| **P0-1 Ticket-Bound Lifecycle Safety Core** | P0 | Keep lifecycle state machine, hard invariants, sequential submit recovery, runner mutation, exchange protection reconciliation, and closure under one model | `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` | A submitted ticket can prove ENTRY, SL, TP1, RUNNER_SL, final exit, reconciliation, settlement, and review, or stop at one exact lifecycle hard blocker |
 | **P0-2 Full Chain Simulation Harness** | P0 | Verify the lifecycle model with constructed raw inputs, two golden paths, and a failure matrix without real exchange writes | `L1_L9_OPTIMIZATION_EXECUTION_PLAN.md`, `PRE_TRADE_RUNTIME_CONTRACT.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` | AVAX short and CPM long golden paths plus failure matrix prove lifecycle correctness; broader active event specs remain impact coverage |
-| **P0-C Production Lifecycle Wiring** | P0 | Wire existing lifecycle, recovery, runner mutation, reconciler, and cleanup services into production cadence without adding a second lifecycle path | `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` | ENTRY, SL, TP1, RUNNER_SL, final exit, recovery, cleanup, and reconciliation are event/startup/periodic wired and stop at exact lifecycle blockers |
+| **P0-C Production Lifecycle Wiring** | P0 | Wire existing lifecycle, first reconciliation tick, recovery, runner mutation, reconciler, and cleanup services into production cadence without adding a second lifecycle path | `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `P0_C_PRODUCTION_LIFECYCLE_SCHEDULER_AND_SNAPSHOT_SOURCE_DESIGN.md`, `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` | ENTRY, SL, TP1, RUNNER_SL, final exit, first tick, recovery, cleanup, and reconciliation are event/startup/periodic wired and stop at exact lifecycle blockers |
 | **P0-D Live Outcome Ledger** | P0 | Turn real tickets and orders into structured strategy-learning rows without becoming submit authority | `LIVE_OUTCOME_LEDGER_CONTRACT.md`, `STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` | Every real ticket can bind entry, stop, TP1, runner, final exit, fees, funding, PnL, MAE/MFE, R multiple, lifecycle defects, and review decision |
 | **P1 Risk Reservation v0** | P1 | Require ticket-level stop-risk estimate and budget reservation before FinalGate-ready state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | `risk_at_stop = abs(entry_price - stop_price) * quantity` is computed and reserved before FinalGate-ready submit |
 | **P1-C Owner Explanation Read Model** | P1 | Make no-trade, signal, ticket, submit, runner, and closure states human-readable | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, `RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` | Owner can see whether the system is waiting, processing, blocked, protected, or closed without decoding internal terms |
@@ -258,6 +259,8 @@ submitted ticket
 | **Lifecycle maintenance API wiring** | Implemented locally through `run_ticket_bound_lifecycle_maintenance` and `/api/trading-console/runtime-ticket-bound-lifecycle-maintenance`; it can materialize protection, prepare/execute recovery, prepare/execute runner mutation, materialize runner proof, and execute linked orphan cleanup |
 | **Production exchange snapshot fetch / scheduler wiring** | Still a controlled integration task; the maintenance service accepts caller-provided exchange snapshots and does not fetch exchange truth on its own |
 | **Runner mutation plan safety** | Default `submit_new_runner_sl_then_cancel_old` is implemented locally; scheduler/live use still needs explicit cadence, exchange snapshot source, and postdeploy acceptance |
+| **First post-submit reconciliation tick** | Designed in `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md`; implementation pending |
+| **Recovery command determinism** | Owner-confirmed matrix exists; implementation must ensure every unsafe lifecycle blocker maps to one recovery command or hard stop |
 
 #### Runner Mutation Plan Policy
 
@@ -288,6 +291,8 @@ new parallel runner mutation service.
 | **Failure is visible** | Cancel failure, runner submit failure, and exchange mismatch update lifecycle blocker and ops health |
 | **No cancel-first assumption** | Tests prove plan selection, including `keep_existing_sl`, `submit_new_runner_sl_then_cancel_old`, and cancel-first only when forced by exchange capability |
 | **Maintenance entry is bounded** | API defaults `allow_exchange_mutation=false`; exchange mutation requires explicit request plus official runtime exchange gateway binding |
+| **First tick is immediate and bounded** | Real protected submit result creates one first reconciliation tick; disabled smoke creates none; no active lifecycle creates no exchange calls or no-op rows |
+| **Recovery matrix is deterministic** | SL missing, TP1 missing, runner SL missing, old SL cancel failure, unknown exchange-only order, and retry exhaustion each produce one recovery command or hard stop |
 
 ### P0-D Live Outcome Ledger
 
@@ -483,11 +488,11 @@ replay event as fresh live signal
 chain_position: daily_live_enablement_status
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scopes
-stage: p0_c_lifecycle_maintenance_api_local
-first_blocker: production_lifecycle_scheduler_snapshot_source_and_live_outcome_ledger_not_complete
-evidence: dev/origin-dev/Tokyo are aligned on f8f299f8; PG alembic is 098; lifecycle cleanup and failure matrix are deployed; local P0-C service/API wiring covers protection materialization, recovery, runner mutation, runner proof, and linked orphan cleanup without file authority
-next_action: review/merge/deploy P0-C maintenance API, then wire bounded scheduler/snapshot source before P0-D Live Outcome Ledger PG projection
-stop_condition: future real ticket proves entry, protection, TP1, runner, final exit, reconciliation, settlement, live outcome, and review, or stops at one exact lifecycle hard blocker
+stage: p0_3_p0_4_design_confirmed
+first_blocker: first_tick_and_recovery_command_implementation_pending
+evidence: dev/origin-dev/Tokyo are aligned on 110e680c; PG alembic is 100; real gateway submit-boundary test is deployed; first-tick and recovery-command defaults are documented in POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md
+next_action: implement PG first-tick projection, recovery command determinism, scheduler integration, focused tests, deploy, and postdeploy acceptance
+stop_condition: every real protected submit result reaches matched/protected, pending visibility, deterministic recovery command, or one exact hard stop without file authority
 owner_action_required: no
 authority_boundary: no FinalGate bypass, no Operation Layer bypass, no exchange write bypass, no live profile or sizing mutation
 ```

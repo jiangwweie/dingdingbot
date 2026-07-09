@@ -102,6 +102,7 @@ async def run_ticket_bound_lifecycle_maintenance(
 
         if str(result.get("status") or "") in {
             "protection_missing",
+            "protection_degraded",
             "protection_submit_failed",
         }:
             recovery = prepare_ticket_bound_protection_recovery_command(
@@ -159,6 +160,42 @@ async def run_ticket_bound_lifecycle_maintenance(
             )
             actions.append(_action("exit_protection_reconciled", reconciled))
             blockers.extend(_result_blockers(reconciled))
+            if (
+                str(reconciled.get("status") or "")
+                in {"protection_missing", "protection_degraded", "protection_submit_failed"}
+                and len(actions) < max_actions
+            ):
+                recovery = prepare_ticket_bound_protection_recovery_command(
+                    conn,
+                    protected_submit_attempt_id=_protection_set_attempt_id(conn, set_id),
+                    now_ms=now_ms + len(actions),
+                )
+                actions.append(_action("protection_recovery_prepared", recovery))
+                blockers.extend(_result_blockers(recovery))
+                command_id = str(recovery.get("protection_recovery_command_id") or "")
+                if (
+                    allow_exchange_mutation
+                    and gateway is not None
+                    and recovery.get("status") == "prepared"
+                    and command_id
+                    and len(actions) < max_actions
+                ):
+                    executed = await execute_ticket_bound_protection_recovery_command(
+                        conn,
+                        protection_recovery_command_id=command_id,
+                        gateway=gateway,
+                        now_ms=now_ms + len(actions),
+                    )
+                    actions.append(_action("protection_recovery_executed", executed))
+                    exchange_write_called = (
+                        exchange_write_called
+                        or _result_exchange_write_called(executed)
+                    )
+                    blockers.extend(_result_blockers(executed))
+                elif recovery.get("status") == "prepared" and not allow_exchange_mutation:
+                    blockers.append("exchange_mutation_not_allowed_for_protection_recovery")
+                elif recovery.get("status") == "prepared" and gateway is None:
+                    blockers.append("gateway_required_for_protection_recovery")
 
         runner: dict[str, Any] = {}
         runner_command_id = ""
@@ -382,6 +419,16 @@ def _role_order(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
         if str(order.get("role") or "").upper() == role:
             return dict(order)
     return {}
+
+
+def _protection_set_attempt_id(conn: sa.engine.Connection, set_id: str) -> str:
+    protection_set = _row_by_id(
+        conn,
+        "brc_ticket_bound_exit_protection_sets",
+        "exit_protection_set_id",
+        set_id,
+    )
+    return str(protection_set.get("protected_submit_attempt_id") or "")
 
 
 def _row_by_id(

@@ -67,6 +67,10 @@ ORPHAN_PROTECTION_CLEANUP_COMMAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-08-098_create_ticket_bound_orphan_protection_cleanup_commands.py"
 )
+POST_SUBMIT_RECONCILIATION_TICK_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-09-101_create_ticket_bound_reconciliation_ticks.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -188,6 +192,22 @@ def pg_control_connection():
                                     orphan_cleanup_command_migration.op = migration.op
                                     try:
                                         orphan_cleanup_command_migration.upgrade()
+                                        post_submit_reconciliation_migration = _load_module(
+                                            POST_SUBMIT_RECONCILIATION_TICK_MIGRATION_PATH,
+                                            "migration_101_action_time_full_chain",
+                                        )
+                                        old_post_submit_reconciliation_op = (
+                                            post_submit_reconciliation_migration.op
+                                        )
+                                        post_submit_reconciliation_migration.op = (
+                                            migration.op
+                                        )
+                                        try:
+                                            post_submit_reconciliation_migration.upgrade()
+                                        finally:
+                                            post_submit_reconciliation_migration.op = (
+                                                old_post_submit_reconciliation_op
+                                            )
                                     finally:
                                         orphan_cleanup_command_migration.op = (
                                             old_orphan_cleanup_op
@@ -607,7 +627,7 @@ def test_full_chain_failure_matrix_stops_at_exact_lifecycle_state(
             "prepared",
         ),
         "sl_ok_tp1_failed": (
-            "protection_submit_failed",
+            "protection_degraded",
             ["exchange_submit_failed:tp1"],
             "prepared",
         ),

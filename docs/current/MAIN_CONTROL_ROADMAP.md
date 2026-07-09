@@ -53,25 +53,26 @@ design documents and acceptance proof.
 | 2 | **Ticket-Bound Lifecycle Safety Core** | P0 | `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
 | 3 | **Full Chain Simulation Harness** | P0 | `docs/current/L1_L9_OPTIMIZATION_EXECUTION_PLAN.md` |
 | 4 | **Official Runner SL Mutation + Protection Reconciler** | P0 | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
-| 5 | **Live Outcome Ledger** | P0/P1 | `docs/current/LIVE_OUTCOME_LEDGER_CONTRACT.md` |
-| 6 | **Risk Reservation v0** | P1 | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
-| 7 | **Owner Explanation Read Model** | P1 | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
-| 8 | **Performance And Retention Control** | P1 | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
-| 9 | **Advanced Capital Risk Allocation** | P2 | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
-| 10 | **Frontend Read Model Integration** | P2 | frontend read-model contracts |
+| 5 | **Post-Submit First Tick + Recovery Command Matrix** | P0 | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
+| 6 | **Live Outcome Ledger** | P0/P1 | `docs/current/LIVE_OUTCOME_LEDGER_CONTRACT.md` |
+| 7 | **Risk Reservation v0** | P1 | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
+| 8 | **Owner Explanation Read Model** | P1 | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
+| 9 | **Performance And Retention Control** | P1 | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
+| 10 | **Advanced Capital Risk Allocation** | P2 | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
+| 11 | **Frontend Read Model Integration** | P2 | frontend read-model contracts |
 
 ## Current Verified Progress
 
 | Area | Current fact |
 | --- | --- |
-| **Integration branch** | `dev` and `origin/dev` are aligned to `4f813a16e32930fefb67590283d041b1fead207f` |
-| **Tokyo release** | Tokyo current release head is `4f813a16e32930fefb67590283d041b1fead207f` |
+| **Integration branch** | `dev` and `origin/dev` are aligned to `110e680c5a919043e46a145d9ef4503638473471` |
+| **Tokyo release** | Tokyo current release head is `110e680c5a919043e46a145d9ef4503638473471` |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
-| **PG migration** | Tokyo is at `alembic=097` after lifecycle migration repair |
+| **PG migration** | Tokyo is at `alembic=100` after submit-mode decision deployment |
 | **Postdeploy acceptance** | Passed; warning only that release identity comes from `.brc-release-manifest.json` because git archive releases have no `.git` directory |
 | **Backend / watcher / monitor** | Active after deploy verification |
-| **Recent market/action events** | No recent signal, promotion, lane, ticket, or attempt after the latest postdeploy health check |
-| **Current first blocker** | `no_recent_fresh_signal` for live action; back-half local engineering first blocker moves to `production_lifecycle_wiring_and_live_outcome_ledger_not_complete` after local P0-2 failure-matrix closure |
+| **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
+| **Current first blocker** | `first_tick_and_recovery_command_implementation_pending` for post-submit hardening; live action still depends on a future fresh signal and official runtime gates |
 
 ## Authority Boundary
 
@@ -96,7 +97,8 @@ design documents and acceptance proof.
 | **P0-D** | **Server monitor ownership** | server-side readonly monitor classifies quiet / notify from PG/current state | no production dependency on local heartbeat or local cache |
 | **P0-E** | **Performance and retention** | no-signal ticks stay quiet and bounded in disk / CPU / PG rows | report growth and restart storms are structurally prevented |
 | **P0-F** | **Ticket-bound lifecycle hardening** | post-submit lifecycle state machine, runner mutation, protection reconciliation, and failure recovery remain one safety core | every submitted ticket reaches protected/closed state or one exact lifecycle hard blocker |
-| **P0-G** | **Live outcome ledger** | real tickets become structured result and learning rows | every real ticket has one outcome row or one exact hard-blocked outcome |
+| **P0-G** | **Post-submit first tick and recovery command determinism** | immediate exchange-truth first tick and one recovery command or hard stop for every unsafe lifecycle blocker | every real protected submit result reaches matched/protected, pending visibility, deterministic recovery command, or exact hard stop |
+| **P0-H** | **Live outcome ledger** | real tickets become structured result and learning rows | every real ticket has one outcome row or one exact hard-blocked outcome |
 
 ## Active Runtime Loop
 
