@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from alembic.operations import Operations
@@ -25,6 +26,8 @@ from src.application.action_time.full_chain_simulation_harness import (
     run_ticket_bound_full_chain_simulation,
     run_ticket_bound_full_chain_failure_scenario,
 )
+from src.interfaces import api as trading_api_module
+from src.interfaces import api_trading_console
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
     _insert_ready_fresh_signal,
@@ -359,6 +362,139 @@ def test_short_raw_pg_input_derives_tp1_before_protected_submit(
     assert tp1_order["gateway_side"] == "buy"
     assert tp1_order["reduce_only"] is True
     assert tp1_order["price"] == expected_tp1
+
+
+@pytest.mark.asyncio
+async def test_raw_pg_input_reaches_real_gateway_submit_boundary(
+    pg_control_connection,
+    monkeypatch,
+):
+    _arm_submit_decision_env(monkeypatch)
+    payloads = _run_raw_pg_input_to_runtime_safety(
+        pg_control_connection,
+        monkeypatch,
+        strategy_group_id="SOR-001",
+        symbol="AVAXUSDT",
+        side="short",
+        fact_values={
+            "opening_range_defined": True,
+            "breakdown_confirmed": True,
+            "opening_range_high_reference": "20",
+            "last_price": "18",
+        },
+    )
+
+    submit_mode_decision = protected_submit.materialize_ticket_bound_submit_mode_decision(
+        pg_control_connection,
+        ticket_id=str(payloads["ticket"]["ticket_id"]),
+        operation_submit_command_id=str(
+            payloads["handoff"]["operation_submit_command_id"]
+        ),
+        production_submit_execution_policy="armed",
+        now_ms=NOW_MS + 6,
+    )
+    assert submit_mode_decision["decision"] == "real_gateway_action"
+    assert submit_mode_decision["blockers"] == []
+
+    prepared_submit = protected_submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=str(payloads["ticket"]["ticket_id"]),
+        operation_submit_command_id=str(
+            payloads["handoff"]["operation_submit_command_id"]
+        ),
+        submit_mode="real_gateway_action",
+        now_ms=NOW_MS + 7,
+    )
+    assert prepared_submit["status"] == "submit_prepared"
+    assert prepared_submit["submit_allowed"] is True
+    assert prepared_submit["submit_mode_decision_id"] == (
+        submit_mode_decision["submit_mode_decision_id"]
+    )
+    assert prepared_submit["exchange_write_called"] is False
+    assert prepared_submit["order_created"] is False
+    assert prepared_submit["order_lifecycle_called"] is False
+
+    submit_orders = prepared_submit["submit_request"]["orders"]
+    assert [order["order_role"] for order in submit_orders] == ["ENTRY", "SL", "TP1"]
+    assert submit_orders[0]["gateway_side"] == "sell"
+    assert submit_orders[0]["gateway_order_type"] == "market"
+    assert submit_orders[0]["reduce_only"] is False
+    assert submit_orders[1]["gateway_side"] == "buy"
+    assert submit_orders[1]["reduce_only"] is True
+    assert submit_orders[2]["gateway_side"] == "buy"
+    assert submit_orders[2]["reduce_only"] is True
+
+    gateway = _ExchangeWriteBoundaryGateway()
+    order_repository = _InMemoryOrderRepository()
+    monkeypatch.setattr(
+        trading_api_module,
+        "_runtime_exchange_submit_gateway",
+        gateway,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        trading_api_module,
+        "_trading_console_pg_order_repo",
+        order_repository,
+        raising=False,
+    )
+
+    gateway_binding = await api_trading_console._runtime_exchange_submit_gateway_binding(
+        trading_api_module
+    )
+    assert gateway_binding["status"] == "ready"
+    assert gateway_binding["blockers"] == []
+
+    submit_result = await api_trading_console._execute_ticket_bound_real_gateway_submit(
+        prepared_submit
+    )
+    assert submit_result["status"] == "entry_submit_failed"
+    assert submit_result["blockers"] == ["controlled_exchange_write_boundary"]
+    assert submit_result["exchange_write_called"] is True
+    assert submit_result["order_created"] is True
+    assert submit_result["order_lifecycle_called"] is True
+    assert submit_result["submitted_orders"] == []
+    assert len(gateway.calls) == 1
+    assert gateway.calls[0]["client_order_id"] == submit_orders[0]["client_order_id"]
+    assert gateway.calls[0]["side"] == "sell"
+    assert gateway.calls[0]["order_type"] == "market"
+    assert gateway.calls[0]["reduce_only"] is False
+    assert list(order_repository.orders) == [submit_orders[0]["local_order_id"]]
+
+    recorded = protected_submit.record_ticket_bound_protected_submit_result(
+        pg_control_connection,
+        protected_submit_attempt_id=str(
+            prepared_submit["protected_submit_attempt_id"]
+        ),
+        submit_result=submit_result,
+        now_ms=NOW_MS + 8,
+    )
+    assert recorded["status"] == "submit_failed"
+    assert recorded["exchange_write_called"] is True
+    assert recorded["order_created"] is True
+    assert recorded["order_lifecycle_called"] is True
+    assert recorded["blockers"] == ["controlled_exchange_write_boundary"]
+
+    attempt_row = pg_control_connection.execute(
+        text(
+            """
+            SELECT status, submit_mode, exchange_write_called, order_created,
+                   order_lifecycle_called
+            FROM brc_ticket_bound_protected_submit_attempts
+            WHERE protected_submit_attempt_id = :protected_submit_attempt_id
+            """
+        ),
+        {
+            "protected_submit_attempt_id": str(
+                prepared_submit["protected_submit_attempt_id"]
+            )
+        },
+    ).mappings().one()
+    assert attempt_row["status"] == "submit_failed"
+    assert attempt_row["submit_mode"] == "real_gateway_action"
+    assert bool(attempt_row["exchange_write_called"]) is True
+    assert bool(attempt_row["order_created"]) is True
+    assert bool(attempt_row["order_lifecycle_called"]) is True
 
 
 @pytest.mark.parametrize(
@@ -939,3 +1075,49 @@ def _finalgate_ready_event_count(conn) -> int:
             """
         )
     ).scalar_one()
+
+
+class _ExchangeWriteBoundaryGateway:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def place_order(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return SimpleNamespace(
+            is_success=False,
+            error_message="controlled_exchange_write_boundary",
+            error_code="CONTROLLED_EXCHANGE_WRITE_BOUNDARY",
+        )
+
+    async def fetch_ticker_price(self, *_args, **_kwargs):
+        raise AssertionError("fetch_ticker_price is not part of submit boundary test")
+
+    async def get_market_info(self, *_args, **_kwargs):
+        raise AssertionError("get_market_info is not part of submit boundary test")
+
+    async def cancel_order(self, *_args, **_kwargs):
+        raise AssertionError("cancel_order is not part of submit boundary test")
+
+    async def fetch_open_orders(self, *_args, **_kwargs):
+        raise AssertionError("fetch_open_orders is not part of submit boundary test")
+
+    async def fetch_order(self, *_args, **_kwargs):
+        raise AssertionError("fetch_order is not part of submit boundary test")
+
+    async def fetch_positions(self, *_args, **_kwargs):
+        raise AssertionError("fetch_positions is not part of submit boundary test")
+
+    async def fetch_my_trades(self, *_args, **_kwargs):
+        raise AssertionError("fetch_my_trades is not part of submit boundary test")
+
+
+class _InMemoryOrderRepository:
+    def __init__(self) -> None:
+        self.orders: dict[str, object] = {}
+
+    async def save(self, order):
+        self.orders[order.id] = order
+        return order
+
+    async def get_order(self, order_id: str):
+        return self.orders.get(order_id)
