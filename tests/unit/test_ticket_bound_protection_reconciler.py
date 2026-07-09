@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import text
 
 from scripts import materialize_ticket_bound_runner_protection_adjustment as runner_adjuster
+from src.application.action_time.capital_safety_guard import current_scope_blockers
 from src.application.action_time.protection_reconciler import (
     reconcile_ticket_bound_exit_protection_set,
 )
@@ -38,6 +39,38 @@ def test_protection_reconciler_marks_complete_set_reconciled(pg_control_connecti
     assert protection_set["status"] == "reconciled"
     assert protection_set["reconciled_with_exchange"] in {True, 1}
     assert _lifecycle_status(pg_control_connection) == "position_protected"
+
+
+def test_protection_reconciler_resolves_stale_scope_freeze_after_match(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    _insert_scope_freeze(pg_control_connection, first_blocker="protection_missing")
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=_snapshot(pg_control_connection, set_id),
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "reconciled"
+    freeze = dict(
+        pg_control_connection.execute(
+            text("SELECT * FROM brc_ticket_bound_scope_freezes")
+        ).mappings().one()
+    )
+    assert freeze["status"] == "resolved"
+    assert freeze["first_blocker"] == "scope_cleanup_pending_no_current_risk"
+    assert (
+        current_scope_blockers(
+            {"ticket_bound_scope_freezes": [freeze]},
+            strategy_group_id="SOR-001",
+            symbol="ETHUSDT",
+            side="long",
+        )
+        == []
+    )
 
 
 def test_protection_reconciler_flags_missing_exchange_sl(pg_control_connection):
@@ -300,4 +333,30 @@ def _lifecycle_status(conn) -> str:
         conn.execute(
             text("SELECT status FROM brc_ticket_bound_order_lifecycle_runs")
         ).scalar_one()
+    )
+
+
+def _insert_scope_freeze(conn, *, first_blocker: str) -> None:
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_ticket_bound_scope_freezes (
+              scope_freeze_id, strategy_group_id, symbol, side, status,
+              source_kind, source_id, first_blocker, blockers, freeze_scope,
+              next_action, authority_boundary, created_at_ms, updated_at_ms
+            ) VALUES (
+              'freeze:SOR-001:ETHUSDT:long', 'SOR-001', 'ETHUSDT', 'long', 'active',
+              'unit_test', 'unit_test_freeze', :first_blocker, :blockers,
+              :freeze_scope, 'repair_scope', 'unit_test', :now_ms, :now_ms
+            )
+            """
+        ),
+        {
+            "first_blocker": first_blocker,
+            "blockers": f'["{first_blocker}"]',
+            "freeze_scope": (
+                '{"strategy_group_id":"SOR-001","symbol":"ETHUSDT","side":"long"}'
+            ),
+            "now_ms": NOW_MS + 8500,
+        },
     )

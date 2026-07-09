@@ -9,6 +9,7 @@ from src.application.action_time.orphan_protection_cleanup_command import (
     execute_ticket_bound_orphan_protection_cleanup_command,
     prepare_ticket_bound_orphan_protection_cleanup_command,
 )
+from src.application.action_time.capital_safety_guard import current_scope_blockers
 from src.application.action_time.protection_reconciler import (
     reconcile_ticket_bound_exit_protection_set,
 )
@@ -27,6 +28,7 @@ async def test_orphan_protection_cleanup_cancels_linked_live_protection_orders(
     pg_control_connection,
 ):
     set_id = _flat_position_live_protection(pg_control_connection)
+    _insert_scope_freeze(pg_control_connection, first_blocker="position_closed_protection_live")
     command = prepare_ticket_bound_orphan_protection_cleanup_command(
         pg_control_connection,
         exit_protection_set_id=set_id,
@@ -60,6 +62,22 @@ async def test_orphan_protection_cleanup_cancels_linked_live_protection_orders(
         "SL": "cancelled",
         "TP1": "cancelled",
     }
+    freeze = dict(
+        pg_control_connection.execute(
+            text("SELECT * FROM brc_ticket_bound_scope_freezes")
+        ).mappings().one()
+    )
+    assert freeze["status"] == "resolved"
+    assert freeze["first_blocker"] == "scope_cleanup_pending_no_current_risk"
+    assert (
+        current_scope_blockers(
+            {"ticket_bound_scope_freezes": [freeze]},
+            strategy_group_id="SOR-001",
+            symbol="ETHUSDT",
+            side="long",
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio
@@ -209,6 +227,32 @@ def _protection_order_statuses(conn) -> dict[str, str]:
             )
         ).mappings()
     }
+
+
+def _insert_scope_freeze(conn, *, first_blocker: str) -> None:
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_ticket_bound_scope_freezes (
+              scope_freeze_id, strategy_group_id, symbol, side, status,
+              source_kind, source_id, first_blocker, blockers, freeze_scope,
+              next_action, authority_boundary, created_at_ms, updated_at_ms
+            ) VALUES (
+              'freeze:SOR-001:ETHUSDT:long', 'SOR-001', 'ETHUSDT', 'long', 'active',
+              'unit_test', 'unit_test_freeze', :first_blocker, :blockers,
+              :freeze_scope, 'repair_scope', 'unit_test', :now_ms, :now_ms
+            )
+            """
+        ),
+        {
+            "first_blocker": first_blocker,
+            "blockers": f'["{first_blocker}"]',
+            "freeze_scope": (
+                '{"strategy_group_id":"SOR-001","symbol":"ETHUSDT","side":"long"}'
+            ),
+            "now_ms": NOW_MS + 9500,
+        },
+    )
 
 
 class _FakeCleanupGateway:

@@ -75,7 +75,8 @@ design documents and acceptance proof.
 | **Backend / watcher / monitor** | Active after deploy verification |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
 | **Post-submit first tick** | Deployed `4b0b8a27` includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, retry limit, and scope freeze writes |
-| **Current first blocker** | `scope_freeze_pre_submit_gate_missing`; scope freeze rows exist, but active freezes must still become hard blockers before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit |
+| **Local P0 capital-safety branch** | `codex/p0-capital-safety-closure` implements current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, and Live Outcome Ledger PG projection |
+| **Current first blocker** | `review_validation_and_deploy_approval_pending`; Tokyo remains at `4b0b8a27` until Owner-approved deploy |
 
 ## Current Next Execution Order
 
@@ -87,7 +88,7 @@ This is the current remaining order after Tokyo release `4b0b8a27`.
 | 2 | **Scope freeze pre-submit hard blocker** | P0 | Active real-risk scope freeze blocks matching `strategy_group_id + symbol + side` before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit |
 | 3 | **Continuous reconciliation tick** | P0 | After first tick, scheduled/event-driven reconciliation continues until lifecycle closure, exact recovery command, or hard stop |
 | 4 | **Live Outcome Ledger** | P0 | Every real ticket has one structured outcome row or one exact hard-blocked outcome row |
-| 5 | **Risk-at-stop reservation** | P1 | Ticket computes and reserves `risk_at_stop = abs(entry_price - stop_price) * quantity` before FinalGate-ready submit |
+| 5 | **Risk-at-stop reservation** | P1 | Closed locally on `codex/p0-capital-safety-closure`; Ticket computes stop-risk and downstream gates recheck it before submit |
 | 6 | **Owner Explanation Read Model** | P1 | Owner sees waiting, processing, blocked, protected, recovered, and closed states without decoding internal blocker codes |
 | 7 | **Frontend read-model integration** | P2 | Frontend only displays backend explanation/read models and does not infer blockers, facts, lanes, tickets, or submit authority |
 | 8 | **Trading quality / capital budget / portfolio risk model** | P2 | Advanced allocation improves exposure quality without weakening per-ticket safety, stop-risk reservation, or lifecycle reconciliation |

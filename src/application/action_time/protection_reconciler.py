@@ -16,6 +16,9 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.capital_safety_freeze_projection import (
+    resolve_current_scope_freeze,
+)
 from src.application.action_time.lifecycle_safety_core import (
     classify_protection_reconciliation,
 )
@@ -234,6 +237,16 @@ def reconcile_ticket_bound_exit_protection_set(
                 "exchange_snapshot_ref": exchange_snapshot.get("snapshot_id"),
                 "lifecycle_status": lifecycle_update["status"],
             },
+            now_ms=now_ms,
+        )
+    if not blockers:
+        resolve_current_scope_freeze(
+            conn,
+            strategy_group_id=protection_set.get("strategy_group_id"),
+            symbol=protection_set.get("symbol"),
+            side=protection_set.get("side"),
+            source_kind="exit_protection_reconciler",
+            source_id=set_id,
             now_ms=now_ms,
         )
     return _result(

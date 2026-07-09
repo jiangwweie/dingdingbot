@@ -71,6 +71,14 @@ POST_SUBMIT_RECONCILIATION_TICK_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-101_create_ticket_bound_reconciliation_ticks.py"
 )
+LIVE_OUTCOME_LEDGER_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-09-102_create_live_outcome_ledger.py"
+)
+RISK_RESERVATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -204,6 +212,38 @@ def pg_control_connection():
                                         )
                                         try:
                                             post_submit_reconciliation_migration.upgrade()
+                                            live_outcome_ledger_migration = _load_module(
+                                                LIVE_OUTCOME_LEDGER_MIGRATION_PATH,
+                                                "migration_102_action_time_full_chain",
+                                            )
+                                            old_live_outcome_ledger_op = (
+                                                live_outcome_ledger_migration.op
+                                            )
+                                            live_outcome_ledger_migration.op = (
+                                                migration.op
+                                            )
+                                            try:
+                                                live_outcome_ledger_migration.upgrade()
+                                                risk_reservation_migration = _load_module(
+                                                    RISK_RESERVATION_MIGRATION_PATH,
+                                                    "migration_103_action_time_full_chain",
+                                                )
+                                                old_risk_reservation_op = (
+                                                    risk_reservation_migration.op
+                                                )
+                                                risk_reservation_migration.op = (
+                                                    migration.op
+                                                )
+                                                try:
+                                                    risk_reservation_migration.upgrade()
+                                                finally:
+                                                    risk_reservation_migration.op = (
+                                                        old_risk_reservation_op
+                                                    )
+                                            finally:
+                                                live_outcome_ledger_migration.op = (
+                                                    old_live_outcome_ledger_op
+                                                )
                                         finally:
                                             post_submit_reconciliation_migration.op = (
                                                 old_post_submit_reconciliation_op

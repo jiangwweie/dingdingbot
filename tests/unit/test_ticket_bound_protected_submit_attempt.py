@@ -158,6 +158,41 @@ def test_protected_submit_attempt_blocks_without_runtime_safety_snapshot(
     assert row["submit_allowed"] in {False, 0}
 
 
+def test_protected_submit_attempt_rechecks_stop_risk_reservation(
+    pg_control_connection,
+):
+    ids = _create_handoff_ready(pg_control_connection)
+    safety_payload = safety.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_layer_handoff_id=ids["operation_layer_handoff_id"],
+        now_ms=NOW_MS + 3000,
+    )
+    assert safety_payload["submit_allowed"] is True
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_budget_reservations
+            SET risk_reservation_basis = 'wrong'
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": ids["ticket_id"]},
+    )
+
+    payload = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "risk_reservation_basis_missing_or_invalid" in payload["blockers"]
+    assert payload["submit_allowed"] is False
+
+
 def test_protected_submit_attempt_refreshes_blocked_after_safety_ready(
     pg_control_connection,
 ):

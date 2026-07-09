@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,10 @@ MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
+RISK_RESERVATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -38,6 +43,10 @@ def _load_module(path: Path, name: str):
 @pytest.fixture()
 def pg_control_connection():
     migration = _load_module(MIGRATION_PATH, "migration_086_action_time_ticket")
+    risk_reservation_migration = _load_module(
+        RISK_RESERVATION_MIGRATION_PATH,
+        "migration_103_action_time_ticket",
+    )
     seed = _load_module(SEED_PATH, "seed_action_time_ticket")
     engine = create_engine(
         "sqlite://",
@@ -49,6 +58,12 @@ def pg_control_connection():
         migration.op = Operations(MigrationContext.configure(conn))
         try:
             migration.upgrade()
+            old_risk_op = risk_reservation_migration.op
+            risk_reservation_migration.op = migration.op
+            try:
+                risk_reservation_migration.upgrade()
+            finally:
+                risk_reservation_migration.op = old_risk_op
         finally:
             migration.op = old_op
         seed.seed_runtime_control_state_foundation(conn)
@@ -134,7 +149,8 @@ def test_materializes_pg_action_time_ticket(pg_control_connection):
     budget = pg_control_connection.execute(
         text(
             """
-            SELECT status, ticket_id
+            SELECT status, ticket_id, entry_reference_price, stop_price,
+                   intended_qty, risk_at_stop, risk_reservation_basis
             FROM brc_budget_reservations
             WHERE action_time_lane_input_id = :lane_id
             """
@@ -143,6 +159,11 @@ def test_materializes_pg_action_time_ticket(pg_control_connection):
     ).mappings().one()
     assert budget["status"] == "consumed"
     assert budget["ticket_id"] == payload["ticket_id"]
+    assert Decimal(str(budget["entry_reference_price"])) == Decimal("2000")
+    assert Decimal(str(budget["stop_price"])) == Decimal("1800")
+    assert Decimal(str(budget["intended_qty"])) == Decimal("0.01")
+    assert Decimal(str(budget["risk_at_stop"])) == Decimal("2")
+    assert budget["risk_reservation_basis"] == "entry_reference_stop_distance_v0"
 
 
 def test_materializer_is_idempotent_for_existing_active_ticket(pg_control_connection):
@@ -410,6 +431,29 @@ def test_materializer_blocks_missing_tp1_reference(pg_control_connection):
     assert _ticket_count(pg_control_connection) == 0
 
 
+def test_materializer_blocks_missing_stop_risk_entry_reference(pg_control_connection):
+    _insert_action_time_lane_graph(
+        pg_control_connection,
+        fact_values={
+            "opening_range_defined": True,
+            "breakout_confirmed": True,
+            "opening_range_low_reference": None,
+            "take_profit_1": "2200",
+        },
+    )
+
+    payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "risk_reservation_entry_reference_price_missing" in payload["blockers"]
+    assert "risk_reservation_intended_qty_invalid" in payload["blockers"]
+    assert "risk_at_stop_invalid" in payload["blockers"]
+    assert _ticket_count(pg_control_connection) == 0
+
+
 def test_materializer_blocks_runtime_scope_side_mismatch(pg_control_connection):
     lane_id = _insert_action_time_lane_graph(pg_control_connection)
     pg_control_connection.execute(
@@ -479,6 +523,7 @@ def test_materializer_allows_brf2_ticket_when_disable_fact_is_clear(pg_control_c
             "short_side_not_disabled": True,
             "rally_high_reference": "1800",
             "strong_uptrend_disable": False,
+            "last_price": "1700",
             "take_profit_1": "1600",
         },
     )

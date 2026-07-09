@@ -24,6 +24,10 @@ MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
+RISK_RESERVATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -40,6 +44,10 @@ def _load_module(path: Path, name: str):
 @pytest.fixture()
 def pg_control_connection():
     migration = _load_module(MIGRATION_PATH, "migration_086_operation_handoff")
+    risk_reservation_migration = _load_module(
+        RISK_RESERVATION_MIGRATION_PATH,
+        "migration_103_operation_handoff",
+    )
     seed = _load_module(SEED_PATH, "seed_operation_handoff")
     engine = create_engine(
         "sqlite://",
@@ -51,6 +59,12 @@ def pg_control_connection():
         migration.op = Operations(MigrationContext.configure(conn))
         try:
             migration.upgrade()
+            old_risk_op = risk_reservation_migration.op
+            risk_reservation_migration.op = migration.op
+            try:
+                risk_reservation_migration.upgrade()
+            finally:
+                risk_reservation_migration.op = old_risk_op
         finally:
             migration.op = old_op
         seed.seed_runtime_control_state_foundation(conn)
@@ -232,6 +246,35 @@ def test_operation_layer_handoff_rejects_ticket_identity_hash_mismatch(
 
     assert payload["status"] == "blocked"
     assert "ticket_hash_mismatch" in payload["blockers"]
+    assert pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_operation_layer_handoffs")
+    ).scalar_one() == 0
+
+
+def test_operation_layer_handoff_rejects_missing_stop_risk_reservation(
+    pg_control_connection,
+):
+    ticket_id, finalgate_pass_id = _create_finalgate_ready_ticket(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_budget_reservations
+            SET risk_at_stop = NULL
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": ticket_id},
+    )
+
+    payload = handoff.materialize_action_time_operation_layer_handoff(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        finalgate_pass_id=finalgate_pass_id,
+        now_ms=NOW_MS + 2000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "risk_at_stop_invalid" in payload["blockers"]
     assert pg_control_connection.execute(
         text("SELECT COUNT(*) FROM brc_operation_layer_handoffs")
     ).scalar_one() == 0

@@ -34,6 +34,9 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
+from src.application.action_time.budget_stop_risk import (  # noqa: E402
+    budget_stop_risk_blockers,
+)
 from src.application.action_time.action_time_ticket import (  # noqa: E402
     compute_action_time_ticket_hash,
 )
@@ -316,6 +319,8 @@ def _ticket_lineage_blockers(
         blockers.append("budget_reservation_ticket_mismatch")
     if budget and budget.get("status") not in {"consumed"}:
         blockers.append(f"budget_reservation_status_not_consumed:{budget.get('status')}")
+    if budget:
+        blockers.extend(budget_stop_risk_blockers(budget))
     if protection and int(protection.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("protection_ref_expired")
     if execution_policy and execution_policy.get("status") != "current":

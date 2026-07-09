@@ -37,6 +37,9 @@ from src.application.action_time.action_time_ticket import (  # noqa: E402
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
+from src.application.action_time.budget_stop_risk import (  # noqa: E402
+    budget_stop_risk_blockers,
+)
 from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
     classify_sequential_submit_result,
 )
@@ -622,6 +625,12 @@ def _select_graph(
         "protection_ref_id",
         ticket.get("protection_ref_id") if ticket else "",
     )
+    budget = _row_by_id(
+        control_state,
+        "budget_reservations",
+        "budget_reservation_id",
+        ticket.get("budget_reservation_id") if ticket else "",
+    )
     execution_policy = _row_by_id(
         control_state,
         "execution_policies",
@@ -645,6 +654,7 @@ def _select_graph(
         "runtime_safety": runtime_safety,
         "signal": signal,
         "protection": protection,
+        "budget": budget,
         "execution_policy": execution_policy,
         "action_time_fact": action_time_fact,
     }
@@ -658,6 +668,7 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
     lane = _as_dict(graph.get("lane"))
     signal = _as_dict(graph.get("signal"))
     protection = _as_dict(graph.get("protection"))
+    budget = _as_dict(graph.get("budget"))
     execution_policy = _as_dict(graph.get("execution_policy"))
     action_time_fact = _as_dict(graph.get("action_time_fact"))
     if not ticket:
@@ -672,6 +683,8 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
         blockers.append("signal_event_missing")
     if not protection:
         blockers.append("protection_ref_missing")
+    if not budget:
+        blockers.append("budget_reservation_missing")
     if not execution_policy:
         blockers.append("execution_policy_missing")
     if blockers:
@@ -743,6 +756,11 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
         blockers.append("signal_generated_at_used_as_event_time")
     if int(protection.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("protection_ref_expired")
+    if budget.get("ticket_id") != ticket.get("ticket_id"):
+        blockers.append("budget_reservation_ticket_mismatch")
+    if budget.get("status") != "consumed":
+        blockers.append(f"budget_reservation_status_not_consumed:{budget.get('status')}")
+    blockers.extend(budget_stop_risk_blockers(budget))
     if _tp1_price(action_time_fact=action_time_fact) <= 0:
         blockers.append("tp1_reference_missing")
     if execution_policy.get("status") != "current":

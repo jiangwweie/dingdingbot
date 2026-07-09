@@ -17,6 +17,10 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.capital_safety_freeze_projection import (
+    resolve_current_scope_freeze,
+)
+
 
 AUTHORITY_BOUNDARY = (
     "ticket_bound_orphan_protection_cleanup_command; requires existing "
@@ -664,6 +668,15 @@ def _apply_successful_cleanup(
             },
             now_ms=now_ms,
         )
+    resolve_current_scope_freeze(
+        conn,
+        strategy_group_id=command.get("strategy_group_id"),
+        symbol=command.get("symbol"),
+        side=command.get("side"),
+        source_kind="orphan_protection_cleanup_command",
+        source_id=str(command.get("orphan_protection_cleanup_command_id") or ""),
+        now_ms=now_ms,
+    )
 
 
 def _result_payload(

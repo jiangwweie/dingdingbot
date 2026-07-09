@@ -12,6 +12,7 @@ from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
     _json_value,
+    _prepare_real_submit,
     _submitted_orders,
 )
 from tests.unit.test_ticket_bound_runner_protection_adjuster import (
@@ -56,13 +57,7 @@ def test_post_submit_closure_blocks_when_attempt_not_submitted(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000,
-    )
+    prepared = _prepare_real_submit(pg_control_connection, ids)
 
     payload = closure.materialize_ticket_bound_post_submit_closure(
         pg_control_connection,
@@ -634,13 +629,7 @@ def _record_submitted_attempt(
     *,
     attempt_offset_ms: int = 0,
 ) -> dict:
-    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
-        conn,
-        ticket_id=ids["ticket_id"],
-        operation_submit_command_id=ids["operation_submit_command_id"],
-        submit_mode="real_gateway_action",
-        now_ms=NOW_MS + 4000 + attempt_offset_ms,
-    )
+    prepared = _prepare_real_submit(conn, ids)
     submit.record_ticket_bound_protected_submit_result(
         conn,
         protected_submit_attempt_id=prepared["protected_submit_attempt_id"],

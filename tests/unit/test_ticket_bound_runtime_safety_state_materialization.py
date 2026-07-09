@@ -63,6 +63,10 @@ LIVE_OUTCOME_LEDGER_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-102_create_live_outcome_ledger.py"
 )
+RISK_RESERVATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -174,6 +178,22 @@ def pg_control_connection():
                                             )
                                             try:
                                                 live_outcome_ledger_migration.upgrade()
+                                                risk_reservation_migration = _load_module(
+                                                    RISK_RESERVATION_MIGRATION_PATH,
+                                                    "migration_103_runtime_safety",
+                                                )
+                                                old_risk_reservation_op = (
+                                                    risk_reservation_migration.op
+                                                )
+                                                risk_reservation_migration.op = (
+                                                    migration.op
+                                                )
+                                                try:
+                                                    risk_reservation_migration.upgrade()
+                                                finally:
+                                                    risk_reservation_migration.op = (
+                                                        old_risk_reservation_op
+                                                    )
                                             finally:
                                                 live_outcome_ledger_migration.op = (
                                                     old_live_outcome_ledger_op
@@ -367,6 +387,36 @@ def test_runtime_safety_state_blocks_account_position_conflict(
     assert "active_position_or_open_order_conflict" in payload["blockers"]
     row = _runtime_safety_row(pg_control_connection)
     assert row["active_position_conflict"] in {True, 1}
+    assert row["submit_allowed"] in {False, 0}
+
+
+def test_runtime_safety_state_blocks_missing_stop_risk_reservation(
+    pg_control_connection,
+):
+    ids = _create_handoff_ready(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_budget_reservations
+            SET risk_at_stop = NULL
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": ids["ticket_id"]},
+    )
+
+    payload = safety.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_layer_handoff_id=ids["operation_layer_handoff_id"],
+        now_ms=NOW_MS + 3000,
+    )
+
+    assert payload["status"] == "runtime_safety_state_blocked"
+    assert payload["submit_allowed"] is False
+    assert "risk_at_stop_invalid" in payload["blockers"]
+    row = _runtime_safety_row(pg_control_connection)
+    assert row["safety_state"] == "blocked_safety"
     assert row["submit_allowed"] in {False, 0}
 
 

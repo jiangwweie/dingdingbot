@@ -34,6 +34,9 @@ from src.application.action_time.action_time_ticket import (  # noqa: E402
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
+from src.application.action_time.budget_stop_risk import (  # noqa: E402
+    budget_stop_risk_blockers,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -317,6 +320,8 @@ def _snapshot_row(
         blockers.append("budget_reservation_ticket_mismatch")
     if budget and budget.get("status") != "consumed":
         blockers.append(f"budget_reservation_status_not_consumed:{budget.get('status') or 'missing'}")
+    if budget:
+        blockers.extend(budget_stop_risk_blockers(budget))
     if protection and int(protection.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("protection_ref_expired")
 

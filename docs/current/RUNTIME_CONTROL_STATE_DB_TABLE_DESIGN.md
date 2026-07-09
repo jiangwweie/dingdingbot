@@ -539,6 +539,11 @@ side
 target_notional
 leverage
 reserved_margin
+entry_reference_price
+stop_price
+intended_qty
+risk_at_stop
+risk_reservation_basis
 reserved_at_ms
 expires_at_ms
 status
@@ -552,6 +557,9 @@ Required invariant:
 available balance alone is not sufficient for real-submit progression.
 ticket.budget_reservation_id must reference active budget_reservation.
 budget_reservation lineage must match ticket lineage before FinalGate.
+consumed budget_reservation must carry stop-risk reservation before FinalGate,
+Operation Layer handoff, Runtime Safety State, and protected submit.
+risk_at_stop = abs(entry_reference_price - stop_price) * intended_qty.
 ```
 
 Checks and indexes:
@@ -562,6 +570,7 @@ Checks and indexes:
 | `uq_brc_budget_reservations_ticket` | Unique nullable `ticket_id`; once filled, one ticket binds one reservation |
 | `ck_brc_budget_reservations_lineage` | StrategyGroup, symbol, side, profile, notional, leverage, and event refs must match the ticket before FinalGate |
 | `ck_brc_budget_reservations_expiry` | Active reservation requires `expires_at_ms` and cannot be consumed after expiry |
+| `ck_brc_budget_res_stop_risk_positive` | When `risk_at_stop` is present, `entry_reference_price`, `stop_price`, `intended_qty`, and `risk_at_stop` must all be positive |
 
 ### Protection Reference
 

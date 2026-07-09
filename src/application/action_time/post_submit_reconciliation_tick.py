@@ -11,6 +11,10 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.capital_safety_freeze_projection import (
+    resolve_current_scope_freeze,
+)
+
 
 AUTHORITY_BOUNDARY = (
     "ticket_bound_first_post_submit_reconciliation_tick; existing PG protected "
@@ -233,6 +237,16 @@ def materialize_ticket_bound_reconciliation_tick(
             attempt=attempt,
             status="entry_unknown",
             blockers=blockers,
+            now_ms=now_ms,
+        )
+    elif status == "matched":
+        resolve_current_scope_freeze(
+            conn,
+            strategy_group_id=attempt.get("strategy_group_id"),
+            symbol=attempt.get("symbol"),
+            side=attempt.get("side"),
+            source_kind=f"{tick_kind}_reconciliation_tick",
+            source_id=_tick_id(attempt_id, tick_kind),
             now_ms=now_ms,
         )
 

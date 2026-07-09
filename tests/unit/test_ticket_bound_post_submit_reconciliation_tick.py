@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from scripts import materialize_ticket_bound_exit_protection_set as exit_protection
 from scripts import materialize_ticket_bound_protected_submit_attempt as submit
+from src.application.action_time.capital_safety_guard import current_scope_blockers
 from src.application.action_time.lifecycle_maintenance_scheduler import (
     lifecycle_maintenance_scopes_require_exchange_gateway,
     run_ticket_bound_lifecycle_maintenance_scheduler,
@@ -150,6 +151,36 @@ def test_first_tick_rechecks_pending_visibility_after_deadline(pg_control_connec
     assert _count(pg_control_connection, "brc_ticket_bound_reconciliation_ticks") == 1
     row = _one(pg_control_connection, "brc_ticket_bound_reconciliation_ticks")
     assert row["status"] == "matched"
+
+
+def test_first_tick_resolves_stale_scope_freeze_after_match(pg_control_connection):
+    prepared = _submitted_real_attempt(pg_control_connection)
+    _insert_scope_freeze(pg_control_connection, first_blocker="protection_missing")
+
+    payload = materialize_ticket_bound_first_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        exchange_snapshot=_attempt_snapshot(prepared),
+        now_ms=NOW_MS + 6000,
+    )
+
+    assert payload["status"] == "matched"
+    freeze = dict(
+        pg_control_connection.execute(
+            text("SELECT * FROM brc_ticket_bound_scope_freezes")
+        ).mappings().one()
+    )
+    assert freeze["status"] == "resolved"
+    assert freeze["first_blocker"] == "scope_cleanup_pending_no_current_risk"
+    assert (
+        current_scope_blockers(
+            {"ticket_bound_scope_freezes": [freeze]},
+            strategy_group_id="SOR-001",
+            symbol="ETHUSDT",
+            side="long",
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio
@@ -357,6 +388,32 @@ def _mark_entry_visibility_pending(conn, attempt_id: str) -> None:
         {
             "attempt_id": attempt_id,
             "submit_result": json.dumps(submit_result, sort_keys=True),
+        },
+    )
+
+
+def _insert_scope_freeze(conn, *, first_blocker: str) -> None:
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_ticket_bound_scope_freezes (
+              scope_freeze_id, strategy_group_id, symbol, side, status,
+              source_kind, source_id, first_blocker, blockers, freeze_scope,
+              next_action, authority_boundary, created_at_ms, updated_at_ms
+            ) VALUES (
+              'freeze:SOR-001:ETHUSDT:long', 'SOR-001', 'ETHUSDT', 'long', 'active',
+              'unit_test', 'unit_test_freeze', :first_blocker, :blockers,
+              :freeze_scope, 'repair_scope', 'unit_test', :now_ms, :now_ms
+            )
+            """
+        ),
+        {
+            "first_blocker": first_blocker,
+            "blockers": f'["{first_blocker}"]',
+            "freeze_scope": (
+                '{"strategy_group_id":"SOR-001","symbol":"ETHUSDT","side":"long"}'
+            ),
+            "now_ms": NOW_MS + 5500,
         },
     )
 

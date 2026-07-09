@@ -67,9 +67,10 @@ review plan.
 | **P0** | Exchange truth is not yet the current authority for protection completeness | Code-covered and deployed by `protection_reconciler` over caller-provided exchange snapshots; next acceptance is official exchange snapshot wiring/capability audit |
 | **P0** | Sequential ENTRY / SL / TP1 submit failures do not yet all map to lifecycle recovery states | Code-covered and deployed by exact lifecycle classification plus `protection_recovery_command`; next acceptance is official scheduling/API path audit |
 | **P0** | First exchange-truth reconciliation tick is not yet materialized immediately after real protected submit result | Closed and deployed by migration `101` and `post_submit_reconciliation_tick` |
-| **P0** | Recovery commands are not yet guaranteed one-to-one for every unsafe lifecycle blocker | Partially closed and deployed for SL/TP1 degraded recovery, retry limit, and scope freeze writes; remaining work is scope freeze pre-submit enforcement and continuous reconciliation |
-| **P0** | Scope freeze rows do not yet block all future pre-submit paths | Active `brc_ticket_bound_scope_freezes` must block matching `strategy_group_id + symbol + side` before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit |
-| **P0** | Reconciliation after first tick is not yet a complete continuous lifecycle cadence | Implement scheduled/event-driven reconciliation ticks until lifecycle closure, exact recovery command, or hard stop |
+| **P0** | Recovery command determinism | Closed locally on `codex/p0-capital-safety-closure` for SL/TP1 degraded recovery, retry limit, scope freeze writes, current-risk pre-submit blocking, and stale/no-risk freeze resolution; Tokyo deploy remains Owner-approved |
+| **P0** | Scope freeze pre-submit enforcement | Closed locally: active real-risk `brc_ticket_bound_scope_freezes` blocks matching `strategy_group_id + symbol + side` before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, Operation Layer handoff, submit-mode decision, and protected submit |
+| **P0** | Continuous reconciliation after first tick | Closed locally: `first_post_submit`, `scheduled`, and `recovery_check` PG reconciliation ticks are materialized without JSON/MD report authority; Tokyo deploy remains Owner-approved |
+| **P1** | Stop-risk budget reservation before submit | Closed locally: Action-Time Ticket computes `entry_reference_price`, `stop_price`, `intended_qty`, `risk_at_stop`, and `risk_reservation_basis`; FinalGate, Operation Layer handoff, Runtime Safety State, and protected submit recheck the consumed budget before allowing progress |
 | **P1** | Flat position with PG-linked live protection had no first-class cleanup command | Closed and deployed by migration `098` and `orphan_protection_cleanup_command` |
 | **P1** | No single lifecycle state machine spans submit result, local orders, exchange refs, position projection, protection, reconciliation, settlement, and review | Closed in code by the Lifecycle Safety Core materializers, full-chain harness, recovery commands, protection reconciler, runner mutation executor, and final closure; live outcome proof waits for a future real ticket |
 | **P1** | Action-time TTL behavior across the full post-submit chain | Closed locally: expired tickets still block new submit attempts, while already-submitted ticket-bound lifecycles can continue protection, runner, and final closure |
@@ -535,11 +536,11 @@ mock submitted
 chain_position: action_time_boundary
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scope
-stage: p0_3_p0_4_design_confirmed
-first_blocker: scope_freeze_pre_submit_gate_missing
-evidence: Tokyo release head 4b0b8a27, PG alembic 101, lifecycle materializers and services cover submitted attempt -> entry fill proof -> SL/TP1 proof -> exchange snapshot reconciliation -> TP1 fill -> official runner mutation command/executor -> runner proof -> final closure proof without file authority; first post-submit tick and recovery hardening are deployed; active scope freeze rows still need pre-submit enforcement
-next_action: enforce active scope freezes before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit; then implement Live Outcome Ledger and continuous reconciliation tick
-stop_condition: active brc_ticket_bound_scope_freezes blocks matching StrategyGroup + symbol + side before any new submit path can form
+stage: p0_capital_safety_local_closure
+first_blocker: review_validation_and_deploy_approval_pending
+evidence: local branch codex/p0-capital-safety-closure implements current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, and Live Outcome Ledger PG projection; Tokyo release remains 4b0b8a27 until Owner-approved deploy
+next_action: finish review and validation, then deploy only with explicit Owner approval
+stop_condition: active real-risk brc_ticket_bound_scope_freezes blocks matching StrategyGroup + symbol + side before any new submit path can form, stale/no-risk freezes resolve after exchange truth disproves risk, continuous ticks continue until closure/recovery/hard stop, terminal real tickets produce outcome rows, and each ticket-bound submit has stop-risk reservation
 owner_action_required: no for current observation; yes before future deployment or authority expansion
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound gateway path
 ```

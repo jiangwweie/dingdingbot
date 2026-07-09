@@ -29,6 +29,10 @@ MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
+RISK_RESERVATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 VALIDATOR_PATH = REPO_ROOT / "scripts/validate_runtime_control_state_repository.py"
 
@@ -46,6 +50,10 @@ def _load_module(path: Path, name: str):
 @pytest.fixture()
 def pg_control_connection():
     migration = _load_module(MIGRATION_PATH, "migration_086_repository")
+    risk_reservation_migration = _load_module(
+        RISK_RESERVATION_MIGRATION_PATH,
+        "migration_103_repository",
+    )
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_repository")
     engine = create_engine(
         "sqlite://",
@@ -57,6 +65,12 @@ def pg_control_connection():
         migration.op = Operations(MigrationContext.configure(conn))
         try:
             migration.upgrade()
+            old_risk_op = risk_reservation_migration.op
+            risk_reservation_migration.op = migration.op
+            try:
+                risk_reservation_migration.upgrade()
+            finally:
+                risk_reservation_migration.op = old_risk_op
         finally:
             migration.op = old_op
         seed.seed_runtime_control_state_foundation(conn)
