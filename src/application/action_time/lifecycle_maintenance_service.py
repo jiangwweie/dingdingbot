@@ -18,6 +18,9 @@ import sqlalchemy as sa
 from src.application.action_time.exit_protection_materializer import (
     materialize_ticket_bound_exit_protection_set,
 )
+from src.application.action_time.exchange_command_reconciliation import (
+    reconcile_unknown_exchange_commands,
+)
 from src.application.action_time.orphan_protection_cleanup_command import (
     execute_ticket_bound_orphan_protection_cleanup_command,
     prepare_ticket_bound_orphan_protection_cleanup_command,
@@ -86,8 +89,35 @@ async def run_ticket_bound_lifecycle_maintenance(
     actions: list[dict[str, Any]] = []
     blockers: list[str] = []
     exchange_write_called = False
+    exchange_read_called = False
+
+    unknown_attempt_ids = _unknown_exchange_command_attempt_ids(
+        conn,
+        scope=scope,
+        limit=max_actions,
+    )
+    if unknown_attempt_ids:
+        if gateway is None:
+            blockers.append("gateway_required_for_unknown_command_reconciliation")
+        else:
+            exchange_read_called = True
+            reconciled = await reconcile_unknown_exchange_commands(
+                conn,
+                gateway=gateway,
+                now_ms=now_ms,
+                max_commands=max(1, min(max_actions, len(unknown_attempt_ids))),
+            )
+            actions.append(
+                _action("exchange_command_unknown_reconciled", reconciled)
+            )
+            blockers.extend(_result_blockers(reconciled))
 
     attempt_ids = _scoped_attempt_ids(conn, scope=scope)
+    attempt_ids = [
+        attempt_id
+        for attempt_id in attempt_ids
+        if attempt_id not in unknown_attempt_ids
+    ]
     for attempt_id in attempt_ids:
         if len(actions) >= max_actions:
             blockers.append("lifecycle_maintenance_max_actions_reached")
@@ -299,6 +329,7 @@ async def run_ticket_bound_lifecycle_maintenance(
         "blockers": blockers,
         "next_action": _next_action(blockers),
         "allow_exchange_mutation": allow_exchange_mutation,
+        "exchange_read_called": exchange_read_called,
         "exchange_write_called": exchange_write_called,
         "finalgate_called": False,
         "operation_layer_called": False,
@@ -330,6 +361,34 @@ def _scoped_attempt_ids(
         query = query.where(~table.c.status.in_(TERMINAL_ATTEMPT_STATUSES))
     query = query.order_by(table.c.created_at_ms.desc()).limit(8)
     return [str(row["protected_submit_attempt_id"]) for row in conn.execute(query).mappings()]
+
+
+def _unknown_exchange_command_attempt_ids(
+    conn: sa.engine.Connection,
+    *,
+    scope: dict[str, str],
+    limit: int,
+) -> set[str]:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
+        return set()
+    commands = _table(conn, "brc_ticket_bound_exchange_commands")
+    query = sa.select(commands.c.protected_submit_attempt_id).where(
+        commands.c.command_state == "outcome_unknown"
+    )
+    if scope["protected_submit_attempt_id"]:
+        query = query.where(
+            commands.c.protected_submit_attempt_id
+            == scope["protected_submit_attempt_id"]
+        )
+    elif scope["ticket_id"]:
+        query = query.where(commands.c.ticket_id == scope["ticket_id"])
+    elif scope["exit_protection_set_id"]:
+        return set()
+    query = query.order_by(commands.c.updated_at_ms.asc()).limit(max(0, limit))
+    return {
+        str(row["protected_submit_attempt_id"])
+        for row in conn.execute(query).mappings()
+    }
 
 
 def _scoped_exit_protection_set_ids(

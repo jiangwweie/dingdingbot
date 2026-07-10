@@ -59,6 +59,8 @@ def upgrade() -> None:
         sa.Column("strategy_group_id", sa.String(128), nullable=False),
         sa.Column("runtime_profile_id", sa.String(128), nullable=False),
         sa.Column("exchange_instrument_id", sa.String(192), nullable=False),
+        sa.Column("gateway_symbol", sa.String(128), nullable=False),
+        sa.Column("symbol", sa.String(128), nullable=False),
         sa.Column("order_role", sa.String(32), nullable=False),
         sa.Column("side", sa.String(32), nullable=False),
         sa.Column("gateway_side", sa.String(32), nullable=False),

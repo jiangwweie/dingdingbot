@@ -10,6 +10,7 @@ from src.application.action_time import operation_layer_handoff as handoff
 from src.application.action_time import promotion_action_time_lane as lane_materializer
 from src.application.action_time import protected_submit_attempt as submit
 from src.application.action_time import runtime_safety_state as safety
+from src.application.action_time.capital_safety_guard import current_scope_blockers
 from tests.unit.test_action_time_ticket_materialization import (
     NOW_MS,
     _insert_action_time_lane_graph,
@@ -45,6 +46,39 @@ def test_scope_freeze_blocks_promotion_and_lane(pg_control_connection):
     assert _json_value(promotion["blockers"]) == [
         "scope_frozen_for_lifecycle_recovery"
     ]
+
+
+def test_unknown_exchange_command_freezes_exact_scope_only():
+    control_state = {
+        "ticket_bound_scope_freezes": [],
+        "ticket_bound_exchange_commands": [
+            {
+                "command_state": "outcome_unknown",
+                "account_id": "account-1",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "exchange_instrument_id": "binance_usdm:ETH/USDT:USDT",
+                "side": "long",
+            }
+        ],
+    }
+
+    assert current_scope_blockers(
+        control_state,
+        account_id="account-1",
+        strategy_group_id="SOR-001",
+        symbol="ETHUSDT",
+        exchange_instrument_id="binance_usdm:ETH/USDT:USDT",
+        side="long",
+    ) == ["exchange_command_outcome_unknown"]
+    assert current_scope_blockers(
+        control_state,
+        account_id="account-1",
+        strategy_group_id="MPG-001",
+        symbol="OPUSDT",
+        exchange_instrument_id="binance_usdm:OP/USDT:USDT",
+        side="long",
+    ) == []
 
 
 def test_scope_freeze_blocks_action_time_ticket(pg_control_connection):

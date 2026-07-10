@@ -2659,7 +2659,7 @@ async def _execute_one_ticket_bound_exchange_command(
         order = Order(
             id=str(command["local_order_id"]),
             signal_id=str(command["ticket_id"]),
-            symbol=str(command["exchange_instrument_id"]),
+            symbol=str(command["gateway_symbol"]),
             direction=direction,
             order_type=_ticket_bound_order_type(command["order_type"]),
             order_role=OrderRole(str(command["order_role"])),
@@ -2707,7 +2707,7 @@ async def _execute_one_ticket_bound_exchange_command(
 
     try:
         placement = await gateway.place_order(
-            symbol=str(command["exchange_instrument_id"]),
+            symbol=str(command["gateway_symbol"]),
             order_type=str(command["order_type"]),
             side=str(command["gateway_side"]),
             amount=Decimal(str(command["amount"])),

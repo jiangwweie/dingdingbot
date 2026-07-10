@@ -669,6 +669,12 @@ def _select_graph(
         "fact_snapshot_id",
         ticket.get("action_time_fact_snapshot_id") if ticket else "",
     )
+    exchange_instrument = _row_by_id(
+        control_state,
+        "exchange_instruments",
+        "exchange_instrument_id",
+        ticket.get("exchange_instrument_id") if ticket else "",
+    )
     return {
         "control_state": control_state,
         "blockers": blockers,
@@ -683,6 +689,7 @@ def _select_graph(
         "budget": budget,
         "execution_policy": execution_policy,
         "action_time_fact": action_time_fact,
+        "exchange_instrument": exchange_instrument,
     }
 
 
@@ -697,6 +704,7 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
     budget = _as_dict(graph.get("budget"))
     execution_policy = _as_dict(graph.get("execution_policy"))
     action_time_fact = _as_dict(graph.get("action_time_fact"))
+    exchange_instrument = _as_dict(graph.get("exchange_instrument"))
     if not ticket:
         blockers.append("action_time_ticket_missing")
     if not handoff:
@@ -713,13 +721,19 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
         blockers.append("budget_reservation_missing")
     if not execution_policy:
         blockers.append("execution_policy_missing")
+    if not exchange_instrument:
+        blockers.append("exchange_instrument_missing")
+    elif str(exchange_instrument.get("status") or "") != "active":
+        blockers.append("exchange_instrument_not_active")
     if blockers:
         return _dedupe(blockers)
     blockers.extend(
         current_scope_blockers(
             graph.get("control_state") or {},
+            account_id=budget.get("account_id"),
             strategy_group_id=ticket.get("strategy_group_id"),
             symbol=ticket.get("symbol"),
+            exchange_instrument_id=ticket.get("exchange_instrument_id"),
             side=ticket.get("side"),
         )
     )
@@ -1122,6 +1136,7 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
     execution_policy = _as_dict(graph.get("execution_policy"))
     action_time_fact = _as_dict(graph.get("action_time_fact"))
     budget = _as_dict(graph.get("budget"))
+    exchange_instrument = _as_dict(graph.get("exchange_instrument"))
     price = _execution_reference_price(
         action_time_fact=action_time_fact,
         protection=protection,
@@ -1150,7 +1165,7 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
         str(ticket["ticket_id"]),
         str(graph["handoff"]["operation_submit_command_id"]),
     )
-    symbol = str(ticket.get("exchange_instrument_id") or ticket.get("symbol") or "")
+    symbol = str(exchange_instrument.get("exchange_symbol") or "")
     ticket_id = str(ticket["ticket_id"])
     operation_submit_command_id = str(
         graph["handoff"]["operation_submit_command_id"]

@@ -41,6 +41,8 @@ def current_scope_status(
     strategy_group_id: Any,
     symbol: Any,
     side: Any,
+    account_id: Any = "",
+    exchange_instrument_id: Any = "",
 ) -> CapitalSafetyScopeStatus:
     """Return the current capital-safety status for one StrategyGroup/symbol/side.
 
@@ -52,7 +54,57 @@ def current_scope_status(
     strategy_group_id = str(strategy_group_id or "").strip()
     symbol = str(symbol or "").strip()
     side = str(side or "").strip()
-    scope_key = f"{strategy_group_id}:{symbol}:{side}"
+    account_id = str(account_id or "").strip()
+    exchange_instrument_id = str(exchange_instrument_id or "").strip()
+    scope_key = ":".join(
+        value
+        for value in (
+            account_id,
+            strategy_group_id,
+            exchange_instrument_id or symbol,
+            side,
+        )
+        if value
+    )
+    command_rows = [
+        row
+        for row in _rows(control_state.get("ticket_bound_exchange_commands"))
+        if str(row.get("command_state") or "")
+        in {"outcome_unknown", "hard_stopped"}
+        and str(row.get("strategy_group_id") or "") == strategy_group_id
+        and str(row.get("symbol") or "") == symbol
+        and str(row.get("side") or "") == side
+        and (
+            not account_id
+            or str(row.get("account_id") or "") == account_id
+        )
+        and (
+            not exchange_instrument_id
+            or str(row.get("exchange_instrument_id") or "")
+            == exchange_instrument_id
+        )
+    ]
+    if command_rows:
+        command = sorted(
+            command_rows,
+            key=lambda item: int(item.get("updated_at_ms") or 0),
+        )[-1]
+        state = str(command.get("command_state") or "")
+        blocker = (
+            "exchange_command_outcome_unknown"
+            if state == "outcome_unknown"
+            else "exchange_command_hard_stopped"
+        )
+        return CapitalSafetyScopeStatus(
+            scope_key=scope_key,
+            status="unknown_risk" if state == "outcome_unknown" else "frozen",
+            first_blocker=blocker,
+            risk_present=state == "hard_stopped",
+            cleanup_required=False,
+            recovery_command_id=str(command.get("exchange_command_id") or ""),
+            explanation_code=blocker,
+            blockers=(blocker,),
+        )
     rows = [
         row
         for row in _rows(control_state.get("ticket_bound_scope_freezes"))
@@ -112,12 +164,16 @@ def current_scope_blockers(
     strategy_group_id: Any,
     symbol: Any,
     side: Any,
+    account_id: Any = "",
+    exchange_instrument_id: Any = "",
 ) -> list[str]:
     status = current_scope_status(
         control_state,
         strategy_group_id=strategy_group_id,
         symbol=symbol,
         side=side,
+        account_id=account_id,
+        exchange_instrument_id=exchange_instrument_id,
     )
     return list(status.blockers)
 

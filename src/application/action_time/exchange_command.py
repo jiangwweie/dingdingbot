@@ -90,6 +90,8 @@ def materialize_ticket_bound_exchange_commands(
                 or request.get("exchange_symbol")
                 or ""
             ),
+            gateway_symbol=str(request.get("exchange_symbol") or ""),
+            symbol=str(attempt.get("symbol") or ""),
             order_role=role,
             side=str(attempt.get("side") or ""),
             gateway_side=str(order.get("gateway_side") or ""),
@@ -133,6 +135,8 @@ def materialize_ticket_bound_exchange_commands(
                 "strategy_group_id",
                 "runtime_profile_id",
                 "exchange_instrument_id",
+                "gateway_symbol",
+                "symbol",
                 "order_role",
                 "side",
                 "gateway_side",

@@ -107,3 +107,40 @@ async def test_unclassified_create_order_exception_is_ambiguous_not_rejected():
         )
 
     assert exc.value.error_code == "C-002"
+
+
+@pytest.mark.asyncio
+async def test_find_order_by_client_id_uses_binance_read_identity():
+    class _LookupRest:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def fetch_order(self, order_id, symbol, *, params):
+            self.calls.append((order_id, symbol, params))
+            return {
+                "id": "exchange-1",
+                "symbol": symbol,
+                "clientOrderId": "brc-client-1",
+                "status": "open",
+                "info": {},
+            }
+
+    rest = _LookupRest()
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    gateway.rest_exchange = rest
+
+    order = await gateway.find_order_by_client_id(
+        "brc-client-1",
+        "ETH/USDT:USDT",
+    )
+
+    assert rest.calls == [
+        (
+            None,
+            "ETH/USDT:USDT",
+            {"origClientOrderId": "brc-client-1"},
+        )
+    ]
+    assert order["exchange_order_id"] == "exchange-1"
+    assert order["client_order_id"] == "brc-client-1"

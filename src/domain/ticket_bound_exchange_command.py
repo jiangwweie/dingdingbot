@@ -50,6 +50,8 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     strategy_group_id: str = Field(min_length=1, max_length=128)
     runtime_profile_id: str = Field(min_length=1, max_length=128)
     exchange_instrument_id: str = Field(min_length=1, max_length=192)
+    gateway_symbol: str = Field(min_length=1, max_length=128)
+    symbol: str = Field(min_length=1, max_length=128)
     order_role: str = Field(pattern="^(ENTRY|SL|TP1|RUNNER_SL)$")
     side: str = Field(pattern="^(long|short)$")
     gateway_side: str = Field(min_length=1, max_length=32)

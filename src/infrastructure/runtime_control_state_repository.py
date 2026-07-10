@@ -48,6 +48,7 @@ CONTROL_STATE_TABLES: dict[str, str] = {
     "ticket_bound_protected_submit_attempts": (
         "brc_ticket_bound_protected_submit_attempts"
     ),
+    "ticket_bound_exchange_commands": "brc_ticket_bound_exchange_commands",
     "ticket_bound_post_submit_closures": "brc_ticket_bound_post_submit_closures",
     "ticket_bound_scope_freezes": "brc_ticket_bound_scope_freezes",
     "live_outcome_ledger": "brc_live_outcome_ledger",
@@ -60,6 +61,7 @@ CONTROL_STATE_TABLES: dict[str, str] = {
 }
 
 OPTIONAL_CONTROL_STATE_TABLES = {
+    "ticket_bound_exchange_commands",
     "ticket_bound_scope_freezes",
     "live_outcome_ledger",
 }

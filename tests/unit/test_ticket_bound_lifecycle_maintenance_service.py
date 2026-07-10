@@ -24,6 +24,10 @@ from tests.unit.test_ticket_bound_runner_protection_adjuster import (
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
+from tests.unit.test_ticket_bound_exchange_command_reconciliation import (
+    _LookupGateway,
+    _unknown_entry_command,
+)
 
 
 @pytest.mark.asyncio
@@ -45,6 +49,35 @@ async def test_lifecycle_maintenance_materializes_exit_protection_without_exchan
     ]
     assert _count(pg_control_connection, "brc_ticket_bound_exit_protection_sets") == 1
     assert _lifecycle_status(pg_control_connection) == "position_protected"
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_maintenance_reconciles_unknown_command_read_only(
+    pg_control_connection,
+):
+    command = _unknown_entry_command(pg_control_connection)
+    gateway = _LookupGateway(
+        SimpleNamespace(
+            exchange_order_id="exchange-reconciled",
+            client_order_id=command["client_order_id"],
+            symbol=command["gateway_symbol"],
+        )
+    )
+
+    payload = await run_ticket_bound_lifecycle_maintenance(
+        pg_control_connection,
+        protected_submit_attempt_id=command["protected_submit_attempt_id"],
+        gateway=gateway,
+        allow_exchange_mutation=False,
+        now_ms=NOW_MS + 10_000,
+    )
+
+    assert payload["actions"][0]["action_type"] == (
+        "exchange_command_unknown_reconciled"
+    )
+    assert payload["actions"][0]["status"] == "reconciliation_complete"
+    assert payload["exchange_write_called"] is False
+    assert gateway.place_order_calls == 0
 
 
 @pytest.mark.asyncio

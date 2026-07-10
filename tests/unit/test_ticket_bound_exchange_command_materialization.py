@@ -36,6 +36,11 @@ def test_real_submit_prepare_commits_entry_sl_tp1_commands(
         row["account_id"] == "owner-subaccount-runtime-v0"
         for row in commands
     )
+    assert all(
+        row["exchange_instrument_id"] == "binance_usdm:ETH/USDT:USDT"
+        for row in commands
+    )
+    assert all(row["gateway_symbol"] == "ETH/USDT:USDT" for row in commands)
 
 
 def test_repeated_materialization_reuses_identity_and_rejects_request_mutation(

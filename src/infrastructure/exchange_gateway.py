@@ -1602,6 +1602,67 @@ class ExchangeGateway:
             logger.error(f"查询订单失败：{e}")
             raise
 
+    async def find_order_by_client_id(
+        self,
+        client_order_id: str,
+        symbol: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Read one order by the deterministic venue client identity.
+
+        A not-found response is returned as ``None`` so the command
+        reconciliation layer can apply its visibility window. Network or
+        unclassified lookup failures remain exceptions and never mean absent.
+        """
+
+        import ccxt
+
+        if not client_order_id or not symbol:
+            raise InvalidOrderError(
+                "client_order_id and symbol are required for order lookup",
+                "F-011",
+            )
+        params = (
+            {"origClientOrderId": client_order_id}
+            if self.exchange_name.lower() == "binance"
+            else {"clientOrderId": client_order_id}
+        )
+        try:
+            raw = await self.rest_exchange.fetch_order(None, symbol, params=params)
+        except ccxt.OrderNotFound:
+            return None
+        except ccxt.DDoSProtection as exc:
+            raise RateLimitError(f"API 频率限制：{exc}", "C-010") from exc
+        except ccxt.NetworkError as exc:
+            raise ConnectionLostError(f"网络错误：{exc}", "C-001") from exc
+        if not isinstance(raw, dict):
+            raise ConnectionLostError(
+                "按 client_order_id 查询订单返回非结构化响应",
+                "C-002",
+            )
+        info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+        actual_client_id = next(
+            (
+                str(value)
+                for value in (
+                    raw.get("clientOrderId"),
+                    raw.get("clientOrderid"),
+                    info.get("origClientOrderId"),
+                    info.get("clientOrderId"),
+                    info.get("clientOrderid"),
+                )
+                if value is not None and str(value)
+            ),
+            "",
+        )
+        return {
+            "exchange_order_id": str(raw.get("id") or info.get("orderId") or ""),
+            "client_order_id": actual_client_id,
+            "symbol": str(raw.get("symbol") or symbol),
+            "status": raw.get("status"),
+            "filled_qty": raw.get("filled"),
+            "average_exec_price": raw.get("average"),
+        }
+
     async def _fetch_conditional_open_order_by_id(
         self,
         exchange_order_id: str,

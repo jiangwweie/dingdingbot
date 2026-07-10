@@ -142,6 +142,10 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             now_ms=now_ms + index + 100,
         )
         blockers.extend(_result_blockers(maintenance))
+        exchange_read_called = (
+            exchange_read_called
+            or maintenance.get("exchange_read_called") is True
+        )
         exchange_write_called = (
             exchange_write_called or maintenance.get("exchange_write_called") is True
         )
@@ -209,6 +213,10 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             now_ms=now_ms + index + 100,
         )
         blockers.extend(_result_blockers(maintenance))
+        exchange_read_called = (
+            exchange_read_called
+            or maintenance.get("exchange_read_called") is True
+        )
         exchange_write_called = (
             exchange_write_called or maintenance.get("exchange_write_called") is True
         )
@@ -317,6 +325,11 @@ def lifecycle_maintenance_scopes_require_exchange_gateway(
 ) -> bool:
     if not scopes:
         return False
+    if any(
+        str(scope.get("attempt_status") or "") == "submit_outcome_unknown"
+        for scope in scopes
+    ):
+        return True
     if any(scope.get("scheduler_scope_kind") == "first_post_submit" for scope in scopes):
         return bool(fetch_exchange_snapshot)
     if allow_exchange_mutation:

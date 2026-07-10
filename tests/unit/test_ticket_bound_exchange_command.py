@@ -121,6 +121,8 @@ def test_migration_105_creates_normalized_exchange_command_table():
             "exchange_command_id",
             "client_order_id",
             "exchange_instrument_id",
+            "gateway_symbol",
+            "symbol",
             "command_state",
             "request_fingerprint",
             "command_generation",

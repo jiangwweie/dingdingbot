@@ -29,7 +29,6 @@ async def test_scheduler_noops_without_maintainable_lifecycle(pg_control_connect
         pg_control_connection,
         max_lifecycle_scopes=4,
     )
-
     payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
         pg_control_connection,
         gateway=gateway,
@@ -52,6 +51,21 @@ async def test_scheduler_noops_without_maintainable_lifecycle(pg_control_connect
         )
         is False
     )
+
+
+def test_unknown_command_scope_requires_read_gateway_even_without_snapshot():
+    scopes = [
+        {
+            "scheduler_scope_kind": "first_post_submit",
+            "attempt_status": "submit_outcome_unknown",
+        }
+    ]
+
+    assert lifecycle_maintenance_scopes_require_exchange_gateway(
+        scopes,
+        allow_exchange_mutation=False,
+        fetch_exchange_snapshot=False,
+    ) is True
 
 
 @pytest.mark.asyncio
