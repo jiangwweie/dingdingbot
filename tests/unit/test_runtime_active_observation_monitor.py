@@ -1513,6 +1513,137 @@ def test_write_runtime_signal_summaries_to_pg_blocks_evaluator_authority_upgrade
     )
 
 
+def test_write_runtime_signal_summaries_to_pg_admits_cpm_v2_trial_event_and_facts(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'runtime-cpm-v2.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            _seed_live_signal_writer_scope(conn)
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE brc_strategy_group_candidate_scope
+                    SET candidate_scope_id = 'scope:CPM-RO-001:SOLUSDT:long',
+                        strategy_group_id = 'CPM-RO-001',
+                        symbol = 'SOLUSDT'
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE brc_candidate_scope_event_bindings
+                    SET candidate_scope_id = 'scope:CPM-RO-001:SOLUSDT:long',
+                        event_spec_id = 'event_spec:CPM-RO-001:CPM-LONG:v2'
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE brc_strategy_side_event_specs
+                    SET event_spec_id = 'event_spec:CPM-RO-001:CPM-LONG:v2',
+                        event_id = 'CPM-LONG',
+                        declared_signal_grade = 'trial_grade_signal',
+                        declared_required_execution_mode = 'trial_live',
+                        execution_eligibility_enabled = 1
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE brc_runtime_fact_snapshots
+                    SET fact_snapshot_id = 'fact-cpm-sol-public',
+                        strategy_group_id = 'CPM-RO-001',
+                        symbol = 'SOLUSDT'
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    fact_observations = [
+        {
+            "fact_key": "htf_trend_intact",
+            "observed_value": True,
+            "observed_at_ms": 1000,
+            "valid_until_ms": 2000,
+            "source_ref": "cpm_historical_evaluator:4h_context",
+        },
+        {
+            "fact_key": "reclaim_confirmed",
+            "observed_value": True,
+            "observed_at_ms": 1000,
+            "valid_until_ms": 2000,
+            "source_ref": "cpm_historical_evaluator:1h_reclaim",
+        },
+        {
+            "fact_key": "pullback_low_reference",
+            "observed_value": "137.25",
+            "observed_at_ms": 1000,
+            "valid_until_ms": 2000,
+            "source_ref": "cpm_historical_evaluator:1h_pullback_low",
+        },
+    ]
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-cpm-sol",
+                    "strategy_family_id": "CPM-RO-001",
+                    "strategy_family_version_id": "sgv:CPM-RO-001:v2",
+                    "symbol": "SOL/USDT:USDT",
+                    "side": "long",
+                    "status": "ready_for_action_time_ticket_materialization",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "signal_grade": "trial_grade_signal",
+                        "required_execution_mode": "trial_live",
+                        "side": "long",
+                        "trigger_candle_close_time_ms": 1000,
+                        "fact_observations": fact_observations,
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+
+    assert result["status"] == "pg_live_signal_events_written"
+    assert result["written_count"] == 1
+    assert result["skipped"] == []
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.text(
+                    """
+                    SELECT signal_grade, required_execution_mode,
+                           execution_eligible, authority_source_ref, signal_payload
+                    FROM brc_live_signal_events
+                    """
+                )
+            ).mappings().one()
+    finally:
+        engine.dispose()
+
+    payload = json.loads(str(row["signal_payload"]))
+    assert row["signal_grade"] == "trial_grade_signal"
+    assert row["required_execution_mode"] == "trial_live"
+    assert row["execution_eligible"] == 1
+    assert row["authority_source_ref"] == (
+        "event-spec:event_spec:CPM-RO-001:CPM-LONG:v2"
+    )
+    assert payload["signal_summary"]["fact_observations"] == fact_observations
+
+
 def test_write_runtime_signal_summaries_to_pg_blocks_without_time_authority(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
     engine = sa.create_engine(database_url)

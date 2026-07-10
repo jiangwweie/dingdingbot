@@ -32,7 +32,23 @@ def test_all_active_candidate_scopes_receive_machine_semantic_conclusion(
     )
     assert payload["evaluated_count"] == active_count
     assert len(rows) == active_count
-    assert {row["conclusion"] for row in rows} == {"observe_only_by_design"}
+    conclusions_by_group = {
+        strategy_group_id: {
+            row["conclusion"]
+            for row in rows
+            if row["strategy_group_id"] == strategy_group_id
+        }
+        for strategy_group_id in {row["strategy_group_id"] for row in rows}
+    }
+    assert conclusions_by_group["CPM-RO-001"] == {"trial_grade_capable"}
+    assert {
+        conclusion
+        for strategy_group_id, conclusions in conclusions_by_group.items()
+        if strategy_group_id != "CPM-RO-001"
+        for conclusion in conclusions
+    } == {"observe_only_by_design"}
+    assert sum(row["conclusion"] == "trial_grade_capable" for row in rows) == 4
+    assert sum(row["conclusion"] == "observe_only_by_design" for row in rows) == 18
     assert all(row["exchange_instrument_id"] for row in rows)
     assert all(row["event_spec_version_id"] for row in rows)
 
