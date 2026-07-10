@@ -48,10 +48,16 @@ def _public_facts() -> dict:
     }
 
 
-def _row(open_time_ms: int, close: str, high: str, low: str) -> list:
+def _row(
+    open_time_ms: int,
+    close: str,
+    high: str,
+    low: str,
+    open_: str = "100",
+) -> list:
     return [
         open_time_ms,
-        "100",
+        open_,
         high,
         low,
         close,
@@ -96,6 +102,7 @@ def _breakdown_candles() -> list[list]:
             close="97",
             high="99",
             low="96.5",
+            open_="99",
         )
     )
     return rows
@@ -137,11 +144,11 @@ def test_sor_session_detector_builds_authorized_symbol_scope():
     long_event = next(row for row in sol["side_event_rows"] if row["event_id"] == "SOR-LONG")
     short_event = next(row for row in sol["side_event_rows"] if row["event_id"] == "SOR-SHORT")
     assert long_event["side"] == "long"
-    assert long_event["event_spec_id"] == "event_spec:SOR-001:SOR-LONG:v1"
+    assert long_event["event_spec_id"] == "event_spec:SOR-001:SOR-LONG:v2"
     assert long_event["fresh_signal"] is True
     assert long_event["protection_ref_type"] == "opening_range_low_reference"
     assert short_event["side"] == "short"
-    assert short_event["event_spec_id"] == "event_spec:SOR-001:SOR-SHORT:v1"
+    assert short_event["event_spec_id"] == "event_spec:SOR-001:SOR-SHORT:v2"
     assert short_event["fresh_signal"] is False
     assert short_event["protection_ref_type"] == "opening_range_high_reference"
     assert avax["fresh_session_range_signal"] is False

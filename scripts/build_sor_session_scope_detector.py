@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,14 @@ from strategygroup_non_executing_projection import (  # noqa: E402
     non_executing_safety_invariants,
 )
 from runtime_pg_fact_snapshots import read_pretrade_public_facts_artifact  # noqa: E402
+from src.domain.sor_session_range_evaluator import SOR001SessionRangeEvaluator  # noqa: E402
+from src.domain.strategy_family_signal import (  # noqa: E402
+    AccountFactsSnapshot,
+    MarketSnapshot,
+    SignalSide,
+    SignalType,
+    StrategyFamilySignalInput,
+)
 
 
 BASE_URL = "https://fapi.binance.com"
@@ -189,16 +198,16 @@ def _detector_row(
     session = _current_session_candles(closed, generated_at)
     opening = session[:4]
     latest = session[-1] if session else {}
-    opening_high = max([_float(row.get("high")) for row in opening if _float(row.get("high")) is not None], default=None)
-    opening_low = min([_float(row.get("low")) for row in opening if _float(row.get("low")) is not None], default=None)
+    evaluation = _evaluate_session(symbol=symbol, session=session, generated_at=generated_at)
+    evidence = evaluation.evidence_payload
+    opening_high = _float(evidence.get("opening_range_high"))
+    opening_low = _float(evidence.get("opening_range_low"))
     close = _float(latest.get("close"))
-    prior = session[-2] if len(session) >= 2 else {}
-    prior_close = _float(prior.get("close"))
-    long_breakout = close is not None and opening_high is not None and close > opening_high
-    long_follow_through = long_breakout and (prior_close is None or close >= prior_close)
+    long_breakout = evidence.get("breakout_confirmed") is True
+    long_follow_through = long_breakout
     long_invalidation_ok = close is not None and opening_low is not None and close > opening_low
-    short_breakdown = close is not None and opening_low is not None and close < opening_low
-    short_follow_through = short_breakdown and (prior_close is None or close <= prior_close)
+    short_breakdown = evidence.get("breakdown_confirmed") is True
+    short_follow_through = short_breakdown
     short_invalidation_ok = close is not None and opening_high is not None and close < opening_high
     public_ready = (
         public_row.get("public_facts_ready") is True
@@ -207,8 +216,18 @@ def _detector_row(
         and public_row.get("qty_step_ok") is True
         and public_row.get("funding_not_extreme") is True
     )
-    long_fresh = bool(public_ready and long_breakout and long_follow_through and long_invalidation_ok)
-    short_fresh = bool(public_ready and short_breakdown and short_follow_through and short_invalidation_ok)
+    long_fresh = bool(
+        public_ready
+        and evaluation.signal_type == SignalType.WOULD_ENTER
+        and evaluation.side == SignalSide.LONG
+        and long_invalidation_ok
+    )
+    short_fresh = bool(
+        public_ready
+        and evaluation.signal_type == SignalType.WOULD_ENTER
+        and evaluation.side == SignalSide.SHORT
+        and short_invalidation_ok
+    )
     long_missing = []
     short_missing = []
     if not public_ready:
@@ -231,7 +250,7 @@ def _detector_row(
         short_missing.append("reclaim_invalidation_clear")
     side_event_rows = [
         {
-            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v1",
+            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v2",
             "event_id": "SOR-LONG",
             "side": "long",
             "event_direction": "closed_15m_breakout_above_opening_range_high",
@@ -245,7 +264,7 @@ def _detector_row(
             "trigger_candle_close_time_utc": latest.get("close_time_utc"),
         },
         {
-            "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v1",
+            "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v2",
             "event_id": "SOR-SHORT",
             "side": "short",
             "event_direction": "closed_15m_breakdown_below_opening_range_low",
@@ -287,6 +306,44 @@ def _detector_row(
             "requires_session_detector_forward_observation_and_private_action_time_facts"
         ),
     }
+
+
+def _evaluate_session(
+    *,
+    symbol: str,
+    session: list[dict[str, Any]],
+    generated_at: datetime,
+):
+    timestamp_ms = int(generated_at.timestamp() * 1000)
+    trigger_ms = int(session[-1].get("close_time_ms") or timestamp_ms) if session else timestamp_ms
+    exchange_symbol = f"{symbol.removesuffix('USDT')}/USDT:USDT"
+    signal_input = StrategyFamilySignalInput(
+        evaluation_id=f"sor-readonly-{symbol}-{trigger_ms}",
+        strategy_family_id="SOR-001",
+        strategy_family_version_id="SOR-001-v0",
+        symbol=exchange_symbol,
+        timestamp_ms=timestamp_ms,
+        trigger_candle_close_time_ms=trigger_ms,
+        primary_timeframe="15m",
+        market_snapshot=MarketSnapshot(
+            symbol=exchange_symbol,
+            timestamp_ms=timestamp_ms,
+            source="binance_usdm_public_closed_candles",
+            freshness="fresh",
+            last_price=(Decimal(str(session[-1]["close"])) if session else None),
+            timeframe="15m",
+            candle_context={"windows": {"15m": session}, "closed_bar": True},
+        ),
+        account_facts_snapshot=AccountFactsSnapshot(
+            source="sor_readonly_detector_no_private_facts",
+            truth_level="not_loaded",
+            timestamp_ms=timestamp_ms,
+            freshness="not_applicable",
+        ),
+        source="sor_readonly_detector",
+        freshness="fresh",
+    )
+    return SOR001SessionRangeEvaluator().evaluate(signal_input)
 
 
 def _fetch_klines(symbol: str) -> list[list[Any]]:
@@ -358,9 +415,11 @@ def _closed_candles(rows: list[list[Any]], now: datetime) -> list[dict[str, Any]
         closed.append(
             {
                 "open_time_ms": _int(row[0]),
+                "open": row[1],
                 "high": row[2],
                 "low": row[3],
                 "close": row[4],
+                "volume": row[5],
                 "close_time_ms": close_time_ms,
                 "close_time_utc": datetime.fromtimestamp(
                     close_time_ms / 1000, tz=timezone.utc
