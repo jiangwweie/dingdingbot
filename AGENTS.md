@@ -1,6 +1,6 @@
 # AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-07-02
+Last updated: 2026-07-10
 Current phase: Pre-Trade Runtime V0
 
 ## Current Document Authority
@@ -124,6 +124,50 @@ surface says intervention is needed.
 
 The system is not an institutional quant platform, a raw packet browser, or a
 manual evidence-interpretation workflow.
+
+### Durable Owner System Vision
+
+The target system is not limited to cryptocurrency. It is a single-Owner,
+multi-StrategyGroup, multi-instrument, multi-side trading system whose core
+contracts must remain usable for venue-supported crypto contracts,
+equity-linked contracts, precious-metals contracts, and future contract asset
+classes. Current deployment scope may remain narrower, but new core models must
+not assume that every instrument is a crypto perpetual, trades continuously,
+uses funding, or shares the same quantity, settlement, session, expiry, or
+protection semantics.
+
+Use canonical `exchange_instrument_id`, `asset_class`, venue identity, contract
+rules, and versioned strategy/event semantics at core boundaries. A future
+capital-allocation policy must be able to compare eligible
+`StrategyGroup + instrument + side` candidates without granting signal,
+ticket, order, or exchange-write authority. The current single action-time lane
+is a bounded execution policy, not a permanent single-strategy architecture.
+
+### Durable Owner Engineering Principles
+
+The Owner defines the product goal, capital/risk policy, live scope, and
+irreversible production boundaries. Codex owns architecture, sequencing,
+schema design, migrations, implementation, tests, and bounded deployment
+inside those decisions. Do not return ordinary technical decisions to the
+Owner after the goal and constraints are clear.
+
+Do not optimize for a narrow MVP by adding StrategyGroup-, symbol-, side-, or
+asset-class-specific patches to the main chain. When one defect reveals a
+missing invariant or abstraction, audit the whole problem class, design the
+shared core boundary, remove or replace the obsolete path, and prove the
+negative cases across the active matrix. Extension readiness means correct
+versioned abstractions and stable interfaces for known future dimensions; it
+does not mean prebuilding speculative institutional infrastructure.
+
+This is a single-Owner system, so development and deployment may be aggressive:
+short maintenance windows, breaking internal migrations, direct deletion of
+wrong compatibility paths, and focused replacement refactors are preferred to
+dual writes, rolling-schema compatibility, long-lived adapters, multi-tenant
+permissions, or enterprise rollout machinery. Aggressive engineering never
+relaxes real-funds invariants: stale facts, duplicate submit, unknown exchange
+outcome, wrong scope/account/instrument, missing protection, FinalGate or
+Operation Layer bypass, credential mutation, withdrawal, and transfer remain
+fail-closed.
 
 The project is a bounded-aggressive real-profit experiment. The Owner-provided
 subaccount allocation is already the upstream risk-control decision and may be
@@ -459,6 +503,20 @@ Claude can touch a core file only when the task card explicitly allows it.
 
 ## Engineering Constraints
 
+- Core abstractions must support known dimensions independently:
+  `StrategyGroup`, strategy/event version, canonical instrument, asset class,
+  venue, side, runtime profile, Owner policy, allocation policy, ticket,
+  exchange command, lifecycle, and review. Do not encode one of these as a
+  hidden constant or infer it from another.
+- New runtime work must distinguish semantic capability, current execution
+  eligibility, Owner authorization, capital allocation, and action-time safety.
+  No lower layer may upgrade authority granted by an earlier layer.
+- Future capital allocation belongs between eligible promotion candidates and
+  action-time lane narrowing. Strategy evaluators must not assign portfolio
+  capital, and allocation decisions must not create signal or submit authority.
+- Prefer decisive replacement over transitional compatibility in this
+  single-Owner system. Any temporary adapter must name the exact old path it
+  replaces and the removal condition in the same task.
 - `domain/` must remain pure business logic and must not import I/O frameworks.
 - Financial calculations must use `decimal.Decimal`, not `float`.
 - Sensitive values must be masked in logs.

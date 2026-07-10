@@ -2,7 +2,7 @@
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
 authority: docs/current/AI_AGENT_CONSTRAINTS.md
-last_verified: 2026-07-01
+last_verified: 2026-07-10
 ---
 
 # AI Agent Constraints
@@ -25,6 +25,46 @@ Owner enables a StrategyGroup
 
 The Owner should not need to read raw evidence artifacts to operate the system.
 Evidence artifacts are audit outputs behind runtime supervision summaries.
+
+## Durable Owner Vision And Engineering Posture
+
+The system target is a single-Owner, multi-StrategyGroup, multi-instrument,
+multi-side trading product. Its long-term instrument universe is not limited to
+cryptocurrency and may include venue-supported equity-linked contracts,
+precious-metals contracts, and other contract asset classes. Current production
+scope does not automatically expand when the vision expands. Live venue,
+instrument, side, capital, and profile authority still require explicit Owner
+policy and current runtime safety.
+
+Agents must keep core models asset-class neutral. Do not assume every
+instrument is a crypto perpetual, trades 24x7, uses funding, lacks expiry, or
+shares crypto quantity and settlement rules. Use the existing canonical symbol
+and exchange-instrument authority and extend it through versioned contract,
+session, precision, settlement, and fact semantics when an asset class requires
+them. String replacement and symbol naming conventions are not instrument
+identity.
+
+The Owner supplies goals and durable engineering principles. Agents own normal
+architecture and engineering decisions once those are clear. Do not stop for
+chat confirmation on schema shape, bounded refactoring, tests, short
+maintenance-window migrations, removal of wrong internal compatibility paths,
+or other reversible in-scope implementation choices.
+
+Agents must not respond to a local defect with a local patch when the defect
+reveals a missing system invariant. Audit the same class across active
+StrategyGroups, instruments, sides, and lifecycle stages; design one core
+abstraction; replace or delete the obsolete path; and add negative tests that
+prove the class is closed. Known future dimensions such as additional asset
+classes and capital allocation require stable extension seams now, but do not
+justify speculative multi-tenant, distributed, or institutional platform
+machinery.
+
+Single-Owner development should be aggressive: prefer short downtime,
+breaking internal migrations, and clean replacement over online dual write,
+long-lived compatibility, or enterprise rollout systems. This posture never
+weakens real-funds safety, exchange-outcome certainty, idempotency, protection,
+scope, credential, withdrawal, transfer, FinalGate, or Operation Layer
+boundaries.
 
 The global business objective is profitability through a small-capital
 right-tail StrategyGroup experimentation system. During the current stage,
