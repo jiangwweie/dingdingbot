@@ -700,11 +700,7 @@ def _pg_current_tradeability_rows(
                     lane_truth=lane_truth,
                 ),
                 BLOCKER_OWNER_BY_CLASS.get(blocker, "engineering"),
-                str(
-                    candidate.get("next_engineering_action")
-                    or selected.get("next_action")
-                    or _next_action_for_contract(blocker)
-                ),
+                _next_action_for_contract(blocker),
                 _after_next_state_for_contract(blocker),
             )
         classifier["legacy_blocker_raw"] = ""

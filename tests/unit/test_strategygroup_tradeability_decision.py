@@ -2381,6 +2381,9 @@ def test_pg_tradeability_classifies_all_five_as_validated_market_wait_when_ready
         row["market_wait_validation"]["valid"] is True
         for row in packet["decision_rows"]
     )
+    assert {
+        row["next_action"] for row in packet["decision_rows"]
+    } == {"continue_watcher_observation_until_fresh_signal"}
 
 
 def _attach_satisfied_pg_observation(control_state: dict, *, now_ms: int) -> None:
