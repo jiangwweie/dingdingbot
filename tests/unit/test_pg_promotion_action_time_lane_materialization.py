@@ -141,6 +141,28 @@ def test_cli_requires_database_url(tmp_path: Path, capsys, monkeypatch):
     assert not (tmp_path / "lane.json").exists()
 
 
+def test_promotion_business_block_report_exits_process_success():
+    report = {
+        "status": "promotion_candidates_blocked",
+        "process_outcome": {
+            "process_state": "business_blocked",
+        },
+    }
+
+    assert lane_materializer._report_exit_code(report) == 0
+
+
+def test_promotion_process_failure_report_exits_failure():
+    report = {
+        "status": "blocked",
+        "process_outcome": {
+            "process_state": "retryable_failure",
+        },
+    }
+
+    assert lane_materializer._report_exit_code(report) == 1
+
+
 def test_noops_without_fresh_signal(pg_control_connection):
     payload = lane_materializer.materialize_pg_promotion_action_time_lane(
         pg_control_connection,

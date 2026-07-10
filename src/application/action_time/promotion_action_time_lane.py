@@ -48,6 +48,7 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 )
 from src.application.runtime_process_outcome import (  # noqa: E402
     materialize_runtime_process_outcome,
+    runtime_process_exit_code,
 )
 from src.application.strategy_semantic_admission import (  # noqa: E402
     materialize_active_strategy_semantic_admissions,
@@ -722,6 +723,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True, default=str))
     else:
         print(report["status"])
+    return _report_exit_code(report)
+
+
+def _report_exit_code(report: dict[str, Any]) -> int:
+    process_outcome = report.get("process_outcome")
+    if isinstance(process_outcome, dict):
+        return runtime_process_exit_code(process_outcome)
     return 1 if report["status"] in {"blocked", "promotion_candidates_blocked"} else 0
 
 
