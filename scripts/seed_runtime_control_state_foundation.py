@@ -14,7 +14,7 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -205,7 +205,9 @@ def build_seed_rows(
     now_ms: int = DEFAULT_NOW_MS,
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID,
     account_id: str = DEFAULT_ACCOUNT_ID,
+    event_seeds: tuple[EventSeed, ...] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
+    selected_event_seeds = event_seeds or ACTIVE_EVENT_SEEDS
     rows: dict[str, list[dict[str, Any]]] = {
         "brc_strategy_groups": [],
         "brc_strategy_group_versions": [],
@@ -226,7 +228,7 @@ def build_seed_rows(
     }
 
     seeds_by_group: dict[str, list[EventSeed]] = {}
-    for seed in ACTIVE_EVENT_SEEDS:
+    for seed in selected_event_seeds:
         seeds_by_group.setdefault(seed.strategy_group_id, []).append(seed)
 
     for strategy_group_id, group_seeds in seeds_by_group.items():
@@ -284,7 +286,7 @@ def build_seed_rows(
             }
         )
 
-    for symbol in sorted({symbol for seed in ACTIVE_EVENT_SEEDS for symbol in seed.symbols}):
+    for symbol in sorted({symbol for seed in selected_event_seeds for symbol in seed.symbols}):
         exchange_symbol = _exchange_symbol(symbol)
         instrument_id = f"binance_usdm:{exchange_symbol}"
         rows["brc_symbols"].append(
@@ -320,7 +322,7 @@ def build_seed_rows(
             }
         )
 
-    for seed in ACTIVE_EVENT_SEEDS:
+    for seed in selected_event_seeds:
         event_spec_id = _event_spec_id(seed)
         version_id = _strategy_group_version_id(
             seed.strategy_group_id,
@@ -493,14 +495,18 @@ def build_seed_rows(
             )
 
     _append_projection_ownership_rows(rows, now_ms=now_ms)
-    validate_seed_rows(rows)
+    validate_seed_rows(rows, event_seeds=selected_event_seeds)
     return rows
 
 
-def validate_seed_rows(rows: dict[str, list[dict[str, Any]]]) -> None:
+def validate_seed_rows(
+    rows: dict[str, list[dict[str, Any]]],
+    *,
+    event_seeds: tuple[EventSeed, ...] = ACTIVE_EVENT_SEEDS,
+) -> None:
     allowed_scope = {
         (seed.strategy_group_id, symbol, seed.side, seed.event_id)
-        for seed in ACTIVE_EVENT_SEEDS
+        for seed in event_seeds
         for symbol in seed.symbols
     }
     event_by_id = {
@@ -550,11 +556,18 @@ def seed_runtime_control_state_foundation(
     now_ms: int = DEFAULT_NOW_MS,
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID,
     account_id: str = DEFAULT_ACCOUNT_ID,
+    migration_baseline_revision: str | None = None,
 ) -> dict[str, Any]:
+    event_seeds = (
+        _migration_baseline_event_seeds(migration_baseline_revision)
+        if migration_baseline_revision
+        else ACTIVE_EVENT_SEEDS
+    )
     rows = build_seed_rows(
         now_ms=now_ms,
         runtime_profile_id=runtime_profile_id,
         account_id=account_id,
+        event_seeds=event_seeds,
     )
     table_counts: dict[str, int] = {}
     for table_name, table_rows in rows.items():
@@ -569,11 +582,18 @@ def dry_run_report(
     now_ms: int = DEFAULT_NOW_MS,
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID,
     account_id: str = DEFAULT_ACCOUNT_ID,
+    migration_baseline_revision: str | None = None,
 ) -> dict[str, Any]:
+    event_seeds = (
+        _migration_baseline_event_seeds(migration_baseline_revision)
+        if migration_baseline_revision
+        else ACTIVE_EVENT_SEEDS
+    )
     rows = build_seed_rows(
         now_ms=now_ms,
         runtime_profile_id=runtime_profile_id,
         account_id=account_id,
+        event_seeds=event_seeds,
     )
     table_counts = {table_name: len(table_rows) for table_name, table_rows in rows.items()}
     return _report(rows, table_counts=table_counts, applied=False)
@@ -586,6 +606,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-profile-id", default=DEFAULT_RUNTIME_PROFILE_ID)
     parser.add_argument("--account-id", default=DEFAULT_ACCOUNT_ID)
     parser.add_argument("--now-ms", type=int, default=DEFAULT_NOW_MS)
+    parser.add_argument(
+        "--migration-baseline-revision",
+        choices=["106"],
+        default=None,
+        help="Seed the deterministic v1 authority baseline before forward migrations.",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
@@ -594,6 +620,7 @@ def main(argv: list[str] | None = None) -> int:
             now_ms=args.now_ms,
             runtime_profile_id=args.runtime_profile_id,
             account_id=args.account_id,
+            migration_baseline_revision=args.migration_baseline_revision,
         )
         _print_report(report, json_output=args.json)
         return 0
@@ -613,9 +640,26 @@ def main(argv: list[str] | None = None) -> int:
             now_ms=args.now_ms,
             runtime_profile_id=args.runtime_profile_id,
             account_id=args.account_id,
+            migration_baseline_revision=args.migration_baseline_revision,
         )
     _print_report(report, json_output=args.json)
     return 0
+
+
+def _migration_baseline_event_seeds(revision: str) -> tuple[EventSeed, ...]:
+    if revision != "106":
+        raise ValueError(f"unsupported migration seed baseline: {revision}")
+    return tuple(
+        replace(
+            seed,
+            strategy_group_version=1,
+            event_spec_version="v1",
+            declared_signal_grade="observe_only_signal",
+            declared_required_execution_mode="observe_only",
+            execution_eligibility_enabled=False,
+        )
+        for seed in ACTIVE_EVENT_SEEDS
+    )
 
 
 def _append_required_fact_rows(

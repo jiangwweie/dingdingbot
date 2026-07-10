@@ -19,8 +19,22 @@ MIGRATIONS = {
     / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py",
     "104": REPO_ROOT
     / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py",
+    "105": REPO_ROOT
+    / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py",
+    "106": REPO_ROOT
+    / "migrations/versions/2026-07-10-106_create_runtime_supervision_and_allocation.py",
+    "107": REPO_ROOT
+    / "migrations/versions/2026-07-10-107_certify_cpm_long_trial_event.py",
+    "108": REPO_ROOT
+    / "migrations/versions/2026-07-10-108_certify_mpg_long_trial_event.py",
+    "109": REPO_ROOT
+    / "migrations/versions/2026-07-10-109_certify_mi_long_trial_event.py",
+    "110": REPO_ROOT
+    / "migrations/versions/2026-07-10-110_certify_sor_dual_side_trial_events.py",
+    "111": REPO_ROOT
+    / "migrations/versions/2026-07-10-111_certify_brf2_short_trial_event.py",
 }
-REVISION_ORDER = ("086", "103", "104")
+REVISION_ORDER = ("086", "103", "104", "105", "106", "107", "108", "109", "110", "111")
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -38,6 +52,7 @@ def install_runtime_control_state_schema(
     conn: Connection,
     *,
     through_revision: str = "104",
+    after_revision: str | None = None,
 ) -> None:
     """Install the requested runtime-control test schema revision."""
 
@@ -45,8 +60,14 @@ def install_runtime_control_state_schema(
         raise ValueError(
             f"unsupported runtime-control test revision: {through_revision}"
         )
+    if after_revision is not None and after_revision not in REVISION_ORDER:
+        raise ValueError(f"unsupported starting revision: {after_revision}")
+    if after_revision is not None and REVISION_ORDER.index(after_revision) >= REVISION_ORDER.index(through_revision):
+        raise ValueError("after_revision must precede through_revision")
     operations = Operations(MigrationContext.configure(conn))
     for revision in REVISION_ORDER:
+        if after_revision is not None and REVISION_ORDER.index(revision) <= REVISION_ORDER.index(after_revision):
+            continue
         migration = _load_module(
             MIGRATIONS[revision],
             f"test_runtime_control_state_migration_{revision}_{id(conn)}",
@@ -61,11 +82,18 @@ def install_runtime_control_state_schema(
             break
 
 
-def seed_runtime_control_state(conn: Connection) -> None:
+def seed_runtime_control_state(
+    conn: Connection,
+    *,
+    migration_baseline_revision: str | None = None,
+) -> None:
     """Seed deterministic StrategyGroup runtime-control rows for tests."""
 
     seed = _load_module(
         SEED_PATH,
         f"test_runtime_control_state_seed_{id(conn)}",
     )
-    seed.seed_runtime_control_state_foundation(conn)
+    seed.seed_runtime_control_state_foundation(
+        conn,
+        migration_baseline_revision=migration_baseline_revision,
+    )
