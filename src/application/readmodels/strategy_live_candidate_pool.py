@@ -45,6 +45,9 @@ AUTHORITY_BOUNDARY = (
     "live_candidate_pool_is_read_model; "
     "no_finalgate_no_operation_layer_no_exchange_write_no_live_profile_or_sizing_change"
 )
+EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED = (
+    "event_execution_capability_not_certified"
+)
 CANDIDATE_POSITIONING = {
     "MPG-001": "selective leader continuation long candidate",
     "CPM-RO-001": "reclaim / pullback recovery long candidate",
@@ -75,6 +78,7 @@ RESIDUAL_DEPLOY_BLOCKERS = {
     "watcher_tick_missing",
     "scope_not_attached",
     "replay_live_rule_mismatch",
+    EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED,
     "action_time_boundary_not_reproduced",
     "action_time_preflight_ready",
     "policy_scope_missing",
@@ -91,6 +95,7 @@ ACTION_TIME_SCOPE_STATES = {
     "conditional_action_time_rehearsal_allowed",
 }
 ACTION_TIME_INPUT_BLOCKERS = {
+    EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED,
     "action_time_boundary_not_reproduced",
     "active_position_resolution",
     "artifact_missing",
@@ -1188,7 +1193,7 @@ def _pg_candidate_first_blocker(
         return event_spec_blocker
     signal = (signal_by_lane or {}).get(key, {})
     if signal and signal.get("execution_eligible") is not True:
-        return "action_time_boundary_not_reproduced"
+        return EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED
     readiness = readiness_by_lane.get(key, {})
     if readiness.get("first_blocker_class"):
         return str(readiness["first_blocker_class"])
@@ -1216,7 +1221,7 @@ def _event_spec_execution_eligibility_blocker(
         or event_spec.get("declared_required_execution_mode")
         not in {"trial_live", "production_live"}
     ):
-        return "action_time_boundary_not_reproduced"
+        return EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED
     return ""
 
 
@@ -1242,6 +1247,9 @@ def _pg_next_action(first_blocker: str) -> str:
         "computed_not_satisfied": "continue_observation_with_failed_fact_matrix",
         "market_wait_validated": "continue_watcher_observation_until_fresh_signal",
         "runtime_profile_scope_missing": "bind_or_start_pretrade_runtime_for_candidate_symbol",
+        EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED: (
+            "certify_event_execution_capability_or_keep_observe_only"
+        ),
         "action_time_boundary_not_reproduced": "repair_non_executing_action_time_rehearsal_path",
         "action_time_preflight_ready": "prepare_non_executing_finalgate_preflight_input",
         "active_position_resolution": "resolve_active_position_or_open_order_conflict",
@@ -1257,6 +1265,7 @@ def _pg_blocker_rank(first_blocker: str) -> int:
         "watcher_tick_missing": 3,
         "detector_not_attached": 4,
         "runtime_profile_scope_missing": 5,
+        EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED: 6,
         "artifact_missing": 6,
     }.get(first_blocker, 9)
 
@@ -2642,6 +2651,9 @@ def _symbol_next_action(
         "scope_not_attached": "produce_scoped_live_observation_or_scope_proposal",
         "runtime_profile_scope_missing": (
             "bind_or_start_pretrade_runtime_for_candidate_symbol"
+        ),
+        EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED: (
+            "certify_event_execution_capability_or_keep_observe_only"
         ),
         "action_time_boundary_not_reproduced": (
             "repair_non_executing_action_time_rehearsal_path"

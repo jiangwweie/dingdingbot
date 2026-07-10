@@ -33,6 +33,10 @@ from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     normalize_sync_postgres_dsn,
 )
 
+NON_GLOBAL_OBSERVE_ONLY_BLOCKERS = {
+    "event_execution_capability_not_certified",
+}
+
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -221,6 +225,8 @@ def _pg_non_market_blockers(candidate_pool: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
     for blocker, count in sorted(_pg_blocker_counts(candidate_pool).items()):
         if blocker in market_wait_blockers:
+            continue
+        if blocker in NON_GLOBAL_OBSERVE_ONLY_BLOCKERS:
             continue
         if blocker.startswith("fresh_") and blocker.endswith("_absent"):
             continue

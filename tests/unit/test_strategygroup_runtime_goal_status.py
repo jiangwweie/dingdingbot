@@ -513,6 +513,7 @@ def test_pg_non_market_blockers_ignores_action_time_preflight_ready() -> None:
         "symbol_readiness_rows": [
             {"first_blocker": "action_time_preflight_ready"},
             {"first_blocker": "computed_not_satisfied"},
+            {"first_blocker": "event_execution_capability_not_certified"},
             {"first_blocker": "runtime_profile_scope_missing"},
         ]
     }

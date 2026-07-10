@@ -431,7 +431,7 @@ def test_candidate_pool_builds_from_pg_control_state_seed(pg_control_connection)
     )
 
 
-def test_pg_projection_classifies_observe_only_fresh_signal_as_action_time_gap():
+def test_pg_projection_classifies_observe_only_fresh_signal_as_event_capability_gap():
     builder = _builder()
     candidate = {
         "strategy_group_id": "SOR-001",
@@ -456,7 +456,7 @@ def test_pg_projection_classifies_observe_only_fresh_signal_as_action_time_gap()
         },
     )
 
-    assert first_blocker == "action_time_boundary_not_reproduced"
+    assert first_blocker == "event_execution_capability_not_certified"
 
 
 def test_pg_projection_rejects_market_wait_when_event_spec_is_observe_only(
@@ -501,7 +501,7 @@ def test_pg_projection_rejects_market_wait_when_event_spec_is_observe_only(
 
     assert {
         row["first_blocker"] for row in inputs["daily_table"]["rows"]
-    } == {"action_time_boundary_not_reproduced"}
+    } == {"event_execution_capability_not_certified"}
 
     artifact = _builder().build_strategy_live_candidate_pool_from_control_state(
         control_state,
@@ -509,7 +509,7 @@ def test_pg_projection_rejects_market_wait_when_event_spec_is_observe_only(
     )
     assert {
         row["first_blocker"] for row in artifact["symbol_readiness_rows"]
-    } == {"action_time_boundary_not_reproduced"}
+    } == {"event_execution_capability_not_certified"}
 
 
 def test_candidate_pool_pg_signal_times_use_market_event_not_observation_time(
