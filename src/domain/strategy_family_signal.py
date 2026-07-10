@@ -13,6 +13,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.execution_eligibility import RequiredExecutionMode, SignalGrade
+
 
 CONTRACT_VERSION = "brc-strategy-family-signal-v1"
 
@@ -226,7 +228,8 @@ class StrategyFamilySignalOutput(StrategyFamilySignalModel):
     )
     reason_codes: list[str] = Field(default_factory=list)
     human_summary: str = Field(default="", max_length=4096)
-    required_execution_mode: str = Field(default="observe_only", max_length=128)
+    signal_grade: SignalGrade = SignalGrade.OBSERVE_ONLY_SIGNAL
+    required_execution_mode: RequiredExecutionMode = RequiredExecutionMode.OBSERVE_ONLY
     expected_risk_shape: ExpectedRiskShape | str = ExpectedRiskShape.UNKNOWN
     invalidation_conditions: list[dict[str, Any]] = Field(default_factory=list)
     signal_snapshot: dict[str, Any] = Field(default_factory=dict)

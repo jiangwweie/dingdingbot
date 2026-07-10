@@ -17,6 +17,11 @@ from src.domain.strategy_family_signal import (
     StrategyFamilySignalInput,
     StrategyFamilySignalOutput,
 )
+from src.domain.execution_eligibility import (
+    RequiredExecutionMode,
+    SignalGrade,
+    resolve_execution_eligibility,
+)
 
 
 def _market_snapshot() -> MarketSnapshot:
@@ -195,6 +200,52 @@ def test_can_construct_would_enter_signal_output():
     assert output.review_plan.review_required is True
     assert output.not_order is True
     assert output.not_execution_intent is True
+
+
+def test_observe_only_signal_is_never_execution_eligible():
+    envelope = resolve_execution_eligibility(
+        declared_signal_grade=SignalGrade.OBSERVE_ONLY_SIGNAL,
+        declared_required_execution_mode=RequiredExecutionMode.OBSERVE_ONLY,
+        execution_eligibility_enabled=False,
+        evaluator_signal_grade=SignalGrade.OBSERVE_ONLY_SIGNAL,
+        evaluator_required_execution_mode=RequiredExecutionMode.OBSERVE_ONLY,
+        authority_source_ref="event-spec:SOR-LONG-v1",
+    )
+
+    assert envelope.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
+    assert envelope.required_execution_mode == RequiredExecutionMode.OBSERVE_ONLY
+    assert envelope.execution_eligible is False
+
+
+def test_evaluator_cannot_upgrade_event_spec_authority():
+    with pytest.raises(ValueError, match="exceeds declared event-spec authority"):
+        resolve_execution_eligibility(
+            declared_signal_grade=SignalGrade.OBSERVE_ONLY_SIGNAL,
+            declared_required_execution_mode=RequiredExecutionMode.OBSERVE_ONLY,
+            execution_eligibility_enabled=False,
+            evaluator_signal_grade=SignalGrade.TRIAL_GRADE_SIGNAL,
+            evaluator_required_execution_mode=RequiredExecutionMode.TRIAL_LIVE,
+            authority_source_ref="event-spec:SOR-LONG-v1",
+        )
+
+
+def test_signal_output_defaults_to_typed_observe_only_authority():
+    output = StrategyFamilySignalOutput(
+        signal_id="sig-observe-only-001",
+        evaluation_id="eval-001",
+        strategy_family_id="tf",
+        strategy_family_version_id="tf-v1",
+        symbol="BTC/USDT:USDT",
+        timestamp_ms=1770000000400,
+        trigger_candle_close_time_ms=1770000000400,
+        timeframe="4h",
+        signal_type=SignalType.WOULD_ENTER,
+        side=SignalSide.LONG,
+        input_refs=_input_refs(),
+    )
+
+    assert output.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
+    assert output.required_execution_mode == RequiredExecutionMode.OBSERVE_ONLY
 
 
 def test_would_enter_signal_output_requires_trigger_candle_close_time():
