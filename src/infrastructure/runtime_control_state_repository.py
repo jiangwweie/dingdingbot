@@ -570,9 +570,15 @@ class PgBackedRuntimeControlStateRepository:
                     f"{event_spec_id} duplicates current event identity"
                 )
             seen_event_keys.add(event_key)
-            if str(event.get("event_spec_version") or "") != "v1":
+            event_spec_version = str(event.get("event_spec_version") or "").strip()
+            if not event_spec_version:
                 raise RuntimeControlStateRepositoryError(
-                    f"{event_spec_id} must use event_spec_version=v1"
+                    f"{event_spec_id} missing event_spec_version"
+                )
+            if not event_spec_id.endswith(f":{event_spec_version}"):
+                raise RuntimeControlStateRepositoryError(
+                    f"{event_spec_id} mismatches event_spec_version="
+                    f"{event_spec_version}"
                 )
             if int(event.get("freshness_window_ms") or 0) <= 0:
                 raise RuntimeControlStateRepositoryError(
@@ -650,6 +656,7 @@ class PgBackedRuntimeControlStateRepository:
                 )
 
             event = current_events[event_spec_id]
+            event_spec_version = str(event.get("event_spec_version") or "").strip()
             protection_ref = str(event.get("protection_ref_type") or "")
             if protection_ref not in required_keys:
                 raise RuntimeControlStateRepositoryError(
@@ -677,7 +684,9 @@ class PgBackedRuntimeControlStateRepository:
                 )
             for fact in facts:
                 fact_key = str(fact.get("fact_key") or "")
-                if not str(fact.get("required_facts_version_id") or "").endswith(":v1"):
+                if not str(fact.get("required_facts_version_id") or "").endswith(
+                    f":{event_spec_version}"
+                ):
                     raise RuntimeControlStateRepositoryError(
                         f"{event_spec_id}:{fact_key} has invalid RequiredFacts version"
                     )

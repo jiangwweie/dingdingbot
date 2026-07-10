@@ -33,6 +33,10 @@ RISK_RESERVATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
 )
+EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 VALIDATOR_PATH = REPO_ROOT / "scripts/validate_runtime_control_state_repository.py"
 
@@ -54,6 +58,10 @@ def pg_control_connection():
         RISK_RESERVATION_MIGRATION_PATH,
         "migration_103_repository",
     )
+    execution_eligibility_migration = _load_module(
+        EXECUTION_ELIGIBILITY_MIGRATION_PATH,
+        "migration_104_repository",
+    )
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_repository")
     engine = create_engine(
         "sqlite://",
@@ -69,6 +77,12 @@ def pg_control_connection():
             risk_reservation_migration.op = migration.op
             try:
                 risk_reservation_migration.upgrade()
+                old_eligibility_op = execution_eligibility_migration.op
+                execution_eligibility_migration.op = migration.op
+                try:
+                    execution_eligibility_migration.upgrade()
+                finally:
+                    execution_eligibility_migration.op = old_eligibility_op
             finally:
                 risk_reservation_migration.op = old_risk_op
         finally:
@@ -590,7 +604,7 @@ def test_pg_backed_runtime_control_state_repository_requires_exact_required_fact
         text(
             """
             DELETE FROM brc_strategy_event_required_facts
-            WHERE event_spec_id = 'event_spec:CPM-RO-001:CPM-LONG:v1'
+            WHERE event_spec_id = 'event_spec:CPM-RO-001:CPM-LONG:v2'
               AND fact_key = 'htf_trend_intact'
             """
         )
@@ -604,6 +618,31 @@ def test_pg_backed_runtime_control_state_repository_requires_exact_required_fact
     with pytest.raises(
         RuntimeControlStateRepositoryError,
         match="CPM-LONG.*RequiredFacts manifest mismatch.*htf_trend_intact",
+    ):
+        repository.read_control_state()
+
+
+def test_pg_backed_runtime_control_state_repository_rejects_event_version_id_mismatch(
+    pg_control_connection,
+):
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_strategy_side_event_specs
+            SET event_spec_version = 'v3'
+            WHERE event_spec_id = 'event_spec:CPM-RO-001:CPM-LONG:v2'
+            """
+        )
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770000120100,
+    )
+
+    with pytest.raises(
+        RuntimeControlStateRepositoryError,
+        match="CPM-LONG:v2 mismatches event_spec_version=v3",
     ):
         repository.read_control_state()
 
