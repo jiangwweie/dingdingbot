@@ -410,6 +410,12 @@ def _snapshot_row(
         "valid_until_ms": valid_until_ms,
         "created_at_ms": now_ms,
         "authority_boundary": AUTHORITY_BOUNDARY,
+        "signal_grade": ticket.get("signal_grade") or "invalid_signal",
+        "required_execution_mode": ticket.get("required_execution_mode")
+        or "observe_only",
+        "execution_eligible": ticket.get("execution_eligible") is True,
+        "authority_source_ref": ticket.get("authority_source_ref")
+        or "runtime-safety:missing-authority-source",
     }
 
 
@@ -430,6 +436,20 @@ def _ticket_blockers(
         blockers.append("ticket_hash_missing")
     elif compute_action_time_ticket_hash(ticket) != ticket.get("ticket_hash"):
         blockers.append("ticket_hash_mismatch")
+    if ticket.get("execution_eligible") is not True:
+        blockers.append("execution_eligibility_missing_or_false")
+    if ticket.get("signal_grade") not in {
+        "trial_grade_signal",
+        "production_grade_signal",
+    }:
+        blockers.append("execution_eligibility_signal_grade_invalid")
+    if ticket.get("required_execution_mode") not in {
+        "trial_live",
+        "production_live",
+    }:
+        blockers.append("execution_eligibility_mode_invalid")
+    if not str(ticket.get("authority_source_ref") or "").strip():
+        blockers.append("execution_eligibility_authority_source_missing")
     expected_pass_id = _latest_finalgate_pass_id(
         control_state,
         str(ticket.get("ticket_id") or ""),
@@ -481,6 +501,8 @@ def _lane_blockers(*, lane: dict[str, Any]) -> list[str]:
         blockers.append(f"lane_scope_not_real_submit_candidate:{lane.get('lane_scope') or 'missing'}")
     if lane.get("status") not in {"ticket_pending", "ticket_created"}:
         blockers.append(f"lane_status_not_runtime_safety_eligible:{lane.get('status') or 'missing'}")
+    if lane.get("execution_eligible") is not True:
+        blockers.append("lane_execution_eligibility_missing_or_false")
     return blockers
 
 
@@ -515,6 +537,16 @@ def _signal_blockers(
         blockers.append("signal_event_time_mismatch:trigger_candle_close_time_ms")
     if int(signal.get("created_at_ms") or 0) == int(signal.get("event_time_ms") or 0):
         blockers.append("signal_generated_at_used_as_event_time")
+    for field in (
+        "signal_grade",
+        "required_execution_mode",
+        "execution_eligible",
+        "authority_source_ref",
+    ):
+        if signal.get(field) != ticket.get(field):
+            blockers.append(f"execution_eligibility_signal_ticket_mismatch:{field}")
+    if signal.get("execution_eligible") is not True:
+        blockers.append("signal_execution_eligibility_missing_or_false")
     return blockers
 
 

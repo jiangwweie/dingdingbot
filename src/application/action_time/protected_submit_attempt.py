@@ -704,6 +704,31 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
         blockers.append("ticket_expired")
     if compute_action_time_ticket_hash(ticket) != ticket.get("ticket_hash"):
         blockers.append("ticket_hash_mismatch")
+    if ticket.get("execution_eligible") is not True:
+        blockers.append("execution_eligibility_missing_or_false")
+    if ticket.get("signal_grade") not in {
+        "trial_grade_signal",
+        "production_grade_signal",
+    }:
+        blockers.append("execution_eligibility_signal_grade_invalid")
+    if ticket.get("required_execution_mode") not in {
+        "trial_live",
+        "production_live",
+    }:
+        blockers.append("execution_eligibility_mode_invalid")
+    for item_name, item in (
+        ("lane", lane),
+        ("signal", signal),
+        ("runtime_safety", safety),
+    ):
+        for field in (
+            "signal_grade",
+            "required_execution_mode",
+            "execution_eligible",
+            "authority_source_ref",
+        ):
+            if item.get(field) != ticket.get(field):
+                blockers.append(f"execution_eligibility_mismatch:{item_name}:{field}")
     if handoff.get("status") != "handoff_ready":
         blockers.append(f"operation_layer_handoff_status_not_ready:{handoff.get('status')}")
     if safety.get("submit_allowed") is not True:
@@ -883,6 +908,18 @@ def _real_submit_mode_decision_blockers(
         blockers.append("submit_mode_decision_command_mismatch")
     if decision.get("blockers"):
         blockers.append("submit_mode_decision_has_blockers")
+    if decision.get("execution_eligible") is not True:
+        blockers.append("submit_mode_decision_execution_eligibility_false")
+    if decision.get("signal_grade") not in {
+        "trial_grade_signal",
+        "production_grade_signal",
+    }:
+        blockers.append("submit_mode_decision_signal_grade_invalid")
+    if decision.get("required_execution_mode") not in {
+        "trial_live",
+        "production_live",
+    }:
+        blockers.append("submit_mode_decision_execution_mode_invalid")
     return _dedupe(blockers)
 
 
@@ -975,6 +1012,12 @@ def _submit_mode_decision_row(
         "created_at_ms": now_ms,
         "expires_at_ms": expires_at_ms,
         "updated_at_ms": now_ms,
+        "signal_grade": ticket.get("signal_grade") or "invalid_signal",
+        "required_execution_mode": ticket.get("required_execution_mode")
+        or "observe_only",
+        "execution_eligible": ticket.get("execution_eligible") is True,
+        "authority_source_ref": ticket.get("authority_source_ref")
+        or "submit-mode:missing-authority-source",
     }
 
 
@@ -1215,6 +1258,12 @@ def _attempt_row(
         "authority_boundary": AUTHORITY_BOUNDARY,
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
+        "signal_grade": ticket.get("signal_grade") or "invalid_signal",
+        "required_execution_mode": ticket.get("required_execution_mode")
+        or "observe_only",
+        "execution_eligible": ticket.get("execution_eligible") is True,
+        "authority_source_ref": ticket.get("authority_source_ref")
+        or "protected-submit:missing-authority-source",
     }
 
 

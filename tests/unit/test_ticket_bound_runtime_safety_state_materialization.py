@@ -67,6 +67,10 @@ RISK_RESERVATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
 )
+EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -190,6 +194,22 @@ def pg_control_connection():
                                                 )
                                                 try:
                                                     risk_reservation_migration.upgrade()
+                                                    execution_eligibility_migration = _load_module(
+                                                        EXECUTION_ELIGIBILITY_MIGRATION_PATH,
+                                                        "migration_104_runtime_safety",
+                                                    )
+                                                    old_eligibility_op = (
+                                                        execution_eligibility_migration.op
+                                                    )
+                                                    execution_eligibility_migration.op = (
+                                                        migration.op
+                                                    )
+                                                    try:
+                                                        execution_eligibility_migration.upgrade()
+                                                    finally:
+                                                        execution_eligibility_migration.op = (
+                                                            old_eligibility_op
+                                                        )
                                                 finally:
                                                     risk_reservation_migration.op = (
                                                         old_risk_reservation_op
@@ -320,6 +340,30 @@ def test_runtime_safety_state_materializes_submit_allowed_snapshot(
         {"lane_id": ids["lane_id"]},
     ).scalar_one()
     assert lane_snapshot_id == row["runtime_safety_snapshot_id"]
+
+
+def test_runtime_safety_blocks_ineligible_ticket_graph(pg_control_connection):
+    ids = _create_handoff_ready(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET execution_eligible = false
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": ids["ticket_id"]},
+    )
+
+    payload = safety.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_layer_handoff_id=ids["operation_layer_handoff_id"],
+        now_ms=NOW_MS + 3000,
+    )
+
+    assert payload["submit_allowed"] is False
+    assert "execution_eligibility_missing_or_false" in payload["blockers"]
 
 
 def test_runtime_safety_state_blocks_ticket_identity_hash_mismatch(
