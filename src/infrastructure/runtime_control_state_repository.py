@@ -986,8 +986,22 @@ def _monitor_bounded_statement(
         return statement.order_by(columns.created_at_ms.desc()).limit(200)
     if logical_key == "ticket_bound_protected_submit_attempts" and "created_at_ms" in columns:
         return statement.where(
-            columns.status.in_(["blocked", "disabled_smoke_passed", "submitted"])
+            columns.status.in_(
+                [
+                    "blocked",
+                    "disabled_smoke_passed",
+                    "submitted",
+                    "submit_outcome_unknown",
+                    "hard_stopped",
+                ]
+            )
         ).order_by(columns.created_at_ms.desc()).limit(200)
+    if logical_key == "ticket_bound_exchange_commands" and "updated_at_ms" in columns:
+        return statement.where(
+            columns.command_state.in_(
+                ["dispatching", "outcome_unknown", "hard_stopped"]
+            )
+        ).order_by(columns.updated_at_ms.desc()).limit(200)
     return statement
 
 

@@ -288,6 +288,12 @@ def _first_pg_focus_row(candidate_pool: dict[str, Any]) -> dict[str, Any]:
 
 def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
     now_ms = int(control_state.get("read_now_ms") or time.time() * 1000)
+    exchange_command_event = _exchange_command_chain_event(
+        _pg_rows(control_state.get("ticket_bound_exchange_commands")),
+        now_ms=now_ms,
+    )
+    if exchange_command_event:
+        return exchange_command_event
     ticket_by_id = {
         str(row.get("ticket_id") or ""): row
         for row in _pg_rows(control_state.get("action_time_tickets"))
@@ -404,6 +410,112 @@ def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _exchange_command_chain_event(
+    commands: list[dict[str, Any]],
+    *,
+    now_ms: int,
+) -> dict[str, Any]:
+    unresolved = [
+        row
+        for row in commands
+        if str(row.get("command_state") or "")
+        in {"dispatching", "outcome_unknown", "hard_stopped"}
+    ]
+    if not unresolved:
+        return {}
+
+    def event(
+        row: dict[str, Any],
+        *,
+        notify: bool,
+        status: str,
+        blocker: str,
+    ) -> dict[str, Any]:
+        return {
+            "event_type": "exchange_command_state",
+            "notify": notify,
+            "decision_status": status,
+            "strategy_group_id": row.get("strategy_group_id"),
+            "symbol": row.get("symbol"),
+            "side": row.get("side"),
+            "checkpoint": "ticket_bound_exchange_command",
+            "blocker_class": blocker,
+            "reasons": [blocker, str(row.get("exchange_command_id") or "")],
+            "owner_message": (
+                "交易命令结果需要介入核对"
+                if notify
+                else "交易命令处理中，无需操作"
+            ),
+        }
+
+    hard_stopped = [
+        row
+        for row in unresolved
+        if str(row.get("command_state") or "") == "hard_stopped"
+    ]
+    if hard_stopped:
+        row = max(hard_stopped, key=lambda item: int(item.get("updated_at_ms") or 0))
+        return event(
+            row,
+            notify=True,
+            status="needs_intervention",
+            blocker="exchange_command_hard_stopped",
+        )
+
+    unknown = [
+        row
+        for row in unresolved
+        if str(row.get("command_state") or "") == "outcome_unknown"
+    ]
+    overdue_unknown = [
+        row
+        for row in unknown
+        if now_ms - int(row.get("updated_at_ms") or 0) >= 30_000
+    ]
+    if overdue_unknown:
+        row = min(
+            overdue_unknown,
+            key=lambda item: int(item.get("updated_at_ms") or 0),
+        )
+        return event(
+            row,
+            notify=True,
+            status="needs_intervention",
+            blocker="exchange_command_outcome_unknown",
+        )
+
+    dispatching = [
+        row
+        for row in unresolved
+        if str(row.get("command_state") or "") == "dispatching"
+    ]
+    overdue_dispatching = [
+        row
+        for row in dispatching
+        if now_ms - int(row.get("updated_at_ms") or 0) >= 60_000
+    ]
+    if overdue_dispatching:
+        row = min(
+            overdue_dispatching,
+            key=lambda item: int(item.get("updated_at_ms") or 0),
+        )
+        return event(
+            row,
+            notify=True,
+            status="needs_intervention",
+            blocker="exchange_command_dispatch_overdue",
+        )
+
+    processing = unknown or dispatching
+    row = max(processing, key=lambda item: int(item.get("updated_at_ms") or 0))
+    return event(
+        row,
+        notify=False,
+        status="processing",
+        blocker="exchange_command_processing",
+    )
+
+
 def _is_current_monitor_ticket(ticket: dict[str, Any], now_ms: int) -> bool:
     status = str(ticket.get("status") or "")
     if status == "submitted":
@@ -465,10 +577,14 @@ def _decision_from_pg_sources(
     elif chain_event:
         event_side = str(chain_event.get("side") or "")
         event_symbol = str(chain_event.get("symbol") or symbol)
+        notify = chain_event.get("notify") is not False
         return {
-            "decision": "notify",
-            "notify": True,
-            "status": "notify_required",
+            "decision": "notify" if notify else "quiet",
+            "notify": notify,
+            "status": str(
+                chain_event.get("decision_status")
+                or ("needs_intervention" if notify else "processing")
+            ),
             "reasons": _dedupe([str(item) for item in chain_event.get("reasons") or []]),
             "automation_id": "tokyo-runtime-server-monitor",
             "strategy_group_id": str(
@@ -481,7 +597,10 @@ def _decision_from_pg_sources(
             ),
             "blocker_class": str(chain_event.get("blocker_class") or "fresh_signal"),
             "checkpoint": str(chain_event.get("checkpoint") or checkpoint),
-            "owner_message": "检测到交易链路事件，系统已按边界处理",
+            "owner_message": str(
+                chain_event.get("owner_message")
+                or "检测到交易链路事件，系统已按边界处理"
+            ),
         }
 
     if status == "waiting_for_signal":

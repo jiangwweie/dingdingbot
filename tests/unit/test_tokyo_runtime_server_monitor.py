@@ -15,6 +15,7 @@ from scripts import materialize_ticket_bound_protected_submit_attempt as submit
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
+    _prepare_real_submit,
 )
 
 
@@ -28,8 +29,76 @@ RISK_RESERVATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
 )
+EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
+)
+EXCHANGE_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 PG_TEST_NOW_MS = 1770001000000
+
+
+def test_recent_dispatching_exchange_command_is_processing_quiet():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "ticket_bound_exchange_commands": [
+            {
+                "exchange_command_id": "command-1",
+                "command_state": "dispatching",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            }
+        ],
+        "action_time_tickets": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "fresh_signal_processing", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "processing"
+    assert decision["notify"] is False
+    assert decision["checkpoint"] == "ticket_bound_exchange_command"
+
+
+def test_overdue_unknown_exchange_command_notifies_owner():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "ticket_bound_exchange_commands": [
+            {
+                "exchange_command_id": "command-unknown",
+                "command_state": "outcome_unknown",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "updated_at_ms": PG_TEST_NOW_MS - 120_000,
+            }
+        ],
+        "action_time_tickets": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "fresh_signal_processing", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "needs_intervention"
+    assert decision["notify"] is True
+    assert decision["blocker_class"] == "exchange_command_outcome_unknown"
 
 
 def _load_module():
@@ -91,6 +160,26 @@ def _seed_pg_engine():
             risk_reservation_migration.op = migration.op
             try:
                 risk_reservation_migration.upgrade()
+                execution_eligibility_migration = _load_file_module(
+                    EXECUTION_ELIGIBILITY_MIGRATION_PATH,
+                    "migration_104_server_monitor",
+                )
+                old_eligibility_op = execution_eligibility_migration.op
+                execution_eligibility_migration.op = migration.op
+                try:
+                    execution_eligibility_migration.upgrade()
+                    exchange_command_migration = _load_file_module(
+                        EXCHANGE_COMMAND_MIGRATION_PATH,
+                        "migration_105_server_monitor",
+                    )
+                    old_exchange_command_op = exchange_command_migration.op
+                    exchange_command_migration.op = migration.op
+                    try:
+                        exchange_command_migration.upgrade()
+                    finally:
+                        exchange_command_migration.op = old_exchange_command_op
+                finally:
+                    execution_eligibility_migration.op = old_eligibility_op
             finally:
                 risk_reservation_migration.op = old_risk_op
         finally:
@@ -603,6 +692,54 @@ def test_pg_completed_disabled_smoke_attempt_is_quiet_not_boundary_blocked(
             assert artifact["source_refs"]["control_state_watermark"]["table_counts"][
                 "ticket_bound_protected_submit_attempts"
             ] == 1
+    finally:
+        engine.dispose()
+
+
+def test_pg_overdue_unknown_exchange_command_notifies_from_current_table(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    engine = _seed_pg_engine()
+    try:
+        with engine.begin() as conn:
+            ids = _create_ready_protected_submit(conn)
+            prepared = _prepare_real_submit(conn, ids)
+            conn.execute(
+                text(
+                    """
+                    UPDATE brc_ticket_bound_exchange_commands
+                    SET command_state = 'outcome_unknown',
+                        outcome_class = 'network_ambiguous',
+                        updated_at_ms = :updated_at_ms
+                    WHERE order_role = 'ENTRY'
+                    """
+                ),
+                {"updated_at_ms": NOW_MS + 5000},
+            )
+            args = _pg_args(module, tmp_path)
+            args.now_ms = NOW_MS + 120_000
+            calls: list[dict] = []
+
+            artifact = module.build_server_monitor_artifact(
+                args,
+                pg_conn=conn,
+                notifier=lambda *args: calls.append({"args": args}) or {"sent": True},
+            )
+
+            assert prepared["status"] == "submit_prepared"
+            assert artifact["decision"]["status"] == "needs_intervention"
+            assert artifact["decision"]["blocker_class"] == (
+                "exchange_command_outcome_unknown"
+            )
+            assert artifact["decision"]["checkpoint"] == (
+                "ticket_bound_exchange_command"
+            )
+            assert artifact["notification"]["attempted"] is True
+            assert artifact["source_refs"]["control_state_watermark"][
+                "table_counts"
+            ]["ticket_bound_exchange_commands"] == 1
+            assert calls
     finally:
         engine.dispose()
 
