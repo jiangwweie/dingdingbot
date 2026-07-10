@@ -301,17 +301,8 @@ def _brf_down_context_4h() -> list[dict[str, Any]]:
     ]
 
 
-def _sor_breakdown_1h() -> list[dict[str, Any]]:
+def _sor_breakdown_15m() -> list[dict[str, Any]]:
     candles = [
-        _candle(0, "106", "107", "104", "105"),
-        _candle(1, "105", "106", "103", "104"),
-        _candle(2, "104", "105", "102", "103"),
-        _candle(3, "103", "104", "101", "102"),
-        _candle(4, "102", "103", "100", "101"),
-        _candle(5, "101", "102", "99", "100"),
-        _candle(6, "100", "101", "98", "99"),
-        _candle(7, "99", "100", "97", "98"),
-        _candle(8, "98", "100", "97", "99"),
         _candle(0, "102", "104", "100", "103"),
         _candle(1, "103", "105", "101", "104"),
         _candle(2, "104", "105", "102", "103"),
@@ -319,7 +310,7 @@ def _sor_breakdown_1h() -> list[dict[str, Any]]:
         _candle(4, "100", "101", "96", "97"),
     ]
     return [
-        {**candle, "open_time_ms": NOW_MS - (len(candles) - index) * 3_600_000}
+        {**candle, "open_time_ms": NOW_MS - (len(candles) - index) * 900_000}
         for index, candle in enumerate(candles)
     ]
 
@@ -352,6 +343,7 @@ def _runtime_signal_input(
     last_price: Decimal,
     atr: Decimal,
     side: str,
+    primary_timeframe: str = "1h",
 ) -> StrategyFamilySignalInput:
     return StrategyFamilySignalInput(
         evaluation_id=f"eval-runtime-signal-{family_id}-{side}",
@@ -360,7 +352,7 @@ def _runtime_signal_input(
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
         trigger_candle_close_time_ms=NOW_MS,
-        primary_timeframe="1h",
+        primary_timeframe=primary_timeframe,
         context_timeframes=["4h"],
         market_snapshot=MarketSnapshot(
             symbol="ETH/USDT:USDT",
@@ -372,9 +364,9 @@ def _runtime_signal_input(
             funding_rate=Decimal("0.0001"),
             volatility=Decimal("0.15"),
             atr=atr,
-            timeframe="1h",
+            timeframe=primary_timeframe,
             candle_context={
-                "windows": {"1h": one_hour, "4h": four_hour},
+                "windows": {primary_timeframe: one_hour, "4h": four_hour},
                 "closed_bar": True,
             },
         ),
@@ -793,17 +785,21 @@ async def test_runtime_signal_input_sor_short_uses_opening_range_high_stop():
         _runtime_signal_input(
             family_id="SOR-001",
             version_id="SOR-001-v0",
-            one_hour=_sor_breakdown_1h(),
+            one_hour=_sor_breakdown_15m(),
             four_hour=_brf_down_context_4h(),
             last_price=Decimal("97"),
             atr=Decimal("3"),
             side="short",
+            primary_timeframe="15m",
         ),
         runtime=runtime,
         context_id="context-sor-shadow-planning-v1",
     )
 
-    assert result.status == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+    assert (
+        result.status
+        == RuntimeStrategySignalCandidatePlanningStatus.SHADOW_CANDIDATE_CREATED
+    ), result.model_dump(mode="json")
     assert result.evaluation_result.output is not None
     assert result.evaluation_result.output.side == SignalSide.SHORT
     assert store.evaluation is not None

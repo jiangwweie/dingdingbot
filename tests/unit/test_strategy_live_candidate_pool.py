@@ -531,7 +531,7 @@ def test_candidate_pool_pg_signal_times_use_market_event_not_observation_time(
             ) VALUES (
               'signal:SOR-001:ETHUSDT:long:market-time-vs-observed-time',
               'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
-              'event_spec:SOR-001:SOR-LONG:v1', 'SOR-001', 'ETHUSDT',
+              'event_spec:SOR-001:SOR-LONG:v2', 'SOR-001', 'ETHUSDT',
               'long', 'detector:SOR-001:long', 'SOR-LONG', 'live_market',
               'facts_validated', 'fresh', 0.9, 'fact:SOR:market-time',
               '[]', '{}', :event_time_ms, :trigger_candle_close_time_ms,

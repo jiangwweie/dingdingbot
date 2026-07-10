@@ -525,8 +525,8 @@ def test_pg_backed_runtime_control_state_repository_rejects_generic_current_even
                 freshness_window_ms, time_authority, protection_ref_type,
                 created_at_ms, created_by
             ) VALUES (
-                'event_spec:SOR-001:SOR-GENERIC:v1', 'SOR-001',
-                'sgv:SOR-001:v1', 'SOR-GENERIC', 'long', '15m', 'v1',
+                'event_spec:SOR-001:SOR-GENERIC:v2', 'SOR-001',
+                'sgv:SOR-001:v2', 'SOR-GENERIC', 'long', '15m', 'v2',
                 'current', 900000, 'trigger_candle_close_time_ms',
                 'opening_range_low_reference', 1770000000000, 'unit_test'
             )
@@ -654,7 +654,7 @@ def test_pg_backed_runtime_control_state_repository_requires_exact_disable_fact_
         text(
             """
             DELETE FROM brc_strategy_event_required_facts
-            WHERE event_spec_id = 'event_spec:BRF2-001:BRF2-SHORT:v1'
+            WHERE event_spec_id = 'event_spec:BRF2-001:BRF2-SHORT:v2'
               AND fact_key = 'strong_uptrend_disable'
             """
         )
@@ -687,7 +687,7 @@ def test_pg_backed_runtime_control_state_repository_rejects_signal_event_spec_mi
             ) VALUES (
               'signal:SOR-001:ETHUSDT:long:wrong-event',
               'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
-              'event_spec:SOR-001:SOR-SHORT:v1', 'SOR-001', 'ETHUSDT',
+              'event_spec:SOR-001:SOR-SHORT:v2', 'SOR-001', 'ETHUSDT',
               'long', 'detector:SOR-001:long', 'SOR-SHORT', 'live_market',
               'facts_validated', 'fresh', 0.9, 'fact:SOR:wrong-event',
               '[]', '{}', 1770000120000, 1770000120000, 1770000120001,
@@ -721,7 +721,7 @@ def test_pg_backed_runtime_control_state_repository_rejects_generic_sor_signal_t
             ) VALUES (
               'signal:SOR-001:ETHUSDT:long:generic-type',
               'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
-              'event_spec:SOR-001:SOR-LONG:v1', 'SOR-001', 'ETHUSDT',
+              'event_spec:SOR-001:SOR-LONG:v2', 'SOR-001', 'ETHUSDT',
               'long', 'detector:SOR-001:long', 'SOR-GENERIC', 'live_market',
               'facts_validated', 'fresh', 0.9, 'fact:SOR:generic-type',
               '[]', '{}', 1770000120000, 1770000120000, 1770000120001,
@@ -782,7 +782,7 @@ def test_pg_backed_runtime_control_state_repository_rejects_lane_without_arbitra
             ) VALUES (
               'signal:SOR-001:ETHUSDT:long:lost',
               'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
-              'event_spec:SOR-001:SOR-LONG:v1', 'SOR-001', 'ETHUSDT',
+              'event_spec:SOR-001:SOR-LONG:v2', 'SOR-001', 'ETHUSDT',
               'long', 'detector:SOR-001:long', 'SOR-LONG', 'live_market',
               'facts_validated', 'fresh', 0.9, 'fact:SOR:lost',
               '[]', '{}', 1770000120000, 1770000120000, 1770000120001,

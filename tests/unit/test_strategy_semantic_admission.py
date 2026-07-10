@@ -40,7 +40,7 @@ def test_all_active_candidate_scopes_receive_machine_semantic_conclusion(
         }
         for strategy_group_id in {row["strategy_group_id"] for row in rows}
     }
-    certified_groups = {"CPM-RO-001", "MPG-001", "MI-001"}
+    certified_groups = {"CPM-RO-001", "MPG-001", "MI-001", "SOR-001", "BRF2-001"}
     assert all(
         conclusions_by_group[group_id] == {"trial_grade_capable"}
         for group_id in certified_groups
@@ -50,9 +50,9 @@ def test_all_active_candidate_scopes_receive_machine_semantic_conclusion(
         for strategy_group_id, conclusions in conclusions_by_group.items()
         if strategy_group_id not in certified_groups
         for conclusion in conclusions
-    } == {"observe_only_by_design"}
-    assert sum(row["conclusion"] == "trial_grade_capable" for row in rows) == 11
-    assert sum(row["conclusion"] == "observe_only_by_design" for row in rows) == 11
+    } == set()
+    assert sum(row["conclusion"] == "trial_grade_capable" for row in rows) == 22
+    assert sum(row["conclusion"] == "observe_only_by_design" for row in rows) == 0
     assert all(row["exchange_instrument_id"] for row in rows)
     assert all(row["event_spec_version_id"] for row in rows)
 
@@ -67,7 +67,7 @@ def test_explicit_trial_event_becomes_trial_capable_without_submit_authority(
             SET declared_signal_grade = 'trial_grade_signal',
                 declared_required_execution_mode = 'trial_live',
                 execution_eligibility_enabled = true
-            WHERE event_spec_id = 'event_spec:SOR-001:SOR-LONG:v1'
+            WHERE event_spec_id = 'event_spec:SOR-001:SOR-LONG:v2'
             """
         )
     )
@@ -81,7 +81,7 @@ def test_explicit_trial_event_becomes_trial_capable_without_submit_authority(
         for row in pg_control_connection.execute(
             text(
                 "SELECT conclusion FROM brc_strategy_semantic_admissions "
-                "WHERE event_spec_id = 'event_spec:SOR-001:SOR-LONG:v1'"
+                "WHERE event_spec_id = 'event_spec:SOR-001:SOR-LONG:v2'"
             )
         ).mappings()
     }

@@ -31,6 +31,7 @@ from src.domain.strategy_semantics import (
 
 
 KNOWN_STRATEGY_FACT_KEYS = (
+    "ohlcv_15m",
     "ohlcv_1h",
     "ohlcv_4h",
     "price_action_structure",
@@ -67,6 +68,7 @@ class StrategyEvaluationContextBuilder:
         facts = {
             fact_key: fact
             for fact_key, fact in (
+                self._ohlcv_fact(signal_input, "15m", "ohlcv_15m", evaluated_at_ms),
                 self._ohlcv_fact(signal_input, "1h", "ohlcv_1h", evaluated_at_ms),
                 self._ohlcv_fact(signal_input, "4h", "ohlcv_4h", evaluated_at_ms),
                 self._price_action_fact(signal_input, output, evaluated_at_ms),
@@ -101,6 +103,8 @@ class StrategyEvaluationContextBuilder:
                 ),
             )
         }
+        if signal_input.primary_timeframe != "15m":
+            facts.pop("ohlcv_15m", None)
         return StrategyEvaluationContext(
             context_id=context_id or _context_id(signal_input.evaluation_id),
             strategy_family_id=(

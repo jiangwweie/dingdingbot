@@ -395,6 +395,8 @@ def initial_strategy_semantics_catalog() -> StrategySemanticsCatalog:
                 stop_reference="opening_range_reclaim_or_atr_reference",
                 reference_role="session_opening_range_short",
                 optional_fact_key="session_window_state",
+                primary_ohlcv_fact_key="ohlcv_15m",
+                require_4h_context=False,
             ),
             _pilot_strategygroup_binding(
                 strategy_family_id="MI-001",
@@ -561,6 +563,8 @@ def _pilot_strategygroup_binding(
     reference_role: str,
     optional_fact_key: str | None = None,
     short_side_conservative_profile_required: bool = False,
+    primary_ohlcv_fact_key: str = "ohlcv_1h",
+    require_4h_context: bool = True,
 ) -> StrategyImplementationBinding:
     optional_facts = [
         _fact(
@@ -582,7 +586,10 @@ def _pilot_strategygroup_binding(
         candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
         source_ref=source_ref,
         supported_sides=supported_sides,
-        required_facts=_price_action_required_facts(),
+        required_facts=_price_action_required_facts(
+            primary_ohlcv_fact_key=primary_ohlcv_fact_key,
+            require_4h_context=require_4h_context,
+        ),
         optional_facts=optional_facts,
         entry_policy=EntryPolicy(
             kind=EntryPolicyKind.MARKET_NEXT_EXECUTABLE_OPPORTUNITY,
@@ -995,15 +1002,24 @@ def _fco_binding() -> StrategyImplementationBinding:
     )
 
 
-def _price_action_required_facts() -> list[StrategyFactRequirement]:
-    return [
-        _fact("ohlcv_1h", description="Closed 1h OHLCV window."),
-        _fact("ohlcv_4h", description="Closed 4h OHLCV context window."),
+def _price_action_required_facts(
+    *,
+    primary_ohlcv_fact_key: str = "ohlcv_1h",
+    require_4h_context: bool = True,
+) -> list[StrategyFactRequirement]:
+    facts = [
+        _fact(
+            primary_ohlcv_fact_key,
+            description=f"Closed {primary_ohlcv_fact_key.removeprefix('ohlcv_')} OHLCV window.",
+        ),
         _fact("price_action_structure", description="Pullback/reclaim or rally-failure evidence."),
         _fact("account_facts", description="Read-only account facts snapshot."),
         _fact("runtime_boundary", description="Runtime attempts/budget/leverage boundary snapshot."),
         _fact("position_projection", description="Trusted local active-position projection."),
     ]
+    if require_4h_context:
+        facts.insert(1, _fact("ohlcv_4h", description="Closed 4h OHLCV context window."))
+    return facts
 
 
 def _fact(
