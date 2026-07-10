@@ -202,6 +202,34 @@ def test_can_construct_would_enter_signal_output():
     assert output.not_execution_intent is True
 
 
+def test_signal_output_accepts_typed_fact_observations():
+    output = StrategyFamilySignalOutput(
+        signal_id="sig-facts-001",
+        evaluation_id="eval-001",
+        strategy_family_id="CPM-RO-001",
+        strategy_family_version_id="CPM-RO-001-v0",
+        symbol="ETH/USDT:USDT",
+        timestamp_ms=1770000000400,
+        trigger_candle_close_time_ms=1770000000400,
+        timeframe="1h",
+        signal_type=SignalType.WOULD_ENTER,
+        side=SignalSide.LONG,
+        fact_observations=[
+            {
+                "fact_key": "htf_trend_intact",
+                "observed_value": True,
+                "observed_at_ms": 1770000000400,
+                "valid_until_ms": 1770003600400,
+                "source_ref": "evaluator:cpm-ro-001-historical-v0:htf_trend",
+            }
+        ],
+        input_refs=_input_refs(),
+    )
+
+    assert output.fact_observations[0].fact_key == "htf_trend_intact"
+    assert output.fact_observations[0].observed_value is True
+
+
 def test_observe_only_signal_is_never_execution_eligible():
     envelope = resolve_execution_eligibility(
         declared_signal_grade=SignalGrade.OBSERVE_ONLY_SIGNAL,

@@ -111,6 +111,16 @@ class SignalReviewPlan(StrategyFamilySignalModel):
     owner_review_status: str = Field(default="pending", max_length=64)
 
 
+class StrategyFactObservation(StrategyFamilySignalModel):
+    """One strategy fact actually observed by a versioned evaluator."""
+
+    fact_key: str = Field(min_length=1, max_length=128)
+    observed_value: bool | Decimal | int | str
+    observed_at_ms: int = Field(ge=0)
+    valid_until_ms: int = Field(gt=0)
+    source_ref: str = Field(min_length=1, max_length=256)
+
+
 class MarketSnapshot(StrategyFamilySignalModel):
     """Read-only market facts used for signal evaluation and later review."""
 
@@ -234,6 +244,7 @@ class StrategyFamilySignalOutput(StrategyFamilySignalModel):
     invalidation_conditions: list[dict[str, Any]] = Field(default_factory=list)
     signal_snapshot: dict[str, Any] = Field(default_factory=dict)
     evidence_payload: dict[str, Any] = Field(default_factory=dict)
+    fact_observations: list[StrategyFactObservation] = Field(default_factory=list)
     input_refs: SignalInputRefs = Field(default_factory=SignalInputRefs)
     data_quality: SignalDataQuality = Field(default_factory=SignalDataQuality)
     review_plan: SignalReviewPlan = Field(default_factory=SignalReviewPlan)

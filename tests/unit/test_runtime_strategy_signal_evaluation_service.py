@@ -15,6 +15,7 @@ from src.domain.strategy_family_signal import (
     StrategyFamilySignalInput,
     StrategyFamilySignalOutput,
 )
+from src.domain.execution_eligibility import RequiredExecutionMode, SignalGrade
 from src.domain.strategy_candidate_semantics import (
     StrategyArchetype,
     StrategyCandidateSemantics,
@@ -307,6 +308,31 @@ def test_cpm_live_reference_route_ready_for_semantic_binding():
     assert result.order_candidate_created is False
     assert result.execution_intent_created is False
     assert result.exchange_called is False
+
+
+def test_cpm_ro_long_emits_trial_grade_observed_facts():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            one_hour=_cpm_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.WOULD_ENTER
+    assert result.output.side == SignalSide.LONG
+    assert result.output.signal_grade == SignalGrade.TRIAL_GRADE_SIGNAL
+    assert result.output.required_execution_mode == RequiredExecutionMode.TRIAL_LIVE
+    facts = {
+        item.fact_key: item.observed_value
+        for item in result.output.fact_observations
+    }
+    assert facts["htf_trend_intact"] is True
+    assert facts["reclaim_confirmed"] is True
+    assert Decimal(str(facts["pullback_low_reference"])) > 0
 
 
 def test_mpg_momentum_persistence_route_ready_for_semantic_binding():

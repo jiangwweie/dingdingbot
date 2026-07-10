@@ -16,6 +16,7 @@ from typing import Any
 from src.domain.strategy_candidate_semantics_builders import (
     build_cpm_long_candidate_semantics,
 )
+from src.domain.execution_eligibility import RequiredExecutionMode, SignalGrade
 from src.domain.strategy_family_signal import (
     ExpectedRiskShape,
     SignalDataQuality,
@@ -26,6 +27,7 @@ from src.domain.strategy_family_signal import (
     SignalType,
     StrategyFamilySignalInput,
     StrategyFamilySignalOutput,
+    StrategyFactObservation,
 )
 
 
@@ -248,6 +250,9 @@ class CPMRO001HistoricalEvaluator:
         evidence: dict[str, Any],
     ) -> StrategyFamilySignalOutput:
         semantic_evidence = dict(evidence)
+        signal_grade = SignalGrade.OBSERVE_ONLY_SIGNAL
+        required_execution_mode = RequiredExecutionMode.OBSERVE_ONLY
+        fact_observations: list[StrategyFactObservation] = []
         if side == SignalSide.LONG:
             semantic_evidence["candidate_semantics"] = (
                 build_cpm_long_candidate_semantics(
@@ -256,6 +261,35 @@ class CPMRO001HistoricalEvaluator:
                     evidence=evidence,
                 ).model_dump(mode="json")
             )
+            trigger_time_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+            pullback_low = Decimal(str(evidence.get("lookback_low") or "0"))
+            if trigger_time_ms > 0 and pullback_low > 0:
+                signal_grade = SignalGrade.TRIAL_GRADE_SIGNAL
+                required_execution_mode = RequiredExecutionMode.TRIAL_LIVE
+                valid_until_ms = trigger_time_ms + 3_600_000
+                fact_observations = [
+                    StrategyFactObservation(
+                        fact_key="htf_trend_intact",
+                        observed_value=evidence.get("htf_trend") == "up",
+                        observed_at_ms=trigger_time_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref="evaluator:cpm-ro-001-historical-v0:htf_trend",
+                    ),
+                    StrategyFactObservation(
+                        fact_key="reclaim_confirmed",
+                        observed_value=bool(evidence.get("long_reclaim_confirmed")),
+                        observed_at_ms=trigger_time_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref="evaluator:cpm-ro-001-historical-v0:long_reclaim",
+                    ),
+                    StrategyFactObservation(
+                        fact_key="pullback_low_reference",
+                        observed_value=pullback_low,
+                        observed_at_ms=trigger_time_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref="evaluator:cpm-ro-001-historical-v0:lookback_low",
+                    ),
+                ]
         return self._output(
             signal_input,
             signal_type=SignalType.WOULD_ENTER,
@@ -266,6 +300,9 @@ class CPMRO001HistoricalEvaluator:
             data_quality=signal_input.input_quality,
             evidence_payload=semantic_evidence,
             review_required=True,
+            signal_grade=signal_grade,
+            required_execution_mode=required_execution_mode,
+            fact_observations=fact_observations,
         )
 
     def _output(
@@ -280,6 +317,9 @@ class CPMRO001HistoricalEvaluator:
         data_quality: SignalDataQuality,
         evidence_payload: dict[str, Any],
         review_required: bool,
+        signal_grade: SignalGrade = SignalGrade.OBSERVE_ONLY_SIGNAL,
+        required_execution_mode: RequiredExecutionMode = RequiredExecutionMode.OBSERVE_ONLY,
+        fact_observations: list[StrategyFactObservation] | None = None,
     ) -> StrategyFamilySignalOutput:
         signal_snapshot = {
             "strategy_family": CPM_FAMILY_ID,
@@ -307,7 +347,8 @@ class CPMRO001HistoricalEvaluator:
             confidence=confidence,
             reason_codes=reason_codes,
             human_summary=human_summary,
-            required_execution_mode="observe_only",
+            signal_grade=signal_grade,
+            required_execution_mode=required_execution_mode,
             expected_risk_shape=ExpectedRiskShape.PULLBACK_CONTINUATION,
             invalidation_conditions=[
                 {"condition_type": "structure_break", "description": "CPM structure invalidates on failed reclaim/loss."},
@@ -319,6 +360,7 @@ class CPMRO001HistoricalEvaluator:
                 "confidence_notice": "confidence is review sorting only, not win probability or authorization",
                 **evidence_payload,
             },
+            fact_observations=list(fact_observations or []),
             input_refs=SignalInputRefs(
                 market_snapshot_ref=f"historical_ohlcv:{signal_input.symbol}:{signal_input.timestamp_ms}",
                 playbook_snapshot_ref=signal_input.playbook_id,
