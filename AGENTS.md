@@ -127,14 +127,26 @@ manual evidence-interpretation workflow.
 
 ### Durable Owner System Vision
 
-The target system is not limited to cryptocurrency. It is a single-Owner,
-multi-StrategyGroup, multi-instrument, multi-side trading system whose core
-contracts must remain usable for venue-supported crypto contracts,
-equity-linked contracts, precious-metals contracts, and future contract asset
-classes. Current deployment scope may remain narrower, but new core models must
-not assume that every instrument is a crypto perpetual, trades continuously,
-uses funding, or shares the same quantity, settlement, session, expiry, or
-protection semantics.
+The target product is a single-Owner, small-capital, bounded-downside,
+right-tail-open, multi-StrategyGroup, multi-instrument, multi-side live-profit
+experiment system. It is not a generic quant platform, stable-yield product,
+low-volatility compounding system, or institutional asset-management platform.
+Its objective is to keep each experiment's downside explicit and bounded while
+preserving the ability to capture rare, materially larger winners.
+
+This objective is a durable decision constraint, not live-submit authority and
+not a fixed return, leverage, notional, drawdown, or win-rate target. It must
+not bypass Owner policy, action-time facts, FinalGate, Operation Layer,
+protection, reconciliation, or settlement. It also must not be reinterpreted as
+a reason to suppress eligible tail opportunities merely to make returns look
+smoother or safer.
+
+The instrument universe is not limited to cryptocurrency. Core contracts must
+remain usable for venue-supported crypto contracts, equity-linked contracts,
+precious-metals contracts, and future contract asset classes. Current
+deployment scope may remain narrower, but new core models must not assume that
+every instrument is a crypto perpetual, trades continuously, uses funding, or
+shares the same quantity, settlement, session, expiry, or protection semantics.
 
 Use canonical `exchange_instrument_id`, `asset_class`, venue identity, contract
 rules, and versioned strategy/event semantics at core boundaries. A future

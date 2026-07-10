@@ -2,7 +2,7 @@
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
 authority: docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
-last_verified: 2026-07-01
+last_verified: 2026-07-10
 ---
 
 # Owner Runtime Operating Model
@@ -82,6 +82,33 @@ Scope expansion, ticket eligibility, and real-submit enablement require
 validation of event specs, RequiredFacts, runtime coverage, ticket lineage,
 FinalGate handoff, Operation Layer handoff, protection, reconciliation, and
 negative tests as applicable.
+
+## Experiment Objective
+
+The product is a small-capital, bounded-downside, right-tail-open live-profit
+experiment system. The Owner bounds the left tail through allocated experiment
+capital and scoped policy. The system preserves the right tail through eligible
+StrategyGroup selection, timely in-boundary execution, protection, partial
+profit taking and runner behavior when the strategy specifies them, disciplined
+exit, and outcome review.
+
+This objective does not mean that every trade must be high leverage, that every
+winner must remain open indefinitely, or that the system may expand capital,
+scope, leverage, notional, or runtime profile on its own. It means the product
+must not optimize for smooth returns, high win rate, low volatility, or avoiding
+all losses at the cost of suppressing valid asymmetric opportunities.
+
+The objective affects product and engineering choices, but it does not replace
+the authority chain:
+
+```text
+Owner capital and scope policy
+-> strategy experiment eligibility
+-> risk-at-stop and protection envelope
+-> current Tradeability Decision and Runtime Safety State
+-> FinalGate and Operation Layer
+-> lifecycle execution, reconciliation, settlement, and review
+```
 
 The Owner-provided subaccount allocation is already the upstream risk-control
 decision. Within that allocation and the selected official runtime profile, the

@@ -2,7 +2,7 @@
 title: STRATEGY_EXPERIMENT_EVALUATION_CONTRACT
 status: CURRENT
 authority: docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md
-last_verified: 2026-06-23
+last_verified: 2026-07-10
 ---
 
 # Strategy Experiment Evaluation Contract
@@ -49,6 +49,19 @@ where it currently sits on that path.
 ## Core Rule
 
 Strategy advancement is based on experiment value, not perfect return proof.
+
+The durable product objective is a small-capital, bounded-downside,
+right-tail-open return distribution. Strategy evaluation should therefore ask
+whether explicit, budgeted losses buy access to a plausible asymmetric payoff,
+whether rare large winners can cover many small failed attempts, and whether
+the lifecycle preserves that asymmetry from entry through protection, partial
+profit taking, runner behavior, exit, and review.
+
+Do not rank strategies primarily by win rate, smooth equity, low volatility, or
+avoidance of every loss. Do not infer live leverage, notional, capital, symbol,
+side, instrument, venue, profile, ticket, order, or exchange-write authority
+from right-tail potential. The objective shapes experiment selection and
+review; official policy and action-time gates still control execution.
 
 Use this evaluation frame:
 
@@ -200,6 +213,12 @@ Every promising strategy direction should answer:
 | What facts are required? | Draft market, strategy, derivatives, risk, account, and exchange facts |
 | What should disable or downshift it? | Convert known failures into reviewable facts |
 | What should happen next? | Replay, paper observation, tiny-live intake, revise, park, or reject |
+
+The quantitative review should include payoff asymmetry, return skewness,
+extreme winning samples, maximum favorable excursion, maximum adverse
+excursion, tail-winner contribution, loss-envelope compliance, and the effect
+of exit or runner rules. These are decision inputs, not standalone proof of
+profitability or runtime authority.
 
 ## Decision Language
 

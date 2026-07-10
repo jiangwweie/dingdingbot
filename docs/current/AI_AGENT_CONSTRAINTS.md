@@ -66,11 +66,30 @@ weakens real-funds safety, exchange-outcome certainty, idempotency, protection,
 scope, credential, withdrawal, transfer, FinalGate, or Operation Layer
 boundaries.
 
-The global business objective is profitability through a small-capital
-right-tail StrategyGroup experimentation system. During the current stage,
-profit is not the engineering acceptance test. Engineering work is valuable
-only when it improves opportunity discovery, runtime capture, execution
-quality, risk-capital governance, or the review loop.
+The global business objective is a single-Owner, small-capital,
+bounded-downside, right-tail-open StrategyGroup experimentation system. The
+target distribution is many explicitly budgeted experiments whose left tail is
+bounded by capital scope, risk-at-stop, protection, attempt limits, and pause
+rules while eligible opportunities retain the strategy-defined ability to
+capture materially larger winners inside explicit Owner policy and lifecycle
+semantics. This is not a stable-yield, low-volatility, high-win-rate, or
+institutional portfolio objective.
+
+Agents must not optimize the system primarily for win rate, smooth equity,
+minimum variance, avoidance of every loss, or the appearance of safety when
+that would suppress eligible right-tail opportunity. Agents must evaluate
+strategy selection, capital allocation, entry timeliness, protection, partial
+profit taking, runner behavior, exit, and review by whether they preserve
+bounded downside and asymmetric upside across the full lifecycle.
+
+Right-tail openness is not automatic leverage, notional, symbol, side,
+instrument, venue, profile, or capital expansion. It never grants signal,
+ticket, order, FinalGate, Operation Layer, or exchange-write authority. Do not
+hard-code a return target, drawdown target, win-rate target, or leverage target
+from this objective. During the current stage, profit is not the engineering
+acceptance test. Engineering work is valuable only when it improves opportunity
+discovery, runtime capture, execution quality, risk-capital governance, or the
+review loop without weakening official safety boundaries.
 
 The project is aggressive inside explicit constraints. The Owner-provided
 subaccount allocation is already the risk-control result and may be treated as
