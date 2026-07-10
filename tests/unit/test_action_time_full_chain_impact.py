@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +22,10 @@ from scripts import materialize_ticket_bound_protected_submit_attempt as protect
 from scripts import materialize_ticket_bound_runtime_safety_state as safety_state
 from scripts import publish_runtime_control_current_projections as publisher
 from scripts import runtime_active_observation_monitor
+from src.application.runtime_strategy_signal_evaluation_service import (
+    RuntimeStrategySignalEvaluationService,
+    RuntimeStrategySignalEvaluationStatus,
+)
 from src.application.action_time.full_chain_simulation_harness import (
     FULL_CHAIN_FAILURE_SCENARIOS,
     FullChainSimulationInput,
@@ -31,6 +37,18 @@ from src.interfaces import api_trading_console
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
     _insert_ready_fresh_signal,
+)
+from tests.unit.test_runtime_strategy_signal_evaluation_service import (
+    _bear_rally_failure_1h,
+    _comparative_snapshot,
+    _cpm_long_1h,
+    _cpm_up_context_4h,
+    _down_context_4h,
+    _mi_comparative_snapshot,
+    _mi_impulse_1h,
+    _mpg_long_1h,
+    _signal_input,
+    _sor_session_15m,
 )
 
 
@@ -373,12 +391,19 @@ def test_each_active_candidate_scope_reaches_disabled_smoke_from_raw_pg_input(
     symbol: str,
     side: str,
 ):
+    signal_summary, last_price = _evaluator_signal_summary(
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+    )
     payloads = _run_raw_pg_input_to_runtime_safety(
         pg_control_connection,
         monkeypatch,
         strategy_group_id=strategy_group_id,
         symbol=symbol,
         side=side,
+        fact_values={"last_price": last_price},
+        signal_summary=signal_summary,
     )
 
     submit_payload = protected_submit.prepare_ticket_bound_protected_submit_attempt(
@@ -403,6 +428,174 @@ def test_each_active_candidate_scope_reaches_disabled_smoke_from_raw_pg_input(
     assert _count(pg_control_connection, "brc_operation_layer_handoffs") == 1
     assert _count(pg_control_connection, "brc_runtime_safety_state_snapshots") == 1
     assert _count(pg_control_connection, "brc_ticket_bound_protected_submit_attempts") == 1
+
+
+@pytest.mark.parametrize(
+    (
+        "strategy_group_id",
+        "symbol",
+        "side",
+        "fact_key",
+        "replacement",
+    ),
+    [
+        ("CPM-RO-001", "ETHUSDT", "long", "reclaim_confirmed", None),
+        ("MPG-001", "SOLUSDT", "long", "leader_strength_confirmed", None),
+        ("MI-001", "AVAXUSDT", "long", "relative_strength_confirmed", None),
+        ("SOR-001", "ETHUSDT", "long", "breakout_confirmed", None),
+        ("SOR-001", "ETHUSDT", "short", "breakdown_confirmed", None),
+        ("BRF2-001", "BTCUSDT", "short", "rally_high_reference", None),
+        ("BRF2-001", "BTCUSDT", "short", "strong_uptrend_disable", True),
+        ("BRF2-001", "BTCUSDT", "short", "strong_uptrend_disable", "unknown"),
+    ],
+)
+def test_evaluator_typed_fact_transport_fails_closed_before_lane(
+    pg_control_connection,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    fact_key: str,
+    replacement,
+):
+    signal_summary, last_price = _evaluator_signal_summary(
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+    )
+    observations = [
+        dict(observation)
+        for observation in signal_summary["fact_observations"]
+        if replacement is not None or observation["fact_key"] != fact_key
+    ]
+    if replacement is not None:
+        for observation in observations:
+            if observation["fact_key"] == fact_key:
+                observation["observed_value"] = replacement
+    signal_summary["fact_observations"] = observations
+
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        strategy_group_id,
+        symbol,
+        side,
+        insert_action_time_fact=False,
+        insert_signal=False,
+        fact_values={"last_price": last_price},
+    )
+    signal_payload = _write_monitor_signal_summary_to_pg(
+        pg_control_connection,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+        signal_summary=signal_summary,
+    )
+    assert signal_payload["written_count"] == 1
+    pg_control_connection.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
+
+    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert fact_payload["status"] == "action_time_fact_snapshots_blocked"
+    failed_facts = pg_control_connection.execute(
+        text(
+            """
+            SELECT failed_facts
+            FROM brc_runtime_fact_snapshots
+            WHERE fact_surface = 'action_time'
+            """
+        )
+    ).scalar_one()
+    assert fact_key in json.loads(failed_facts)
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+
+
+def test_stale_evaluator_typed_fact_blocks_action_time_materialization(
+    pg_control_connection,
+):
+    signal_summary, last_price = _evaluator_signal_summary(
+        strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
+        side="long",
+    )
+    for observation in signal_summary["fact_observations"]:
+        if observation["fact_key"] == "reclaim_confirmed":
+            observation["valid_until_ms"] = NOW_MS
+
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        "CPM-RO-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+        insert_signal=False,
+        fact_values={"last_price": last_price},
+    )
+    _write_monitor_signal_summary_to_pg(
+        pg_control_connection,
+        strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
+        side="long",
+        signal_summary=signal_summary,
+    )
+    pg_control_connection.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
+
+    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert fact_payload["status"] == "action_time_fact_snapshots_blocked"
+    assert "required_fact_missing:reclaim_confirmed" in fact_payload["blockers"]
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+
+
+def test_action_time_snapshot_does_not_outlive_typed_fact_observations(
+    pg_control_connection,
+):
+    signal_summary, last_price = _evaluator_signal_summary(
+        strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
+        side="long",
+    )
+    typed_valid_until_ms = NOW_MS + 30_000
+    for observation in signal_summary["fact_observations"]:
+        observation["valid_until_ms"] = typed_valid_until_ms
+
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        "CPM-RO-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+        insert_signal=False,
+        fact_values={"last_price": last_price},
+    )
+    _write_monitor_signal_summary_to_pg(
+        pg_control_connection,
+        strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
+        side="long",
+        signal_summary=signal_summary,
+    )
+    pg_control_connection.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
+
+    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert fact_payload["status"] == "action_time_fact_snapshots_materialized"
+    assert pg_control_connection.execute(
+        text(
+            """
+            SELECT valid_until_ms
+            FROM brc_runtime_fact_snapshots
+            WHERE fact_surface = 'action_time'
+            """
+        )
+    ).scalar_one() == typed_valid_until_ms
 
 
 @pytest.mark.parametrize(
@@ -959,6 +1152,7 @@ def _run_raw_pg_input_to_runtime_safety(
     symbol: str,
     side: str,
     fact_values: dict | None = None,
+    signal_summary: dict | None = None,
 ) -> dict[str, dict]:
     _insert_ready_fresh_signal(
         conn,
@@ -969,11 +1163,24 @@ def _run_raw_pg_input_to_runtime_safety(
         insert_signal=False,
         fact_values=fact_values,
     )
+    effective_fact_values = (
+        fact_values
+        if fact_values is not None
+        else _fact_values_for_surface(
+            conn,
+            strategy_group_id=strategy_group_id,
+            symbol=symbol,
+            side=side,
+            fact_surface="pretrade_public",
+        )
+    )
     signal_payload = _write_monitor_signal_summary_to_pg(
         conn,
         strategy_group_id=strategy_group_id,
         symbol=symbol,
         side=side,
+        signal_summary=signal_summary,
+        fact_values=effective_fact_values,
     )
     assert signal_payload["status"] == "pg_live_signal_events_written"
     assert signal_payload["written_count"] == 1
@@ -1096,7 +1303,60 @@ def _write_monitor_signal_summary_to_pg(
     strategy_group_id: str,
     symbol: str,
     side: str,
+    signal_summary: dict | None = None,
+    fact_values: dict | None = None,
 ) -> dict:
+    summary = signal_summary
+    if summary is None:
+        required_fact_keys = {
+            str(row["fact_key"])
+            for row in conn.execute(
+                text(
+                    """
+                    SELECT rf.fact_key
+                    FROM brc_strategy_group_candidate_scope c
+                    JOIN brc_candidate_scope_event_bindings b
+                      ON b.candidate_scope_id = c.candidate_scope_id
+                     AND b.status = 'active'
+                    JOIN brc_strategy_event_required_facts rf
+                      ON rf.event_spec_id = b.event_spec_id
+                     AND rf.status = 'current'
+                     AND rf.required_for_promotion = true
+                    WHERE c.strategy_group_id = :strategy_group_id
+                      AND c.symbol = :symbol
+                      AND c.side = :side
+                      AND c.status = 'active'
+                    """
+                ),
+                {
+                    "strategy_group_id": strategy_group_id,
+                    "symbol": symbol,
+                    "side": side,
+                },
+            ).mappings()
+        }
+        observed_values = fact_values or {}
+        summary = {
+            "signal_type": "would_enter",
+            "signal_grade": "trial_grade_signal",
+            "required_execution_mode": "trial_live",
+            "side": side,
+            "confidence": "0.90",
+            "reason_codes": ["constructed_monitor_signal_summary"],
+            "trigger_candle_close_time_ms": NOW_MS - 60_000,
+            "time_authority": "trigger_candle_close_time_ms",
+            "fact_observations": [
+                {
+                    "fact_key": key,
+                    "observed_value": observed_values[key],
+                    "observed_at_ms": NOW_MS - 60_000,
+                    "valid_until_ms": NOW_MS + 600_000,
+                    "source_ref": f"unit:evaluator:{strategy_group_id}:{key}",
+                }
+                for key in sorted(required_fact_keys)
+                if key in observed_values
+            ],
+        }
     return runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
         {
             "runtime_summaries": [
@@ -1107,16 +1367,7 @@ def _write_monitor_signal_summary_to_pg(
                     "symbol": symbol,
                     "side": side,
                     "status": "waiting_for_signal",
-                    "signal_summary": {
-                        "signal_type": "would_enter",
-                        "signal_grade": "trial_grade_signal",
-                        "required_execution_mode": "trial_live",
-                        "side": side,
-                        "confidence": "0.90",
-                        "reason_codes": ["constructed_monitor_signal_summary"],
-                        "trigger_candle_close_time_ms": NOW_MS - 60_000,
-                        "time_authority": "trigger_candle_close_time_ms",
-                    },
+                    "signal_summary": summary,
                 }
             ],
         },
@@ -1124,6 +1375,136 @@ def _write_monitor_signal_summary_to_pg(
         allow_non_postgres_for_test=True,
         now_ms=NOW_MS,
         conn=conn,
+    )
+
+
+def _evaluator_signal_summary(
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> tuple[dict, str]:
+    if strategy_group_id == "CPM-RO-001":
+        signal_input = _signal_input(
+            family_id=strategy_group_id,
+            version_id="CPM-RO-001-v0",
+            one_hour=_cpm_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+        )
+        last_price = "105"
+    elif strategy_group_id == "MPG-001":
+        signal_input = _signal_input(
+            family_id=strategy_group_id,
+            version_id="MPG-001-v0",
+            one_hour=_mpg_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+            comparative_strength_snapshot=_comparative_for_symbol(
+                _comparative_snapshot(),
+                strategy_group_id=strategy_group_id,
+                symbol=symbol,
+            ),
+        )
+        last_price = "107"
+    elif strategy_group_id == "MI-001":
+        signal_input = _signal_input(
+            family_id=strategy_group_id,
+            version_id="MI-001-v0",
+            one_hour=_mi_impulse_1h(),
+            comparative_strength_snapshot=_comparative_for_symbol(
+                _mi_comparative_snapshot(),
+                strategy_group_id=strategy_group_id,
+                symbol=symbol,
+            ),
+        )
+        last_price = "106"
+    elif strategy_group_id == "SOR-001":
+        signal_input = _signal_input(
+            family_id=strategy_group_id,
+            version_id="SOR-001-v0",
+            one_hour=_sor_session_15m(side=side),
+            four_hour=None,
+            primary_timeframe="15m",
+        )
+        last_price = "103" if side == "long" else "97"
+    elif strategy_group_id == "BRF2-001":
+        signal_input = _signal_input(
+            family_id=strategy_group_id,
+            version_id="BRF2-001-v0",
+            one_hour=_bear_rally_failure_1h(),
+            four_hour=_down_context_4h(),
+        )
+        last_price = "106"
+    else:
+        raise AssertionError(f"unexpected active StrategyGroup: {strategy_group_id}")
+
+    trigger_ms = NOW_MS - 60_000
+    market_snapshot = signal_input.market_snapshot.model_copy(
+        update={
+            "symbol": symbol,
+            "timestamp_ms": trigger_ms,
+            "last_price": Decimal(last_price),
+            "mark_price": Decimal(last_price),
+        }
+    )
+    comparative = signal_input.comparative_strength_snapshot
+    if comparative is not None:
+        comparative = comparative.model_copy(
+            update={
+                "trigger_candle_close_time_ms": trigger_ms,
+                "observed_at_ms": trigger_ms,
+                "valid_until_ms": trigger_ms + 3_600_000,
+            }
+        )
+    signal_input = signal_input.model_copy(
+        update={
+            "evaluation_id": f"eval:{strategy_group_id}:{symbol}:{side}",
+            "symbol": symbol,
+            "timestamp_ms": trigger_ms,
+            "trigger_candle_close_time_ms": trigger_ms,
+            "market_snapshot": market_snapshot,
+            "comparative_strength_snapshot": comparative,
+        }
+    )
+    evaluation = RuntimeStrategySignalEvaluationService().evaluate(signal_input)
+    assert (
+        evaluation.status
+        == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+    )
+    assert evaluation.output is not None
+    assert evaluation.output.side.value == side
+    assert evaluation.output.fact_observations
+
+    summary = runtime_active_observation_monitor._signal_summary(
+        {
+            "latest_artifact": {
+                "observation_payload": {
+                    "signal_artifact": {
+                        "evaluation_result": evaluation.model_dump(mode="json")
+                    }
+                }
+            }
+        }
+    )
+    return summary, last_price
+
+
+def _comparative_for_symbol(
+    snapshot,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+):
+    candidate, peer = snapshot.members
+    peer_symbol = "BTCUSDT" if symbol != "BTCUSDT" else "ETHUSDT"
+    return snapshot.model_copy(
+        update={
+            "strategy_group_id": strategy_group_id,
+            "universe_symbols": (symbol, peer_symbol),
+            "members": (
+                candidate.model_copy(update={"symbol": symbol}),
+                peer.model_copy(update={"symbol": peer_symbol}),
+            ),
+        }
     )
 
 

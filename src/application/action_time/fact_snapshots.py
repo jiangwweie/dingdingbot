@@ -34,6 +34,7 @@ from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     is_sync_postgres_dsn,
     normalize_sync_postgres_dsn,
 )
+from src.domain.strategy_family_signal import StrategyFactObservation  # noqa: E402
 from src.application.runtime_process_outcome import (  # noqa: E402
     materialize_runtime_process_outcome,
     runtime_process_exit_code,
@@ -146,12 +147,21 @@ def _materialize_one(
     required_facts = _required_facts(conn, str(signal["event_spec_id"]))
     public_fact = _public_fact(conn, str(signal.get("fact_snapshot_id") or ""))
     payload = _as_dict(signal.get("signal_payload"))
-    source_values = _source_values(payload=payload, public_fact=public_fact)
+    source_values, typed_valid_until_by_key = _source_values(
+        payload=payload,
+        public_fact=public_fact,
+        now_ms=now_ms,
+    )
     fact_values, missing = _fact_values(
         event=event,
         signal=signal,
         required_facts=required_facts,
         source_values=source_values,
+        required_typed_fact_keys=(
+            set(typed_valid_until_by_key)
+            if _truthy(event.get("execution_eligibility_enabled"))
+            else None
+        ),
     )
     failed = _failed_facts(required_facts, fact_values)
     blockers = [
@@ -176,6 +186,16 @@ def _materialize_one(
         int(signal.get("expires_at_ms") or 0),
         int(public_fact.get("valid_until_ms") or 0),
     ]
+    required_fact_keys = {
+        str(row.get("fact_key") or "")
+        for row in required_facts
+        if str(row.get("fact_key") or "")
+    }
+    valid_until_candidates.extend(
+        valid_until_ms
+        for key, valid_until_ms in typed_valid_until_by_key.items()
+        if key in required_fact_keys and key in fact_values
+    )
     fact_freshness = [
         int(row.get("freshness_ms") or 0)
         for row in required_facts
@@ -330,11 +350,20 @@ def _public_fact(conn: sa.engine.Connection, fact_snapshot_id: str) -> dict[str,
     return dict(row) if row else {}
 
 
-def _source_values(*, payload: dict[str, Any], public_fact: dict[str, Any]) -> dict[str, Any]:
+def _source_values(
+    *,
+    payload: dict[str, Any],
+    public_fact: dict[str, Any],
+    now_ms: int,
+) -> tuple[dict[str, Any], dict[str, int]]:
     signal_summary = _as_dict(payload.get("signal_summary"))
     evidence = _as_dict(signal_summary.get("evidence_payload"))
     signal_snapshot = _as_dict(signal_summary.get("signal_snapshot"))
     public_values = _as_dict(public_fact.get("fact_values"))
+    typed_values, typed_valid_until_by_key = _typed_fact_observation_values(
+        signal_summary,
+        now_ms=now_ms,
+    )
     merged: dict[str, Any] = {}
     for source in (
         public_values,
@@ -343,22 +372,40 @@ def _source_values(*, payload: dict[str, Any], public_fact: dict[str, Any]) -> d
         evidence,
         _as_dict(payload.get("action_time_fact_values")),
         _as_dict(signal_summary.get("action_time_fact_values")),
-        _typed_fact_observation_values(signal_summary),
+        typed_values,
     ):
         _deep_merge_into(merged, source)
-    return merged
+    return merged, typed_valid_until_by_key
 
 
 def _typed_fact_observation_values(
     signal_summary: dict[str, Any],
-) -> dict[str, Any]:
-    values: dict[str, Any] = {}
+    *,
+    now_ms: int,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    observations_by_key: dict[str, list[StrategyFactObservation]] = {}
     for item in _as_list(signal_summary.get("fact_observations")):
-        row = _as_dict(item)
-        key = str(row.get("fact_key") or "")
-        if key and row.get("observed_value") is not None:
-            values[key] = row["observed_value"]
-    return values
+        try:
+            observation = StrategyFactObservation.model_validate(item)
+        except (TypeError, ValueError):
+            continue
+        if not observation.source_ref.strip():
+            continue
+        observations_by_key.setdefault(observation.fact_key, []).append(observation)
+
+    values: dict[str, Any] = {}
+    valid_until_by_key: dict[str, int] = {}
+    for key, observations in observations_by_key.items():
+        if len(observations) != 1:
+            continue
+        observation = observations[0]
+        if observation.observed_at_ms > now_ms:
+            continue
+        if observation.valid_until_ms <= now_ms:
+            continue
+        values[key] = observation.observed_value
+        valid_until_by_key[key] = observation.valid_until_ms
+    return values, valid_until_by_key
 
 
 def _fact_values(
@@ -367,6 +414,7 @@ def _fact_values(
     signal: dict[str, Any],
     required_facts: list[dict[str, Any]],
     source_values: dict[str, Any],
+    required_typed_fact_keys: set[str] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     values: dict[str, Any] = {}
     missing: list[str] = []
@@ -377,6 +425,9 @@ def _fact_values(
     for fact in required_facts:
         key = str(fact.get("fact_key") or "")
         if not key:
+            continue
+        if required_typed_fact_keys is not None and key not in required_typed_fact_keys:
+            missing.append(key)
             continue
         resolved = _find_fact_value(key, source_values)
         if resolved is None:
@@ -566,7 +617,7 @@ def _failed_facts(required_facts: list[dict[str, Any]], fact_values: dict[str, A
             continue
         satisfied = _fact_condition_satisfied(fact, fact_values)
         if _truthy(fact.get("disable_on_match")):
-            if _disable_fact_active(key, fact_values):
+            if not _disable_fact_explicitly_inactive(key, fact_values):
                 failed.append(key)
             continue
         if not satisfied:
@@ -574,22 +625,17 @@ def _failed_facts(required_facts: list[dict[str, Any]], fact_values: dict[str, A
     return failed
 
 
-def _disable_fact_active(fact_key: str, fact_values: dict[str, Any]) -> bool:
+def _disable_fact_explicitly_inactive(
+    fact_key: str,
+    fact_values: dict[str, Any],
+) -> bool:
     observed = _normalized_scalar(fact_values.get(fact_key))
-    if observed is True:
+    if observed is False:
         return True
-    if observed in (False, None):
-        return False
-    if isinstance(observed, str) and observed.strip().lower() in {
-        "",
-        "unknown",
-        "missing",
-        "null",
-        "false",
-    }:
-        return False
+    if isinstance(observed, str) and observed.strip().lower() in {"false", "0", "no"}:
+        return True
     if isinstance(observed, (int, float, Decimal)):
-        return _decimal(observed) > Decimal("0")
+        return _decimal(observed) == Decimal("0")
     return False
 
 

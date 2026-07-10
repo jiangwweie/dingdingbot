@@ -828,6 +828,7 @@ def _insert_constructed_raw_input(
         public_fact_id=public_fact_id,
         signal_event_id=f"signal:{suffix}",
         now_ms=now_ms,
+        fact_values=fact_values,
     )
     conn.execute(sa.text("DELETE FROM brc_pretrade_readiness_rows"))
     _insert_readiness(conn, row, public_fact_id=public_fact_id, now_ms=now_ms)
@@ -974,8 +975,35 @@ def _insert_signal(
     public_fact_id: str,
     signal_event_id: str,
     now_ms: int,
+    fact_values: dict[str, Any],
 ) -> None:
     event_time_ms = now_ms - 60_000
+    required_fact_keys = {
+        str(required_fact["fact_key"])
+        for required_fact in conn.execute(
+            sa.text(
+                """
+                SELECT fact_key
+                FROM brc_strategy_event_required_facts
+                WHERE event_spec_id = :event_spec_id
+                  AND status = 'current'
+                  AND required_for_promotion = true
+                """
+            ),
+            {"event_spec_id": row["event_spec_id"]},
+        ).mappings()
+    }
+    fact_observations = [
+        {
+            "fact_key": key,
+            "observed_value": fact_values[key],
+            "observed_at_ms": event_time_ms,
+            "valid_until_ms": now_ms + 600_000,
+            "source_ref": f"simulation:evaluator:{row['event_spec_id']}:{key}",
+        }
+        for key in sorted(required_fact_keys)
+        if key in fact_values
+    ]
     conn.execute(
         sa.text(
             """
@@ -1013,6 +1041,9 @@ def _insert_signal(
                 {
                     "time_authority": "trigger_candle_close_time_ms",
                     "trigger_candle_close_time_ms": event_time_ms,
+                    "signal_summary": {
+                        "fact_observations": fact_observations,
+                    },
                 }
             ),
             "event_time_ms": event_time_ms,

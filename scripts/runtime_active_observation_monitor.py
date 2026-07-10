@@ -1353,6 +1353,9 @@ def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
     data_quality = output.get("data_quality")
     if not isinstance(data_quality, dict):
         data_quality = {}
+    fact_observations = output.get("fact_observations")
+    if not isinstance(fact_observations, list):
+        fact_observations = []
     return {
         "evaluation_status": evaluation.get("status"),
         "evaluator_id": evaluation.get("evaluator_id"),
@@ -1372,6 +1375,11 @@ def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
         "time_authority": output.get("time_authority"),
         "trigger_candle_close_time_ms": output.get("trigger_candle_close_time_ms"),
         "signal_snapshot": signal_snapshot,
+        "fact_observations": [
+            dict(observation)
+            for observation in fact_observations
+            if isinstance(observation, dict)
+        ],
         "evidence_payload": output.get("evidence_payload")
         if isinstance(output.get("evidence_payload"), dict)
         else {},

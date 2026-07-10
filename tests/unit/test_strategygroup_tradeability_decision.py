@@ -2183,6 +2183,68 @@ def test_cli_requires_pg_database_url(tmp_path: Path) -> None:
     assert "PG_DATABASE_URL is required" in result.stderr
 
 
+def test_cli_normalizes_asyncpg_database_url_before_engine_creation(
+    monkeypatch,
+    capsys,
+) -> None:
+    module = _load_module()
+    captured: dict[str, str] = {}
+
+    class _Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    class _Engine:
+        def connect(self):
+            return _Connection()
+
+        def dispose(self):
+            return None
+
+    class _Repository:
+        def __init__(self, conn):
+            assert isinstance(conn, _Connection)
+
+        def read_control_state(self):
+            return {"source": "unit_pg_current"}
+
+    def fake_create_engine(database_url: str):
+        captured["database_url"] = database_url
+        return _Engine()
+
+    monkeypatch.setattr(module.sa, "create_engine", fake_create_engine)
+    monkeypatch.setattr(module, "PgBackedRuntimeControlStateRepository", _Repository)
+    monkeypatch.setattr(
+        module,
+        "build_tradeability_decision_from_control_state",
+        lambda _state: {
+            "status": "tradeability_decision_ready",
+            "summary": {
+                "row_count": 5,
+                "top_decision": "not_tradable_market_wait",
+                "top_strategy_group_id": "MPG-001",
+                "tradable_now_count": 0,
+            },
+        },
+    )
+
+    returncode = module.main(
+        [
+            "--database-url",
+            "postgresql+asyncpg://unit:secret@pg.example/brc",
+        ]
+    )
+
+    assert returncode == 0
+    assert captured["database_url"] == (
+        "postgresql+psycopg://unit:secret@pg.example/brc"
+    )
+    assert json.loads(capsys.readouterr().out)["row_count"] == 5
+
+
 def test_cli_pg_backed_tradeability_decision_reads_seeded_runtime_control_state(
     tmp_path: Path,
 ) -> None:

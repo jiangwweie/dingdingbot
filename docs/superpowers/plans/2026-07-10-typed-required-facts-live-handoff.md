@@ -20,10 +20,16 @@ systemd command planning, pytest, Alembic 112.
 
 - `scripts/runtime_active_observation_monitor.py`: preserve typed observations
   in the watcher signal summary.
+- `src/application/action_time/fact_snapshots.py`: validate typed fact
+  completeness, uniqueness, provenance, time bounds, and snapshot expiry.
+- `src/application/action_time/full_chain_simulation_harness.py`: make the
+  non-executing harness obey the same typed fact contract.
 - `tests/unit/test_runtime_active_observation_monitor.py`: focused summary
   transport test.
 - `tests/unit/test_action_time_full_chain_impact.py`: evaluator-to-PG-to-
   action-time and five-StrategyGroup certification tests.
+- `tests/unit/test_pg_promotion_action_time_lane_materialization.py`: typed
+  fact validation and fixture-contract tests.
 - `scripts/build_strategygroup_tradeability_decision.py`: shared sync PG DSN
   normalization.
 - `tests/unit/test_strategygroup_tradeability_decision.py`: asyncpg DSN
@@ -58,7 +64,8 @@ allow-list omits the field.
 
 ### Step 2: Add the real boundary integration test
 
-For one representative scope of each StrategyGroup and both SOR sides:
+For all twenty-two current candidate scopes across every StrategyGroup and both
+SOR sides:
 
 1. run the real runtime evaluator;
 2. pass its serialized result through `_signal_summary`;
@@ -93,8 +100,13 @@ twenty-two-scope disabled-smoke tests pass.
 ### Step 3: Add negative assertions
 
 Prove an absent typed observation remains missing and
-`strong_uptrend_disable=true` blocks BRF2 before promotion. Reuse existing
-fail-closed materializer behavior rather than adding fallback inference.
+`strong_uptrend_disable=true` blocks BRF2 before promotion. Prove stale,
+future-dated, malformed, provenance-free, and duplicate observations cannot
+satisfy RequiredFacts, and cap the action-time snapshot at the shortest typed
+fact validity. For current execution-eligible Event Specs, prove every
+promotion RequiredFact must exist in the valid typed set and that nested
+evidence with the same key cannot become a fallback. Reuse existing fail-closed
+materializer behavior rather than adding fallback inference.
 
 ## Task 3: Normalize the Tradeability PG DSN
 
@@ -131,8 +143,9 @@ pytest -q tests/unit/test_strategygroup_tradeability_decision.py
 ### Step 1: Add failing command-order tests
 
 Assert phase 3 stops the watcher timer and running watcher service before the
-backend. Assert phase 4 checks health before starting the watcher timer, then
-verifies the timer is active.
+backend. Apply the same quiesce invariant to runtime monitor and ticket
+lifecycle maintenance timers/services. Assert phase 4 checks health before
+restoring recurring consumers, then verifies the timers are active.
 
 Expected before implementation: phase 3 contains no watcher quiesce and phase
 4 contains no watcher timer start/active check.
@@ -143,7 +156,11 @@ Add non-interactive bounded systemd commands to the existing deploy plan:
 
 ```text
 systemctl stop brc-runtime-signal-watcher.timer
+systemctl stop brc-runtime-monitor.timer
+systemctl stop brc-ticket-lifecycle-maintenance.timer
 systemctl stop brc-runtime-signal-watcher.service
+systemctl stop brc-runtime-monitor.service
+systemctl stop brc-ticket-lifecycle-maintenance.service
 systemctl stop brc-owner-console-backend.service
 ...
 curl health loop
@@ -161,11 +178,8 @@ in installation.
 pytest -q \
   tests/unit/test_runtime_signal_watcher_systemd_units.py \
   tests/unit/test_tokyo_runtime_governance_release_prep.py \
-  tests/unit/test_tokyo_runtime_governance_postdeploy_verify.py \
-  tests/unit/test_execute_tokyo_runtime_governance_git_deploy.py
+  tests/unit/test_tokyo_runtime_governance_postdeploy_verify.py
 ```
-
-Use the actual existing executor test filename if the last path differs.
 
 ## Task 5: Repository verification
 

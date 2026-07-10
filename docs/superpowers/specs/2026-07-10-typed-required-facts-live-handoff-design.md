@@ -77,9 +77,16 @@ recomputing, or flattening strategy semantics. The existing PG live-signal
 payload remains the durable handoff; no new table, fact bus, JSON file, or
 Markdown authority is introduced.
 
-The summary projection accepts only dictionary rows. Pydantic validation stays
-owned by the evaluator output boundary. Action-time remains fail-closed when a
-required fact is absent, false, disabled, or cannot be derived.
+The summary projection accepts only dictionary rows. Evaluators own typed fact
+creation, and Action-Time revalidates each serialized
+`StrategyFactObservation` before using it. A fact is accepted only while
+`observed_at_ms <= now_ms < valid_until_ms`. Missing provenance, malformed
+rows, future observations, stale observations, and duplicate fact keys are
+ignored so the corresponding RequiredFact fails closed. The materialized
+action-time snapshot cannot outlive the shortest typed RequiredFact validity.
+For an execution-eligible Event Spec, every promotion RequiredFact must be
+present in this valid typed set. A same-named field buried in `evidence_payload`
+or `signal_snapshot` cannot substitute for a missing typed observation.
 
 ### 2. Certify the real boundary, not hand-built endpoints
 
@@ -112,20 +119,22 @@ test flag.
 The deploy lifecycle becomes:
 
 ```text
-stop watcher timer and any running watcher service
+stop watcher, runtime-monitor, and lifecycle-maintenance timers
+-> stop any running watcher, monitor, and lifecycle-maintenance services
 -> stop backend
 -> migrate and validate PG
 -> switch release
 -> start backend
 -> wait boundedly for HTTP 200 health
 -> install current watcher/systemd units and drop-ins
--> start watcher timer
--> verify timer active
+-> restore watcher, monitor, and lifecycle-maintenance timers/services
+-> verify all recurring timers active
 -> postdeploy read-only verification
 ```
 
-The existing thirty-second bounded health loop is retained. Timer restoration
-must occur only after health succeeds and the new units are installed.
+The health loop and systemd stops are timeout-bounded. Recurring-service
+restoration must occur only after health succeeds and the new units are
+installed, so no runtime consumer can race backend or PG migration.
 
 ## Strategy And Scope Matrix
 
@@ -143,8 +152,16 @@ must occur only after health succeeds and the new units are installed.
   reports exact missing RequiredFacts.
 - Non-dictionary observation row: ignore it; never infer a fact.
 - Missing `observed_value`: it cannot satisfy action-time RequiredFacts.
+- Stale, future-dated, provenance-free, malformed, or duplicate typed facts:
+  ignore them and report the RequiredFact as missing.
+- Missing typed RequiredFact on an execution-eligible Event Spec: fail closed
+  even if an untyped evidence object contains a same-named value.
+- Action-time snapshot expiry: cap it at the earliest validity of the signal,
+  public fact snapshot, RequiredFacts freshness, and typed observations used.
 - Active disable fact such as `strong_uptrend_disable=true`: block before lane
   creation.
+- Unknown, null, malformed, or non-zero disable fact: fail closed; only an
+  explicit false/zero observation is safe enough to continue.
 - Unsupported symbol/side or ambiguous active Event Spec: preserve existing
   scope and identity hard stops.
 - Async-driver DSN that cannot be normalized to the approved sync PG scheme:

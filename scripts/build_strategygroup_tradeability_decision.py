@@ -40,6 +40,10 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 from scripts.strategygroup_non_executing_projection import (  # noqa: E402
     recursive_true_key_paths,
 )
+from scripts.pg_dsn import (  # noqa: E402
+    is_sync_postgres_dsn,
+    normalize_sync_postgres_dsn,
+)
 
 SCHEMA = "brc.strategygroup_tradeability_decision.v1"
 JULY_BULLISH_REBOUND_HYPOTHESIS_ID = "JULY-BULLISH-REBOUND-TRADE-PATH-CLOSURE-001"
@@ -212,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Allow SQLite/non-PG DSNs only in tests.",
     )
     args = parser.parse_args(argv)
-    database_url = args.database_url
+    database_url = normalize_sync_postgres_dsn(args.database_url)
     if not database_url:
         print(
             "ERROR: PG_DATABASE_URL is required for DB-backed Tradeability Decision",
@@ -220,9 +224,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    if not database_url.startswith(
-        ("postgresql://", "postgresql+psycopg://")
-    ) and not args.allow_non_postgres_for_test:
+    if (
+        not is_sync_postgres_dsn(database_url)
+        and not args.allow_non_postgres_for_test
+    ):
         print(
             "ERROR: DB-backed Tradeability Decision requires PostgreSQL DSN",
             file=sys.stderr,

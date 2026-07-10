@@ -124,6 +124,48 @@ def _runtime(
     return payload
 
 
+def test_signal_summary_preserves_typed_fact_observations():
+    fact_observations = [
+        {
+            "fact_key": "impulse_confirmed",
+            "observed_value": True,
+            "observed_at_ms": 1_000,
+            "valid_until_ms": 3_601_000,
+            "source_ref": "closed_ohlcv:AVAXUSDT:1000:mi-v1",
+        },
+        {
+            "fact_key": "impulse_invalidation_reference",
+            "observed_value": "18.25",
+            "observed_at_ms": 1_000,
+            "valid_until_ms": 3_601_000,
+            "source_ref": "closed_ohlcv:AVAXUSDT:1000:mi-v1",
+        },
+    ]
+    artifact = {
+        "latest_artifact": {
+            "observation_payload": {
+                "signal_artifact": {
+                    "evaluation_result": {
+                        "status": "ready_for_semantic_binding",
+                        "evaluator_id": "_MI001RuntimeReferenceEvaluator",
+                        "output": {
+                            "signal_type": "would_enter",
+                            "signal_grade": "trial_grade_signal",
+                            "required_execution_mode": "trial_live",
+                            "side": "long",
+                            "fact_observations": [*fact_observations, "invalid-row"],
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+    summary = runtime_active_observation_monitor._signal_summary(artifact)
+
+    assert summary["fact_observations"] == fact_observations
+
+
 def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path):
     client = _FakeClient(
         [

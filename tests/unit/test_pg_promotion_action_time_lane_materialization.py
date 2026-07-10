@@ -739,19 +739,104 @@ def test_disable_fact_without_observation_is_missing():
 def test_cpm_typed_fact_observations_are_first_class_source_values():
     signal_summary = {
         "fact_observations": [
-            {"fact_key": "htf_trend_intact", "observed_value": True},
-            {"fact_key": "reclaim_confirmed", "observed_value": True},
-            {"fact_key": "pullback_low_reference", "observed_value": "95"},
+            {
+                "fact_key": "htf_trend_intact",
+                "observed_value": True,
+                "observed_at_ms": NOW_MS - 1_000,
+                "valid_until_ms": NOW_MS + 60_000,
+                "source_ref": "unit:cpm:trend",
+            },
+            {
+                "fact_key": "reclaim_confirmed",
+                "observed_value": True,
+                "observed_at_ms": NOW_MS - 1_000,
+                "valid_until_ms": NOW_MS + 60_000,
+                "source_ref": "unit:cpm:reclaim",
+            },
+            {
+                "fact_key": "pullback_low_reference",
+                "observed_value": "95",
+                "observed_at_ms": NOW_MS - 1_000,
+                "valid_until_ms": NOW_MS + 60_000,
+                "source_ref": "unit:cpm:protection",
+            },
         ]
     }
 
-    values = fact_materializer._typed_fact_observation_values(signal_summary)
+    values, valid_until_by_key = fact_materializer._typed_fact_observation_values(
+        signal_summary,
+        now_ms=NOW_MS,
+    )
 
     assert values == {
         "htf_trend_intact": True,
         "reclaim_confirmed": True,
         "pullback_low_reference": "95",
     }
+    assert valid_until_by_key == {
+        "htf_trend_intact": NOW_MS + 60_000,
+        "reclaim_confirmed": NOW_MS + 60_000,
+        "pullback_low_reference": NOW_MS + 60_000,
+    }
+
+
+def test_typed_fact_observations_fail_closed_on_time_contract_and_duplicates():
+    def observation(
+        fact_key: str,
+        *,
+        observed_at_ms: int,
+        valid_until_ms: int,
+        source_ref: str = "unit:typed-fact",
+    ) -> dict:
+        return {
+            "fact_key": fact_key,
+            "observed_value": True,
+            "observed_at_ms": observed_at_ms,
+            "valid_until_ms": valid_until_ms,
+            "source_ref": source_ref,
+        }
+
+    values, valid_until_by_key = fact_materializer._typed_fact_observation_values(
+        {
+            "fact_observations": [
+                observation(
+                    "fresh_fact",
+                    observed_at_ms=NOW_MS - 1,
+                    valid_until_ms=NOW_MS + 1,
+                ),
+                observation(
+                    "stale_fact",
+                    observed_at_ms=NOW_MS - 10,
+                    valid_until_ms=NOW_MS,
+                ),
+                observation(
+                    "future_fact",
+                    observed_at_ms=NOW_MS + 1,
+                    valid_until_ms=NOW_MS + 10,
+                ),
+                observation(
+                    "missing_source_ref",
+                    observed_at_ms=NOW_MS - 1,
+                    valid_until_ms=NOW_MS + 1,
+                    source_ref=" ",
+                ),
+                observation(
+                    "duplicate_fact",
+                    observed_at_ms=NOW_MS - 1,
+                    valid_until_ms=NOW_MS + 1,
+                ),
+                observation(
+                    "duplicate_fact",
+                    observed_at_ms=NOW_MS - 1,
+                    valid_until_ms=NOW_MS + 2,
+                ),
+            ]
+        },
+        now_ms=NOW_MS,
+    )
+
+    assert values == {"fresh_fact": True}
+    assert valid_until_by_key == {"fresh_fact": NOW_MS + 1}
 
 
 def test_action_time_fact_materializer_blocks_missing_required_facts_contract(
@@ -1842,6 +1927,7 @@ def _insert_ready_fresh_signal(
             public_fact_id=public_fact_id,
             signal_event_id=signal_event_id,
             execution_eligible=execution_eligible,
+            fact_values=fact_values,
         )
     conn.execute(
         text(
@@ -1990,9 +2076,37 @@ def _insert_signal(
     created_at_ms: int = NOW_MS - 54_000,
     event_time_ms: int = NOW_MS - 60_000,
     execution_eligible: bool = True,
+    fact_values: dict | None = None,
 ) -> None:
     signal_grade = "trial_grade_signal" if execution_eligible else "observe_only_signal"
     required_execution_mode = "trial_live" if execution_eligible else "observe_only"
+    required_fact_keys = {
+        str(required_fact["fact_key"])
+        for required_fact in conn.execute(
+            text(
+                """
+                SELECT fact_key
+                FROM brc_strategy_event_required_facts
+                WHERE event_spec_id = :event_spec_id
+                  AND status = 'current'
+                  AND required_for_promotion = true
+                """
+            ),
+            {"event_spec_id": row["event_spec_id"]},
+        ).mappings()
+    }
+    observed_fact_values = fact_values or _fact_values(conn, row)
+    fact_observations = [
+        {
+            "fact_key": key,
+            "observed_value": observed_fact_values[key],
+            "observed_at_ms": event_time_ms,
+            "valid_until_ms": NOW_MS + 600_000,
+            "source_ref": f"unit:evaluator:{row['event_spec_id']}:{key}",
+        }
+        for key in sorted(required_fact_keys)
+        if key in observed_fact_values
+    ]
     conn.execute(
         text(
             """
@@ -2031,6 +2145,9 @@ def _insert_signal(
                 {
                     "time_authority": "trigger_candle_close_time_ms",
                     "trigger_candle_close_time_ms": event_time_ms,
+                    "signal_summary": {
+                        "fact_observations": fact_observations,
+                    },
                 }
             ),
             "event_time_ms": event_time_ms,

@@ -274,6 +274,16 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     commands = "\n".join(
         command for phase in phases for command in phase["commands"]
     )
+    quiesce_command = next(
+        phase["commands"][0]
+        for phase in phases
+        if phase["phase"] == "3_quiesce_and_migrate"
+    )
+    switch_command = next(
+        phase["commands"][0]
+        for phase in phases
+        if phase["phase"] == "4_switch_start_and_smoke"
+    )
     assert "brc-runtime-signal-watcher.service" in commands
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "brc-runtime-monitor.service" in commands
@@ -295,9 +305,48 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "brc-runtime-signal-watcher.timer" in commands
     assert "systemctl enable --now" in commands
     assert "systemctl enable --now brc-runtime-signal-watcher.timer" not in commands
-    assert "systemctl is-active brc-runtime-signal-watcher.timer" not in commands
     assert "systemctl enable brc-runtime-signal-watcher.timer" in commands
+    assert "systemctl start brc-runtime-signal-watcher.timer" in commands
+    assert "systemctl is-active brc-runtime-signal-watcher.timer" in commands
     assert "systemctl restart brc-runtime-signal-watcher.timer" not in commands
+    assert "for attempt in $(seq 1 15)" in switch_command
+    assert "curl --connect-timeout 1 --max-time 1 -fsS" in switch_command
+    assert "timeout 30 sudo -n systemctl stop brc-runtime-signal-watcher.timer" in (
+        quiesce_command
+    )
+    assert "timeout 30 sudo -n systemctl stop brc-runtime-monitor.timer" in (
+        quiesce_command
+    )
+    assert "timeout 30 sudo -n systemctl stop brc-ticket-lifecycle-maintenance.timer" in (
+        quiesce_command
+    )
+    assert "timeout 60 sudo -n systemctl stop brc-runtime-signal-watcher.service" in (
+        quiesce_command
+    )
+    assert "timeout 60 sudo -n systemctl stop brc-runtime-monitor.service" in (
+        quiesce_command
+    )
+    assert (
+        "timeout 60 sudo -n systemctl stop brc-ticket-lifecycle-maintenance.service"
+        in quiesce_command
+    )
+    assert "timeout 60 sudo -n systemctl stop brc-owner-console-backend.service" in (
+        quiesce_command
+    )
+    assert (
+        quiesce_command.index("systemctl stop brc-runtime-signal-watcher.timer")
+        < quiesce_command.index("systemctl stop brc-runtime-monitor.timer")
+        < quiesce_command.index("systemctl stop brc-ticket-lifecycle-maintenance.timer")
+        < quiesce_command.index("systemctl stop brc-runtime-signal-watcher.service")
+        < quiesce_command.index("systemctl stop brc-runtime-monitor.service")
+        < quiesce_command.index("systemctl stop brc-ticket-lifecycle-maintenance.service")
+        < quiesce_command.index("systemctl stop brc-owner-console-backend.service")
+    )
+    assert (
+        switch_command.index('test "$HEALTH_READY" = 1')
+        < switch_command.index("systemctl start brc-runtime-signal-watcher.timer")
+        < switch_command.index("systemctl is-active brc-runtime-signal-watcher.timer")
+    )
     assert "systemctl start brc-runtime-monitor.service" in commands
     assert "systemctl enable --now brc-ticket-lifecycle-maintenance.timer" in commands
     assert "systemctl restart brc-ticket-lifecycle-maintenance.timer" in commands

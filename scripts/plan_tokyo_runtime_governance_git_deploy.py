@@ -388,13 +388,13 @@ def _plan_phases(
     health_wait_command = (
         f"set -eu; HEALTH_URL={q(health_url)}; "
         "HEALTH_READY=0; "
-        "for attempt in $(seq 1 30); do "
-        'if curl -fsS "$HEALTH_URL" 2>/dev/null; then '
+        "for attempt in $(seq 1 15); do "
+        'if curl --connect-timeout 1 --max-time 1 -fsS "$HEALTH_URL" 2>/dev/null; then '
         "HEALTH_READY=1; break; "
         "fi; "
         "sleep 1; "
         "done; "
-        'test "$HEALTH_READY" = 1 || curl -fsS "$HEALTH_URL"'
+        'test "$HEALTH_READY" = 1 || curl --connect-timeout 1 --max-time 2 -fsS "$HEALTH_URL"'
     )
     base_revision = remote_migration_revision or "UNKNOWN_REMOTE_REVISION"
     head_revision = target_migration_revision or "UNKNOWN_TARGET_REVISION"
@@ -427,7 +427,13 @@ def _plan_phases(
         f"test $(readlink -f {q(app_current)}) = {q(previous_release_path)}"
     )
     quiesce_and_migrate_command = (
-        f"set -eu; sudo -n systemctl stop {q(service_name)}; "
+        f"set -eu; timeout 30 sudo -n systemctl stop {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"timeout 30 sudo -n systemctl stop {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"timeout 30 sudo -n systemctl stop {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
+        f"timeout 60 sudo -n systemctl stop {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME)}; "
+        f"timeout 60 sudo -n systemctl stop {q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)}; "
+        f"timeout 60 sudo -n systemctl stop {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME)}; "
+        f"timeout 60 sudo -n systemctl stop {q(service_name)}; "
         f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
         f"test ! -f requirements.txt || {q(venv_python)} -m pip install "
         "--disable-pip-version-check -r requirements.txt; "
@@ -806,12 +812,14 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"sudo -n rm -f {q(stale_runtime_db_retention_timer_path)}; "
         "sudo -n systemctl daemon-reload; "
         f"sudo -n systemctl enable {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl start {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
         f"sudo -n systemctl enable --now {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
         f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
         f"sudo -n systemctl restart {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
         f"sudo -n systemctl start {q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)}; "
         f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
         f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
         f"sudo -n systemctl is-enabled {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
         f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
