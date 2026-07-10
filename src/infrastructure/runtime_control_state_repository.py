@@ -937,8 +937,10 @@ def _monitor_bounded_statement(
         return statement.where(
             sa.and_(
                 columns.computed_at_ms <= now_ms,
-                columns.valid_until_ms.is_not(None),
-                columns.valid_until_ms > now_ms,
+                sa.or_(
+                    columns.valid_until_ms.is_(None),
+                    columns.valid_until_ms > now_ms,
+                ),
             )
         )
     if logical_key == "runtime_fact_snapshots":
@@ -1185,11 +1187,12 @@ def is_current_pretrade_readiness(row: dict[str, Any], now_ms: int) -> bool:
     """Return whether one per-lane readiness projection is current."""
 
     computed_at_ms = int(row.get("computed_at_ms") or 0)
-    valid_until_ms = int(row.get("valid_until_ms") or 0)
+    valid_until = row.get("valid_until_ms")
+    valid_until_current = valid_until in (None, "") or int(valid_until) > now_ms
     return (
         computed_at_ms > 0
         and computed_at_ms <= now_ms
-        and valid_until_ms > now_ms
+        and valid_until_current
     )
 
 

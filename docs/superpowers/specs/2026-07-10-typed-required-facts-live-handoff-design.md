@@ -238,7 +238,7 @@ The following currentness rules are shared across read models:
 | PG object | Currentness requirement | Authority consequence |
 | --- | --- | --- |
 | watcher coverage | current flag, bounded last tick, unexpired | may prove detector/watcher coverage only |
-| pre-trade readiness | bounded compute time, unexpired | may classify the current per-symbol blocker |
+| pre-trade readiness | bounded compute time; nullable validity remains current until the unique row is atomically replaced, otherwise unexpired | may classify the current per-symbol blocker |
 | live signal / promotion / lane / ticket | not future-dated, legal open state, unexpired | may advance the L5-L7 chain only |
 | Runtime Safety State | observed no later than now, unexpired, execution-eligible payload | still not enough for `tradable_now` |
 | verified safety lineage | same StrategyGroup/symbol/side/profile across signal, promotion, lane, ticket, handoff, and safety snapshot | may support `tradable_now`; still no exchange-write authority by itself |

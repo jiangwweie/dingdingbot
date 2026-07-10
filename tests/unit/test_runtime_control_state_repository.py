@@ -19,6 +19,7 @@ from src.infrastructure.runtime_control_state_repository import (
     is_current_action_time_ticket,
     is_current_fact_snapshot,
     is_current_live_signal,
+    is_current_pretrade_readiness,
     is_current_promotion_candidate,
     runtime_safety_submit_authorized,
 )
@@ -213,6 +214,58 @@ def test_runtime_safety_submit_authority_requires_concrete_trusted_refs() -> Non
     }
 
     assert runtime_safety_submit_authorized(row) is False
+
+
+def test_current_readiness_allows_null_validity_until_projector_replaces_row() -> None:
+    now_ms = 1770001000000
+
+    assert is_current_pretrade_readiness(
+        {
+            "computed_at_ms": now_ms - 1,
+            "valid_until_ms": None,
+        },
+        now_ms,
+    ) is True
+
+
+def test_monitor_read_profile_keeps_current_readiness_with_null_validity(
+    pg_control_connection,
+) -> None:
+    now_ms = 1770001000000
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_pretrade_readiness_rows (
+              readiness_row_id, candidate_scope_id, strategy_group_id, symbol,
+              side, readiness_state, detector_state, watcher_state,
+              public_facts_state, signal_lifecycle_status,
+              signal_freshness_state, risk_state, scope_state, promotion_state,
+              first_blocker_class, first_blocker_detail, next_action,
+              stop_condition, evidence_ref, source_watermark, computed_at_ms,
+              valid_until_ms
+            ) VALUES (
+              'readiness:MPG-001:OPUSDT:long:null-validity',
+              'candidate_scope:MPG-001:OPUSDT:long:MPG-LONG',
+              'MPG-001', 'OPUSDT', 'long', 'market_wait', 'ready', 'fresh',
+              'satisfied', 'absent', 'absent', 'acceptable',
+              'live_submit_allowed', 'idle', 'market_wait_validated',
+              'current until projector replacement',
+              'continue_watcher_observation_until_fresh_signal',
+              'fresh signal or projector replacement', NULL, 'unit',
+              :computed_at_ms, NULL
+            )
+            """
+        ),
+        {"computed_at_ms": now_ms - 1},
+    )
+    pg_control_connection.commit()
+
+    monitor_state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    ).read_monitor_control_state()
+
+    assert monitor_state["table_counts"]["pretrade_readiness_rows"] == 1
 
 def test_live_signal_writer_output_is_readable_by_repository(pg_control_connection):
     pg_control_connection.execute(
