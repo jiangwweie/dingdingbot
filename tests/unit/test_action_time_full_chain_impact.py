@@ -79,6 +79,14 @@ RISK_RESERVATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
 )
+EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
+)
+EXCHANGE_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -236,6 +244,38 @@ def pg_control_connection():
                                                 )
                                                 try:
                                                     risk_reservation_migration.upgrade()
+                                                    execution_eligibility_migration = _load_module(
+                                                        EXECUTION_ELIGIBILITY_MIGRATION_PATH,
+                                                        "migration_104_action_time_full_chain",
+                                                    )
+                                                    old_eligibility_op = (
+                                                        execution_eligibility_migration.op
+                                                    )
+                                                    execution_eligibility_migration.op = (
+                                                        migration.op
+                                                    )
+                                                    try:
+                                                        execution_eligibility_migration.upgrade()
+                                                        exchange_command_migration = _load_module(
+                                                            EXCHANGE_COMMAND_MIGRATION_PATH,
+                                                            "migration_105_action_time_full_chain",
+                                                        )
+                                                        old_exchange_command_op = (
+                                                            exchange_command_migration.op
+                                                        )
+                                                        exchange_command_migration.op = (
+                                                            migration.op
+                                                        )
+                                                        try:
+                                                            exchange_command_migration.upgrade()
+                                                        finally:
+                                                            exchange_command_migration.op = (
+                                                                old_exchange_command_op
+                                                            )
+                                                    finally:
+                                                        execution_eligibility_migration.op = (
+                                                            old_eligibility_op
+                                                        )
                                                 finally:
                                                     risk_reservation_migration.op = (
                                                         old_risk_reservation_op
@@ -505,8 +545,10 @@ async def test_raw_pg_input_reaches_real_gateway_submit_boundary(
     assert gateway_binding["status"] == "ready"
     assert gateway_binding["blockers"] == []
 
+    pg_control_connection.commit()
     submit_result = await api_trading_console._execute_ticket_bound_real_gateway_submit(
-        prepared_submit
+        prepared_submit,
+        engine=pg_control_connection.engine,
     )
     assert submit_result["status"] == "entry_submit_failed"
     assert submit_result["blockers"] == ["controlled_exchange_write_boundary"]
@@ -1047,6 +1089,8 @@ def _write_monitor_signal_summary_to_pg(
                     "status": "waiting_for_signal",
                     "signal_summary": {
                         "signal_type": "would_enter",
+                        "signal_grade": "trial_grade_signal",
+                        "required_execution_mode": "trial_live",
                         "side": side,
                         "confidence": "0.90",
                         "reason_codes": ["constructed_monitor_signal_summary"],

@@ -43,6 +43,7 @@ OUTCOME_CLASSES = (
 
 
 def upgrade() -> None:
+    _extend_submit_attempt_statuses(include_unknown=True)
     if _has_table(TABLE_NAME):
         return
 
@@ -147,7 +148,47 @@ def upgrade() -> None:
 def downgrade() -> None:
     if _has_table(TABLE_NAME):
         op.drop_table(TABLE_NAME)
+    _extend_submit_attempt_statuses(include_unknown=False)
 
 
 def _has_table(table_name: str) -> bool:
     return table_name in sa.inspect(op.get_bind()).get_table_names()
+
+
+def _extend_submit_attempt_statuses(*, include_unknown: bool) -> None:
+    table_name = "brc_ticket_bound_protected_submit_attempts"
+    if not _has_table(table_name):
+        return
+    statuses = [
+        "blocked",
+        "submit_prepared",
+        "disabled_smoke_passed",
+        "submitted",
+        "submit_failed",
+        "hard_stopped",
+    ]
+    if include_unknown:
+        statuses.append("submit_outcome_unknown")
+    condition = "status IN (" + ", ".join(repr(value) for value in statuses) + ")"
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.execute(
+            "ALTER TABLE brc_ticket_bound_protected_submit_attempts "
+            "DROP CONSTRAINT IF EXISTS ck_brc_ticket_submit_status"
+        )
+        op.create_check_constraint(
+            "ck_brc_ticket_submit_status",
+            table_name,
+            condition,
+        )
+        return
+    if bind.dialect.name == "sqlite":
+        with op.batch_alter_table(table_name) as batch_op:
+            batch_op.drop_constraint(
+                "ck_brc_ticket_submit_status",
+                type_="check",
+            )
+            batch_op.create_check_constraint(
+                "ck_brc_ticket_submit_status",
+                condition,
+            )

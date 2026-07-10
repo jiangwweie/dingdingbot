@@ -46,6 +46,9 @@ from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
 from src.application.action_time.exchange_command import (  # noqa: E402
     materialize_ticket_bound_exchange_commands,
 )
+from src.domain.ticket_bound_exchange_command import (  # noqa: E402
+    deterministic_client_order_id,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -420,6 +423,10 @@ def record_ticket_bound_protected_submit_result(
         and submit_result.get("exchange_write_called") is True
         and submit_result.get("order_lifecycle_called") is True
     )
+    outcome_unknown = result_status in {
+        "exchange_submit_outcome_unknown",
+        "exchange_command_outcome_unknown",
+    }
     failed = (
         result_status.endswith("_failed")
         or bool(result_blockers)
@@ -431,7 +438,15 @@ def record_ticket_bound_protected_submit_result(
     status = (
         "submitted"
         if submitted
-        else ("hard_stopped" if identity_blockers else ("submit_failed" if failed else "hard_stopped"))
+        else (
+            "hard_stopped"
+            if identity_blockers
+            else (
+                "submit_outcome_unknown"
+                if outcome_unknown
+                else ("submit_failed" if failed else "hard_stopped")
+            )
+        )
     )
     updated = {
         **row,
@@ -457,7 +472,7 @@ def record_ticket_bound_protected_submit_result(
     lifecycle_classification = None
     if status == "submitted":
         _mark_ticket_submitted(conn, updated, now_ms=now_ms)
-    elif not identity_blockers:
+    elif not identity_blockers and not outcome_unknown:
         lifecycle_classification = classify_sequential_submit_result(
             attempt=updated,
             submit_result=submit_result,
@@ -481,6 +496,8 @@ def record_ticket_bound_protected_submit_result(
             else (
                 "repair_ticket_bound_submit_result_identity"
                 if identity_blockers
+                else "reconcile_unknown_exchange_command_before_any_new_submit"
+                if outcome_unknown
                 else lifecycle_classification.next_action
                 if lifecycle_classification
                 else "repair_ticket_bound_submit_result_identity"
@@ -1134,6 +1151,10 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
         str(graph["handoff"]["operation_submit_command_id"]),
     )
     symbol = str(ticket.get("exchange_instrument_id") or ticket.get("symbol") or "")
+    ticket_id = str(ticket["ticket_id"])
+    operation_submit_command_id = str(
+        graph["handoff"]["operation_submit_command_id"]
+    )
     entry_order_type = _gateway_order_type(str(execution_policy.get("order_type") or "market"))
     protection_order_type = _gateway_order_type(
         str(protection.get("stop_order_type") or "stop_market")
@@ -1165,7 +1186,12 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
                 "price": None,
                 "trigger_price": None,
                 "reduce_only": False,
-                "client_order_id": entry_order_id,
+                "client_order_id": deterministic_client_order_id(
+                    ticket_id,
+                    operation_submit_command_id,
+                    "ENTRY",
+                    1,
+                ),
             },
             {
                 "local_order_id": protection_order_id,
@@ -1179,7 +1205,12 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
                 "price": None,
                 "trigger_price": str(protection.get("reference_price")),
                 "reduce_only": True,
-                "client_order_id": protection_order_id,
+                "client_order_id": deterministic_client_order_id(
+                    ticket_id,
+                    operation_submit_command_id,
+                    "SL",
+                    1,
+                ),
             },
             {
                 "local_order_id": tp1_order_id,
@@ -1193,7 +1224,12 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
                 "price": str(tp1_price),
                 "trigger_price": None,
                 "reduce_only": True,
-                "client_order_id": tp1_order_id,
+                "client_order_id": deterministic_client_order_id(
+                    ticket_id,
+                    operation_submit_command_id,
+                    "TP1",
+                    1,
+                ),
             },
         ],
     }

@@ -2429,7 +2429,10 @@ async def _run_ticket_bound_protected_submit(
         if submit_mode != SUBMIT_MODE_REAL_GATEWAY_ACTION:
             return report
 
-        submit_result = await _execute_ticket_bound_real_gateway_submit(report)
+        submit_result = await _execute_ticket_bound_real_gateway_submit(
+            report,
+            engine=engine,
+        )
         with engine.begin() as conn:
             return record_ticket_bound_protected_submit_result(
                 conn,
@@ -2505,6 +2508,8 @@ async def _run_ticket_bound_lifecycle_maintenance(
 
 async def _execute_ticket_bound_real_gateway_submit(
     report: dict[str, Any],
+    *,
+    engine: Any,
 ) -> dict[str, Any]:
     from src.application.order_lifecycle_service import OrderLifecycleService
     from src.interfaces import api as api_module
@@ -2529,11 +2534,395 @@ async def _execute_ticket_bound_real_gateway_submit(
             blockers=["order_lifecycle_repository_unavailable"],
         )
     order_lifecycle_service = OrderLifecycleService(repository=order_repository)
-    return await _submit_ticket_bound_orders(
-        report,
-        gateway=gateway,
-        order_lifecycle_service=order_lifecycle_service,
+    from src.application.action_time.exchange_command import (
+        list_exchange_commands_for_attempt,
     )
+
+    with engine.connect() as conn:
+        commands = list_exchange_commands_for_attempt(
+            conn,
+            protected_submit_attempt_id=str(
+                report.get("protected_submit_attempt_id") or ""
+            ),
+        )
+    if not commands:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="exchange_commands_missing",
+            blockers=["exchange_commands_missing"],
+        )
+
+    submitted_orders: list[dict[str, Any]] = []
+    for command in commands:
+        result = await _execute_one_ticket_bound_exchange_command(
+            engine=engine,
+            exchange_command_id=str(command["exchange_command_id"]),
+            gateway=gateway,
+            order_lifecycle_service=order_lifecycle_service,
+            now_ms=int(time.time() * 1000),
+        )
+        submitted = result.get("submitted_order")
+        if isinstance(submitted, dict) and submitted:
+            submitted_orders.append(submitted)
+        if result.get("status") != "exchange_command_confirmed_submitted":
+            status = str(result.get("status") or "exchange_command_failed")
+            aggregate_status = (
+                "exchange_submit_outcome_unknown"
+                if status == "exchange_command_outcome_unknown"
+                else (
+                    "entry_submit_failed"
+                    if command.get("order_role") == "ENTRY"
+                    else "protection_submit_failed"
+                )
+            )
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status=aggregate_status,
+                blockers=list(result.get("blockers") or []),
+                order_created=bool(result.get("order_created")),
+                order_lifecycle_called=bool(
+                    result.get("order_lifecycle_called")
+                ),
+                exchange_write_called=bool(result.get("exchange_write_called")),
+                submitted_orders=submitted_orders,
+            )
+
+    return {
+        "schema": "brc.ticket_bound_protected_submit_result.v1",
+        "status": "exchange_submit_orders_submitted",
+        "ticket_id": report.get("ticket_id"),
+        "operation_submit_command_id": report.get(
+            "operation_submit_command_id"
+        ),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "exchange_call_count": len(commands),
+        "submitted_orders": submitted_orders,
+        "exchange_write_called": True,
+        "order_created": True,
+        "order_lifecycle_called": True,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+async def _execute_one_ticket_bound_exchange_command(
+    *,
+    engine: Any,
+    exchange_command_id: str,
+    gateway: Any,
+    order_lifecycle_service: Any,
+    now_ms: int,
+) -> dict[str, Any]:
+    """Dispatch one persisted command without holding a command transaction."""
+
+    from src.application.action_time.exchange_command import (
+        mark_exchange_command_dispatching,
+        record_exchange_command_outcome,
+    )
+    from src.domain.exceptions import (
+        ConnectionLostError,
+        InsufficientMarginError,
+        InvalidOrderError,
+    )
+    from src.domain.models import Direction, Order, OrderRole, OrderStatus
+    from src.domain.ticket_bound_exchange_command import (
+        ExchangeCommandOutcomeClass,
+        ExchangeCommandState,
+    )
+
+    with engine.connect() as conn:
+        table = sa.Table(
+            "brc_ticket_bound_exchange_commands",
+            sa.MetaData(),
+            autoload_with=conn,
+        )
+        command_row = conn.execute(
+            sa.select(table).where(
+                table.c.exchange_command_id == exchange_command_id
+            )
+        ).mappings().first()
+    if command_row is None:
+        return {
+            "status": "exchange_command_missing",
+            "blockers": ["exchange_command_missing"],
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+        }
+    command = dict(command_row)
+    try:
+        direction = Direction.LONG if command["side"] == "long" else Direction.SHORT
+        amount = Decimal(str(command["amount"]))
+        order = Order(
+            id=str(command["local_order_id"]),
+            signal_id=str(command["ticket_id"]),
+            symbol=str(command["exchange_instrument_id"]),
+            direction=direction,
+            order_type=_ticket_bound_order_type(command["order_type"]),
+            order_role=OrderRole(str(command["order_role"])),
+            price=_optional_decimal(command.get("price")),
+            trigger_price=_optional_decimal(command.get("stop_price")),
+            requested_qty=amount,
+            status=OrderStatus.CREATED,
+            created_at=now_ms,
+            updated_at=now_ms,
+            reduce_only=command.get("reduce_only") is True,
+            parent_order_id=command.get("parent_order_id"),
+            signal_evaluation_id=str(command["ticket_id"]),
+        )
+        await order_lifecycle_service.register_created_order(
+            order,
+            metadata={
+                "scope": "ticket_bound_exchange_command",
+                "exchange_command_id": exchange_command_id,
+                "ticket_id": command["ticket_id"],
+                "operation_submit_command_id": command[
+                    "operation_submit_command_id"
+                ],
+                "exchange_order_submitted": False,
+                "exchange_called": False,
+            },
+        )
+    except Exception as exc:
+        return {
+            "status": "local_order_registration_failed",
+            "blockers": [
+                "local_order_registration_failed:"
+                f"{command.get('local_order_id')}:{type(exc).__name__}"
+            ],
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": True,
+        }
+
+    with engine.begin() as conn:
+        command = mark_exchange_command_dispatching(
+            conn,
+            exchange_command_id=exchange_command_id,
+            now_ms=now_ms,
+        )
+
+    try:
+        placement = await gateway.place_order(
+            symbol=str(command["exchange_instrument_id"]),
+            order_type=str(command["order_type"]),
+            side=str(command["gateway_side"]),
+            amount=Decimal(str(command["amount"])),
+            price=_optional_decimal(command.get("price")),
+            trigger_price=_optional_decimal(command.get("stop_price")),
+            reduce_only=command.get("reduce_only") is True,
+            client_order_id=str(command["client_order_id"]),
+        )
+    except (InvalidOrderError, InsufficientMarginError) as exc:
+        with engine.begin() as conn:
+            record_exchange_command_outcome(
+                conn,
+                exchange_command_id=exchange_command_id,
+                target_state=ExchangeCommandState.CONFIRMED_REJECTED,
+                outcome_class=ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION,
+                exchange_result={
+                    "error_code": getattr(exc, "error_code", None),
+                    "error_message": str(exc),
+                },
+                now_ms=now_ms,
+            )
+        return _exchange_command_execution_result(
+            "exchange_command_confirmed_rejected",
+            command,
+            blockers=[str(exc)],
+        )
+    except (ConnectionLostError, TimeoutError, ConnectionError) as exc:
+        return _record_unknown_exchange_command(
+            engine,
+            command,
+            exchange_command_id=exchange_command_id,
+            error=exc,
+            now_ms=now_ms,
+        )
+    except Exception as exc:
+        return _record_unknown_exchange_command(
+            engine,
+            command,
+            exchange_command_id=exchange_command_id,
+            error=exc,
+            now_ms=now_ms,
+        )
+
+    exchange_order_id = str(
+        getattr(placement, "exchange_order_id", None) or ""
+    ).strip()
+    if not getattr(placement, "is_success", False):
+        with engine.begin() as conn:
+            record_exchange_command_outcome(
+                conn,
+                exchange_command_id=exchange_command_id,
+                target_state=ExchangeCommandState.CONFIRMED_REJECTED,
+                outcome_class=ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION,
+                exchange_result={
+                    "error_code": getattr(placement, "error_code", None),
+                    "error_message": getattr(placement, "error_message", None),
+                },
+                now_ms=now_ms,
+            )
+        return _exchange_command_execution_result(
+            "exchange_command_confirmed_rejected",
+            command,
+            blockers=[
+                str(
+                    getattr(placement, "error_message", None)
+                    or getattr(placement, "error_code", None)
+                    or "exchange_command_rejected"
+                )
+            ],
+        )
+    if not exchange_order_id:
+        return _record_unknown_exchange_command(
+            engine,
+            command,
+            exchange_command_id=exchange_command_id,
+            error=RuntimeError("exchange_order_id_missing"),
+            now_ms=now_ms,
+            incomplete_response=True,
+        )
+
+    with engine.begin() as conn:
+        record_exchange_command_outcome(
+            conn,
+            exchange_command_id=exchange_command_id,
+            target_state=ExchangeCommandState.CONFIRMED_SUBMITTED,
+            outcome_class=ExchangeCommandOutcomeClass.EXCHANGE_ACCEPTED,
+            exchange_result={"exchange_order_id": exchange_order_id},
+            now_ms=now_ms,
+        )
+    try:
+        await order_lifecycle_service.submit_order(
+            str(command["local_order_id"]),
+            exchange_order_id=exchange_order_id,
+        )
+        filled_qty = getattr(placement, "filled_qty", None)
+        parsed_filled_qty = _decimal_or_zero(filled_qty)
+        if (
+            str(getattr(placement, "status", "")).split(".")[-1].lower()
+            == "filled"
+            or parsed_filled_qty > Decimal("0")
+        ):
+            await order_lifecycle_service.update_order_filled(
+                str(command["local_order_id"]),
+                filled_qty=parsed_filled_qty
+                if parsed_filled_qty > 0
+                else Decimal(str(command["amount"])),
+                average_exec_price=Decimal(
+                    str(
+                        getattr(placement, "average_exec_price", None)
+                        or command.get("price")
+                        or command.get("stop_price")
+                        or "0"
+                    )
+                ),
+            )
+        else:
+            await order_lifecycle_service.confirm_order(
+                str(command["local_order_id"]),
+                exchange_order_id=exchange_order_id,
+            )
+    except Exception as exc:
+        return _exchange_command_execution_result(
+            "order_lifecycle_update_failed",
+            command,
+            blockers=[
+                "order_lifecycle_update_failed:"
+                f"{command.get('local_order_id')}:{type(exc).__name__}"
+            ],
+            exchange_order_id=exchange_order_id,
+        )
+
+    return _exchange_command_execution_result(
+        "exchange_command_confirmed_submitted",
+        command,
+        exchange_order_id=exchange_order_id,
+        placement=placement,
+    )
+
+
+def _record_unknown_exchange_command(
+    engine: Any,
+    command: dict[str, Any],
+    *,
+    exchange_command_id: str,
+    error: Exception,
+    now_ms: int,
+    incomplete_response: bool = False,
+) -> dict[str, Any]:
+    from src.application.action_time.exchange_command import (
+        record_exchange_command_outcome,
+    )
+    from src.domain.ticket_bound_exchange_command import (
+        ExchangeCommandOutcomeClass,
+        ExchangeCommandState,
+    )
+
+    outcome = (
+        ExchangeCommandOutcomeClass.INCOMPLETE_RESPONSE
+        if incomplete_response
+        else ExchangeCommandOutcomeClass.NETWORK_AMBIGUOUS
+    )
+    with engine.begin() as conn:
+        record_exchange_command_outcome(
+            conn,
+            exchange_command_id=exchange_command_id,
+            target_state=ExchangeCommandState.OUTCOME_UNKNOWN,
+            outcome_class=outcome,
+            exchange_result={
+                "error_code": getattr(error, "error_code", None),
+                "error_message": str(error),
+            },
+            now_ms=now_ms,
+        )
+    return _exchange_command_execution_result(
+        "exchange_command_outcome_unknown",
+        command,
+        blockers=["exchange_command_outcome_unknown"],
+    )
+
+
+def _exchange_command_execution_result(
+    status: str,
+    command: dict[str, Any],
+    *,
+    blockers: list[str] | None = None,
+    exchange_order_id: str = "",
+    placement: Any = None,
+) -> dict[str, Any]:
+    submitted_order = {}
+    if exchange_order_id:
+        submitted_order = {
+            "local_order_id": command.get("local_order_id"),
+            "exchange_order_id": exchange_order_id,
+            "order_role": command.get("order_role"),
+            "reduce_only": command.get("reduce_only") is True,
+            "amount": str(command.get("amount") or ""),
+            "price": str(command.get("price") or ""),
+            "trigger_price": str(command.get("stop_price") or ""),
+            "status": str(getattr(placement, "status", "")).split(".")[-1],
+            "filled_qty": str(getattr(placement, "filled_qty", "") or ""),
+            "average_exec_price": str(
+                getattr(placement, "average_exec_price", "") or ""
+            ),
+        }
+    return {
+        "status": status,
+        "exchange_command_id": command.get("exchange_command_id"),
+        "order_role": command.get("order_role"),
+        "blockers": blockers or [],
+        "submitted_order": submitted_order,
+        "exchange_write_called": status
+        not in {"local_order_registration_failed", "exchange_command_missing"},
+        "order_created": True,
+        "order_lifecycle_called": True,
+    }
 
 
 async def _submit_ticket_bound_orders(

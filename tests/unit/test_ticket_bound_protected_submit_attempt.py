@@ -746,6 +746,40 @@ def test_protected_submit_result_forbidden_effect_hard_stops_without_breaking_db
     assert _json_value(row["submit_result"])["live_profile_changed"] is True
 
 
+def test_protected_submit_result_preserves_unknown_outcome_for_reconciliation(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+
+    result = submit.record_ticket_bound_protected_submit_result(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        submit_result={
+            "status": "exchange_submit_outcome_unknown",
+            "ticket_id": ids["ticket_id"],
+            "operation_submit_command_id": ids["operation_submit_command_id"],
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "blockers": ["exchange_command_outcome_unknown"],
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "submitted_orders": [],
+        },
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "submit_outcome_unknown"
+    assert result["next_action"] == (
+        "reconcile_unknown_exchange_command_before_any_new_submit"
+    )
+    assert _protected_submit_row(pg_control_connection)["status"] == (
+        "submit_outcome_unknown"
+    )
+
+
 def _create_ready_protected_submit(conn) -> dict[str, str]:
     ids = _create_handoff_ready(conn)
     safety_payload = safety.materialize_ticket_bound_runtime_safety_state(

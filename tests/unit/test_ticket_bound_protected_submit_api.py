@@ -5,8 +5,18 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import text
 
+from src.domain.exceptions import ConnectionLostError
 from src.interfaces import api_trading_console
+from tests.unit.test_action_time_ticket_materialization import NOW_MS
+from tests.unit.test_ticket_bound_protected_submit_attempt import (
+    _create_ready_protected_submit,
+    _prepare_real_submit,
+)
+from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
+    pg_control_connection,
+)
 
 
 @pytest.mark.asyncio
@@ -482,3 +492,145 @@ class _FakeOrderLifecycle:
             filled_qty=filled_qty,
             average_exec_price=average_exec_price,
         )
+
+
+@pytest.mark.asyncio
+async def test_network_timeout_records_outcome_unknown_without_retry(
+    pg_control_connection,
+):
+    command_id = _prepared_entry_command_id(pg_control_connection)
+    gateway = _TimeoutGateway()
+    lifecycle = _FakeOrderLifecycle()
+
+    result = await api_trading_console._execute_one_ticket_bound_exchange_command(
+        engine=pg_control_connection.engine,
+        exchange_command_id=command_id,
+        gateway=gateway,
+        order_lifecycle_service=lifecycle,
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "exchange_command_outcome_unknown"
+    assert _command_state(pg_control_connection, command_id) == "outcome_unknown"
+    assert gateway.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_call_occurs_without_open_command_transaction(
+    pg_control_connection,
+):
+    command_id = _prepared_entry_command_id(pg_control_connection)
+    gateway = _NoTransactionGateway(pg_control_connection.engine)
+
+    result = await api_trading_console._execute_one_ticket_bound_exchange_command(
+        engine=pg_control_connection.engine,
+        exchange_command_id=command_id,
+        gateway=gateway,
+        order_lifecycle_service=_FakeOrderLifecycle(),
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "exchange_command_confirmed_submitted"
+    assert gateway.saw_open_transaction is False
+    assert _command_state(pg_control_connection, command_id) == "confirmed_submitted"
+
+
+@pytest.mark.asyncio
+async def test_authoritative_gateway_rejection_is_confirmed_rejected(
+    pg_control_connection,
+):
+    command_id = _prepared_entry_command_id(pg_control_connection)
+
+    result = await api_trading_console._execute_one_ticket_bound_exchange_command(
+        engine=pg_control_connection.engine,
+        exchange_command_id=command_id,
+        gateway=_AuthoritativeRejectGateway(),
+        order_lifecycle_service=_FakeOrderLifecycle(),
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "exchange_command_confirmed_rejected"
+    assert _command_state(pg_control_connection, command_id) == "confirmed_rejected"
+
+
+@pytest.mark.asyncio
+async def test_success_response_without_exchange_order_id_is_outcome_unknown(
+    pg_control_connection,
+):
+    command_id = _prepared_entry_command_id(pg_control_connection)
+
+    result = await api_trading_console._execute_one_ticket_bound_exchange_command(
+        engine=pg_control_connection.engine,
+        exchange_command_id=command_id,
+        gateway=_MissingExchangeIdGateway(),
+        order_lifecycle_service=_FakeOrderLifecycle(),
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "exchange_command_outcome_unknown"
+    assert _command_state(pg_control_connection, command_id) == "outcome_unknown"
+
+
+def _prepared_entry_command_id(conn) -> str:
+    ids = _create_ready_protected_submit(conn)
+    _prepare_real_submit(conn, ids)
+    command_id = str(
+        conn.execute(
+            text(
+                "SELECT exchange_command_id "
+                "FROM brc_ticket_bound_exchange_commands "
+                "WHERE order_role = 'ENTRY'"
+            )
+        ).scalar_one()
+    )
+    conn.commit()
+    return command_id
+
+
+def _command_state(conn, command_id: str) -> str:
+    return str(
+        conn.execute(
+            text(
+                "SELECT command_state FROM brc_ticket_bound_exchange_commands "
+                "WHERE exchange_command_id = :command_id"
+            ),
+            {"command_id": command_id},
+        ).scalar_one()
+    )
+
+
+class _TimeoutGateway:
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def place_order(self, **_kwargs):
+        self.call_count += 1
+        raise ConnectionLostError("timeout", "C-001")
+
+
+class _NoTransactionGateway:
+    def __init__(self, engine) -> None:
+        self.engine = engine
+        self.saw_open_transaction = None
+
+    async def place_order(self, **kwargs):
+        with self.engine.connect() as conn:
+            self.saw_open_transaction = conn.in_transaction()
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+        )
+
+
+class _AuthoritativeRejectGateway:
+    async def place_order(self, **_kwargs):
+        return SimpleNamespace(
+            is_success=False,
+            error_code="F-011",
+            error_message="invalid order",
+        )
+
+
+class _MissingExchangeIdGateway:
+    async def place_order(self, **_kwargs):
+        return SimpleNamespace(is_success=True, exchange_order_id=None)

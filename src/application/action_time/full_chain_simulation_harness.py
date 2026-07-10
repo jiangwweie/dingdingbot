@@ -773,6 +773,18 @@ def _insert_constructed_raw_input(
     fact_values: dict[str, Any],
     now_ms: int,
 ) -> None:
+    conn.execute(
+        sa.text(
+            """
+            UPDATE brc_strategy_side_event_specs
+            SET declared_signal_grade = 'trial_grade_signal',
+                declared_required_execution_mode = 'trial_live',
+                execution_eligibility_enabled = true
+            WHERE event_spec_id = :event_spec_id
+            """
+        ),
+        {"event_spec_id": row["event_spec_id"]},
+    )
     suffix = f"{row['strategy_group_id']}:{row['symbol']}:{row['side']}:simulation"
     public_fact_id = f"fact:{suffix}:public"
     expires_at_ms = now_ms + 600_000
@@ -972,14 +984,17 @@ def _insert_signal(
               symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
               confidence, fact_snapshot_id, reason_codes, signal_payload,
               event_time_ms, trigger_candle_close_time_ms, observed_at_ms,
-              expires_at_ms, invalidated_at_ms, created_at_ms
+              expires_at_ms, invalidated_at_ms, created_at_ms,
+              signal_grade, required_execution_mode, execution_eligible,
+              authority_source_ref
             ) VALUES (
               :signal_event_id, :candidate_scope_id, :event_spec_id, :strategy_group_id,
               :symbol, :side, :detector_key, :signal_type,
               'live_market', 'facts_validated', 'fresh', 0.9, :fact_snapshot_id,
               :reason_codes, :signal_payload, :event_time_ms,
               :trigger_candle_close_time_ms, :observed_at_ms, :expires_at_ms,
-              NULL, :created_at_ms
+              NULL, :created_at_ms, 'trial_grade_signal', 'trial_live', true,
+              :authority_source_ref
             )
             """
         ),
@@ -1005,6 +1020,7 @@ def _insert_signal(
             "observed_at_ms": now_ms - 55_000,
             "expires_at_ms": now_ms + 600_000,
             "created_at_ms": now_ms - 54_000,
+            "authority_source_ref": f"event-spec:{row['event_spec_id']}",
         },
     )
 

@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from src.infrastructure.exchange_gateway import ExchangeGateway
+from src.domain.exceptions import ConnectionLostError
 
 
 class _RestExchange:
@@ -84,3 +85,25 @@ async def test_fetch_my_trades_wrapper_calls_rest_exchange():
     assert rest.fetch_my_trades_calls == [
         {"symbol": "BTC/USDT:USDT", "limit": 20, "params": {}}
     ]
+
+
+@pytest.mark.asyncio
+async def test_unclassified_create_order_exception_is_ambiguous_not_rejected():
+    class _AmbiguousRest:
+        async def create_order(self, **_kwargs):
+            raise RuntimeError("connection closed after request write")
+
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    gateway.rest_exchange = _AmbiguousRest()
+
+    with pytest.raises(ConnectionLostError) as exc:
+        await gateway.place_order(
+            symbol="BTC/USDT:USDT",
+            order_type="market",
+            side="buy",
+            amount=Decimal("0.001"),
+            client_order_id="brc-test-ambiguous",
+        )
+
+    assert exc.value.error_code == "C-002"

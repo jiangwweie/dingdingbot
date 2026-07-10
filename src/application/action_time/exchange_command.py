@@ -21,6 +21,28 @@ from src.domain.ticket_bound_exchange_command import (
 TABLE_NAME = "brc_ticket_bound_exchange_commands"
 
 
+def list_exchange_commands_for_attempt(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+) -> list[dict[str, Any]]:
+    table = _table(conn)
+    role_order = sa.case(
+        (table.c.order_role == "ENTRY", 1),
+        (table.c.order_role == "SL", 2),
+        (table.c.order_role == "TP1", 3),
+        else_=4,
+    )
+    rows = conn.execute(
+        sa.select(table)
+        .where(
+            table.c.protected_submit_attempt_id == protected_submit_attempt_id
+        )
+        .order_by(role_order, table.c.command_generation)
+    ).mappings()
+    return [_json_safe(dict(row)) for row in rows]
+
+
 def materialize_ticket_bound_exchange_commands(
     conn: sa.engine.Connection,
     *,

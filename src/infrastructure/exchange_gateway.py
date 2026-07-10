@@ -1165,28 +1165,10 @@ class ExchangeGateway:
 
         except Exception as e:
             logger.error(f"下单失败：{e}")
-            return OrderPlacementResult(
-                order_id=system_order_id,
-                symbol=symbol,
-                order_type=OrderType(order_type.upper()),
-                direction=self._map_side_to_direction(side, reduce_only),
-                side=side,
-                amount=amount,
-                price=price,
-                trigger_price=trigger_price,
-                reduce_only=reduce_only,
-                exchange_reduce_only_param_sent=(
-                    reduce_only and not self._should_omit_reduce_only_param(position_side)
-                ),
-                exchange_reduce_only_omit_reason=(
-                    "binance_hedge_mode_position_side"
-                    if reduce_only and self._should_omit_reduce_only_param(position_side)
-                    else None
-                ),
-                client_order_id=client_order_id,
-                error_code="F-011",
-                error_message=f"下单失败：{str(e)}",
-                status=OrderStatus.REJECTED,
+            raise ConnectionLostError(
+                "下单请求结果不确定，必须按 client_order_id 查询交易所事实："
+                f"{e}",
+                "C-002",
             )
 
     async def _cancel_conditional_open_order_if_visible(
