@@ -71,6 +71,10 @@ EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
 )
+EXCHANGE_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -206,6 +210,22 @@ def pg_control_connection():
                                                     )
                                                     try:
                                                         execution_eligibility_migration.upgrade()
+                                                        exchange_command_migration = _load_module(
+                                                            EXCHANGE_COMMAND_MIGRATION_PATH,
+                                                            "migration_105_runtime_safety",
+                                                        )
+                                                        old_exchange_command_op = (
+                                                            exchange_command_migration.op
+                                                        )
+                                                        exchange_command_migration.op = (
+                                                            migration.op
+                                                        )
+                                                        try:
+                                                            exchange_command_migration.upgrade()
+                                                        finally:
+                                                            exchange_command_migration.op = (
+                                                                old_exchange_command_op
+                                                            )
                                                     finally:
                                                         execution_eligibility_migration.op = (
                                                             old_eligibility_op

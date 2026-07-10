@@ -43,6 +43,9 @@ from src.application.action_time.budget_stop_risk import (  # noqa: E402
 from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
     classify_sequential_submit_result,
 )
+from src.application.action_time.exchange_command import (  # noqa: E402
+    materialize_ticket_bound_exchange_commands,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -199,6 +202,12 @@ def prepare_ticket_bound_protected_submit_attempt(
         "protected_submit_attempt_id",
         attempt,
     )
+    if status == "submit_prepared":
+        materialize_ticket_bound_exchange_commands(
+            conn,
+            attempt=attempt,
+            now_ms=now_ms,
+        )
     return _result(
         status,
         now_ms=now_ms,
@@ -1095,6 +1104,7 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
     protection = _as_dict(graph.get("protection"))
     execution_policy = _as_dict(graph.get("execution_policy"))
     action_time_fact = _as_dict(graph.get("action_time_fact"))
+    budget = _as_dict(graph.get("budget"))
     price = _execution_reference_price(
         action_time_fact=action_time_fact,
         protection=protection,
@@ -1133,8 +1143,10 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
         "ticket_id": ticket.get("ticket_id"),
         "operation_submit_command_id": graph["handoff"].get("operation_submit_command_id"),
         "strategy_group_id": ticket.get("strategy_group_id"),
+        "account_id": budget.get("account_id"),
         "symbol": ticket.get("symbol"),
         "exchange_symbol": symbol,
+        "exchange_instrument_id": ticket.get("exchange_instrument_id"),
         "side": ticket.get("side"),
         "direction": direction,
         "target_notional": str(target_notional),
@@ -1413,6 +1425,7 @@ def _identity_evidence(
         "ticket_id": attempt.get("ticket_id"),
         "operation_submit_command_id": attempt.get("operation_submit_command_id"),
         "strategy_group_id": attempt.get("strategy_group_id"),
+        "runtime_profile_id": attempt.get("runtime_profile_id"),
         "symbol": attempt.get("symbol"),
         "side": attempt.get("side"),
         "submit_result_status": submit_result.get("status"),
@@ -1789,6 +1802,7 @@ def _result(
         "action_time_lane_input_id": attempt.get("action_time_lane_input_id"),
         "submit_mode_decision_id": attempt.get("submit_mode_decision_id"),
         "strategy_group_id": attempt.get("strategy_group_id"),
+        "runtime_profile_id": attempt.get("runtime_profile_id"),
         "symbol": attempt.get("symbol"),
         "side": attempt.get("side"),
         "submit_mode": attempt.get("submit_mode"),
@@ -1814,6 +1828,7 @@ def _result(
         "forbidden_effects": FORBIDDEN_EFFECTS,
         "next_action": next_action,
         "authority_boundary": attempt.get("authority_boundary", AUTHORITY_BOUNDARY),
+        "authority_source_ref": attempt.get("authority_source_ref"),
         "observed_at_ms": now_ms,
     }
     if extra:
