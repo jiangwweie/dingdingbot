@@ -87,6 +87,10 @@ EXCHANGE_COMMAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
 )
+RUNTIME_SUPERVISION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-106_create_runtime_supervision_and_allocation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -268,6 +272,22 @@ def pg_control_connection():
                                                         )
                                                         try:
                                                             exchange_command_migration.upgrade()
+                                                            runtime_supervision_migration = _load_module(
+                                                                RUNTIME_SUPERVISION_MIGRATION_PATH,
+                                                                "migration_106_action_time_full_chain",
+                                                            )
+                                                            old_runtime_supervision_op = (
+                                                                runtime_supervision_migration.op
+                                                            )
+                                                            runtime_supervision_migration.op = (
+                                                                migration.op
+                                                            )
+                                                            try:
+                                                                runtime_supervision_migration.upgrade()
+                                                            finally:
+                                                                runtime_supervision_migration.op = (
+                                                                    old_runtime_supervision_op
+                                                                )
                                                         finally:
                                                             exchange_command_migration.op = (
                                                                 old_exchange_command_op

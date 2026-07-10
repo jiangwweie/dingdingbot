@@ -37,11 +37,17 @@ from src.application.readmodels.daily_live_enablement_table import WIP_LANES  # 
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
+from src.application.action_time.budget_stop_risk import (  # noqa: E402
+    compute_stop_risk_reservation,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
     is_current_action_time_lane,
     is_current_live_signal,
+)
+from src.application.runtime_process_outcome import (  # noqa: E402
+    materialize_runtime_process_outcome,
 )
 
 
@@ -123,6 +129,35 @@ def materialize_pg_promotion_action_time_lane(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
+    started_at_ms = now_ms
+
+    def result(status: str, **kwargs: Any) -> dict[str, Any]:
+        payload = _result(status, **kwargs)
+        signal_table = sa.Table(
+            "brc_live_signal_events",
+            sa.MetaData(),
+            autoload_with=conn,
+        )
+        signal_count = int(
+            conn.execute(sa.select(sa.func.count()).select_from(signal_table)).scalar_one()
+        )
+        if not sa.inspect(conn).has_table("brc_runtime_process_outcomes"):
+            return payload
+        process_row = materialize_runtime_process_outcome(
+            conn,
+            process_name="promotion_action_time_lane",
+            scope_key="global",
+            run_id=_stable_id("promotion_process_run", str(now_ms), status),
+            result_status=status,
+            blockers=list(kwargs.get("blockers") or []),
+            started_at_ms=started_at_ms,
+            completed_at_ms=now_ms,
+            runtime_head=os.getenv("BRC_RUNTIME_HEAD", "runtime-head-unknown"),
+            source_watermark=f"live_signal_events:{signal_count}",
+        )
+        payload["process_outcome"] = process_row
+        return payload
+
     _expire_stale_open_promotions(conn, now_ms=now_ms)
     _expire_stale_open_real_lanes(conn, now_ms=now_ms)
     try:
@@ -131,7 +166,7 @@ def materialize_pg_promotion_action_time_lane(
             now_ms=now_ms,
         ).read_control_state()
     except RuntimeControlStateRepositoryError as exc:
-        return _result(
+        return result(
             "blocked",
             now_ms=now_ms,
             blockers=[f"runtime_control_state_invalid:{exc}"],
@@ -143,7 +178,7 @@ def materialize_pg_promotion_action_time_lane(
         lane = sorted(open_lanes, key=lambda row: str(row.get("action_time_lane_input_id") or ""))[0]
         lane_expires_at_ms = int(lane.get("expires_at_ms") or 0)
         if lane_expires_at_ms <= now_ms:
-            return _result(
+            return result(
                 "open_action_time_lane_expired",
                 now_ms=now_ms,
                 action_time_lane_input_id=str(lane.get("action_time_lane_input_id") or ""),
@@ -155,7 +190,7 @@ def materialize_pg_promotion_action_time_lane(
                 blockers=["open_action_time_lane_expired_not_closed"],
                 next_action="expire_or_close_pg_action_time_lane",
             )
-        return _result(
+        return result(
             "action_time_lane_already_open",
             now_ms=now_ms,
             action_time_lane_input_id=str(lane.get("action_time_lane_input_id") or ""),
@@ -170,7 +205,7 @@ def materialize_pg_promotion_action_time_lane(
 
     bundles = _fresh_signal_bundles(control_state, now_ms=now_ms)
     if not bundles:
-        return _result(
+        return result(
             "no_fresh_signal",
             now_ms=now_ms,
             blockers=[],
@@ -178,10 +213,24 @@ def materialize_pg_promotion_action_time_lane(
         )
 
     bundles = _apply_same_session_opposite_side_conflicts(bundles)
+    bundles = _apply_allocation_capital_scope(bundles)
     eligible = [bundle for bundle in bundles if not bundle.blockers]
     blocked = [bundle for bundle in bundles if bundle.blockers]
     selected = _select_winner(eligible)
     selected_id = selected.promotion_candidate_id if selected else ""
+    allocation = _allocation_decision_row(
+        bundles=bundles,
+        eligible=eligible,
+        selected=selected,
+        now_ms=now_ms,
+    )
+    if sa.inspect(conn).has_table("brc_allocation_decisions"):
+        _upsert_row(
+            conn,
+            "brc_allocation_decisions",
+            "allocation_decision_id",
+            allocation,
+        )
 
     promotion_rows: list[dict[str, Any]] = []
     for bundle in blocked:
@@ -192,6 +241,7 @@ def materialize_pg_promotion_action_time_lane(
                 status="blocked",
                 arbitration_rank=None,
                 closed_at_ms=now_ms,
+                allocation=allocation,
             )
         )
     for rank, bundle in enumerate(_ranked_candidates(eligible), start=1):
@@ -206,13 +256,14 @@ def materialize_pg_promotion_action_time_lane(
                 closed_at_ms=None
                 if bundle.promotion_candidate_id == selected_id
                 else now_ms,
+                allocation=allocation,
             )
         )
 
     if selected is None:
         for row in promotion_rows:
             _upsert_row(conn, "brc_promotion_candidates", "promotion_candidate_id", row)
-        return _result(
+        return result(
             "promotion_candidates_blocked",
             now_ms=now_ms,
             blockers=_dedupe(
@@ -221,6 +272,7 @@ def materialize_pg_promotion_action_time_lane(
                 for blocker in bundle.blockers
             ),
             promotion_candidate_count=len(promotion_rows),
+            allocation_decision_id=allocation["allocation_decision_id"],
             next_action="repair_first_blocked_fresh_signal_candidate",
             per_candidate_results=_candidate_results(bundles, selected=None),
         )
@@ -236,7 +288,7 @@ def materialize_pg_promotion_action_time_lane(
         lane_row=lane,
     )
     if terminal_blockers:
-        return _result(
+        return result(
             "terminal_action_time_identity_not_reopened",
             now_ms=now_ms,
             blockers=terminal_blockers,
@@ -252,10 +304,11 @@ def materialize_pg_promotion_action_time_lane(
     _upsert_row(conn, "brc_budget_reservations", "budget_reservation_id", budget)
     _upsert_row(conn, "brc_protection_references", "protection_ref_id", protection)
 
-    return _result(
+    return result(
         "promotion_action_time_lane_created",
         now_ms=now_ms,
         promotion_candidate_id=selected.promotion_candidate_id,
+        allocation_decision_id=allocation["allocation_decision_id"],
         action_time_lane_input_id=selected.action_time_lane_input_id,
         budget_reservation_id=selected.budget_reservation_id,
         protection_ref_id=selected.protection_ref_id,
@@ -1018,6 +1071,7 @@ def _promotion_row(
     status: str,
     arbitration_rank: int | None,
     closed_at_ms: int | None,
+    allocation: dict[str, Any],
 ) -> dict[str, Any]:
     expires_at_ms = min(
         int(bundle.signal.get("expires_at_ms") or 0),
@@ -1026,6 +1080,18 @@ def _promotion_row(
     )
     if expires_at_ms <= 0:
         expires_at_ms = int(bundle.signal.get("expires_at_ms") or now_ms)
+    requested_risk_at_stop = _requested_risk_at_stop(bundle)
+    selected = (
+        str(allocation.get("selected_promotion_candidate_id") or "")
+        == bundle.promotion_candidate_id
+    )
+    allocation_state = (
+        "ineligible"
+        if status == "blocked"
+        else "selected"
+        if selected
+        else "deferred"
+    )
     return {
         "promotion_candidate_id": bundle.promotion_candidate_id,
         "signal_event_id": str(bundle.signal["signal_event_id"]),
@@ -1040,6 +1106,17 @@ def _promotion_row(
         "facts_snapshot_id": str(bundle.public_fact.get("fact_snapshot_id") or ""),
         "blockers": list(bundle.blockers),
         "arbitration_rank": arbitration_rank,
+        "allocation_decision_id": allocation["allocation_decision_id"],
+        "allocation_rank": arbitration_rank,
+        "requested_risk_at_stop": requested_risk_at_stop
+        if requested_risk_at_stop > 0
+        else None,
+        "allocated_risk_at_stop": requested_risk_at_stop
+        if selected and requested_risk_at_stop > 0
+        else Decimal("0")
+        if status != "blocked"
+        else None,
+        "allocation_state": allocation_state,
         "created_at_ms": now_ms,
         "expires_at_ms": expires_at_ms,
         "closed_at_ms": closed_at_ms,
@@ -1049,6 +1126,81 @@ def _promotion_row(
         "execution_eligible": bool(bundle.signal["execution_eligible"]),
         "authority_source_ref": str(bundle.signal["authority_source_ref"]),
     }
+
+
+def _allocation_decision_row(
+    *,
+    bundles: list[CandidateBundle],
+    eligible: list[CandidateBundle],
+    selected: CandidateBundle | None,
+    now_ms: int,
+) -> dict[str, Any]:
+    cycle_identity = "|".join(
+        sorted(
+            str(bundle.signal.get("signal_event_id") or bundle.promotion_candidate_id)
+            for bundle in bundles
+        )
+    )
+    cycle_ref = _stable_id("allocation_cycle", cycle_identity)
+    selected_id = selected.promotion_candidate_id if selected else None
+    capital_scope_ref = (
+        f"account:{selected.account_id}"
+        if selected and selected.account_id
+        else "no_selected_capital_scope"
+    )
+    return {
+        "allocation_decision_id": _stable_id(
+            "allocation_decision",
+            cycle_ref,
+            "allocation-policy-v0",
+        ),
+        "allocation_policy_version": "allocation-policy-v0",
+        "arbitration_cycle_ref": cycle_ref,
+        "max_new_action_time_lanes": 1,
+        "eligible_candidate_count": len(eligible),
+        "selected_candidate_count": 1 if selected else 0,
+        "capital_scope_ref": capital_scope_ref,
+        "selected_promotion_candidate_id": selected_id,
+        "created_at_ms": now_ms,
+    }
+
+
+def _requested_risk_at_stop(bundle: CandidateBundle) -> Decimal:
+    if not bundle.action_time_fact or not bundle.event_spec:
+        return Decimal("0")
+    try:
+        budget = _budget_row(bundle, now_ms=0)
+        protection = _protection_row(bundle)
+    except (KeyError, TypeError, ValueError):
+        return Decimal("0")
+    reservation = compute_stop_risk_reservation(
+        action_time_fact=bundle.action_time_fact,
+        protection=protection,
+        budget=budget,
+    )
+    if reservation.get("blockers"):
+        return Decimal("0")
+    return _decimal(reservation.get("risk_at_stop"))
+
+
+def _apply_allocation_capital_scope(
+    bundles: list[CandidateBundle],
+) -> list[CandidateBundle]:
+    guarded: list[CandidateBundle] = []
+    for bundle in bundles:
+        blockers = list(bundle.blockers)
+        requested = _requested_risk_at_stop(bundle)
+        owner_loss_unit = _decimal(bundle.policy.get("loss_unit"))
+        if requested > 0 and (
+            owner_loss_unit <= 0 or requested > owner_loss_unit
+        ):
+            blockers.append("allocation_risk_exceeds_owner_capital_scope")
+        guarded.append(
+            replace(bundle, blockers=tuple(_dedupe(blockers)))
+            if tuple(blockers) != bundle.blockers
+            else bundle
+        )
+    return guarded
 
 
 def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:

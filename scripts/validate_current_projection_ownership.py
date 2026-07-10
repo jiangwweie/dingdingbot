@@ -61,6 +61,37 @@ def validate_current_projection_ownership(conn: sa.engine.Connection) -> list[st
             errors.append(
                 f"owner mismatch for {model_type}: expected={expected_owner}:actual={actual}"
             )
+    errors.extend(_validate_runtime_process_outcomes(conn))
+    return errors
+
+
+def _validate_runtime_process_outcomes(
+    conn: sa.engine.Connection,
+) -> list[str]:
+    if not sa.inspect(conn).has_table("brc_runtime_process_outcomes"):
+        return []
+    table = sa.Table(
+        "brc_runtime_process_outcomes",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    expected_runtime_head = str(os.getenv("BRC_RUNTIME_HEAD") or "").strip()
+    errors: list[str] = []
+    for row in conn.execute(sa.select(table)).mappings():
+        process_name = str(row.get("process_name") or "unknown")
+        scope_key = str(row.get("scope_key") or "unknown")
+        identity = f"{process_name}:{scope_key}"
+        if row.get("projector_owner") != "runtime_process_outcome_projector":
+            errors.append(f"runtime process projector mismatch: {identity}")
+        if not str(row.get("source_watermark") or "").strip():
+            errors.append(f"runtime process source watermark missing: {identity}")
+        if int(row.get("completed_at_ms") or 0) > int(row.get("updated_at_ms") or 0):
+            errors.append(f"runtime process timestamp invalid: {identity}")
+        if expected_runtime_head and row.get("runtime_head") != expected_runtime_head:
+            errors.append(
+                f"runtime process head mismatch: {identity}:"
+                f"expected={expected_runtime_head}:actual={row.get('runtime_head')}"
+            )
     return errors
 
 

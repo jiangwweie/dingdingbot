@@ -42,6 +42,14 @@ EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
 )
+EXCHANGE_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
+)
+RUNTIME_SUPERVISION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-106_create_runtime_supervision_and_allocation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -67,6 +75,14 @@ def pg_control_connection():
         EXECUTION_ELIGIBILITY_MIGRATION_PATH,
         "migration_104_pg_promotion_lane",
     )
+    exchange_command_migration = _load_module(
+        EXCHANGE_COMMAND_MIGRATION_PATH,
+        "migration_105_pg_promotion_lane",
+    )
+    runtime_supervision_migration = _load_module(
+        RUNTIME_SUPERVISION_MIGRATION_PATH,
+        "migration_106_pg_promotion_lane",
+    )
     seed = _load_module(SEED_PATH, "seed_pg_promotion_lane")
     engine = create_engine(
         "sqlite://",
@@ -86,6 +102,20 @@ def pg_control_connection():
                 execution_eligibility_migration.op = migration.op
                 try:
                     execution_eligibility_migration.upgrade()
+                    old_exchange_command_op = exchange_command_migration.op
+                    exchange_command_migration.op = migration.op
+                    try:
+                        exchange_command_migration.upgrade()
+                        old_runtime_supervision_op = runtime_supervision_migration.op
+                        runtime_supervision_migration.op = migration.op
+                        try:
+                            runtime_supervision_migration.upgrade()
+                        finally:
+                            runtime_supervision_migration.op = (
+                                old_runtime_supervision_op
+                            )
+                    finally:
+                        exchange_command_migration.op = old_exchange_command_op
                 finally:
                     execution_eligibility_migration.op = old_eligibility_op
             finally:
@@ -124,6 +154,11 @@ def test_noops_without_fresh_signal(pg_control_connection):
     assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
     assert _count(pg_control_connection, "brc_budget_reservations") == 0
     assert _count(pg_control_connection, "brc_protection_references") == 0
+    process = pg_control_connection.execute(
+        text("SELECT process_state, business_state FROM brc_runtime_process_outcomes")
+    ).mappings().one()
+    assert process["process_state"] == "noop"
+    assert process["business_state"] == "waiting_for_opportunity"
 
 
 def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_connection):
@@ -982,6 +1017,20 @@ def test_existing_open_real_lane_prevents_duplicate(pg_control_connection):
     assert _count(pg_control_connection, "brc_budget_reservations") == 1
     assert _count(pg_control_connection, "brc_protection_references") == 1
 
+    allocation = pg_control_connection.execute(
+        text("SELECT * FROM brc_allocation_decisions")
+    ).mappings().one()
+    promotion = pg_control_connection.execute(
+        text("SELECT * FROM brc_promotion_candidates")
+    ).mappings().one()
+    assert allocation["allocation_policy_version"] == "allocation-policy-v0"
+    assert allocation["max_new_action_time_lanes"] == 1
+    assert allocation["selected_candidate_count"] == 1
+    assert promotion["allocation_decision_id"] == allocation["allocation_decision_id"]
+    assert promotion["allocation_rank"] == 1
+    assert promotion["allocation_state"] == "selected"
+    assert Decimal(str(promotion["allocated_risk_at_stop"])) > 0
+
 
 def test_expired_open_real_lane_is_expired_and_does_not_block_new_lane(
     pg_control_connection,
@@ -1406,6 +1455,52 @@ def test_multiple_fresh_candidates_select_one_by_strategy_priority(pg_control_co
         ).mappings()
     }
     assert statuses == {"MPG-001": "arbitration_won", "SOR-001": "arbitration_lost"}
+    allocation_rows = list(
+        pg_control_connection.execute(
+            text(
+                "SELECT strategy_group_id, allocation_state, allocation_rank, "
+                "allocated_risk_at_stop FROM brc_promotion_candidates "
+                "ORDER BY allocation_rank"
+            )
+        ).mappings()
+    )
+    assert [row["allocation_state"] for row in allocation_rows] == [
+        "selected",
+        "deferred",
+    ]
+    assert sum(
+        1
+        for row in allocation_rows
+        if Decimal(str(row["allocated_risk_at_stop"] or "0")) > 0
+    ) == 1
+
+
+def test_allocation_cannot_exceed_owner_loss_unit(pg_control_connection):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_owner_policy_current
+            SET loss_unit = 1
+            WHERE strategy_group_id = 'SOR-001'
+              AND symbol = 'ETHUSDT'
+              AND side = 'long'
+            """
+        )
+    )
+
+    payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "promotion_candidates_blocked"
+    assert "allocation_risk_exceeds_owner_capital_scope" in payload["blockers"]
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+    decision = pg_control_connection.execute(
+        text("SELECT selected_candidate_count FROM brc_allocation_decisions")
+    ).scalar_one()
+    assert decision == 0
 
 
 def test_stale_high_priority_candidate_loses_to_fresh_lower_priority(pg_control_connection):

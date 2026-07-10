@@ -37,6 +37,10 @@ EXCHANGE_COMMAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
 )
+RUNTIME_SUPERVISION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-106_create_runtime_supervision_and_allocation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 PG_TEST_NOW_MS = 1770001000000
 
@@ -99,6 +103,69 @@ def test_overdue_unknown_exchange_command_notifies_owner():
     assert decision["status"] == "needs_intervention"
     assert decision["notify"] is True
     assert decision["blocker_class"] == "exchange_command_outcome_unknown"
+
+
+def test_retryable_process_failure_is_temporarily_unavailable_and_notified():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "runtime_process_outcomes": [
+            {
+                "process_name": "promotion_action_time_lane",
+                "scope_key": "global",
+                "process_state": "retryable_failure",
+                "business_state": "temporarily_unavailable",
+                "first_blocker": "runtime_control_state_invalid:connection_lost",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            }
+        ],
+        "ticket_bound_exchange_commands": [],
+        "action_time_tickets": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "waiting_for_signal", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "temporarily_unavailable"
+    assert decision["notify"] is True
+    assert decision["blocker_class"] == "runtime_process_failure"
+
+
+def test_submitted_but_unprotected_lifecycle_notifies_owner():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "runtime_process_outcomes": [],
+        "ticket_bound_exchange_commands": [],
+        "ticket_bound_order_lifecycle_runs": [
+            {
+                "lifecycle_run_id": "lifecycle-1",
+                "status": "protection_missing",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            }
+        ],
+        "action_time_tickets": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "real_order_submitted", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "needs_intervention"
+    assert decision["notify"] is True
+    assert decision["blocker_class"] == "submitted_position_unprotected"
 
 
 def _load_module():
@@ -176,6 +243,18 @@ def _seed_pg_engine():
                     exchange_command_migration.op = migration.op
                     try:
                         exchange_command_migration.upgrade()
+                        runtime_supervision_migration = _load_file_module(
+                            RUNTIME_SUPERVISION_MIGRATION_PATH,
+                            "migration_106_server_monitor",
+                        )
+                        old_runtime_supervision_op = runtime_supervision_migration.op
+                        runtime_supervision_migration.op = migration.op
+                        try:
+                            runtime_supervision_migration.upgrade()
+                        finally:
+                            runtime_supervision_migration.op = (
+                                old_runtime_supervision_op
+                            )
                     finally:
                         exchange_command_migration.op = old_exchange_command_op
                 finally:

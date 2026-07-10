@@ -50,6 +50,7 @@ CONTROL_STATE_TABLES: dict[str, str] = {
     ),
     "ticket_bound_exchange_commands": "brc_ticket_bound_exchange_commands",
     "ticket_bound_post_submit_closures": "brc_ticket_bound_post_submit_closures",
+    "ticket_bound_order_lifecycle_runs": "brc_ticket_bound_order_lifecycle_runs",
     "ticket_bound_scope_freezes": "brc_ticket_bound_scope_freezes",
     "live_outcome_ledger": "brc_live_outcome_ledger",
     "goal_status_current": "brc_goal_status_current",
@@ -58,9 +59,16 @@ CONTROL_STATE_TABLES: dict[str, str] = {
     "control_read_model_snapshots": "brc_control_read_model_snapshots",
     "server_monitor_runs": "brc_server_monitor_runs",
     "server_monitor_notifications": "brc_server_monitor_notifications",
+    "runtime_process_outcomes": "brc_runtime_process_outcomes",
+    "strategy_semantic_admissions": "brc_strategy_semantic_admissions",
+    "allocation_decisions": "brc_allocation_decisions",
 }
 
 OPTIONAL_CONTROL_STATE_TABLES = {
+    "allocation_decisions",
+    "runtime_process_outcomes",
+    "strategy_semantic_admissions",
+    "ticket_bound_order_lifecycle_runs",
     "ticket_bound_exchange_commands",
     "ticket_bound_scope_freezes",
     "live_outcome_ledger",
@@ -1000,6 +1008,21 @@ def _monitor_bounded_statement(
         return statement.where(
             columns.command_state.in_(
                 ["dispatching", "outcome_unknown", "hard_stopped"]
+            )
+        ).order_by(columns.updated_at_ms.desc()).limit(200)
+    if logical_key == "runtime_process_outcomes" and "updated_at_ms" in columns:
+        return statement.order_by(columns.updated_at_ms.desc()).limit(200)
+    if logical_key == "ticket_bound_order_lifecycle_runs" and "updated_at_ms" in columns:
+        return statement.where(
+            ~columns.status.in_(
+                [
+                    "position_protected",
+                    "runner_protected",
+                    "reconciliation_matched",
+                    "budget_settled",
+                    "review_recorded",
+                    "lifecycle_closed",
+                ]
             )
         ).order_by(columns.updated_at_ms.desc()).limit(200)
     return statement

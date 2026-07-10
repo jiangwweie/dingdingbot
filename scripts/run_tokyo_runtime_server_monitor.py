@@ -288,6 +288,17 @@ def _first_pg_focus_row(candidate_pool: dict[str, Any]) -> dict[str, Any]:
 
 def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
     now_ms = int(control_state.get("read_now_ms") or time.time() * 1000)
+    process_failure = _runtime_process_failure_event(
+        _pg_rows(control_state.get("runtime_process_outcomes"))
+    )
+    if process_failure:
+        return process_failure
+    lifecycle_event = _lifecycle_safety_event(
+        _pg_rows(control_state.get("ticket_bound_order_lifecycle_runs")),
+        now_ms=now_ms,
+    )
+    if lifecycle_event:
+        return lifecycle_event
     exchange_command_event = _exchange_command_chain_event(
         _pg_rows(control_state.get("ticket_bound_exchange_commands")),
         now_ms=now_ms,
@@ -408,6 +419,80 @@ def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
                 "reasons": ["fresh_signal_detected", str(signal.get("signal_event_id") or "")],
             }
     return {}
+
+
+def _runtime_process_failure_event(
+    outcomes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    failures = [
+        row
+        for row in outcomes
+        if str(row.get("process_state") or "")
+        in {"retryable_failure", "hard_failure"}
+    ]
+    if not failures:
+        return {}
+    row = max(failures, key=lambda item: int(item.get("updated_at_ms") or 0))
+    hard = str(row.get("process_state") or "") == "hard_failure"
+    blocker = str(row.get("first_blocker") or "runtime_process_failure")
+    return {
+        "event_type": "runtime_process_failure",
+        "notify": True,
+        "decision_status": "needs_intervention"
+        if hard
+        else "temporarily_unavailable",
+        "strategy_group_id": "runtime",
+        "symbol": str(row.get("scope_key") or "all"),
+        "checkpoint": str(row.get("process_name") or "runtime_process"),
+        "blocker_class": "runtime_process_failure",
+        "reasons": ["runtime_process_failure", blocker],
+        "owner_message": (
+            "运行流程发生硬失败，需要介入"
+            if hard
+            else "运行流程暂时不可用，系统需要恢复"
+        ),
+    }
+
+
+def _lifecycle_safety_event(
+    rows: list[dict[str, Any]],
+    *,
+    now_ms: int,
+) -> dict[str, Any]:
+    _ = now_ms
+    unprotected_statuses = {
+        "entry_filled",
+        "entry_unknown",
+        "entry_orphaned",
+        "entry_partial_fill_unhandled",
+        "protection_missing",
+        "protection_submit_failed",
+        "protection_reconciliation_mismatch",
+    }
+    unsafe = [
+        row
+        for row in rows
+        if str(row.get("status") or "") in unprotected_statuses
+    ]
+    if not unsafe:
+        return {}
+    row = max(unsafe, key=lambda item: int(item.get("updated_at_ms") or 0))
+    return {
+        "event_type": "submitted_position_unprotected",
+        "notify": True,
+        "decision_status": "needs_intervention",
+        "strategy_group_id": row.get("strategy_group_id"),
+        "symbol": row.get("symbol"),
+        "side": row.get("side"),
+        "checkpoint": "ticket_bound_order_lifecycle",
+        "blocker_class": "submitted_position_unprotected",
+        "reasons": [
+            "submitted_position_unprotected",
+            str(row.get("status") or ""),
+            str(row.get("lifecycle_run_id") or ""),
+        ],
+        "owner_message": "已提交仓位缺少已验证保护，需要介入",
+    }
 
 
 def _exchange_command_chain_event(
