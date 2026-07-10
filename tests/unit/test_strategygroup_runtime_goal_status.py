@@ -30,6 +30,10 @@ RISK_RESERVATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
 )
+EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 PG_TEST_NOW_MS = 1770001000000
 
@@ -53,6 +57,10 @@ def pg_control_connection():
         RISK_RESERVATION_MIGRATION_PATH,
         "migration_103_goal_status",
     )
+    execution_eligibility_migration = _load_module(
+        EXECUTION_ELIGIBILITY_MIGRATION_PATH,
+        "migration_104_goal_status",
+    )
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_goal_status")
     engine = create_engine(
         "sqlite://",
@@ -68,6 +76,12 @@ def pg_control_connection():
             risk_reservation_migration.op = migration.op
             try:
                 risk_reservation_migration.upgrade()
+                old_eligibility_op = execution_eligibility_migration.op
+                execution_eligibility_migration.op = migration.op
+                try:
+                    execution_eligibility_migration.upgrade()
+                finally:
+                    execution_eligibility_migration.op = old_eligibility_op
             finally:
                 risk_reservation_migration.op = old_risk_op
         finally:

@@ -473,7 +473,22 @@ def test_pg_projection_rejects_market_wait_when_event_spec_is_observe_only(
             "strategy_group_id": candidate["strategy_group_id"],
             "symbol": candidate["symbol"],
             "side": candidate["side"],
+            "detector_state": "ready",
+            "watcher_state": "fresh",
+            "public_facts_state": "satisfied",
             "first_blocker_class": "market_wait_validated",
+        }
+        for candidate in control_state["candidate_scope"]
+        if candidate.get("status") == "active"
+    ]
+    control_state["watcher_runtime_coverage"] = [
+        {
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "coverage_state": "covered",
+            "liveness_state": "healthy",
+            "is_current": True,
         }
         for candidate in control_state["candidate_scope"]
         if candidate.get("status") == "active"
@@ -486,6 +501,14 @@ def test_pg_projection_rejects_market_wait_when_event_spec_is_observe_only(
 
     assert {
         row["first_blocker"] for row in inputs["daily_table"]["rows"]
+    } == {"action_time_boundary_not_reproduced"}
+
+    artifact = _builder().build_strategy_live_candidate_pool_from_control_state(
+        control_state,
+        generated_at_utc="2026-07-10T00:00:00+00:00",
+    )
+    assert {
+        row["first_blocker"] for row in artifact["symbol_readiness_rows"]
     } == {"action_time_boundary_not_reproduced"}
 
 

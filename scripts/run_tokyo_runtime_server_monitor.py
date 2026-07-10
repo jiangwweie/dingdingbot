@@ -710,6 +710,25 @@ def _decision_from_pg_sources(
                 "checkpoint": "server_runtime_monitor",
                 "owner_message": "等待机会，无需操作",
             }
+    elif (
+        status == "missing_fact"
+        and checks.get("fresh_signal_present") is False
+        and goal_status.get("owner_action_required") is not True
+        and coverage_complete
+        and systemd.get("ready")
+    ):
+        return {
+            "decision": "quiet",
+            "notify": False,
+            "status": "healthy_waiting_quiet",
+            "reasons": [],
+            "automation_id": "tokyo-runtime-server-monitor",
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "blocker_class": "none",
+            "checkpoint": "server_runtime_monitor",
+            "owner_message": "当前无新信号，前置工程阻断已记录，无需操作",
+        }
     elif status == "protected_submit_rehearsal_completed":
         return {
             "decision": "quiet",

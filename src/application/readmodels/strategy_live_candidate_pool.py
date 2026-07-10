@@ -364,6 +364,7 @@ def _candidate_pool_inputs_from_control_state(
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
             signal_by_lane=signal_by_lane,
+            event_spec_by_candidate=event_spec_by_candidate,
         ),
         "action_time_boundary": _pg_action_time_boundary_projection(
             generated_at_utc=generated_at_utc,
@@ -760,6 +761,7 @@ def _pg_replay_live_parity_projection(
     readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    event_spec_by_candidate: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for candidate in candidate_rows:
@@ -784,7 +786,12 @@ def _pg_replay_live_parity_projection(
             )
             if str(item or "")
         ]
-        blocker_class = _pg_replay_live_blocker_class(
+        blocker_class = _event_spec_execution_eligibility_blocker(
+            event_spec_by_candidate.get(
+                str(candidate.get("candidate_scope_id") or ""),
+                {},
+            )
+        ) or _pg_replay_live_blocker_class(
             readiness=readiness,
             facts=facts,
             signal=signal,
@@ -1176,14 +1183,9 @@ def _pg_candidate_first_blocker(
 ) -> str:
     key = _lane_key(candidate)
     event_spec = event_spec or {}
-    if "execution_eligibility_enabled" in event_spec and (
-        event_spec.get("execution_eligibility_enabled") is not True
-        or event_spec.get("declared_signal_grade")
-        not in {"trial_grade_signal", "production_grade_signal"}
-        or event_spec.get("declared_required_execution_mode")
-        not in {"trial_live", "production_live"}
-    ):
-        return "action_time_boundary_not_reproduced"
+    event_spec_blocker = _event_spec_execution_eligibility_blocker(event_spec)
+    if event_spec_blocker:
+        return event_spec_blocker
     signal = (signal_by_lane or {}).get(key, {})
     if signal and signal.get("execution_eligible") is not True:
         return "action_time_boundary_not_reproduced"
@@ -1200,6 +1202,22 @@ def _pg_candidate_first_blocker(
     if runtime_scope and runtime_scope.get("live_submit_allowed") is not True:
         return "runtime_profile_scope_missing"
     return "detector_not_attached"
+
+
+def _event_spec_execution_eligibility_blocker(
+    event_spec: dict[str, Any],
+) -> str:
+    if "execution_eligibility_enabled" not in event_spec:
+        return ""
+    if (
+        event_spec.get("execution_eligibility_enabled") is not True
+        or event_spec.get("declared_signal_grade")
+        not in {"trial_grade_signal", "production_grade_signal"}
+        or event_spec.get("declared_required_execution_mode")
+        not in {"trial_live", "production_live"}
+    ):
+        return "action_time_boundary_not_reproduced"
+    return ""
 
 
 def _pg_candidate_evidence_ref(
