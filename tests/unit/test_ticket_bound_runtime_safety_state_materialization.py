@@ -366,6 +366,35 @@ def test_runtime_safety_blocks_ineligible_ticket_graph(pg_control_connection):
     assert "execution_eligibility_missing_or_false" in payload["blockers"]
 
 
+def test_runtime_safety_blocks_lane_ticket_authority_mismatch(
+    pg_control_connection,
+):
+    ids = _create_handoff_ready(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET signal_grade = 'production_grade_signal',
+                required_execution_mode = 'production_live'
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"lane_id": ids["lane_id"]},
+    )
+
+    payload = safety.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_layer_handoff_id=ids["operation_layer_handoff_id"],
+        now_ms=NOW_MS + 3000,
+    )
+
+    assert payload["submit_allowed"] is False
+    assert "execution_eligibility_lane_ticket_mismatch:signal_grade" in payload[
+        "blockers"
+    ]
+
+
 def test_runtime_safety_state_blocks_ticket_identity_hash_mismatch(
     pg_control_connection,
 ):

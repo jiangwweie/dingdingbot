@@ -302,7 +302,7 @@ def _snapshot_row(
     blockers.extend(_scope_blockers(ticket=ticket, row=protection, label="protection"))
     blockers.extend(_scope_blockers(ticket=ticket, row=budget, label="budget"))
     blockers.extend(_scope_blockers(ticket=ticket, row=signal, label="signal"))
-    blockers.extend(_lane_blockers(lane=lane))
+    blockers.extend(_lane_blockers(ticket=ticket, lane=lane))
     blockers.extend(_signal_blockers(ticket=ticket, signal=signal, now_ms=now_ms))
     for key, fact in facts.items():
         blockers.extend(_scope_blockers(ticket=ticket, row=fact, label=key))
@@ -493,7 +493,7 @@ def _handoff_blockers(*, ticket: dict[str, Any], handoff: dict[str, Any]) -> lis
     return blockers
 
 
-def _lane_blockers(*, lane: dict[str, Any]) -> list[str]:
+def _lane_blockers(*, ticket: dict[str, Any], lane: dict[str, Any]) -> list[str]:
     if not lane:
         return []
     blockers: list[str] = []
@@ -503,6 +503,14 @@ def _lane_blockers(*, lane: dict[str, Any]) -> list[str]:
         blockers.append(f"lane_status_not_runtime_safety_eligible:{lane.get('status') or 'missing'}")
     if lane.get("execution_eligible") is not True:
         blockers.append("lane_execution_eligibility_missing_or_false")
+    for field in (
+        "signal_grade",
+        "required_execution_mode",
+        "execution_eligible",
+        "authority_source_ref",
+    ):
+        if lane.get(field) != ticket.get(field):
+            blockers.append(f"execution_eligibility_lane_ticket_mismatch:{field}")
     return blockers
 
 
