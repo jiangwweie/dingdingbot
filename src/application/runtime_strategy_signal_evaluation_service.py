@@ -584,7 +584,7 @@ class _BRF2LiveReferenceEvaluator:
             deep=True,
         )
         output = self._delegate.evaluate(mapped_input)
-        return _retarget_reference_output(
+        retargeted = _retarget_reference_output(
             output,
             strategy_family_id=signal_input.strategy_family_id,
             strategy_family_version_id=signal_input.strategy_family_version_id,
@@ -592,6 +592,87 @@ class _BRF2LiveReferenceEvaluator:
                 "reference_strategy_family": "BRF-001",
                 "reference_logic_version": output.signal_snapshot.get("logic_version"),
             },
+        )
+        if retargeted.signal_type != SignalType.WOULD_ENTER:
+            return retargeted
+        if retargeted.side != SignalSide.SHORT:
+            return retargeted.model_copy(
+                update={
+                    "signal_type": SignalType.INVALID,
+                    "side": SignalSide.NONE,
+                    "signal_grade": SignalGrade.OBSERVE_ONLY_SIGNAL,
+                    "required_execution_mode": RequiredExecutionMode.OBSERVE_ONLY,
+                    "reason_codes": [
+                        *retargeted.reason_codes,
+                        "brf2_invalid_non_short_reference_output",
+                    ],
+                    "fact_observations": [],
+                },
+                deep=True,
+            )
+
+        htf_context = retargeted.evidence_payload.get("htf_context")
+        price_action = retargeted.evidence_payload.get("price_action_structure")
+        rally_high = (
+            price_action.get("rally_high_reference")
+            if isinstance(price_action, dict)
+            else None
+        )
+        if htf_context not in {"trend_down", "mixed"} or rally_high is None:
+            return retargeted.model_copy(
+                update={
+                    "signal_type": SignalType.INVALID,
+                    "side": SignalSide.NONE,
+                    "signal_grade": SignalGrade.OBSERVE_ONLY_SIGNAL,
+                    "required_execution_mode": RequiredExecutionMode.OBSERVE_ONLY,
+                    "reason_codes": [
+                        *retargeted.reason_codes,
+                        "brf2_invalid_disable_or_protection_fact_missing",
+                    ],
+                    "fact_observations": [],
+                },
+                deep=True,
+            )
+
+        trigger_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+        valid_until_ms = trigger_ms + 3_600_000
+        source_ref = f"closed_ohlcv:{signal_input.symbol}:{trigger_ms}:brf2-v2"
+        return retargeted.model_copy(
+            update={
+                "signal_grade": SignalGrade.TRIAL_GRADE_SIGNAL,
+                "required_execution_mode": RequiredExecutionMode.TRIAL_LIVE,
+                "fact_observations": [
+                    StrategyFactObservation(
+                        fact_key="rally_failure_confirmed",
+                        observed_value=True,
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                    StrategyFactObservation(
+                        fact_key="short_side_not_disabled",
+                        observed_value=True,
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                    StrategyFactObservation(
+                        fact_key="strong_uptrend_disable",
+                        observed_value=False,
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                    StrategyFactObservation(
+                        fact_key="rally_high_reference",
+                        observed_value=Decimal(str(rally_high)),
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                ],
+            },
+            deep=True,
         )
 
 

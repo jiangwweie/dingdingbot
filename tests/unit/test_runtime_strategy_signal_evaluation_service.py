@@ -664,7 +664,17 @@ def test_mainline_mi_and_brf2_routes_are_configured_and_non_executing():
     assert brf2.output.strategy_family_version_id == "BRF2-001-v0"
     assert brf2.output.signal_type == SignalType.WOULD_ENTER
     assert brf2.output.side == SignalSide.SHORT
+    assert brf2.output.signal_grade == SignalGrade.TRIAL_GRADE_SIGNAL
+    assert brf2.output.required_execution_mode == RequiredExecutionMode.TRIAL_LIVE
     assert brf2.output.signal_snapshot["reference_strategy_family"] == "BRF-001"
+    brf2_facts = {
+        item.fact_key: item.observed_value
+        for item in brf2.output.fact_observations
+    }
+    assert brf2_facts["rally_failure_confirmed"] is True
+    assert brf2_facts["short_side_not_disabled"] is True
+    assert brf2_facts["strong_uptrend_disable"] is False
+    assert Decimal(str(brf2_facts["rally_high_reference"])) > 0
     assert brf2.order_candidate_created is False
     assert brf2.execution_intent_created is False
     assert brf2.exchange_called is False
