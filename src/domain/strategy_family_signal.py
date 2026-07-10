@@ -13,6 +13,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.comparative_strength import ComparativeStrengthSnapshot
+
 from src.domain.execution_eligibility import RequiredExecutionMode, SignalGrade
 
 
@@ -192,6 +194,7 @@ class StrategyFamilySignalInput(StrategyFamilySignalModel):
     primary_timeframe: str = Field(min_length=1, max_length=32)
     context_timeframes: list[str] = Field(default_factory=list)
     market_snapshot: MarketSnapshot
+    comparative_strength_snapshot: Optional[ComparativeStrengthSnapshot] = None
     account_facts_snapshot: AccountFactsSnapshot
     position_open_order_summary: dict[str, Any] = Field(default_factory=dict)
     reconciliation_status: dict[str, Any] = Field(default_factory=dict)
