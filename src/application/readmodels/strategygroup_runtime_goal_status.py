@@ -26,6 +26,10 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     is_current_action_time_lane,
     is_current_action_time_ticket,
+    runtime_safety_submit_authorized,
+)
+from src.application.readmodels.runtime_safety_truth import (  # noqa: E402
+    current_runtime_safety_truth_by_lane,
 )
 
 from src.infrastructure.sync_pg_dsn import (  # noqa: E402
@@ -149,17 +153,12 @@ def _control_state_now_ms(control_state: dict[str, Any]) -> int:
 def _pg_latest_safety_by_lane(
     control_state: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    snapshots: dict[str, dict[str, Any]] = {}
-    for row in _pg_rows(control_state.get("runtime_safety_state")):
-        lane_id = str(row.get("action_time_lane_input_id") or "")
-        if not lane_id:
-            continue
-        current = snapshots.get(lane_id)
-        if current is None or int(row.get("observed_at_ms") or 0) >= int(
-            current.get("observed_at_ms") or 0
-        ):
-            snapshots[lane_id] = row
-    return snapshots
+    return {
+        lane_id: truth.annotated_snapshot()
+        for lane_id, truth in current_runtime_safety_truth_by_lane(
+            control_state
+        ).items()
+    }
 
 
 LIVE_SUCCESSFUL_PROTECTED_SUBMIT_STATUSES = {"submitted"}
@@ -317,7 +316,8 @@ def _pg_real_order_ready(
     safety = safety_by_lane.get(lane_id, {})
     return (
         ticket.get("status") == "finalgate_ready"
-        and safety.get("submit_allowed") is True
+        and runtime_safety_submit_authorized(safety)
+        and safety.get("_submit_lineage_verified") is True
         and safety.get("finalgate_ready") is True
         and safety.get("operation_layer_ready") is True
         and safety.get("protection_ready") is True

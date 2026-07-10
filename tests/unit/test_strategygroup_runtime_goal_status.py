@@ -895,6 +895,53 @@ def test_pg_goal_status_ignores_expired_action_time_ticket(
     assert f"action_time_ticket_missing:{lane_id}" in packet["blockers"]
 
 
+def test_pg_goal_status_ignores_expired_runtime_safety_conflict(
+    pg_control_connection,
+) -> None:
+    now_ms = 1770002000000
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_runtime_safety_state_snapshots (
+              runtime_safety_snapshot_id, action_time_lane_input_id,
+              strategy_group_id, symbol, side, runtime_profile_id, safety_state,
+              submit_allowed, finalgate_ready, operation_layer_ready,
+              protection_ready, active_position_conflict, facts_fresh,
+              trusted_fact_refs_complete, blockers, trusted_fact_refs,
+              observed_at_ms, valid_until_ms, created_at_ms, authority_boundary
+            ) VALUES (
+              'runtime_safety:expired-conflict', 'lane:expired-conflict',
+              'SOR-001', 'ETHUSDT', 'long',
+              'runtime-profile:SOR-001:ETHUSDT:long:v1', 'blocked_safety',
+              false, false, false, false, true, false, false,
+              '["active_position_resolution"]', '{}',
+              :observed_at_ms, :valid_until_ms, :created_at_ms,
+              'unit no exchange write'
+            )
+            """
+        ),
+        {
+            "observed_at_ms": now_ms - 1000,
+            "valid_until_ms": now_ms - 1,
+            "created_at_ms": now_ms - 1000,
+        },
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
+    )
+
+    assert packet["status"] == "waiting_for_signal"
+    assert packet["ready_for_real_order_action"] is False
+    assert "active_position_resolution" not in packet["blockers"]
+
+
 def test_pg_goal_status_blocks_open_lane_with_invalid_runtime_scope_binding(
     tmp_path: Path,
     pg_control_connection,

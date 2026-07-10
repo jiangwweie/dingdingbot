@@ -316,14 +316,155 @@ def test_daily_table_pg_runtime_safety_projection_uses_snapshot_id(
             """
         )
     )
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1770001000000,
+    )
     control_state = repository.read_control_state()
+    control_state["runtime_safety_state"][0].update(
+        {
+            "signal_grade": "trial_grade_signal",
+            "required_execution_mode": "trial_live",
+            "execution_eligible": True,
+            "authority_source_ref": "event_spec:SOR-LONG:v2",
+            "trusted_fact_refs": {
+                "ticket_id": "ticket:unit",
+                "ticket_hash": "ticket-hash:unit",
+                "finalgate_pass_id": "finalgate-pass:unit",
+                "signal_event_id": "signal:unit",
+                "operation_layer_handoff_id": "handoff:unit",
+                "operation_submit_command_id": "submit-command:unit",
+                "budget_reservation_id": "budget:unit",
+                "protection_ref_id": "protection:unit",
+                "public_fact_snapshot_id": "fact:public:unit",
+                "action_time_fact_snapshot_id": "fact:action-time:unit",
+                "account_safe_fact_snapshot_id": "fact:account-safe:unit",
+                "account_mode_snapshot_id": "fact:account-mode:unit",
+            },
+        }
+    )
+    scope = {
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "runtime_profile_id": "runtime-profile:SOR-001:ETHUSDT:long:v1",
+    }
+    control_state["live_signal_events"].append(
+        {
+            **scope,
+            "signal_event_id": "signal:unit",
+            "status": "facts_validated",
+            "freshness_state": "fresh",
+            "source_kind": "live_market",
+            "invalidated_at_ms": None,
+            "expires_at_ms": 1770001600000,
+        }
+    )
+    control_state["promotion_candidates"].append(
+        {
+            **scope,
+            "promotion_candidate_id": "promotion:unit",
+            "signal_event_id": "signal:unit",
+            "status": "arbitration_won",
+            "closed_at_ms": None,
+            "expires_at_ms": 1770001600000,
+        }
+    )
+    control_state["action_time_lane_inputs"].append(
+        {
+            **scope,
+            "action_time_lane_input_id": "lane:unit",
+            "promotion_candidate_id": "promotion:unit",
+            "signal_event_id": "signal:unit",
+            "runtime_safety_snapshot_id": "runtime_safety:unit",
+            "lane_scope": "real_submit_candidate",
+            "status": "ticket_created",
+            "closed_at_ms": None,
+            "expires_at_ms": 1770001600000,
+        }
+    )
+    control_state["action_time_tickets"].append(
+        {
+            **scope,
+            "ticket_id": "ticket:unit",
+            "action_time_lane_input_id": "lane:unit",
+            "signal_event_id": "signal:unit",
+            "status": "finalgate_ready",
+            "expires_at_ms": 1770001600000,
+            "ticket_hash": "ticket-hash:unit",
+            "budget_reservation_id": "budget:unit",
+            "protection_ref_id": "protection:unit",
+            "public_fact_snapshot_id": "fact:public:unit",
+            "action_time_fact_snapshot_id": "fact:action-time:unit",
+            "account_safe_fact_snapshot_id": "fact:account-safe:unit",
+            "account_mode_snapshot_id": "fact:account-mode:unit",
+        }
+    )
+    control_state["action_time_ticket_events"].append(
+        {
+            "ticket_event_id": "ticket-event:unit:finalgate",
+            "ticket_id": "ticket:unit",
+            "action_time_lane_input_id": "lane:unit",
+            "to_status": "finalgate_ready",
+            "event_payload": {"finalgate_pass_id": "finalgate-pass:unit"},
+        }
+    )
+    control_state["operation_layer_handoffs"].append(
+        {
+            **scope,
+            "operation_layer_handoff_id": "handoff:unit",
+            "ticket_id": "ticket:unit",
+            "action_time_lane_input_id": "lane:unit",
+            "operation_submit_command_id": "submit-command:unit",
+            "finalgate_pass_id": "finalgate-pass:unit",
+            "command_plan": {"finalgate_pass_id": "finalgate-pass:unit"},
+            "status": "handoff_ready",
+        }
+    )
 
     runtime_safety = _builder()._pg_runtime_safety_projection(control_state)
 
     assert runtime_safety["status"] == "live_submit_ready"
     assert runtime_safety["runtime_safety_state"]["live_submit_ready"] is True
     assert runtime_safety["runtime_safety_state"]["snapshot_id"] == "runtime_safety:unit"
+
+
+def test_daily_table_pg_runtime_safety_projection_ignores_expired_snapshot() -> None:
+    now_ms = 1770001000000
+    control_state = {
+        "read_now_ms": now_ms,
+        "runtime_safety_state": [
+            {
+                "runtime_safety_snapshot_id": "runtime_safety:expired",
+                "action_time_lane_input_id": "lane:expired",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "safety_state": "live_submit_ready",
+                "submit_allowed": True,
+                "finalgate_ready": True,
+                "operation_layer_ready": True,
+                "protection_ready": True,
+                "active_position_conflict": False,
+                "facts_fresh": True,
+                "trusted_fact_refs_complete": True,
+                "blockers": [],
+                "observed_at_ms": now_ms - 100,
+                "valid_until_ms": now_ms - 1,
+                "created_at_ms": now_ms - 100,
+                "signal_grade": "trial_grade_signal",
+                "required_execution_mode": "trial_live",
+                "execution_eligible": True,
+                "authority_source_ref": "event_spec:SOR-LONG:v2",
+            }
+        ],
+    }
+
+    runtime_safety = _builder()._pg_runtime_safety_projection(control_state)
+
+    assert runtime_safety["status"] == "runtime_safety_state_ready"
+    assert runtime_safety["runtime_safety_state"]["live_submit_ready"] is False
+    assert runtime_safety["runtime_safety_state"]["snapshot_id"] == ""
 
 
 def test_daily_table_pg_cli_requires_pg_dsn_without_test_flag(tmp_path: Path):

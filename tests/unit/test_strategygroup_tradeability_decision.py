@@ -2295,6 +2295,8 @@ def test_cli_pg_backed_tradeability_decision_reads_seeded_runtime_control_state(
     assert rows["BRF2-001"]["policy_scope"]["side_scope"] == ["short"]
     assert packet["summary"]["tradable_now_count"] == 0
     for row in rows.values():
+        assert row["state_source"] == "pg_current_candidate_pool"
+        assert row["first_blocker_class"] not in {"artifact_missing", "schema_invalid"}
         assert row["runtime_safety_reference"]["live_submit_ready_for_strategy"] is False
         assert "actionable_now" not in row
         assert "real_order_authority" not in row
@@ -2348,6 +2350,349 @@ def test_tradeability_ignores_expired_invalidated_and_non_live_pg_signals(
     sor = next(row for row in packet["decision_rows"] if row["strategy_group_id"] == "SOR-001")
     assert ("SOR-001", "ETHUSDT", "long") not in signal_by_lane
     assert sor["decision"] != "tradable_now"
+
+
+def test_pg_tradeability_classifies_all_five_as_validated_market_wait_when_ready(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    database_url = _create_seeded_runtime_control_db(tmp_path / "runtime.db")
+    now_ms = 1770001000000
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            control_state = PgBackedRuntimeControlStateRepository(
+                conn,
+                now_ms=now_ms,
+            ).read_control_state()
+        _attach_satisfied_pg_observation(control_state, now_ms=now_ms)
+
+        packet = module.build_tradeability_decision_from_control_state(control_state)
+    finally:
+        engine.dispose()
+
+    assert packet["status"] == "tradeability_decision_ready"
+    assert packet["summary"]["tradable_now_count"] == 0
+    assert packet["summary"]["market_first_blocker_count"] == 5
+    assert {
+        row["first_blocker_class"] for row in packet["decision_rows"]
+    } == {"market_wait_validated"}
+    assert all(
+        row["market_wait_validation"]["valid"] is True
+        for row in packet["decision_rows"]
+    )
+
+
+def _attach_satisfied_pg_observation(control_state: dict, *, now_ms: int) -> None:
+    for event in control_state["strategy_side_event_specs"]:
+        event.update(
+            {
+                "declared_signal_grade": "trial_grade_signal",
+                "declared_required_execution_mode": "trial_live",
+                "execution_eligibility_enabled": True,
+            }
+        )
+    runtime_by_candidate = {
+        row["candidate_scope_id"]: row
+        for row in control_state["runtime_scope_bindings"]
+        if row.get("status") == "active"
+    }
+    for index, candidate in enumerate(control_state["candidate_scope"], start=1):
+        if candidate.get("status") != "active":
+            continue
+        runtime = runtime_by_candidate[candidate["candidate_scope_id"]]
+        observed_at_ms = now_ms - 1000 + index
+        lane_suffix = (
+            f"{candidate['strategy_group_id']}:{candidate['symbol']}:{candidate['side']}"
+        )
+        control_state["watcher_runtime_coverage"].append(
+            {
+                "runtime_coverage_id": f"coverage:{lane_suffix}:ready",
+                "strategy_group_id": candidate["strategy_group_id"],
+                "symbol": candidate["symbol"],
+                "side": candidate["side"],
+                "detector_key": f"detector:{candidate['strategy_group_id']}:{candidate['side']}",
+                "runtime_profile_id": runtime["runtime_profile_id"],
+                "coverage_state": "covered",
+                "liveness_state": "healthy",
+                "last_tick_at_ms": observed_at_ms,
+                "valid_until_ms": now_ms + 60_000,
+                "is_current": True,
+                "created_at_ms": observed_at_ms,
+            }
+        )
+        control_state["runtime_fact_snapshots"].append(
+            {
+                "fact_snapshot_id": f"fact:{lane_suffix}:ready",
+                "strategy_group_id": candidate["strategy_group_id"],
+                "symbol": candidate["symbol"],
+                "side": candidate["side"],
+                "runtime_profile_id": runtime["runtime_profile_id"],
+                "fact_surface": "pretrade_public",
+                "source_kind": "live_market",
+                "source_ref": f"unit:{lane_suffix}",
+                "computed": True,
+                "satisfied": True,
+                "freshness_state": "fresh",
+                "failed_facts": [],
+                "fact_values": {"all_strategy_facts_satisfied": True},
+                "blocker_class": None,
+                "observed_at_ms": observed_at_ms,
+                "valid_until_ms": now_ms + 60_000,
+                "created_at_ms": observed_at_ms,
+            }
+        )
+
+
+def test_pg_tradeability_ignores_expired_runtime_safety_snapshot(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    database_url = _create_seeded_runtime_control_db(tmp_path / "runtime.db")
+    now_ms = 1770001000000
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            control_state = PgBackedRuntimeControlStateRepository(
+                conn,
+                now_ms=now_ms,
+            ).read_control_state()
+        control_state["runtime_safety_state"].append(
+            _pg_runtime_safety_row(
+                now_ms=now_ms,
+                valid_until_ms=now_ms - 1,
+                lane_id="lane:SOR-001:ETHUSDT:long:expired",
+            )
+        )
+
+        packet = module.build_tradeability_decision_from_control_state(control_state)
+    finally:
+        engine.dispose()
+
+    sor = next(
+        row
+        for row in packet["decision_rows"]
+        if row["strategy_group_id"] == "SOR-001"
+    )
+    assert packet["summary"]["tradable_now_count"] == 0
+    assert sor["decision"] != "tradable_now"
+    assert sor["runtime_safety_reference"]["snapshot_id"] == ""
+
+
+def test_pg_tradeability_rejects_unexpired_orphan_runtime_safety_snapshot(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    database_url = _create_seeded_runtime_control_db(tmp_path / "runtime.db")
+    now_ms = 1770001000000
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            control_state = PgBackedRuntimeControlStateRepository(
+                conn,
+                now_ms=now_ms,
+            ).read_control_state()
+        control_state["runtime_safety_state"].append(
+            _pg_runtime_safety_row(
+                now_ms=now_ms,
+                valid_until_ms=now_ms + 60_000,
+                lane_id="lane:SOR-001:ETHUSDT:long:orphan",
+            )
+        )
+
+        packet = module.build_tradeability_decision_from_control_state(control_state)
+    finally:
+        engine.dispose()
+
+    sor = next(
+        row
+        for row in packet["decision_rows"]
+        if row["strategy_group_id"] == "SOR-001"
+    )
+    assert packet["summary"]["tradable_now_count"] == 0
+    assert sor["decision"] != "tradable_now"
+    assert sor["runtime_safety_reference"]["lineage_verified"] is False
+
+
+def test_pg_tradeability_accepts_only_verified_current_runtime_safety_lineage(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    database_url = _create_seeded_runtime_control_db(tmp_path / "runtime.db")
+    now_ms = 1770001000000
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            control_state = PgBackedRuntimeControlStateRepository(
+                conn,
+                now_ms=now_ms,
+            ).read_control_state()
+        _attach_verified_sor_chain(control_state, now_ms=now_ms)
+
+        packet = module.build_tradeability_decision_from_control_state(control_state)
+    finally:
+        engine.dispose()
+
+    sor = next(
+        row
+        for row in packet["decision_rows"]
+        if row["strategy_group_id"] == "SOR-001"
+    )
+    assert packet["status"] == "tradeability_decision_ready"
+    assert packet["summary"]["tradable_now_count"] == 1
+    assert sor["decision"] == "tradable_now"
+    assert sor["runtime_safety_reference"]["lineage_verified"] is True
+    assert sor["runtime_safety_reference"]["live_submit_ready_for_strategy"] is True
+
+
+def _attach_verified_sor_chain(control_state: dict, *, now_ms: int) -> None:
+    lane_id = "lane:SOR-001:ETHUSDT:long:verified"
+    signal_id = "signal:SOR-001:ETHUSDT:long:verified"
+    promotion_id = "promotion:SOR-001:ETHUSDT:long:verified"
+    ticket_id = "ticket:SOR-001:ETHUSDT:long:verified"
+    handoff_id = "handoff:SOR-001:ETHUSDT:long:verified"
+    command_id = "submit-command:SOR-001:ETHUSDT:long:verified"
+    snapshot = _pg_runtime_safety_row(
+        now_ms=now_ms,
+        valid_until_ms=now_ms + 60_000,
+        lane_id=lane_id,
+    )
+    snapshot["trusted_fact_refs"] = {
+        "ticket_id": ticket_id,
+        "ticket_hash": "ticket-hash:verified",
+        "finalgate_pass_id": "finalgate-pass:verified",
+        "signal_event_id": signal_id,
+        "operation_layer_handoff_id": handoff_id,
+        "operation_submit_command_id": command_id,
+        "budget_reservation_id": "budget:verified",
+        "protection_ref_id": "protection:verified",
+        "public_fact_snapshot_id": "fact:public:verified",
+        "action_time_fact_snapshot_id": "fact:action-time:verified",
+        "account_safe_fact_snapshot_id": "fact:account-safe:verified",
+        "account_mode_snapshot_id": "fact:account-mode:verified",
+    }
+    control_state["runtime_safety_state"].append(snapshot)
+    scope = {
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "runtime_profile_id": "owner-runtime-console-v1",
+    }
+    control_state["live_signal_events"].append(
+        {
+            **scope,
+            "signal_event_id": signal_id,
+            "status": "facts_validated",
+            "freshness_state": "fresh",
+            "source_kind": "live_market",
+            "invalidated_at_ms": None,
+            "expires_at_ms": now_ms + 60_000,
+            "execution_eligible": True,
+        }
+    )
+    control_state["promotion_candidates"].append(
+        {
+            **scope,
+            "promotion_candidate_id": promotion_id,
+            "signal_event_id": signal_id,
+            "status": "arbitration_won",
+            "closed_at_ms": None,
+            "expires_at_ms": now_ms + 60_000,
+            "execution_eligible": True,
+        }
+    )
+    control_state["action_time_lane_inputs"].append(
+        {
+            **scope,
+            "action_time_lane_input_id": lane_id,
+            "promotion_candidate_id": promotion_id,
+            "signal_event_id": signal_id,
+            "runtime_safety_snapshot_id": snapshot["runtime_safety_snapshot_id"],
+            "lane_scope": "real_submit_candidate",
+            "status": "ticket_created",
+            "closed_at_ms": None,
+            "expires_at_ms": now_ms + 60_000,
+            "first_blocker_class": "action_time_preflight_ready",
+            "execution_eligible": True,
+        }
+    )
+    control_state["action_time_tickets"].append(
+        {
+            **scope,
+            "ticket_id": ticket_id,
+            "action_time_lane_input_id": lane_id,
+            "signal_event_id": signal_id,
+            "status": "finalgate_ready",
+            "expires_at_ms": now_ms + 60_000,
+            "execution_eligible": True,
+            "ticket_hash": "ticket-hash:verified",
+            "budget_reservation_id": "budget:verified",
+            "protection_ref_id": "protection:verified",
+            "public_fact_snapshot_id": "fact:public:verified",
+            "action_time_fact_snapshot_id": "fact:action-time:verified",
+            "account_safe_fact_snapshot_id": "fact:account-safe:verified",
+            "account_mode_snapshot_id": "fact:account-mode:verified",
+        }
+    )
+    control_state["action_time_ticket_events"].append(
+        {
+            "ticket_event_id": "ticket-event:SOR-001:ETHUSDT:long:verified",
+            "ticket_id": ticket_id,
+            "action_time_lane_input_id": lane_id,
+            "to_status": "finalgate_ready",
+            "event_payload": {"finalgate_pass_id": "finalgate-pass:verified"},
+        }
+    )
+    control_state["operation_layer_handoffs"].append(
+        {
+            **scope,
+            "operation_layer_handoff_id": handoff_id,
+            "ticket_id": ticket_id,
+            "action_time_lane_input_id": lane_id,
+            "operation_submit_command_id": command_id,
+            "finalgate_pass_id": "finalgate-pass:verified",
+            "command_plan": {"finalgate_pass_id": "finalgate-pass:verified"},
+            "status": "handoff_ready",
+        }
+    )
+
+
+def _pg_runtime_safety_row(
+    *,
+    now_ms: int,
+    valid_until_ms: int,
+    lane_id: str,
+) -> dict:
+    return {
+        "runtime_safety_snapshot_id": f"runtime_safety:{lane_id}",
+        "action_time_lane_input_id": lane_id,
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "runtime_profile_id": "owner-runtime-console-v1",
+        "safety_state": "live_submit_ready",
+        "submit_allowed": True,
+        "finalgate_ready": True,
+        "operation_layer_ready": True,
+        "protection_ready": True,
+        "active_position_conflict": False,
+        "facts_fresh": True,
+        "trusted_fact_refs_complete": True,
+        "blockers": [],
+        "trusted_fact_refs": {
+            "ticket_id": "ticket:SOR-001:ETHUSDT:long:orphan",
+            "operation_layer_handoff_id": "handoff:SOR-001:ETHUSDT:long:orphan",
+            "signal_event_id": "signal:SOR-001:ETHUSDT:long:orphan",
+        },
+        "observed_at_ms": now_ms - 100,
+        "valid_until_ms": valid_until_ms,
+        "created_at_ms": now_ms - 100,
+        "authority_boundary": "unit no exchange write",
+        "signal_grade": "trial_grade_signal",
+        "required_execution_mode": "trial_live",
+        "execution_eligible": True,
+        "authority_source_ref": "event_spec:SOR-LONG:v2",
+    }
 
 
 def _insert_tradeability_signal(

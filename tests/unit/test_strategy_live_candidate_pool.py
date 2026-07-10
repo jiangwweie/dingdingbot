@@ -462,7 +462,11 @@ def test_pg_projection_classifies_observe_only_fresh_signal_as_event_capability_
 def test_pg_projection_rejects_market_wait_when_event_spec_is_observe_only(
     pg_control_connection,
 ):
-    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    now_ms = 1770001000000
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
     control_state = repository.read_control_state()
     for event_spec in control_state["strategy_side_event_specs"]:
         event_spec["declared_signal_grade"] = "observe_only_signal"
@@ -477,6 +481,8 @@ def test_pg_projection_rejects_market_wait_when_event_spec_is_observe_only(
             "watcher_state": "fresh",
             "public_facts_state": "satisfied",
             "first_blocker_class": "market_wait_validated",
+            "computed_at_ms": now_ms - 1000,
+            "valid_until_ms": now_ms + 60_000,
         }
         for candidate in control_state["candidate_scope"]
         if candidate.get("status") == "active"
@@ -489,6 +495,8 @@ def test_pg_projection_rejects_market_wait_when_event_spec_is_observe_only(
             "coverage_state": "covered",
             "liveness_state": "healthy",
             "is_current": True,
+            "last_tick_at_ms": now_ms - 1000,
+            "valid_until_ms": now_ms + 60_000,
         }
         for candidate in control_state["candidate_scope"]
         if candidate.get("status") == "active"

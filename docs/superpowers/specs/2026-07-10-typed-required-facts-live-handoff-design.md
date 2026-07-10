@@ -211,6 +211,44 @@ Natural market opportunity is not required for engineering acceptance. A real
 order remains conditional on a future fresh live signal and all action-time
 safety gates.
 
+## Production Truth Cutover Extension
+
+The first Tokyo acceptance run exposed two additional P0 truth defects after
+the Typed RequiredFacts handoff itself was healthy:
+
+1. Tradeability selected the most recently written Runtime Safety State without
+   checking its validity window or current chain lineage, so an expired SOR
+   snapshot could produce a false `tradable_now`;
+2. the PG Tradeability adapter converted current rows back into legacy artifact
+   shapes and re-ran historical schema guards, producing false
+   `artifact_missing` / `schema_invalid` blockers for the other four groups.
+
+The production design is therefore extended as follows:
+
+```text
+PG Candidate Pool per-symbol current truth
+-> one strategy-level Tradeability aggregation per StrategyGroup
+-> current Runtime Safety State payload validation
+-> live_signal -> promotion -> lane -> ticket -> Operation Layer lineage proof
+-> tradable_now only when both payload and lineage are valid
+```
+
+The following currentness rules are shared across read models:
+
+| PG object | Currentness requirement | Authority consequence |
+| --- | --- | --- |
+| watcher coverage | current flag, bounded last tick, unexpired | may prove detector/watcher coverage only |
+| pre-trade readiness | bounded compute time, unexpired | may classify the current per-symbol blocker |
+| live signal / promotion / lane / ticket | not future-dated, legal open state, unexpired | may advance the L5-L7 chain only |
+| Runtime Safety State | observed no later than now, unexpired, execution-eligible payload | still not enough for `tradable_now` |
+| verified safety lineage | same StrategyGroup/symbol/side/profile across signal, promotion, lane, ticket, handoff, and safety snapshot | may support `tradable_now`; still no exchange-write authority by itself |
+
+`Tradeability`, `Daily Live Enablement`, and `Goal Status` consume this shared
+Runtime Safety truth. Expired snapshots are absent from current truth; orphan
+or mismatched snapshots remain diagnostic evidence but cannot grant submit
+readiness. Production Tradeability no longer invokes legacy artifact schema or
+timestamp guards on PG current data.
+
 ## Rollback
 
 No schema migration is required. Code rollback can atomically repoint

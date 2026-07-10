@@ -924,11 +924,29 @@ def _monitor_bounded_statement(
 ) -> sa.sql.Select[Any]:
     columns = table.c
     if logical_key == "watcher_runtime_coverage" and "is_current" in columns:
-        return statement.where(columns.is_current.is_(True))
+        return statement.where(
+            sa.and_(
+                columns.is_current.is_(True),
+                columns.last_tick_at_ms.is_not(None),
+                columns.last_tick_at_ms <= now_ms,
+                columns.valid_until_ms.is_not(None),
+                columns.valid_until_ms > now_ms,
+            )
+        )
+    if logical_key == "pretrade_readiness_rows":
+        return statement.where(
+            sa.and_(
+                columns.computed_at_ms <= now_ms,
+                columns.valid_until_ms.is_not(None),
+                columns.valid_until_ms > now_ms,
+            )
+        )
     if logical_key == "runtime_fact_snapshots":
         statement = statement.where(
             sa.and_(
                 columns.freshness_state == "fresh",
+                columns.observed_at_ms <= now_ms,
+                columns.created_at_ms <= now_ms,
                 columns.valid_until_ms.is_not(None),
                 columns.valid_until_ms > now_ms,
             )
@@ -943,6 +961,9 @@ def _monitor_bounded_statement(
                 columns.freshness_state == "fresh",
                 columns.source_kind == "live_market",
                 columns.invalidated_at_ms.is_(None),
+                columns.event_time_ms <= now_ms,
+                columns.observed_at_ms <= now_ms,
+                columns.created_at_ms <= now_ms,
                 columns.expires_at_ms.is_not(None),
                 columns.expires_at_ms > now_ms,
             )
@@ -957,6 +978,7 @@ def _monitor_bounded_statement(
                     ["eligible", "arbitration_pending", "arbitration_won"]
                 ),
                 columns.closed_at_ms.is_(None),
+                columns.created_at_ms <= now_ms,
                 columns.expires_at_ms.is_not(None),
                 columns.expires_at_ms > now_ms,
             )
@@ -967,6 +989,7 @@ def _monitor_bounded_statement(
                 columns.lane_scope == "real_submit_candidate",
                 columns.status.in_(list(OPEN_REAL_LANE_STATUSES)),
                 columns.closed_at_ms.is_(None),
+                columns.created_at_ms <= now_ms,
                 columns.expires_at_ms.is_not(None),
                 columns.expires_at_ms > now_ms,
             )
@@ -974,6 +997,7 @@ def _monitor_bounded_statement(
     if logical_key == "action_time_tickets":
         return statement.where(
             sa.and_(
+                columns.created_at_ms <= now_ms,
                 sa.or_(
                     sa.and_(
                         columns.status.in_(["created", "preflight_pending", "finalgate_ready"]),
@@ -984,6 +1008,17 @@ def _monitor_bounded_statement(
                 ),
             )
         )
+    if logical_key == "runtime_safety_state":
+        statement = statement.where(
+            sa.and_(
+                columns.observed_at_ms <= now_ms,
+                columns.valid_until_ms.is_not(None),
+                columns.valid_until_ms > now_ms,
+            )
+        )
+        if "observed_at_ms" in columns:
+            statement = statement.order_by(columns.observed_at_ms.desc()).limit(200)
+        return statement
     if logical_key == "projection_runs":
         statement = statement.where(
             sa.and_(
@@ -1082,6 +1117,9 @@ def is_current_live_signal(row: dict[str, Any], now_ms: int) -> bool:
         and row.get("freshness_state") == "fresh"
         and row.get("source_kind") == "live_market"
         and row.get("invalidated_at_ms") is None
+        and _timestamp_not_future(row, "event_time_ms", now_ms)
+        and _timestamp_not_future(row, "observed_at_ms", now_ms)
+        and _timestamp_not_future(row, "created_at_ms", now_ms)
         and row.get("expires_at_ms") is not None
         and int(row.get("expires_at_ms") or 0) > now_ms
     )
@@ -1092,6 +1130,7 @@ def is_current_promotion_candidate(row: dict[str, Any], now_ms: int) -> bool:
         row.get("closed_at_ms") is None
         and row.get("status")
         in {"eligible", "arbitration_pending", "arbitration_won"}
+        and _timestamp_not_future(row, "created_at_ms", now_ms)
         and row.get("expires_at_ms") is not None
         and int(row.get("expires_at_ms") or 0) > now_ms
     )
@@ -1102,6 +1141,7 @@ def is_current_action_time_lane(row: dict[str, Any], now_ms: int) -> bool:
         row.get("lane_scope") == "real_submit_candidate"
         and row.get("status") in OPEN_REAL_LANE_STATUSES
         and row.get("closed_at_ms") is None
+        and _timestamp_not_future(row, "created_at_ms", now_ms)
         and row.get("expires_at_ms") is not None
         and int(row.get("expires_at_ms") or 0) > now_ms
     )
@@ -1109,9 +1149,10 @@ def is_current_action_time_lane(row: dict[str, Any], now_ms: int) -> bool:
 
 def is_current_action_time_ticket(row: dict[str, Any], now_ms: int) -> bool:
     if row.get("status") == "submitted":
-        return True
+        return _timestamp_not_future(row, "created_at_ms", now_ms)
     return (
         row.get("status") in {"created", "preflight_pending", "finalgate_ready"}
+        and _timestamp_not_future(row, "created_at_ms", now_ms)
         and row.get("expires_at_ms") is not None
         and int(row.get("expires_at_ms") or 0) > now_ms
     )
@@ -1120,6 +1161,103 @@ def is_current_action_time_ticket(row: dict[str, Any], now_ms: int) -> bool:
 def is_current_fact_snapshot(row: dict[str, Any], now_ms: int) -> bool:
     return (
         row.get("freshness_state") == "fresh"
+        and _timestamp_not_future(row, "observed_at_ms", now_ms)
+        and _timestamp_not_future(row, "created_at_ms", now_ms)
         and row.get("valid_until_ms") is not None
         and int(row.get("valid_until_ms") or 0) > now_ms
     )
+
+
+def is_current_watcher_coverage(row: dict[str, Any], now_ms: int) -> bool:
+    """Return whether one watcher-coverage row is current at ``now_ms``."""
+
+    last_tick_at_ms = int(row.get("last_tick_at_ms") or 0)
+    valid_until_ms = int(row.get("valid_until_ms") or 0)
+    return (
+        row.get("is_current") is True
+        and last_tick_at_ms > 0
+        and last_tick_at_ms <= now_ms
+        and valid_until_ms > now_ms
+    )
+
+
+def is_current_pretrade_readiness(row: dict[str, Any], now_ms: int) -> bool:
+    """Return whether one per-lane readiness projection is current."""
+
+    computed_at_ms = int(row.get("computed_at_ms") or 0)
+    valid_until_ms = int(row.get("valid_until_ms") or 0)
+    return (
+        computed_at_ms > 0
+        and computed_at_ms <= now_ms
+        and valid_until_ms > now_ms
+    )
+
+
+def is_current_runtime_safety_state(row: dict[str, Any], now_ms: int) -> bool:
+    """Return whether one Runtime Safety State snapshot is time-current."""
+
+    observed_at_ms = int(row.get("observed_at_ms") or 0)
+    valid_until_ms = int(row.get("valid_until_ms") or 0)
+    return (
+        observed_at_ms > 0
+        and observed_at_ms <= now_ms
+        and valid_until_ms > now_ms
+    )
+
+
+def runtime_safety_submit_authorized(row: dict[str, Any]) -> bool:
+    """Fail closed unless the snapshot itself proves submit eligibility.
+
+    This validates the snapshot payload only. Consumers must additionally prove
+    its current lane/ticket/signal/Operation-Layer lineage before presenting
+    ``tradable_now`` or any equivalent Owner-facing state.
+    """
+
+    blockers = row.get("blockers")
+    blockers_clear = isinstance(blockers, list) and not blockers
+    trusted_refs = row.get("trusted_fact_refs")
+    required_ref_keys = (
+        "ticket_id",
+        "ticket_hash",
+        "finalgate_pass_id",
+        "operation_layer_handoff_id",
+        "operation_submit_command_id",
+        "signal_event_id",
+        "budget_reservation_id",
+        "protection_ref_id",
+        "public_fact_snapshot_id",
+        "action_time_fact_snapshot_id",
+        "account_safe_fact_snapshot_id",
+        "account_mode_snapshot_id",
+    )
+    trusted_refs_concrete = isinstance(trusted_refs, dict) and all(
+        bool(str(trusted_refs.get(key) or "").strip()) for key in required_ref_keys
+    )
+    return (
+        row.get("submit_allowed") is True
+        and row.get("safety_state") == "live_submit_ready"
+        and row.get("finalgate_ready") is True
+        and row.get("operation_layer_ready") is True
+        and row.get("protection_ready") is True
+        and row.get("active_position_conflict") is False
+        and row.get("facts_fresh") is True
+        and row.get("trusted_fact_refs_complete") is True
+        and trusted_refs_concrete
+        and blockers_clear
+        and row.get("execution_eligible") is True
+        and row.get("signal_grade")
+        in {"trial_grade_signal", "production_grade_signal"}
+        and row.get("required_execution_mode") in {"trial_live", "production_live"}
+        and bool(str(row.get("authority_source_ref") or "").strip())
+    )
+
+
+def _timestamp_not_future(row: dict[str, Any], key: str, now_ms: int) -> bool:
+    value = row.get(key)
+    if value in (None, ""):
+        return True
+    try:
+        timestamp = int(value)
+    except (TypeError, ValueError):
+        return False
+    return 0 < timestamp <= now_ms

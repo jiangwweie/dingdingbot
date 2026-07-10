@@ -264,6 +264,45 @@ Read PG/current projections and confirm:
 - no exchange write, order, profile, sizing, credential, withdrawal, or
   transfer mutation occurred during deployment or acceptance.
 
+## Task 7: Close PG Tradeability current-truth defects found in production acceptance
+
+### Step 1: Add failing truth tests
+
+Prove the deployed defects before implementation:
+
+- an expired `submit_allowed=true` Runtime Safety State must not make SOR
+  `tradable_now`;
+- an unexpired but orphaned safety snapshot without current lane/ticket/signal/
+  handoff lineage must not grant Tradeability;
+- seeded PG current state must not emit legacy `generated_at_utc`,
+  `artifact_missing`, or `schema_invalid` blockers merely because a historical
+  artifact shape is absent;
+- expired safety conflicts must not block Goal Status or Daily Table;
+- future-dated signal, fact, promotion, lane, and ticket rows are not current.
+
+### Step 2: Implement shared current Runtime Safety truth
+
+Add one shared read-model boundary that validates snapshot time, payload
+execution eligibility, and exact L5-L7 lineage. Reuse it from Tradeability,
+Daily Table, and Goal Status. Extend the PG repository's monitor-bounded reads
+to filter stale/future coverage, readiness, fact, signal, promotion, lane,
+ticket, and safety rows.
+
+### Step 3: Cut Tradeability over to Candidate Pool aggregation
+
+Use the PG Candidate Pool as the per-symbol readiness source and aggregate one
+row for each of the five active StrategyGroups. Preserve exact blocker classes,
+policy scope, selected symbol/side, failed-fact evidence, and next action.
+Do not translate PG rows into legacy JSON-artifact input shapes.
+
+### Step 4: Re-run and redeploy
+
+Run the five affected read-model/repository suites, the full repository suite,
+file-I/O audit, compile validation, and diff checks. Commit and push a new exact
+head, deploy it as an incremental Tokyo release, trigger one bounded watcher
+tick, and verify Tradeability, Candidate Pool, Goal Status, timers, migration
+head, and release manifest from PG current truth.
+
 ## Done When
 
 The exact deployed commit preserves typed evaluator facts through PG action-

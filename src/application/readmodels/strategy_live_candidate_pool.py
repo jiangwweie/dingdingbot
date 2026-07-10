@@ -25,6 +25,8 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     is_current_action_time_lane,
     is_current_fact_snapshot,
     is_current_live_signal,
+    is_current_pretrade_readiness,
+    is_current_watcher_coverage,
 )
 
 from src.infrastructure.sync_pg_dsn import (  # noqa: E402
@@ -503,9 +505,11 @@ def _require_pg_policy_runtime_scope(
 def _current_pretrade_readiness_by_lane(
     control_state: dict[str, Any],
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
     return {
         _lane_key(row): row
         for row in _dict_rows(control_state.get("pretrade_readiness_rows"))
+        if is_current_pretrade_readiness(row, now_ms)
     }
 
 
@@ -597,9 +601,10 @@ def _open_action_time_lane_by_lane(
 def _current_watcher_coverage_by_lane(
     control_state: dict[str, Any],
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
     coverage: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("watcher_runtime_coverage")):
-        if row.get("is_current") is not True:
+        if not is_current_watcher_coverage(row, now_ms):
             continue
         key = _lane_key(row)
         coverage[key] = row

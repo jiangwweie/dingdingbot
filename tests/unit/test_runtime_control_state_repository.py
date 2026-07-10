@@ -15,6 +15,12 @@ from sqlalchemy.pool import StaticPool
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
+    is_current_action_time_lane,
+    is_current_action_time_ticket,
+    is_current_fact_snapshot,
+    is_current_live_signal,
+    is_current_promotion_candidate,
+    runtime_safety_submit_authorized,
 )
 from scripts import runtime_active_observation_monitor
 from scripts import materialize_ticket_bound_protected_submit_attempt as submit
@@ -135,6 +141,78 @@ def test_pg_backed_runtime_control_state_repository_reads_seeded_state(
         "liquidity_clear",
     ]
 
+
+def test_current_chain_helpers_reject_future_dated_rows() -> None:
+    now_ms = 1770001000000
+
+    assert is_current_live_signal(
+        {
+            "status": "facts_validated",
+            "freshness_state": "fresh",
+            "source_kind": "live_market",
+            "invalidated_at_ms": None,
+            "event_time_ms": now_ms + 1,
+            "observed_at_ms": now_ms + 1,
+            "expires_at_ms": now_ms + 60_000,
+        },
+        now_ms,
+    ) is False
+    assert is_current_fact_snapshot(
+        {
+            "freshness_state": "fresh",
+            "observed_at_ms": now_ms + 1,
+            "valid_until_ms": now_ms + 60_000,
+        },
+        now_ms,
+    ) is False
+    assert is_current_promotion_candidate(
+        {
+            "status": "eligible",
+            "closed_at_ms": None,
+            "created_at_ms": now_ms + 1,
+            "expires_at_ms": now_ms + 60_000,
+        },
+        now_ms,
+    ) is False
+    assert is_current_action_time_lane(
+        {
+            "lane_scope": "real_submit_candidate",
+            "status": "opened",
+            "closed_at_ms": None,
+            "created_at_ms": now_ms + 1,
+            "expires_at_ms": now_ms + 60_000,
+        },
+        now_ms,
+    ) is False
+    assert is_current_action_time_ticket(
+        {
+            "status": "created",
+            "created_at_ms": now_ms + 1,
+            "expires_at_ms": now_ms + 60_000,
+        },
+        now_ms,
+    ) is False
+
+
+def test_runtime_safety_submit_authority_requires_concrete_trusted_refs() -> None:
+    row = {
+        "submit_allowed": True,
+        "safety_state": "live_submit_ready",
+        "finalgate_ready": True,
+        "operation_layer_ready": True,
+        "protection_ready": True,
+        "active_position_conflict": False,
+        "facts_fresh": True,
+        "trusted_fact_refs_complete": True,
+        "blockers": [],
+        "trusted_fact_refs": {},
+        "execution_eligible": True,
+        "signal_grade": "trial_grade_signal",
+        "required_execution_mode": "trial_live",
+        "authority_source_ref": "event_spec:SOR-LONG:v2",
+    }
+
+    assert runtime_safety_submit_authorized(row) is False
 
 def test_live_signal_writer_output_is_readable_by_repository(pg_control_connection):
     pg_control_connection.execute(

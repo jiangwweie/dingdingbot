@@ -25,6 +25,9 @@ if str(REPO_ROOT) not in sys.path:
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
+from src.application.readmodels.runtime_safety_truth import (  # noqa: E402
+    current_runtime_safety_truths,
+)
 
 from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     is_sync_postgres_dsn,
@@ -340,14 +343,11 @@ def _pg_mi_trial_admission_projection(control_state: dict[str, Any]) -> dict[str
 
 
 def _pg_runtime_safety_projection(control_state: dict[str, Any]) -> dict[str, Any]:
-    rows = sorted(
-        _dict_rows(control_state.get("runtime_safety_state")),
-        key=lambda row: int(row.get("created_at_ms") or row.get("snapshot_at_ms") or 0),
-        reverse=True,
-    )
-    if rows:
-        row = rows[0]
-        submit_allowed = row.get("submit_allowed") is True
+    truths = current_runtime_safety_truths(control_state)
+    if truths:
+        truth = truths[0]
+        row = truth.snapshot
+        submit_allowed = truth.submit_authorized
         return {
             "schema": "brc.strategygroup_runtime_safety_state.v1",
             "status": "live_submit_ready"
@@ -356,11 +356,14 @@ def _pg_runtime_safety_projection(control_state: dict[str, Any]) -> dict[str, An
             "runtime_safety_state": {
                 "live_submit_ready": submit_allowed,
                 "live_submit_ready_false_reason": str(
-                    row.get("safety_state")
-                    or row.get("first_blocker_class")
+                    ""
+                    if submit_allowed
+                    else ",".join(truth.failure_reasons)
+                    or row.get("safety_state")
                     or "submit_allowed_false"
                 ),
                 "snapshot_id": str(row.get("runtime_safety_snapshot_id") or ""),
+                "lineage_verified": truth.lineage_verified,
             },
             "source_mode": "db_backed",
         }
@@ -369,7 +372,9 @@ def _pg_runtime_safety_projection(control_state: dict[str, Any]) -> dict[str, An
         "status": "runtime_safety_state_ready",
         "runtime_safety_state": {
             "live_submit_ready": False,
-            "live_submit_ready_false_reason": "pg_runtime_safety_snapshot_missing",
+            "live_submit_ready_false_reason": "no_current_runtime_safety_snapshot",
+            "snapshot_id": "",
+            "lineage_verified": False,
         },
         "source_mode": "db_backed",
     }
