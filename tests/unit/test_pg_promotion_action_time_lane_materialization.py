@@ -38,6 +38,10 @@ RISK_RESERVATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
 )
+EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -59,6 +63,10 @@ def pg_control_connection():
         RISK_RESERVATION_MIGRATION_PATH,
         "migration_103_pg_promotion_lane",
     )
+    execution_eligibility_migration = _load_module(
+        EXECUTION_ELIGIBILITY_MIGRATION_PATH,
+        "migration_104_pg_promotion_lane",
+    )
     seed = _load_module(SEED_PATH, "seed_pg_promotion_lane")
     engine = create_engine(
         "sqlite://",
@@ -74,6 +82,12 @@ def pg_control_connection():
             risk_reservation_migration.op = migration.op
             try:
                 risk_reservation_migration.upgrade()
+                old_eligibility_op = execution_eligibility_migration.op
+                execution_eligibility_migration.op = migration.op
+                try:
+                    execution_eligibility_migration.upgrade()
+                finally:
+                    execution_eligibility_migration.op = old_eligibility_op
             finally:
                 risk_reservation_migration.op = old_risk_op
         finally:
@@ -193,6 +207,27 @@ def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_con
     assert ticket_payload["strategy_group_id"] == "SOR-001"
     assert ticket_payload["symbol"] == "ETHUSDT"
     assert ticket_payload["side"] == "long"
+
+
+def test_observe_only_signal_cannot_materialize_real_submit_promotion(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        execution_eligible=False,
+    )
+
+    payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "promotion_candidates_blocked"
+    assert "signal_execution_eligibility_missing_or_false" in payload["blockers"]
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
 
 
 def test_materializes_action_time_facts_projection_lane_and_ticket_from_raw_signal(
@@ -588,6 +623,21 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
         "long",
         insert_signal=False,
     )
+    event_authority = pg_control_connection.execute(
+        text(
+            """
+            SELECT declared_signal_grade, declared_required_execution_mode,
+                   execution_eligibility_enabled
+            FROM brc_strategy_side_event_specs
+            WHERE strategy_group_id = 'MPG-001' AND side = 'long'
+            """
+        )
+    ).mappings().one()
+    assert dict(event_authority) == {
+        "declared_signal_grade": "trial_grade_signal",
+        "declared_required_execution_mode": "trial_live",
+        "execution_eligibility_enabled": 1,
+    }
 
     class _FakeClient:
         def request_json(self, method, path, *, query=None, body=None):
@@ -654,6 +704,8 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
             timeframe="1h",
             signal_type=SignalType.WOULD_ENTER,
             side=SignalSide.LONG,
+            signal_grade="trial_grade_signal",
+            required_execution_mode="trial_live",
             confidence=Decimal("0.82"),
             reason_codes=["writer_repository_lane_contract"],
             human_summary="MPG unit would enter long.",
@@ -708,7 +760,7 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
         conn=pg_control_connection,
     )
 
-    assert write_payload["status"] == "pg_live_signal_events_written"
+    assert write_payload["status"] == "pg_live_signal_events_written", write_payload
     signal_event = pg_control_connection.execute(
         text(
             """
@@ -1469,6 +1521,7 @@ def _insert_ready_fresh_signal(
     insert_action_time_fact: bool = True,
     insert_signal: bool = True,
     fact_values: dict | None = None,
+    execution_eligible: bool = True,
 ) -> None:
     row = _candidate_runtime_row(conn, strategy_group_id, symbol, side)
     suffix = f"{strategy_group_id}:{symbol}:{side}:unit"
@@ -1480,6 +1533,20 @@ def _insert_ready_fresh_signal(
     readiness_row_id = f"readiness:{suffix}"
     expires_at_ms = NOW_MS + 600_000
     fact_values = fact_values or _fact_values(conn, row)
+
+    if execution_eligible:
+        conn.execute(
+            text(
+                """
+                UPDATE brc_strategy_side_event_specs
+                SET declared_signal_grade = 'trial_grade_signal',
+                    declared_required_execution_mode = 'trial_live',
+                    execution_eligibility_enabled = true
+                WHERE event_spec_id = :event_spec_id
+                """
+            ),
+            {"event_spec_id": row["event_spec_id"]},
+        )
 
     _insert_coverage(conn, row, expires_at_ms=expires_at_ms)
     _insert_fact(
@@ -1531,6 +1598,7 @@ def _insert_ready_fresh_signal(
             row,
             public_fact_id=public_fact_id,
             signal_event_id=signal_event_id,
+            execution_eligible=execution_eligible,
         )
     conn.execute(
         text(
@@ -1678,7 +1746,10 @@ def _insert_signal(
     source_kind: str = "live_market",
     created_at_ms: int = NOW_MS - 54_000,
     event_time_ms: int = NOW_MS - 60_000,
+    execution_eligible: bool = True,
 ) -> None:
+    signal_grade = "trial_grade_signal" if execution_eligible else "observe_only_signal"
+    required_execution_mode = "trial_live" if execution_eligible else "observe_only"
     conn.execute(
         text(
             """
@@ -1687,14 +1758,17 @@ def _insert_signal(
               symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
               confidence, fact_snapshot_id, reason_codes, signal_payload,
               event_time_ms, trigger_candle_close_time_ms, observed_at_ms,
-              expires_at_ms, invalidated_at_ms, created_at_ms
+              expires_at_ms, invalidated_at_ms, created_at_ms,
+              signal_grade, required_execution_mode, execution_eligible,
+              authority_source_ref
             ) VALUES (
               :signal_event_id, :candidate_scope_id, :event_spec_id, :strategy_group_id,
               :symbol, :side, :detector_key, :signal_type,
               :source_kind, 'facts_validated', 'fresh', 0.9, :fact_snapshot_id,
               :reason_codes, :signal_payload, :event_time_ms,
               :trigger_candle_close_time_ms, :observed_at_ms, :expires_at_ms,
-              NULL, :created_at_ms
+              NULL, :created_at_ms, :signal_grade, :required_execution_mode,
+              :execution_eligible, :authority_source_ref
             )
             """
         ),
@@ -1721,6 +1795,10 @@ def _insert_signal(
             "observed_at_ms": NOW_MS - 55_000,
             "expires_at_ms": NOW_MS + 600_000,
             "created_at_ms": created_at_ms,
+            "signal_grade": signal_grade,
+            "required_execution_mode": required_execution_mode,
+            "execution_eligible": execution_eligible,
+            "authority_source_ref": f"event-spec:{row['event_spec_id']}",
         },
     )
 

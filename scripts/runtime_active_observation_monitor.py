@@ -1357,6 +1357,7 @@ def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
         "evaluation_status": evaluation.get("status"),
         "evaluator_id": evaluation.get("evaluator_id"),
         "signal_type": output.get("signal_type"),
+        "signal_grade": output.get("signal_grade"),
         "required_execution_mode": output.get("required_execution_mode"),
         "side": output.get("side"),
         "reason_codes": list(output.get("reason_codes") or []),

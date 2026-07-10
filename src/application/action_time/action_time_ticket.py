@@ -91,6 +91,10 @@ TICKET_IDENTITY_HASH_FIELDS = (
     "expires_at_ms",
     "authority_boundary",
     "created_under_versions_hash",
+    "signal_grade",
+    "required_execution_mode",
+    "execution_eligible",
+    "authority_source_ref",
 )
 DECIMAL_HASH_FIELDS = {"target_notional", "leverage"}
 INTEGER_HASH_FIELDS = {
@@ -666,6 +670,10 @@ def _build_ticket_bundle(
         "authority_boundary": AUTHORITY_BOUNDARY,
         "created_under_versions_hash": created_under_versions_hash,
         "created_at_ms": now_ms,
+        "signal_grade": signal["signal_grade"],
+        "required_execution_mode": signal["required_execution_mode"],
+        "execution_eligible": signal["execution_eligible"],
+        "authority_source_ref": signal["authority_source_ref"],
     }
     ticket["ticket_hash"] = compute_action_time_ticket_hash(ticket)
     ticket_event = {
@@ -761,6 +769,39 @@ def _validate_lineage(blockers: list[str], **items: Any) -> None:
         blockers.append("signal_event_time_mismatch:trigger_candle_close_time_ms")
     if int(items["signal"].get("created_at_ms") or 0) == event_time_ms:
         blockers.append("signal_generated_at_used_as_event_time")
+    authority_fields = (
+        "signal_grade",
+        "required_execution_mode",
+        "execution_eligible",
+        "authority_source_ref",
+    )
+    for field in authority_fields:
+        expected = items["signal"].get(field)
+        for item_name in ("promotion", "lane"):
+            if items[item_name].get(field) != expected:
+                blockers.append(f"execution_eligibility_mismatch:{item_name}:{field}")
+    if items["signal"].get("execution_eligible") is not True:
+        blockers.append("execution_eligibility_missing_or_false")
+    if items["signal"].get("signal_grade") not in {
+        "trial_grade_signal",
+        "production_grade_signal",
+    }:
+        blockers.append("execution_eligibility_signal_grade_invalid")
+    if items["signal"].get("required_execution_mode") not in {
+        "trial_live",
+        "production_live",
+    }:
+        blockers.append("execution_eligibility_mode_invalid")
+    if items["event_spec"].get("execution_eligibility_enabled") is not True:
+        blockers.append("event_spec_execution_eligibility_disabled")
+    if str(items["event_spec"].get("declared_signal_grade") or "") != str(
+        items["signal"].get("signal_grade") or ""
+    ):
+        blockers.append("execution_eligibility_event_spec_grade_mismatch")
+    if str(
+        items["event_spec"].get("declared_required_execution_mode") or ""
+    ) != str(items["signal"].get("required_execution_mode") or ""):
+        blockers.append("execution_eligibility_event_spec_mode_mismatch")
     if items["runtime_scope"].get("status") != "active":
         blockers.append("runtime_scope_binding_not_active")
     for flag in (
@@ -933,7 +974,8 @@ def _insert_ticket_bundle(
               execution_policy_id, execution_policy_version, owner_policy_version,
               sizing_policy_version, protection_policy_version, target_notional,
               leverage, expires_at_ms, status, authority_boundary, ticket_hash,
-              created_under_versions_hash, created_at_ms
+              created_under_versions_hash, created_at_ms, signal_grade,
+              required_execution_mode, execution_eligible, authority_source_ref
             ) VALUES (
               :ticket_id, :action_time_lane_input_id, :promotion_candidate_id,
               :signal_event_id, :event_spec_id, :event_spec_version_id,
@@ -946,7 +988,8 @@ def _insert_ticket_bundle(
               :execution_policy_id, :execution_policy_version, :owner_policy_version,
               :sizing_policy_version, :protection_policy_version, :target_notional,
               :leverage, :expires_at_ms, :status, :authority_boundary, :ticket_hash,
-              :created_under_versions_hash, :created_at_ms
+              :created_under_versions_hash, :created_at_ms, :signal_grade,
+              :required_execution_mode, :execution_eligible, :authority_source_ref
             )
             """
         ),

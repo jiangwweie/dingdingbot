@@ -26,6 +26,10 @@ RISK_RESERVATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
 )
+EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -47,6 +51,10 @@ def pg_control_connection():
         RISK_RESERVATION_MIGRATION_PATH,
         "migration_103_action_time_ticket",
     )
+    execution_eligibility_migration = _load_module(
+        EXECUTION_ELIGIBILITY_MIGRATION_PATH,
+        "migration_104_action_time_ticket",
+    )
     seed = _load_module(SEED_PATH, "seed_action_time_ticket")
     engine = create_engine(
         "sqlite://",
@@ -62,6 +70,12 @@ def pg_control_connection():
             risk_reservation_migration.op = migration.op
             try:
                 risk_reservation_migration.upgrade()
+                old_eligibility_op = execution_eligibility_migration.op
+                execution_eligibility_migration.op = migration.op
+                try:
+                    execution_eligibility_migration.upgrade()
+                finally:
+                    execution_eligibility_migration.op = old_eligibility_op
             finally:
                 risk_reservation_migration.op = old_risk_op
         finally:
@@ -381,6 +395,22 @@ def test_materializer_blocks_missing_candidate_authorization_ref(pg_control_conn
     assert _ticket_count(pg_control_connection) == 0
 
 
+def test_materializer_blocks_ineligible_action_time_lane(pg_control_connection):
+    _insert_action_time_lane_graph(
+        pg_control_connection,
+        execution_eligible=False,
+    )
+
+    payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "execution_eligibility_missing_or_false" in payload["blockers"]
+    assert _ticket_count(pg_control_connection) == 0
+
+
 def test_materializer_blocks_missing_budget_reservation(pg_control_connection):
     _insert_action_time_lane_graph(pg_control_connection, insert_budget=False)
 
@@ -676,6 +706,7 @@ def _insert_action_time_lane_graph(
     candidate_authorization_ref: str | None = "candidate_auth:SOR-001:ETHUSDT:long:unit",
     insert_budget: bool = True,
     insert_protection: bool = True,
+    execution_eligible: bool = True,
 ) -> str:
     row = conn.execute(
         text(
@@ -721,6 +752,21 @@ def _insert_action_time_lane_graph(
     account_safe_fact_id = f"fact:{strategy_group_id}:{symbol}:{side}:account-safe:unit"
     account_mode_fact_id = f"fact:{strategy_group_id}:{symbol}:{side}:account-mode:unit"
     expires_at_ms = NOW_MS + 600_000
+    signal_grade = "trial_grade_signal" if execution_eligible else "observe_only_signal"
+    required_execution_mode = "trial_live" if execution_eligible else "observe_only"
+    if execution_eligible:
+        conn.execute(
+            text(
+                """
+                UPDATE brc_strategy_side_event_specs
+                SET declared_signal_grade = 'trial_grade_signal',
+                    declared_required_execution_mode = 'trial_live',
+                    execution_eligibility_enabled = true
+                WHERE event_spec_id = :event_spec_id
+                """
+            ),
+            {"event_spec_id": row["event_spec_id"]},
+        )
     if row["side"] == "short":
         default_protection_price = "2000"
         fact_values = fact_values or {
@@ -792,14 +838,17 @@ def _insert_action_time_lane_graph(
               symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
               confidence, fact_snapshot_id, reason_codes, signal_payload,
               event_time_ms, trigger_candle_close_time_ms, observed_at_ms,
-              expires_at_ms, invalidated_at_ms, created_at_ms
+              expires_at_ms, invalidated_at_ms, created_at_ms,
+              signal_grade, required_execution_mode, execution_eligible,
+              authority_source_ref
             ) VALUES (
               :signal_event_id, :candidate_scope_id, :event_spec_id, :strategy_group_id,
               :symbol, :side, :detector_key, :signal_type,
               'live_market', 'facts_validated', 'fresh', 0.9, :fact_snapshot_id,
               :reason_codes, :signal_payload, :event_time_ms,
               :trigger_candle_close_time_ms, :observed_at_ms, :expires_at_ms,
-              NULL, :created_at_ms
+              NULL, :created_at_ms, :signal_grade, :required_execution_mode,
+              :execution_eligible, :authority_source_ref
             )
             """
         ),
@@ -825,6 +874,10 @@ def _insert_action_time_lane_graph(
             "observed_at_ms": NOW_MS - 55_000,
             "expires_at_ms": expires_at_ms,
             "created_at_ms": NOW_MS - 54_000,
+            "signal_grade": signal_grade,
+            "required_execution_mode": required_execution_mode,
+            "execution_eligible": execution_eligible,
+            "authority_source_ref": f"event-spec:{row['event_spec_id']}",
         },
     )
     conn.execute(
@@ -864,12 +917,16 @@ def _insert_action_time_lane_graph(
               promotion_candidate_id, signal_event_id, readiness_row_id,
               strategy_group_id, symbol, side, promotion_scope, status, scope_state,
               risk_state, facts_snapshot_id, blockers, arbitration_rank, created_at_ms,
-              expires_at_ms, closed_at_ms, authority_boundary
+              expires_at_ms, closed_at_ms, authority_boundary,
+              signal_grade, required_execution_mode, execution_eligible,
+              authority_source_ref
             ) VALUES (
               :promotion_candidate_id, :signal_event_id, :readiness_row_id,
               :strategy_group_id, :symbol, :side, 'live_submit_candidate', 'arbitration_won',
               'live_submit_allowed', 'acceptable', :facts_snapshot_id, :blockers,
-              1, :created_at_ms, :expires_at_ms, NULL, :authority_boundary
+              1, :created_at_ms, :expires_at_ms, NULL, :authority_boundary,
+              :signal_grade, :required_execution_mode, :execution_eligible,
+              :authority_source_ref
             )
             """
         ),
@@ -885,6 +942,10 @@ def _insert_action_time_lane_graph(
             "created_at_ms": NOW_MS - 1_000,
             "expires_at_ms": expires_at_ms,
             "authority_boundary": "promotion_only; no_finalgate_no_operation_layer_no_exchange_write",
+            "signal_grade": signal_grade,
+            "required_execution_mode": required_execution_mode,
+            "execution_eligible": execution_eligible,
+            "authority_source_ref": f"event-spec:{row['event_spec_id']}",
         },
     )
     conn.execute(
@@ -896,14 +957,17 @@ def _insert_action_time_lane_graph(
               public_fact_snapshot_id, action_time_fact_snapshot_id,
               runtime_scope_binding_id, candidate_authorization_ref,
               runtime_safety_snapshot_id, first_blocker_class, created_at_ms,
-              expires_at_ms, closed_at_ms, authority_boundary
+              expires_at_ms, closed_at_ms, authority_boundary,
+              signal_grade, required_execution_mode, execution_eligible,
+              authority_source_ref
             ) VALUES (
               :lane_id, :promotion_candidate_id, :strategy_group_id, :symbol, :side,
               :runtime_profile_id, 'real_submit_candidate', 'ticket_pending',
               :signal_event_id, :public_fact_snapshot_id, :action_time_fact_snapshot_id,
               :runtime_scope_binding_id, :candidate_authorization_ref, NULL,
               'action_time_preflight_ready', :created_at_ms, :expires_at_ms, NULL,
-              :authority_boundary
+              :authority_boundary, :signal_grade, :required_execution_mode,
+              :execution_eligible, :authority_source_ref
             )
             """
         ),
@@ -922,6 +986,10 @@ def _insert_action_time_lane_graph(
             "created_at_ms": NOW_MS - 500,
             "expires_at_ms": expires_at_ms,
             "authority_boundary": "real_submit_candidate_identity_only; no_finalgate_no_operation_layer_no_exchange_write",
+            "signal_grade": signal_grade,
+            "required_execution_mode": required_execution_mode,
+            "execution_eligible": execution_eligible,
+            "authority_source_ref": f"event-spec:{row['event_spec_id']}",
         },
     )
     if insert_budget:

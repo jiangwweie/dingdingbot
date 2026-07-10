@@ -883,6 +883,35 @@ def _candidate_blockers(
         blockers.append("signal_event_time_mismatch:trigger_candle_close_time_ms")
     if int(signal.get("created_at_ms") or 0) == int(signal.get("event_time_ms") or 0):
         blockers.append("signal_generated_at_used_as_event_time")
+    if signal.get("execution_eligible") is not True:
+        blockers.append("signal_execution_eligibility_missing_or_false")
+    if signal.get("signal_grade") not in {
+        "trial_grade_signal",
+        "production_grade_signal",
+    }:
+        blockers.append(
+            f"signal_grade_not_execution_eligible:{signal.get('signal_grade') or 'missing'}"
+        )
+    if signal.get("required_execution_mode") not in {
+        "trial_live",
+        "production_live",
+    }:
+        blockers.append(
+            "signal_required_execution_mode_not_live:"
+            f"{signal.get('required_execution_mode') or 'missing'}"
+        )
+    if event_spec.get("execution_eligibility_enabled") is not True:
+        blockers.append("event_spec_execution_eligibility_disabled")
+    if str(signal.get("signal_grade") or "") != str(
+        event_spec.get("declared_signal_grade") or ""
+    ):
+        blockers.append("signal_event_spec_grade_mismatch")
+    if str(signal.get("required_execution_mode") or "") != str(
+        event_spec.get("declared_required_execution_mode") or ""
+    ):
+        blockers.append("signal_event_spec_execution_mode_mismatch")
+    if not str(signal.get("authority_source_ref") or "").strip():
+        blockers.append("signal_authority_source_ref_missing")
 
     if runtime_scope.get("status") != "active":
         blockers.append("runtime_scope_binding_not_active")
@@ -1015,6 +1044,10 @@ def _promotion_row(
         "expires_at_ms": expires_at_ms,
         "closed_at_ms": closed_at_ms,
         "authority_boundary": PROMOTION_AUTHORITY_BOUNDARY,
+        "signal_grade": str(bundle.signal["signal_grade"]),
+        "required_execution_mode": str(bundle.signal["required_execution_mode"]),
+        "execution_eligible": bool(bundle.signal["execution_eligible"]),
+        "authority_source_ref": str(bundle.signal["authority_source_ref"]),
     }
 
 
@@ -1046,6 +1079,10 @@ def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
         "expires_at_ms": expires_at_ms,
         "closed_at_ms": None,
         "authority_boundary": LANE_AUTHORITY_BOUNDARY,
+        "signal_grade": str(bundle.signal["signal_grade"]),
+        "required_execution_mode": str(bundle.signal["required_execution_mode"]),
+        "execution_eligible": bool(bundle.signal["execution_eligible"]),
+        "authority_source_ref": str(bundle.signal["authority_source_ref"]),
     }
 
 
