@@ -339,6 +339,7 @@ def _candidate_pool_inputs_from_control_state(
             fact_by_lane=fact_by_lane,
             binding_by_candidate=binding_by_candidate,
             runtime_by_candidate=runtime_by_candidate,
+            signal_by_lane=signal_by_lane,
         ),
         "tradeability": _pg_tradeability_projection(
             candidate_rows=candidate_rows,
@@ -347,6 +348,7 @@ def _candidate_pool_inputs_from_control_state(
             runtime_by_candidate=runtime_by_candidate,
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
+            signal_by_lane=signal_by_lane,
         ),
         "replay_live_parity": _pg_replay_live_parity_projection(
             candidate_rows=candidate_rows,
@@ -598,6 +600,7 @@ def _pg_daily_table_projection(
     fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     binding_by_candidate: dict[str, dict[str, Any]],
     runtime_by_candidate: dict[str, dict[str, Any]],
+    signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for rank, strategy_group_id in enumerate(WIP_LANES, start=1):
@@ -610,6 +613,7 @@ def _pg_daily_table_projection(
             group_candidates,
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
+            signal_by_lane=signal_by_lane,
         )
         candidate_scope_id = str(selected.get("candidate_scope_id") or "")
         first_blocker = _pg_candidate_first_blocker(
@@ -617,6 +621,7 @@ def _pg_daily_table_projection(
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
             runtime_scope=runtime_by_candidate.get(candidate_scope_id, {}),
+            signal_by_lane=signal_by_lane,
         )
         rows.append(
             {
@@ -664,6 +669,7 @@ def _pg_tradeability_projection(
     runtime_by_candidate: dict[str, dict[str, Any]],
     readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
 ) -> dict[str, Any]:
     decision_rows: list[dict[str, Any]] = []
     for strategy_group_id in WIP_LANES:
@@ -676,6 +682,7 @@ def _pg_tradeability_projection(
             group_candidates,
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
+            signal_by_lane=signal_by_lane,
         )
         candidate_scope_id = str(selected.get("candidate_scope_id") or "")
         runtime_scope = runtime_by_candidate.get(candidate_scope_id, {})
@@ -684,6 +691,7 @@ def _pg_tradeability_projection(
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
             runtime_scope=runtime_scope,
+            signal_by_lane=signal_by_lane,
         )
         policies = [
             policy_by_id.get(str(row.get("policy_current_id") or ""), {})
@@ -1114,6 +1122,7 @@ def _pg_strategy_summary_candidate(
     *,
     readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
 ) -> dict[str, Any]:
     if not candidates:
         return {}
@@ -1126,6 +1135,7 @@ def _pg_strategy_summary_candidate(
                     readiness_by_lane=readiness_by_lane,
                     fact_by_lane=fact_by_lane,
                     runtime_scope={},
+                    signal_by_lane=signal_by_lane,
                 )
             ),
             int(row.get("priority_rank") or 999),
@@ -1141,8 +1151,12 @@ def _pg_candidate_first_blocker(
     readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     runtime_scope: dict[str, Any],
+    signal_by_lane: dict[tuple[str, str, str], dict[str, Any]] | None = None,
 ) -> str:
     key = _lane_key(candidate)
+    signal = (signal_by_lane or {}).get(key, {})
+    if signal and signal.get("execution_eligible") is not True:
+        return "action_time_boundary_not_reproduced"
     readiness = readiness_by_lane.get(key, {})
     if readiness.get("first_blocker_class"):
         return str(readiness["first_blocker_class"])

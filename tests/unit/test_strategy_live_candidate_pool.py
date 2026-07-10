@@ -431,6 +431,34 @@ def test_candidate_pool_builds_from_pg_control_state_seed(pg_control_connection)
     )
 
 
+def test_pg_projection_classifies_observe_only_fresh_signal_as_action_time_gap():
+    builder = _builder()
+    candidate = {
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+    }
+    lane_key = ("SOR-001", "ETHUSDT", "long")
+
+    first_blocker = builder._pg_candidate_first_blocker(
+        candidate,
+        readiness_by_lane={
+            lane_key: {"first_blocker_class": "market_wait_validated"}
+        },
+        fact_by_lane={},
+        runtime_scope={"live_submit_allowed": True},
+        signal_by_lane={
+            lane_key: {
+                "signal_grade": "observe_only_signal",
+                "required_execution_mode": "observe_only",
+                "execution_eligible": False,
+            }
+        },
+    )
+
+    assert first_blocker == "action_time_boundary_not_reproduced"
+
+
 def test_candidate_pool_pg_signal_times_use_market_event_not_observation_time(
     pg_control_connection,
 ):
