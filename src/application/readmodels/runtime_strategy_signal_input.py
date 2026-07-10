@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from contextlib import redirect_stdout
+from dataclasses import dataclass
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -32,6 +33,16 @@ COMPARATIVE_SNAPSHOT_KEYS = (
     "valid_until_ms",
     "source_ref",
 )
+
+
+@dataclass(frozen=True)
+class RuntimeEventInputContract:
+    event_spec_id: str
+    event_id: str
+    strategy_group_id: str
+    symbol: str
+    side: str
+    primary_timeframe: str
 
 
 def _json_value(value: Any) -> Any:
@@ -229,6 +240,84 @@ async def load_comparative_strength_snapshot(
     return snapshot
 
 
+async def load_runtime_event_input_contract(
+    conn: Any,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> RuntimeEventInputContract:
+    """Load the single active PG Event Spec for one runtime lane."""
+
+    normalized_symbol = _normalized_symbol(symbol)
+    result = await conn.execute(
+        sa.text(
+            """
+            SELECT
+              e.event_spec_id,
+              e.event_id,
+              c.strategy_group_id,
+              c.symbol,
+              c.side,
+              e.timeframe
+            FROM brc_strategy_group_candidate_scope AS c
+            JOIN brc_candidate_scope_event_bindings AS b
+              ON b.candidate_scope_id = c.candidate_scope_id
+             AND b.status = 'active'
+            JOIN brc_strategy_side_event_specs AS e
+              ON e.event_spec_id = b.event_spec_id
+             AND e.status = 'current'
+            WHERE c.strategy_group_id = :strategy_group_id
+              AND c.symbol = :symbol
+              AND c.side = :side
+              AND c.status = 'active'
+            ORDER BY b.created_at_ms DESC, e.event_spec_id ASC
+            """
+        ),
+        {
+            "strategy_group_id": strategy_group_id,
+            "symbol": normalized_symbol,
+            "side": side,
+        },
+    )
+    rows = list(result.mappings().all())
+    if len(rows) != 1:
+        raise RuntimeError(
+            "runtime_event_input_contract_"
+            + ("missing" if not rows else "ambiguous")
+            + f":{strategy_group_id}:{normalized_symbol}:{side}:count={len(rows)}"
+        )
+    row = rows[0]
+    timeframe = str(row.get("timeframe") or "").strip()
+    if not timeframe:
+        raise RuntimeError("runtime_event_input_contract_timeframe_missing")
+    return RuntimeEventInputContract(
+        event_spec_id=str(row["event_spec_id"]),
+        event_id=str(row["event_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        symbol=_normalized_symbol(row["symbol"]),
+        side=str(row["side"]),
+        primary_timeframe=timeframe,
+    )
+
+
+async def load_runtime_event_input_contract_for_runtime(
+    *,
+    runtime: Any,
+) -> RuntimeEventInputContract:
+    """Resolve the active PG Event Spec input contract for a runtime."""
+
+    from src.infrastructure.database import get_pg_engine
+
+    async with get_pg_engine().connect() as conn:
+        return await load_runtime_event_input_contract(
+            conn,
+            strategy_group_id=runtime.strategy_family_id,
+            symbol=runtime.symbol,
+            side=runtime.side,
+        )
+
+
 async def load_runtime_comparative_strength_snapshot(
     *,
     runtime: Any,
@@ -296,6 +385,7 @@ def build_signal_input(
     playbook_id: str | None,
     now_ms: int,
     comparative_strength_snapshot: Any | None = None,
+    primary_timeframe: str = "1h",
 ) -> Any:
     from src.domain.strategy_family_signal import (
         MarketSnapshot,
@@ -322,7 +412,7 @@ def build_signal_input(
         symbol=runtime.symbol,
         timestamp_ms=trigger_candle_close_time_ms,
         trigger_candle_close_time_ms=trigger_candle_close_time_ms,
-        primary_timeframe="1h",
+        primary_timeframe=primary_timeframe,
         context_timeframes=["4h"],
         market_snapshot=MarketSnapshot(
             symbol=runtime.symbol,
@@ -334,10 +424,10 @@ def build_signal_input(
             last_price=Decimal(str(latest.close)),
             mark_price=Decimal(str(latest.close)),
             atr=atr,
-            timeframe="1h",
+            timeframe=primary_timeframe,
             candle_context={
                 "windows": {
-                    "1h": [_candle_json(item) for item in one_hour],
+                    primary_timeframe: [_candle_json(item) for item in one_hour],
                     "4h": [_candle_json(item) for item in four_hour],
                 },
                 "closed_bar": True,
@@ -381,10 +471,13 @@ async def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     runtime = await _load_runtime(args.runtime_instance_id)
+    event_contract = await load_runtime_event_input_contract_for_runtime(
+        runtime=runtime,
+    )
     source = market_source(args)
     one_hour = source.latest_closed_candles(
         symbol=args.symbol or runtime.symbol,
-        timeframe="1h",
+        timeframe=event_contract.primary_timeframe,
         limit=args.one_hour_limit,
     )
     four_hour = source.latest_closed_candles(
@@ -411,6 +504,7 @@ async def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
         playbook_id=args.playbook_id,
         now_ms=now_ms,
         comparative_strength_snapshot=comparative_strength_snapshot,
+        primary_timeframe=event_contract.primary_timeframe,
     )
     evaluation = RuntimeStrategySignalEvaluationService().evaluate(signal_input)
     ready = (
@@ -427,6 +521,8 @@ async def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
         "runtime_instance_id": runtime.runtime_instance_id,
         "strategy_family_id": runtime.strategy_family_id,
         "strategy_family_version_id": runtime.strategy_family_version_id,
+        "event_spec_id": event_contract.event_spec_id,
+        "event_id": event_contract.event_id,
         "symbol": runtime.symbol,
         "side": runtime.side,
         "source": getattr(source, "source_id", "unknown_read_only_market_source"),

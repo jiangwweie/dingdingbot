@@ -30,6 +30,9 @@ class _AsyncMappingsResult:
     def first(self):
         return self._row
 
+    def all(self):
+        return [] if self._row is None else [self._row]
+
 
 class _AsyncConnection:
     def __init__(self, row):
@@ -87,6 +90,23 @@ def _comparative_row(
                 "fact_key": "leader_strength_confirmed",
             },
         ),
+    }
+
+
+def _event_contract_row(
+    *,
+    strategy_group_id: str = "SOR-001",
+    symbol: str = "BTCUSDT",
+    side: str = "short",
+    timeframe: str = "15m",
+):
+    return {
+        "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v2",
+        "event_id": "SOR-SHORT",
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "side": side,
+        "timeframe": timeframe,
     }
 
 
@@ -158,6 +178,26 @@ def _runtime() -> StrategyRuntimeInstance:
         shadow_mode=True,
         created_at_ms=NOW_MS,
         updated_at_ms=NOW_MS,
+    )
+
+
+def _sor_runtime() -> StrategyRuntimeInstance:
+    runtime = _runtime()
+    return runtime.model_copy(
+        update={
+            "runtime_instance_id": "runtime-sor-short-1",
+            "strategy_family_id": "SOR-001",
+            "strategy_family_version_id": "SOR-001-v0",
+            "carrier_id": "SOR-001-runtime",
+            "symbol": "BTC/USDT:USDT",
+            "side": "short",
+            "boundary": runtime.boundary.model_copy(
+                update={
+                    "allowed_symbols": ["BTC/USDT:USDT"],
+                    "allowed_sides": ["short"],
+                }
+            ),
+        }
     )
 
 
@@ -236,6 +276,48 @@ async def test_load_comparative_strength_snapshot_returns_none_when_missing():
 
 
 @pytest.mark.asyncio
+async def test_load_runtime_event_input_contract_uses_active_pg_event_timeframe():
+    conn = _AsyncConnection(_event_contract_row())
+
+    contract = await runtime_strategy_signal_input.load_runtime_event_input_contract(
+        conn,
+        strategy_group_id="SOR-001",
+        symbol="BTC/USDT:USDT",
+        side="short",
+    )
+
+    assert contract.event_spec_id == "event_spec:SOR-001:SOR-SHORT:v2"
+    assert contract.event_id == "SOR-SHORT"
+    assert contract.primary_timeframe == "15m"
+    assert conn.params == {
+        "strategy_group_id": "SOR-001",
+        "symbol": "BTCUSDT",
+        "side": "short",
+    }
+
+
+def test_build_signal_input_uses_pg_owned_primary_timeframe():
+    primary = _btpc_1h()
+
+    signal_input = runtime_strategy_signal_input.build_signal_input(
+        runtime=_runtime(),
+        one_hour=primary,
+        four_hour=_down_context_4h(),
+        source_id="unit_market",
+        source_type="unit_read_only",
+        evaluation_id="eval-pg-timeframe",
+        playbook_id=None,
+        now_ms=NOW_MS,
+        primary_timeframe="15m",
+    )
+
+    assert signal_input.primary_timeframe == "15m"
+    assert "15m" in signal_input.market_snapshot.candle_context["windows"]
+    assert "1h" not in signal_input.market_snapshot.candle_context["windows"]
+    assert signal_input.trigger_candle_close_time_ms == primary[-1].close_time_ms
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "row",
     [
@@ -309,10 +391,25 @@ def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypa
     async def fake_load_comparative_strength(**kwargs):
         return None
 
+    async def fake_event_contract(*, runtime):
+        return runtime_strategy_signal_input.RuntimeEventInputContract(
+            event_spec_id="event_spec:BTPC-001:BTPC-SHORT:v1",
+            event_id="BTPC-SHORT",
+            strategy_group_id="BTPC-001",
+            symbol="AVAXUSDT",
+            side="short",
+            primary_timeframe="1h",
+        )
+
     monkeypatch.setattr(
         runtime_strategy_signal_input,
         "load_runtime_comparative_strength_snapshot",
         fake_load_comparative_strength,
+    )
+    monkeypatch.setattr(
+        runtime_strategy_signal_input,
+        "load_runtime_event_input_contract_for_runtime",
+        fake_event_contract,
     )
     output_path = tmp_path / "signal-input.json"
 
@@ -344,6 +441,68 @@ def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypa
     assert payload["safety_invariants"]["execution_intent_created"] is False
     assert payload["safety_invariants"]["order_candidate_created"] is False
     assert not output_path.exists()
+
+
+def test_signal_input_artifact_fetches_pg_owned_sor_15m_primary_window(monkeypatch):
+    requested_timeframes = []
+
+    class FakeSource:
+        source_id = "unit_market_source"
+        source_type = "unit_read_only"
+
+        def latest_closed_candles(self, *, symbol, timeframe, limit):
+            requested_timeframes.append(timeframe)
+            return _down_context_4h() if timeframe == "4h" else _btpc_1h()
+
+    async def fake_load_runtime(runtime_instance_id):
+        return _sor_runtime()
+
+    async def fake_event_contract(*, runtime):
+        assert runtime.strategy_family_id == "SOR-001"
+        return runtime_strategy_signal_input.RuntimeEventInputContract(
+            event_spec_id="event_spec:SOR-001:SOR-SHORT:v2",
+            event_id="SOR-SHORT",
+            strategy_group_id="SOR-001",
+            symbol="BTCUSDT",
+            side="short",
+            primary_timeframe="15m",
+        )
+
+    async def fake_load_comparative_strength(**kwargs):
+        return None
+
+    monkeypatch.setattr(runtime_strategy_signal_input, "_load_runtime", fake_load_runtime)
+    monkeypatch.setattr(runtime_strategy_signal_input, "market_source", lambda args: FakeSource())
+    monkeypatch.setattr(
+        runtime_strategy_signal_input,
+        "load_runtime_event_input_contract_for_runtime",
+        fake_event_contract,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runtime_strategy_signal_input,
+        "load_runtime_comparative_strength_snapshot",
+        fake_load_comparative_strength,
+    )
+
+    payload = __import__("asyncio").run(
+        runtime_strategy_signal_input.build_artifact(
+            argparse.Namespace(
+                runtime_instance_id="runtime-sor-short-1",
+                source="live_market",
+                symbol=None,
+                evaluation_id="eval-sor-short",
+                playbook_id=None,
+                one_hour_limit=25,
+                four_hour_limit=12,
+                timeout_seconds=10.0,
+            )
+        )
+    )
+
+    assert requested_timeframes == ["15m", "4h"]
+    assert payload["signal_input"]["primary_timeframe"] == "15m"
+    assert "15m" in payload["signal_input"]["market_snapshot"]["candle_context"]["windows"]
 
 
 def test_signal_input_artifact_readmodel_cli_stdout_is_json_only(monkeypatch, capsys):
