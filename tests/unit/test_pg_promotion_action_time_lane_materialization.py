@@ -170,6 +170,40 @@ def test_noops_without_fresh_signal(pg_control_connection):
     )
 
 
+def test_action_time_fact_no_signal_materializes_pg_process_noop(
+    pg_control_connection,
+):
+    payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "no_current_fresh_live_signal"
+    process = pg_control_connection.execute(
+        text(
+            """
+            SELECT process_name, process_state, business_state, first_blocker
+            FROM brc_runtime_process_outcomes
+            WHERE process_name = 'action_time_fact_snapshots'
+            """
+        )
+    ).mappings().one()
+    assert process["process_state"] == "noop"
+    assert process["business_state"] == "waiting_for_opportunity"
+    assert process["first_blocker"] is None
+
+
+def test_action_time_fact_business_block_report_exits_process_success():
+    report = {
+        "status": "action_time_fact_snapshots_blocked",
+        "process_outcome": {
+            "process_state": "business_blocked",
+        },
+    }
+
+    assert fact_materializer._report_exit_code(report) == 0
+
+
 def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_connection):
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
 
@@ -613,6 +647,20 @@ def test_action_time_fact_materializer_blocks_missing_protection_reference(
     assert row["satisfied"] in {False, 0}
     assert "opening_range_high_reference" in json.loads(row["failed_facts"])
     assert row["blocker_class"] == "computed_not_satisfied"
+    process = pg_control_connection.execute(
+        text(
+            """
+            SELECT process_name, process_state, business_state, first_blocker
+            FROM brc_runtime_process_outcomes
+            WHERE process_name = 'action_time_fact_snapshots'
+            """
+        )
+    ).mappings().one()
+    assert process["process_state"] == "business_blocked"
+    assert process["business_state"] == "temporarily_unavailable"
+    assert process["first_blocker"] == (
+        "required_fact_missing:opening_range_high_reference"
+    )
 
 
 def test_missing_required_boolean_is_not_filled_from_expected_value():

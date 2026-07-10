@@ -54,10 +54,15 @@ def runtime_process_exit_code(
 
 NOOP_STATUSES = {
     "no_fresh_signal",
+    "no_current_fresh_live_signal",
     "no_operation_layer_handoff_ready",
     "no_unknown_commands",
     "healthy_waiting_quiet",
     "action_time_lane_already_open",
+}
+TEMPORARILY_UNAVAILABLE_BUSINESS_STATUSES = {
+    "action_time_fact_snapshots_blocked",
+    "promotion_candidates_blocked",
 }
 PROCESS_FAILURE_PREFIXES = (
     "runtime_control_state_invalid",
@@ -102,11 +107,18 @@ def classify_process_outcome(
             business_state="temporarily_unavailable",
             first_blocker=first,
         )
-    if normalized or result_status in {"blocked", "promotion_candidates_blocked"}:
+    if normalized or result_status in {
+        "blocked",
+        *TEMPORARILY_UNAVAILABLE_BUSINESS_STATUSES,
+    }:
         return RuntimeProcessOutcome(
             process_name=process_name,
             process_state="business_blocked",
-            business_state="needs_intervention",
+            business_state=(
+                "temporarily_unavailable"
+                if result_status in TEMPORARILY_UNAVAILABLE_BUSINESS_STATUSES
+                else "needs_intervention"
+            ),
             first_blocker=first or result_status,
         )
     business_state = (

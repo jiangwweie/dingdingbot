@@ -51,6 +51,20 @@ def test_runtime_dependency_error_is_retryable_process_failure():
     assert outcome.business_state == "temporarily_unavailable"
 
 
+def test_action_time_fact_business_block_is_temporarily_unavailable_not_intervention():
+    outcome = classify_process_outcome(
+        process_name="action_time_fact_snapshots",
+        result_status="action_time_fact_snapshots_blocked",
+        blockers=["required_fact_not_satisfied:leader_strength_confirmed"],
+    )
+
+    assert outcome.process_state == "business_blocked"
+    assert outcome.business_state == "temporarily_unavailable"
+    assert outcome.first_blocker == (
+        "required_fact_not_satisfied:leader_strength_confirmed"
+    )
+
+
 def test_runtime_process_exit_code_treats_completed_process_states_as_success():
     for process_state in ("succeeded", "noop", "business_blocked"):
         assert runtime_process_exit_code({"process_state": process_state}) == 0

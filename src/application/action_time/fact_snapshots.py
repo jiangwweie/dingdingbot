@@ -34,6 +34,10 @@ from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     is_sync_postgres_dsn,
     normalize_sync_postgres_dsn,
 )
+from src.application.runtime_process_outcome import (  # noqa: E402
+    materialize_runtime_process_outcome,
+    runtime_process_exit_code,
+)
 
 
 ACTION_TIME_FACT_SURFACE = "action_time"
@@ -60,9 +64,36 @@ def materialize_action_time_fact_snapshots(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now = int(now_ms if now_ms is not None else time.time() * 1000)
+    started_at_ms = now
+
+    def result(status: str, **kwargs: Any) -> dict[str, Any]:
+        payload = _result(status, **kwargs)
+        if not sa.inspect(conn).has_table("brc_runtime_process_outcomes"):
+            return payload
+        signal_count = int(
+            conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_live_signal_events")
+            ).scalar_one()
+            or 0
+        )
+        process_row = materialize_runtime_process_outcome(
+            conn,
+            process_name="action_time_fact_snapshots",
+            scope_key="global",
+            run_id=_stable_id("action_time_fact_process_run", str(now), status),
+            result_status=status,
+            blockers=list(kwargs.get("blockers") or []),
+            started_at_ms=started_at_ms,
+            completed_at_ms=now,
+            runtime_head=os.getenv("BRC_RUNTIME_HEAD", "runtime-head-unknown"),
+            source_watermark=f"live_signal_events:{signal_count}",
+        )
+        payload["process_outcome"] = process_row
+        return payload
+
     signals = _current_fresh_live_signals(conn, now_ms=now)
     if not signals:
-        return _result(
+        return result(
             "no_current_fresh_live_signal",
             now_ms=now,
             materialized=[],
@@ -90,7 +121,7 @@ def materialize_action_time_fact_snapshots(
         if materialized
         else "action_time_fact_snapshots_blocked"
     )
-    return _result(
+    return result(
         status,
         now_ms=now,
         materialized=materialized,
@@ -811,6 +842,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True, default=str))
     else:
         print(report["status"])
+    return _report_exit_code(report)
+
+
+def _report_exit_code(report: dict[str, Any]) -> int:
+    process_outcome = report.get("process_outcome")
+    if isinstance(process_outcome, dict):
+        return runtime_process_exit_code(process_outcome)
     return 1 if report["status"] == "action_time_fact_snapshots_blocked" else 0
 
 
