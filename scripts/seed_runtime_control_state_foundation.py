@@ -49,6 +49,11 @@ class EventSeed:
     wip_slot: str
     tradeability_stage: str
     required_facts: tuple[str, ...]
+    strategy_group_version: int = 1
+    event_spec_version: str = "v1"
+    declared_signal_grade: str = "observe_only_signal"
+    declared_required_execution_mode: str = "observe_only"
+    execution_eligibility_enabled: bool = False
     disable_facts: tuple[str, ...] = ()
 
 
@@ -70,6 +75,11 @@ ACTIVE_EVENT_SEEDS: tuple[EventSeed, ...] = (
             "reclaim_confirmed",
             "pullback_low_reference",
         ),
+        strategy_group_version=2,
+        event_spec_version="v2",
+        declared_signal_grade="trial_grade_signal",
+        declared_required_execution_mode="trial_live",
+        execution_eligibility_enabled=True,
     ),
     EventSeed(
         strategy_group_id="MPG-001",
@@ -196,7 +206,10 @@ def build_seed_rows(
 
     for strategy_group_id, group_seeds in seeds_by_group.items():
         first = group_seeds[0]
-        version_id = _strategy_group_version_id(strategy_group_id)
+        version_id = _strategy_group_version_id(
+            strategy_group_id,
+            first.strategy_group_version,
+        )
         supported_sides = sorted({seed.side for seed in group_seeds})
         supported_timeframes = sorted({seed.timeframe for seed in group_seeds})
         rows["brc_strategy_groups"].append(
@@ -219,7 +232,7 @@ def build_seed_rows(
             {
                 "strategy_group_version_id": version_id,
                 "strategy_group_id": strategy_group_id,
-                "version": 1,
+                "version": first.strategy_group_version,
                 "status": "current",
                 "edge_thesis": _edge_thesis(strategy_group_id),
                 "trade_logic": _trade_logic(strategy_group_id),
@@ -284,7 +297,10 @@ def build_seed_rows(
 
     for seed in ACTIVE_EVENT_SEEDS:
         event_spec_id = _event_spec_id(seed)
-        version_id = _strategy_group_version_id(seed.strategy_group_id)
+        version_id = _strategy_group_version_id(
+            seed.strategy_group_id,
+            seed.strategy_group_version,
+        )
         rows["brc_strategy_side_event_specs"].append(
             {
                 "event_spec_id": event_spec_id,
@@ -293,20 +309,27 @@ def build_seed_rows(
                 "event_id": seed.event_id,
                 "side": seed.side,
                 "timeframe": seed.timeframe,
-                "event_spec_version": "v1",
+                "event_spec_version": seed.event_spec_version,
                 "status": "current",
                 "freshness_window_ms": seed.freshness_window_ms,
                 "time_authority": seed.time_authority,
                 "protection_ref_type": seed.protection_ref_type,
                 "created_at_ms": now_ms,
                 "created_by": "codex_seed",
+                "declared_signal_grade": seed.declared_signal_grade,
+                "declared_required_execution_mode": (
+                    seed.declared_required_execution_mode
+                ),
+                "execution_eligibility_enabled": (
+                    seed.execution_eligibility_enabled
+                ),
             }
         )
         _append_required_fact_rows(rows, seed=seed, event_spec_id=event_spec_id, now_ms=now_ms)
         rows["brc_execution_policies"].append(
             {
                 "execution_policy_id": f"exec_policy:{event_spec_id}",
-                "execution_policy_version": "exec-v1",
+                "execution_policy_version": f"exec-{seed.event_spec_version}",
                 "runtime_profile_id": runtime_profile_id,
                 "strategy_group_id": seed.strategy_group_id,
                 "event_spec_id": event_spec_id,
@@ -577,7 +600,10 @@ def _append_required_fact_rows(
     event_spec_id: str,
     now_ms: int,
 ) -> None:
-    version_id = _strategy_group_version_id(seed.strategy_group_id)
+    version_id = _strategy_group_version_id(
+        seed.strategy_group_id,
+        seed.strategy_group_version,
+    )
     for fact_key in seed.required_facts:
         fact_contract_id = f"fact_contract:{version_id}:{fact_key}:finalgate"
         existing_contract = next(
@@ -628,7 +654,9 @@ def _append_required_fact_rows(
             {
                 "event_required_fact_id": f"event_fact:{event_spec_id}:{fact_key}",
                 "event_spec_id": event_spec_id,
-                "required_facts_version_id": f"rf:{event_spec_id}:v1",
+                "required_facts_version_id": (
+                    f"rf:{event_spec_id}:{seed.event_spec_version}"
+                ),
                 "fact_key": fact_key,
                 "fact_role": "required",
                 "fact_surface": "finalgate",
@@ -675,7 +703,9 @@ def _append_required_fact_rows(
             {
                 "event_required_fact_id": f"event_fact:{event_spec_id}:{fact_key}",
                 "event_spec_id": event_spec_id,
-                "required_facts_version_id": f"rf:{event_spec_id}:v1",
+                "required_facts_version_id": (
+                    f"rf:{event_spec_id}:{seed.event_spec_version}"
+                ),
                 "fact_key": fact_key,
                 "fact_role": "disable",
                 "fact_surface": "finalgate",
@@ -753,16 +783,24 @@ def _upsert_rows(
     if len(pk_columns) != 1:
         raise RuntimeError(f"{table_name} must have exactly one primary key")
     pk = pk_columns[0]
+    table_column_names = {str(column.name) for column in table.columns}
     affected = 0
     for row in rows:
         pk_value = row[pk.name]
+        persisted_row = {
+            key: value
+            for key, value in row.items()
+            if key in table_column_names
+        }
         existing = conn.execute(
             sa.select(pk).where(pk == pk_value).limit(1)
         ).scalar_one_or_none()
         if existing is None:
-            conn.execute(table.insert().values(**row))
+            conn.execute(table.insert().values(**persisted_row))
         else:
-            conn.execute(table.update().where(pk == pk_value).values(**row))
+            conn.execute(
+                table.update().where(pk == pk_value).values(**persisted_row)
+            )
         affected += 1
     return affected
 
@@ -816,12 +854,18 @@ def _print_report(report: dict[str, Any], *, json_output: bool) -> None:
     print(f"candidate_scope_count={report['candidate_scope_count']}")
 
 
-def _strategy_group_version_id(strategy_group_id: str) -> str:
-    return f"sgv:{strategy_group_id}:v1"
+def _strategy_group_version_id(
+    strategy_group_id: str,
+    version: int = 1,
+) -> str:
+    return f"sgv:{strategy_group_id}:v{version}"
 
 
 def _event_spec_id(seed: EventSeed) -> str:
-    return f"event_spec:{seed.strategy_group_id}:{seed.event_id}:v1"
+    return (
+        f"event_spec:{seed.strategy_group_id}:"
+        f"{seed.event_id}:{seed.event_spec_version}"
+    )
 
 
 def _candidate_scope_id(seed: EventSeed, symbol: str) -> str:
