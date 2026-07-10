@@ -28,10 +28,10 @@ from src.domain.reference_price_action_evaluators import (
     LSR001PriceActionEvaluator,
     PMR001PilotReferenceEvaluator,
     RBR001PriceActionEvaluator,
-    SOR001PilotReferenceEvaluator,
     TEQ001PilotReferenceEvaluator,
     VCB001PriceActionEvaluator,
 )
+from src.domain.sor_session_range_evaluator import SOR001SessionRangeEvaluator
 from src.domain.strategy_family_signal import (
     ExpectedRiskShape,
     SignalInputRefs,
@@ -271,7 +271,7 @@ def _default_evaluators() -> dict[tuple[str, str], RuntimeStrategySignalEvaluato
         ("TEQ-001", "TEQ-001-v0"): TEQ001PilotReferenceEvaluator(),
         ("FBS-001", "FBS-001-v0"): FBS001PilotReferenceEvaluator(),
         ("PMR-001", "PMR-001-v0"): PMR001PilotReferenceEvaluator(),
-        ("SOR-001", "SOR-001-v0"): SOR001PilotReferenceEvaluator(),
+        ("SOR-001", "SOR-001-v0"): SOR001SessionRangeEvaluator(),
         ("MI-001", "MI-001-v0"): _MI001RuntimeReferenceEvaluator(),
         ("BRF2-001", "BRF2-001-v0"): _BRF2LiveReferenceEvaluator(),
         ("BRF-001", "BRF-001-v0"): BRF001PriceActionEvaluator(),

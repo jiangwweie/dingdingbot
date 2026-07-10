@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+import pytest
+
 from src.application.runtime_strategy_signal_evaluation_service import (
     RuntimeStrategySignalEvaluationService,
     RuntimeStrategySignalEvaluationStatus,
@@ -146,10 +148,11 @@ def _signal_input(
     one_hour: list[dict[str, Any]] | None = None,
     four_hour: list[dict[str, Any]] | None = None,
     comparative_strength_snapshot: ComparativeStrengthSnapshot | None = None,
+    primary_timeframe: str = "1h",
 ) -> StrategyFamilySignalInput:
     windows: dict[str, list[dict[str, Any]]] = {}
     if one_hour is not None:
-        windows["1h"] = one_hour
+        windows[primary_timeframe] = one_hour
     if four_hour is not None:
         windows["4h"] = four_hour
     return StrategyFamilySignalInput(
@@ -159,7 +162,7 @@ def _signal_input(
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
         trigger_candle_close_time_ms=NOW_MS,
-        primary_timeframe="1h",
+        primary_timeframe=primary_timeframe,
         context_timeframes=["4h"],
         market_snapshot=MarketSnapshot(
             symbol="ETH/USDT:USDT",
@@ -171,7 +174,7 @@ def _signal_input(
             funding_rate=Decimal("0.0001"),
             volatility=Decimal("0.18"),
             atr=Decimal("4"),
-            timeframe="1h",
+            timeframe=primary_timeframe,
             candle_context={"windows": windows, "closed_bar": True},
         ),
         account_facts_snapshot=AccountFactsSnapshot(
@@ -197,6 +200,18 @@ def _signal_input(
         freshness="fresh",
         comparative_strength_snapshot=comparative_strength_snapshot,
     )
+
+
+def _sor_session_15m(*, side: str) -> list[dict[str, Any]]:
+    opening = [
+        _candle(0, "100", "101", "99", "100"),
+        _candle(1, "100", "102", "99", "101"),
+        _candle(2, "101", "102", "98", "100"),
+        _candle(3, "100", "101", "98", "100"),
+    ]
+    if side == "long":
+        return opening + [_candle(4, "101", "104", "100", "103")]
+    return opening + [_candle(4, "99", "100", "96", "97")]
 
 
 def _comparative_snapshot(
@@ -561,6 +576,41 @@ def test_strategygroup_pilot_reference_routes_are_configured_and_non_executing()
         assert result.order_created is False
         assert result.order_lifecycle_called is False
         assert result.exchange_called is False
+
+
+@pytest.mark.parametrize(
+    ("side", "event_fact", "protection_fact"),
+    [
+        ("long", "breakout_confirmed", "opening_range_low_reference"),
+        ("short", "breakdown_confirmed", "opening_range_high_reference"),
+    ],
+)
+def test_sor_runtime_evaluator_emits_side_specific_trial_event_facts(
+    side,
+    event_fact,
+    protection_fact,
+):
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="SOR-001",
+            version_id="SOR-001-v0",
+            one_hour=_sor_session_15m(side=side),
+            four_hour=None,
+            primary_timeframe="15m",
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+    assert result.blockers == []
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.WOULD_ENTER
+    assert result.output.side.value == side
+    assert result.output.signal_grade == SignalGrade.TRIAL_GRADE_SIGNAL
+    assert result.output.required_execution_mode == RequiredExecutionMode.TRIAL_LIVE
+    facts = {item.fact_key: item.observed_value for item in result.output.fact_observations}
+    assert facts["opening_range_defined"] is True
+    assert facts[event_fact] is True
+    assert Decimal(str(facts[protection_fact])) > 0
 
 
 def test_mainline_mi_and_brf2_routes_are_configured_and_non_executing():
