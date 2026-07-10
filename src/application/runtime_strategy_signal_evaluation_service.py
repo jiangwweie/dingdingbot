@@ -38,9 +38,11 @@ from src.domain.strategy_family_signal import (
     SignalReviewPlan,
     SignalSide,
     SignalType,
+    StrategyFactObservation,
     StrategyFamilySignalInput,
     StrategyFamilySignalOutput,
 )
+from src.domain.execution_eligibility import RequiredExecutionMode, SignalGrade
 from src.domain.strategy_semantics import (
     StrategyCandidateMode,
     StrategySemanticsCatalog,
@@ -327,7 +329,7 @@ class _MI001RuntimeReferenceEvaluator:
             (latest["close"] - lookback["close"]) / lookback["close"]
         ) * Decimal("100")
         evidence = {
-            "logic_version": "mi001-runtime-reference-v0",
+            "logic_version": "mi001-runtime-reference-v1",
             "lookback_bars": self._lookback_bars,
             "return_threshold_pct": str(self._return_threshold_pct),
             "lookback_close": str(lookback["close"]),
@@ -351,6 +353,98 @@ class _MI001RuntimeReferenceEvaluator:
                 review_required=False,
             )
 
+        comparative = signal_input.comparative_strength_snapshot
+        if comparative is None:
+            return self._output(
+                signal_input,
+                signal_type=SignalType.INVALID,
+                side=SignalSide.NONE,
+                confidence=Decimal("0"),
+                reason_codes=["mi001_invalid_comparative_strength_missing"],
+                human_summary=(
+                    "MI-001 requires a fresh PG comparative-strength snapshot "
+                    "after the impulse threshold is met."
+                ),
+                evidence_payload=evidence,
+                review_required=False,
+            )
+        if (
+            comparative.strategy_group_id != "MI-001"
+            or comparative.timeframe != signal_input.primary_timeframe
+            or comparative.lookback_bars != self._lookback_bars
+            or comparative.trigger_candle_close_time_ms
+            != signal_input.trigger_candle_close_time_ms
+        ):
+            return self._output(
+                signal_input,
+                signal_type=SignalType.INVALID,
+                side=SignalSide.NONE,
+                confidence=Decimal("0"),
+                reason_codes=["mi001_invalid_comparative_strength_scope"],
+                human_summary="MI-001 comparative-strength scope does not match the signal input.",
+                evidence_payload=evidence,
+                review_required=False,
+            )
+        try:
+            comparative_member = comparative.member(signal_input.symbol)
+        except KeyError:
+            return self._output(
+                signal_input,
+                signal_type=SignalType.INVALID,
+                side=SignalSide.NONE,
+                confidence=Decimal("0"),
+                reason_codes=["mi001_invalid_comparative_strength_member_missing"],
+                human_summary="MI-001 candidate is missing from its comparative universe.",
+                evidence_payload=evidence,
+                review_required=False,
+            )
+        if comparative_member.return_pct != impulse_return_pct:
+            return self._output(
+                signal_input,
+                signal_type=SignalType.INVALID,
+                side=SignalSide.NONE,
+                confidence=Decimal("0"),
+                reason_codes=["mi001_invalid_comparative_return_mismatch"],
+                human_summary="MI-001 own impulse and PG comparative return do not match.",
+                evidence_payload={
+                    **evidence,
+                    "comparative_return_pct": str(comparative_member.return_pct),
+                },
+                review_required=False,
+            )
+
+        relative_strength_confirmed = comparative_member.rank == 1
+        evidence["comparative_strength"] = comparative.model_dump(mode="json")
+        evidence["relative_strength"] = {
+            "candidate_symbol": comparative_member.symbol,
+            "rank": comparative_member.rank,
+            "return_pct": str(comparative_member.return_pct),
+            "relative_strength_confirmed": relative_strength_confirmed,
+        }
+        fact_observations = self._fact_observations(
+            signal_input=signal_input,
+            comparative_observed_at_ms=comparative.observed_at_ms,
+            comparative_valid_until_ms=comparative.valid_until_ms,
+            comparative_source_ref=comparative.source_ref,
+            relative_strength_confirmed=relative_strength_confirmed,
+            invalidation_reference=lookback["close"],
+        )
+        if not relative_strength_confirmed:
+            return self._output(
+                signal_input,
+                signal_type=SignalType.NO_ACTION,
+                side=SignalSide.NONE,
+                confidence=Decimal("0.25"),
+                reason_codes=["mi001_no_action_relative_strength_not_confirmed"],
+                human_summary=(
+                    "MI-001 impulse crossed threshold, but the candidate is not "
+                    "the comparison-universe leader."
+                ),
+                evidence_payload=evidence,
+                review_required=False,
+                fact_observations=fact_observations,
+            )
+
         return self._output(
             signal_input,
             signal_type=SignalType.WOULD_ENTER,
@@ -358,7 +452,7 @@ class _MI001RuntimeReferenceEvaluator:
             confidence=Decimal("0.65"),
             reason_codes=[
                 "mi001_12h_momentum_impulse",
-                "observe_only_review_required",
+                "mi001_relative_strength_confirmed",
             ],
             human_summary=(
                 "MI-001 would-enter long observation: 12h close-to-close "
@@ -366,7 +460,47 @@ class _MI001RuntimeReferenceEvaluator:
             ),
             evidence_payload=evidence,
             review_required=True,
+            fact_observations=fact_observations,
+            signal_grade=SignalGrade.TRIAL_GRADE_SIGNAL,
+            required_execution_mode=RequiredExecutionMode.TRIAL_LIVE,
         )
+
+    def _fact_observations(
+        self,
+        *,
+        signal_input: StrategyFamilySignalInput,
+        comparative_observed_at_ms: int,
+        comparative_valid_until_ms: int,
+        comparative_source_ref: str,
+        relative_strength_confirmed: bool,
+        invalidation_reference: Decimal,
+    ) -> list[StrategyFactObservation]:
+        trigger_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+        local_source_ref = f"closed_ohlcv:{signal_input.symbol}:{trigger_ms}:mi-v1"
+        local_valid_until_ms = trigger_ms + 3_600_000
+        return [
+            StrategyFactObservation(
+                fact_key="impulse_confirmed",
+                observed_value=True,
+                observed_at_ms=trigger_ms,
+                valid_until_ms=local_valid_until_ms,
+                source_ref=local_source_ref,
+            ),
+            StrategyFactObservation(
+                fact_key="relative_strength_confirmed",
+                observed_value=relative_strength_confirmed,
+                observed_at_ms=comparative_observed_at_ms,
+                valid_until_ms=comparative_valid_until_ms,
+                source_ref=comparative_source_ref,
+            ),
+            StrategyFactObservation(
+                fact_key="impulse_invalidation_reference",
+                observed_value=invalidation_reference,
+                observed_at_ms=trigger_ms,
+                valid_until_ms=local_valid_until_ms,
+                source_ref=local_source_ref,
+            ),
+        ]
 
     def _output(
         self,
@@ -379,6 +513,9 @@ class _MI001RuntimeReferenceEvaluator:
         human_summary: str,
         evidence_payload: dict,
         review_required: bool,
+        fact_observations: list[StrategyFactObservation] | None = None,
+        signal_grade: SignalGrade = SignalGrade.OBSERVE_ONLY_SIGNAL,
+        required_execution_mode: RequiredExecutionMode = RequiredExecutionMode.OBSERVE_ONLY,
     ) -> StrategyFamilySignalOutput:
         return StrategyFamilySignalOutput(
             signal_id=f"mi001-runtime-{signal_input.evaluation_id}",
@@ -395,13 +532,15 @@ class _MI001RuntimeReferenceEvaluator:
             confidence=confidence,
             reason_codes=reason_codes,
             human_summary=human_summary,
-            required_execution_mode="observe_only",
+            signal_grade=signal_grade,
+            required_execution_mode=required_execution_mode,
             expected_risk_shape=ExpectedRiskShape.TREND_FOLLOWING_WIDE_STOP,
             signal_snapshot={
                 "strategy_family": signal_input.strategy_family_id,
-                "logic_version": "mi001-runtime-reference-v0",
+                "logic_version": "mi001-runtime-reference-v1",
             },
             evidence_payload=evidence_payload,
+            fact_observations=fact_observations or [],
             input_refs=SignalInputRefs(
                 market_snapshot_ref=(
                     f"closed_ohlcv:{signal_input.symbol}:"

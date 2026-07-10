@@ -121,6 +121,11 @@ ACTIVE_EVENT_SEEDS: tuple[EventSeed, ...] = (
             "relative_strength_confirmed",
             "impulse_invalidation_reference",
         ),
+        strategy_group_version=2,
+        event_spec_version="v2",
+        declared_signal_grade="trial_grade_signal",
+        declared_required_execution_mode="trial_live",
+        execution_eligibility_enabled=True,
     ),
     EventSeed(
         strategy_group_id="SOR-001",

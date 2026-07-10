@@ -233,6 +233,48 @@ def _comparative_snapshot(
     )
 
 
+def _mi_comparative_snapshot(
+    *,
+    candidate_rank: int = 1,
+    candidate_return_pct: Decimal | None = None,
+) -> ComparativeStrengthSnapshot:
+    candles = _mi_impulse_1h()
+    start = Decimal(str(candles[-13]["close"]))
+    end = Decimal(str(candles[-1]["close"]))
+    actual_return = ((end - start) / start) * Decimal("100")
+    candidate_return = (
+        actual_return
+        if candidate_return_pct is None
+        else candidate_return_pct
+    )
+    return ComparativeStrengthSnapshot(
+        strategy_group_id="MI-001",
+        timeframe="1h",
+        lookback_bars=12,
+        trigger_candle_close_time_ms=NOW_MS,
+        universe_symbols=("ETHUSDT", "SOLUSDT"),
+        members=(
+            ComparativeStrengthMember(
+                symbol="ETHUSDT",
+                start_close=start,
+                end_close=end,
+                return_pct=candidate_return,
+                rank=candidate_rank,
+            ),
+            ComparativeStrengthMember(
+                symbol="SOLUSDT",
+                start_close=Decimal("100"),
+                end_close=Decimal("102"),
+                return_pct=Decimal("2"),
+                rank=2 if candidate_rank == 1 else 1,
+            ),
+        ),
+        observed_at_ms=NOW_MS,
+        valid_until_ms=NOW_MS + 3_600_000,
+        source_ref="pg:strategy_comparative:mi-unit",
+    )
+
+
 class _FakeShortEvaluator:
     def evaluate(
         self,
@@ -529,6 +571,7 @@ def test_mainline_mi_and_brf2_routes_are_configured_and_non_executing():
             family_id="MI-001",
             version_id="MI-001-v0",
             one_hour=_mi_impulse_1h(),
+            comparative_strength_snapshot=_mi_comparative_snapshot(),
         )
     )
     brf2 = service.evaluate(
@@ -549,6 +592,15 @@ def test_mainline_mi_and_brf2_routes_are_configured_and_non_executing():
     assert mi.output.strategy_family_version_id == "MI-001-v0"
     assert mi.output.signal_type == SignalType.WOULD_ENTER
     assert mi.output.side == SignalSide.LONG
+    assert mi.output.signal_grade == SignalGrade.TRIAL_GRADE_SIGNAL
+    assert mi.output.required_execution_mode == RequiredExecutionMode.TRIAL_LIVE
+    mi_facts = {
+        item.fact_key: item.observed_value
+        for item in mi.output.fact_observations
+    }
+    assert mi_facts["impulse_confirmed"] is True
+    assert mi_facts["relative_strength_confirmed"] is True
+    assert Decimal(str(mi_facts["impulse_invalidation_reference"])) > 0
     assert mi.order_candidate_created is False
     assert mi.execution_intent_created is False
     assert mi.exchange_called is False
@@ -566,6 +618,59 @@ def test_mainline_mi_and_brf2_routes_are_configured_and_non_executing():
     assert brf2.order_candidate_created is False
     assert brf2.execution_intent_created is False
     assert brf2.exchange_called is False
+
+
+def test_mi_missing_comparative_snapshot_is_invalid_engineering_input():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="MI-001",
+            version_id="MI-001-v0",
+            one_hour=_mi_impulse_1h(),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.BLOCKED
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.INVALID
+    assert "mi001_invalid_comparative_strength_missing" in result.output.reason_codes
+    assert result.output.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
+
+
+def test_mi_computed_non_leader_is_market_no_action():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="MI-001",
+            version_id="MI-001-v0",
+            one_hour=_mi_impulse_1h(),
+            comparative_strength_snapshot=_mi_comparative_snapshot(
+                candidate_rank=2
+            ),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.OBSERVE_ONLY
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.NO_ACTION
+    assert "mi001_no_action_relative_strength_not_confirmed" in result.output.reason_codes
+    assert result.output.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
+
+
+def test_mi_rejects_comparative_return_mismatch_as_invalid_input():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="MI-001",
+            version_id="MI-001-v0",
+            one_hour=_mi_impulse_1h(),
+            comparative_strength_snapshot=_mi_comparative_snapshot(
+                candidate_return_pct=Decimal("99")
+            ),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.BLOCKED
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.INVALID
+    assert "mi001_invalid_comparative_return_mismatch" in result.output.reason_codes
 
 
 def test_rmr_classifier_binding_observe_only_without_evaluator_call():

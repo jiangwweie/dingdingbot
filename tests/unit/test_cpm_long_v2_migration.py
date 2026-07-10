@@ -47,7 +47,7 @@ def _upgrade(conn, path: Path, name: str) -> None:
         module.op = old_op
 
 
-def test_fresh_seed_certifies_cpm_and_mpg_long_v2() -> None:
+def test_fresh_seed_certifies_cpm_mpg_and_mi_long_v2() -> None:
     rows = seed.build_seed_rows()
     events = rows["brc_strategy_side_event_specs"]
     eligible = [
@@ -80,6 +80,13 @@ def test_fresh_seed_certifies_cpm_and_mpg_long_v2() -> None:
             "trial_grade_signal",
             "trial_live",
         ),
+        (
+            "MI-001",
+            "MI-LONG",
+            "v2",
+            "trial_grade_signal",
+            "trial_live",
+        ),
     ]
     cpm_group = next(
         row
@@ -94,10 +101,10 @@ def test_non_certified_event_specs_remain_observe_only() -> None:
     non_cpm = [
         row
         for row in rows["brc_strategy_side_event_specs"]
-        if row["strategy_group_id"] not in {"CPM-RO-001", "MPG-001"}
+        if row["strategy_group_id"] not in {"CPM-RO-001", "MPG-001", "MI-001"}
     ]
 
-    assert len(non_cpm) == 4
+    assert len(non_cpm) == 3
     assert {
         (
             row["event_spec_version"],
