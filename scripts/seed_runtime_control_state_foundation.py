@@ -861,6 +861,22 @@ def _upsert_rows(
         existing = conn.execute(
             sa.select(pk).where(pk == pk_value).limit(1)
         ).scalar_one_or_none()
+        if existing is None and table_name == "brc_required_fact_contracts":
+            existing = conn.execute(
+                sa.select(pk)
+                .where(
+                    sa.and_(
+                        table.c.strategy_group_version_id
+                        == row["strategy_group_version_id"],
+                        table.c.fact_key == row["fact_key"],
+                        table.c.required_surface == row["required_surface"],
+                    )
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if existing is not None:
+                pk_value = existing
+                persisted_row[pk.name] = existing
         if existing is None:
             conn.execute(table.insert().values(**persisted_row))
         else:

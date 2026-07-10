@@ -83,6 +83,21 @@ def test_migration_111_switches_three_brf2_bindings_and_preserves_disable_fact()
             for index, path in enumerate(BASE[5:], start=107):
                 _upgrade(conn, path, f"brf2_{index}")
             _upgrade(conn, M111, "brf2_111")
+            seed.ACTIVE_EVENT_SEEDS = original
+            seed.seed_runtime_control_state_foundation(conn)
+
+            disable_contract_count = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM brc_required_fact_contracts
+                    WHERE strategy_group_version_id='sgv:BRF2-001:v2'
+                      AND fact_key='strong_uptrend_disable'
+                      AND required_surface='finalgate'
+                    """
+                )
+            ).scalar_one()
+            assert disable_contract_count == 1
 
             events = conn.execute(
                 text(
