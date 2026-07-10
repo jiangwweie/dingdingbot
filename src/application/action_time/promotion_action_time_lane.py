@@ -1682,13 +1682,14 @@ def _upsert_row(
     metadata = sa.MetaData()
     table = sa.Table(table_name, metadata, autoload_with=conn)
     pk = table.c[pk_name]
+    values = {key: value for key, value in row.items() if key in table.c}
     existing = conn.execute(
         sa.select(pk).where(pk == row[pk_name]).limit(1)
     ).scalar_one_or_none()
     if existing is None:
-        conn.execute(table.insert().values(**row))
+        conn.execute(table.insert().values(**values))
     else:
-        conn.execute(table.update().where(pk == row[pk_name]).values(**row))
+        conn.execute(table.update().where(pk == row[pk_name]).values(**values))
 
 
 def _lane_key(row: dict[str, Any]) -> tuple[str, str, str]:
