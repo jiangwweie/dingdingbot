@@ -159,6 +159,15 @@ def test_noops_without_fresh_signal(pg_control_connection):
     ).mappings().one()
     assert process["process_state"] == "noop"
     assert process["business_state"] == "waiting_for_opportunity"
+    active_scope_count = pg_control_connection.execute(
+        text(
+            "SELECT COUNT(*) FROM brc_strategy_group_candidate_scope "
+            "WHERE status = 'active'"
+        )
+    ).scalar_one()
+    assert _count(pg_control_connection, "brc_strategy_semantic_admissions") == (
+        active_scope_count
+    )
 
 
 def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_connection):
@@ -1983,6 +1992,7 @@ def _count(conn, table_name: str) -> int:
         "brc_budget_reservations",
         "brc_promotion_candidates",
         "brc_protection_references",
+        "brc_strategy_semantic_admissions",
     }
     return conn.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one()
 

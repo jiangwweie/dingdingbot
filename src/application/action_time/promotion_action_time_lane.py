@@ -49,6 +49,9 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 from src.application.runtime_process_outcome import (  # noqa: E402
     materialize_runtime_process_outcome,
 )
+from src.application.strategy_semantic_admission import (  # noqa: E402
+    materialize_active_strategy_semantic_admissions,
+)
 
 
 OPEN_REAL_LANE_STATUSES = {
@@ -160,6 +163,8 @@ def materialize_pg_promotion_action_time_lane(
 
     _expire_stale_open_promotions(conn, now_ms=now_ms)
     _expire_stale_open_real_lanes(conn, now_ms=now_ms)
+    if sa.inspect(conn).has_table("brc_strategy_semantic_admissions"):
+        materialize_active_strategy_semantic_admissions(conn, now_ms=now_ms)
     try:
         control_state = PgBackedRuntimeControlStateRepository(
             conn,
