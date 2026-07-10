@@ -459,6 +459,36 @@ def test_pg_projection_classifies_observe_only_fresh_signal_as_action_time_gap()
     assert first_blocker == "action_time_boundary_not_reproduced"
 
 
+def test_pg_projection_rejects_market_wait_when_event_spec_is_observe_only(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    control_state = repository.read_control_state()
+    for event_spec in control_state["strategy_side_event_specs"]:
+        event_spec["declared_signal_grade"] = "observe_only_signal"
+        event_spec["declared_required_execution_mode"] = "observe_only"
+        event_spec["execution_eligibility_enabled"] = False
+    control_state["pretrade_readiness_rows"] = [
+        {
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "first_blocker_class": "market_wait_validated",
+        }
+        for candidate in control_state["candidate_scope"]
+        if candidate.get("status") == "active"
+    ]
+
+    inputs = _builder().build_strategy_live_candidate_pool_inputs_from_control_state(
+        control_state,
+        generated_at_utc="2026-07-10T00:00:00+00:00",
+    )
+
+    assert {
+        row["first_blocker"] for row in inputs["daily_table"]["rows"]
+    } == {"action_time_boundary_not_reproduced"}
+
+
 def test_candidate_pool_pg_signal_times_use_market_event_not_observation_time(
     pg_control_connection,
 ):

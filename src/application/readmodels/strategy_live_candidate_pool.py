@@ -285,6 +285,13 @@ def _candidate_pool_inputs_from_control_state(
             + ", ".join(sorted(extra_event_strategy_groups))
         )
     binding_by_candidate = _active_scope_event_binding_by_candidate(control_state)
+    event_spec_by_candidate = {
+        candidate_scope_id: event_by_id.get(
+            str(binding.get("event_spec_id") or ""),
+            {},
+        )
+        for candidate_scope_id, binding in binding_by_candidate.items()
+    }
     runtime_by_candidate = _active_runtime_scope_by_candidate(control_state)
     policy_by_id = {
         str(row.get("policy_current_id") or ""): row
@@ -340,6 +347,7 @@ def _candidate_pool_inputs_from_control_state(
             binding_by_candidate=binding_by_candidate,
             runtime_by_candidate=runtime_by_candidate,
             signal_by_lane=signal_by_lane,
+            event_spec_by_candidate=event_spec_by_candidate,
         ),
         "tradeability": _pg_tradeability_projection(
             candidate_rows=candidate_rows,
@@ -349,6 +357,7 @@ def _candidate_pool_inputs_from_control_state(
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
             signal_by_lane=signal_by_lane,
+            event_spec_by_candidate=event_spec_by_candidate,
         ),
         "replay_live_parity": _pg_replay_live_parity_projection(
             candidate_rows=candidate_rows,
@@ -601,6 +610,7 @@ def _pg_daily_table_projection(
     binding_by_candidate: dict[str, dict[str, Any]],
     runtime_by_candidate: dict[str, dict[str, Any]],
     signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    event_spec_by_candidate: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for rank, strategy_group_id in enumerate(WIP_LANES, start=1):
@@ -614,6 +624,7 @@ def _pg_daily_table_projection(
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
             signal_by_lane=signal_by_lane,
+            event_spec_by_candidate=event_spec_by_candidate,
         )
         candidate_scope_id = str(selected.get("candidate_scope_id") or "")
         first_blocker = _pg_candidate_first_blocker(
@@ -622,6 +633,7 @@ def _pg_daily_table_projection(
             fact_by_lane=fact_by_lane,
             runtime_scope=runtime_by_candidate.get(candidate_scope_id, {}),
             signal_by_lane=signal_by_lane,
+            event_spec=event_spec_by_candidate.get(candidate_scope_id, {}),
         )
         rows.append(
             {
@@ -670,6 +682,7 @@ def _pg_tradeability_projection(
     readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    event_spec_by_candidate: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     decision_rows: list[dict[str, Any]] = []
     for strategy_group_id in WIP_LANES:
@@ -683,6 +696,7 @@ def _pg_tradeability_projection(
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
             signal_by_lane=signal_by_lane,
+            event_spec_by_candidate=event_spec_by_candidate,
         )
         candidate_scope_id = str(selected.get("candidate_scope_id") or "")
         runtime_scope = runtime_by_candidate.get(candidate_scope_id, {})
@@ -692,6 +706,7 @@ def _pg_tradeability_projection(
             fact_by_lane=fact_by_lane,
             runtime_scope=runtime_scope,
             signal_by_lane=signal_by_lane,
+            event_spec=event_spec_by_candidate.get(candidate_scope_id, {}),
         )
         policies = [
             policy_by_id.get(str(row.get("policy_current_id") or ""), {})
@@ -1123,6 +1138,7 @@ def _pg_strategy_summary_candidate(
     readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    event_spec_by_candidate: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     if not candidates:
         return {}
@@ -1136,6 +1152,10 @@ def _pg_strategy_summary_candidate(
                     fact_by_lane=fact_by_lane,
                     runtime_scope={},
                     signal_by_lane=signal_by_lane,
+                    event_spec=event_spec_by_candidate.get(
+                        str(row.get("candidate_scope_id") or ""),
+                        {},
+                    ),
                 )
             ),
             int(row.get("priority_rank") or 999),
@@ -1152,8 +1172,18 @@ def _pg_candidate_first_blocker(
     fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     runtime_scope: dict[str, Any],
     signal_by_lane: dict[tuple[str, str, str], dict[str, Any]] | None = None,
+    event_spec: dict[str, Any] | None = None,
 ) -> str:
     key = _lane_key(candidate)
+    event_spec = event_spec or {}
+    if "execution_eligibility_enabled" in event_spec and (
+        event_spec.get("execution_eligibility_enabled") is not True
+        or event_spec.get("declared_signal_grade")
+        not in {"trial_grade_signal", "production_grade_signal"}
+        or event_spec.get("declared_required_execution_mode")
+        not in {"trial_live", "production_live"}
+    ):
+        return "action_time_boundary_not_reproduced"
     signal = (signal_by_lane or {}).get(key, {})
     if signal and signal.get("execution_eligible") is not True:
         return "action_time_boundary_not_reproduced"
