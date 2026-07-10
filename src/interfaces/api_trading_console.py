@@ -5660,6 +5660,13 @@ async def _runtime_next_attempt_observation_cycle_payload(
         limit=request.four_hour_limit,
     )
     now_ms = int(time.time() * 1000)
+    comparative_strength_snapshot = (
+        await signal_builder.load_runtime_comparative_strength_snapshot(
+            runtime=runtime,
+            trigger_candle_close_time_ms=int(one_hour[-1].close_time_ms),
+            now_ms=now_ms,
+        )
+    )
     signal_input = signal_builder.build_signal_input(
         runtime=runtime,
         one_hour=one_hour,
@@ -5669,6 +5676,7 @@ async def _runtime_next_attempt_observation_cycle_payload(
         evaluation_id=request.evaluation_id,
         playbook_id=request.playbook_id,
         now_ms=now_ms,
+        comparative_strength_snapshot=comparative_strength_snapshot,
     )
     evaluation = RuntimeStrategySignalEvaluationService().evaluate(signal_input)
     signal_artifact = {

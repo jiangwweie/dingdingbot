@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 from decimal import Decimal
+import json
 import sys
 from types import SimpleNamespace
+
+import pytest
 
 from src.domain.strategy_runtime import (
     StrategyRuntimeBoundary,
@@ -15,6 +18,76 @@ from scripts import build_runtime_strategy_signal_input_artifact
 
 
 NOW_MS = 1781000000000
+
+
+class _AsyncMappingsResult:
+    def __init__(self, row):
+        self._row = row
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._row
+
+
+class _AsyncConnection:
+    def __init__(self, row):
+        self.row = row
+        self.params = None
+
+    async def execute(self, statement, params):
+        self.params = params
+        return _AsyncMappingsResult(self.row)
+
+
+def _comparative_row(
+    *,
+    strategy_group_id: str = "MPG-001",
+    symbol: str = "BTCUSDT",
+    side: str = "long",
+    freshness_state: str = "fresh",
+    valid_until_ms: int = NOW_MS + 60_000,
+):
+    return {
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "side": side,
+        "computed": True,
+        "satisfied": True,
+        "freshness_state": freshness_state,
+        "valid_until_ms": valid_until_ms,
+        "fact_values": json.dumps(
+            {
+                "strategy_group_id": strategy_group_id,
+                "timeframe": "1h",
+                "lookback_bars": 8,
+                "trigger_candle_close_time_ms": NOW_MS - 1,
+                "universe_symbols": ["BTCUSDT", "ETHUSDT"],
+                "members": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "start_close": "100",
+                        "end_close": "112",
+                        "return_pct": "12",
+                        "rank": 1,
+                    },
+                    {
+                        "symbol": "ETHUSDT",
+                        "start_close": "100",
+                        "end_close": "108",
+                        "return_pct": "8",
+                        "rank": 2,
+                    },
+                ],
+                "observed_at_ms": NOW_MS - 1,
+                "valid_until_ms": valid_until_ms,
+                "source_ref": "binance_closed_1h",
+                "candidate_symbol": symbol,
+                "fact_key": "leader_strength_confirmed",
+            },
+        ),
+    }
 
 
 def _candle(index: int, open_: str, high: str, low: str, close: str) -> SimpleNamespace:
@@ -121,6 +194,97 @@ def test_build_btpc_signal_input_uses_runtime_boundary_and_placeholder_account()
     )
 
 
+@pytest.mark.asyncio
+async def test_load_comparative_strength_snapshot_accepts_exact_fresh_pg_row():
+    conn = _AsyncConnection(_comparative_row())
+
+    snapshot = await runtime_strategy_signal_input.load_comparative_strength_snapshot(
+        conn,
+        strategy_group_id="MPG-001",
+        symbol="BTC/USDT:USDT",
+        side="long",
+        trigger_candle_close_time_ms=NOW_MS - 1,
+        now_ms=NOW_MS,
+    )
+
+    assert snapshot is not None
+    assert snapshot.strategy_group_id == "MPG-001"
+    assert snapshot.member("BTC/USDT:USDT").rank == 1
+    assert conn.params == {
+        "fact_surface": "strategy_comparative",
+        "strategy_group_id": "MPG-001",
+        "symbol": "BTCUSDT",
+        "side": "long",
+        "now_ms": NOW_MS,
+    }
+
+
+@pytest.mark.asyncio
+async def test_load_comparative_strength_snapshot_returns_none_when_missing():
+    conn = _AsyncConnection(None)
+
+    snapshot = await runtime_strategy_signal_input.load_comparative_strength_snapshot(
+        conn,
+        strategy_group_id="MPG-001",
+        symbol="BTCUSDT",
+        side="long",
+        trigger_candle_close_time_ms=NOW_MS - 1,
+        now_ms=NOW_MS,
+    )
+
+    assert snapshot is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "row",
+    [
+        _comparative_row(freshness_state="stale"),
+        _comparative_row(valid_until_ms=NOW_MS),
+        _comparative_row(strategy_group_id="MI-001"),
+        _comparative_row(symbol="ETHUSDT"),
+        _comparative_row(side="short"),
+    ],
+)
+async def test_load_comparative_strength_snapshot_rejects_stale_or_cross_scope_row(row):
+    conn = _AsyncConnection(row)
+
+    snapshot = await runtime_strategy_signal_input.load_comparative_strength_snapshot(
+        conn,
+        strategy_group_id="MPG-001",
+        symbol="BTCUSDT",
+        side="long",
+        trigger_candle_close_time_ms=NOW_MS - 1,
+        now_ms=NOW_MS,
+    )
+
+    assert snapshot is None
+
+
+def test_build_signal_input_attaches_typed_pg_comparative_snapshot():
+    row = _comparative_row()
+    snapshot_payload = json.loads(row["fact_values"])
+    snapshot_payload = {
+        key: snapshot_payload[key]
+        for key in runtime_strategy_signal_input.COMPARATIVE_SNAPSHOT_KEYS
+    }
+
+    signal_input = runtime_strategy_signal_input.build_signal_input(
+        runtime=_runtime(),
+        one_hour=_btpc_1h(),
+        four_hour=_down_context_4h(),
+        source_id="unit_market",
+        source_type="unit_read_only",
+        evaluation_id="eval-btpc-unit",
+        playbook_id=None,
+        now_ms=NOW_MS,
+        comparative_strength_snapshot=snapshot_payload,
+    )
+
+    assert signal_input.comparative_strength_snapshot is not None
+    assert signal_input.comparative_strength_snapshot.member("BTCUSDT").rank == 1
+
+
 def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypatch, tmp_path):
     class FakeSource:
         source_id = "unit_market_source"
@@ -141,6 +305,14 @@ def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypa
         runtime_strategy_signal_input,
         "market_source",
         lambda args: FakeSource(),
+    )
+    async def fake_load_comparative_strength(**kwargs):
+        return None
+
+    monkeypatch.setattr(
+        runtime_strategy_signal_input,
+        "load_runtime_comparative_strength_snapshot",
+        fake_load_comparative_strength,
     )
     output_path = tmp_path / "signal-input.json"
 

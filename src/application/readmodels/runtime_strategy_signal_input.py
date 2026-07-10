@@ -13,9 +13,25 @@ import sys
 import time
 from typing import Any
 
+import sqlalchemy as sa
+
 ROOT_DIR = Path(__file__).resolve().parents[3]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+
+
+COMPARATIVE_FACT_SURFACE = "strategy_comparative"
+COMPARATIVE_SNAPSHOT_KEYS = (
+    "strategy_group_id",
+    "timeframe",
+    "lookback_bars",
+    "trigger_candle_close_time_ms",
+    "universe_symbols",
+    "members",
+    "observed_at_ms",
+    "valid_until_ms",
+    "source_ref",
+)
 
 
 def _json_value(value: Any) -> Any:
@@ -133,6 +149,142 @@ def _trial_constraints(runtime: Any) -> dict[str, Any]:
     }
 
 
+async def load_comparative_strength_snapshot(
+    conn: Any,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    trigger_candle_close_time_ms: int,
+    now_ms: int,
+) -> Any | None:
+    """Load one exact-scope fresh comparative snapshot from PG."""
+
+    from src.domain.comparative_strength import ComparativeStrengthSnapshot
+
+    normalized_symbol = _normalized_symbol(symbol)
+    result = await conn.execute(
+        sa.text(
+            """
+            SELECT
+              strategy_group_id,
+              symbol,
+              side,
+              computed,
+              satisfied,
+              freshness_state,
+              valid_until_ms,
+              fact_values
+            FROM brc_runtime_fact_snapshots
+            WHERE fact_surface = :fact_surface
+              AND strategy_group_id = :strategy_group_id
+              AND symbol = :symbol
+              AND side = :side
+              AND computed = true
+              AND satisfied = true
+              AND freshness_state = 'fresh'
+              AND valid_until_ms > :now_ms
+            ORDER BY observed_at_ms DESC, fact_snapshot_id DESC
+            LIMIT 1
+            """
+        ),
+        {
+            "fact_surface": COMPARATIVE_FACT_SURFACE,
+            "strategy_group_id": strategy_group_id,
+            "symbol": normalized_symbol,
+            "side": side,
+            "now_ms": now_ms,
+        },
+    )
+    row = result.mappings().first()
+    if row is None or not _comparative_row_matches_scope(
+        row,
+        strategy_group_id=strategy_group_id,
+        symbol=normalized_symbol,
+        side=side,
+        now_ms=now_ms,
+    ):
+        return None
+    values = _json_dict(row.get("fact_values"))
+    if values.get("candidate_symbol") != normalized_symbol:
+        return None
+    snapshot_payload = {
+        key: values[key]
+        for key in COMPARATIVE_SNAPSHOT_KEYS
+        if key in values
+    }
+    try:
+        snapshot = ComparativeStrengthSnapshot.model_validate(snapshot_payload)
+    except (TypeError, ValueError):
+        return None
+    if (
+        snapshot.strategy_group_id != strategy_group_id
+        or snapshot.trigger_candle_close_time_ms != trigger_candle_close_time_ms
+    ):
+        return None
+    try:
+        snapshot.member(normalized_symbol)
+    except KeyError:
+        return None
+    return snapshot
+
+
+async def load_runtime_comparative_strength_snapshot(
+    *,
+    runtime: Any,
+    trigger_candle_close_time_ms: int,
+    now_ms: int,
+) -> Any | None:
+    """Resolve the PG comparative projection for one runtime scope."""
+
+    from src.infrastructure.database import get_pg_engine
+
+    async with get_pg_engine().connect() as conn:
+        return await load_comparative_strength_snapshot(
+            conn,
+            strategy_group_id=runtime.strategy_family_id,
+            symbol=runtime.symbol,
+            side=runtime.side,
+            trigger_candle_close_time_ms=trigger_candle_close_time_ms,
+            now_ms=now_ms,
+        )
+
+
+def _comparative_row_matches_scope(
+    row: Any,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    now_ms: int,
+) -> bool:
+    return (
+        str(row.get("strategy_group_id") or "") == strategy_group_id
+        and _normalized_symbol(row.get("symbol")) == symbol
+        and str(row.get("side") or "") == side
+        and row.get("computed") is True
+        and row.get("satisfied") is True
+        and str(row.get("freshness_state") or "") == "fresh"
+        and int(row.get("valid_until_ms") or 0) > now_ms
+    )
+
+
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _normalized_symbol(value: Any) -> str:
+    return str(value or "").strip().upper().replace("/", "").replace(":USDT", "")
+
+
 def build_signal_input(
     *,
     runtime: Any,
@@ -143,6 +295,7 @@ def build_signal_input(
     evaluation_id: str | None,
     playbook_id: str | None,
     now_ms: int,
+    comparative_strength_snapshot: Any | None = None,
 ) -> Any:
     from src.domain.strategy_family_signal import (
         MarketSnapshot,
@@ -217,6 +370,7 @@ def build_signal_input(
                 "account_facts_placeholder_requires_trusted_overlay_before_candidate_planning",
             ]
         ),
+        comparative_strength_snapshot=comparative_strength_snapshot,
     )
 
 
@@ -241,6 +395,12 @@ async def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
     if args.symbol and args.symbol != runtime.symbol:
         raise RuntimeError("signal symbol override must match runtime symbol")
     now_ms = int(time.time() * 1000)
+    trigger_candle_close_time_ms = int(one_hour[-1].close_time_ms)
+    comparative_strength_snapshot = await load_runtime_comparative_strength_snapshot(
+        runtime=runtime,
+        trigger_candle_close_time_ms=trigger_candle_close_time_ms,
+        now_ms=now_ms,
+    )
     signal_input = build_signal_input(
         runtime=runtime,
         one_hour=one_hour,
@@ -250,6 +410,7 @@ async def build_artifact(args: argparse.Namespace) -> dict[str, Any]:
         evaluation_id=args.evaluation_id,
         playbook_id=args.playbook_id,
         now_ms=now_ms,
+        comparative_strength_snapshot=comparative_strength_snapshot,
     )
     evaluation = RuntimeStrategySignalEvaluationService().evaluate(signal_input)
     ready = (
