@@ -47,7 +47,7 @@ def _upgrade(conn, path: Path, name: str) -> None:
         module.op = old_op
 
 
-def test_fresh_seed_certifies_cpm_mpg_and_mi_long_v2() -> None:
+def test_fresh_seed_certifies_all_wave3_event_specs() -> None:
     rows = seed.build_seed_rows()
     events = rows["brc_strategy_side_event_specs"]
     eligible = [
@@ -87,6 +87,27 @@ def test_fresh_seed_certifies_cpm_mpg_and_mi_long_v2() -> None:
             "trial_grade_signal",
             "trial_live",
         ),
+        (
+            "SOR-001",
+            "SOR-LONG",
+            "v2",
+            "trial_grade_signal",
+            "trial_live",
+        ),
+        (
+            "SOR-001",
+            "SOR-SHORT",
+            "v2",
+            "trial_grade_signal",
+            "trial_live",
+        ),
+        (
+            "BRF2-001",
+            "BRF2-SHORT",
+            "v2",
+            "trial_grade_signal",
+            "trial_live",
+        ),
     ]
     cpm_group = next(
         row
@@ -96,7 +117,7 @@ def test_fresh_seed_certifies_cpm_mpg_and_mi_long_v2() -> None:
     assert cpm_group["current_version_id"] == "sgv:CPM-RO-001:v2"
 
 
-def test_non_certified_event_specs_remain_observe_only() -> None:
+def test_fresh_seed_has_no_uncertified_active_event_specs() -> None:
     rows = seed.build_seed_rows()
     non_cpm = [
         row
@@ -105,15 +126,13 @@ def test_non_certified_event_specs_remain_observe_only() -> None:
     ]
 
     assert len(non_cpm) == 3
-    assert {
-        (
-            row["event_spec_version"],
-            row["declared_signal_grade"],
-            row["declared_required_execution_mode"],
-            row["execution_eligibility_enabled"],
-        )
+    assert all(
+        row["event_spec_version"] == "v2"
+        and row["declared_signal_grade"] == "trial_grade_signal"
+        and row["declared_required_execution_mode"] == "trial_live"
+        and row["execution_eligibility_enabled"] is True
         for row in non_cpm
-    } == {("v1", "observe_only_signal", "observe_only", False)}
+    )
 
 
 def test_migration_107_preserves_cpm_v1_and_activates_v2() -> None:
