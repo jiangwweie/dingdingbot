@@ -583,7 +583,7 @@ def test_pg_backed_runtime_control_state_repository_requires_hard_required_facts
         text(
             """
             DELETE FROM brc_strategy_event_required_facts
-            WHERE event_spec_id = 'event_spec:MI-001:MI-LONG:v1'
+            WHERE event_spec_id = 'event_spec:MI-001:MI-LONG:v2'
             """
         )
     )

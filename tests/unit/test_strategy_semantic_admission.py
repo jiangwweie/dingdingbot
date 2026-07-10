@@ -40,15 +40,19 @@ def test_all_active_candidate_scopes_receive_machine_semantic_conclusion(
         }
         for strategy_group_id in {row["strategy_group_id"] for row in rows}
     }
-    assert conclusions_by_group["CPM-RO-001"] == {"trial_grade_capable"}
+    certified_groups = {"CPM-RO-001", "MPG-001", "MI-001"}
+    assert all(
+        conclusions_by_group[group_id] == {"trial_grade_capable"}
+        for group_id in certified_groups
+    )
     assert {
         conclusion
         for strategy_group_id, conclusions in conclusions_by_group.items()
-        if strategy_group_id != "CPM-RO-001"
+        if strategy_group_id not in certified_groups
         for conclusion in conclusions
     } == {"observe_only_by_design"}
-    assert sum(row["conclusion"] == "trial_grade_capable" for row in rows) == 4
-    assert sum(row["conclusion"] == "observe_only_by_design" for row in rows) == 18
+    assert sum(row["conclusion"] == "trial_grade_capable" for row in rows) == 11
+    assert sum(row["conclusion"] == "observe_only_by_design" for row in rows) == 11
     assert all(row["exchange_instrument_id"] for row in rows)
     assert all(row["event_spec_version_id"] for row in rows)
 

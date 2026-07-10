@@ -207,7 +207,7 @@ def test_seed_records_mi_relative_strength_as_hard_required_fact(
             """
             SELECT required_for_promotion, required_for_ticket, required_for_finalgate
             FROM brc_strategy_event_required_facts
-            WHERE event_spec_id = 'event_spec:MI-001:MI-LONG:v1'
+            WHERE event_spec_id = 'event_spec:MI-001:MI-LONG:v2'
               AND fact_key = 'relative_strength_confirmed'
             """
         )
