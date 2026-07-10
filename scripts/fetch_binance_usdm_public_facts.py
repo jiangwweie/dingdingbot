@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Fetch Binance USD-M public facts without private account authority.
+"""Fetch Binance USD-M public facts into PG without private account authority.
 
 The script reads public exchange endpoints only. It never reads secrets, signs
-requests, calls account endpoints, places orders, or writes remote files. When
-local public access is blocked, callers may use --ssh-host to run the same
-public fetch from a remote host and write the resulting JSON locally.
+requests, calls account endpoints, places orders, or writes JSON/Markdown state
+files. PG runtime fact snapshots are the sole current-state projection; stdout
+is process diagnostics only.
 """
 
 from __future__ import annotations
@@ -35,6 +35,14 @@ from runtime_pg_fact_snapshots import (  # noqa: E402
     write_pretrade_public_fact_snapshots,
 )
 from pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
+from src.application.comparative_strength_fact_service import (  # noqa: E402
+    ComparativeStrengthFactPlan,
+    load_comparative_strength_fact_plan,
+    materialize_comparative_strength_fact_snapshots,
+)
+from src.infrastructure.binance_public_kline_market_source import (  # noqa: E402
+    BinancePublicKlineMarketSource,
+)
 
 
 SCHEMA = "brc.binance_usdm_public_facts.v1"
@@ -106,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
                 if args.symbols is not None
                 else _active_candidate_symbols(conn)
             )
+            comparative_plan = _comparative_plan_if_available(conn)
         if not symbols:
             print(
                 "ERROR: active candidate symbols are required for DB-backed public facts",
@@ -117,12 +126,44 @@ def main(argv: list[str] | None = None) -> int:
             artifact = _fetch_via_ssh(args.ssh_host, symbols)
         else:
             artifact = build_public_facts(symbols=symbols)
+        comparative_candles: dict[str, list[dict[str, Any]]] = {}
+        comparative_fetch_blocker = ""
+        if comparative_plan.required_symbols and not args.ssh_host:
+            try:
+                comparative_candles = _fetch_comparative_candles(
+                    BinancePublicKlineMarketSource(),
+                    comparative_plan.required_symbols,
+                )
+            except Exception as exc:  # noqa: BLE001 - persist unavailable facts.
+                comparative_fetch_blocker = (
+                    f"comparative_candle_fetch_failed:{type(exc).__name__}"
+                )
         with engine.begin() as conn:
             fact_snapshot_ids = write_pretrade_public_fact_snapshots(
                 conn,
                 artifact=artifact,
                 source_ref="binance_usdm_public_facts_fetch",
             )
+            comparative_result = (
+                materialize_comparative_strength_fact_snapshots(
+                    conn,
+                    candles_by_symbol=comparative_candles,
+                    observed_at_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+                    source_ref="binance_closed_1h",
+                )
+                if comparative_plan.groups
+                else {
+                    "status": "comparative_strength_not_configured",
+                    "materialized_count": 0,
+                    "blocked_count": 0,
+                    "blockers": [],
+                }
+            )
+            if comparative_fetch_blocker:
+                comparative_result["blockers"] = [
+                    comparative_fetch_blocker,
+                    *list(comparative_result.get("blockers") or []),
+                ]
     finally:
         engine.dispose()
     artifact["source_mode"] = "db_backed"
@@ -134,6 +175,11 @@ def main(argv: list[str] | None = None) -> int:
                 "status": artifact["status"],
                 "ready_symbol_count": artifact["summary"]["ready_symbol_count"],
                 "pg_fact_snapshot_count": len(fact_snapshot_ids),
+                "comparative_fact_status": comparative_result["status"],
+                "comparative_fact_snapshot_count": int(
+                    comparative_result.get("materialized_count") or 0
+                )
+                + int(comparative_result.get("blocked_count") or 0),
                 "remote_interaction_count": artifact["interaction"][
                     "remote_interaction_count"
                 ],
@@ -143,6 +189,41 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     return _exit_code_for_status(str(artifact["status"]))
+
+
+def _comparative_plan_if_available(
+    conn: sa.engine.Connection,
+) -> ComparativeStrengthFactPlan:
+    required_tables = {
+        "brc_strategy_group_candidate_scope",
+        "brc_candidate_scope_event_bindings",
+        "brc_strategy_side_event_specs",
+        "brc_required_fact_contracts",
+    }
+    if not required_tables <= set(sa.inspect(conn).get_table_names()):
+        return ComparativeStrengthFactPlan(groups=(), required_symbols=())
+    return load_comparative_strength_fact_plan(conn)
+
+
+def _fetch_comparative_candles(
+    source: Any,
+    symbols: tuple[str, ...] | list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    return {
+        symbol: [
+            {
+                "open_time_ms": int(candle.open_time_ms),
+                "close_time_ms": int(candle.close_time_ms),
+                "close": str(candle.close),
+            }
+            for candle in source.latest_closed_candles(
+                symbol=symbol,
+                timeframe="1h",
+                limit=13,
+            )
+        ]
+        for symbol in sorted(set(symbols))
+    }
 
 
 def build_public_facts(
