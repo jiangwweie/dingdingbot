@@ -615,6 +615,75 @@ def test_action_time_fact_materializer_blocks_missing_protection_reference(
     assert row["blocker_class"] == "computed_not_satisfied"
 
 
+def test_missing_required_boolean_is_not_filled_from_expected_value():
+    value = fact_materializer._derive_fact_value(
+        key="htf_trend_intact",
+        fact={
+            "operator": "eq",
+            "expected_value": True,
+            "disable_on_match": False,
+        },
+        event_id="CPM-LONG",
+        protection_ref_type="pullback_low_reference",
+        source_values={},
+        reason_codes=[],
+    )
+
+    assert value is None
+
+
+def test_expr_ref_without_observation_is_missing():
+    value = fact_materializer._derive_fact_value(
+        key="custom_expr_fact",
+        fact={
+            "operator": "expr_ref",
+            "expected_value": None,
+            "disable_on_match": False,
+        },
+        event_id="CPM-LONG",
+        protection_ref_type="pullback_low_reference",
+        source_values={},
+        reason_codes=[],
+    )
+
+    assert value is None
+
+
+def test_disable_fact_without_observation_is_missing():
+    value = fact_materializer._derive_fact_value(
+        key="strong_uptrend_disable",
+        fact={
+            "operator": "eq",
+            "expected_value": True,
+            "disable_on_match": True,
+        },
+        event_id="BRF2-SHORT",
+        protection_ref_type="rally_high_reference",
+        source_values={},
+        reason_codes=[],
+    )
+
+    assert value is None
+
+
+def test_cpm_typed_fact_observations_are_first_class_source_values():
+    signal_summary = {
+        "fact_observations": [
+            {"fact_key": "htf_trend_intact", "observed_value": True},
+            {"fact_key": "reclaim_confirmed", "observed_value": True},
+            {"fact_key": "pullback_low_reference", "observed_value": "95"},
+        ]
+    }
+
+    values = fact_materializer._typed_fact_observation_values(signal_summary)
+
+    assert values == {
+        "htf_trend_intact": True,
+        "reclaim_confirmed": True,
+        "pullback_low_reference": "95",
+    }
+
+
 def test_action_time_fact_materializer_blocks_missing_required_facts_contract(
     pg_control_connection,
 ):

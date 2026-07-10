@@ -312,9 +312,22 @@ def _source_values(*, payload: dict[str, Any], public_fact: dict[str, Any]) -> d
         evidence,
         _as_dict(payload.get("action_time_fact_values")),
         _as_dict(signal_summary.get("action_time_fact_values")),
+        _typed_fact_observation_values(signal_summary),
     ):
         _deep_merge_into(merged, source)
     return merged
+
+
+def _typed_fact_observation_values(
+    signal_summary: dict[str, Any],
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for item in _as_list(signal_summary.get("fact_observations")):
+        row = _as_dict(item)
+        key = str(row.get("fact_key") or "")
+        if key and row.get("observed_value") is not None:
+            values[key] = row["observed_value"]
+    return values
 
 
 def _fact_values(
@@ -383,8 +396,6 @@ def _derive_fact_value(
     source_values: dict[str, Any],
     reason_codes: list[str],
 ) -> Any:
-    if _truthy(fact.get("disable_on_match")):
-        return False
     if key == protection_ref_type:
         return _reference_value_for(key, source_values)
     if key.endswith("_reference"):
@@ -395,11 +406,6 @@ def _derive_fact_value(
         return "sor_opening_range_breakdown" in reason_codes
     if key == "opening_range_defined":
         return _has_any(source_values, ("opening_range", "session_structure"))
-    expected = fact.get("expected_value")
-    if expected is not None:
-        return expected
-    if str(fact.get("operator") or "") == "expr_ref":
-        return True
     return None
 
 
