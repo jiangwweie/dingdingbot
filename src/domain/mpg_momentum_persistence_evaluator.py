@@ -13,11 +13,13 @@ from decimal import Decimal
 from hashlib import sha1
 from typing import Any
 
+from src.domain.comparative_strength import ComparativeStrengthSnapshot
 from src.domain.strategy_candidate_semantics_builders import (
     build_mpg_long_candidate_semantics,
 )
 from src.domain.strategy_family_signal import (
     ExpectedRiskShape,
+    StrategyFactObservation,
     SignalDataQuality,
     SignalDataQualityStatus,
     SignalInputRefs,
@@ -27,6 +29,7 @@ from src.domain.strategy_family_signal import (
     StrategyFamilySignalInput,
     StrategyFamilySignalOutput,
 )
+from src.domain.execution_eligibility import RequiredExecutionMode, SignalGrade
 
 
 MPG_FAMILY_ID = "MPG-001"
@@ -87,7 +90,7 @@ class MPG001MomentumPersistenceEvaluator:
             return self._invalid(
                 signal_input,
                 ["mpg_invalid_insufficient_1h_candles"],
-                "Insufficient 1h closed candles for MPG-001 v0.",
+                "Insufficient 1h closed candles for MPG-001 v1.",
                 evidence_payload={
                     "one_hour_count": len(one_hour),
                     "min_needed": self._config.min_1h_candles,
@@ -97,7 +100,7 @@ class MPG001MomentumPersistenceEvaluator:
             return self._invalid(
                 signal_input,
                 ["mpg_invalid_insufficient_4h_candles"],
-                "Insufficient 4h closed candles for MPG-001 v0.",
+                "Insufficient 4h closed candles for MPG-001 v1.",
                 evidence_payload={
                     "four_hour_count": len(four_hour),
                     "min_needed": self._config.min_4h_candles,
@@ -113,8 +116,76 @@ class MPG001MomentumPersistenceEvaluator:
             return self._no_action(
                 signal_input,
                 ["mpg_no_action_momentum_persistence_not_confirmed"],
-                "MPG-001 v0 did not confirm long momentum persistence.",
+                "MPG-001 v1 did not confirm long momentum persistence.",
                 evidence,
+            )
+
+        comparative = signal_input.comparative_strength_snapshot
+        if comparative is None:
+            return self._invalid(
+                signal_input,
+                ["mpg_invalid_comparative_strength_missing"],
+                "MPG-001 requires a fresh PG comparative-strength snapshot.",
+                evidence_payload=evidence,
+            )
+        if (
+            comparative.strategy_group_id != MPG_FAMILY_ID
+            or comparative.timeframe != signal_input.primary_timeframe
+            or comparative.lookback_bars != self._config.lookback_bars
+            or comparative.trigger_candle_close_time_ms
+            != signal_input.trigger_candle_close_time_ms
+        ):
+            return self._invalid(
+                signal_input,
+                ["mpg_invalid_comparative_strength_scope"],
+                "MPG-001 comparative-strength scope does not match the signal input.",
+                evidence_payload=evidence,
+            )
+        try:
+            comparative_member = comparative.member(signal_input.symbol)
+        except KeyError:
+            return self._invalid(
+                signal_input,
+                ["mpg_invalid_comparative_strength_member_missing"],
+                "MPG-001 candidate is missing from its comparative universe.",
+                evidence_payload=evidence,
+            )
+
+        floor_reference = Decimal(
+            str(evidence["price_action_structure"]["momentum_floor_reference"])
+        )
+        leader_confirmed = (
+            comparative_member.rank == 1
+            and comparative_member.return_pct > Decimal("0")
+        )
+        evidence["comparative_strength"] = comparative.model_dump(mode="json")
+        evidence["leader_strength"] = {
+            "candidate_symbol": comparative_member.symbol,
+            "rank": comparative_member.rank,
+            "return_pct": _s(_q(comparative_member.return_pct)),
+            "leader_strength_confirmed": leader_confirmed,
+        }
+        fact_observations = self._fact_observations(
+            signal_input=signal_input,
+            comparative=comparative,
+            leader_confirmed=leader_confirmed,
+            floor_reference=floor_reference,
+        )
+        if comparative_member.rank != 1:
+            return self._no_action(
+                signal_input,
+                ["mpg_no_action_leader_strength_not_confirmed"],
+                "MPG-001 momentum persisted, but the candidate is not the group leader.",
+                evidence,
+                fact_observations=fact_observations,
+            )
+        if comparative_member.return_pct <= Decimal("0"):
+            return self._no_action(
+                signal_input,
+                ["mpg_no_action_leader_return_not_positive"],
+                "MPG-001 candidate ranked first without a positive momentum return.",
+                evidence,
+                fact_observations=fact_observations,
             )
 
         evidence["candidate_semantics"] = (
@@ -134,12 +205,51 @@ class MPG001MomentumPersistenceEvaluator:
                 "mpg_htf_trend_up",
                 "mpg_1h_momentum_positive",
                 "mpg_breakout_close_confirmed",
+                "mpg_leader_strength_confirmed",
             ],
             human_summary=(
-                "MPG-001 v0 long momentum persistence detected for review."
+                "MPG-001 v1 long momentum persistence detected for review."
             ),
             evidence_payload=evidence,
+            fact_observations=fact_observations,
         )
+
+    def _fact_observations(
+        self,
+        *,
+        signal_input: StrategyFamilySignalInput,
+        comparative: ComparativeStrengthSnapshot,
+        leader_confirmed: bool,
+        floor_reference: Decimal,
+    ) -> list[StrategyFactObservation]:
+        trigger_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+        local_valid_until_ms = trigger_ms + 3_600_000
+        local_source_ref = (
+            f"closed_ohlcv:{signal_input.symbol}:{trigger_ms}:mpg-v1"
+        )
+        return [
+            StrategyFactObservation(
+                fact_key="momentum_persistence_confirmed",
+                observed_value=True,
+                observed_at_ms=trigger_ms,
+                valid_until_ms=local_valid_until_ms,
+                source_ref=local_source_ref,
+            ),
+            StrategyFactObservation(
+                fact_key="leader_strength_confirmed",
+                observed_value=leader_confirmed,
+                observed_at_ms=comparative.observed_at_ms,
+                valid_until_ms=comparative.valid_until_ms,
+                source_ref=comparative.source_ref,
+            ),
+            StrategyFactObservation(
+                fact_key="momentum_floor_reference",
+                observed_value=floor_reference,
+                observed_at_ms=trigger_ms,
+                valid_until_ms=local_valid_until_ms,
+                source_ref=local_source_ref,
+            ),
+        ]
 
     def _evaluate_structure(
         self,
@@ -239,6 +349,7 @@ class MPG001MomentumPersistenceEvaluator:
         reason_codes: list[str],
         human_summary: str,
         evidence_payload: dict[str, Any],
+        fact_observations: list[StrategyFactObservation] | None = None,
     ) -> StrategyFamilySignalOutput:
         return self._output(
             signal_input,
@@ -250,6 +361,7 @@ class MPG001MomentumPersistenceEvaluator:
             data_quality=signal_input.input_quality,
             evidence_payload=evidence_payload,
             review_required=False,
+            fact_observations=fact_observations or [],
         )
 
     def _would_enter(
@@ -261,6 +373,7 @@ class MPG001MomentumPersistenceEvaluator:
         reason_codes: list[str],
         human_summary: str,
         evidence_payload: dict[str, Any],
+        fact_observations: list[StrategyFactObservation] | None = None,
     ) -> StrategyFamilySignalOutput:
         return self._output(
             signal_input,
@@ -272,6 +385,9 @@ class MPG001MomentumPersistenceEvaluator:
             data_quality=signal_input.input_quality,
             evidence_payload=evidence_payload,
             review_required=True,
+            fact_observations=fact_observations or [],
+            signal_grade=SignalGrade.TRIAL_GRADE_SIGNAL,
+            required_execution_mode=RequiredExecutionMode.TRIAL_LIVE,
         )
 
     def _output(
@@ -286,10 +402,13 @@ class MPG001MomentumPersistenceEvaluator:
         data_quality: SignalDataQuality,
         evidence_payload: dict[str, Any],
         review_required: bool,
+        fact_observations: list[StrategyFactObservation] | None = None,
+        signal_grade: SignalGrade = SignalGrade.OBSERVE_ONLY_SIGNAL,
+        required_execution_mode: RequiredExecutionMode = RequiredExecutionMode.OBSERVE_ONLY,
     ) -> StrategyFamilySignalOutput:
         signal_snapshot = {
             "strategy_family": MPG_FAMILY_ID,
-            "logic_version": "mpg-001-momentum-persistence-v0",
+            "logic_version": "mpg-001-momentum-persistence-v1",
             "context_tags": {
                 "market_state": evidence_payload.get("market_state", "UNKNOWN"),
                 "htf_context": evidence_payload.get("htf_context", "unknown"),
@@ -311,20 +430,22 @@ class MPG001MomentumPersistenceEvaluator:
             confidence=confidence,
             reason_codes=reason_codes,
             human_summary=human_summary,
-            required_execution_mode="observe_only",
+            signal_grade=signal_grade,
+            required_execution_mode=required_execution_mode,
             expected_risk_shape=ExpectedRiskShape.TREND_FOLLOWING_WIDE_STOP,
             invalidation_conditions=list(
                 evidence_payload.get("invalidation_conditions") or []
             ),
             signal_snapshot=signal_snapshot,
             evidence_payload={
-                "logic_version": "mpg-001-momentum-persistence-v0",
+                "logic_version": "mpg-001-momentum-persistence-v1",
                 "confidence_notice": (
                     "confidence is review sorting only, not win probability "
                     "or authorization"
                 ),
                 **evidence_payload,
             },
+            fact_observations=fact_observations or [],
             input_refs=SignalInputRefs(
                 market_snapshot_ref=(
                     f"closed_ohlcv:{signal_input.symbol}:"

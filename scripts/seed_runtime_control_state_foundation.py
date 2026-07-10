@@ -98,6 +98,11 @@ ACTIVE_EVENT_SEEDS: tuple[EventSeed, ...] = (
             "leader_strength_confirmed",
             "momentum_floor_reference",
         ),
+        strategy_group_version=2,
+        event_spec_version="v2",
+        declared_signal_grade="trial_grade_signal",
+        declared_required_execution_mode="trial_live",
+        execution_eligibility_enabled=True,
     ),
     EventSeed(
         strategy_group_id="MI-001",
@@ -627,13 +632,10 @@ def _append_required_fact_rows(
                     "missing_blocker_class": "fact_missing",
                     "failed_blocker_class": "computed_not_satisfied",
                     "required_for_live_submit": True,
-                    "definition_payload": {
-                        "event_id": seed.event_id,
-                        "event_ids": [seed.event_id],
-                        "fact_role": "required",
-                        "operator": "exists" if "reference" in fact_key else "eq",
-                        "expected_value": None if "reference" in fact_key else True,
-                    },
+                    "definition_payload": _fact_definition_payload(
+                        seed,
+                        fact_key=fact_key,
+                    ),
                     "created_at_ms": now_ms,
                 },
             )
@@ -885,6 +887,34 @@ def _fact_group(fact_key: str) -> str:
     if "disable" in fact_key:
         return "risk"
     return "strategy"
+
+
+def _fact_definition_payload(seed: EventSeed, *, fact_key: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "event_id": seed.event_id,
+        "event_ids": [seed.event_id],
+        "fact_role": "required",
+        "operator": "exists" if "reference" in fact_key else "eq",
+        "expected_value": None if "reference" in fact_key else True,
+    }
+    comparative_policies = {
+        ("MPG-001", "leader_strength_confirmed"): {
+            "timeframe": "1h",
+            "lookback_bars": 8,
+            "max_rank": 1,
+            "require_positive_return": True,
+        },
+        ("MI-001", "relative_strength_confirmed"): {
+            "timeframe": "1h",
+            "lookback_bars": 12,
+            "max_rank": 1,
+            "require_positive_return": True,
+        },
+    }
+    comparative = comparative_policies.get((seed.strategy_group_id, fact_key))
+    if comparative:
+        payload["comparative_strength"] = comparative
+    return payload
 
 
 def _conditional_hard_gates(seed: EventSeed) -> list[str]:

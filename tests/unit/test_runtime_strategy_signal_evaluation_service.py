@@ -16,6 +16,10 @@ from src.domain.strategy_family_signal import (
     StrategyFamilySignalOutput,
 )
 from src.domain.execution_eligibility import RequiredExecutionMode, SignalGrade
+from src.domain.comparative_strength import (
+    ComparativeStrengthMember,
+    ComparativeStrengthSnapshot,
+)
 from src.domain.strategy_candidate_semantics import (
     StrategyArchetype,
     StrategyCandidateSemantics,
@@ -141,6 +145,7 @@ def _signal_input(
     version_id: str = "BRF-001-v0",
     one_hour: list[dict[str, Any]] | None = None,
     four_hour: list[dict[str, Any]] | None = None,
+    comparative_strength_snapshot: ComparativeStrengthSnapshot | None = None,
 ) -> StrategyFamilySignalInput:
     windows: dict[str, list[dict[str, Any]]] = {}
     if one_hour is not None:
@@ -190,6 +195,41 @@ def _signal_input(
         runtime_safety_snapshot={"runtime_state": "shadow", "live_ready": False},
         source="unit_test",
         freshness="fresh",
+        comparative_strength_snapshot=comparative_strength_snapshot,
+    )
+
+
+def _comparative_snapshot(
+    *,
+    candidate_rank: int = 1,
+    candidate_return_pct: str = "8",
+) -> ComparativeStrengthSnapshot:
+    peer_rank = 2 if candidate_rank == 1 else 1
+    return ComparativeStrengthSnapshot(
+        strategy_group_id="MPG-001",
+        timeframe="1h",
+        lookback_bars=8,
+        trigger_candle_close_time_ms=NOW_MS,
+        universe_symbols=("ETHUSDT", "SOLUSDT"),
+        members=(
+            ComparativeStrengthMember(
+                symbol="ETHUSDT",
+                start_close=Decimal("100"),
+                end_close=Decimal("108"),
+                return_pct=Decimal(candidate_return_pct),
+                rank=candidate_rank,
+            ),
+            ComparativeStrengthMember(
+                symbol="SOLUSDT",
+                start_close=Decimal("100"),
+                end_close=Decimal("106"),
+                return_pct=Decimal("6"),
+                rank=peer_rank,
+            ),
+        ),
+        observed_at_ms=NOW_MS,
+        valid_until_ms=NOW_MS + 3_600_000,
+        source_ref="pg:strategy_comparative:unit",
     )
 
 
@@ -342,6 +382,7 @@ def test_mpg_momentum_persistence_route_ready_for_semantic_binding():
             version_id="MPG-001-v0",
             one_hour=_mpg_long_1h(),
             four_hour=_cpm_up_context_4h(),
+            comparative_strength_snapshot=_comparative_snapshot(),
         )
     )
 
@@ -353,6 +394,15 @@ def test_mpg_momentum_persistence_route_ready_for_semantic_binding():
     assert result.output is not None
     assert result.output.signal_type == SignalType.WOULD_ENTER
     assert result.output.side == SignalSide.LONG
+    assert result.output.signal_grade == SignalGrade.TRIAL_GRADE_SIGNAL
+    assert result.output.required_execution_mode == RequiredExecutionMode.TRIAL_LIVE
+    observed_facts = {
+        item.fact_key: item.observed_value
+        for item in result.output.fact_observations
+    }
+    assert observed_facts["momentum_persistence_confirmed"] is True
+    assert observed_facts["leader_strength_confirmed"] is True
+    assert Decimal(str(observed_facts["momentum_floor_reference"])) > 0
     semantics = StrategyCandidateSemantics.model_validate(
         result.output.evidence_payload["candidate_semantics"]
     )
@@ -366,6 +416,63 @@ def test_mpg_momentum_persistence_route_ready_for_semantic_binding():
     assert result.order_created is False
     assert result.order_lifecycle_called is False
     assert result.exchange_called is False
+
+
+def test_mpg_missing_comparative_snapshot_is_invalid_engineering_input():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="MPG-001",
+            version_id="MPG-001-v0",
+            one_hour=_mpg_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.BLOCKED
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.INVALID
+    assert "mpg_invalid_comparative_strength_missing" in result.output.reason_codes
+    assert result.output.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
+    assert result.output.required_execution_mode == RequiredExecutionMode.OBSERVE_ONLY
+
+
+def test_mpg_computed_non_leader_is_market_no_action_not_missing_input():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="MPG-001",
+            version_id="MPG-001-v0",
+            one_hour=_mpg_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+            comparative_strength_snapshot=_comparative_snapshot(candidate_rank=2),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.OBSERVE_ONLY
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.NO_ACTION
+    assert "mpg_no_action_leader_strength_not_confirmed" in result.output.reason_codes
+    assert result.output.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
+
+
+def test_mpg_rank_one_with_non_positive_return_is_market_no_action():
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="MPG-001",
+            version_id="MPG-001-v0",
+            one_hour=_mpg_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+            comparative_strength_snapshot=_comparative_snapshot(
+                candidate_rank=1,
+                candidate_return_pct="0",
+            ),
+        )
+    )
+
+    assert result.status == RuntimeStrategySignalEvaluationStatus.OBSERVE_ONLY
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.NO_ACTION
+    assert "mpg_no_action_leader_return_not_positive" in result.output.reason_codes
+    assert result.output.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
 
 
 def test_mpg_momentum_persistence_no_action_stays_observe_only():
