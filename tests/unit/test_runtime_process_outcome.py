@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -13,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from src.application.runtime_process_outcome import (
     classify_process_outcome,
     materialize_runtime_process_outcome,
+    runtime_process_exit_code,
 )
 from scripts.validate_current_projection_ownership import (
     _validate_runtime_process_outcomes,
@@ -47,6 +49,21 @@ def test_runtime_dependency_error_is_retryable_process_failure():
 
     assert outcome.process_state == "retryable_failure"
     assert outcome.business_state == "temporarily_unavailable"
+
+
+def test_runtime_process_exit_code_treats_completed_process_states_as_success():
+    for process_state in ("succeeded", "noop", "business_blocked"):
+        assert runtime_process_exit_code({"process_state": process_state}) == 0
+
+
+def test_runtime_process_exit_code_treats_process_failures_as_failure():
+    for process_state in ("retryable_failure", "hard_failure"):
+        assert runtime_process_exit_code({"process_state": process_state}) == 1
+
+
+def test_runtime_process_exit_code_rejects_unknown_process_state():
+    with pytest.raises(ValueError, match="unsupported runtime process state"):
+        runtime_process_exit_code({"process_state": "unknown"})
 
 
 def test_process_outcome_materializes_one_current_row_per_scope():

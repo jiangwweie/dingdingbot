@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Literal
 from hashlib import sha256
 
@@ -30,6 +31,25 @@ class RuntimeProcessOutcome(BaseModel):
         "completed",
     ]
     first_blocker: str = ""
+
+
+PROCESS_SUCCESS_STATES = {"succeeded", "noop", "business_blocked"}
+PROCESS_FAILURE_STATES = {"retryable_failure", "hard_failure"}
+
+
+def runtime_process_exit_code(
+    outcome: RuntimeProcessOutcome | Mapping[str, object],
+) -> int:
+    process_state = (
+        outcome.process_state
+        if isinstance(outcome, RuntimeProcessOutcome)
+        else str(outcome.get("process_state") or "")
+    )
+    if process_state in PROCESS_SUCCESS_STATES:
+        return 0
+    if process_state in PROCESS_FAILURE_STATES:
+        return 1
+    raise ValueError(f"unsupported runtime process state: {process_state or 'missing'}")
 
 
 NOOP_STATUSES = {
