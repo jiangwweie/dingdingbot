@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
-from alembic.operations import Operations
-from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import StaticPool
 
@@ -16,57 +12,21 @@ from tests.unit.test_action_time_ticket_materialization import (
     NOW_MS,
     _insert_action_time_lane_graph,
 )
-
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_PATH = (
-    REPO_ROOT
-    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+from tests.support.runtime_control_state_schema import (
+    install_runtime_control_state_schema,
+    seed_runtime_control_state,
 )
-RISK_RESERVATION_MIGRATION_PATH = (
-    REPO_ROOT
-    / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
-)
-SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
-
-
-def _load_module(path: Path, name: str):
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
 
 @pytest.fixture()
 def pg_control_connection():
-    migration = _load_module(MIGRATION_PATH, "migration_086_action_time_finalgate")
-    risk_reservation_migration = _load_module(
-        RISK_RESERVATION_MIGRATION_PATH,
-        "migration_103_action_time_finalgate",
-    )
-    seed = _load_module(SEED_PATH, "seed_action_time_finalgate")
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     with engine.begin() as conn:
-        old_op = migration.op
-        migration.op = Operations(MigrationContext.configure(conn))
-        try:
-            migration.upgrade()
-            old_risk_op = risk_reservation_migration.op
-            risk_reservation_migration.op = migration.op
-            try:
-                risk_reservation_migration.upgrade()
-            finally:
-                risk_reservation_migration.op = old_risk_op
-        finally:
-            migration.op = old_op
-        seed.seed_runtime_control_state_foundation(conn)
+        install_runtime_control_state_schema(conn, through_revision="104")
+        seed_runtime_control_state(conn)
     with engine.connect() as conn:
         yield conn
     engine.dispose()
