@@ -57,3 +57,6 @@ docker/.env.docker
 node_modules/
 dist/
 *.pyc
+
+# Local isolated implementation worktrees
+.worktrees/

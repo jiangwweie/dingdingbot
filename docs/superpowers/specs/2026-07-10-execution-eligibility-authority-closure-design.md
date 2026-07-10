@@ -210,6 +210,24 @@ packet, or second source of truth.
 
 The next migration follows current migration `103` and uses sequence `104`.
 
+The production deployment is a bounded maintenance-window migration. This is a
+single-Owner, low-frequency runtime, so P0-1 must not add online dual-write,
+rolling-schema compatibility, shadow tables, or zero-downtime cutover machinery.
+The deploy sequence is:
+
+```text
+verify no unresolved submitted order lifecycle
+-> stop watcher / dispatcher / lifecycle timer
+-> apply migration 104 and fail-closed backfill
+-> deploy the matching application revision
+-> run read-only schema and current-state checks
+-> restart timers
+```
+
+If the pre-stop lifecycle check finds an unresolved submitted order, the deploy
+stops before migration. The runtime may remain unavailable during this short
+maintenance window; availability is not traded against execution authority.
+
 Migration rules:
 
 1. Existing event-spec rows are backfilled to `observe_only_signal`,
