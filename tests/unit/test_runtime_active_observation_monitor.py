@@ -1425,7 +1425,9 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
                 sa.text(
                     """
                     SELECT strategy_group_id, symbol, side, status, freshness_state,
-                           fact_snapshot_id, signal_type, signal_payload
+                           fact_snapshot_id, signal_type, signal_payload,
+                           signal_grade, required_execution_mode,
+                           execution_eligible, authority_source_ref
                     FROM brc_live_signal_events
                     """
                 )
@@ -1443,6 +1445,10 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
         "freshness_state": "fresh",
         "fact_snapshot_id": "fact-mpg-op-public",
         "signal_type": "MPG-LONG",
+        "signal_grade": "observe_only_signal",
+        "required_execution_mode": "observe_only",
+        "execution_eligible": 0,
+        "authority_source_ref": "event-spec:event-mpg-long",
         "signal_payload": {
             "detector_verdict": "would_enter",
             "action_time_ticket_id": None,
@@ -1462,6 +1468,49 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
             "strategy_family_version_id": "MPG-001:v1",
         },
     }
+
+
+def test_write_runtime_signal_summaries_to_pg_blocks_evaluator_authority_upgrade(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'runtime-upgrade.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            _seed_live_signal_writer_scope(conn)
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {
+            "runtime_summaries": [
+                {
+                    "runtime_instance_id": "runtime-mpg-op",
+                    "strategy_family_id": "MPG-001",
+                    "strategy_family_version_id": "MPG-001:v1",
+                    "symbol": "OP/USDT:USDT",
+                    "side": "long",
+                    "status": "ready_for_action_time_ticket_materialization",
+                    "signal_summary": {
+                        "signal_type": "would_enter",
+                        "signal_grade": "trial_grade_signal",
+                        "required_execution_mode": "trial_live",
+                        "side": "long",
+                        "trigger_candle_close_time_ms": 1000,
+                    },
+                }
+            ]
+        },
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+
+    assert result["status"] == "pg_live_signal_events_blocked"
+    assert result["skipped"][0]["blocker"] == (
+        "execution_eligibility_authority_invalid"
+    )
 
 
 def test_write_runtime_signal_summaries_to_pg_blocks_without_time_authority(tmp_path):
@@ -2040,7 +2089,10 @@ def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
               event_id TEXT,
               status TEXT,
               time_authority TEXT,
-              freshness_window_ms INTEGER
+              freshness_window_ms INTEGER,
+              declared_signal_grade TEXT NOT NULL DEFAULT 'observe_only_signal',
+              declared_required_execution_mode TEXT NOT NULL DEFAULT 'observe_only',
+              execution_eligibility_enabled BOOLEAN NOT NULL DEFAULT 0
             )
             """
         )
@@ -2089,7 +2141,11 @@ def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
               observed_at_ms INTEGER,
               expires_at_ms INTEGER,
               invalidated_at_ms INTEGER,
-              created_at_ms INTEGER
+              created_at_ms INTEGER,
+              signal_grade TEXT NOT NULL DEFAULT 'observe_only_signal',
+              required_execution_mode TEXT NOT NULL DEFAULT 'observe_only',
+              execution_eligible BOOLEAN NOT NULL DEFAULT 0,
+              authority_source_ref TEXT NOT NULL DEFAULT 'legacy-observe-only'
             )
             """
         )

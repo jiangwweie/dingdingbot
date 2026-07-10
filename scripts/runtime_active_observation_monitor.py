@@ -33,6 +33,11 @@ from scripts.build_daily_live_enablement_table import WIP_LANES  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
 )
+from src.domain.execution_eligibility import (  # noqa: E402
+    RequiredExecutionMode,
+    SignalGrade,
+    resolve_execution_eligibility,
+)
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     API_BASE_ENV as FIRST_REAL_SUBMIT_API_BASE_ENV,
     DEFAULT_API_BASE,
@@ -567,6 +572,10 @@ def _live_signal_candidates_from_summaries(
                 "symbol": symbol,
                 "side": side,
                 "signal_type": "would_enter",
+                "signal_grade": signal.get("signal_grade")
+                or SignalGrade.OBSERVE_ONLY_SIGNAL.value,
+                "required_execution_mode": signal.get("required_execution_mode")
+                or RequiredExecutionMode.OBSERVE_ONLY.value,
                 "confidence": signal.get("confidence"),
                 "reason_codes": list(signal.get("reason_codes") or []),
                 "trigger_candle_close_time_ms": _int_or_zero(
@@ -636,6 +645,35 @@ def _write_live_signal_candidate(
             "strategy_group_id": candidate["strategy_group_id"],
             "symbol": candidate["symbol"],
             "side": candidate["side"],
+        }
+    try:
+        authority = resolve_execution_eligibility(
+            declared_signal_grade=scope.get("declared_signal_grade")
+            or SignalGrade.OBSERVE_ONLY_SIGNAL,
+            declared_required_execution_mode=scope.get(
+                "declared_required_execution_mode"
+            )
+            or RequiredExecutionMode.OBSERVE_ONLY,
+            execution_eligibility_enabled=bool(
+                scope.get("execution_eligibility_enabled")
+            ),
+            evaluator_signal_grade=candidate.get("signal_grade")
+            or SignalGrade.OBSERVE_ONLY_SIGNAL,
+            evaluator_required_execution_mode=candidate.get(
+                "required_execution_mode"
+            )
+            or RequiredExecutionMode.OBSERVE_ONLY,
+            authority_source_ref=f"event-spec:{scope['event_spec_id']}",
+        )
+    except ValueError as exc:
+        return {
+            "written": False,
+            "blocker": "execution_eligibility_authority_invalid",
+            "detail": str(exc),
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "event_spec_id": scope.get("event_spec_id"),
         }
     freshness_window_ms = _int_or_zero(scope.get("freshness_window_ms"))
     if freshness_window_ms <= 0:
@@ -757,6 +795,10 @@ def _write_live_signal_candidate(
         "observed_at_ms": observed_ms,
         "expires_at_ms": expires_at_ms,
         "created_at_ms": created_at_ms,
+        "signal_grade": authority.signal_grade.value,
+        "required_execution_mode": authority.required_execution_mode.value,
+        "execution_eligible": authority.execution_eligible,
+        "authority_source_ref": authority.authority_source_ref,
     }
     _upsert_live_signal_event(conn, row)
     return {
@@ -765,6 +807,10 @@ def _write_live_signal_candidate(
         "strategy_group_id": candidate["strategy_group_id"],
         "symbol": candidate["symbol"],
         "side": candidate["side"],
+        "signal_grade": authority.signal_grade.value,
+        "required_execution_mode": authority.required_execution_mode.value,
+        "execution_eligible": authority.execution_eligible,
+        "authority_source_ref": authority.authority_source_ref,
     }
 
 
@@ -782,7 +828,10 @@ def _active_candidate_scope_event(
                   b.event_spec_id,
                   e.event_id,
                   e.time_authority,
-                  e.freshness_window_ms
+                  e.freshness_window_ms,
+                  e.declared_signal_grade,
+                  e.declared_required_execution_mode,
+                  e.execution_eligibility_enabled
                 FROM brc_strategy_group_candidate_scope AS c
                 JOIN brc_candidate_scope_event_bindings AS b
                   ON b.candidate_scope_id = c.candidate_scope_id
@@ -870,7 +919,11 @@ def _upsert_live_signal_event(conn: sa.engine.Connection, row: dict[str, Any]) -
           observed_at_ms,
           expires_at_ms,
           invalidated_at_ms,
-          created_at_ms
+          created_at_ms,
+          signal_grade,
+          required_execution_mode,
+          execution_eligible,
+          authority_source_ref
         ) VALUES (
           :signal_event_id,
           :candidate_scope_id,
@@ -892,7 +945,11 @@ def _upsert_live_signal_event(conn: sa.engine.Connection, row: dict[str, Any]) -
           :observed_at_ms,
           :expires_at_ms,
           NULL,
-          :created_at_ms
+          :created_at_ms,
+          :signal_grade,
+          :required_execution_mode,
+          :execution_eligible,
+          :authority_source_ref
         )
         """
     )
@@ -906,7 +963,11 @@ def _upsert_live_signal_event(conn: sa.engine.Connection, row: dict[str, Any]) -
               expires_at_ms = EXCLUDED.expires_at_ms,
               fact_snapshot_id = EXCLUDED.fact_snapshot_id,
               reason_codes = EXCLUDED.reason_codes,
-              signal_payload = EXCLUDED.signal_payload
+              signal_payload = EXCLUDED.signal_payload,
+              signal_grade = EXCLUDED.signal_grade,
+              required_execution_mode = EXCLUDED.required_execution_mode,
+              execution_eligible = EXCLUDED.execution_eligible,
+              authority_source_ref = EXCLUDED.authority_source_ref
             """
         )
     conn.execute(statement, row)
