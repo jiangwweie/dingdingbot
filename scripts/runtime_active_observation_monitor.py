@@ -494,6 +494,7 @@ def write_runtime_signal_summaries_to_pg(
 
     observed_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     written: list[str] = []
+    write_dispositions: list[dict[str, str]] = []
     skipped: list[dict[str, Any]] = []
     if conn is not None:
         for candidate in candidates:
@@ -504,9 +505,19 @@ def write_runtime_signal_summaries_to_pg(
             )
             if result.get("written") is True:
                 written.append(str(result["signal_event_id"]))
+                write_dispositions.append(
+                    {
+                        "signal_event_id": str(result["signal_event_id"]),
+                        "disposition": str(result["write_disposition"]),
+                    }
+                )
             else:
                 skipped.append(result)
-        return _pg_live_signal_events_result(written=written, skipped=skipped)
+        return _pg_live_signal_events_result(
+            written=written,
+            write_dispositions=write_dispositions,
+            skipped=skipped,
+        )
 
     normalized_url = normalize_sync_postgres_dsn(database_url)
     if not is_sync_postgres_dsn(normalized_url) and not allow_non_postgres_for_test:
@@ -522,16 +533,27 @@ def write_runtime_signal_summaries_to_pg(
                 )
                 if result.get("written") is True:
                     written.append(str(result["signal_event_id"]))
+                    write_dispositions.append(
+                        {
+                            "signal_event_id": str(result["signal_event_id"]),
+                            "disposition": str(result["write_disposition"]),
+                        }
+                    )
                 else:
                     skipped.append(result)
     finally:
         engine.dispose()
-    return _pg_live_signal_events_result(written=written, skipped=skipped)
+    return _pg_live_signal_events_result(
+        written=written,
+        write_dispositions=write_dispositions,
+        skipped=skipped,
+    )
 
 
 def _pg_live_signal_events_result(
     *,
     written: list[str],
+    write_dispositions: list[dict[str, str]],
     skipped: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -543,6 +565,7 @@ def _pg_live_signal_events_result(
         "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
         "written_count": len(written),
         "signal_event_ids": written,
+        "write_dispositions": write_dispositions,
         "skipped": skipped,
         "authority_boundary": (
             "live_signal_event_projection_only; "
@@ -800,9 +823,39 @@ def _write_live_signal_candidate(
         "execution_eligible": authority.execution_eligible,
         "authority_source_ref": authority.authority_source_ref,
     }
-    _upsert_live_signal_event(conn, row)
+    inserted = _upsert_live_signal_event(conn, row)
+    if not inserted:
+        existing = _live_signal_event_by_identity(conn, identity=row)
+        signal_event_id = str(existing.get("signal_event_id") or signal_event_id)
+        existing_is_fresh = (
+            str(existing.get("status") or "") == "facts_validated"
+            and str(existing.get("freshness_state") or "") == "fresh"
+            and int(existing.get("expires_at_ms") or 0) > observed_ms
+            and existing.get("invalidated_at_ms") is None
+        )
+        if not existing_is_fresh:
+            expired = (
+                int(existing.get("expires_at_ms") or 0) <= observed_ms
+                or str(existing.get("freshness_state") or "")
+                in {"expired", "stale"}
+            )
+            return {
+                "written": False,
+                "blocker": (
+                    "signal_event_expired"
+                    if expired
+                    else "signal_event_identity_terminal"
+                ),
+                "signal_event_id": signal_event_id,
+                "strategy_group_id": candidate["strategy_group_id"],
+                "symbol": candidate["symbol"],
+                "side": candidate["side"],
+            }
     return {
         "written": True,
+        "write_disposition": (
+            "inserted" if inserted else "duplicate_identity_preserved"
+        ),
         "signal_event_id": signal_event_id,
         "strategy_group_id": candidate["strategy_group_id"],
         "symbol": candidate["symbol"],
@@ -895,7 +948,10 @@ def _latest_fresh_public_fact(
     return dict(row) if row else {}
 
 
-def _upsert_live_signal_event(conn: sa.engine.Connection, row: dict[str, Any]) -> None:
+def _upsert_live_signal_event(
+    conn: sa.engine.Connection,
+    row: dict[str, Any],
+) -> bool:
     statement = sa.text(
         """
         INSERT INTO brc_live_signal_events (
@@ -958,19 +1014,53 @@ def _upsert_live_signal_event(conn: sa.engine.Connection, row: dict[str, Any]) -
             statement.text
             + """
             ON CONFLICT ON CONSTRAINT uq_brc_live_signal_identity
-            DO UPDATE SET
-              observed_at_ms = EXCLUDED.observed_at_ms,
-              expires_at_ms = EXCLUDED.expires_at_ms,
-              fact_snapshot_id = EXCLUDED.fact_snapshot_id,
-              reason_codes = EXCLUDED.reason_codes,
-              signal_payload = EXCLUDED.signal_payload,
-              signal_grade = EXCLUDED.signal_grade,
-              required_execution_mode = EXCLUDED.required_execution_mode,
-              execution_eligible = EXCLUDED.execution_eligible,
-              authority_source_ref = EXCLUDED.authority_source_ref
+            DO NOTHING
+            RETURNING signal_event_id
             """
         )
-    conn.execute(statement, row)
+    elif conn.dialect.name == "sqlite":
+        statement = sa.text(
+            statement.text.replace("INSERT INTO", "INSERT OR IGNORE INTO", 1)
+            + " RETURNING signal_event_id"
+        )
+    result = conn.execute(statement, row)
+    if conn.dialect.name in {"postgresql", "sqlite"}:
+        return result.scalar_one_or_none() is not None
+    return result.rowcount != 0
+
+
+def _live_signal_event_by_identity(
+    conn: sa.engine.Connection,
+    *,
+    identity: dict[str, Any],
+) -> dict[str, Any]:
+    row = conn.execute(
+        sa.text(
+            """
+            SELECT signal_event_id, status, freshness_state, expires_at_ms,
+                   invalidated_at_ms
+            FROM brc_live_signal_events
+            WHERE strategy_group_id = :strategy_group_id
+              AND symbol = :symbol
+              AND side = :side
+              AND detector_key = :detector_key
+              AND event_spec_id = :event_spec_id
+              AND signal_type = :signal_type
+              AND event_time_ms = :event_time_ms
+            LIMIT 1
+            """
+        ),
+        {
+            "strategy_group_id": identity["strategy_group_id"],
+            "symbol": identity["symbol"],
+            "side": identity["side"],
+            "detector_key": identity["detector_key"],
+            "event_spec_id": identity["event_spec_id"],
+            "signal_type": identity["signal_type"],
+            "event_time_ms": identity["event_time_ms"],
+        },
+    ).mappings().first()
+    return dict(row) if row else {}
 
 
 def _stable_signal_event_id(

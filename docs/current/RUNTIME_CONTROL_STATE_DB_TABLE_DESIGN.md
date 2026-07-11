@@ -320,6 +320,8 @@ Required constraints:
 | freshness source | `detected_at_ms`, `written_at_ms`, and `exported_at_ms` cannot define freshness |
 | closed candle | Unclosed candles cannot create fresh live signal events |
 | replay boundary | Replay or historical events cannot insert current live events with `status='facts_validated'` and `freshness_state='fresh'` |
+| immutable first observation | A duplicate event identity must not update `fact_snapshot_id`, `signal_payload`, `reason_codes`, signal grade/mode/eligibility, `observed_at_ms`, `expires_at_ms`, `created_at_ms`, or other creation-time authority fields |
+| lifecycle owner | Only the signal lifecycle projector may move `status`, `freshness_state`, or `invalidated_at_ms`, and only through the legal transition graph below |
 
 `brc_candle_snapshots` must be unique by:
 
@@ -431,6 +433,12 @@ Forbidden transitions:
 | `brc_promotion_candidates` | `blocked -> arbitration_won`; `arbitration_lost -> arbitration_won`; `expired -> arbitration_won` |
 | `brc_action_time_lane_inputs` | `expired -> ticket_pending`; `invalidated -> ticket_created`; `closed -> facts_refreshing` |
 | `brc_action_time_tickets` | `expired -> finalgate_ready`; `finalgate_rejected -> submitted`; `submitted -> submitted`; `closed -> preflight_pending` |
+
+Repeated watcher observations are idempotent acknowledgements of the original
+event, not event refreshes. A new attempt requires a **new distinct market event
+identity** or a separately designed repair-generation identity. Routine upsert
+must not extend a signal's lifetime, replace its fact provenance, or reopen a
+terminal promotion/lane/ticket identity.
 
 Every transition must append an event row in `brc_state_transition_events` or a
 domain-specific event table with:

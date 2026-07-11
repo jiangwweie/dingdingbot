@@ -333,6 +333,11 @@ def _process_outcome_specs(
             overwrite=False,
         )
 
+    promotion_status = str(promotion.get("status") or "")
+    promotion_succeeded = promotion_status in {
+        "promotion_action_time_lane_created",
+        "action_time_lane_already_open",
+    }
     for row in promotion.get("per_candidate_results") or []:
         if not isinstance(row, dict):
             continue
@@ -340,14 +345,19 @@ def _process_outcome_specs(
         candidate_status = str(row.get("status") or "")
         if candidate_blockers:
             row_status = "action_time_ticket_sequence_blocked"
-        elif candidate_status == "arbitration_lost":
+            row_blockers = candidate_blockers
+        elif candidate_status == "arbitration_lost" and promotion_succeeded:
             row_status = "action_time_ticket_sequence_candidate_ready"
+            row_blockers = []
+        elif candidate_status == "arbitration_lost":
+            row_status = "action_time_ticket_sequence_blocked"
+            row_blockers = blockers
         else:
             continue
         add(
             _lane_scope_key(row),
             row_status=row_status,
-            row_blockers=candidate_blockers,
+            row_blockers=row_blockers,
             source_watermark=str(row.get("signal_event_id") or ""),
         )
 

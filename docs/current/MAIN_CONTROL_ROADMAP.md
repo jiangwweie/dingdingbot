@@ -69,32 +69,33 @@ design documents and acceptance proof.
 
 | Area | Current fact |
 | --- | --- |
-| **Focused delivery branch** | `codex/p0-fh-typed-required-facts` is deployed from `12feb47e2cd777a93c314c781dbafdcd69930cfc` |
-| **Tokyo release** | `/home/ubuntu/brc-deploy/app/current` points to `brc-runtime-governance-12feb47e-p0-fh-truth` |
+| **Focused delivery branch** | `codex/p0-real-signal-ticket-closure`; exact Tokyo release head is recorded by `.brc-release-manifest.json` |
+| **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` follows the focused real-signal-to-Ticket release line |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
 | **PG migration** | Tokyo is at migration `112` (`2026-07-10-112_version_live_signal_identity.py`) |
-| **Postdeploy acceptance** | Full local suite passed with `2669 passed, 1 skipped`; production file-I/O audit is clear; deploy acceptance applied without exchange writes |
+| **Current branch verification** | Full local suite passes with `2720 passed, 1 skipped`; production file-I/O audit remains a mandatory deploy gate |
 | **Backend / watcher / monitor** | Backend and both timers are active; watcher and monitor oneshot services complete with `Result=success` outside signal-time blocked runs |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
 | **Post-submit first tick** | Deployed release includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, retry limit, scope freeze writes, and stop-risk reservation rechecks |
 | **P0 capital-safety closure** | `381aed34` deploys current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, Live Outcome Ledger projection, and protective stop-risk direction validation |
 | **Current runtime coverage** | Five StrategyGroups, 22 candidate scopes, and six current v2 Event Specs have current watcher coverage and execution-eligibility declarations |
-| **Production signal lineage after `12feb47e`** | Tokyo PG recorded 7 fresh trial-grade signals, 7 promotion candidates, and 6 `real_submit_candidate` action-time lanes across CPM and BRF2, but 0 Action-Time Tickets and 0 Runtime Safety State snapshots |
-| **Current engineering bottleneck** | Every observed real-submit lane was blocked at Ticket materialization by `risk_reservation_entry_reference_price_missing`, `risk_reservation_intended_qty_invalid`, and `risk_at_stop_invalid`; current Readiness later reverted to `market_wait_validated`, hiding this unresolved engineering blocker |
+| **Typed Ticket boundary** | Side-aware price, normalized quantity, positive stop risk, one reservation, atomic fact-to-Ticket transaction, and six-Event-Spec production-shaped certification are implemented on the focused branch |
+| **Latest production acceptance finding** | CPM/SUI and MPG/SUI exposed two same-candle terminal identities; no new lane or Ticket was created, but per-candidate aggregation incorrectly wrote successful process outcomes instead of the parent terminal blocker |
+| **Temporal truth correction** | Duplicate signal identity preserves the first event row, and a failed parent promotion forces every affected lane outcome to remain blocked; this closes the false `processing` projection without reopening terminal identities |
 
 ## Current Next Execution Order
 
-This is the current remaining order after Tokyo release `12feb47e`.
+This is the current remaining order for the focused real-signal-to-Ticket
+release line.
 
 | Order | Work | Priority | Done when |
 | --- | --- | --- | --- |
-| 1 | **P0-RT Real Signal -> Ticket Closure** | P0 | A production-shaped fresh signal obtains a fresh side-aware entry reference, normalized quantity, positive risk-at-stop reservation, and one PG Action-Time Ticket inside the lane validity window |
-| 2 | **P0-PC Production-Shaped Chain Certification** | P0 | All six current Event Specs pass raw-source -> PG facts -> signal -> promotion -> lane -> Ticket -> Runtime Safety State certification without hand-injecting downstream dictionary keys |
-| 3 | **Blocker truth and monitor closure** | P0 | Ticket/process blockers remain visible in PG current state until repaired and cannot be overwritten by a later no-signal tick or mislabeled as `market_wait_validated` |
-| 4 | **Continuous reconciliation tick** | P0 | After first submit, scheduled/event-driven reconciliation continues until lifecycle closure, exact recovery command, or hard stop |
-| 5 | **Live Outcome Ledger validation** | P0/P1 | Every future real ticket has one structured outcome row or one exact hard-blocked outcome row |
-| 6 | **Owner Explanation and frontend integration** | P1/P2 | Owner sees waiting, processing, blocked, protected, recovered, and closed states without decoding internal chain objects |
-| 7 | **Advanced capital allocation** | P2 | Allocation combines open risk, reserved risk, StrategyGroup sleeves, symbol/side clusters, cooldown, and drawdown without weakening per-ticket safety |
+| 1 | **Temporal truth postdeploy acceptance** | P0 | Same-candle duplicate input remains immutable, parent blockers remain visible per lane, services are healthy, and no exchange write occurs |
+| 2 | **Production lifecycle wiring and continuous reconciliation** | P0 | Continue non-market-dependent engineering through protection, deterministic recovery, settlement, and review |
+| 3 | **Next distinct natural signal acceptance** | P0 | A new eligible `signal_event_id` creates Ticket and Runtime Safety State or exposes one genuine current blocker; it preempts lower work when it appears |
+| 4 | **Live Outcome Ledger validation** | P0/P1 | Every future real ticket has one structured outcome row or one exact hard-blocked outcome row |
+| 5 | **Owner Explanation and frontend integration** | P1/P2 | Owner sees waiting, processing, blocked, protected, recovered, and closed states without decoding internal chain objects |
+| 6 | **Capital allocation V1 then advanced allocation** | P1/P2 | Allocation starts from reliable per-ticket stop risk and outcomes, then adds sleeves, clusters, cooldown, and drawdown |
 
 ## Why This Was Not Detected Before Production Signals
 
@@ -108,6 +109,8 @@ production producer-to-consumer contract.
 | Risk allocation | Zero requested risk was treated as no allocation value | `requested_risk_at_stop=0` allowed promotion/lane progression | Missing price and quantity were discovered only at Ticket materialization |
 | Full-chain harness | Constructed downstream-complete dictionaries represented action-time state | Raw exchange/public facts were not replayed through the exact production projector chain for all six Event Specs | The harness proved lifecycle behavior after the missing handoff, not the handoff itself |
 | Readiness/monitor | Latest no-signal state could return to market wait | A prior fresh signal had already exposed a repeatable Ticket engineering blocker | The unresolved blocker disappeared from the current Owner view |
+| Repeated watcher cadence | Idempotency was treated as duplicate-row prevention | The same event identity could still overwrite first-observation fact and timing lineage | Event identity was stable while event content was mutable |
+| Multi-candidate outcome aggregation | `arbitration_lost` meant a healthy loser after a winner was selected | Parent promotion can fail before any winner exists | Child success semantics overwrote the parent terminal blocker |
 
 The systemic root cause is therefore:
 
@@ -116,6 +119,8 @@ untyped dictionary compatibility
 + privileged downstream fixtures
 + no producer-consumer field ownership check
 + no production-shaped six-event certification
++ no repeated-cadence state-machine certification
++ no parent-child blocker conservation rule
 -> tests green while the real PG chain is incomplete
 ```
 
@@ -136,6 +141,8 @@ gate.
 | **Projection consistency** | Candidate Pool, Readiness, Tradeability, Goal Status, Server Monitor, and lane-scoped process outcomes agree on the same first blocker and input watermark; one failed lane cannot hide another |
 | **Production cadence** | The action-time path finishes within source validity windows; only lightweight PG readiness runs inside the Ticket transaction; Owner projections run afterward; business blockers keep watcher health green; no-signal ticks create zero JSON/MD files |
 | **Deploy acceptance** | Postdeploy validation runs one non-exchange-write production-shaped certification and verifies PG lineage; service health alone is insufficient |
+| **Temporal identity** | Repeating the same closed-candle event cannot mutate first fact lineage, authority fields, observed time, expiry, or terminal state |
+| **Outcome conservation** | Parent business/retryable/hard failure cannot be downgraded by child candidate rows; each affected lane preserves the parent blocker |
 
 ## Long-Horizon Development Route
 

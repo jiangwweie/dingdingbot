@@ -2139,6 +2139,279 @@ def test_write_runtime_signal_summaries_to_pg_uses_event_spec_freshness_window(t
     assert result["written_count"] == 1
 
 
+def test_duplicate_signal_observation_preserves_first_event_lineage_and_ttl(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime-duplicate-signal.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            _seed_live_signal_writer_scope(conn)
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE brc_strategy_side_event_specs
+                    SET freshness_window_ms = 10000
+                    WHERE event_spec_id = 'event-mpg-long'
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE brc_runtime_fact_snapshots
+                    SET valid_until_ms = 1600
+                    WHERE fact_snapshot_id = 'fact-mpg-op-public'
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    artifact = {
+        "runtime_summaries": [
+            {
+                "runtime_instance_id": "runtime-mpg-op",
+                "strategy_family_id": "MPG-001",
+                "strategy_family_version_id": "MPG-001:v1",
+                "symbol": "OPUSDT",
+                "side": "long",
+                "status": "ready_for_action_time_ticket_materialization",
+                "signal_summary": {
+                    "signal_type": "would_enter",
+                    "side": "long",
+                    "trigger_candle_close_time_ms": 1000,
+                    "reason_codes": ["first_observation"],
+                },
+            }
+        ]
+    }
+    first = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        artifact,
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+    assert first["written_count"] == 1
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_runtime_fact_snapshots (
+                      fact_snapshot_id, strategy_group_id, symbol, side,
+                      fact_surface, source_kind, computed, satisfied,
+                      freshness_state, valid_until_ms, observed_at_ms, created_at_ms
+                    ) VALUES (
+                      'fact-mpg-op-public-new', 'MPG-001', 'OPUSDT', 'long',
+                      'pretrade_public', 'live_market', 1, 1,
+                      'fresh', 5000, 1250, 1250
+                    )
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    second = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        artifact,
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1300,
+    )
+
+    assert second["status"] == "pg_live_signal_events_written"
+    assert second["written_count"] == 1
+    assert second["write_dispositions"] == [
+        {
+            "signal_event_id": first["signal_event_ids"][0],
+            "disposition": "duplicate_identity_preserved",
+        }
+    ]
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.text(
+                    """
+                    SELECT COUNT(*) AS row_count, observed_at_ms, expires_at_ms,
+                           fact_snapshot_id, reason_codes
+                    FROM brc_live_signal_events
+                    """
+                )
+            ).mappings().one()
+    finally:
+        engine.dispose()
+
+    assert dict(row) == {
+        "row_count": 1,
+        "observed_at_ms": 1200,
+        "expires_at_ms": 1600,
+        "fact_snapshot_id": "fact-mpg-op-public",
+        "reason_codes": '["first_observation"]',
+    }
+
+
+def test_duplicate_signal_observation_cannot_revive_expired_first_event(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime-expired-duplicate.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            _seed_live_signal_writer_scope(conn)
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE brc_strategy_side_event_specs
+                    SET freshness_window_ms = 10000
+                    WHERE event_spec_id = 'event-mpg-long'
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE brc_runtime_fact_snapshots
+                    SET valid_until_ms = 1600
+                    WHERE fact_snapshot_id = 'fact-mpg-op-public'
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    artifact = {
+        "runtime_summaries": [
+            {
+                "runtime_instance_id": "runtime-mpg-op",
+                "strategy_family_id": "MPG-001",
+                "symbol": "OPUSDT",
+                "side": "long",
+                "status": "ready_for_action_time_ticket_materialization",
+                "signal_summary": {
+                    "signal_type": "would_enter",
+                    "side": "long",
+                    "trigger_candle_close_time_ms": 1000,
+                },
+            }
+        ]
+    }
+    first = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        artifact,
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+    assert first["written_count"] == 1
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_runtime_fact_snapshots (
+                      fact_snapshot_id, strategy_group_id, symbol, side,
+                      fact_surface, source_kind, computed, satisfied,
+                      freshness_state, valid_until_ms, observed_at_ms, created_at_ms
+                    ) VALUES (
+                      'fact-mpg-op-public-after-expiry', 'MPG-001', 'OPUSDT', 'long',
+                      'pretrade_public', 'live_market', 1, 1,
+                      'fresh', 5000, 1650, 1650
+                    )
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    second = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        artifact,
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1700,
+    )
+
+    assert second["status"] == "pg_live_signal_events_blocked"
+    assert second["written_count"] == 0
+    assert second["skipped"] == [
+        {
+            "written": False,
+            "blocker": "signal_event_expired",
+            "signal_event_id": first["signal_event_ids"][0],
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "side": "long",
+        }
+    ]
+
+
+def test_duplicate_signal_identity_returns_existing_pg_identity(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'runtime-existing-identity.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            _seed_live_signal_writer_scope(conn)
+    finally:
+        engine.dispose()
+
+    artifact = {
+        "runtime_summaries": [
+            {
+                "runtime_instance_id": "runtime-mpg-op",
+                "strategy_family_id": "MPG-001",
+                "symbol": "OPUSDT",
+                "side": "long",
+                "status": "ready_for_action_time_ticket_materialization",
+                "signal_summary": {
+                    "signal_type": "would_enter",
+                    "side": "long",
+                    "trigger_candle_close_time_ms": 1000,
+                },
+            }
+        ]
+    }
+    first = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        artifact,
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1200,
+    )
+    assert first["written_count"] == 1
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    UPDATE brc_live_signal_events
+                    SET signal_event_id = 'signal-existing-pg-identity'
+                    """
+                )
+            )
+    finally:
+        engine.dispose()
+
+    second = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        artifact,
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=1300,
+    )
+
+    assert second["status"] == "pg_live_signal_events_written"
+    assert second["signal_event_ids"] == ["signal-existing-pg-identity"]
+    assert second["write_dispositions"] == [
+        {
+            "signal_event_id": "signal-existing-pg-identity",
+            "disposition": "duplicate_identity_preserved",
+        }
+    ]
+
+
 def test_write_runtime_signal_summaries_to_pg_blocks_expired_event_spec_window(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
     engine = sa.create_engine(database_url)
@@ -2318,7 +2591,11 @@ def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
               signal_grade TEXT NOT NULL DEFAULT 'observe_only_signal',
               required_execution_mode TEXT NOT NULL DEFAULT 'observe_only',
               execution_eligible BOOLEAN NOT NULL DEFAULT 0,
-              authority_source_ref TEXT NOT NULL DEFAULT 'legacy-observe-only'
+              authority_source_ref TEXT NOT NULL DEFAULT 'legacy-observe-only',
+              CONSTRAINT uq_brc_live_signal_identity UNIQUE (
+                strategy_group_id, symbol, side, detector_key, event_spec_id,
+                signal_type, event_time_ms
+              )
             )
             """
         )

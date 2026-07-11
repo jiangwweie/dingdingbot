@@ -378,6 +378,68 @@ def test_sequence_clears_repaired_arbitration_loser_without_opening_second_lane(
     assert _count(pg_control_connection, "brc_action_time_tickets") == 1
 
 
+def test_terminal_promotion_blocker_cannot_be_hidden_by_candidate_success_outcomes(
+    pg_control_connection,
+):
+    terminal_blocker = "terminal_promotion_identity_reuse:promotion-existing"
+    candidates = [
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "symbol": "SUIUSDT",
+            "side": "long",
+            "signal_event_id": "signal-cpm-sui",
+            "status": "arbitration_lost",
+            "blockers": [],
+        },
+        {
+            "strategy_group_id": "MPG-001",
+            "symbol": "SUIUSDT",
+            "side": "long",
+            "signal_event_id": "signal-mpg-sui",
+            "status": "arbitration_lost",
+            "blockers": [],
+        },
+    ]
+
+    payload = materialize_action_time_ticket_sequence(
+        pg_control_connection,
+        now_ms=NOW_MS,
+        projection_publisher=_projection_ready,
+        fact_materializer=lambda conn, now_ms: {
+            "status": "action_time_fact_snapshots_materialized",
+            "materialized": candidates,
+            "blocked": [],
+            "blockers": [],
+        },
+        promotion_materializer=lambda conn, now_ms: {
+            "status": "terminal_action_time_identity_not_reopened",
+            "blockers": [terminal_blocker],
+            "per_candidate_results": candidates,
+        },
+        completion_clock_ms=lambda: NOW_MS + 1,
+    )
+
+    assert payload["status"] == "action_time_ticket_sequence_rolled_back"
+    outcomes = {
+        row["scope_key"]: row
+        for row in payload["process_outcomes"]
+        if row["scope_key"].startswith("lane:")
+    }
+    assert set(outcomes) == {
+        "lane:CPM-RO-001:SUIUSDT:long",
+        "lane:MPG-001:SUIUSDT:long",
+    }
+    assert {row["process_state"] for row in outcomes.values()} == {
+        "business_blocked"
+    }
+    assert {row["business_state"] for row in outcomes.values()} == {
+        "temporarily_unavailable"
+    }
+    assert {row["first_blocker"] for row in outcomes.values()} == {
+        terminal_blocker
+    }
+
+
 def test_sequence_rolls_back_when_shortest_ttl_expires_before_commit(
     pg_control_connection,
 ):

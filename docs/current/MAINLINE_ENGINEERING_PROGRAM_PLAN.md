@@ -30,7 +30,7 @@ repo MD/JSON/output/report files.
 
 | Fact | Current evidence |
 | --- | --- |
-| **Current Tokyo release** | Tokyo runs focused release `12feb47e2cd777a93c314c781dbafdcd69930cfc`; PG migration is `112`; backend, watcher timer, and monitor timer are active |
+| **Current Tokyo release line** | Tokyo follows focused branch `codex/p0-real-signal-ticket-closure`; the immutable deployed head is recorded by `.brc-release-manifest.json`; PG migration is `112` |
 | **PG current state is the runtime source** | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | **Repo/output/report files are not runtime authority** | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | **Five StrategyGroups are active WIP** | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`, PG candidate scope seed |
@@ -41,9 +41,11 @@ repo MD/JSON/output/report files.
 | **Exchange protection reconciliation is code-covered and deployed as readonly comparison logic** | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots, including missing order, side mismatch, qty mismatch, orphan reduce-only order, TP1-fill runner gap, and flat-position live protection |
 | **First tick and recovery-command defaults are deployed** | The current Tokyo release includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, max 3 recovery attempts, and scope freeze records at `strategy_group_id + symbol + side` |
 | **Scope freeze pre-submit hard blocker is deployed** | `381aed34` blocks active real-risk freezes across promotion, lane, ticket, Runtime Safety State, FinalGate preflight, Operation Layer handoff, submit-mode decision, and protected submit; stale/no-risk freezes resolve through reconciliation/cleanup |
-| **Production signals reached L7** | After `12feb47e`, PG recorded 7 fresh signals, 7 promotions, and 6 real-submit action-time lanes across CPM and BRF2; all lanes expired without a Ticket |
-| **Risk Reservation implementation is consumer-complete but producer-incomplete** | Ticket code computes `risk_at_stop = abs(entry_price - stop_price) * quantity`, but production action-time facts did not provide a canonical entry reference, so all six observed lanes failed with missing entry reference, invalid quantity, and invalid stop risk |
-| **Current projections hide the unresolved blocker** | After signals expired, Readiness and Goal Status returned to market wait even though Ticket materialization had repeatedly failed; blocker persistence and projection consistency are not closed |
+| **Typed pricing / sizing / reservation closure is implemented** | Action-time facts now own a side-aware executable price, Decimal normalized quantity, and positive risk-at-stop reservation; promotion, Ticket, and protected submit reuse the same lineage rather than recomputing loose dictionary values |
+| **Atomic Ticket sequence is implemented** | Action-time facts, lightweight readiness, promotion, reservation, lane, and Ticket run under one savepoint and roll back together when any blocker or TTL boundary fails |
+| **Production-shaped certification exists** | Five StrategyGroups, 22 candidate scopes, and six current Event Specs have positive, missing, stale, malformed, conflict, and production-shaped raw-source chain coverage without exchange write |
+| **Production temporal-truth acceptance found a second defect class** | A repeated watcher observation of the same closed-candle signal preserved the same `signal_event_id`; its prior promotion/lane identity was terminal, but sequence aggregation incorrectly converted child `arbitration_lost` rows into successful process outcomes and hid the parent terminal blocker |
+| **Temporal-truth correction is implemented on the focused branch** | Duplicate signal identity now preserves the first event row without mutating fact lineage or TTL; a failed parent promotion forces every affected lane outcome to remain `business_blocked`; the full suite passes with `2720 passed, 1 skipped` |
 | **Test escape is proven** | Unit/full-chain fixtures inject `last_price`, `mark_price`, or `entry_price` directly, while production fact materialization does not guarantee the same typed field; downstream-complete dictionary fixtures therefore bypassed the missing producer handoff |
 | **Advanced trading quality / capital allocation remains future work** | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`; portfolio sleeve allocation, cluster exposure, cooldown, and drawdown controls remain above the per-ticket safety layer |
 
@@ -86,18 +88,17 @@ repo MD/JSON/output/report files.
 
 ## Current Next Execution Order
 
-This is the authoritative remaining sequence after Tokyo release `12feb47e`.
+This is the authoritative remaining sequence for the focused
+`codex/p0-real-signal-ticket-closure` release line.
 It supersedes ad hoc task ordering in chat summaries.
 
 | Order | Next work | Priority | Acceptance |
 | --- | --- | --- | --- |
-| 1 | **RT-1 Typed Action-Time Pricing And Sizing** | P0 | A fresh side-aware executable price is produced with provenance/freshness; target notional becomes exchange-precision quantity; positive stop risk is computed once and reused downstream |
-| 2 | **RT-2 Atomic Ticket Materialization And TTL** | P0 | Facts, risk reservation, and Ticket complete inside one bounded application transaction before the shortest source validity expires |
-| 3 | **RT-3 Blocker Truth And Monitor Closure** | P0 | Process outcome stores lane/signal-scoped first blocker; later no-signal ticks cannot overwrite it with market wait until repair certification clears it |
-| 4 | **PC-1 Six-Event Production-Shaped Certification** | P0 | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, and BRF2-SHORT run from raw typed source facts to Ticket and Runtime Safety State without exchange write or downstream key injection |
-| 5 | **PC-2 Release Regression Gate** | P0 | CI and postdeploy acceptance reject missing/stale/malformed producer fields, fixture-only fields, projection disagreement, and action-time work exceeding freshness/timeout bounds |
-| 6 | **Continuous reconciliation and Live Outcome validation** | P0/P1 | The first real ticket proceeds through protection, reconciliation, settlement, and one structured outcome or exact hard blocker |
-| 7 | **Owner Explanation, frontend, and advanced allocation** | P1/P2 | Product surfaces and portfolio allocation build only after RT/PC gates are closed |
+| 1 | **RT-5 Temporal Truth Postdeploy Acceptance** | P0 | Repeated same-candle input cannot mutate the original signal event; parent terminal blocker remains visible per lane; services stay healthy and no exchange write occurs |
+| 2 | **Production lifecycle wiring and continuous reconciliation** | P0 | Non-market-dependent post-Ticket lifecycle work continues through protection, scheduled reconciliation, deterministic recovery, settlement, and review |
+| 3 | **RT-4 Next-Distinct-Signal Acceptance** | P0 | The next distinct eligible `signal_event_id` creates one Ticket and Runtime Safety State or stops at one genuine current safety/account/position/protection blocker; it preempts lower work when it arrives |
+| 4 | **Live Outcome validation** | P0/P1 | The first real ticket produces one structured outcome or one exact hard-blocked outcome row |
+| 5 | **Owner Explanation, frontend, and capital allocation** | P1/P2 | Product surfaces and portfolio allocation build on stable backend truth after the first real lifecycle outcome |
 
 ## P0-RT Real Signal -> Ticket Closure
 
@@ -116,6 +117,22 @@ production source values
 -> later no-signal projection hides the engineering blocker
 ```
 
+Production acceptance then exposed a second, temporal state-machine chain:
+
+```text
+same closed candle is observed again
+-> stable signal_event_id conflicts with the existing event
+-> writer mutates the existing event's fact lineage / timing fields
+-> prior promotion and lane identity is terminal and cannot reopen
+-> promotion returns one parent terminal blocker
+-> per-candidate arbitration_lost rows are projected as success
+-> PG process outcome says processing instead of preserving the blocker
+```
+
+The systemic issue is broader than dictionaries: release tests did not exercise
+**the same identity across repeated production cadence**, and aggregation tests
+did not require **parent failure conservation**.
+
 ### Task Packages
 
 | Task | Scope | Acceptance | Stop condition |
@@ -124,6 +141,18 @@ production source values
 | **RT-2 Atomic Ticket Materialization And TTL** | Collapse action-time fact refresh, lightweight readiness refresh, sizing/risk reservation, and Ticket creation into one bounded application service/transaction; move Candidate Pool, Daily Table, Goal Status, and Owner snapshots after the critical path | Critical path completes before the shortest trusted fact expiry; timeouts fail with lane-scoped PG process outcomes; no JSON/MD output | Stop on multiple open real-submit lanes, stale facts, missing account facts, or PG transaction ambiguity |
 | **RT-3 Blocker Truth And Monitor Closure** | Reuse PG runtime process outcomes and state events with signal/lane scope; project unresolved engineering blocker into Readiness, Tradeability, Goal Status, and Monitor | Every affected signal/lane has one first blocker and watermark across all views; no-signal ticks do not erase unresolved repair state; fresh signals may re-certify and clear it; business blockers do not mark watcher infrastructure failed | Stop when a newer successful certification for the same capability clears the blocker |
 | **RT-4 Natural-Signal Acceptance** | Observe the next eligible production signal after deployment | Signal creates Ticket and Runtime Safety State or stops at a genuine action-time safety/account/position/protection blocker | Do not bypass FinalGate, Operation Layer, protection, or exchange-write authority |
+| **RT-5 Temporal Identity And Outcome Truth** | Make signal-event identity immutable across repeated watcher ticks and conserve parent blockers across per-candidate outcome aggregation | Same closed-candle input is idempotent; terminal identity never appears as successful processing; every affected lane persists the exact parent blocker | Stop on any duplicate-submit ambiguity or any need to reopen a terminal real-submit identity |
+
+### RT-5 Cadence And Performance Boundary
+
+| Dimension | Required behavior |
+| --- | --- |
+| **Cadence** | Runs only for watcher summaries that contain a `would_enter` signal and for the bounded Action-Time sequence |
+| **File writes** | **0** JSON/MD files for no-signal and duplicate-signal ticks |
+| **PG writes** | First distinct signal inserts one event; a duplicate event inserts **0** signal rows and performs one bounded current-state read; process outcomes remain bounded to affected lanes |
+| **CPU** | Stable ID hashing and per-candidate aggregation are linear in the bounded candidate set; no broad report builder runs in the critical transaction |
+| **Timeout** | The existing server Action-Time sequence remains bounded by the **45-second** subprocess timeout and the shortest trusted-fact TTL |
+| **Retention** | The original signal event and lifecycle transitions remain PG provenance; no per-run sidecar file is created |
 
 ## P0-PC Production-Shaped Chain Certification
 
@@ -143,6 +172,8 @@ downstream dictionary keys whose production materialization is under test.
 | **Protection facts** | valid stop direction, missing stop, wrong-side stop, expired protection, missing TP1 |
 | **Account facts** | fresh safe account, stale, open-order conflict, active-position conflict, unavailable private facts |
 | **Projection truth** | success, computed-not-satisfied, engineering blocker, runtime safety blocker, later no-signal tick |
+| **Cadence and identity** | first observation, repeated same-candle observation, post-expiry observation, next distinct candle, terminal prior progression |
+| **Outcome aggregation** | one parent success with one arbitration loser, parent business blocker, parent retryable failure, candidate-specific blocker, multi-lane mixed result |
 
 ### Release Gate
 
@@ -155,6 +186,28 @@ Completion requires all of the following:
 5. Candidate Pool, Readiness, Tradeability, Goal Status, Server Monitor, and process outcomes agree.
 6. No-signal cadence writes zero JSON/MD files; heavy work is event-triggered and timeout-bounded.
 7. Postdeploy acceptance verifies PG lineage, not only service health and test-suite success.
+8. Repeating an identical event identity cannot change its first fact reference,
+   authority fields, observed time, expiry, or lifecycle state.
+9. A parent-stage failure cannot be downgraded by child candidate rows; every
+   affected lane must preserve the parent first blocker.
+
+### Pre-Market Engineering Discovery Gate
+
+This gate exists specifically so engineering blockers are found before a rare
+market event reaches them.
+
+| Gate | Required proof before release |
+| --- | --- |
+| **Producer ownership** | Every downstream-required value has one typed producer, one PG owner, one freshness rule, and no fixture-only alias |
+| **Raw-source chain** | Tests start from venue/account/strategy source shape and traverse the same projectors used in production |
+| **Temporal metamorphic replay** | The same input is run once, repeatedly, after expiry, and after a distinct event; state changes must match the declared state machine |
+| **Parent-child truth conservation** | Parent failure, retryable failure, and hard stop can never become child success during fan-out/fan-in aggregation |
+| **Fault injection by boundary** | Missing, stale, malformed, conflicting, timeout, rollback, duplicate, and terminal-identity cases are injected at every L2-L7 handoff |
+| **Production-shaped postdeploy** | One no-exchange-write acceptance run verifies PG row counts, lineage, first blocker, service health, and zero recurring JSON/MD output |
+
+This gate is a release constraint, not a one-time task. A new StrategyGroup,
+instrument class, side, Event Spec, capital allocator, or lifecycle transition
+must extend the same matrix before it can be called execution-capable.
 
 ## Program Details
 
