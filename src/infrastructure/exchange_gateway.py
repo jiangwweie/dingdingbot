@@ -1027,6 +1027,26 @@ class ExchangeGateway:
             logger.error(f"获取未完成订单失败：symbol={symbol}, error={e}")
             raise
 
+    async def fetch_all_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
+        """Fetch the complete venue open-order view for one symbol.
+
+        Binance USDT-M exposes regular orders and conditional/algo orders via
+        separate CCXT views.  Both reads are required: a failure in either view
+        is propagated so callers cannot mistake an incomplete snapshot for an
+        authoritative absence.  Other exchanges retain the unified default
+        view until their gateway capability contract says otherwise.
+        """
+
+        normal_orders = await self.fetch_open_orders(symbol)
+        order_views = [normal_orders]
+        if str(getattr(self, "exchange_name", "")).lower() == "binance":
+            conditional_orders = await self.fetch_open_orders(
+                symbol,
+                params={"stop": True},
+            )
+            order_views.append(conditional_orders)
+        return self._merge_open_order_views(order_views)
+
     async def fetch_my_trades(
         self,
         symbol: str,
@@ -1178,7 +1198,7 @@ class ExchangeGateway:
     ) -> Optional[Dict[str, Any]]:
         """Cancel Binance futures conditional orders visible only in stop-order views."""
         try:
-            raw_orders = await self.rest_exchange.fetch_open_orders(symbol, params={"stop": True})
+            raw_orders = await self.fetch_all_open_orders(symbol)
         except Exception as exc:
             logger.warning(
                 "Conditional open-order lookup failed during cancel fallback: "
@@ -1188,7 +1208,7 @@ class ExchangeGateway:
                 exc,
                 exc_info=True,
             )
-            return None
+            raise
 
         for raw_order in raw_orders or []:
             if not self._raw_order_matches(
@@ -1363,42 +1383,32 @@ class ExchangeGateway:
                     exc,
                 )
 
-        params_candidates = [{}]
-        if order_type == OrderType.STOP_MARKET or str(expected_type).upper() == "STOP_MARKET":
-            params_candidates.extend(
-                [
-                    {"stop": True},
-                    {"type": "STOP_MARKET"},
-                ]
-            )
-
         retry_delays = list(self._order_confirmation_retry_delays) if fetch_order_missed else []
         attempts = 1 + len(retry_delays)
         for attempt_idx in range(attempts):
-            for params in params_candidates:
-                try:
-                    raw_orders = await self.rest_exchange.fetch_open_orders(symbol, params=params)
-                except Exception as exc:
-                    logger.warning(
-                        "Order confirmation fetch_open_orders miss: symbol=%s params=%s error=%s",
-                        symbol,
-                        params,
-                        exc,
-                    )
-                    continue
+            try:
+                raw_orders = await self.fetch_all_open_orders(symbol)
+            except Exception as exc:
+                logger.warning(
+                    "Order confirmation complete open-order read failed: "
+                    "symbol=%s error=%s",
+                    symbol,
+                    exc,
+                )
+                raw_orders = []
 
-                for raw_order in raw_orders:
-                    if self._raw_order_matches(
-                        raw_order,
-                        exchange_order_id=exchange_order_id,
-                        client_order_id=client_order_id,
-                        expected_symbol=symbol,
-                        expected_side=side,
-                        expected_reduce_only=reduce_only,
-                        expected_type=expected_type,
-                        expected_stop_price=stop_price,
-                    ):
-                        return True
+            for raw_order in raw_orders:
+                if self._raw_order_matches(
+                    raw_order,
+                    exchange_order_id=exchange_order_id,
+                    client_order_id=client_order_id,
+                    expected_symbol=symbol,
+                    expected_side=side,
+                    expected_reduce_only=reduce_only,
+                    expected_type=expected_type,
+                    expected_stop_price=stop_price,
+                ):
+                    return True
             if attempt_idx < len(retry_delays):
                 await asyncio.sleep(retry_delays[attempt_idx])
 
@@ -1454,19 +1464,152 @@ class ExchangeGateway:
 
     @staticmethod
     def _candidate_order_ids(raw_order: Dict[str, Any]) -> set[str]:
-        info = raw_order.get("info") or {}
-        candidate_ids = {
+        return ExchangeGateway._open_order_exchange_ids(
+            raw_order
+        ) | ExchangeGateway._open_order_client_ids(raw_order)
+
+    @staticmethod
+    def _open_order_exchange_ids(raw_order: Dict[str, Any]) -> set[str]:
+        info = raw_order.get("info") if isinstance(raw_order.get("info"), dict) else {}
+        values = {
             raw_order.get("id"),
+            raw_order.get("orderId"),
+            raw_order.get("exchange_order_id"),
+            info.get("orderId"),
+            info.get("algoId"),
+            info.get("triggerOrderId"),
+        }
+        return {str(value) for value in values if value is not None and str(value)}
+
+    @staticmethod
+    def _open_order_client_ids(raw_order: Dict[str, Any]) -> set[str]:
+        info = raw_order.get("info") if isinstance(raw_order.get("info"), dict) else {}
+        values = {
             raw_order.get("clientOrderId"),
             raw_order.get("clientOrderid"),
-            info.get("orderId"),
+            raw_order.get("client_order_id"),
             info.get("origClientOrderId"),
             info.get("clientOrderId"),
             info.get("clientOrderid"),
-            info.get("algoId"),
             info.get("clientAlgoId"),
         }
-        return {str(item) for item in candidate_ids if item is not None}
+        return {str(value) for value in values if value is not None and str(value)}
+
+    @classmethod
+    def _merge_open_order_views(
+        cls,
+        order_views: List[List[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        merged_orders: List[Dict[str, Any]] = []
+        exchange_id_indexes: Dict[str, int] = {}
+        client_id_indexes: Dict[str, int] = {}
+
+        for orders in order_views:
+            for raw_order in orders or []:
+                if not isinstance(raw_order, dict):
+                    raise ConnectionLostError(
+                        "Open-order view returned a non-structured order",
+                        "C-002",
+                    )
+                exchange_ids = cls._open_order_exchange_ids(raw_order)
+                client_ids = cls._open_order_client_ids(raw_order)
+                matching_indexes = {
+                    index
+                    for identity, index in exchange_id_indexes.items()
+                    if identity in exchange_ids
+                } | {
+                    index
+                    for identity, index in client_id_indexes.items()
+                    if identity in client_ids
+                }
+                if len(matching_indexes) > 1:
+                    raise ConnectionLostError(
+                        "Open-order views returned contradictory order identities",
+                        "C-002",
+                    )
+
+                if matching_indexes:
+                    index = next(iter(matching_indexes))
+                    existing = merged_orders[index]
+                    combined_exchange_ids = (
+                        cls._open_order_exchange_ids(existing) | exchange_ids
+                    )
+                    combined_client_ids = (
+                        cls._open_order_client_ids(existing) | client_ids
+                    )
+                    merged_orders[index] = cls._merge_open_order_payload(
+                        existing,
+                        raw_order,
+                    )
+                else:
+                    index = len(merged_orders)
+                    merged_orders.append(dict(raw_order))
+                    combined_exchange_ids = exchange_ids
+                    combined_client_ids = client_ids
+
+                cls._bind_open_order_identities(
+                    exchange_id_indexes,
+                    combined_exchange_ids,
+                    index,
+                )
+                cls._bind_open_order_identities(
+                    client_id_indexes,
+                    combined_client_ids,
+                    index,
+                )
+
+        return merged_orders
+
+    @staticmethod
+    def _bind_open_order_identities(
+        identity_indexes: Dict[str, int],
+        identities: set[str],
+        index: int,
+    ) -> None:
+        for identity in identities:
+            existing_index = identity_indexes.get(identity)
+            if existing_index is not None and existing_index != index:
+                raise ConnectionLostError(
+                    "Open-order views returned contradictory order identities",
+                    "C-002",
+                )
+            identity_indexes[identity] = index
+
+    @staticmethod
+    def _merge_open_order_payload(
+        existing: Dict[str, Any],
+        incoming: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        merged = dict(existing)
+        identity_keys = {
+            "clientOrderId",
+            "clientOrderid",
+            "client_order_id",
+            "symbol",
+        }
+        for key, value in incoming.items():
+            if key == "info":
+                existing_info = (
+                    dict(merged.get("info"))
+                    if isinstance(merged.get("info"), dict)
+                    else {}
+                )
+                incoming_info = value if isinstance(value, dict) else {}
+                existing_info.update(
+                    {
+                        info_key: info_value
+                        for info_key, info_value in incoming_info.items()
+                        if info_value is not None and info_value != ""
+                    }
+                )
+                merged["info"] = existing_info
+                continue
+            if value is None or value == "":
+                continue
+            if key in identity_keys and merged.get(key) not in {None, ""}:
+                continue
+            merged[key] = value
+        return merged
 
     @staticmethod
     def _raw_order_matches(
@@ -1668,31 +1811,15 @@ class ExchangeGateway:
         exchange_order_id: str,
         symbol: str,
     ) -> Optional[Dict[str, Any]]:
-        params_candidates = ({}, {"stop": True}, {"type": "STOP_MARKET"})
-        for params in params_candidates:
-            try:
-                raw_orders = await self.rest_exchange.fetch_open_orders(
-                    symbol,
-                    params=params,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "conditional fetch_order fallback fetch_open_orders miss: "
-                    "symbol=%s params=%s exchange_order_id=%s error=%s",
-                    symbol,
-                    params,
-                    exchange_order_id,
-                    exc,
-                )
-                continue
-            for raw_order in raw_orders:
-                if self._raw_order_matches(
-                    raw_order,
-                    exchange_order_id=exchange_order_id,
-                    client_order_id=None,
-                    expected_symbol=symbol,
-                ):
-                    return raw_order
+        raw_orders = await self.fetch_all_open_orders(symbol)
+        for raw_order in raw_orders:
+            if self._raw_order_matches(
+                raw_order,
+                exchange_order_id=exchange_order_id,
+                client_order_id=None,
+                expected_symbol=symbol,
+            ):
+                return raw_order
         return None
 
     def _order_placement_result_from_raw_order(
