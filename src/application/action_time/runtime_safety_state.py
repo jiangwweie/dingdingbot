@@ -37,6 +37,9 @@ from src.application.action_time.capital_safety_guard import (  # noqa: E402
 from src.application.action_time.budget_stop_risk import (  # noqa: E402
     budget_stop_risk_blockers,
 )
+from src.application.action_time.lifecycle_mutation_capability import (  # noqa: E402
+    lifecycle_mutation_capability_decision,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -120,6 +123,17 @@ def materialize_ticket_bound_runtime_safety_state(
         ticket=ticket,
         handoff=handoff,
         now_ms=now_ms,
+    )
+    capability = lifecycle_mutation_capability_decision(conn)
+    if capability["blockers"]:
+        snapshot["blockers"] = _dedupe(
+            list(snapshot.get("blockers") or []) + list(capability["blockers"])
+        )
+        snapshot["submit_allowed"] = False
+        snapshot["safety_state"] = "blocked_safety"
+    snapshot["lifecycle_mutation_capability_ready"] = capability["enabled"]
+    snapshot["lifecycle_mutation_capability_ref"] = (
+        capability.get("capability", {}).get("certification_ref")
     )
     _upsert_row(
         conn,
@@ -761,6 +775,13 @@ def _result(
         "side": snapshot.get("side"),
         "submit_allowed": snapshot.get("submit_allowed", False),
         "safety_state": snapshot.get("safety_state"),
+        "lifecycle_mutation_capability_ready": snapshot.get(
+            "lifecycle_mutation_capability_ready",
+            False,
+        ),
+        "lifecycle_mutation_capability_ref": snapshot.get(
+            "lifecycle_mutation_capability_ref"
+        ),
         "blockers": _dedupe(blockers),
         "next_action": next_action,
         "authority_boundary": AUTHORITY_BOUNDARY,

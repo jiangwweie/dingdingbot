@@ -51,6 +51,14 @@ RUNTIME_SUPERVISION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-106_create_runtime_supervision_and_allocation.py"
 )
+LIFECYCLE_TYPED_SCOPE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-11-113_create_exchange_account_mode_and_domain_holds.py"
+)
+LIFECYCLE_COMMAND_EXTENSION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -84,6 +92,14 @@ def pg_control_connection():
         RUNTIME_SUPERVISION_MIGRATION_PATH,
         "migration_106_pg_promotion_lane",
     )
+    lifecycle_typed_scope_migration = _load_module(
+        LIFECYCLE_TYPED_SCOPE_MIGRATION_PATH,
+        "migration_113_pg_promotion_lane",
+    )
+    lifecycle_command_extension_migration = _load_module(
+        LIFECYCLE_COMMAND_EXTENSION_MIGRATION_PATH,
+        "migration_114_pg_promotion_lane",
+    )
     seed = _load_module(SEED_PATH, "seed_pg_promotion_lane")
     engine = create_engine(
         "sqlite://",
@@ -111,6 +127,22 @@ def pg_control_connection():
                         runtime_supervision_migration.op = migration.op
                         try:
                             runtime_supervision_migration.upgrade()
+                            old_typed_scope_op = lifecycle_typed_scope_migration.op
+                            lifecycle_typed_scope_migration.op = migration.op
+                            try:
+                                lifecycle_typed_scope_migration.upgrade()
+                                old_command_extension_op = (
+                                    lifecycle_command_extension_migration.op
+                                )
+                                lifecycle_command_extension_migration.op = migration.op
+                                try:
+                                    lifecycle_command_extension_migration.upgrade()
+                                finally:
+                                    lifecycle_command_extension_migration.op = (
+                                        old_command_extension_op
+                                    )
+                            finally:
+                                lifecycle_typed_scope_migration.op = old_typed_scope_op
                         finally:
                             runtime_supervision_migration.op = (
                                 old_runtime_supervision_op
@@ -124,6 +156,14 @@ def pg_control_connection():
         finally:
             migration.op = old_op
         seed.seed_runtime_control_state_foundation(conn)
+        conn.execute(
+            text(
+                "UPDATE brc_runtime_capabilities_current SET status = 'enabled', "
+                "certification_ref = 'test:pg-promotion-lane', updated_at_ms = :now_ms "
+                "WHERE capability_id = 'ticket_lifecycle_durable_mutation'"
+            ),
+            {"now_ms": NOW_MS - 1},
+        )
     with engine.connect() as conn:
         yield conn
     engine.dispose()

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
 
 from scripts import materialize_action_time_ticket as ticket_materializer
@@ -854,6 +854,45 @@ def _insert_action_time_lane_graph(
         observed_at_ms=NOW_MS - 10_000,
         valid_until_ms=expires_at_ms,
     )
+    if inspect(conn).has_table("brc_exchange_account_modes_current"):
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_exchange_account_modes_current (
+                  account_mode_current_id, account_id, exchange_id,
+                  runtime_profile_id, position_mode, dual_side_position,
+                  position_mode_safe, status, fact_snapshot_id,
+                  source_kind, source_ref, observed_at_ms, valid_until_ms,
+                  updated_at_ms
+                ) VALUES (
+                  :current_id, 'owner-subaccount-runtime-v0', 'binance_usdm',
+                  :runtime_profile_id, 'one_way', false, true, 'current',
+                  :fact_snapshot_id, 'unit_test', 'unit:account-mode',
+                  :observed_at_ms, :valid_until_ms, :observed_at_ms
+                )
+                ON CONFLICT(account_id, exchange_id) DO UPDATE SET
+                  runtime_profile_id = excluded.runtime_profile_id,
+                  position_mode = excluded.position_mode,
+                  dual_side_position = excluded.dual_side_position,
+                  position_mode_safe = excluded.position_mode_safe,
+                  status = excluded.status,
+                  fact_snapshot_id = excluded.fact_snapshot_id,
+                  observed_at_ms = excluded.observed_at_ms,
+                  valid_until_ms = excluded.valid_until_ms,
+                  updated_at_ms = excluded.updated_at_ms
+                """
+            ),
+            {
+                "current_id": (
+                    "account_mode_current:owner-subaccount-runtime-v0:"
+                    "binance_usdm"
+                ),
+                "runtime_profile_id": row["runtime_profile_id"],
+                "fact_snapshot_id": account_mode_fact_id,
+                "observed_at_ms": NOW_MS - 3_000,
+                "valid_until_ms": expires_at_ms,
+            },
+        )
     _insert_fact(
         conn,
         fact_snapshot_id=action_time_fact_id,
@@ -884,7 +923,13 @@ def _insert_action_time_lane_graph(
         row=row,
         fact_surface="account_mode",
         source_ref="unit:account-mode",
-        fact_values={"account_mode": "one_way", "position_mode_safe": True},
+        fact_values={
+            "account_id": "owner-subaccount-runtime-v0",
+            "exchange_id": "binance_usdm",
+            "account_mode": "one_way",
+            "dual_side_position": False,
+            "position_mode_safe": True,
+        },
         observed_at_ms=NOW_MS - 3_000,
         valid_until_ms=expires_at_ms,
     )

@@ -600,6 +600,9 @@ def _command_state(conn, command_id: str) -> str:
 
 
 class _TimeoutGateway:
+    runtime_account_id = "owner-subaccount-runtime-v0"
+    runtime_exchange_id = "binance_usdm"
+
     def __init__(self) -> None:
         self.call_count = 0
 
@@ -609,6 +612,9 @@ class _TimeoutGateway:
 
 
 class _NoTransactionGateway:
+    runtime_account_id = "owner-subaccount-runtime-v0"
+    runtime_exchange_id = "binance_usdm"
+
     def __init__(self, engine) -> None:
         self.engine = engine
         self.saw_open_transaction = None
@@ -623,6 +629,9 @@ class _NoTransactionGateway:
 
 
 class _AuthoritativeRejectGateway:
+    runtime_account_id = "owner-subaccount-runtime-v0"
+    runtime_exchange_id = "binance_usdm"
+
     async def place_order(self, **_kwargs):
         return SimpleNamespace(
             is_success=False,
@@ -632,5 +641,8 @@ class _AuthoritativeRejectGateway:
 
 
 class _MissingExchangeIdGateway:
+    runtime_account_id = "owner-subaccount-runtime-v0"
+    runtime_exchange_id = "binance_usdm"
+
     async def place_order(self, **_kwargs):
         return SimpleNamespace(is_success=True, exchange_order_id=None)

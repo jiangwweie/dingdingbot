@@ -70,6 +70,8 @@ def test_collect_strategy_group_live_facts_readonly_uses_get_and_masks_values(tm
             )
         if "/fapi/v1/openOrders" in request.full_url:
             return _Response([{"symbol": "BTCUSDT", "orderId": 1}])
+        if "/fapi/v1/positionSide/dual" in request.full_url:
+            return _Response({"dualSidePosition": False})
         raise AssertionError(request.full_url)
 
     packet = collect_live_facts(
@@ -77,6 +79,8 @@ def test_collect_strategy_group_live_facts_readonly_uses_get_and_masks_values(tm
         max_notional_requirement_usdt="8",
         has_candidate_specific_protection_template=True,
         strategy_group_count=1,
+        account_id="owner-subaccount-runtime-v0",
+        exchange_id="binance_usdm",
         env_file=env_file,
         base_url="https://unit.test",
         urlopen=fake_urlopen,
@@ -104,6 +108,15 @@ def test_collect_strategy_group_live_facts_readonly_uses_get_and_masks_values(tm
     assert packet["protection"]["status"] == "ready_for_candidate_specific_plan"
     assert packet["next_attempt_gate"]["status"] == "blocked"
     assert packet["next_attempt_gate"]["reason"] == "active_position_present"
+    assert packet["account_mode"]["account_id"] == "owner-subaccount-runtime-v0"
+    assert packet["account_mode"]["exchange_id"] == "binance_usdm"
+    assert packet["account_mode"]["dual_side_position"] is False
+    assert packet["account_mode"]["account_mode"] == "one_way"
+    assert packet["account_mode"]["position_mode_safe"] is True
+    assert packet["account_mode"]["observed_at"]
+    assert packet["account_mode"]["source"].endswith(
+        "/fapi/v1/positionSide/dual"
+    )
     assert packet["safety_invariants"]["post_delete_put_used"] is False
     assert packet["safety_invariants"]["secrets_printed"] is False
 
@@ -144,6 +157,8 @@ def test_collect_strategy_group_live_facts_derives_candidate_prerequisites_when_
             )
         if "/fapi/v1/openOrders" in request.full_url:
             return _Response([])
+        if "/fapi/v1/positionSide/dual" in request.full_url:
+            return _Response({"dualSidePosition": False})
         raise AssertionError(request.full_url)
 
     packet = collect_live_facts(
@@ -151,6 +166,8 @@ def test_collect_strategy_group_live_facts_derives_candidate_prerequisites_when_
         max_notional_requirement_usdt="8",
         has_candidate_specific_protection_template=True,
         strategy_group_count=1,
+        account_id="owner-subaccount-runtime-v0",
+        exchange_id="binance_usdm",
         env_file=env_file,
         base_url="https://unit.test",
         urlopen=fake_urlopen,
@@ -162,3 +179,57 @@ def test_collect_strategy_group_live_facts_derives_candidate_prerequisites_when_
     assert packet["protection"]["status"] == "ready_for_candidate_specific_plan"
     assert packet["next_attempt_gate"]["status"] == "ready_for_strategy_signal"
     assert "9.00" not in json.dumps(packet)
+
+
+def test_collect_strategy_group_live_facts_rejects_non_boolean_position_mode(
+    tmp_path,
+):
+    env_file = tmp_path / ".env.local"
+    env_file.write_text(
+        "EXCHANGE_API_KEY=test-key\nEXCHANGE_API_SECRET=test-secret\n",
+        encoding="utf-8",
+    )
+
+    def fake_urlopen(request, *, timeout):
+        if request.full_url.endswith("/fapi/v1/exchangeInfo"):
+            return _Response(
+                {
+                    "symbols": [
+                        {"symbol": "BTCUSDT", "status": "TRADING", "filters": []}
+                    ]
+                }
+            )
+        if "/fapi/v2/account" in request.full_url:
+            return _Response(
+                {
+                    "canTrade": True,
+                    "availableBalance": "9.00",
+                    "totalWalletBalance": "9.00",
+                    "assets": [],
+                }
+            )
+        if "/fapi/v2/positionRisk" in request.full_url:
+            return _Response([{"symbol": "BTCUSDT", "positionAmt": "0"}])
+        if "/fapi/v1/openOrders" in request.full_url:
+            return _Response([])
+        if "/fapi/v1/positionSide/dual" in request.full_url:
+            return _Response({"dualSidePosition": "false"})
+        raise AssertionError(request.full_url)
+
+    packet = collect_live_facts(
+        symbols=["BTCUSDT"],
+        max_notional_requirement_usdt="8",
+        has_candidate_specific_protection_template=True,
+        strategy_group_count=1,
+        account_id="owner-subaccount-runtime-v0",
+        exchange_id="binance_usdm",
+        env_file=env_file,
+        base_url="https://unit.test",
+        urlopen=fake_urlopen,
+    )
+
+    assert packet["status"] == "partial"
+    assert packet["account_mode"]["status"] == "malformed"
+    assert packet["account_mode"]["dual_side_position"] is None
+    assert packet["account_mode"]["account_mode"] is None
+    assert packet["account_mode"]["position_mode_safe"] is False

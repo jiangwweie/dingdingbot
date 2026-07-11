@@ -48,7 +48,11 @@ L2_L7_CHAIN_TABLES = (
     "brc_ticket_bound_exit_protection_orders",
     "brc_ticket_bound_lifecycle_events",
     "brc_ticket_bound_runner_mutation_commands",
+    "brc_ticket_bound_exchange_commands",
+    "brc_ticket_bound_scope_freezes",
+    "brc_ticket_bound_reconciliation_ticks",
     "brc_ticket_bound_post_submit_closures",
+    "brc_live_outcome_ledger",
     "brc_goal_status_current",
     "brc_server_monitor_runs",
 )
@@ -90,6 +94,14 @@ COMMANDS = (
     ("backend_status", ("systemctl", "is-active", "brc-owner-console-backend.service")),
     ("watcher_timer_status", ("systemctl", "is-active", "brc-runtime-signal-watcher.timer")),
     ("monitor_timer_status", ("systemctl", "is-active", "brc-runtime-monitor.timer")),
+    (
+        "lifecycle_timer_status",
+        ("systemctl", "is-active", "brc-ticket-lifecycle-maintenance.timer"),
+    ),
+    (
+        "lifecycle_service_enabled",
+        ("systemctl", "is-enabled", "brc-ticket-lifecycle-maintenance.service"),
+    ),
     ("pg_listener", ("ss", "-ltnp")),
 )
 
@@ -136,7 +148,9 @@ def build_payload(*, execute_local: bool) -> dict[str, Any]:
     results.append(_pg_l2_l7_chain_health_result(execute_local=execute_local))
     statuses = {row["status"] for row in results}
     status = "ok"
-    if "warn" in statuses or "missing_binary" in statuses:
+    if "critical" in statuses:
+        status = "critical"
+    elif "warn" in statuses or "missing_binary" in statuses:
         status = "warn"
     return {
         "schema": SCHEMA,
@@ -221,7 +235,7 @@ def _pg_l2_l7_chain_health_result(*, execute_local: bool) -> dict[str, Any]:
     summary = summarize_l2_l7_chain_snapshot(snapshot)
     return {
         **base,
-        "status": "ok" if not summary["issues"] else "warn",
+        "status": summary["status"],
         "stdout_tail": json.dumps(summary, ensure_ascii=False, sort_keys=True)[-4000:],
         "stderr_tail": "",
     }
@@ -783,6 +797,58 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             {"attention_statuses": LIFECYCLE_ATTENTION_STATUSES},
         ).mappings()
     )
+    exchange_command_critical_rows = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT exchange_command_id, ticket_id, command_kind,
+                       command_source, command_state, first_blocker,
+                       netting_domain_key, claim_owner, claim_expires_at_ms,
+                       updated_at_ms
+                FROM brc_ticket_bound_exchange_commands
+                WHERE command_state IN ('outcome_unknown', 'hard_stopped')
+                   OR (command_state = 'dispatching'
+                       AND claim_expires_at_ms IS NOT NULL
+                       AND claim_expires_at_ms <= :now_ms)
+                ORDER BY updated_at_ms DESC
+                LIMIT 20
+                """
+            ),
+            {"now_ms": now_ms},
+        ).mappings()
+    )
+    active_domain_holds = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT scope_freeze_id, ticket_id, source_ticket_id,
+                       source_kind, source_id, netting_domain_key,
+                       first_blocker, blockers, updated_at_ms
+                FROM brc_ticket_bound_scope_freezes
+                WHERE status = 'active'
+                ORDER BY updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
+    lifecycle_closed_without_live_outcome = list(
+        conn.execute(
+            sa.text(
+                """
+                SELECT l.lifecycle_run_id, l.ticket_id,
+                       l.protected_submit_attempt_id, l.updated_at_ms
+                FROM brc_ticket_bound_order_lifecycle_runs AS l
+                LEFT JOIN brc_live_outcome_ledger AS o
+                  ON o.ticket_id = l.ticket_id
+                WHERE l.status = 'lifecycle_closed'
+                  AND o.live_outcome_id IS NULL
+                ORDER BY l.updated_at_ms DESC
+                LIMIT 20
+                """
+            )
+        ).mappings()
+    )
     goal = conn.execute(
         sa.text(
             """
@@ -884,6 +950,13 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             dict(row) for row in runner_mutation_commands_without_runner_proof
         ],
         "lifecycle_attention_rows": [dict(row) for row in lifecycle_attention_rows],
+        "exchange_command_critical_rows": [
+            dict(row) for row in exchange_command_critical_rows
+        ],
+        "active_domain_holds": [dict(row) for row in active_domain_holds],
+        "lifecycle_closed_without_live_outcome": [
+            dict(row) for row in lifecycle_closed_without_live_outcome
+        ],
         "goal": dict(goal or {}),
         "monitor": dict(monitor or {}),
         "unadvanced_fresh_signals": [dict(row) for row in unadvanced_fresh_signals],
@@ -923,6 +996,12 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         issues.append("runner_mutation_command_without_runner_proof")
     if snapshot.get("lifecycle_attention_rows"):
         issues.append("ticket_bound_lifecycle_attention_state")
+    if snapshot.get("exchange_command_critical_rows"):
+        issues.append("ticket_bound_exchange_command_critical_state")
+    if snapshot.get("active_domain_holds"):
+        issues.append("active_netting_domain_hold")
+    if snapshot.get("lifecycle_closed_without_live_outcome"):
+        issues.append("lifecycle_closed_without_live_outcome")
 
     goal = snapshot.get("goal") or {}
     blockers = goal.get("blockers") or []
@@ -952,9 +1031,21 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         issues=issues,
     )
 
+    critical_issue_names = {
+        "submitted_attempt_without_exit_protection_set",
+        "closed_exit_protection_set_with_live_orders",
+        "ticket_bound_exchange_command_critical_state",
+        "active_netting_domain_hold",
+        "lifecycle_closed_without_live_outcome",
+    }
+    status = (
+        "critical"
+        if any(issue in critical_issue_names for issue in issues)
+        else ("warn" if issues else "ok")
+    )
     return {
         "schema": "brc.ops.l2_l7_chain_health_summary.v1",
-        "status": "ok" if not issues else "warn",
+        "status": status,
         "issues": issues,
         "now_ms": snapshot.get("now_ms"),
         "since_ms": snapshot.get("since_ms"),
@@ -1008,6 +1099,15 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
                 for row in snapshot.get("lifecycle_attention_rows") or []
                 if row.get("status")
             }
+        ),
+        "exchange_command_critical_count": len(
+            snapshot.get("exchange_command_critical_rows") or []
+        ),
+        "active_netting_domain_hold_count": len(
+            snapshot.get("active_domain_holds") or []
+        ),
+        "lifecycle_closed_without_live_outcome_count": len(
+            snapshot.get("lifecycle_closed_without_live_outcome") or []
         ),
         "authority_boundary": {
             "readonly_check": True,

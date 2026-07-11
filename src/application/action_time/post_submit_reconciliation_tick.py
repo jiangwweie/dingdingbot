@@ -11,8 +11,15 @@ from typing import Any
 
 import sqlalchemy as sa
 
-from src.application.action_time.capital_safety_freeze_projection import (
-    resolve_current_scope_freeze,
+from src.application.action_time.exchange_order_ownership import (
+    classify_exchange_order_ownership,
+)
+from src.application.action_time.exchange_scope import (
+    resolve_ticket_bound_exchange_scope,
+)
+from src.application.action_time.netting_domain_hold import (
+    resolve_netting_domain_hold_source,
+    upsert_netting_domain_hold,
 )
 
 
@@ -141,6 +148,20 @@ def materialize_ticket_bound_reconciliation_tick(
             blockers=[],
             next_action="continue_submit_failure_handling",
         )
+    scope_resolution = resolve_ticket_bound_exchange_scope(
+        conn,
+        ticket_id=str(attempt.get("ticket_id") or ""),
+        now_ms=now_ms,
+    )
+    if scope_resolution.status != "resolved" or scope_resolution.scope is None:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            tick={},
+            blockers=list(scope_resolution.blockers),
+            next_action="repair_ticket_bound_exchange_scope",
+        )
+    exchange_scope = scope_resolution.scope
 
     existing = _existing_tick(conn, attempt_id, tick_kind)
     if tick_kind == FIRST_TICK_KIND and existing and not _pending_tick_due(existing, now_ms=now_ms):
@@ -185,17 +206,39 @@ def materialize_ticket_bound_reconciliation_tick(
     next_action = "continue_ticket_bound_lifecycle_monitoring"
     visibility_deadline_ms = int(attempt.get("updated_at_ms") or now_ms) + VISIBILITY_GRACE_MS
 
-    unknown_exchange_order = _unknown_exchange_reduce_only_order(open_orders, submitted_orders)
-    if unknown_exchange_order:
-        blockers.append("exchange_only_unknown_order")
+    ownership = classify_exchange_order_ownership(
+        conn,
+        current_scope=exchange_scope,
+        open_orders=open_orders,
+        now_ms=now_ms,
+    )
+    ownership_blockers = [
+        str(item.blocker)
+        for item in ownership
+        if item.blocks_current_domain and item.blocker
+    ]
+    if ownership_blockers:
+        blockers.extend(ownership_blockers)
         status = "hard_stopped"
         next_action = "freeze_new_submits_for_scope"
-        _upsert_scope_freeze(
+        upsert_netting_domain_hold(
             conn,
-            attempt=attempt,
+            account_id=exchange_scope.account_id,
+            runtime_profile_id=exchange_scope.runtime_profile_id,
+            exchange_id=exchange_scope.exchange_id,
+            exchange_instrument_id=exchange_scope.exchange_instrument_id,
+            position_mode=exchange_scope.position_mode,
+            position_bucket=exchange_scope.position_bucket,
+            netting_domain_key=exchange_scope.netting_domain_key,
+            source_ticket_id=exchange_scope.ticket_id,
+            strategy_group_id=exchange_scope.strategy_group_id,
+            symbol=exchange_scope.canonical_symbol,
+            side=exchange_scope.side,
             source_kind=f"{tick_kind}_reconciliation_tick",
             source_id=_tick_id(attempt_id, tick_kind),
             blockers=blockers,
+            next_action="reconcile_global_exchange_order_ownership",
+            authority_boundary=AUTHORITY_BOUNDARY,
             now_ms=now_ms,
         )
     elif position_state == "open" and sl_state == "missing":
@@ -240,13 +283,12 @@ def materialize_ticket_bound_reconciliation_tick(
             now_ms=now_ms,
         )
     elif status == "matched":
-        resolve_current_scope_freeze(
+        resolve_netting_domain_hold_source(
             conn,
-            strategy_group_id=attempt.get("strategy_group_id"),
-            symbol=attempt.get("symbol"),
-            side=attempt.get("side"),
+            netting_domain_key=exchange_scope.netting_domain_key,
             source_kind=f"{tick_kind}_reconciliation_tick",
             source_id=_tick_id(attempt_id, tick_kind),
+            resolution_source="matched_post_submit_reconciliation_tick",
             now_ms=now_ms,
         )
 

@@ -100,7 +100,11 @@ the existing PG model pattern in `src/infrastructure/pg_models.py`.
 | `brc_execution_policies` | Order type, time-in-force, slippage, and execution intent policy | P0 |
 | `brc_state_transition_events` | Append-only state transition audit events | P1 |
 | `brc_runtime_safety_state_snapshots` | Runtime Safety State snapshots | P1 |
+| `brc_runtime_capabilities_current` | PG-current lifecycle capability gates | P0 |
+| `brc_exchange_account_modes_current` | Exact account + exchange position-mode truth | P0 |
 | `brc_ticket_bound_protected_submit_attempts` | Ticket-bound protected submit attempts and result identity | P0 |
+| `brc_ticket_bound_exchange_commands` | One durable authority for protected-submit and lifecycle exchange commands | P0 |
+| `brc_ticket_bound_scope_freezes` | Source-specific NettingDomain holds and scope freezes | P0 |
 | `brc_ticket_bound_post_submit_closures` | Ticket-bound protection/reconciliation/settlement/review closure state | P0 |
 | `brc_projection_runs` | Projection lineage and input watermark records | P0 |
 | `brc_current_projection_ownership` | Single-owner registry for current projections | P0 |
@@ -1397,6 +1401,8 @@ model and must fail closed when required facts are missing or stale.
 | `active_position_conflict` | `Boolean` | Position/open-order conflict |
 | `facts_fresh` | `Boolean` | All required trusted facts are within freshness window |
 | `trusted_fact_refs_complete` | `Boolean` | Required trusted fact refs exist and match expected surfaces |
+| `lifecycle_mutation_capability_ready` | `Boolean` | True only from enabled PG current durable lifecycle capability |
+| `lifecycle_mutation_capability_ref` | `String(256)` nullable | Certification lineage for the current capability decision |
 | `blockers` | `JSONB` | Blockers |
 | `trusted_fact_refs` | `JSONB` | Fact snapshot refs |
 | `observed_at_ms` | `BIGINT` | Observation time |
@@ -1417,6 +1423,51 @@ Writer: Runtime Safety State builder.
 
 Readers: Daily Table, Candidate Pool, FinalGate preflight, runtime status
 projectors.
+
+### `brc_runtime_capabilities_current`
+
+Purpose: one PG-current capability gate for durable ticket lifecycle mutation.
+Migration `113` creates `ticket_lifecycle_durable_mutation` as `disabled`;
+phase-two deployment may enable it only after schema, zero-active-risk,
+file-I/O, timer, and no-active lifecycle checks pass. This row does not grant
+FinalGate, Operation Layer, profile, sizing, transfer, or withdrawal authority.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `capability_id` | `String(128)` PK | `ticket_lifecycle_durable_mutation` |
+| `status` | `String(32)` | `disabled` or `enabled` |
+| `certification_ref` | `String(256)` | Commit/deploy certification lineage |
+| `updated_at_ms` | `BIGINT` | Last PG-current transition |
+
+### `brc_exchange_account_modes_current`
+
+Purpose: exact signed read-only position-mode truth keyed by
+`account_id + exchange_id`. A global, inferred, stale, or foreign-account mode
+cannot qualify ENTRY or lifecycle mutation.
+
+| Column group | Rule |
+| --- | --- |
+| Identity | `account_id`, `exchange_id`, optional `runtime_profile_id` |
+| Mode | `position_mode`, `dual_side_position`, `position_mode_safe` |
+| Lineage | `fact_snapshot_id`, `source_kind`, `source_ref` |
+| Time | `observed_at_ms`, `valid_until_ms`, `updated_at_ms` |
+
+### `brc_ticket_bound_exchange_commands`
+
+Purpose: one durable command authority shared by protected submit,
+protection recovery, runner mutation, and orphan cleanup. Migration `114`
+adds typed venue/netting identity, command source/kind, claim lease, execution
+attempt, reconciliation, and full exchange-result fields. Command intent is
+committed before network I/O; result is committed afterward. Timeout after a
+call is `outcome_unknown` and must reconcile by deterministic identity before
+any retry.
+
+### `brc_ticket_bound_scope_freezes`
+
+Purpose: source-specific holds over a typed `NettingDomainKey`. Multiple hold
+sources may coexist; resolving one source cannot clear another. One-way scope
+is account + exchange + instrument + `NET`; hedge scope additionally binds the
+proven LONG/SHORT bucket.
 
 ### `brc_ticket_bound_protected_submit_attempts`
 

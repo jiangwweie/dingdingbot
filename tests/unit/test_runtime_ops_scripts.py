@@ -519,7 +519,7 @@ def test_tokyo_ops_l2_l7_summary_flags_closed_protection_with_live_orders():
         }
     )
 
-    assert summary["status"] == "warn"
+    assert summary["status"] == "critical"
     assert "closed_exit_protection_set_with_live_orders" in summary["issues"]
     assert summary["closed_protection_set_with_live_order_count"] == 1
 

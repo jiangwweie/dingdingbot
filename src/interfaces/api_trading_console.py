@@ -2621,6 +2621,10 @@ async def _execute_one_ticket_bound_exchange_command(
     from src.application.action_time.exchange_command import (
         mark_exchange_command_dispatching,
         record_exchange_command_outcome,
+        resize_prepared_protection_command_to_entry_fill,
+    )
+    from src.application.action_time.lifecycle_mutation_capability import (
+        lifecycle_mutation_capability_decision,
     )
     from src.domain.exceptions import (
         ConnectionLostError,
@@ -2653,6 +2657,49 @@ async def _execute_one_ticket_bound_exchange_command(
             "order_lifecycle_called": False,
         }
     command = dict(command_row)
+    with engine.begin() as conn:
+        capability = lifecycle_mutation_capability_decision(conn)
+        if capability["blockers"]:
+            return {
+                "status": "lifecycle_mutation_capability_not_ready",
+                "blockers": list(capability["blockers"]),
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            }
+        try:
+            command = resize_prepared_protection_command_to_entry_fill(
+                conn,
+                exchange_command_id=exchange_command_id,
+                now_ms=now_ms,
+            )
+        except ValueError as exc:
+            return {
+                "status": "protection_quantity_binding_blocked",
+                "blockers": [str(exc)],
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            }
+    gateway_account_id = str(
+        getattr(gateway, "runtime_account_id", "") or ""
+    ).strip()
+    gateway_exchange_id = str(
+        getattr(gateway, "runtime_exchange_id", "") or ""
+    ).strip()
+    identity_blockers: list[str] = []
+    if gateway_account_id != str(command.get("account_id") or ""):
+        identity_blockers.append("exchange_command_gateway_account_mismatch")
+    if gateway_exchange_id != str(command.get("exchange_id") or ""):
+        identity_blockers.append("exchange_command_gateway_exchange_mismatch")
+    if identity_blockers:
+        return {
+            "status": "exchange_command_identity_blocked",
+            "blockers": identity_blockers,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+        }
     try:
         direction = Direction.LONG if command["side"] == "long" else Direction.SHORT
         amount = Decimal(str(command["amount"]))
@@ -2714,6 +2761,7 @@ async def _execute_one_ticket_bound_exchange_command(
             price=_optional_decimal(command.get("price")),
             trigger_price=_optional_decimal(command.get("stop_price")),
             reduce_only=command.get("reduce_only") is True,
+            position_side=command.get("position_side"),
             client_order_id=str(command["client_order_id"]),
         )
     except (InvalidOrderError, InsufficientMarginError) as exc:
@@ -2794,7 +2842,15 @@ async def _execute_one_ticket_bound_exchange_command(
             exchange_command_id=exchange_command_id,
             target_state=ExchangeCommandState.CONFIRMED_SUBMITTED,
             outcome_class=ExchangeCommandOutcomeClass.EXCHANGE_ACCEPTED,
-            exchange_result={"exchange_order_id": exchange_order_id},
+            exchange_result={
+                "exchange_order_id": exchange_order_id,
+                "filled_qty": str(getattr(placement, "filled_qty", "") or ""),
+                "average_exec_price": str(
+                    getattr(placement, "average_exec_price", "") or ""
+                ),
+                "fee": getattr(placement, "fee", None),
+                "fill_time_ms": getattr(placement, "fill_time_ms", None),
+            },
             now_ms=now_ms,
         )
     try:
@@ -2911,6 +2967,8 @@ def _exchange_command_execution_result(
             "average_exec_price": str(
                 getattr(placement, "average_exec_price", "") or ""
             ),
+            "fee": getattr(placement, "fee", None),
+            "fill_time_ms": getattr(placement, "fill_time_ms", None),
         }
     return {
         "status": status,
@@ -6586,6 +6644,14 @@ def _runtime_exchange_submit_gateway_env_blockers() -> list[str]:
         actual = os.environ.get(key, "").strip().lower()
         if actual != expected_value:
             blockers.append(f"{key.lower()}_not_{expected_value}")
+    account_id = os.environ.get("BRC_RUNTIME_EXCHANGE_ACCOUNT_ID", "").strip()
+    exchange_id = os.environ.get("BRC_RUNTIME_EXCHANGE_ID", "").strip()
+    if not account_id:
+        blockers.append("brc_runtime_exchange_account_id_missing")
+    if not exchange_id:
+        blockers.append("brc_runtime_exchange_id_missing")
+    elif exchange_id != "binance_usdm":
+        blockers.append(f"brc_runtime_exchange_id_unsupported:{exchange_id}")
     return blockers
 
 
@@ -6596,11 +6662,24 @@ def _runtime_exchange_submit_gateway_status(gateway: Any) -> dict[str, Any]:
         for name in required
         if not callable(getattr(gateway, name, None))
     ]
+    account_id = os.environ.get("BRC_RUNTIME_EXCHANGE_ACCOUNT_ID", "").strip()
+    exchange_id = os.environ.get("BRC_RUNTIME_EXCHANGE_ID", "").strip()
+    if not account_id:
+        missing.append("brc_runtime_exchange_account_id_missing")
+    if not exchange_id:
+        missing.append("brc_runtime_exchange_id_missing")
+    elif exchange_id != "binance_usdm":
+        missing.append(f"brc_runtime_exchange_id_unsupported:{exchange_id}")
+    if not missing:
+        setattr(gateway, "runtime_account_id", account_id)
+        setattr(gateway, "runtime_exchange_id", exchange_id)
     return {
         "status": "ready" if not missing else "blocked_methods_missing",
         "gateway": gateway if not missing else None,
         "blockers": missing,
         "gateway_type": type(gateway).__name__,
+        "account_id": account_id,
+        "exchange_id": exchange_id,
     }
 
 

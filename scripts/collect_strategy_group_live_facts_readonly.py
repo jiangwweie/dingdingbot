@@ -8,6 +8,7 @@ submits, cancels, replaces, or transfers anything and never prints API secrets.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
@@ -24,11 +25,14 @@ import urllib.request
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASE_URL = "https://fapi.binance.com"
+ACCOUNT_MODE_ENDPOINT = "/fapi/v1/positionSide/dual"
+ACCOUNT_MODE_SOURCE = f"binance_usdm_signed_get:{ACCOUNT_MODE_ENDPOINT}"
 READ_ONLY_ENDPOINTS = {
     "exchange_info": ("GET", "/fapi/v1/exchangeInfo", False),
     "account": ("GET", "/fapi/v2/account", True),
     "position_risk": ("GET", "/fapi/v2/positionRisk", True),
     "open_orders": ("GET", "/fapi/v1/openOrders", True),
+    "account_mode": ("GET", ACCOUNT_MODE_ENDPOINT, True),
 }
 UrlOpen = Callable[..., Any]
 
@@ -96,7 +100,10 @@ def _request_json(
         raise RuntimeError(f"http_{exc.code}:{body[:160]}") from exc
     if not isinstance(payload, (dict, list)):
         raise RuntimeError("unexpected_json_root")
-    return {"payload": payload}
+    return {
+        "payload": payload,
+        "observed_at_ms": int(time.time() * 1000),
+    }
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -193,6 +200,72 @@ def _account_summary(account: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _account_mode_summary(
+    account_mode: dict[str, Any],
+    *,
+    account_id: str | None,
+    exchange_id: str | None,
+    runtime_profile_id: str | None = None,
+    collected_at_ms: int | None = None,
+) -> dict[str, Any]:
+    """Normalize Binance position mode without coercing unknown values.
+
+    Binance returns a JSON boolean.  Strings, numbers, missing fields, and
+    missing PG identity remain unsafe; none of them may silently become
+    one-way mode.
+    """
+
+    payload = account_mode.get("payload")
+    observed_at_ms = account_mode.get("observed_at_ms")
+    if not isinstance(observed_at_ms, int) or isinstance(observed_at_ms, bool):
+        observed_at_ms = collected_at_ms if isinstance(payload, dict) else None
+    observed_at = _ms_to_utc_iso(observed_at_ms)
+    normalized_account_id = str(account_id or "").strip()
+    normalized_exchange_id = str(exchange_id or "").strip()
+    normalized_profile_id = str(runtime_profile_id or "").strip()
+    result = {
+        "status": "missing",
+        "account_id": normalized_account_id or None,
+        "exchange_id": normalized_exchange_id or None,
+        "runtime_profile_id": normalized_profile_id or None,
+        "dual_side_position": None,
+        "account_mode": None,
+        "position_mode_safe": False,
+        "observed_at": observed_at,
+        "source": ACCOUNT_MODE_SOURCE,
+    }
+    if not isinstance(payload, dict):
+        result["reason"] = "position_mode_response_missing"
+        return result
+    dual_side_position = payload.get("dualSidePosition")
+    if type(dual_side_position) is not bool:
+        result["status"] = "malformed"
+        result["reason"] = "dual_side_position_must_be_boolean"
+        return result
+    if not normalized_account_id or not normalized_exchange_id:
+        result["status"] = "missing_identity"
+        result["reason"] = "account_or_exchange_identity_missing"
+        return result
+    result.update(
+        {
+            "status": "fresh",
+            "dual_side_position": dual_side_position,
+            "account_mode": "hedge" if dual_side_position else "one_way",
+            "position_mode_safe": observed_at is not None,
+        }
+    )
+    if observed_at is None:
+        result["status"] = "missing"
+        result["reason"] = "position_mode_observed_at_missing"
+    return result
+
+
+def _ms_to_utc_iso(value: Any) -> str | None:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        return None
+    return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+
+
 def _budget_state(
     *,
     account_payload: dict[str, Any],
@@ -277,6 +350,9 @@ def collect_live_facts(
     max_notional_requirement_usdt: str | None = None,
     has_candidate_specific_protection_template: bool = False,
     strategy_group_count: int | None = None,
+    account_id: str | None = None,
+    exchange_id: str | None = "binance_usdm",
+    runtime_profile_id: str | None = None,
     env_file: Path | None,
     base_url: str = DEFAULT_BASE_URL,
     timeout_seconds: float = 12,
@@ -287,12 +363,16 @@ def collect_live_facts(
         "strategy_group_count": strategy_group_count,
         "max_notional_requirement_usdt": max_notional_requirement_usdt,
         "has_candidate_specific_protection_template": has_candidate_specific_protection_template,
+        "account_id": str(account_id or "").strip() or None,
+        "exchange_id": str(exchange_id or "").strip() or None,
+        "runtime_profile_id": str(runtime_profile_id or "").strip() or None,
     }
     symbols = list(scope["symbols"])
     api_key = _env_value(("EXCHANGE_API_KEY", "BINANCE_API_KEY", "binance_exchange_key"), env_file=env_file)
     api_secret = _env_value(("EXCHANGE_API_SECRET", "BINANCE_SECRET_KEY", "binance_exchange_secret"), env_file=env_file)
     payloads: dict[str, dict[str, Any]] = {}
     errors: dict[str, str] = {}
+    collected_at_ms = int(time.time() * 1000)
     for name, (_method, path, signed) in READ_ONLY_ENDPOINTS.items():
         try:
             payloads[name] = _request_json(
@@ -311,6 +391,13 @@ def collect_live_facts(
     position = _position_summary(payloads["position_risk"], symbols)
     open_orders = _open_order_summary(payloads["open_orders"], symbols)
     account = _account_summary(payloads["account"])
+    account_mode = _account_mode_summary(
+        payloads["account_mode"],
+        account_id=scope["account_id"],
+        exchange_id=scope["exchange_id"],
+        runtime_profile_id=scope["runtime_profile_id"],
+        collected_at_ms=collected_at_ms,
+    )
     budget = _budget_state(
         account_payload=payloads["account"],
         handoff_summary=scope,
@@ -322,12 +409,17 @@ def collect_live_facts(
     )
     return {
         "scope": "strategy_group_live_facts_input",
-        "status": "ready" if not errors else "partial",
+        "status": (
+            "ready"
+            if not errors and account_mode.get("position_mode_safe") is True
+            else "partial"
+        ),
         "source": "explicit_scope_binance_usdm_futures_readonly_get_endpoints",
         "source_mode": "explicit_runtime_scope",
         "supported_symbol_count": len(symbols),
         "exchange_rules": exchange_rules,
         "account": account,
+        "account_mode": account_mode,
         "active_position": position,
         "open_orders": open_orders,
         "protection": protection,
@@ -361,6 +453,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
     )
     parser.add_argument("--strategy-group-count", type=int)
+    parser.add_argument("--account-id")
+    parser.add_argument("--exchange-id", default="binance_usdm")
+    parser.add_argument("--runtime-profile-id")
     parser.add_argument("--env-file", default=".env.local")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     return parser.parse_args(argv)
@@ -379,6 +474,9 @@ def main(argv: list[str] | None = None) -> int:
             args.has_candidate_specific_protection_template
         ),
         strategy_group_count=args.strategy_group_count,
+        account_id=args.account_id,
+        exchange_id=args.exchange_id,
+        runtime_profile_id=args.runtime_profile_id,
         env_file=Path(args.env_file).expanduser() if args.env_file else None,
         base_url=args.base_url,
     )

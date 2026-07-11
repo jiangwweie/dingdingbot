@@ -81,6 +81,44 @@ def test_unknown_exchange_command_freezes_exact_scope_only():
     ) == []
 
 
+def test_typed_one_way_domain_hold_blocks_other_strategy_and_direction():
+    hold = {
+        "status": "active",
+        "account_id": "account-1",
+        "exchange_instrument_id": "binance_usdm:ETH/USDT:USDT",
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "position_mode": "one_way",
+        "position_bucket": "BOTH",
+        "netting_domain_key": (
+            "account-1|binance_usdm:ETH/USDT:USDT|one_way|BOTH"
+        ),
+        "first_blocker": "exchange_command_outcome_unknown",
+        "blockers": ["exchange_command_outcome_unknown"],
+        "source_id": "command-1",
+        "updated_at_ms": NOW_MS,
+    }
+    control_state = {"ticket_bound_scope_freezes": [hold]}
+
+    assert current_scope_blockers(
+        control_state,
+        account_id="account-1",
+        strategy_group_id="MPG-001",
+        symbol="ETHUSDT",
+        exchange_instrument_id="binance_usdm:ETH/USDT:USDT",
+        side="short",
+    ) == ["scope_frozen_for_exchange_unknown_risk"]
+    assert current_scope_blockers(
+        control_state,
+        account_id="account-2",
+        strategy_group_id="MPG-001",
+        symbol="ETHUSDT",
+        exchange_instrument_id="binance_usdm:ETH/USDT:USDT",
+        side="short",
+    ) == []
+
+
 def test_scope_freeze_blocks_action_time_ticket(pg_control_connection):
     _insert_action_time_lane_graph(pg_control_connection)
     _insert_scope_freeze(pg_control_connection, first_blocker="protection_missing")

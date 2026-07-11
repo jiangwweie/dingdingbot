@@ -17,6 +17,8 @@ import sqlalchemy as sa
 PRETRADE_PUBLIC_FACT_SURFACE = "pretrade_public"
 PUBLIC_FACT_VALID_FOR_MS = 300_000
 ACCOUNT_SAFE_FACT_VALID_FOR_MS = 60_000
+ACCOUNT_MODE_SOURCE_SUFFIX = "/fapi/v1/positionSide/dual"
+ACCOUNT_MODE_MAX_FUTURE_SKEW_MS = 5_000
 
 
 def write_pretrade_public_fact_snapshots(
@@ -192,9 +194,8 @@ def write_account_safe_fact_snapshots(
     generated_at_ms = _iso_to_ms(str(artifact.get("generated_at_utc") or "")) or _now_ms()
     checks = _json_dict(artifact.get("checks"))
     facts = _json_dict(artifact.get("facts"))
-    safe_ready = checks.get("account_safe_facts_ready") is True
-    blocker_class = None if safe_ready else "hard_safety_stop"
-    failed_facts = _account_safe_failed_facts(artifact)
+    account_mode = _json_dict(artifact.get("account_mode"))
+    declared_safe_ready = checks.get("account_safe_facts_ready") is True
     account_safe_values = {
         **checks,
         **facts,
@@ -209,33 +210,92 @@ def write_account_safe_fact_snapshots(
         "source_status": artifact.get("source_status"),
         "source_role": "readonly_account_action_time_facts",
     }
+    mode_observed_at_ms = _iso_to_ms(str(account_mode.get("observed_at") or ""))
+    mode_ready = _account_mode_is_safe(
+        account_mode,
+        generated_at_ms=generated_at_ms,
+        observed_at_ms=mode_observed_at_ms,
+    )
+    safe_ready = declared_safe_ready and mode_ready
+    blocker_class = None if safe_ready else "hard_safety_stop"
+    failed_facts = _account_safe_failed_facts(artifact)
+    if not mode_ready and "account_mode_ready" not in failed_facts:
+        failed_facts.append("account_mode_ready")
+    mode_status = str(account_mode.get("status") or "missing")
+    observed_mode_expired = (
+        mode_observed_at_ms is not None
+        and generated_at_ms
+        > mode_observed_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS
+    )
+    mode_freshness_state = (
+        "fresh"
+        if mode_ready
+        else "stale"
+        if mode_status == "stale" or observed_mode_expired
+        else "missing"
+        if mode_status in {"missing", "missing_identity"}
+        else "unknown"
+    )
     account_mode_values = {
-        "account_mode_ready": safe_ready,
+        "account_id": account_mode.get("account_id"),
+        "exchange_id": account_mode.get("exchange_id"),
+        "account_mode": account_mode.get("account_mode") if mode_ready else None,
+        "dual_side_position": (
+            account_mode.get("dual_side_position") if mode_ready else None
+        ),
+        "position_mode_safe": mode_ready,
+        "observed_at": account_mode.get("observed_at"),
+        "source": account_mode.get("source"),
+        "runtime_profile_id": account_mode.get("runtime_profile_id"),
+        "account_mode_ready": mode_ready,
         "account_trade_permission": checks.get("account_trade_permission") is True,
         "source_signed_get_only": checks.get("source_signed_get_only") is True,
         "source_exchange_write_called": checks.get("source_exchange_write_called") is True,
         "source_order_created": checks.get("source_order_created") is True,
         "mode_source": "live_facts_readonly",
+        "mode_status": mode_status,
     }
     rows = [
-        (
-            "account_safe",
-            account_safe_values,
-            failed_facts,
-            safe_ready,
-            blocker_class,
-        ),
-        (
-            "account_mode",
-            account_mode_values,
-            [] if safe_ready else ["account_mode_not_ready"],
-            safe_ready,
-            blocker_class,
-        ),
+        {
+            "fact_surface": "account_safe",
+            "fact_values": account_safe_values,
+            "failed": failed_facts,
+            "satisfied": safe_ready,
+            "blocker": blocker_class,
+            "freshness_state": "fresh" if safe_ready else "stale",
+            "observed_at_ms": generated_at_ms,
+            "valid_until_ms": generated_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS,
+        },
+        {
+            "fact_surface": "account_mode",
+            "fact_values": account_mode_values,
+            "failed": [] if mode_ready else ["account_mode_not_ready"],
+            "satisfied": mode_ready,
+            "blocker": None if mode_ready else "hard_safety_stop",
+            "freshness_state": mode_freshness_state,
+            "observed_at_ms": mode_observed_at_ms or generated_at_ms,
+            "valid_until_ms": (
+                mode_observed_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS
+                if mode_observed_at_ms is not None
+                else generated_at_ms
+            ),
+        },
     ]
     inserted: list[str] = []
-    for fact_surface, fact_values, failed, satisfied, blocker in rows:
-        fact_snapshot_id = f"fact:global:{fact_surface}:{generated_at_ms}"
+    runtime_profile_id = str(account_mode.get("runtime_profile_id") or "").strip()
+    account_id = str(account_mode.get("account_id") or "").strip()
+    exchange_id = str(account_mode.get("exchange_id") or "").strip()
+    mode_fact_snapshot_id = ""
+    for row in rows:
+        fact_surface = str(row["fact_surface"])
+        identity = (
+            f"{account_id}:{exchange_id}"
+            if account_id and exchange_id
+            else "identity-missing"
+        )
+        fact_snapshot_id = (
+            f"fact:global:{identity}:{fact_surface}:{generated_at_ms}"
+        )
         conn.execute(
             sa.text(
                 """
@@ -262,7 +322,7 @@ def write_account_safe_fact_snapshots(
                   NULL,
                   NULL,
                   NULL,
-                  NULL,
+                  :runtime_profile_id,
                   :fact_surface,
                   :source_kind,
                   :source_ref,
@@ -281,20 +341,106 @@ def write_account_safe_fact_snapshots(
             {
                 "fact_snapshot_id": fact_snapshot_id,
                 "fact_surface": fact_surface,
+                "runtime_profile_id": runtime_profile_id or None,
                 "source_kind": source_kind,
                 "source_ref": source_ref,
-                "satisfied": satisfied,
-                "freshness_state": "fresh" if satisfied else "stale",
-                "failed_facts": _json(failed),
-                "fact_values": _json(fact_values),
-                "blocker_class": blocker,
-                "observed_at_ms": generated_at_ms,
-                "valid_until_ms": generated_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS,
+                "satisfied": row["satisfied"],
+                "freshness_state": row["freshness_state"],
+                "failed_facts": _json(row["failed"]),
+                "fact_values": _json(row["fact_values"]),
+                "blocker_class": row["blocker"],
+                "observed_at_ms": row["observed_at_ms"],
+                "valid_until_ms": row["valid_until_ms"],
                 "created_at_ms": generated_at_ms,
             },
         )
         inserted.append(fact_snapshot_id)
+        if fact_surface == "account_mode":
+            mode_fact_snapshot_id = fact_snapshot_id
+    if account_id and exchange_id and mode_fact_snapshot_id:
+        _upsert_exchange_account_mode_current(
+            conn,
+            account_id=account_id,
+            exchange_id=exchange_id,
+            runtime_profile_id=runtime_profile_id,
+            mode_values=account_mode_values,
+            mode_ready=mode_ready,
+            mode_status=mode_status,
+            fact_snapshot_id=mode_fact_snapshot_id,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            observed_at_ms=mode_observed_at_ms or generated_at_ms,
+            valid_until_ms=(
+                mode_observed_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS
+                if mode_observed_at_ms is not None
+                else generated_at_ms
+            ),
+            updated_at_ms=generated_at_ms,
+        )
     return inserted
+
+
+def _upsert_exchange_account_mode_current(
+    conn: sa.engine.Connection,
+    *,
+    account_id: str,
+    exchange_id: str,
+    runtime_profile_id: str,
+    mode_values: dict[str, Any],
+    mode_ready: bool,
+    mode_status: str,
+    fact_snapshot_id: str,
+    source_kind: str,
+    source_ref: str,
+    observed_at_ms: int,
+    valid_until_ms: int,
+    updated_at_ms: int,
+) -> None:
+    """Project one account/exchange mode when migration 113 is available."""
+
+    table_name = "brc_exchange_account_modes_current"
+    if not sa.inspect(conn).has_table(table_name):
+        return
+    table = sa.Table(table_name, sa.MetaData(), autoload_with=conn)
+    current_id = f"account_mode_current:{account_id}:{exchange_id}"
+    status = (
+        "current"
+        if mode_ready
+        else "stale"
+        if mode_status == "stale"
+        else "unknown"
+    )
+    values = {
+        "account_mode_current_id": current_id,
+        "account_id": account_id,
+        "exchange_id": exchange_id,
+        "runtime_profile_id": runtime_profile_id or None,
+        "position_mode": mode_values.get("account_mode") if mode_ready else None,
+        "dual_side_position": (
+            mode_values.get("dual_side_position") if mode_ready else None
+        ),
+        "position_mode_safe": mode_ready,
+        "status": status,
+        "fact_snapshot_id": fact_snapshot_id,
+        "source_kind": source_kind,
+        "source_ref": source_ref,
+        "observed_at_ms": observed_at_ms,
+        "valid_until_ms": valid_until_ms,
+        "updated_at_ms": updated_at_ms,
+    }
+    existing = conn.execute(
+        sa.select(table.c.account_mode_current_id).where(
+            table.c.account_mode_current_id == current_id
+        )
+    ).first()
+    if existing:
+        conn.execute(
+            table.update()
+            .where(table.c.account_mode_current_id == current_id)
+            .values(**values)
+        )
+        return
+    conn.execute(table.insert().values(**values))
 
 
 def read_latest_account_safe_facts_artifact(
@@ -317,6 +463,7 @@ def read_latest_account_safe_facts_artifact(
             "blockers": ["account_safe_fact_snapshot_missing"],
         }
     values = _json_dict(account_safe.get("fact_values"))
+    mode_values = _json_dict(account_mode.get("fact_values"))
     ready = (
         _is_true(account_safe.get("computed"))
         and _is_true(account_safe.get("satisfied"))
@@ -332,6 +479,8 @@ def read_latest_account_safe_facts_artifact(
             and _is_true(account_mode.get("computed"))
             and _is_true(account_mode.get("satisfied"))
             and account_mode.get("freshness_state") == "fresh"
+            and mode_values.get("position_mode_safe") is True
+            and mode_values.get("account_mode") in {"one_way", "hedge"}
         ),
     }
     return {
@@ -436,6 +585,35 @@ def _account_safe_failed_facts(artifact: dict[str, Any]) -> list[str]:
         "action_time_available_balance",
     )
     return [key for key in expected_true if checks.get(key) is not True]
+
+
+def _account_mode_is_safe(
+    values: dict[str, Any],
+    *,
+    generated_at_ms: int,
+    observed_at_ms: int | None,
+) -> bool:
+    dual_side_position = values.get("dual_side_position")
+    account_mode = values.get("account_mode")
+    expected_mode = (
+        "hedge"
+        if dual_side_position is True
+        else "one_way"
+        if dual_side_position is False
+        else None
+    )
+    source = str(values.get("source") or "")
+    return (
+        values.get("position_mode_safe") is True
+        and type(dual_side_position) is bool
+        and account_mode == expected_mode
+        and str(values.get("account_id") or "").strip() != ""
+        and str(values.get("exchange_id") or "").strip() != ""
+        and observed_at_ms is not None
+        and observed_at_ms <= generated_at_ms + ACCOUNT_MODE_MAX_FUTURE_SKEW_MS
+        and generated_at_ms <= observed_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS
+        and source.endswith(ACCOUNT_MODE_SOURCE_SUFFIX)
+    )
 
 
 def _iso_to_ms(value: str) -> int | None:

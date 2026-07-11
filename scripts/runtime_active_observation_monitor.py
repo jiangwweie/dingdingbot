@@ -421,8 +421,9 @@ def write_candidate_universe_coverage_to_pg(
     database_url: str,
     allow_non_postgres_for_test: bool = False,
     now_ms: int | None = None,
+    conn: sa.engine.Connection | None = None,
 ) -> dict[str, Any]:
-    if not database_url:
+    if not database_url and conn is None:
         return {
             "status": "pg_watcher_runtime_coverage_skipped",
             "reason": "database_url_missing",
@@ -443,10 +444,27 @@ def write_candidate_universe_coverage_to_pg(
             "written_count": 0,
         }
 
+    observed_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    if conn is not None:
+        _replace_current_watcher_runtime_coverage(
+            conn,
+            rows=rows,
+            observed_ms=observed_ms,
+        )
+        return {
+            "status": "pg_watcher_runtime_coverage_written",
+            "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
+            "written_count": len(rows),
+            "observed_at_ms": observed_ms,
+            "authority_boundary": (
+                "watcher_runtime_coverage_projection_only; "
+                "no_finalgate_no_operation_layer_no_exchange_write"
+            ),
+        }
+
     normalized_url = normalize_sync_postgres_dsn(database_url)
     if not is_sync_postgres_dsn(normalized_url) and not allow_non_postgres_for_test:
         raise RuntimeError("PG watcher runtime coverage write requires PostgreSQL DSN")
-    observed_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     engine = sa.create_engine(normalized_url)
     try:
         with engine.begin() as conn:

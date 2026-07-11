@@ -75,6 +75,14 @@ EXCHANGE_COMMAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
 )
+TYPED_SCOPE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-11-113_create_exchange_account_mode_and_domain_holds.py"
+)
+LIFECYCLE_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -222,6 +230,38 @@ def pg_control_connection():
                                                         )
                                                         try:
                                                             exchange_command_migration.upgrade()
+                                                            typed_scope_migration = _load_module(
+                                                                TYPED_SCOPE_MIGRATION_PATH,
+                                                                "migration_113_runtime_safety",
+                                                            )
+                                                            old_typed_scope_op = (
+                                                                typed_scope_migration.op
+                                                            )
+                                                            typed_scope_migration.op = (
+                                                                migration.op
+                                                            )
+                                                            try:
+                                                                typed_scope_migration.upgrade()
+                                                                lifecycle_command_migration = _load_module(
+                                                                    LIFECYCLE_COMMAND_MIGRATION_PATH,
+                                                                    "migration_114_runtime_safety",
+                                                                )
+                                                                old_lifecycle_command_op = (
+                                                                    lifecycle_command_migration.op
+                                                                )
+                                                                lifecycle_command_migration.op = (
+                                                                    migration.op
+                                                                )
+                                                                try:
+                                                                    lifecycle_command_migration.upgrade()
+                                                                finally:
+                                                                    lifecycle_command_migration.op = (
+                                                                        old_lifecycle_command_op
+                                                                    )
+                                                            finally:
+                                                                typed_scope_migration.op = (
+                                                                    old_typed_scope_op
+                                                                )
                                                         finally:
                                                             exchange_command_migration.op = (
                                                                 old_exchange_command_op
@@ -263,6 +303,15 @@ def pg_control_connection():
         finally:
             migration.op = old_op
         seed.seed_runtime_control_state_foundation(conn)
+        conn.execute(
+            text(
+                "UPDATE brc_runtime_capabilities_current "
+                "SET status = 'enabled', certification_ref = 'unit-fixture:certified', "
+                "updated_at_ms = :now_ms "
+                "WHERE capability_id = 'ticket_lifecycle_durable_mutation'"
+            ),
+            {"now_ms": NOW_MS},
+        )
     with engine.connect() as conn:
         yield conn
     engine.dispose()
@@ -318,7 +367,6 @@ def test_runtime_safety_state_materializes_submit_allowed_snapshot(
     assert payload["submit_allowed"] is True
     assert payload["blockers"] == []
     assert payload["forbidden_effects"] == safety.FORBIDDEN_EFFECTS
-
     row = pg_control_connection.execute(
         text(
             """
@@ -360,6 +408,32 @@ def test_runtime_safety_state_materializes_submit_allowed_snapshot(
         {"lane_id": ids["lane_id"]},
     ).scalar_one()
     assert lane_snapshot_id == row["runtime_safety_snapshot_id"]
+
+
+def test_runtime_safety_blocks_entry_when_lifecycle_mutation_capability_disabled(
+    pg_control_connection,
+):
+    ids = _create_handoff_ready(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_runtime_capabilities_current "
+            "SET status = 'disabled', "
+            "certification_ref = 'unit:phase-one-fail-closed' "
+            "WHERE capability_id = 'ticket_lifecycle_durable_mutation'"
+        )
+    )
+
+    payload = safety.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_layer_handoff_id=ids["operation_layer_handoff_id"],
+        now_ms=NOW_MS + 3000,
+    )
+
+    assert payload["status"] == "runtime_safety_state_blocked"
+    assert payload["submit_allowed"] is False
+    assert payload["lifecycle_mutation_capability_ready"] is False
+    assert "lifecycle_mutation_capability_not_ready" in payload["blockers"]
 
 
 def test_runtime_safety_blocks_ineligible_ticket_graph(pg_control_connection):

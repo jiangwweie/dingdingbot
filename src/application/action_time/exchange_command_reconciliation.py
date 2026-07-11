@@ -9,6 +9,13 @@ import sqlalchemy as sa
 from src.application.action_time.exchange_command import (
     record_exchange_command_outcome,
 )
+from src.application.action_time.lifecycle_exchange_command_completion import (
+    apply_completed_lifecycle_exchange_sources,
+)
+from src.application.action_time.netting_domain_hold import (
+    resolve_netting_domain_hold_source,
+    upsert_exchange_command_domain_hold,
+)
 from src.domain.ticket_bound_exchange_command import (
     ExchangeCommandOutcomeClass,
     ExchangeCommandState,
@@ -21,6 +28,237 @@ AUTHORITY_BOUNDARY = (
     "persisted client_order_id; no submit, cancel, replace, profile, sizing, "
     "withdrawal, transfer, or file authority"
 )
+
+
+async def run_one_unknown_exchange_command_reconciliation(
+    engine: sa.Engine,
+    *,
+    gateway: Any,
+    now_ms: int,
+) -> dict[str, Any]:
+    """Short select -> transaction-free lookup -> short result projection."""
+
+    with engine.begin() as conn:
+        command = select_one_unknown_exchange_command(conn)
+    if not command:
+        return {
+            "schema": "brc.ticket_bound_exchange_command_reconciliation_worker.v1",
+            "status": "no_unknown_commands",
+            "exchange_read_called": False,
+            "exchange_write_called": False,
+            "blockers": [],
+        }
+    identity_blockers = _gateway_identity_blockers(command, gateway)
+    if identity_blockers:
+        decision = {
+            "status": "hard_stopped",
+            "exchange_order_id": None,
+            "blockers": identity_blockers,
+        }
+    else:
+        decision = await lookup_unknown_exchange_command(
+            command=command,
+            gateway=gateway,
+            now_ms=now_ms,
+        )
+    with engine.begin() as conn:
+        applied = apply_unknown_exchange_command_decision(
+            conn,
+            command=command,
+            decision=decision,
+            now_ms=now_ms,
+        )
+    return {
+        "schema": "brc.ticket_bound_exchange_command_reconciliation_worker.v1",
+        **applied,
+        "exchange_read_called": not identity_blockers,
+        "exchange_write_called": False,
+        "automatic_resubmit_called": False,
+        "authority_boundary": AUTHORITY_BOUNDARY,
+    }
+
+
+def select_one_unknown_exchange_command(
+    conn: sa.engine.Connection,
+) -> dict[str, Any]:
+    table = sa.Table(
+        "brc_ticket_bound_exchange_commands",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    query = (
+        sa.select(table)
+        .where(table.c.command_state == "outcome_unknown")
+        .order_by(table.c.updated_at_ms.asc())
+        .limit(1)
+    )
+    if conn.dialect.name == "postgresql":
+        query = query.with_for_update(skip_locked=True)
+    row = conn.execute(query).mappings().first()
+    return dict(row) if row else {}
+
+
+async def lookup_unknown_exchange_command(
+    *,
+    command: dict[str, Any],
+    gateway: Any,
+    now_ms: int,
+) -> dict[str, Any]:
+    try:
+        if str(command.get("command_kind") or "") == "cancel_order":
+            orders = await gateway.fetch_all_open_orders(
+                str(command["gateway_symbol"])
+            )
+            target = str(command.get("target_exchange_order_id") or "")
+            still_open = any(
+                str(_mapping(order).get("id") or _mapping(order).get("exchange_order_id") or "")
+                == target
+                for order in orders or []
+            )
+            exchange_order = None if still_open else {
+                "exchange_order_id": target,
+                "client_order_id": str(command.get("client_order_id") or ""),
+                "symbol": str(command.get("gateway_symbol") or ""),
+            }
+        else:
+            exchange_order = await gateway.find_order_by_client_id(
+                str(command["client_order_id"]),
+                str(command["gateway_symbol"]),
+            )
+    except Exception as exc:
+        return {
+            "status": "lookup_failed",
+            "exchange_order_id": None,
+            "blockers": [
+                f"exchange_command_lookup_failed:{type(exc).__name__}"
+            ],
+        }
+    if exchange_order is None:
+        deadline = int(command.get("updated_at_ms") or now_ms) + VISIBILITY_WINDOW_MS
+        if now_ms < deadline:
+            return {
+                "status": "pending_visibility",
+                "exchange_order_id": None,
+                "blockers": ["exchange_command_visibility_window_active"],
+            }
+        return {
+            "status": "reconciled_absent",
+            "exchange_order_id": None,
+            "blockers": [],
+        }
+    exchange = _mapping(exchange_order)
+    exchange_order_id = str(exchange.get("exchange_order_id") or "").strip()
+    actual_client_id = str(exchange.get("client_order_id") or "").strip()
+    actual_symbol = str(exchange.get("symbol") or "").strip()
+    contradictory = (
+        not exchange_order_id
+        or (
+            bool(actual_client_id)
+            and actual_client_id != str(command["client_order_id"])
+        )
+        or (
+            bool(actual_symbol)
+            and actual_symbol != str(command["gateway_symbol"])
+        )
+    )
+    if contradictory:
+        return {
+            "status": "hard_stopped",
+            "exchange_order_id": exchange_order_id or None,
+            "blockers": ["reconciled_exchange_identity_contradictory"],
+        }
+    return {
+        "status": "reconciled_submitted",
+        "exchange_order_id": exchange_order_id,
+        "blockers": [],
+    }
+
+
+def apply_unknown_exchange_command_decision(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+    decision: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    status = str(decision.get("status") or "")
+    blockers = [str(item) for item in decision.get("blockers") or []]
+    if status in {"lookup_failed", "pending_visibility"}:
+        return {
+            "status": status,
+            "exchange_command_id": command.get("exchange_command_id"),
+            "first_blocker": blockers[0] if blockers else None,
+            "blockers": blockers,
+        }
+    target, outcome = {
+        "reconciled_submitted": (
+            ExchangeCommandState.RECONCILED_SUBMITTED,
+            ExchangeCommandOutcomeClass.RECONCILED_EXCHANGE_TRUTH,
+        ),
+        "reconciled_absent": (
+            ExchangeCommandState.RECONCILED_ABSENT,
+            ExchangeCommandOutcomeClass.RECONCILED_ABSENCE,
+        ),
+        "hard_stopped": (
+            ExchangeCommandState.HARD_STOPPED,
+            ExchangeCommandOutcomeClass.CONTRADICTORY_TRUTH,
+        ),
+    }[status]
+    recorded = record_exchange_command_outcome(
+        conn,
+        exchange_command_id=str(command["exchange_command_id"]),
+        target_state=target,
+        outcome_class=outcome,
+        exchange_result={
+            "exchange_order_id": decision.get("exchange_order_id"),
+            "error_message": blockers[0] if blockers else None,
+        },
+        now_ms=now_ms,
+    )
+    if status == "hard_stopped":
+        upsert_exchange_command_domain_hold(
+            conn,
+            command=recorded,
+            blockers=blockers or ["exchange_command_hard_stopped"],
+            now_ms=now_ms,
+        )
+    else:
+        resolve_netting_domain_hold_source(
+            conn,
+            netting_domain_key=str(recorded.get("netting_domain_key") or ""),
+            source_kind="exchange_command",
+            source_id=str(recorded.get("exchange_command_id") or ""),
+            resolution_source=f"exchange_command_{status}",
+            now_ms=now_ms,
+        )
+        if status == "reconciled_submitted":
+            apply_completed_lifecycle_exchange_sources(
+                conn,
+                now_ms=now_ms,
+                source_command_id=str(recorded.get("source_command_id") or ""),
+            )
+    return {
+        "status": status,
+        "exchange_command_id": recorded.get("exchange_command_id"),
+        "first_blocker": blockers[0] if blockers else None,
+        "blockers": blockers,
+    }
+
+
+def _gateway_identity_blockers(
+    command: dict[str, Any],
+    gateway: Any,
+) -> list[str]:
+    blockers: list[str] = []
+    if str(getattr(gateway, "runtime_account_id", "") or "") != str(
+        command.get("account_id") or ""
+    ):
+        blockers.append("exchange_command_gateway_account_mismatch")
+    if str(getattr(gateway, "runtime_exchange_id", "") or "") != str(
+        command.get("exchange_id") or ""
+    ):
+        blockers.append("exchange_command_gateway_exchange_mismatch")
+    return blockers
 
 
 async def reconcile_unknown_exchange_commands(

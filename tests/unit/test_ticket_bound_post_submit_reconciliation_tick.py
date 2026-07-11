@@ -37,6 +37,11 @@ def runtime_submit_env(monkeypatch):
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED", "true")
+    monkeypatch.setenv(
+        "BRC_RUNTIME_EXCHANGE_ACCOUNT_ID",
+        "owner-subaccount-runtime-v0",
+    )
+    monkeypatch.setenv("BRC_RUNTIME_EXCHANGE_ID", "binance_usdm")
 
 
 def test_first_tick_skips_disabled_smoke_without_pg_tick(pg_control_connection):
@@ -153,7 +158,7 @@ def test_first_tick_rechecks_pending_visibility_after_deadline(pg_control_connec
     assert row["status"] == "matched"
 
 
-def test_first_tick_resolves_stale_scope_freeze_after_match(pg_control_connection):
+def test_first_tick_does_not_resolve_another_sources_scope_hold(pg_control_connection):
     prepared = _submitted_real_attempt(pg_control_connection)
     _insert_scope_freeze(pg_control_connection, first_blocker="protection_missing")
 
@@ -170,17 +175,8 @@ def test_first_tick_resolves_stale_scope_freeze_after_match(pg_control_connectio
             text("SELECT * FROM brc_ticket_bound_scope_freezes")
         ).mappings().one()
     )
-    assert freeze["status"] == "resolved"
-    assert freeze["first_blocker"] == "scope_cleanup_pending_no_current_risk"
-    assert (
-        current_scope_blockers(
-            {"ticket_bound_scope_freezes": [freeze]},
-            strategy_group_id="SOR-001",
-            symbol="ETHUSDT",
-            side="long",
-        )
-        == []
-    )
+    assert freeze["status"] == "active"
+    assert freeze["first_blocker"] == "protection_missing"
 
 
 @pytest.mark.asyncio
@@ -420,10 +416,15 @@ def _insert_scope_freeze(conn, *, first_blocker: str) -> None:
 
 class _FirstTickGateway:
     def __init__(self, prepared: dict, *, omit_roles: set[str] | None = None) -> None:
+        self.runtime_account_id = "owner-subaccount-runtime-v0"
+        self.runtime_exchange_id = "binance_usdm"
         self.snapshot = _attempt_snapshot(prepared, omit_roles=omit_roles)
         self.place_calls: list[dict] = []
 
     async def fetch_open_orders(self, symbol: str, params=None):
+        return list(self.snapshot["open_orders"])
+
+    async def fetch_all_open_orders(self, symbol: str):
         return list(self.snapshot["open_orders"])
 
     async def fetch_my_trades(self, symbol: str, limit: int = 50, params=None):
@@ -439,6 +440,9 @@ class _FirstTickGateway:
                 "mark_price": "2010",
             }
         ]
+
+    async def fetch_position_rows(self, symbol: str):
+        return await self.fetch_positions(symbol)
 
     async def place_order(self, **kwargs):
         self.place_calls.append(dict(kwargs))

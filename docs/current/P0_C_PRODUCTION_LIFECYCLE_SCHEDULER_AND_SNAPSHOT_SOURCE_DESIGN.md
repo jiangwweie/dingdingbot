@@ -43,7 +43,7 @@ sizing defaults, withdrawals, transfers, or file artifacts.
 | **Reconciler input** | `protection_reconciler` consumes normalized snapshots; deployed provider currently misses some conditional-order views and requires P0-LC typed venue scope |
 | **PG truth** | Runtime and lifecycle state live in PG current tables; repo/output/report files are not authority |
 | **First tick and recovery defaults** | First/scheduled ticks and recovery defaults are deployed; active real lifecycle behavior has not yet been production-certified |
-| **Current command boundary** | Exchange reads/writes and PG changes still run under one CLI transaction; P0-LC must extend the existing `brc_ticket_bound_exchange_commands` authority and move network I/O outside long transactions |
+| **Current command boundary** | Local P0-LC commits `brc_ticket_bound_exchange_commands` claims before network I/O and commits results afterward; Tokyo remains on the prior long-transaction release until controlled cutover |
 
 ## Target Components
 
@@ -175,13 +175,13 @@ Forbidden:
 ## Chain Position
 
 ```text
-chain_position: post_submit_lifecycle_wiring
+chain_position: post_submit_lifecycle_production_certification
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scopes
-stage: p0_3_p0_4_design_confirmed
-first_blocker: first_tick_and_recovery_command_implementation_pending
-evidence: lifecycle maintenance service/API exists locally; scheduler and snapshot source are defined here; first-tick and recovery-command defaults are confirmed in POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md
-next_action: implement first-tick due selection, scheduler runner, snapshot provider, recovery command determinism, tests, deploy, and Tokyo acceptance
+stage: local_certification_complete_pending_full_verification_and_cutover
+first_blocker: full_verification_and_tokyo_two_phase_cutover_pending
+evidence: local P0-LC uses typed exchange snapshots, durable command claims/results outside long PG transactions, fill projection, finalization, settlement, and one terminal Outcome; Tokyo remains pre-cutover
+next_action: finish full verification and controlled two-phase Tokyo cutover; keep capability disabled until phase-two gates pass
 stop_condition: production runner can maintain existing ticket-bound lifecycle rows, create required first reconciliation ticks, or expose one exact current lifecycle blocker without file authority or report growth
 owner_action_required: no
 authority_boundary: no FinalGate bypass, no Operation Layer bypass, no new ENTRY submit, no live profile/sizing mutation, no withdrawal/transfer

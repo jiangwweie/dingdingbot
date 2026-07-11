@@ -86,7 +86,7 @@ def test_exit_protection_blocks_before_entry_fill(
     ] == "entry_fill_pending"
 
 
-def test_exit_protection_blocks_partial_entry_fill(
+def test_exit_protection_blocks_unresized_partial_entry_protection(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
@@ -110,11 +110,11 @@ def test_exit_protection_blocks_partial_entry_fill(
         now_ms=NOW_MS + 6000,
     )
 
-    assert payload["status"] == "entry_partial_fill_unhandled"
-    assert "entry_partial_fill_not_lifecycle_ready" in payload["blockers"]
+    assert payload["status"] == "protection_reconciliation_mismatch"
+    assert "partial_entry_sl_qty_not_actual_fill" in payload["blockers"]
     assert _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")[
         "status"
-    ] == "entry_partial_fill_unhandled"
+    ] == "protection_reconciliation_mismatch"
 
 
 def test_exit_protection_blocks_without_tp1(

@@ -43,7 +43,7 @@ DEFAULT_VENV_PYTHON = (
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_GIT_REF = "program/live-safe-v1"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-05-090_create_runtime_retention_runs.py"
+    "2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
 )
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
 DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.service"
@@ -454,6 +454,12 @@ def _plan_phases(
         f"test -f {q(release_manifest)}; "
         f"test $(readlink -f {q(app_current)}) = {q(remote_release_path)}"
     )
+    phase_two_enable_command = ticket_lifecycle_phase_two_enable_command(
+        remote_release_path=remote_release_path,
+        env_path=env_path,
+        venv_python=venv_python,
+        certification_ref=f"tokyo-release:{target_commit}",
+    )
 
     return [
         {
@@ -557,6 +563,22 @@ def _plan_phases(
                 "health is not ok",
                 "health live_ready is true",
                 "post-deploy readonly probe fails",
+            ],
+        },
+        {
+            "phase": "5_certify_and_enable_durable_lifecycle_mutation",
+            "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
+            "requires_confirmation_phrase": CONFIRMATION_PHRASE,
+            "commands": [_ssh(host, phase_two_enable_command)],
+            "stop_if": [
+                "phase-one PG capability is not disabled",
+                "fresh account-mode truth is not exactly one safe account",
+                "an active real lifecycle, unknown command, or domain hold exists",
+                "no-active lifecycle run calls the exchange or creates state",
+                "capability enablement cannot be committed to PG current truth",
             ],
         },
     ]
@@ -824,6 +846,83 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"sudo -n systemctl is-enabled {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
         f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
         f"sudo -n systemctl is-active {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}"
+    )
+
+
+def ticket_lifecycle_phase_two_enable_command(
+    *,
+    remote_release_path: str,
+    env_path: str,
+    venv_python: str,
+    certification_ref: str,
+) -> str:
+    """Build fail-closed phase-two activation with automatic PG rollback."""
+
+    q = shlex.quote
+    watcher_timer = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)
+    monitor_timer = q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)
+    lifecycle_timer = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)
+    lifecycle_service = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME)
+    disable = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --disable "
+        "--require-database-url --certification-ref "
+        f"{q('rollback:' + certification_ref)} --json"
+    )
+    return (
+        "set -eu; SUCCESS=0; "
+        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        "rollback_phase_two() { "
+        f"if [ \"$SUCCESS\" != 1 ]; then {disable} >/dev/null 2>&1 || true; fi; "
+        f"sudo -n systemctl start {watcher_timer} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {monitor_timer} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {lifecycle_timer} >/dev/null 2>&1 || true; "
+        "}; trap rollback_phase_two EXIT; "
+        f"sudo -n systemctl stop {watcher_timer}; "
+        f"sudo -n systemctl stop {monitor_timer}; "
+        f"sudo -n systemctl stop {lifecycle_timer}; "
+        f"sudo -n systemctl stop {lifecycle_service}; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
+        "--require-database-url --json; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/audit_production_runtime_file_io.py --json; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --enable "
+        f"--require-database-url --certification-ref {q(certification_ref)} --json; "
+        f"LIFECYCLE_OUTPUT=$(PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/run_ticket_bound_lifecycle_maintenance_once.py "
+        "--require-database-url --max-lifecycle-scopes 1 "
+        "--max-actions-per-scope 16 --snapshot-timeout-seconds 8); "
+        "export LIFECYCLE_OUTPUT; "
+        f"{q(venv_python)} -c "
+        + q(
+            "import json,os; p=json.loads(os.environ['LIFECYCLE_OUTPUT']); "
+            "assert p['status']=='no_maintainable_lifecycle'; "
+            "assert p['exchange_write_called'] is False; "
+            "assert p['network_inside_pg_transaction'] is False; "
+            "assert p['selected_scope_count']==0"
+        )
+        + "; "
+        f"CAPABILITY_OUTPUT=$(PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --status "
+        "--require-database-url --json); export CAPABILITY_OUTPUT; "
+        f"{q(venv_python)} -c "
+        + q(
+            "import json,os; p=json.loads(os.environ['CAPABILITY_OUTPUT']); "
+            "assert p['status']=='ready'; "
+            "assert p['enabled'] is True; assert p['exchange_write_called'] is False"
+        )
+        + "; "
+        f"sudo -n systemctl start {lifecycle_service}; "
+        f"test $(systemctl show {lifecycle_service} --property=Result --value) = success; "
+        "SUCCESS=1; trap - EXIT; "
+        f"sudo -n systemctl start {watcher_timer}; "
+        f"sudo -n systemctl start {monitor_timer}; "
+        f"sudo -n systemctl start {lifecycle_timer}; "
+        f"systemctl is-active {watcher_timer}; "
+        f"systemctl is-active {monitor_timer}; "
+        f"systemctl is-active {lifecycle_timer}"
     )
 
 

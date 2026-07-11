@@ -88,11 +88,11 @@ lifecycle safety core:
 | Area | Current implementation | Remaining boundary |
 | --- | --- | --- |
 | Full-chain simulation | `full_chain_simulation_harness` runs constructed PG input through signal, lane, ticket, safety, protected submit, protection, runner command, runner proof, final closure | It uses mock exchange result and does not grant live exchange authority; next harness work should focus on two golden paths plus failure matrix |
-| Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes submit failures into lifecycle states such as `submit_failed`, `protection_missing`, and `protection_submit_failed`; `protection_recovery_command` prepares and executes missing SL/TP1 recovery locally through an injected gateway; recovery failures update attempt and lifecycle blockers | Production scheduling/API activation remains explicit wiring work, not implicit exchange authority |
+| Sequential submit failure | `record_ticket_bound_protected_submit_result` materializes exact failure states; recovery plans become committed `brc_ticket_bound_exchange_commands` and execute only through the short-transaction Worker | Legacy direct recovery execution is hard-interlocked before gateway I/O |
 | Protection reconciliation | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots and writes current lifecycle blockers; linked SL/TP1/RUNNER_SL must match exchange existence, reduce-only flag, side, and bounded qty | It consumes already-fetched facts and does not call exchange APIs |
 | Runner mutation command | `runner_mutation_command` creates PG command intent and records official-path results for RUNNER_SL submit / old SL cleanup | Command rows are intent/result records, not proof of runner protection |
-| Runner mutation executor | `runner_mutation_executor` consumes a prepared PG command, calls injected gateway cancel/place, and records the PG result | Executor is mockable and still cannot call FinalGate, change profile/sizing, or use file authority |
-| Lifecycle maintenance wiring | `lifecycle_maintenance_service` and Trading Console API `/runtime-ticket-bound-lifecycle-maintenance` run one bounded maintenance pass over existing PG ticket-bound rows | It defaults to no exchange mutation; mutation requires explicit `allow_exchange_mutation=true` and an injected official gateway |
+| Runner mutation executor | The legacy direct executor is retired; prepared runner plans materialize RUNNER_SL place then old-SL cancel into the shared durable command authority | The command Worker is the only exchange mutation caller |
+| Lifecycle maintenance wiring | Scheduler materializes durable recovery/runner/cleanup commands; the production CLI claims at most one command, performs network I/O outside PG transactions, and persists the result independently | `allow_exchange_mutation` no longer enables a direct legacy gateway path |
 | Runner mutation failure projection | Failed old SL cancel or failed RUNNER_SL submit updates lifecycle and protection set to `runner_mutation_failed`; if old SL was cancelled before RUNNER_SL failed, `runner_unprotected_after_old_sl_cancelled` is added | Failure must not remain hidden in a command row |
 | Orphan protection cleanup | `orphan_protection_cleanup_command` cancels only PG-linked reduce-only protection refs after `position_closed_protection_live` | Exchange-only unknown orders remain blocked until identity proof exists |
 | Ops health | Tokyo ops health reads exact lifecycle attention states and runner commands without runner proof | It remains readonly and non-mutating |
@@ -540,14 +540,14 @@ Acceptance:
 ## Chain Position
 
 ```text
-chain_position: action_time_boundary
+chain_position: post_submit_lifecycle_production_certification
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scope
-stage: lifecycle_cleanup_failure_matrix_deployed
-first_blocker: production_lifecycle_wiring_and_live_outcome_ledger_not_complete
-evidence: Tokyo release head f8f299f8, PG alembic 098, postdeploy acceptance passed, lifecycle cleanup/failure matrix deployed, and server health shows backend/timers active with file-authority audit clear
-next_action: implement production lifecycle wiring with runner mutation plan safety, then implement Live Outcome Ledger PG projection while watcher/monitor continue readonly observation
+stage: production_lifecycle_local_certification
+first_blocker: full_verification_and_tokyo_two_phase_cutover_pending
+evidence: local P0-LC has durable mutation authority, typed exchange truth, fill projection, continuous reconciliation, settlement/finalizer/Outcome callers, 22-scope producer-shaped closure coverage, and fail-closed capability gating; Tokyo remains on the prior release
+next_action: complete full tests/audits, commit/push, then run phase-one and mechanically gated phase-two Tokyo acceptance
 stop_condition: one future real ticket proves entry, protection, TP1, runner, final exit, reconciliation, settlement, and live outcome, or stops at one exact lifecycle hard blocker
-owner_action_required: no for current observation; yes before future deployment or authority expansion
+owner_action_required: no
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound path
 ```

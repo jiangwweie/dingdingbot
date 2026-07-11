@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -22,6 +23,17 @@ def _live_facts() -> dict:
         "exchange_rules": {"status": "ready"},
         "next_attempt_gate": {"status": "ready_for_strategy_signal"},
         "protection": {"status": "ready_for_candidate_specific_plan"},
+        "account_mode": {
+            "status": "fresh",
+            "account_id": "owner-subaccount-runtime-v0",
+            "exchange_id": "binance_usdm",
+            "runtime_profile_id": "owner-runtime-console-v1",
+            "dual_side_position": False,
+            "account_mode": "one_way",
+            "position_mode_safe": True,
+            "observed_at": "2026-07-03T00:00:00+00:00",
+            "source": "binance_usdm_signed_get:/fapi/v1/positionSide/dual",
+        },
         "safety_invariants": {
             "signed_get_only": True,
             "exchange_write_called": False,
@@ -42,6 +54,9 @@ def test_runtime_account_safe_facts_ready_from_live_facts():
     assert artifact["checks"]["active_position_or_open_order_clear"] is True
     assert artifact["checks"]["action_time_available_balance"] is True
     assert artifact["blockers"] == []
+    assert artifact["account_mode"]["account_mode"] == "one_way"
+    assert artifact["account_mode"]["dual_side_position"] is False
+    assert artifact["account_mode"]["position_mode_safe"] is True
     assert artifact["safety_invariants"]["calls_finalgate"] is False
     assert artifact["safety_invariants"]["calls_operation_layer"] is False
     assert artifact["safety_invariants"]["calls_exchange_write"] is False
@@ -60,6 +75,61 @@ def test_runtime_account_safe_facts_blocks_open_position():
     assert artifact["status"] == "runtime_account_safe_facts_blocked"
     assert artifact["checks"]["account_safe_facts_ready"] is False
     assert "active_position_clear" in artifact["blockers"]
+
+
+@pytest.mark.parametrize(
+    ("account_mode", "expected_status"),
+    [
+        ({}, "missing"),
+        (
+            {
+                "status": "fresh",
+                "account_id": "owner-subaccount-runtime-v0",
+                "exchange_id": "binance_usdm",
+                "runtime_profile_id": "owner-runtime-console-v1",
+                "dual_side_position": "false",
+                "account_mode": "one_way",
+                "position_mode_safe": True,
+                "observed_at": "2026-07-03T00:00:00+00:00",
+                "source": "binance_usdm_signed_get:/fapi/v1/positionSide/dual",
+            },
+            "malformed",
+        ),
+        (
+            {
+                "status": "fresh",
+                "account_id": "owner-subaccount-runtime-v0",
+                "exchange_id": "binance_usdm",
+                "runtime_profile_id": "owner-runtime-console-v1",
+                "dual_side_position": False,
+                "account_mode": "one_way",
+                "position_mode_safe": True,
+                "observed_at": "2026-07-02T23:58:00+00:00",
+                "source": "binance_usdm_signed_get:/fapi/v1/positionSide/dual",
+            },
+            "stale",
+        ),
+    ],
+    ids=("missing", "malformed", "stale"),
+)
+def test_runtime_account_safe_facts_never_defaults_unsafe_mode_to_one_way(
+    account_mode: dict,
+    expected_status: str,
+):
+    live_facts = _live_facts()
+    live_facts["account_mode"] = account_mode
+
+    artifact = module.build_runtime_account_safe_facts(
+        live_facts=live_facts,
+        generated_at_utc="2026-07-03T00:00:00+00:00",
+    )
+
+    assert artifact["status"] == "runtime_account_safe_facts_blocked"
+    assert "account_mode_ready" in artifact["blockers"]
+    assert artifact["account_mode"]["status"] == expected_status
+    assert artifact["account_mode"]["account_mode"] is None
+    assert artifact["account_mode"]["dual_side_position"] is None
+    assert artifact["account_mode"]["position_mode_safe"] is False
 
 
 def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
@@ -125,6 +195,8 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
             return {"payload": [{"symbol": "ETHUSDT", "positionAmt": "0"}]}
         if path.endswith("/openOrders"):
             return {"payload": []}
+        if path.endswith("/positionSide/dual"):
+            return {"payload": {"dualSidePosition": False}}
         raise AssertionError(path)
 
     monkeypatch.setattr(module._impl, "_request_json", fake_request_json)
@@ -142,16 +214,26 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT fact_surface, strategy_group_id, symbol, side, satisfied,
-                   freshness_state
+            SELECT fact_surface, strategy_group_id, symbol, side,
+                   runtime_profile_id, satisfied, freshness_state, fact_values
             FROM brc_runtime_fact_snapshots
             ORDER BY fact_surface
             """
         ).fetchall()
     assert {row[0] for row in rows} == {"account_safe", "account_mode"}
     assert all(row[1] is None and row[2] is None and row[3] is None for row in rows)
-    assert all(row[4] == 1 for row in rows)
-    assert all(row[5] == "fresh" for row in rows)
+    assert all(row[4] == "owner-runtime-console-v1" for row in rows)
+    assert all(row[5] == 1 for row in rows)
+    assert all(row[6] == "fresh" for row in rows)
+    account_mode_row = next(row for row in rows if row[0] == "account_mode")
+    account_mode_values = json.loads(account_mode_row[7])
+    assert account_mode_values["account_id"] == "owner-subaccount-runtime-v0"
+    assert account_mode_values["exchange_id"] == "binance_usdm"
+    assert account_mode_values["account_mode"] == "one_way"
+    assert account_mode_values["dual_side_position"] is False
+    assert account_mode_values["position_mode_safe"] is True
+    assert account_mode_values["observed_at"]
+    assert account_mode_values["source"].endswith("/fapi/v1/positionSide/dual")
 
 
 def test_runtime_account_safe_facts_cli_rejects_live_facts_json(tmp_path: Path):
@@ -180,6 +262,33 @@ def _create_pg_scope_tables(conn: sqlite3.Connection) -> None:
           policy_current_id TEXT,
           status TEXT
         );
+        CREATE TABLE brc_strategy_groups (
+          strategy_group_id TEXT PRIMARY KEY,
+          current_version_id TEXT
+        );
+        CREATE TABLE brc_strategy_group_versions (
+          strategy_group_version_id TEXT PRIMARY KEY,
+          risk_envelope TEXT
+        );
+        CREATE TABLE brc_runtime_scope_bindings (
+          runtime_scope_binding_id TEXT PRIMARY KEY,
+          candidate_scope_id TEXT,
+          runtime_profile_id TEXT,
+          status TEXT
+        );
+        CREATE TABLE brc_symbol_instrument_mappings (
+          mapping_id TEXT PRIMARY KEY,
+          symbol TEXT,
+          exchange_instrument_id TEXT,
+          status TEXT,
+          valid_from_ms INTEGER,
+          valid_until_ms INTEGER
+        );
+        CREATE TABLE brc_exchange_instruments (
+          exchange_instrument_id TEXT PRIMARY KEY,
+          exchange_id TEXT,
+          status TEXT
+        );
         CREATE TABLE brc_owner_policy_current (
           policy_current_id TEXT PRIMARY KEY,
           enabled_state TEXT,
@@ -202,12 +311,41 @@ def _create_pg_scope_tables(conn: sqlite3.Connection) -> None:
         ) VALUES (
           'policy:CPM-RO-001:ETHUSDT:long', 'enabled', 1, 20
         );
+        INSERT INTO brc_strategy_groups (
+          strategy_group_id, current_version_id
+        ) VALUES (
+          'CPM-RO-001', 'version:CPM-RO-001:v2'
+        );
+        INSERT INTO brc_strategy_group_versions (
+          strategy_group_version_id, risk_envelope
+        ) VALUES (
+          'version:CPM-RO-001:v2',
+          '{"account_id":"owner-subaccount-runtime-v0"}'
+        );
         INSERT INTO brc_strategy_group_candidate_scope (
           candidate_scope_id, strategy_group_id, symbol, scope_state,
           policy_current_id, status
         ) VALUES (
           'scope:CPM-RO-001:ETHUSDT:long', 'CPM-RO-001', 'ETHUSDT',
           'live_submit_allowed', 'policy:CPM-RO-001:ETHUSDT:long', 'active'
+        );
+        INSERT INTO brc_runtime_scope_bindings (
+          runtime_scope_binding_id, candidate_scope_id, runtime_profile_id, status
+        ) VALUES (
+          'runtime:scope:CPM-RO-001:ETHUSDT:long',
+          'scope:CPM-RO-001:ETHUSDT:long', 'owner-runtime-console-v1', 'active'
+        );
+        INSERT INTO brc_symbol_instrument_mappings (
+          mapping_id, symbol, exchange_instrument_id, status,
+          valid_from_ms, valid_until_ms
+        ) VALUES (
+          'mapping:ETHUSDT:binance_usdm', 'ETHUSDT',
+          'binance_usdm:ETH/USDT:USDT', 'active', 0, NULL
+        );
+        INSERT INTO brc_exchange_instruments (
+          exchange_instrument_id, exchange_id, status
+        ) VALUES (
+          'binance_usdm:ETH/USDT:USDT', 'binance_usdm', 'active'
         );
         INSERT INTO brc_candidate_scope_event_bindings (
           binding_id, candidate_scope_id, event_spec_id, status

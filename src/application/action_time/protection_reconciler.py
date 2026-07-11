@@ -16,8 +16,15 @@ from typing import Any
 
 import sqlalchemy as sa
 
-from src.application.action_time.capital_safety_freeze_projection import (
-    resolve_current_scope_freeze,
+from src.application.action_time.exchange_order_ownership import (
+    classify_exchange_order_ownership,
+)
+from src.application.action_time.exchange_scope import (
+    resolve_ticket_bound_exchange_scope,
+)
+from src.application.action_time.netting_domain_hold import (
+    resolve_netting_domain_hold_source,
+    upsert_netting_domain_hold,
 )
 from src.application.action_time.lifecycle_safety_core import (
     classify_protection_reconciliation,
@@ -71,6 +78,21 @@ def reconcile_ticket_bound_exit_protection_set(
         str(protection_set.get("ticket_id") or ""),
     )
     orders = _orders_for_set(conn, set_id)
+    scope_resolution = resolve_ticket_bound_exchange_scope(
+        conn,
+        ticket_id=str(protection_set.get("ticket_id") or ""),
+        now_ms=now_ms,
+    )
+    if scope_resolution.status != "resolved" or scope_resolution.scope is None:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            blockers=list(scope_resolution.blockers),
+            protection_set=protection_set,
+            lifecycle=lifecycle,
+            next_action="repair_ticket_bound_exchange_scope",
+        )
+    exchange_scope = scope_resolution.scope
     sl_order = _role_order(orders, "SL")
     tp1_order = _role_order(orders, "TP1")
     runner_order = _role_order(orders, "RUNNER_SL")
@@ -88,6 +110,17 @@ def reconcile_ticket_bound_exit_protection_set(
     position_snapshot_missing = not isinstance(raw_position, dict) or not raw_position
     position = dict(raw_position) if isinstance(raw_position, dict) else {}
     position_flat = False if position_snapshot_missing else _position_flat(position)
+    ownership = classify_exchange_order_ownership(
+        conn,
+        current_scope=exchange_scope,
+        open_orders=open_orders,
+        now_ms=now_ms,
+    )
+    ownership_blockers = [
+        str(item.blocker)
+        for item in ownership
+        if item.blocks_current_domain and item.blocker
+    ]
 
     live_protection_orders = _live_protection_orders(open_orders, orders)
     tp1_filled = (
@@ -95,11 +128,33 @@ def reconcile_ticket_bound_exit_protection_set(
         or _exchange_order_filled(tp1_order, recent_fills)
     )
     active_sl_order = runner_order if runner_order else sl_order
+    if (
+        position_flat
+        and _exchange_order_filled(active_sl_order, recent_fills)
+        and not live_protection_orders
+        and not ownership_blockers
+    ):
+        return _apply_flat_final_exit_reconciliation(
+            conn,
+            protection_set=protection_set,
+            lifecycle=lifecycle,
+            orders=orders,
+            final_order=active_sl_order,
+            exchange_scope=exchange_scope,
+            exchange_snapshot=exchange_snapshot,
+            now_ms=now_ms,
+        )
     classification = classify_protection_reconciliation(
         position_qty=position.get("qty") or position.get("position_qty"),
-        has_valid_sl=_has_valid_exchange_protection(active_sl_order, open_orders),
-        has_valid_tp1=tp1_filled or _has_valid_exchange_protection(tp1_order, open_orders),
-        has_runner_sl=_has_valid_exchange_protection(runner_order, open_orders),
+        has_valid_sl=_has_valid_exchange_protection(
+            active_sl_order, open_orders, exchange_scope
+        ),
+        has_valid_tp1=tp1_filled or _has_valid_exchange_protection(
+            tp1_order, open_orders, exchange_scope
+        ),
+        has_runner_sl=_has_valid_exchange_protection(
+            runner_order, open_orders, exchange_scope
+        ),
         tp1_filled=tp1_filled,
         position_flat=position_flat,
         live_protection_orders=live_protection_orders,
@@ -118,6 +173,8 @@ def reconcile_ticket_bound_exit_protection_set(
         old_sl_order=sl_order,
         runner_order=runner_order,
         classification_blockers=classification_blockers,
+        ownership_blockers=ownership_blockers,
+        exchange_scope=exchange_scope,
     )
     if blockers != classification_blockers:
         classification = classify_protection_reconciliation(
@@ -127,11 +184,17 @@ def reconcile_ticket_bound_exit_protection_set(
                 blocker in blockers
                 for blocker in ("sl_exchange_order_missing", "runner_sl_exchange_order_missing")
             )
-            else _has_valid_exchange_protection(active_sl_order, open_orders),
+            else _has_valid_exchange_protection(
+                active_sl_order, open_orders, exchange_scope
+            ),
             has_valid_tp1=False
             if "tp1_exchange_order_missing" in blockers
-            else tp1_filled or _has_valid_exchange_protection(tp1_order, open_orders),
-            has_runner_sl=_has_valid_exchange_protection(runner_order, open_orders),
+            else tp1_filled or _has_valid_exchange_protection(
+                tp1_order, open_orders, exchange_scope
+            ),
+            has_runner_sl=_has_valid_exchange_protection(
+                runner_order, open_orders, exchange_scope
+            ),
             tp1_filled=tp1_filled,
             position_flat=position_flat,
             live_protection_orders=live_protection_orders,
@@ -151,15 +214,27 @@ def reconcile_ticket_bound_exit_protection_set(
     if "exchange_position_snapshot_missing" in blockers:
         status = "protection_reconciliation_mismatch"
         next_action = "refresh_exchange_position_snapshot"
-    elif any(blocker == "exchange_only_unknown_order" for blocker in blockers):
+    elif ownership_blockers:
         status = "exchange_orphan_detected"
         next_action = "freeze_new_submits_for_scope"
-        _upsert_scope_freeze(
+        upsert_netting_domain_hold(
             conn,
-            protection_set=protection_set,
+            account_id=exchange_scope.account_id,
+            runtime_profile_id=exchange_scope.runtime_profile_id,
+            exchange_id=exchange_scope.exchange_id,
+            exchange_instrument_id=exchange_scope.exchange_instrument_id,
+            position_mode=exchange_scope.position_mode,
+            position_bucket=exchange_scope.position_bucket,
+            netting_domain_key=exchange_scope.netting_domain_key,
+            source_ticket_id=exchange_scope.ticket_id,
+            strategy_group_id=exchange_scope.strategy_group_id,
+            symbol=exchange_scope.canonical_symbol,
+            side=exchange_scope.side,
             source_kind="exit_protection_reconciler",
             source_id=set_id,
-            blockers=["exchange_only_unknown_order"],
+            blockers=ownership_blockers,
+            next_action="reconcile_global_exchange_order_ownership",
+            authority_boundary=AUTHORITY_BOUNDARY,
             now_ms=now_ms,
         )
     elif "old_sl_still_live_after_runner_mutation" in blockers:
@@ -183,6 +258,7 @@ def reconcile_ticket_bound_exit_protection_set(
     elif any(
         blocker.endswith("_side_mismatch")
         or blocker.endswith("_reduce_only_missing")
+        or blocker.endswith("_reduce_intent_missing")
         or blocker.endswith("_qty_exceeds_position")
         for blocker in blockers
     ):
@@ -240,13 +316,12 @@ def reconcile_ticket_bound_exit_protection_set(
             now_ms=now_ms,
         )
     if not blockers:
-        resolve_current_scope_freeze(
+        resolve_netting_domain_hold_source(
             conn,
-            strategy_group_id=protection_set.get("strategy_group_id"),
-            symbol=protection_set.get("symbol"),
-            side=protection_set.get("side"),
+            netting_domain_key=exchange_scope.netting_domain_key,
             source_kind="exit_protection_reconciler",
             source_id=set_id,
+            resolution_source="matched_exit_protection_reconciliation",
             now_ms=now_ms,
         )
     return _result(
@@ -270,13 +345,10 @@ def _additional_blockers(
     old_sl_order: dict[str, Any],
     runner_order: dict[str, Any],
     classification_blockers: list[str],
+    ownership_blockers: list[str],
+    exchange_scope: Any,
 ) -> list[str]:
-    blockers = list(classification_blockers)
-    linked_exchange_ids = {
-        str(order.get("exchange_order_id") or "")
-        for order in orders
-        if order.get("exchange_order_id")
-    }
+    blockers = list(classification_blockers) + list(ownership_blockers)
     for role, pg_order in (("SL", active_sl_order), ("TP1", _role_order(orders, "TP1"))):
         label = "runner_sl" if role == "SL" and pg_order == runner_order else role.lower()
         if role == "TP1" and _exchange_order_filled(pg_order, recent_fills):
@@ -287,8 +359,16 @@ def _additional_blockers(
         if not exchange_order:
             blockers.append(f"{label}_exchange_order_missing")
             continue
-        if exchange_order.get("reduce_only") is not True:
-            blockers.append(f"{label}_reduce_only_missing")
+        if not _exchange_order_proves_reduce_intent(
+            exchange_order,
+            pg_order=pg_order,
+            exchange_scope=exchange_scope,
+        ):
+            blockers.append(
+                f"{label}_reduce_only_missing"
+                if exchange_scope.position_mode == "one_way"
+                else f"{label}_reduce_intent_missing"
+            )
         if not _exchange_order_side_matches_pg(exchange_order, pg_order):
             blockers.append(f"{label}_side_mismatch")
         if _exchange_order_qty_exceeds_position(
@@ -300,28 +380,137 @@ def _additional_blockers(
             blockers.append(f"{label}_qty_exceeds_position")
     if runner_order and _exchange_order_by_id(open_orders, old_sl_order):
         blockers.append("old_sl_still_live_after_runner_mutation")
-    for exchange_order in open_orders:
-        exchange_order_id = str(exchange_order.get("exchange_order_id") or "")
-        if exchange_order.get("reduce_only") is True and exchange_order_id:
-            if exchange_order_id not in linked_exchange_ids:
-                blockers.append("exchange_only_unknown_order")
     return _dedupe(blockers)
+
+
+def _apply_flat_final_exit_reconciliation(
+    conn: sa.engine.Connection,
+    *,
+    protection_set: dict[str, Any],
+    lifecycle: dict[str, Any],
+    orders: list[dict[str, Any]],
+    final_order: dict[str, Any],
+    exchange_scope: Any,
+    exchange_snapshot: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    order_table = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    for order in orders:
+        if str(order.get("exit_protection_order_id") or "") == str(
+            final_order.get("exit_protection_order_id") or ""
+        ):
+            continue
+        if str(order.get("status") or "") in {
+            "planned",
+            "submitted",
+            "open",
+            "partially_filled",
+            "cancel_pending",
+            "replace_pending",
+        }:
+            conn.execute(
+                order_table.update()
+                .where(
+                    order_table.c.exit_protection_order_id
+                    == order["exit_protection_order_id"]
+                )
+                .values(status="cancelled", updated_at_ms=now_ms)
+            )
+    protection_update = {
+        **protection_set,
+        "status": "closed",
+        "reconciled_with_exchange": True,
+        "first_blocker": None,
+        "blockers": [],
+        "updated_at_ms": now_ms,
+    }
+    lifecycle_update = {
+        **lifecycle,
+        "status": "reconciliation_matched",
+        "first_blocker": None,
+        "blockers": [],
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_exit_protection_sets",
+        "exit_protection_set_id",
+        protection_update,
+    )
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "lifecycle_run_id",
+        lifecycle_update,
+    )
+    _insert_event(
+        conn,
+        lifecycle_update,
+        "reconciliation_matched",
+        {
+            "final_exit_exchange_order_id": final_order.get("exchange_order_id"),
+            "final_exit_role": final_order.get("role"),
+            "final_position_flat_confirmed": True,
+            "exchange_snapshot_ref": exchange_snapshot.get("snapshot_ref")
+            or exchange_snapshot.get("snapshot_id"),
+        },
+        now_ms=now_ms,
+    )
+    resolve_netting_domain_hold_source(
+        conn,
+        netting_domain_key=exchange_scope.netting_domain_key,
+        source_kind="exit_protection_reconciler",
+        source_id=str(protection_set.get("exit_protection_set_id") or ""),
+        resolution_source="flat_final_exit_reconciliation",
+        now_ms=now_ms,
+    )
+    return _result(
+        "reconciliation_matched",
+        now_ms=now_ms,
+        blockers=[],
+        protection_set=protection_update,
+        lifecycle=lifecycle_update,
+        next_action="finalize_ticket_bound_lifecycle",
+    )
 
 
 def _has_valid_exchange_protection(
     pg_order: dict[str, Any],
     open_orders: list[dict[str, Any]],
+    exchange_scope: Any,
 ) -> bool:
     if not pg_order:
         return False
     exchange_order = _exchange_order_by_id(open_orders, pg_order)
     if not exchange_order:
         return False
-    if exchange_order.get("reduce_only") is not True:
+    if not _exchange_order_proves_reduce_intent(
+        exchange_order,
+        pg_order=pg_order,
+        exchange_scope=exchange_scope,
+    ):
         return False
     if not _exchange_order_side_matches_pg(exchange_order, pg_order):
         return False
     return _decimal(exchange_order.get("qty") or exchange_order.get("amount")) > 0
+
+
+def _exchange_order_proves_reduce_intent(
+    exchange_order: dict[str, Any],
+    *,
+    pg_order: dict[str, Any],
+    exchange_scope: Any,
+) -> bool:
+    if exchange_scope.position_mode == "one_way":
+        return (
+            exchange_order.get("reduce_only") is True
+            or exchange_order.get("close_position") is True
+        )
+    return (
+        str(exchange_order.get("position_side") or "").upper()
+        == exchange_scope.position_side
+        and _exchange_order_side_matches_pg(exchange_order, pg_order)
+    )
 
 
 def _exchange_order_side_matches_pg(

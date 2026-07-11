@@ -18,25 +18,20 @@ import sqlalchemy as sa
 from src.application.action_time.exit_protection_materializer import (
     materialize_ticket_bound_exit_protection_set,
 )
-from src.application.action_time.exchange_command_reconciliation import (
-    reconcile_unknown_exchange_commands,
-)
 from src.application.action_time.orphan_protection_cleanup_command import (
-    execute_ticket_bound_orphan_protection_cleanup_command,
     prepare_ticket_bound_orphan_protection_cleanup_command,
+)
+from src.application.action_time.lifecycle_exchange_command_materializer import (
+    materialize_lifecycle_exchange_commands,
 )
 from src.application.action_time.protection_reconciler import (
     reconcile_ticket_bound_exit_protection_set,
 )
 from src.application.action_time.protection_recovery_command import (
-    execute_ticket_bound_protection_recovery_command,
     prepare_ticket_bound_protection_recovery_command,
 )
 from src.application.action_time.runner_mutation_command import (
     prepare_ticket_bound_runner_mutation_command,
-)
-from src.application.action_time.runner_mutation_executor import (
-    execute_ticket_bound_runner_mutation_command,
 )
 from src.application.action_time.runner_protection_adjuster import (
     materialize_ticket_bound_runner_protection_adjustment,
@@ -97,20 +92,7 @@ async def run_ticket_bound_lifecycle_maintenance(
         limit=max_actions,
     )
     if unknown_attempt_ids:
-        if gateway is None:
-            blockers.append("gateway_required_for_unknown_command_reconciliation")
-        else:
-            exchange_read_called = True
-            reconciled = await reconcile_unknown_exchange_commands(
-                conn,
-                gateway=gateway,
-                now_ms=now_ms,
-                max_commands=max(1, min(max_actions, len(unknown_attempt_ids))),
-            )
-            actions.append(
-                _action("exchange_command_unknown_reconciled", reconciled)
-            )
-            blockers.extend(_result_blockers(reconciled))
+        blockers.append("exchange_command_reconciliation_worker_required")
 
     attempt_ids = _scoped_attempt_ids(conn, scope=scope)
     attempt_ids = [
@@ -143,38 +125,17 @@ async def run_ticket_bound_lifecycle_maintenance(
             actions.append(_action("protection_recovery_prepared", recovery))
             blockers.extend(_result_blockers(recovery))
             command_id = str(recovery.get("protection_recovery_command_id") or "")
-            if (
-                allow_exchange_mutation
-                and gateway is not None
-                and recovery.get("status") == "prepared"
-                and command_id
-                and len(actions) < max_actions
-            ):
-                executed = await execute_ticket_bound_protection_recovery_command(
+            if recovery.get("status") == "prepared" and command_id:
+                durable = _materialize_durable_commands(
                     conn,
-                    protection_recovery_command_id=command_id,
-                    gateway=gateway,
+                    command_source="protection_recovery",
+                    source_command_id=command_id,
                     now_ms=now_ms + len(actions),
                 )
-                actions.append(_action("protection_recovery_executed", executed))
-                exchange_write_called = (
-                    exchange_write_called or _result_exchange_write_called(executed)
+                actions.append(
+                    _action("protection_recovery_exchange_commands_prepared", durable)
                 )
-                blockers.extend(_result_blockers(executed))
-                if executed.get("status") == "result_recorded" and len(actions) < max_actions:
-                    repaired = materialize_ticket_bound_exit_protection_set(
-                        conn,
-                        protected_submit_attempt_id=attempt_id,
-                        now_ms=now_ms + len(actions),
-                    )
-                    actions.append(
-                        _action("exit_protection_materialized_after_recovery", repaired)
-                    )
-                    blockers.extend(_result_blockers(repaired))
-            elif recovery.get("status") == "prepared" and not allow_exchange_mutation:
-                blockers.append("exchange_mutation_not_allowed_for_protection_recovery")
-            elif recovery.get("status") == "prepared" and gateway is None:
-                blockers.append("gateway_required_for_protection_recovery")
+                blockers.extend(_result_blockers(durable))
 
     protection_set_ids = _scoped_exit_protection_set_ids(conn, scope=scope)
     for set_id in protection_set_ids:
@@ -203,29 +164,20 @@ async def run_ticket_bound_lifecycle_maintenance(
                 actions.append(_action("protection_recovery_prepared", recovery))
                 blockers.extend(_result_blockers(recovery))
                 command_id = str(recovery.get("protection_recovery_command_id") or "")
-                if (
-                    allow_exchange_mutation
-                    and gateway is not None
-                    and recovery.get("status") == "prepared"
-                    and command_id
-                    and len(actions) < max_actions
-                ):
-                    executed = await execute_ticket_bound_protection_recovery_command(
+                if recovery.get("status") == "prepared" and command_id:
+                    durable = _materialize_durable_commands(
                         conn,
-                        protection_recovery_command_id=command_id,
-                        gateway=gateway,
+                        command_source="protection_recovery",
+                        source_command_id=command_id,
                         now_ms=now_ms + len(actions),
                     )
-                    actions.append(_action("protection_recovery_executed", executed))
-                    exchange_write_called = (
-                        exchange_write_called
-                        or _result_exchange_write_called(executed)
+                    actions.append(
+                        _action(
+                            "protection_recovery_exchange_commands_prepared",
+                            durable,
+                        )
                     )
-                    blockers.extend(_result_blockers(executed))
-                elif recovery.get("status") == "prepared" and not allow_exchange_mutation:
-                    blockers.append("exchange_mutation_not_allowed_for_protection_recovery")
-                elif recovery.get("status") == "prepared" and gateway is None:
-                    blockers.append("gateway_required_for_protection_recovery")
+                    blockers.extend(_result_blockers(durable))
 
         runner: dict[str, Any] = {}
         runner_command_id = ""
@@ -239,45 +191,17 @@ async def run_ticket_bound_lifecycle_maintenance(
                 actions.append(_action("runner_mutation_prepared", runner))
                 blockers.extend(_result_blockers(runner))
             runner_command_id = str(runner.get("runner_mutation_command_id") or "")
-        if (
-            allow_exchange_mutation
-            and gateway is not None
-            and runner.get("status") == "prepared"
-            and runner_command_id
-            and len(actions) < max_actions
-        ):
-            executed = await execute_ticket_bound_runner_mutation_command(
+        if runner.get("status") == "prepared" and runner_command_id:
+            durable = _materialize_durable_commands(
                 conn,
-                runner_mutation_command_id=runner_command_id,
-                gateway=gateway,
+                command_source="runner_mutation",
+                source_command_id=runner_command_id,
                 now_ms=now_ms + len(actions),
             )
-            actions.append(_action("runner_mutation_executed", executed))
-            exchange_write_called = (
-                exchange_write_called or _result_exchange_write_called(executed)
+            actions.append(
+                _action("runner_mutation_exchange_commands_prepared", durable)
             )
-            blockers.extend(_result_blockers(executed))
-            result_payload = dict(executed.get("result_payload") or {})
-            runner_exchange_id = str(result_payload.get("runner_sl_exchange_order_id") or "")
-            runner_local_id = str(result_payload.get("runner_sl_local_order_id") or "")
-            if (
-                executed.get("status") == "result_recorded"
-                and runner_exchange_id
-                and len(actions) < max_actions
-            ):
-                adjusted = materialize_ticket_bound_runner_protection_adjustment(
-                    conn,
-                    exit_protection_set_id=set_id,
-                    runner_sl_exchange_order_id=runner_exchange_id,
-                    runner_sl_local_order_id=runner_local_id,
-                    now_ms=now_ms + len(actions),
-                )
-                actions.append(_action("runner_protection_materialized", adjusted))
-                blockers.extend(_result_blockers(adjusted))
-        elif runner.get("status") == "prepared" and not allow_exchange_mutation:
-            blockers.append("exchange_mutation_not_allowed_for_runner_mutation")
-        elif runner.get("status") == "prepared" and gateway is None:
-            blockers.append("gateway_required_for_runner_mutation")
+            blockers.extend(_result_blockers(durable))
 
         cleanup: dict[str, Any] = {}
         cleanup_command_id = ""
@@ -291,28 +215,17 @@ async def run_ticket_bound_lifecycle_maintenance(
                 actions.append(_action("orphan_protection_cleanup_prepared", cleanup))
                 blockers.extend(_result_blockers(cleanup))
             cleanup_command_id = str(cleanup.get("orphan_protection_cleanup_command_id") or "")
-        if (
-            allow_exchange_mutation
-            and gateway is not None
-            and cleanup.get("status") == "prepared"
-            and cleanup_command_id
-            and len(actions) < max_actions
-        ):
-            executed_cleanup = await execute_ticket_bound_orphan_protection_cleanup_command(
+        if cleanup.get("status") == "prepared" and cleanup_command_id:
+            durable = _materialize_durable_commands(
                 conn,
-                orphan_protection_cleanup_command_id=cleanup_command_id,
-                gateway=gateway,
+                command_source="orphan_cleanup",
+                source_command_id=cleanup_command_id,
                 now_ms=now_ms + len(actions),
             )
-            actions.append(_action("orphan_protection_cleanup_executed", executed_cleanup))
-            exchange_write_called = (
-                exchange_write_called or _result_exchange_write_called(executed_cleanup)
+            actions.append(
+                _action("orphan_cleanup_exchange_commands_prepared", durable)
             )
-            blockers.extend(_result_blockers(executed_cleanup))
-        elif cleanup.get("status") == "prepared" and not allow_exchange_mutation:
-            blockers.append("exchange_mutation_not_allowed_for_orphan_cleanup")
-        elif cleanup.get("status") == "prepared" and gateway is None:
-            blockers.append("gateway_required_for_orphan_cleanup")
+            blockers.extend(_result_blockers(durable))
 
     blockers = _dedupe(
         _control_blockers(blockers)
@@ -329,6 +242,7 @@ async def run_ticket_bound_lifecycle_maintenance(
         "blockers": blockers,
         "next_action": _next_action(blockers),
         "allow_exchange_mutation": allow_exchange_mutation,
+        "direct_exchange_mutation_enabled": False,
         "exchange_read_called": exchange_read_called,
         "exchange_write_called": exchange_write_called,
         "finalgate_called": False,
@@ -339,6 +253,40 @@ async def run_ticket_bound_lifecycle_maintenance(
         "order_sizing_changed": False,
         "runtime_budget_mutated": False,
         "authority_boundary": AUTHORITY_BOUNDARY,
+    }
+
+
+def _materialize_durable_commands(
+    conn: sa.engine.Connection,
+    *,
+    command_source: str,
+    source_command_id: str,
+    now_ms: int,
+) -> dict[str, Any]:
+    try:
+        rows = materialize_lifecycle_exchange_commands(
+            conn,
+            command_source=command_source,  # type: ignore[arg-type]
+            source_command_id=source_command_id,
+            now_ms=now_ms,
+        )
+    except Exception as exc:
+        blocker = f"lifecycle_exchange_command_materialization_failed:{type(exc).__name__}"
+        return {
+            "status": "blocked",
+            "first_blocker": blocker,
+            "blockers": [blocker, str(exc)],
+            "exchange_write_called": False,
+        }
+    return {
+        "status": "prepared",
+        "exchange_command_count": len(rows),
+        "exchange_command_ids": [
+            str(row.get("exchange_command_id") or "") for row in rows
+        ],
+        "first_blocker": None,
+        "blockers": [],
+        "exchange_write_called": False,
     }
 
 
@@ -525,6 +473,7 @@ def _action(action_type: str, result: dict[str, Any]) -> dict[str, Any]:
 def _control_blockers(blockers: list[str]) -> list[str]:
     prefixes = (
         "exchange_mutation_not_allowed",
+        "exchange_command_reconciliation_worker_required",
         "gateway_required",
         "lifecycle_maintenance_max_actions_reached",
     )

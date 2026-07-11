@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +35,9 @@ from src.application.action_time.full_chain_simulation_harness import (
 )
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
+)
+from src.application.action_time.runtime_pg_fact_snapshots import (
+    write_account_safe_fact_snapshots,
 )
 from src.interfaces import api as trading_api_module
 from src.interfaces import api_trading_console
@@ -112,6 +116,14 @@ RUNTIME_SUPERVISION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-106_create_runtime_supervision_and_allocation.py"
 )
+LIFECYCLE_TYPED_SCOPE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-11-113_create_exchange_account_mode_and_domain_holds.py"
+)
+LIFECYCLE_COMMAND_EXTENSION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -157,6 +169,11 @@ def _arm_submit_decision_env(monkeypatch) -> None:
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED", "true")
+    monkeypatch.setenv(
+        "BRC_RUNTIME_EXCHANGE_ACCOUNT_ID",
+        "owner-subaccount-runtime-v0",
+    )
+    monkeypatch.setenv("BRC_RUNTIME_EXCHANGE_ID", "binance_usdm")
 
 
 @pytest.fixture()
@@ -349,7 +366,36 @@ def pg_control_connection():
                 lifecycle_migration.op = old_lifecycle_op
         finally:
             migration.op = old_op
+        for path, module_name in (
+            (
+                LIFECYCLE_TYPED_SCOPE_MIGRATION_PATH,
+                "migration_113_action_time_full_chain",
+            ),
+            (
+                LIFECYCLE_COMMAND_EXTENSION_MIGRATION_PATH,
+                "migration_114_action_time_full_chain",
+            ),
+        ):
+            extension = _load_module(path, module_name)
+            old_extension_op = extension.op
+            extension.op = Operations(MigrationContext.configure(conn))
+            try:
+                extension.upgrade()
+            finally:
+                extension.op = old_extension_op
         seed.seed_runtime_control_state_foundation(conn)
+        conn.execute(
+            text(
+                """
+                UPDATE brc_runtime_capabilities_current
+                SET status = 'enabled',
+                    certification_ref = 'test:production-shaped-lifecycle',
+                    updated_at_ms = :now_ms
+                WHERE capability_id = 'ticket_lifecycle_durable_mutation'
+                """
+            ),
+            {"now_ms": NOW_MS - 1},
+        )
     with engine.connect() as conn:
         yield conn
     engine.dispose()
@@ -906,15 +952,19 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
     assert payloads["submitted"]["status"] == "submitted"
     assert payloads["protection"]["status"] == "position_protected"
     assert payloads["post_submit_pending"]["status"] == "reconciliation_pending"
-    assert payloads["runner_mutation_command"]["status"] == "prepared"
-    assert payloads["runner_mutation_result"]["status"] == "result_recorded"
-    assert payloads["runner"]["status"] == "runner_protected"
+    assert payloads["initial_scheduler"]["exchange_write_called"] is False
+    assert payloads["final_scheduler"]["exchange_write_called"] is False
     assert payloads["final"]["status"] == "closed"
     assert payloads["final"]["reconciliation_state"] == "matched"
     assert payloads["final"]["settlement_state"] == "released"
     assert payloads["final"]["review_state"] == "recorded"
     assert payloads["authority_boundary"]["uses_mock_exchange_result"] is True
     assert payloads["authority_boundary"]["calls_exchange_write"] is False
+    assert payloads["authority_boundary"]["uses_production_fill_projector"] is True
+    assert (
+        payloads["authority_boundary"]["uses_production_reconciliation_scheduler"]
+        is True
+    )
 
     assert _status(
         pg_control_connection,
@@ -931,7 +981,7 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
     assert _count(pg_control_connection, "brc_ticket_bound_post_submit_closures") == 1
     assert _count(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs") == 1
     assert _count(pg_control_connection, "brc_ticket_bound_exit_protection_sets") == 1
-    assert _count(pg_control_connection, "brc_ticket_bound_exit_protection_orders") == 3
+    assert _count(pg_control_connection, "brc_ticket_bound_exit_protection_orders") == 2
     assert _status(
         pg_control_connection,
         "brc_ticket_bound_order_lifecycle_runs",
@@ -1023,7 +1073,7 @@ def test_full_chain_failure_matrix_stops_at_exact_lifecycle_state(
         "flat_position_live_protection_cleanup": (
             "reconciliation_matched",
             [],
-            "result_recorded",
+            "command_confirmed",
         ),
         "duplicate_tp1_fill_idempotent": (
             "runner_mutation_pending",
@@ -1233,6 +1283,41 @@ def _run_raw_pg_input_to_runtime_safety(
         insert_action_time_fact=False,
         insert_signal=False,
         fact_values=public_fact_values,
+    )
+    observed_at = datetime.fromtimestamp(
+        (NOW_MS - 1000) / 1000,
+        tz=timezone.utc,
+    ).isoformat()
+    write_account_safe_fact_snapshots(
+        conn,
+        artifact={
+            "generated_at_utc": observed_at,
+            "source_status": "unit_raw_signed_response",
+            "checks": {
+                "account_safe_facts_ready": True,
+                "account_safe": True,
+                "account_trade_permission": True,
+                "open_orders_clear": True,
+                "active_position_or_open_order_clear": True,
+                "action_time_available_balance": True,
+                "source_signed_get_only": True,
+                "source_exchange_write_called": False,
+                "source_order_created": False,
+            },
+            "facts": {},
+            "account_mode": {
+                "status": "fresh",
+                "account_id": "owner-subaccount-runtime-v0",
+                "exchange_id": "binance_usdm",
+                "runtime_profile_id": "owner-runtime-console-v1",
+                "account_mode": "one_way",
+                "dual_side_position": False,
+                "position_mode_safe": True,
+                "observed_at": observed_at,
+                "source": "binance_usdm_signed_get:/fapi/v1/positionSide/dual",
+            },
+        },
+        source_ref="unit:signed-account-response",
     )
     signal_payload = _write_monitor_signal_summary_to_pg(
         conn,

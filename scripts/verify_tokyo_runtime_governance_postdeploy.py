@@ -23,9 +23,9 @@ from typing import Any, Callable
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 84
+DEFAULT_EXPECTED_MIGRATION_COUNT = 114
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+    "2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
 
@@ -119,6 +119,35 @@ def build_postdeploy_report(
             connect_timeout_seconds=connect_timeout_seconds,
             runner=command_runner,
         ),
+        "lifecycle_timer_enabled": _ssh_text(
+            host,
+            "systemctl is-enabled brc-ticket-lifecycle-maintenance.timer",
+            connect_timeout_seconds=connect_timeout_seconds,
+            runner=command_runner,
+        ),
+        "lifecycle_timer_active": _ssh_text(
+            host,
+            "systemctl is-active brc-ticket-lifecycle-maintenance.timer",
+            connect_timeout_seconds=connect_timeout_seconds,
+            runner=command_runner,
+        ),
+        "lifecycle_service_result": _ssh_text(
+            host,
+            "systemctl show brc-ticket-lifecycle-maintenance.service "
+            "--property=Result --property=ExecMainStatus --value",
+            connect_timeout_seconds=connect_timeout_seconds,
+            runner=command_runner,
+        ),
+        "lifecycle_units_match_release": _ssh_text(
+            host,
+            "cmp -s /etc/systemd/system/brc-ticket-lifecycle-maintenance.service "
+            f"{quoted_current_path}/deploy/systemd/brc-ticket-lifecycle-maintenance.service "
+            "&& cmp -s /etc/systemd/system/brc-ticket-lifecycle-maintenance.timer "
+            f"{quoted_current_path}/deploy/systemd/brc-ticket-lifecycle-maintenance.timer "
+            "&& echo match",
+            connect_timeout_seconds=connect_timeout_seconds,
+            runner=command_runner,
+        ),
         "http_checks": _http_checks(
             host,
             api_base=api_base,
@@ -194,6 +223,15 @@ def evaluate_postdeploy_checks(
     latest_migration = str(facts.get("latest_migration") or "").strip()
     if latest_migration != expected_latest_migration:
         blockers.append("postdeploy_latest_migration_mismatch")
+    if str(facts.get("lifecycle_timer_enabled") or "").strip() != "enabled":
+        blockers.append("postdeploy_lifecycle_timer_not_enabled")
+    if str(facts.get("lifecycle_timer_active") or "").strip() != "active":
+        blockers.append("postdeploy_lifecycle_timer_not_active")
+    lifecycle_result = str(facts.get("lifecycle_service_result") or "").splitlines()
+    if lifecycle_result != ["success", "0"]:
+        blockers.append("postdeploy_lifecycle_service_last_run_failed")
+    if str(facts.get("lifecycle_units_match_release") or "").strip() != "match":
+        blockers.append("postdeploy_lifecycle_units_release_mismatch")
 
     http_checks = facts.get("http_checks")
     if not isinstance(http_checks, list):

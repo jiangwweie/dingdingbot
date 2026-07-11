@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import text
 
 from src.application.action_time.exchange_snapshot_provider import (
     fetch_ticket_bound_exchange_snapshot,
@@ -87,10 +89,17 @@ async def test_exchange_snapshot_provider_normalizes_readonly_gateway_facts(
     assert payload["exchange_read_called"] is True
     assert payload["exchange_write_called"] is False
     assert [event for event in gateway.events] == [
-        "fetch_open_orders",
+        "fetch_all_open_orders",
         "fetch_my_trades",
         "fetch_positions",
     ]
+    assert gateway.read_symbols == [
+        "ETH/USDT:USDT",
+        "ETH/USDT:USDT",
+        "ETH/USDT:USDT",
+    ]
+    assert snapshot["symbol"] == "ETHUSDT"
+    assert snapshot["exchange_symbol"] == "ETH/USDT:USDT"
     assert snapshot["open_orders"][0]["exchange_order_id"] == "exchange-sl-1"
     assert snapshot["open_orders"][0]["reduce_only"] is True
     assert snapshot["recent_fills"][0]["exchange_order_id"] == "exchange-tp1-1"
@@ -98,11 +107,10 @@ async def test_exchange_snapshot_provider_normalizes_readonly_gateway_facts(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_fetches_snapshot_and_runs_runner_mutation(
+async def test_scheduler_fetches_snapshot_and_prepares_durable_runner_commands(
     pg_control_connection,
 ):
     set_id = _materialized_exit_protection_set(pg_control_connection)
-    _mark_tp1_filled(pg_control_connection, set_id)
     scopes = select_ticket_bound_lifecycle_maintenance_scopes(
         pg_control_connection,
         max_lifecycle_scopes=4,
@@ -124,7 +132,7 @@ async def test_scheduler_fetches_snapshot_and_runs_runner_mutation(
     ]
     assert payload["status"] == "scheduler_complete"
     assert payload["exchange_read_called"] is True
-    assert payload["exchange_write_called"] is True
+    assert payload["exchange_write_called"] is False
     assert (
         lifecycle_maintenance_scopes_require_exchange_gateway(
             scopes,
@@ -134,26 +142,160 @@ async def test_scheduler_fetches_snapshot_and_runs_runner_mutation(
         is True
     )
     assert "exit_protection_reconciled" in actions
-    assert actions[-3:] == [
+    assert actions[-2:] == [
         "runner_mutation_prepared",
-        "runner_mutation_executed",
-        "runner_protection_materialized",
+        "runner_mutation_exchange_commands_prepared",
     ]
     assert gateway.events == [
-        "fetch_open_orders",
+        "fetch_all_open_orders",
         "fetch_my_trades",
         "fetch_positions",
-        "place_order",
-        "cancel_order",
     ]
+    assert pg_control_connection.execute(
+        text(
+            "SELECT status FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE role = 'TP1'"
+        )
+    ).scalar_one() == "filled"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_blocks_gateway_identity_mismatch_before_exchange_io(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    gateway = _SchedulerGateway()
+    gateway.runtime_account_id = "another-account"
+
+    payload = await fetch_ticket_bound_exchange_snapshot(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        gateway=gateway,
+        now_ms=NOW_MS + 10_000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert payload["first_blocker"] == (
+        "ticket_exchange_scope_gateway_account_mismatch"
+    )
+    assert payload["exchange_read_called"] is False
+    assert gateway.events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_snapshot_selects_exact_hedge_position_bucket_independent_of_order(
+    pg_control_connection,
+    reverse: bool,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_runtime_fact_snapshots
+            SET fact_values = :fact_values
+            WHERE fact_snapshot_id = (
+              SELECT account_mode_snapshot_id
+              FROM brc_action_time_tickets
+              LIMIT 1
+            )
+            """
+        ),
+        {
+            "fact_values": json.dumps(
+                {
+                    "account_id": "owner-subaccount-runtime-v0",
+                    "exchange_id": "binance_usdm",
+                    "account_mode": "hedge",
+                    "dual_side_position": True,
+                    "position_mode_safe": True,
+                }
+            )
+        },
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_exchange_account_modes_current
+            SET position_mode = 'hedge',
+                dual_side_position = true,
+                position_mode_safe = true,
+                status = 'current'
+            WHERE account_id = 'owner-subaccount-runtime-v0'
+              AND exchange_id = 'binance_usdm'
+            """
+        )
+    )
+    gateway = _SchedulerGateway()
+    rows = [
+        {
+            "symbol": "ETH/USDT:USDT",
+            "side": "long",
+            "size": "0.25",
+            "position_side": "LONG",
+        },
+        {
+            "symbol": "ETH/USDT:USDT",
+            "side": "short",
+            "size": "0.75",
+            "position_side": "SHORT",
+        },
+    ]
+    gateway.position_rows = list(reversed(rows)) if reverse else rows
+
+    payload = await fetch_ticket_bound_exchange_snapshot(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        gateway=gateway,
+        now_ms=NOW_MS + 10_000,
+    )
+
+    assert payload["status"] == "snapshot_ready"
+    assert payload["snapshot"]["position_mode"] == "hedge"
+    assert payload["snapshot"]["position_side"] == "LONG"
+    assert payload["snapshot"]["position"]["qty"] == "0.25"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_complete_empty_position_rows_prove_flat(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    gateway = _SchedulerGateway()
+    gateway.position_rows = []
+
+    payload = await fetch_ticket_bound_exchange_snapshot(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        gateway=gateway,
+        now_ms=NOW_MS + 10_000,
+    )
+
+    assert payload["status"] == "snapshot_ready"
+    assert payload["snapshot"]["position"]["truth_state"] == "flat"
+    assert payload["snapshot"]["position"]["position_flat"] is True
 
 
 class _SchedulerGateway:
     def __init__(self) -> None:
+        self.runtime_account_id = "owner-subaccount-runtime-v0"
+        self.runtime_exchange_id = "binance_usdm"
         self.events: list[str] = []
+        self.read_symbols: list[str] = []
+        self.position_rows = None
 
     async def fetch_open_orders(self, symbol: str, params=None):
         self.events.append("fetch_open_orders")
+        self.read_symbols.append(symbol)
+        return self._open_orders(symbol)
+
+    async def fetch_all_open_orders(self, symbol: str):
+        self.events.append("fetch_all_open_orders")
+        self.read_symbols.append(symbol)
+        return self._open_orders(symbol)
+
+    @staticmethod
+    def _open_orders(symbol: str):
         return [
             {
                 "id": "exchange-sl-1",
@@ -170,6 +312,7 @@ class _SchedulerGateway:
 
     async def fetch_my_trades(self, symbol: str, limit: int = 50, params=None):
         self.events.append("fetch_my_trades")
+        self.read_symbols.append(symbol)
         return [
             {
                 "order": "exchange-tp1-1",
@@ -183,6 +326,7 @@ class _SchedulerGateway:
 
     async def fetch_positions(self, symbol: str | None = None):
         self.events.append("fetch_positions")
+        self.read_symbols.append(str(symbol or ""))
         return [
             {
                 "symbol": symbol or "ETHUSDT",
@@ -194,6 +338,13 @@ class _SchedulerGateway:
                 "liquidation_price": "1200",
             }
         ]
+
+    async def fetch_position_rows(self, symbol: str):
+        if self.position_rows is not None:
+            self.events.append("fetch_positions")
+            self.read_symbols.append(symbol)
+            return list(self.position_rows)
+        return await self.fetch_positions(symbol)
 
     async def place_order(self, **kwargs):
         self.events.append("place_order")

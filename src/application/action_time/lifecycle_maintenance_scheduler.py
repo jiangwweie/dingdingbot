@@ -20,6 +20,12 @@ from src.application.action_time.post_submit_reconciliation_tick import (
     materialize_ticket_bound_reconciliation_tick,
     select_ticket_bound_first_reconciliation_tick_scopes,
 )
+from src.application.action_time.ticket_bound_fill_projector import (
+    project_ticket_bound_exchange_fills,
+)
+from src.application.action_time.ticket_bound_lifecycle_finalizer import (
+    finalize_ticket_bound_lifecycle_if_ready,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -42,6 +48,9 @@ MAINTAINABLE_LIFECYCLE_STATUSES = {
     "runner_mutation_failed",
     "runner_reconciliation_mismatch",
     "position_closed_protection_live",
+    "reconciliation_matched",
+    "budget_settled",
+    "review_recorded",
 }
 SNAPSHOT_STATUSES = {
     "position_protected",
@@ -64,6 +73,7 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
     max_lifecycle_scopes: int = 4,
     max_actions_per_scope: int = 16,
     snapshot_timeout_seconds: float = 8.0,
+    provided_exchange_snapshots: dict[str, dict[str, Any]] | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
@@ -103,10 +113,24 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
     blockers: list[str] = []
     exchange_read_called = False
     exchange_write_called = False
+    provided_exchange_snapshots = provided_exchange_snapshots or {}
     for index, scope in enumerate(first_tick_scopes):
         snapshot_payload: dict[str, Any] = {}
         exchange_snapshot: dict[str, Any] | None = None
-        if fetch_exchange_snapshot and gateway is not None:
+        provided = provided_exchange_snapshots.get(
+            str(scope["protected_submit_attempt_id"])
+        )
+        if provided is not None:
+            snapshot_payload = dict(provided)
+            exchange_read_called = (
+                exchange_read_called
+                or snapshot_payload.get("exchange_read_called") is True
+            )
+            if snapshot_payload.get("status") == "snapshot_ready":
+                exchange_snapshot = dict(snapshot_payload.get("snapshot") or {})
+            else:
+                blockers.extend(_result_blockers(snapshot_payload))
+        elif fetch_exchange_snapshot and gateway is not None:
             snapshot_payload = await fetch_ticket_bound_attempt_exchange_snapshot(
                 conn,
                 protected_submit_attempt_id=str(scope["protected_submit_attempt_id"]),
@@ -131,6 +155,16 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             now_ms=now_ms + index + 25,
         )
         blockers.extend(_result_blockers(tick))
+        fill_projection = (
+            project_ticket_bound_exchange_fills(
+                conn,
+                ticket_id=str(scope.get("ticket_id") or ""),
+                exchange_snapshot=exchange_snapshot,
+                now_ms=now_ms + index + 50,
+            )
+            if exchange_snapshot
+            else {}
+        )
         maintenance = await run_ticket_bound_lifecycle_maintenance(
             conn,
             ticket_id=str(scope.get("ticket_id") or ""),
@@ -149,12 +183,20 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
         exchange_write_called = (
             exchange_write_called or maintenance.get("exchange_write_called") is True
         )
+        finalization = finalize_ticket_bound_lifecycle_if_ready(
+            conn,
+            ticket_id=str(scope.get("ticket_id") or ""),
+            now_ms=now_ms + index + 110,
+        )
+        blockers.extend(_result_blockers(finalization))
         runs.append(
             {
                 "scope": {**scope, "scheduler_scope_kind": "first_post_submit"},
                 "snapshot": _summary(snapshot_payload),
                 "first_tick": _summary(tick),
+                "fill_projection": _summary(fill_projection),
                 "maintenance": _summary(maintenance),
+                "finalization": _summary(finalization),
                 "actions": list(maintenance.get("actions") or []),
             }
         )
@@ -162,7 +204,20 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
     for index, scope in enumerate(scopes):
         snapshot_payload: dict[str, Any] = {}
         exchange_snapshot: dict[str, Any] | None = None
-        if (
+        provided = provided_exchange_snapshots.get(
+            str(scope.get("exit_protection_set_id") or "")
+        )
+        if provided is not None:
+            snapshot_payload = dict(provided)
+            exchange_read_called = (
+                exchange_read_called
+                or snapshot_payload.get("exchange_read_called") is True
+            )
+            if snapshot_payload.get("status") == "snapshot_ready":
+                exchange_snapshot = dict(snapshot_payload.get("snapshot") or {})
+            else:
+                blockers.extend(_result_blockers(snapshot_payload))
+        elif (
             fetch_exchange_snapshot
             and gateway is not None
             and scope.get("exit_protection_set_id")
@@ -191,6 +246,14 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             blockers.append("exchange_snapshot_gateway_required")
 
         scheduled_tick: dict[str, Any] = {}
+        fill_projection: dict[str, Any] = {}
+        if exchange_snapshot:
+            fill_projection = project_ticket_bound_exchange_fills(
+                conn,
+                ticket_id=str(scope.get("ticket_id") or ""),
+                exchange_snapshot=exchange_snapshot,
+                now_ms=now_ms + index + 25,
+            )
         if exchange_snapshot and scope.get("protected_submit_attempt_id"):
             scheduled_tick = materialize_ticket_bound_reconciliation_tick(
                 conn,
@@ -251,14 +314,22 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
                 blockers.extend(_result_blockers(recovery_check_tick))
             else:
                 blockers.extend(_result_blockers(post_recovery_snapshot_payload))
+        finalization = finalize_ticket_bound_lifecycle_if_ready(
+            conn,
+            ticket_id=str(scope.get("ticket_id") or ""),
+            now_ms=now_ms + index + 175,
+        )
+        blockers.extend(_result_blockers(finalization))
         runs.append(
             {
                 "scope": scope,
                 "snapshot": _summary(snapshot_payload),
                 "scheduled_tick": _summary(scheduled_tick),
+                "fill_projection": _summary(fill_projection),
                 "maintenance": _summary(maintenance),
                 "post_recovery_snapshot": _summary(post_recovery_snapshot_payload),
                 "recovery_check_tick": _summary(recovery_check_tick),
+                "finalization": _summary(finalization),
                 "actions": list(maintenance.get("actions") or []),
             }
         )

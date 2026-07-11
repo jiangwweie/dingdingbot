@@ -50,6 +50,7 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     strategy_group_id: str = Field(min_length=1, max_length=128)
     runtime_profile_id: str = Field(min_length=1, max_length=128)
     exchange_instrument_id: str = Field(min_length=1, max_length=192)
+    exchange_id: str = Field(min_length=1, max_length=128)
     gateway_symbol: str = Field(min_length=1, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
     order_role: str = Field(pattern="^(ENTRY|SL|TP1|RUNNER_SL)$")
@@ -65,6 +66,17 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     price: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
     stop_price: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
     reduce_only: bool = False
+    reduce_intent: str = Field(pattern="^(open_position|reduce_position)$")
+    position_mode: str = Field(pattern="^(one_way|hedge)$")
+    position_side: Optional[str] = Field(default=None, pattern="^(LONG|SHORT)$")
+    position_bucket: str = Field(pattern="^(BOTH|LONG|SHORT)$")
+    netting_domain_key: str = Field(min_length=1, max_length=640)
+    command_kind: str = Field(pattern="^(place_order|cancel_order)$")
+    command_source: str = Field(
+        pattern="^(protected_submit|protection_recovery|runner_mutation|orphan_cleanup)$"
+    )
+    source_command_id: str = Field(min_length=1, max_length=192)
+    target_exchange_order_id: Optional[str] = Field(default=None, max_length=192)
     authority_source_ref: str = Field(min_length=1, max_length=256)
     command_state: ExchangeCommandState
     outcome_class: ExchangeCommandOutcomeClass = ExchangeCommandOutcomeClass.PENDING
@@ -75,6 +87,12 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     dispatch_started_at_ms: Optional[int] = Field(default=None, ge=0)
     resolved_at_ms: Optional[int] = Field(default=None, ge=0)
     updated_at_ms: int = Field(ge=0)
+    claim_owner: Optional[str] = Field(default=None, max_length=128)
+    claim_token: Optional[str] = Field(default=None, max_length=192)
+    claim_started_at_ms: Optional[int] = Field(default=None, ge=0)
+    claim_expires_at_ms: Optional[int] = Field(default=None, ge=0)
+    execution_attempt_count: int = Field(default=0, ge=0)
+    last_reconciled_at_ms: Optional[int] = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _validate_resolution(self) -> "TicketBoundExchangeCommand":
@@ -91,6 +109,19 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
             raise ValueError(
                 "confirmed rejection requires authoritative rejection"
             )
+        if self.position_mode == "one_way" and (
+            self.position_side is not None or self.position_bucket != "BOTH"
+        ):
+            raise ValueError("one-way command must use BOTH without positionSide")
+        if self.position_mode == "hedge" and (
+            self.position_side not in {"LONG", "SHORT"}
+            or self.position_bucket != self.position_side
+        ):
+            raise ValueError("hedge command requires matching positionSide bucket")
+        if self.reduce_intent == "open_position" and self.order_role != "ENTRY":
+            raise ValueError("only ENTRY may open position")
+        if self.reduce_intent == "reduce_position" and self.order_role == "ENTRY":
+            raise ValueError("ENTRY may not carry reduce intent")
         return self
 
 

@@ -9,6 +9,9 @@ from sqlalchemy import text
 from src.application.action_time.lifecycle_maintenance_service import (
     run_ticket_bound_lifecycle_maintenance,
 )
+from src.application.action_time.exchange_command_worker import (
+    run_one_ticket_bound_exchange_command,
+)
 from src.application.action_time.protection_reconciler import (
     reconcile_ticket_bound_exit_protection_set,
 )
@@ -52,7 +55,7 @@ async def test_lifecycle_maintenance_materializes_exit_protection_without_exchan
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_maintenance_reconciles_unknown_command_read_only(
+async def test_lifecycle_maintenance_delegates_unknown_command_reconciliation(
     pg_control_connection,
 ):
     command = _unknown_entry_command(pg_control_connection)
@@ -72,10 +75,10 @@ async def test_lifecycle_maintenance_reconciles_unknown_command_read_only(
         now_ms=NOW_MS + 10_000,
     )
 
-    assert payload["actions"][0]["action_type"] == (
-        "exchange_command_unknown_reconciled"
+    assert payload["actions"] == []
+    assert payload["first_blocker"] == (
+        "exchange_command_reconciliation_worker_required"
     )
-    assert payload["actions"][0]["status"] == "reconciliation_complete"
     assert payload["exchange_write_called"] is False
     assert gateway.place_order_calls == 0
 
@@ -100,13 +103,20 @@ async def test_lifecycle_maintenance_recovers_missing_tp1_then_materializes_prot
         now_ms=NOW_MS + 10_000,
     )
 
-    assert payload["status"] == "maintenance_complete"
-    assert payload["exchange_write_called"] is True
+    assert payload["status"] == "maintenance_blocked"
+    assert payload["exchange_write_called"] is False
     assert [action["action_type"] for action in payload["actions"]] == [
         "exit_protection_materialized",
         "protection_recovery_prepared",
-        "protection_recovery_executed",
-        "exit_protection_materialized_after_recovery",
+        "protection_recovery_exchange_commands_prepared",
+    ]
+    results = await _run_durable_worker_until_idle(
+        pg_control_connection,
+        gateway,
+    )
+    assert [result["status"] for result in results] == [
+        "command_confirmed",
+        "no_prepared_command",
     ]
     assert [call["reduce_only"] for call in gateway.place_calls] == [True]
     assert _lifecycle_status(pg_control_connection) == "position_protected"
@@ -131,8 +141,16 @@ async def test_lifecycle_maintenance_executes_runner_mutation_and_materializes_r
     assert payload["status"] == "maintenance_complete"
     assert [action["action_type"] for action in payload["actions"]] == [
         "runner_mutation_prepared",
-        "runner_mutation_executed",
-        "runner_protection_materialized",
+        "runner_mutation_exchange_commands_prepared",
+    ]
+    results = await _run_durable_worker_until_idle(
+        pg_control_connection,
+        gateway,
+    )
+    assert [result["status"] for result in results] == [
+        "command_confirmed",
+        "command_confirmed",
+        "no_prepared_command",
     ]
     assert gateway.events == ["place_order", "cancel_order"]
     assert _lifecycle_status(pg_control_connection) == "runner_protected"
@@ -154,9 +172,10 @@ async def test_lifecycle_maintenance_prepares_runner_without_exchange_mutation(
         now_ms=NOW_MS + 10_000,
     )
 
-    assert payload["status"] == "maintenance_blocked"
-    assert payload["first_blocker"] == "exchange_mutation_not_allowed_for_runner_mutation"
+    assert payload["status"] == "maintenance_complete"
+    assert payload["first_blocker"] is None
     assert gateway.events == []
+    assert _count(pg_control_connection, "brc_ticket_bound_exchange_commands") == 5
     assert _lifecycle_status(pg_control_connection) == "runner_mutation_pending"
 
 
@@ -184,11 +203,17 @@ async def test_lifecycle_maintenance_executes_orphan_cleanup_after_flat_reconcil
     )
 
     assert reconciled["status"] == "position_closed_protection_live"
-    assert payload["status"] == "maintenance_complete"
+    assert payload["status"] == "maintenance_blocked"
+    assert payload["first_blocker"] == "position_flat_with_live_protection_orders"
     assert [action["action_type"] for action in payload["actions"]] == [
         "orphan_protection_cleanup_prepared",
-        "orphan_protection_cleanup_executed",
+        "orphan_cleanup_exchange_commands_prepared",
     ]
+    results = await _run_durable_worker_until_idle(
+        pg_control_connection,
+        gateway,
+    )
+    assert results[-1]["status"] == "no_prepared_command"
     assert gateway.events == ["cancel_order", "cancel_order"]
     assert _lifecycle_status(pg_control_connection) == "reconciliation_matched"
 
@@ -239,6 +264,8 @@ def _remove_submitted_order_role(conn, attempt_id: str, role: str) -> None:
 
 class _LifecycleMaintenanceGateway:
     def __init__(self) -> None:
+        self.runtime_account_id = "owner-subaccount-runtime-v0"
+        self.runtime_exchange_id = "binance_usdm"
         self.events: list[str] = []
         self.place_calls: list[dict] = []
         self.cancel_calls: list[dict] = []
@@ -260,3 +287,27 @@ class _LifecycleMaintenanceGateway:
             exchange_order_id=kwargs["exchange_order_id"],
             status="CANCELED",
         )
+
+
+async def _run_durable_worker_until_idle(conn, gateway, *, limit: int = 8):
+    conn.commit()
+    results = []
+    for index in range(limit):
+        result = await run_one_ticket_bound_exchange_command(
+            conn.engine,
+            gateway=gateway,
+            worker_id=f"unit-lifecycle-worker-{index}",
+            now_ms=NOW_MS + 20_000 + index,
+            command_sources=(
+                "protection_recovery",
+                "runner_mutation",
+                "orphan_cleanup",
+            ),
+        )
+        results.append(result)
+        if result["status"] in {
+            "no_prepared_command",
+            "outcome_unknown_persisted",
+        }:
+            break
+    return results

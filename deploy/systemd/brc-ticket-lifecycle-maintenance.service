@@ -13,11 +13,10 @@ EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/ticket-lifecycle-maintenance.env
 ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/run_ticket_bound_lifecycle_maintenance_once.py \
   --require-database-url \
-  --fetch-exchange-snapshot \
-  --allow-exchange-mutation \
-  --max-lifecycle-scopes 4 \
+  --max-lifecycle-scopes 1 \
   --max-actions-per-scope 16 \
-  --snapshot-timeout-seconds 8
+  --snapshot-timeout-seconds 8 \
+  --global-deadline-seconds 28
 
 NoNewPrivileges=true
 PrivateTmp=true
@@ -28,4 +27,4 @@ CPUQuota=40%
 IOAccounting=true
 IOSchedulingClass=best-effort
 IOSchedulingPriority=6
-TimeoutStartSec=25s
+TimeoutStartSec=35s

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 import sqlalchemy as sa
@@ -19,9 +20,25 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src.application.action_time.lifecycle_maintenance_scheduler import (  # noqa: E402
-    lifecycle_maintenance_scopes_require_exchange_gateway,
     run_ticket_bound_lifecycle_maintenance_scheduler,
     select_ticket_bound_lifecycle_maintenance_scopes,
+)
+from src.application.action_time.exchange_command_worker import (  # noqa: E402
+    run_one_ticket_bound_exchange_command,
+)
+from src.application.action_time.exchange_command_reconciliation import (  # noqa: E402
+    run_one_unknown_exchange_command_reconciliation,
+)
+from src.application.action_time.exchange_scope import (  # noqa: E402
+    resolve_ticket_bound_exchange_scope,
+)
+from src.application.action_time.lifecycle_mutation_capability import (  # noqa: E402
+    lifecycle_mutation_capability_decision,
+)
+from src.application.action_time.exchange_snapshot_provider import (  # noqa: E402
+    ATTEMPT_AUTHORITY_BOUNDARY,
+    AUTHORITY_BOUNDARY as SNAPSHOT_AUTHORITY_BOUNDARY,
+    fetch_resolved_ticket_bound_exchange_snapshot,
 )
 from src.application.action_time.post_submit_reconciliation_tick import (  # noqa: E402
     select_ticket_bound_first_reconciliation_tick_scopes,
@@ -47,46 +64,172 @@ async def _amain(argv: list[str] | None = None) -> int:
 
     engine = sa.create_engine(database_url)
     gateway = None
+    worker_payload: dict[str, Any] = {}
+    deadline_at = time.monotonic() + float(args.global_deadline_seconds)
     try:
+        with engine.begin() as conn:
+            initial_first_tick_scopes = [
+                {**scope, "scheduler_scope_kind": "first_post_submit"}
+                for scope in select_ticket_bound_first_reconciliation_tick_scopes(
+                    conn,
+                    max_scopes=1,
+                )
+            ]
+            initial_scopes = select_ticket_bound_lifecycle_maintenance_scopes(
+                conn,
+                max_lifecycle_scopes=1,
+            )
+            command_pending = _prepared_or_unknown_command_exists(conn)
+            capability = lifecycle_mutation_capability_decision(conn)
+        requires_gateway = bool(
+            command_pending or initial_first_tick_scopes or initial_scopes
+        )
+        gateway_binding: dict[str, Any] = {}
+        if requires_gateway:
+            gateway_binding = await _await_before_deadline(
+                _runtime_exchange_gateway_binding(),
+                deadline_at=deadline_at,
+                stage="gateway_binding",
+            )
+            gateway = gateway_binding.get("gateway")
+            if gateway is None:
+                payload = _blocked_gateway_payload(gateway_binding)
+                print(
+                    json.dumps(
+                        payload,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    )
+                )
+                return 1
+
+        worker_payload: dict[str, Any] = {
+            "status": "durable_mutation_disabled",
+            "exchange_write_called": False,
+            "blockers": [],
+        }
+        durable_mutation_enabled = capability["enabled"] is True
+        reconciliation_payload: dict[str, Any] = {
+            "status": "no_unknown_commands",
+            "exchange_read_called": False,
+            "exchange_write_called": False,
+            "blockers": [],
+        }
+        if command_pending and gateway is not None:
+            reconciliation_payload = (
+                await _await_before_deadline(
+                    run_one_unknown_exchange_command_reconciliation(
+                        engine,
+                        gateway=gateway,
+                        now_ms=int(time.time() * 1000),
+                    ),
+                    deadline_at=deadline_at,
+                    stage="unknown_command_reconciliation",
+                )
+            )
+        if (
+            command_pending
+            and durable_mutation_enabled
+            and gateway is not None
+            and reconciliation_payload.get("status") == "no_unknown_commands"
+        ):
+            dispatch_timeout = max(
+                0.1,
+                _remaining_seconds(deadline_at, "durable_exchange_command") - 1.0,
+            )
+            worker_payload = await run_one_ticket_bound_exchange_command(
+                engine,
+                gateway=gateway,
+                worker_id=f"ticket-lifecycle:{os.getpid()}",
+                lease_ms=args.command_lease_ms,
+                command_sources=(
+                    "protection_recovery",
+                    "runner_mutation",
+                    "orphan_cleanup",
+                ),
+                dispatch_timeout_seconds=dispatch_timeout,
+            )
+            _remaining_seconds(deadline_at, "durable_exchange_command_result")
+
         with engine.begin() as conn:
             first_tick_scopes = [
                 {**scope, "scheduler_scope_kind": "first_post_submit"}
                 for scope in select_ticket_bound_first_reconciliation_tick_scopes(
                     conn,
-                    max_scopes=args.max_lifecycle_scopes,
+                    max_scopes=1,
                 )
             ]
             scopes = select_ticket_bound_lifecycle_maintenance_scopes(
                 conn,
-                max_lifecycle_scopes=args.max_lifecycle_scopes,
+                max_lifecycle_scopes=1,
             )
-            if lifecycle_maintenance_scopes_require_exchange_gateway(
-                first_tick_scopes + scopes,
-                allow_exchange_mutation=args.allow_exchange_mutation,
-                fetch_exchange_snapshot=args.fetch_exchange_snapshot,
-            ):
-                gateway_binding = await _runtime_exchange_gateway_binding()
-                gateway = gateway_binding.get("gateway")
-                if gateway is None:
-                    payload = _blocked_gateway_payload(gateway_binding)
-                    print(
-                        json.dumps(
-                            payload,
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            default=str,
-                        )
-                    )
-                    return 1
-            payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
+            prepared_scopes = _prepare_snapshot_scopes(
                 conn,
-                gateway=gateway,
-                allow_exchange_mutation=args.allow_exchange_mutation,
-                fetch_exchange_snapshot=args.fetch_exchange_snapshot,
-                max_lifecycle_scopes=args.max_lifecycle_scopes,
+                first_tick_scopes=first_tick_scopes,
+                scopes=scopes,
+            )
+
+        provided_snapshots: dict[str, dict[str, Any]] = {}
+        for prepared in prepared_scopes:
+            provided_snapshots[prepared["snapshot_identity"]] = await _await_before_deadline(
+                fetch_resolved_ticket_bound_exchange_snapshot(
+                    scope=prepared["scope"],
+                    snapshot_identity=prepared["snapshot_identity"],
+                    gateway=gateway,
+                    timeout_seconds=min(
+                        args.snapshot_timeout_seconds,
+                        _remaining_seconds(deadline_at, "exchange_snapshot"),
+                    ),
+                    recent_fill_limit=50,
+                    now_ms=prepared["now_ms"],
+                    authority_boundary=prepared["authority_boundary"],
+                ),
+                deadline_at=deadline_at,
+                stage="exchange_snapshot",
+            )
+
+        _remaining_seconds(deadline_at, "pg_lifecycle_projection")
+        with engine.begin() as conn:
+            maintenance_payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
+                conn,
+                gateway=None,
+                allow_exchange_mutation=False,
+                fetch_exchange_snapshot=False,
+                max_lifecycle_scopes=1,
                 max_actions_per_scope=args.max_actions_per_scope,
                 snapshot_timeout_seconds=args.snapshot_timeout_seconds,
+                provided_exchange_snapshots=provided_snapshots,
             )
+        payload = {
+            **maintenance_payload,
+            "schema": "brc.ticket_bound_lifecycle_production_worker.v2",
+            "durable_mutation_enabled": durable_mutation_enabled,
+            "durable_mutation_capability_ref": (
+                capability.get("capability", {}).get("certification_ref")
+            ),
+            "exchange_command_worker": worker_payload,
+            "exchange_command_reconciliation": reconciliation_payload,
+            "exchange_write_called": (
+                worker_payload.get("exchange_write_called") is True
+            ),
+            "network_inside_pg_transaction": False,
+            "max_mutation_commands_per_invocation": 1,
+            "global_deadline_seconds": float(args.global_deadline_seconds),
+            "deadline_remaining_seconds": max(0.0, deadline_at - time.monotonic()),
+        }
+    except TimeoutError as exc:
+        payload = {
+            "schema": "brc.ticket_bound_lifecycle_production_worker.v2",
+            "status": "scheduler_process_failed",
+            "first_blocker": "lifecycle_global_deadline_exceeded",
+            "blockers": ["lifecycle_global_deadline_exceeded", str(exc)],
+            "exchange_write_called": worker_payload.get("exchange_write_called") is True,
+            "network_inside_pg_transaction": False,
+            "global_deadline_seconds": float(args.global_deadline_seconds),
+        }
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 1
     finally:
         engine.dispose()
         close = getattr(gateway, "close", None)
@@ -94,7 +237,11 @@ async def _amain(argv: list[str] | None = None) -> int:
             await close()
 
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
-    return 0 if payload.get("status") in {"scheduler_complete", "no_maintainable_lifecycle"} else 1
+    return 0 if payload.get("status") in {
+        "scheduler_complete",
+        "scheduler_blocked",
+        "no_maintainable_lifecycle",
+    } else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -140,16 +287,105 @@ def _blocked_gateway_payload(gateway_binding: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _prepared_or_unknown_command_exists(conn: sa.engine.Connection) -> bool:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
+        return False
+    table = sa.Table(
+        "brc_ticket_bound_exchange_commands",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    return conn.execute(
+        sa.select(table.c.exchange_command_id)
+        .where(
+            table.c.command_state.in_(
+                ("prepared", "dispatching", "outcome_unknown")
+            )
+        )
+        .limit(1)
+    ).first() is not None
+
+
+def _prepare_snapshot_scopes(
+    conn: sa.engine.Connection,
+    *,
+    first_tick_scopes: list[dict[str, Any]],
+    scopes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    prepared: list[dict[str, Any]] = []
+    now_ms = int(time.time() * 1000)
+    for item in first_tick_scopes[:1]:
+        resolution = resolve_ticket_bound_exchange_scope(
+            conn,
+            ticket_id=str(item.get("ticket_id") or ""),
+            now_ms=now_ms,
+        )
+        if resolution.status == "resolved" and resolution.scope is not None:
+            prepared.append(
+                {
+                    "snapshot_identity": str(
+                        item["protected_submit_attempt_id"]
+                    ),
+                    "scope": resolution.scope,
+                    "now_ms": now_ms,
+                    "authority_boundary": ATTEMPT_AUTHORITY_BOUNDARY,
+                }
+            )
+        return prepared
+    for item in scopes[:1]:
+        if not item.get("exit_protection_set_id"):
+            continue
+        resolution = resolve_ticket_bound_exchange_scope(
+            conn,
+            ticket_id=str(item.get("ticket_id") or ""),
+            now_ms=now_ms,
+        )
+        if resolution.status == "resolved" and resolution.scope is not None:
+            prepared.append(
+                {
+                    "snapshot_identity": str(item["exit_protection_set_id"]),
+                    "scope": resolution.scope,
+                    "now_ms": now_ms,
+                    "authority_boundary": SNAPSHOT_AUTHORITY_BOUNDARY,
+                }
+            )
+    return prepared
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--fetch-exchange-snapshot", action="store_true")
     parser.add_argument("--allow-exchange-mutation", action="store_true")
-    parser.add_argument("--max-lifecycle-scopes", type=int, default=4)
+    parser.add_argument("--max-lifecycle-scopes", type=int, default=1)
     parser.add_argument("--max-actions-per-scope", type=int, default=16)
     parser.add_argument("--snapshot-timeout-seconds", type=float, default=8.0)
-    return parser.parse_args(argv)
+    parser.add_argument("--command-lease-ms", type=int, default=15_000)
+    parser.add_argument("--global-deadline-seconds", type=float, default=28.0)
+    args = parser.parse_args(argv)
+    if args.global_deadline_seconds <= 0:
+        parser.error("--global-deadline-seconds must be positive")
+    return args
+
+
+async def _await_before_deadline(
+    awaitable: Any,
+    *,
+    deadline_at: float,
+    stage: str,
+) -> Any:
+    return await asyncio.wait_for(
+        awaitable,
+        timeout=_remaining_seconds(deadline_at, stage),
+    )
+
+
+def _remaining_seconds(deadline_at: float, stage: str) -> float:
+    remaining = float(deadline_at) - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError(f"lifecycle_global_deadline_exceeded:{stage}")
+    return remaining
 
 
 if __name__ == "__main__":

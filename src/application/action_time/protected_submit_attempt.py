@@ -47,6 +47,9 @@ from src.application.action_time.pricing_sizing import (  # noqa: E402
 from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
     classify_sequential_submit_result,
 )
+from src.application.action_time.lifecycle_mutation_capability import (  # noqa: E402
+    lifecycle_mutation_capability_decision,
+)
 from src.application.action_time.exchange_command import (  # noqa: E402
     materialize_ticket_bound_exchange_commands,
 )
@@ -151,6 +154,7 @@ def prepare_ticket_bound_protected_submit_attempt(
     )
     blockers = list(graph["blockers"])
     blockers.extend(_graph_blockers(graph, now_ms=now_ms))
+    blockers.extend(lifecycle_mutation_capability_decision(conn)["blockers"])
     submit_mode_decision = _current_submit_mode_decision(
         control_state,
         operation_submit_command_id=operation_submit_command_id,
@@ -283,6 +287,7 @@ def materialize_ticket_bound_submit_mode_decision(
     )
     blockers = list(graph["blockers"])
     blockers.extend(_graph_blockers(graph, now_ms=now_ms))
+    blockers.extend(lifecycle_mutation_capability_decision(conn)["blockers"])
     blockers.extend(
         _submit_mode_authority_blockers(
             graph,
@@ -473,6 +478,12 @@ def record_ticket_bound_protected_submit_result(
         "protected_submit_attempt_id",
         updated,
     )
+    _project_durable_exchange_command_results(
+        conn,
+        attempt=updated,
+        submit_result=submit_result,
+        now_ms=now_ms,
+    )
     lifecycle_classification = None
     if status == "submitted":
         _mark_ticket_submitted(conn, updated, now_ms=now_ms)
@@ -508,6 +519,71 @@ def record_ticket_bound_protected_submit_result(
             )
         ),
     )
+
+
+def _project_durable_exchange_command_results(
+    conn: sa.engine.Connection,
+    *,
+    attempt: dict[str, Any],
+    submit_result: dict[str, Any],
+    now_ms: int,
+) -> None:
+    """Keep the command authority aligned with the official aggregate result."""
+
+    table_name = "brc_ticket_bound_exchange_commands"
+    if not sa.inspect(conn).has_table(table_name):
+        return
+    table = _table(conn, table_name)
+    commands = list(
+        conn.execute(
+            sa.select(table).where(
+                table.c.protected_submit_attempt_id
+                == str(attempt.get("protected_submit_attempt_id") or "")
+            )
+        ).mappings()
+    )
+    submitted_by_role = {
+        str(order.get("order_role") or "").upper(): dict(order)
+        for order in submit_result.get("submitted_orders", [])
+        if isinstance(order, dict)
+        and str(order.get("exchange_order_id") or "").strip()
+    }
+    aggregate_submitted = (
+        str(submit_result.get("status") or "")
+        == "exchange_submit_orders_submitted"
+    )
+    for command in commands:
+        role = str(command.get("order_role") or "").upper()
+        submitted = submitted_by_role.get(role)
+        if submitted:
+            conn.execute(
+                table.update()
+                .where(
+                    table.c.exchange_command_id
+                    == command["exchange_command_id"]
+                )
+                .values(
+                    command_state="confirmed_submitted",
+                    outcome_class="exchange_accepted",
+                    exchange_order_id=str(submitted["exchange_order_id"]),
+                    resolved_at_ms=now_ms,
+                    updated_at_ms=now_ms,
+                )
+            )
+        elif aggregate_submitted:
+            conn.execute(
+                table.update()
+                .where(
+                    table.c.exchange_command_id
+                    == command["exchange_command_id"]
+                )
+                .values(
+                    command_state="reconciled_absent",
+                    outcome_class="reconciled_absence",
+                    resolved_at_ms=now_ms,
+                    updated_at_ms=now_ms,
+                )
+            )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -794,6 +870,8 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
             blockers.append(f"runtime_safety_flag_false:{flag}")
     if safety.get("active_position_conflict") is not False:
         blockers.append("runtime_safety_active_position_conflict")
+    if safety.get("lifecycle_mutation_capability_ready") is not True:
+        blockers.append("lifecycle_mutation_capability_not_ready")
 
     refs = _as_dict(safety.get("trusted_fact_refs"))
     expected = {
@@ -1684,6 +1762,13 @@ def _materialize_submit_lifecycle_state(
             "lifecycle_status": classification.status,
             "blockers": list(classification.blockers),
             "next_action": classification.next_action,
+            "entry_fill": {
+                "exchange_order_id": entry_order.get("exchange_order_id"),
+                "fill_qty": entry_order.get("filled_qty"),
+                "fill_price": entry_order.get("average_exec_price"),
+                "fee": entry_order.get("fee"),
+                "fill_time_ms": entry_order.get("fill_time_ms") or now_ms,
+            },
         },
         "created_at_ms": now_ms,
     }

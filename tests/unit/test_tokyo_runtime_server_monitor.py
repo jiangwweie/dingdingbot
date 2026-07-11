@@ -17,6 +17,7 @@ from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
     _prepare_real_submit,
 )
+from tests.unit.lifecycle_test_schema import apply_enabled_lifecycle_command_schema
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -413,6 +414,12 @@ def _seed_pg_engine():
         finally:
             migration.op = old_op
         seed.seed_runtime_control_state_foundation(conn)
+        apply_enabled_lifecycle_command_schema(
+            conn,
+            repo_root=REPO_ROOT,
+            module_prefix="server_monitor",
+            now_ms=PG_TEST_NOW_MS - 1,
+        )
     return engine
 
 

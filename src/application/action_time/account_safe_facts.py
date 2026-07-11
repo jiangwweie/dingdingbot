@@ -22,9 +22,11 @@ from src.application.action_time.runtime_pg_fact_snapshots import (  # noqa: E40
     write_account_safe_fact_snapshots,
 )
 from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
+    ACCOUNT_MODE_SOURCE,
     DEFAULT_BASE_URL,
     READ_ONLY_ENDPOINTS,
     UrlOpen,
+    _account_mode_summary,
     _account_summary,
     _budget_state,
     _env_value,
@@ -36,6 +38,8 @@ from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
     _request_json,
 )
 DEFAULT_ENV_FILE = Path("/home/ubuntu/brc-deploy/env/live-readonly.env")
+ACCOUNT_MODE_VALID_FOR_MS = 60_000
+ACCOUNT_MODE_MAX_FUTURE_SKEW_MS = 5_000
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -118,8 +122,13 @@ def collect_account_safe_live_facts_from_pg_scope(
         env_file=env_file,
     )
     payloads: dict[str, dict[str, Any]] = {}
-    errors: dict[str, str] = {}
+    errors: dict[str, str] = {
+        "scope_identity": ",".join(scope["identity_errors"])
+        for _ in [0]
+        if scope["identity_errors"]
+    }
     opener = urlopen if urlopen is not None else urllib.request.urlopen
+    collected_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     for name, (_method, path, signed) in READ_ONLY_ENDPOINTS.items():
         try:
             payloads[name] = _request_json(
@@ -139,6 +148,13 @@ def collect_account_safe_live_facts_from_pg_scope(
     position = _position_summary(payloads["position_risk"], symbols)
     open_orders = _open_order_summary(payloads["open_orders"], symbols)
     account = _account_summary(payloads["account"])
+    account_mode = _account_mode_summary(
+        payloads["account_mode"],
+        account_id=scope.get("account_id"),
+        exchange_id=scope.get("exchange_id"),
+        runtime_profile_id=scope.get("runtime_profile_id"),
+        collected_at_ms=collected_at_ms,
+    )
     budget = _budget_state(account_payload=payloads["account"], handoff_summary=scope)
     protection = _protection_state(scope)
     next_attempt_gate = _next_attempt_gate_state(
@@ -147,12 +163,21 @@ def collect_account_safe_live_facts_from_pg_scope(
     )
     return {
         "scope": "strategy_group_live_facts_input",
-        "status": "ready" if not errors and symbols else "partial",
+        "status": (
+            "ready"
+            if (
+                not errors
+                and symbols
+                and account_mode.get("position_mode_safe") is True
+            )
+            else "partial"
+        ),
         "source": "pg_scope_binance_usdm_futures_readonly_get_endpoints",
         "source_mode": "pg_scope_direct_readonly_exchange",
         "supported_symbol_count": len(symbols),
         "exchange_rules": exchange_rules,
         "account": account,
+        "account_mode": account_mode,
         "active_position": position,
         "open_orders": open_orders,
         "protection": protection,
@@ -174,6 +199,7 @@ def collect_account_safe_live_facts_from_pg_scope(
 
 
 def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]:
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     scope_rows = [
         dict(row)
         for row in conn.execute(
@@ -182,10 +208,31 @@ def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]
                 SELECT DISTINCT
                   candidate.strategy_group_id,
                   candidate.symbol,
-                  policy.max_notional
+                  policy.max_notional,
+                  runtime.runtime_profile_id,
+                  version.risk_envelope,
+                  instrument.exchange_id
                 FROM brc_strategy_group_candidate_scope AS candidate
                 LEFT JOIN brc_owner_policy_current AS policy
                   ON policy.policy_current_id = candidate.policy_current_id
+                LEFT JOIN brc_runtime_scope_bindings AS runtime
+                  ON runtime.candidate_scope_id = candidate.candidate_scope_id
+                 AND runtime.status = 'active'
+                LEFT JOIN brc_strategy_groups AS strategy_group
+                  ON strategy_group.strategy_group_id = candidate.strategy_group_id
+                LEFT JOIN brc_strategy_group_versions AS version
+                  ON version.strategy_group_version_id = strategy_group.current_version_id
+                LEFT JOIN brc_symbol_instrument_mappings AS mapping
+                  ON mapping.symbol = candidate.symbol
+                 AND mapping.status = 'active'
+                 AND mapping.valid_from_ms <= :now_ms
+                 AND (
+                   mapping.valid_until_ms IS NULL
+                   OR mapping.valid_until_ms > :now_ms
+                 )
+                LEFT JOIN brc_exchange_instruments AS instrument
+                  ON instrument.exchange_instrument_id = mapping.exchange_instrument_id
+                 AND instrument.status = 'active'
                 WHERE candidate.status = 'active'
                   AND candidate.scope_state = 'live_submit_allowed'
                   AND (
@@ -197,7 +244,8 @@ def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]
                   )
                 ORDER BY candidate.strategy_group_id, candidate.symbol
                 """
-            )
+            ),
+            {"now_ms": now_ms},
         ).mappings()
     ]
     symbols = sorted({str(row.get("symbol") or "").upper() for row in scope_rows if row.get("symbol")})
@@ -207,6 +255,30 @@ def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]
         if value is not None
     ]
     max_notional = max(max_notional_values, default=None)
+    runtime_profile_ids = {
+        str(row.get("runtime_profile_id") or "").strip()
+        for row in scope_rows
+        if str(row.get("runtime_profile_id") or "").strip()
+    }
+    account_ids = {
+        str(_json_object(row.get("risk_envelope")).get("account_id") or "").strip()
+        for row in scope_rows
+        if str(_json_object(row.get("risk_envelope")).get("account_id") or "").strip()
+    }
+    exchange_ids = {
+        str(row.get("exchange_id") or "").strip()
+        for row in scope_rows
+        if str(row.get("exchange_id") or "").strip()
+    }
+    identity_errors: list[str] = []
+    if len(account_ids) != 1:
+        identity_errors.append("account_id_missing_or_ambiguous")
+    if len(exchange_ids) != 1:
+        identity_errors.append("exchange_id_missing_or_ambiguous")
+    elif exchange_ids != {"binance_usdm"}:
+        identity_errors.append("exchange_id_not_binance_usdm")
+    if len(runtime_profile_ids) != 1:
+        identity_errors.append("runtime_profile_id_missing_or_ambiguous")
     protection_count = conn.execute(
         sa.text(
             """
@@ -238,6 +310,16 @@ def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]
         "strategy_group_count": len({str(row.get("strategy_group_id")) for row in scope_rows}),
         "max_notional_requirement_usdt": str(max_notional) if max_notional is not None else None,
         "has_candidate_specific_protection_template": int(protection_count or 0) > 0,
+        "account_id": next(iter(account_ids), None) if len(account_ids) == 1 else None,
+        "exchange_id": (
+            next(iter(exchange_ids), None) if len(exchange_ids) == 1 else None
+        ),
+        "runtime_profile_id": (
+            next(iter(runtime_profile_ids), None)
+            if len(runtime_profile_ids) == 1
+            else None
+        ),
+        "identity_errors": identity_errors,
     }
 
 
@@ -253,6 +335,9 @@ def _decimal_or_none(value: Any) -> Decimal | None:
 def build_runtime_account_safe_facts(
     *, live_facts: dict[str, Any], generated_at_utc: str | None = None
 ) -> dict[str, Any]:
+    effective_generated_at_utc = generated_at_utc or datetime.now(
+        timezone.utc
+    ).isoformat()
     account = _as_dict(live_facts.get("account"))
     active_position = _as_dict(live_facts.get("active_position"))
     open_orders = _as_dict(live_facts.get("open_orders"))
@@ -261,6 +346,10 @@ def build_runtime_account_safe_facts(
     next_attempt_gate = _as_dict(live_facts.get("next_attempt_gate"))
     protection = _as_dict(live_facts.get("protection"))
     source_safety = _as_dict(live_facts.get("safety_invariants"))
+    account_mode = _normalized_account_mode_fact(
+        _as_dict(live_facts.get("account_mode")),
+        generated_at_utc=effective_generated_at_utc,
+    )
 
     checks = {
         "source_live_facts_ready": live_facts.get("status") == "ready",
@@ -278,6 +367,7 @@ def build_runtime_account_safe_facts(
         "protection_template_ready": str(protection.get("status") or "").startswith(
             "ready"
         ),
+        "account_mode_ready": account_mode.get("position_mode_safe") is True,
         "source_signed_get_only": source_safety.get("signed_get_only") is True,
         "source_exchange_write_called": source_safety.get("exchange_write_called")
         is True,
@@ -316,8 +406,7 @@ def build_runtime_account_safe_facts(
             if ready
             else "runtime_account_safe_facts_blocked"
         ),
-        "generated_at_utc": generated_at_utc
-        or datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": effective_generated_at_utc,
         "checks": {
             **checks,
             "account_safe_facts_ready": ready,
@@ -333,6 +422,7 @@ def build_runtime_account_safe_facts(
             ),
         },
         "blockers": blockers,
+        "account_mode": account_mode,
         "facts": {
             "active_position_or_open_order_clear": (
                 checks["active_position_clear"] and checks["open_orders_clear"]
@@ -361,6 +451,91 @@ def build_runtime_account_safe_facts(
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _normalized_account_mode_fact(
+    value: dict[str, Any],
+    *,
+    generated_at_utc: str,
+) -> dict[str, Any]:
+    """Revalidate producer truth and discard unsafe authoritative mode values."""
+
+    account_id = str(value.get("account_id") or "").strip()
+    exchange_id = str(value.get("exchange_id") or "").strip()
+    runtime_profile_id = str(value.get("runtime_profile_id") or "").strip()
+    source = str(value.get("source") or "").strip()
+    observed_at = str(value.get("observed_at") or "").strip()
+    raw_dual_side_position = value.get("dual_side_position")
+    raw_account_mode = str(value.get("account_mode") or "").strip()
+    observed_ms = _iso_to_ms(observed_at)
+    generated_ms = _iso_to_ms(generated_at_utc)
+    expected_mode = (
+        "hedge"
+        if raw_dual_side_position is True
+        else "one_way"
+        if raw_dual_side_position is False
+        else None
+    )
+    shape_valid = (
+        type(raw_dual_side_position) is bool
+        and raw_account_mode in {"one_way", "hedge"}
+        and raw_account_mode == expected_mode
+        and account_id != ""
+        and exchange_id != ""
+        and source == ACCOUNT_MODE_SOURCE
+        and observed_ms is not None
+        and generated_ms is not None
+        and value.get("position_mode_safe") is True
+    )
+    fresh = (
+        shape_valid
+        and observed_ms <= generated_ms + ACCOUNT_MODE_MAX_FUTURE_SKEW_MS
+        and generated_ms <= observed_ms + ACCOUNT_MODE_VALID_FOR_MS
+    )
+    if not value:
+        status = "missing"
+    elif shape_valid and not fresh:
+        status = "stale"
+    elif not shape_valid:
+        status = "malformed"
+    else:
+        status = "fresh"
+    result = {
+        "status": status,
+        "account_id": account_id or None,
+        "exchange_id": exchange_id or None,
+        "runtime_profile_id": runtime_profile_id or None,
+        "account_mode": raw_account_mode if fresh else None,
+        "dual_side_position": raw_dual_side_position if fresh else None,
+        "position_mode_safe": bool(fresh),
+        "observed_at": observed_at or None,
+        "source": source or None,
+    }
+    if not fresh and expected_mode is not None:
+        result["observed_account_mode"] = expected_mode
+        result["observed_dual_side_position"] = raw_dual_side_position
+    return result
+
+
+def _iso_to_ms(value: str) -> int | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return int(parsed.astimezone(timezone.utc).timestamp() * 1000)
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    while isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return dict(value) if isinstance(value, dict) else {}
 
 
 if __name__ == "__main__":

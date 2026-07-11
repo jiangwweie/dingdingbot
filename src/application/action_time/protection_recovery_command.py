@@ -155,6 +155,14 @@ async def execute_ticket_bound_protection_recovery_command(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
+    return _result(
+        "blocked",
+        now_ms=now_ms,
+        command={},
+        blockers=["legacy_direct_protection_recovery_executor_retired"],
+        next_action="materialize_durable_protection_recovery_exchange_commands",
+        extra={"exchange_write_called": False},
+    )
     command_id = str(protection_recovery_command_id or "").strip()
     if not command_id:
         return _result(
@@ -279,7 +287,7 @@ async def execute_ticket_bound_protection_recovery_command(
     submitted_orders: list[dict[str, Any]] = []
     for order_request in missing_orders:
         try:
-            placement_result = await gateway.place_order(
+            placement_result = await _retired_direct_exchange_mutation(
                 symbol=str(order_request.get("symbol") or command["symbol"]),
                 order_type=str(order_request["gateway_order_type"]),
                 side=str(order_request["gateway_side"]),
@@ -406,6 +414,84 @@ async def execute_ticket_bound_protection_recovery_command(
         blockers=[],
         next_action="materialize_ticket_bound_exit_protection_set",
     )
+
+
+async def _retired_direct_exchange_mutation(**kwargs: Any) -> Any:
+    del kwargs
+    raise RuntimeError("legacy_direct_protection_recovery_executor_retired")
+
+
+def apply_durable_protection_recovery_exchange_commands(
+    conn: sa.engine.Connection,
+    *,
+    protection_recovery_command_id: str,
+    exchange_commands: list[dict[str, Any]],
+    now_ms: int,
+) -> dict[str, Any]:
+    """Project confirmed durable place commands into the recovery plan."""
+
+    command = _row_by_id(
+        conn,
+        "brc_ticket_bound_protection_recovery_commands",
+        "protection_recovery_command_id",
+        protection_recovery_command_id,
+    )
+    if not command:
+        raise ValueError("protection_recovery_command_missing")
+    if str(command.get("status") or "") == "result_recorded":
+        return command
+    submitted_orders: list[dict[str, Any]] = []
+    for exchange_command in exchange_commands:
+        if str(exchange_command.get("command_state") or "") not in {
+            "confirmed_submitted",
+            "reconciled_submitted",
+        }:
+            raise ValueError("protection_recovery_exchange_command_not_confirmed")
+        submitted_orders.append(
+            {
+                "local_order_id": exchange_command.get("local_order_id"),
+                "exchange_order_id": exchange_command.get("exchange_order_id"),
+                "client_order_id": exchange_command.get("client_order_id"),
+                "order_role": exchange_command.get("order_role"),
+                "gateway_side": exchange_command.get("gateway_side"),
+                "amount": str(exchange_command.get("amount") or ""),
+                "price": (
+                    str(exchange_command.get("price"))
+                    if exchange_command.get("price") is not None
+                    else None
+                ),
+                "trigger_price": (
+                    str(exchange_command.get("stop_price"))
+                    if exchange_command.get("stop_price") is not None
+                    else None
+                ),
+                "reduce_only": True,
+                "status": "NEW",
+            }
+        )
+    result_payload = _result_payload(
+        command=command,
+        submitted_orders=submitted_orders,
+        blockers=[],
+        exchange_write_called=True,
+        extra={"durable_exchange_command_authority": True},
+    )
+    updated = _record_result(
+        conn,
+        command=command,
+        status="result_recorded",
+        blockers=[],
+        result_payload=result_payload,
+        now_ms=now_ms,
+    )
+    _merge_recovered_orders_into_attempt(
+        conn,
+        command=command,
+        recovered_orders=submitted_orders,
+        result_payload=result_payload,
+        now_ms=now_ms,
+    )
+    return updated
 
 
 def _prepare_blockers(

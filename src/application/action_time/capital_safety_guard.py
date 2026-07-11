@@ -71,17 +71,13 @@ def current_scope_status(
         for row in _rows(control_state.get("ticket_bound_exchange_commands"))
         if str(row.get("command_state") or "")
         in {"outcome_unknown", "hard_stopped"}
-        and str(row.get("strategy_group_id") or "") == strategy_group_id
-        and str(row.get("symbol") or "") == symbol
-        and str(row.get("side") or "") == side
-        and (
-            not account_id
-            or str(row.get("account_id") or "") == account_id
-        )
-        and (
-            not exchange_instrument_id
-            or str(row.get("exchange_instrument_id") or "")
-            == exchange_instrument_id
+        and _row_affects_scope(
+            row,
+            strategy_group_id=strategy_group_id,
+            symbol=symbol,
+            side=side,
+            account_id=account_id,
+            exchange_instrument_id=exchange_instrument_id,
         )
     ]
     if command_rows:
@@ -109,9 +105,14 @@ def current_scope_status(
         row
         for row in _rows(control_state.get("ticket_bound_scope_freezes"))
         if str(row.get("status") or "") == "active"
-        and str(row.get("strategy_group_id") or "") == strategy_group_id
-        and str(row.get("symbol") or "") == symbol
-        and str(row.get("side") or "") == side
+        and _row_affects_scope(
+            row,
+            strategy_group_id=strategy_group_id,
+            symbol=symbol,
+            side=side,
+            account_id=account_id,
+            exchange_instrument_id=exchange_instrument_id,
+        )
     ]
     if not rows:
         return CapitalSafetyScopeStatus(
@@ -208,3 +209,39 @@ def _dedupe(values: list[str]) -> list[str]:
         if text and text not in result:
             result.append(text)
     return result
+
+
+def _row_affects_scope(
+    row: dict[str, Any],
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    account_id: str,
+    exchange_instrument_id: str,
+) -> bool:
+    row_mode = str(row.get("position_mode") or "")
+    domain_key = str(row.get("netting_domain_key") or "").strip()
+    typed_domain = bool(
+        domain_key
+        and not domain_key.startswith("legacy_unknown")
+        and row_mode in {"one_way", "hedge", "unknown"}
+    )
+    if not typed_domain:
+        return (
+            str(row.get("strategy_group_id") or "") == strategy_group_id
+            and str(row.get("symbol") or "") == symbol
+            and str(row.get("side") or "") == side
+        )
+    if account_id and str(row.get("account_id") or "") != account_id:
+        return False
+    if exchange_instrument_id and str(
+        row.get("exchange_instrument_id") or ""
+    ) != exchange_instrument_id:
+        return False
+    if not account_id and str(row.get("symbol") or "") != symbol:
+        return False
+    if row_mode == "one_way" or str(row.get("position_bucket") or "") == "ANY":
+        return True
+    expected_bucket = "LONG" if side == "long" else "SHORT"
+    return str(row.get("position_bucket") or "") == expected_bucket

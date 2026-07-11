@@ -68,7 +68,7 @@ they are not separate concurrent WIP programs.
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` currently points to release `5f40c62d`, migration `112` |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
 | **PG migration** | Tokyo is at migration `112` (`2026-07-10-112_version_live_signal_identity.py`) |
-| **Current branch verification** | P0-LC started from 148 passing lifecycle/action-time baseline tests; LC-0 projection/monitor suite passes `202 passed`; full-suite verification remains a pre-deploy gate |
+| **Current branch verification** | P0-LC local targeted lifecycle/pre-trade/ops suites and producer-shaped 22-scope closure coverage pass; full-suite verification and Tokyo cutover remain pre-completion gates |
 | **Backend / watcher / monitor** | Backend and both timers are active; watcher and monitor oneshot services complete with `Result=success` outside signal-time blocked runs |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
 | **Post-submit first tick** | Deployed release includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, retry limit, scope freeze writes, and stop-risk reservation rechecks |
@@ -77,7 +77,7 @@ they are not separate concurrent WIP programs.
 | **Typed Ticket boundary** | Side-aware price, normalized quantity, positive stop risk, one reservation, atomic fact-to-Ticket transaction, and six-Event-Spec production-shaped certification are implemented on the focused branch |
 | **Latest current-truth finding** | 20/22 scopes show `market_wait_validated`; CPM/SUI and MPG/SUI are still overridden by event-scoped historical Action-Time outcomes whose source identities have expired |
 | **Temporal truth correction** | Deployed `5f40c62d` preserves signal identity and parent blocker truth; P0-LC Batch 0 adds the missing current-relevance rule so historical process results cannot become permanent blockers |
-| **Lifecycle production audit** | Timer is active at 30-second cadence, but production has only exercised `no_maintainable_lifecycle`; canonical/exchange identity, conditional orders, fill projection, command transaction boundaries, and terminal closure are not yet production-certified |
+| **Lifecycle production audit** | Tokyo timer has only exercised `no_maintainable_lifecycle`; the focused branch now closes typed identity, conditional views, fill projection, short command transactions, continuous reconciliation, settlement, finalization, and Outcome locally, pending two-phase production cutover |
 
 ## Current Next Execution Order
 

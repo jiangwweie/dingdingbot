@@ -126,6 +126,15 @@ async def execute_ticket_bound_orphan_protection_cleanup_command(
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
+    return _result(
+        "blocked",
+        now_ms=now_ms,
+        command={},
+        result_payload={},
+        blockers=["legacy_direct_orphan_cleanup_executor_retired"],
+        next_action="materialize_durable_orphan_cleanup_exchange_commands",
+        extra={"exchange_write_called": False},
+    )
     command_id = str(orphan_protection_cleanup_command_id or "").strip()
     if not command_id:
         return _result(
@@ -233,7 +242,7 @@ async def execute_ticket_bound_orphan_protection_cleanup_command(
     canceled_orders: list[dict[str, Any]] = []
     for order in cancel_orders:
         try:
-            cancel_result = await gateway.cancel_order(
+            cancel_result = await _retired_direct_exchange_mutation(
                 exchange_order_id=str(order["exchange_order_id"]),
                 symbol=str(command["symbol"]),
             )
@@ -329,6 +338,74 @@ async def execute_ticket_bound_orphan_protection_cleanup_command(
         blockers=[],
         next_action="continue_ticket_bound_lifecycle_closure",
     )
+
+
+async def _retired_direct_exchange_mutation(**kwargs: Any) -> Any:
+    del kwargs
+    raise RuntimeError("legacy_direct_orphan_cleanup_executor_retired")
+
+
+def apply_durable_orphan_cleanup_exchange_commands(
+    conn: sa.engine.Connection,
+    *,
+    orphan_protection_cleanup_command_id: str,
+    exchange_commands: list[dict[str, Any]],
+    now_ms: int,
+) -> dict[str, Any]:
+    """Project confirmed durable cancel commands into cleanup state."""
+
+    command = _row_by_id(
+        conn,
+        "brc_ticket_bound_orphan_protection_cleanup_commands",
+        "orphan_protection_cleanup_command_id",
+        orphan_protection_cleanup_command_id,
+    )
+    if not command:
+        raise ValueError("orphan_protection_cleanup_command_missing")
+    if str(command.get("status") or "") == "result_recorded":
+        return command
+    canceled_orders: list[dict[str, Any]] = []
+    for exchange_command in exchange_commands:
+        if str(exchange_command.get("command_state") or "") not in {
+            "confirmed_submitted",
+            "reconciled_submitted",
+        }:
+            raise ValueError("orphan_cleanup_exchange_command_not_confirmed")
+        canceled_orders.append(
+            {
+                "exit_protection_order_id": exchange_command.get(
+                    "parent_order_id"
+                ),
+                "role": exchange_command.get("order_role"),
+                "exchange_order_id": exchange_command.get(
+                    "target_exchange_order_id"
+                ),
+                "cancel_confirmed": True,
+            }
+        )
+    result_payload = _result_payload(
+        command=command,
+        canceled_orders=canceled_orders,
+        blockers=[],
+        exchange_write_called=True,
+        extra={"durable_exchange_command_authority": True},
+    )
+    updated = _record_result(
+        conn,
+        command=command,
+        status="result_recorded",
+        blockers=[],
+        result_payload=result_payload,
+        now_ms=now_ms,
+    )
+    _apply_successful_cleanup(
+        conn,
+        command=command,
+        canceled_orders=canceled_orders,
+        result_payload=result_payload,
+        now_ms=now_ms,
+    )
+    return updated
 
 
 def _prepare_blockers(

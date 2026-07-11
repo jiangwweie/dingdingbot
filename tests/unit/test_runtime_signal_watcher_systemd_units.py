@@ -214,14 +214,15 @@ def test_ticket_lifecycle_maintenance_timer_is_bounded_and_report_free():
 
     assert "run_ticket_bound_lifecycle_maintenance_once.py" in service_text
     assert "--require-database-url" in service_text
-    assert "--fetch-exchange-snapshot" in service_text
-    assert "--allow-exchange-mutation" in service_text
+    assert "--allow-exchange-mutation" not in service_text
+    assert "--max-lifecycle-scopes 1" in service_text
     assert "EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env" in service_text
     assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env" in service_text
     assert "--report-dir" not in service_text
     assert "--output-json" not in service_text
     assert "ReadWritePaths=" not in service_text
-    assert "TimeoutStartSec=25s" in service_text
+    assert "TimeoutStartSec=35s" in service_text
+    assert "--global-deadline-seconds 28" in service_text
     assert "CPUQuota=40%" in service_text
     assert "OnUnitActiveSec=30s" in timer_text
     assert "Persistent=false" in timer_text

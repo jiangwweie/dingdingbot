@@ -31,6 +31,14 @@ COMMAND_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
 )
+TYPED_SCOPE_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-11-113_create_exchange_account_mode_and_domain_holds.py"
+)
+LIFECYCLE_COMMAND_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
+)
 
 
 def _load_module(path: Path, name: str):
@@ -131,4 +139,56 @@ def test_migration_105_creates_normalized_exchange_command_table():
             "side",
         } <= columns
 
+    engine.dispose()
+
+
+def test_migration_114_extends_existing_command_authority_for_lifecycle():
+    foundation = _load_module(FOUNDATION_PATH, "migration_086_exchange_lifecycle")
+    eligibility = _load_module(ELIGIBILITY_PATH, "migration_104_exchange_lifecycle")
+    command_migration = _load_module(COMMAND_PATH, "migration_105_exchange_lifecycle")
+    typed_scope = _load_module(TYPED_SCOPE_PATH, "migration_113_exchange_lifecycle")
+    lifecycle = _load_module(LIFECYCLE_COMMAND_PATH, "migration_114_exchange_lifecycle")
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        operations = Operations(MigrationContext.configure(conn))
+        for module in (
+            foundation,
+            eligibility,
+            command_migration,
+            typed_scope,
+            lifecycle,
+        ):
+            previous = module.op
+            module.op = operations
+            try:
+                module.upgrade()
+            finally:
+                module.op = previous
+        columns = {
+            item["name"]
+            for item in sa.inspect(conn).get_columns(
+                "brc_ticket_bound_exchange_commands"
+            )
+        }
+        assert {
+            "exchange_id",
+            "position_mode",
+            "position_side",
+            "position_bucket",
+            "netting_domain_key",
+            "reduce_intent",
+            "command_kind",
+            "command_source",
+            "source_command_id",
+            "target_exchange_order_id",
+            "claim_owner",
+            "claim_token",
+            "claim_expires_at_ms",
+            "execution_attempt_count",
+            "exchange_result",
+        } <= columns
     engine.dispose()

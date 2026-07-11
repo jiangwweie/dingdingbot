@@ -37,7 +37,7 @@ repo MD/JSON/output/report files.
 | **Multi-symbol and side-specific action-time path exists** | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
 | **Ticket identity and TP1 are PG-backed** | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | **Initial order lifecycle/protection PG objects exist** | `brc_ticket_bound_*` tables and current ticket-bound materializers |
-| **Runner dynamic management is code-covered and deployed as lifecycle repair** | `runner_mutation_command`, `runner_mutation_executor`, `runner_protection_adjuster`, lifecycle tests, and the current Tokyo release cover TP1 filled -> RUNNER_SL submit -> old SL cleanup -> runner proof through official-path records |
+| **Runner dynamic management has one local durable path** | `runner_mutation_command` materializes RUNNER_SL then old-SL cancel into the existing durable command authority; the short-transaction Worker preserves ordering and projects result; the legacy direct executor is retired |
 | **Exchange protection reconciliation is code-covered and deployed as readonly comparison logic** | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots, including missing order, side mismatch, qty mismatch, orphan reduce-only order, TP1-fill runner gap, and flat-position live protection |
 | **First tick and recovery-command defaults are deployed** | The current Tokyo release includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, max 3 recovery attempts, and scope freeze records at `strategy_group_id + symbol + side` |
 | **Scope freeze pre-submit hard blocker is deployed** | `381aed34` blocks active real-risk freezes across promotion, lane, ticket, Runtime Safety State, FinalGate preflight, Operation Layer handoff, submit-mode decision, and protected submit; stale/no-risk freezes resolve through reconciliation/cleanup |
@@ -633,10 +633,10 @@ replay event as fresh live signal
 chain_position: post_submit_lifecycle_certification
 strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
 symbol: 22 active candidate scopes
-stage: production_lifecycle_partially_wired
-first_blocker: exchange_truth_identity_and_command_atomicity_not_production_certified
-evidence: Tokyo 5f40c62d/migration 112 has an active lifecycle timer but only no-maintainable runs; canonical symbols reach the gateway, conditional orders are incomplete, TP1 fills are not projected, exchange I/O shares a long PG transaction, and finalization has no production caller
-next_action: execute LC-0 through LC-5; a different-identity natural signal preempts at a safe transaction boundary after higher safety incidents
+stage: production_lifecycle_local_certification_and_cutover_pending
+first_blocker: full_verification_and_tokyo_two_phase_cutover_pending
+evidence: local branch has typed account/exchange/mode/symbol truth, complete conditional order views, domain ownership/holds, committed command claims before I/O, fill projection, continuous reconciliation, independent settlement/finalization, one terminal Outcome, and producer-shaped 22-scope closure coverage; Tokyo remains 5f40c62d/migration 112 until cutover
+next_action: finish full tests and audits, commit/push, run controlled phase one with capability disabled, then phase-two readiness/enable/no-active acceptance; a different-identity natural signal remains the first acceptance interrupt after real-funds safety
 stop_condition: every isolated production-shaped Ticket reaches simulated lifecycle_closed plus one terminal Outcome or one deterministic blocker; Tokyo release/schema/unit/no-active/ops acceptance passes; only venue-specific live calibration remains
 owner_action_required: no
 authority_boundary: no new ENTRY path, no FinalGate/Operation Layer bypass, no profile/sizing expansion, no unknown-order mutation, no synthetic-to-live authority

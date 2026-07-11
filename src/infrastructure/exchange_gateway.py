@@ -1006,6 +1006,61 @@ class ExchangeGateway:
             logger.error(f"获取持仓失败：{e}")
             raise
 
+    async def fetch_position_rows(self, symbol: str) -> List[Dict[str, Any]]:
+        """Return a complete, side-preserving CCXT position view.
+
+        Lifecycle reconciliation needs zero-sized rows and Binance
+        ``positionSide``.  The legacy ``fetch_positions`` method intentionally
+        returns active ``PositionInfo`` objects and therefore cannot prove a
+        hedge bucket flat.  This read-only method keeps the complete venue
+        shape, validates quantities, and never infers a missing side.
+        """
+
+        try:
+            raw_positions = await self.rest_exchange.fetch_positions()
+        except Exception as exc:
+            logger.error(
+                "获取完整持仓视图失败：symbol=%s, error=%s",
+                symbol,
+                exc,
+            )
+            raise
+        if not isinstance(raw_positions, list):
+            raise RuntimeError("exchange_position_rows_root_not_list")
+        rows: List[Dict[str, Any]] = []
+        for raw in raw_positions:
+            if not isinstance(raw, dict):
+                raise RuntimeError("exchange_position_row_not_object")
+            row_symbol = str(raw.get("symbol") or "").strip()
+            if not row_symbol:
+                raise RuntimeError("exchange_position_symbol_missing")
+            if row_symbol != symbol:
+                continue
+            contracts = raw.get("contracts")
+            if contracts is None:
+                raise RuntimeError("exchange_position_contracts_missing")
+            try:
+                size = Decimal(str(contracts))
+            except (ArithmeticError, ValueError) as exc:
+                raise RuntimeError("exchange_position_contracts_invalid") from exc
+            info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+            position_side = str(
+                raw.get("positionSide")
+                or raw.get("position_side")
+                or info.get("positionSide")
+                or ""
+            ).upper()
+            rows.append(
+                {
+                    **raw,
+                    "symbol": row_symbol,
+                    "size": str(size),
+                    "position_side": position_side,
+                    "info": dict(info),
+                }
+            )
+        return rows
+
     # ============================================================
     # Phase 5: Order Management APIs
     # ============================================================

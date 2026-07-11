@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -150,6 +151,17 @@ def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
             "active_position_or_open_order_clear": True,
             "action_time_available_balance": True,
         },
+        "account_mode": {
+            "status": "fresh",
+            "account_id": "owner-subaccount-runtime-v0",
+            "exchange_id": "binance_usdm",
+            "runtime_profile_id": "owner-runtime-console-v1",
+            "account_mode": "hedge",
+            "dual_side_position": True,
+            "position_mode_safe": True,
+            "observed_at": "2026-07-05T00:00:00+00:00",
+            "source": "binance_usdm_signed_get:/fapi/v1/positionSide/dual",
+        },
         "blockers": [],
     }
     try:
@@ -164,7 +176,8 @@ def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
                 text(
                     """
                     SELECT fact_snapshot_id, strategy_group_id, symbol, side,
-                           fact_surface, satisfied, freshness_state
+                           runtime_profile_id, fact_surface, satisfied,
+                           freshness_state, fact_values
                     FROM brc_runtime_fact_snapshots
                     WHERE fact_surface IN ('account_safe', 'account_mode')
                     ORDER BY fact_surface
@@ -180,9 +193,92 @@ def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
     assert all(row["strategy_group_id"] is None for row in rows)
     assert all(row["symbol"] is None for row in rows)
     assert all(row["side"] is None for row in rows)
+    assert all(row["runtime_profile_id"] == "owner-runtime-console-v1" for row in rows)
     assert all(row["satisfied"] in {True, 1} for row in rows)
     assert all(row["freshness_state"] == "fresh" for row in rows)
     assert export["source_mode"] == "db_backed"
     assert export["checks"]["account_safe_facts_ready"] is True
     assert export["checks"]["account_mode_snapshot_ready"] is True
     assert export["checks"]["open_orders_clear"] is True
+    mode_values = next(
+        row["fact_values"]
+        for row in rows
+        if row["fact_surface"] == "account_mode"
+    )
+    if isinstance(mode_values, str):
+        mode_values = json.loads(mode_values)
+    assert mode_values["account_id"] == "owner-subaccount-runtime-v0"
+    assert mode_values["exchange_id"] == "binance_usdm"
+    assert mode_values["account_mode"] == "hedge"
+    assert mode_values["dual_side_position"] is True
+    assert mode_values["position_mode_safe"] is True
+
+
+def test_stale_account_mode_cannot_leave_account_safe_snapshot_satisfied():
+    helper = _load_file_module(HELPER_PATH, "runtime_pg_stale_account_mode_test")
+    engine = _seed_engine()
+    artifact = {
+        "generated_at_utc": "2026-07-05T00:02:00+00:00",
+        "status": "runtime_account_safe_facts_ready",
+        "source_status": "ready",
+        "checks": {
+            "account_safe_facts_ready": True,
+            "account_safe": True,
+            "private_action_time_facts_ready": True,
+            "active_position_or_open_order_clear": True,
+            "action_time_available_balance": True,
+            "open_orders_clear": True,
+            "account_trade_permission": True,
+            "source_signed_get_only": True,
+            "source_exchange_write_called": False,
+            "source_order_created": False,
+        },
+        "facts": {
+            "active_position_or_open_order_clear": True,
+            "action_time_available_balance": True,
+        },
+        "account_mode": {
+            "status": "fresh",
+            "account_id": "owner-subaccount-runtime-v0",
+            "exchange_id": "binance_usdm",
+            "runtime_profile_id": "owner-runtime-console-v1",
+            "account_mode": "one_way",
+            "dual_side_position": False,
+            "position_mode_safe": True,
+            "observed_at": "2026-07-05T00:00:00+00:00",
+            "source": "binance_usdm_signed_get:/fapi/v1/positionSide/dual",
+        },
+        "blockers": [],
+    }
+    try:
+        with engine.begin() as conn:
+            helper.write_account_safe_fact_snapshots(
+                conn,
+                artifact=artifact,
+                source_ref="unit:stale-live-facts",
+                source_kind="unit_test",
+            )
+            rows = {
+                row["fact_surface"]: dict(row)
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT fact_surface, satisfied, freshness_state, fact_values
+                        FROM brc_runtime_fact_snapshots
+                        WHERE fact_surface IN ('account_safe', 'account_mode')
+                        """
+                    )
+                ).mappings()
+            }
+    finally:
+        engine.dispose()
+
+    mode_values = rows["account_mode"]["fact_values"]
+    if isinstance(mode_values, str):
+        mode_values = json.loads(mode_values)
+    assert rows["account_safe"]["satisfied"] in {False, 0}
+    assert rows["account_mode"]["satisfied"] in {False, 0}
+    assert rows["account_mode"]["freshness_state"] == "stale"
+    assert mode_values["account_mode"] is None
+    assert mode_values["dual_side_position"] is None
+    assert mode_values["position_mode_safe"] is False

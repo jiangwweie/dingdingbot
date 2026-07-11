@@ -20,9 +20,9 @@ from typing import Any
 
 
 DEFAULT_DEPLOYED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
-DEFAULT_EXPECTED_MIN_MIGRATIONS = 81
+DEFAULT_EXPECTED_MIN_MIGRATIONS = 114
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-11-081_create_llm_advisory_plane.py"
+    "2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
 )
 class ReleaseReadinessError(RuntimeError):
     """Raised when release readiness inspection cannot proceed."""

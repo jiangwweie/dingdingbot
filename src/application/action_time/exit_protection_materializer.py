@@ -98,6 +98,13 @@ def materialize_ticket_bound_exit_protection_set(
     blockers.extend(entry_fill["blockers"])
     blockers.extend(_exit_order_blockers(sl_order, role="SL"))
     blockers.extend(_exit_order_blockers(tp1_order, role="TP1"))
+    blockers.extend(
+        _partial_entry_protection_quantity_blockers(
+            entry_fill=entry_fill,
+            sl_order=sl_order,
+            tp1_order=tp1_order,
+        )
+    )
     classification = classify_exit_protection_materialization(
         attempt=attempt,
         entry_order=entry_order,
@@ -142,7 +149,16 @@ def materialize_ticket_bound_exit_protection_set(
                 "next_action": classification.next_action,
             }
             if classification.blockers
-            else {"entry_order": entry_order}
+            else {
+                "entry_order": entry_order,
+                "entry_fill": {
+                    "exchange_order_id": entry_order.get("exchange_order_id"),
+                    "fill_qty": str(entry_fill.get("filled_qty") or ""),
+                    "fill_price": str(entry_fill.get("avg_price") or ""),
+                    "fee": entry_order.get("fee"),
+                    "fill_time_ms": entry_order.get("fill_time_ms") or now_ms,
+                },
+            }
         ),
         now_ms=now_ms,
     )
@@ -317,12 +333,10 @@ def _entry_fill(
         blockers.append("entry_exchange_order_id_missing")
     if requested_qty <= 0:
         blockers.append("entry_requested_qty_missing")
-    if status != "filled":
+    if status not in {"filled", "partially_filled", "partiallyfilled"}:
         blockers.append(f"entry_status_not_filled:{status or 'missing'}")
     if filled_qty <= 0:
         blockers.append("entry_filled_qty_missing")
-    elif requested_qty > 0 and filled_qty < requested_qty:
-        blockers.append("entry_partial_fill_not_lifecycle_ready")
     if avg_price <= 0:
         blockers.append("entry_average_exec_price_missing")
     return {
@@ -331,6 +345,26 @@ def _entry_fill(
         "filled_qty": filled_qty,
         "avg_price": avg_price,
     }
+
+
+def _partial_entry_protection_quantity_blockers(
+    *,
+    entry_fill: dict[str, Any],
+    sl_order: dict[str, Any],
+    tp1_order: dict[str, Any],
+) -> list[str]:
+    requested_qty = _decimal(entry_fill.get("requested_qty"))
+    filled_qty = _decimal(entry_fill.get("filled_qty"))
+    if filled_qty <= 0 or requested_qty <= 0 or filled_qty >= requested_qty:
+        return []
+    blockers: list[str] = []
+    sl_qty = _qty(sl_order)
+    tp1_qty = _qty(tp1_order)
+    if sl_qty != filled_qty:
+        blockers.append("partial_entry_sl_qty_not_actual_fill")
+    if tp1_qty <= 0 or tp1_qty > filled_qty:
+        blockers.append("partial_entry_tp1_qty_not_bounded_by_actual_fill")
+    return blockers
 
 
 def _exit_order_blockers(order: dict[str, Any], *, role: str) -> list[str]:

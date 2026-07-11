@@ -64,6 +64,14 @@ def _runner(*, live_ready: bool = False, generic_post_status: int = 405):
             return module.CommandResult("70\n", "", 0)
         if "tail -1" in remote:
             return module.CommandResult(LATEST_MIGRATION + "\n", "", 0)
+        if remote == "set -eu; systemctl is-enabled brc-ticket-lifecycle-maintenance.timer":
+            return module.CommandResult("enabled\n", "", 0)
+        if remote == "set -eu; systemctl is-active brc-ticket-lifecycle-maintenance.timer":
+            return module.CommandResult("active\n", "", 0)
+        if "systemctl show brc-ticket-lifecycle-maintenance.service" in remote:
+            return module.CommandResult("success\n0\n", "", 0)
+        if "cmp -s /etc/systemd/system/brc-ticket-lifecycle-maintenance.service" in remote:
+            return module.CommandResult("match\n", "", 0)
         if "/api/health" in remote:
             return module.CommandResult(
                 json.dumps(
@@ -161,9 +169,9 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
 def test_postdeploy_verifier_defaults_track_current_stage_migration_head():
     module = _load_module()
 
-    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 84
+    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 114
     assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+        "2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
     )
 
 

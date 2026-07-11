@@ -24,6 +24,11 @@ def runtime_submit_env(monkeypatch):
     monkeypatch.setenv("RUNTIME_CONTROL_API_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_TEST_SIGNAL_INJECTION_ENABLED", "false")
     monkeypatch.setenv("RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED", "true")
+    monkeypatch.setenv(
+        "BRC_RUNTIME_EXCHANGE_ACCOUNT_ID",
+        "owner-subaccount-runtime-v0",
+    )
+    monkeypatch.setenv("BRC_RUNTIME_EXCHANGE_ID", "binance_usdm")
 
 
 def test_protected_submit_attempt_disabled_smoke_records_ticket_bound_pg_attempt(
@@ -885,6 +890,10 @@ def _ensure_runtime_submit_env() -> None:
     os.environ["RUNTIME_CONTROL_API_ENABLED"] = "false"
     os.environ["RUNTIME_TEST_SIGNAL_INJECTION_ENABLED"] = "false"
     os.environ["RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED"] = "true"
+    os.environ["BRC_RUNTIME_EXCHANGE_ACCOUNT_ID"] = (
+        "owner-subaccount-runtime-v0"
+    )
+    os.environ["BRC_RUNTIME_EXCHANGE_ID"] = "binance_usdm"
 
 
 def _protected_submit_row(conn):

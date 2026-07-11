@@ -98,6 +98,20 @@ def materialize_live_outcome_ledger(
 
     lifecycle_status = str(lifecycle.get("status") or "")
     attempt_status = str(attempt.get("status") or "")
+    if lifecycle_status == "lifecycle_closed":
+        lineage_blockers = _closed_lifecycle_lineage_blockers(
+            conn,
+            lifecycle=lifecycle,
+            ticket_id=ticket_id,
+        )
+        if lineage_blockers:
+            return _result(
+                "blocked_invalid_lifecycle_lineage",
+                now_ms=now_ms,
+                outcome={},
+                blockers=lineage_blockers,
+                next_action="repair_lifecycle_closure_lineage",
+            )
     outcome_type = _outcome_type(lifecycle_status, attempt_status)
     if not outcome_type:
         return _result(
@@ -118,8 +132,32 @@ def materialize_live_outcome_ledger(
     sl = _role_order(protection_orders, "SL")
     tp1 = _role_order(protection_orders, "TP1")
     runner_sl = _role_order(protection_orders, "RUNNER_SL")
-    entry_price = _decimal(lifecycle.get("entry_avg_price"))
-    entry_qty = _decimal(lifecycle.get("entry_filled_qty"))
+    entry_fill = _lifecycle_fill_event(
+        conn,
+        lifecycle_run_id=str(lifecycle.get("lifecycle_run_id") or ""),
+        event_type="entry_filled",
+        payload_key="entry_fill",
+    )
+    tp1_fill = _lifecycle_fill_event(
+        conn,
+        lifecycle_run_id=str(lifecycle.get("lifecycle_run_id") or ""),
+        event_type="tp1_filled",
+        payload_key="fill",
+    )
+    final_fill = _lifecycle_fill_event(
+        conn,
+        lifecycle_run_id=str(lifecycle.get("lifecycle_run_id") or ""),
+        event_type="final_exit_detected",
+        payload_key="fill",
+    )
+    entry_price = _first_positive_decimal(
+        entry_fill.get("fill_price"),
+        lifecycle.get("entry_avg_price"),
+    )
+    entry_qty = _first_positive_decimal(
+        entry_fill.get("fill_qty"),
+        lifecycle.get("entry_filled_qty"),
+    )
     stop_price = _decimal(sl.get("trigger_price"))
     risk_at_stop = (
         abs(entry_price - stop_price) * entry_qty
@@ -127,6 +165,30 @@ def materialize_live_outcome_ledger(
         else None
     )
     initial_notional = entry_price * entry_qty if entry_price > 0 and entry_qty > 0 else None
+    tp1_fill_price = _positive_decimal(tp1_fill.get("fill_price"))
+    tp1_fill_qty = _positive_decimal(tp1_fill.get("fill_qty"))
+    final_exit_price = _positive_decimal(final_fill.get("fill_price"))
+    final_exit_qty = _positive_decimal(final_fill.get("fill_qty"))
+    realized_pnl = _realized_pnl(
+        side=str(ticket.get("side") or ""),
+        entry_price=entry_price,
+        entry_qty=entry_qty,
+        exits=[
+            (tp1_fill_price, tp1_fill_qty),
+            (final_exit_price, final_exit_qty),
+        ],
+    )
+    fees = _compatible_fee_total(
+        entry_fill.get("fee"),
+        tp1_fill.get("fee"),
+        final_fill.get("fee"),
+    )
+    net_pnl = realized_pnl - fees if realized_pnl is not None and fees is not None else realized_pnl
+    r_multiple = (
+        net_pnl / risk_at_stop
+        if net_pnl is not None and risk_at_stop is not None and risk_at_stop > 0
+        else None
+    )
     lifecycle_defects = _lifecycle_defects(lifecycle)
     outcome = {
         "live_outcome_id": _stable_id("live_outcome", ticket_id),
@@ -154,21 +216,21 @@ def materialize_live_outcome_ledger(
         "leverage": _positive_decimal(ticket.get("leverage")),
         "sl_exchange_order_id": str(sl.get("exchange_order_id") or "") or None,
         "tp1_exchange_order_id": str(tp1.get("exchange_order_id") or "") or None,
-        "tp1_fill_time_ms": tp1.get("updated_at_ms") if str(tp1.get("status") or "") == "filled" else None,
-        "tp1_fill_price": _positive_decimal(tp1.get("price")) if str(tp1.get("status") or "") == "filled" else None,
+        "tp1_fill_time_ms": tp1_fill.get("fill_time_ms"),
+        "tp1_fill_price": tp1_fill_price,
         "runner_qty": _positive_decimal(protection_set.get("runner_qty")),
         "runner_sl_price": _positive_decimal(runner_sl.get("trigger_price")),
         "runner_sl_exchange_order_id": str(runner_sl.get("exchange_order_id") or "") or None,
-        "final_exit_time_ms": lifecycle.get("updated_at_ms") if lifecycle_status == "lifecycle_closed" else None,
-        "final_exit_price": None,
+        "final_exit_time_ms": final_fill.get("fill_time_ms"),
+        "final_exit_price": final_exit_price,
         "flat_reconciled_at_ms": lifecycle.get("updated_at_ms") if lifecycle_status in CLOSED_LIFECYCLE_STATUSES else None,
-        "fees": None,
+        "fees": fees,
         "funding": None,
-        "realized_pnl": None,
+        "realized_pnl": realized_pnl,
         "unrealized_pnl": None,
         "mae": None,
         "mfe": None,
-        "r_multiple": None,
+        "r_multiple": r_multiple,
         "stage_reached": lifecycle_status or attempt_status,
         "outcome_type": outcome_type,
         "status": "recorded",
@@ -265,6 +327,118 @@ def _existing_outcome(conn: sa.engine.Connection, ticket_id: str) -> dict[str, A
     return dict(row) if row else {}
 
 
+def _lifecycle_fill_event(
+    conn: sa.engine.Connection,
+    *,
+    lifecycle_run_id: str,
+    event_type: str,
+    payload_key: str,
+) -> dict[str, Any]:
+    if not lifecycle_run_id:
+        return {}
+    table = _table(conn, "brc_ticket_bound_lifecycle_events")
+    rows = conn.execute(
+        sa.select(table)
+        .where(
+            table.c.lifecycle_run_id == lifecycle_run_id,
+            table.c.event_type == event_type,
+        )
+        .order_by(table.c.created_at_ms.desc())
+    ).mappings()
+    for row in rows:
+        payload = _json_dict(row.get("event_payload"))
+        fill = _json_dict(payload.get(payload_key))
+        if fill and (
+            _positive_decimal(fill.get("fill_price")) is not None
+            or _positive_decimal(fill.get("fill_qty")) is not None
+        ):
+            return fill
+    return {}
+
+
+def _closed_lifecycle_lineage_blockers(
+    conn: sa.engine.Connection,
+    *,
+    lifecycle: dict[str, Any],
+    ticket_id: str,
+) -> list[str]:
+    blockers: list[str] = []
+    closure = _row_by_id(
+        conn,
+        "brc_ticket_bound_post_submit_closures",
+        "protected_submit_attempt_id",
+        str(lifecycle.get("protected_submit_attempt_id") or ""),
+    )
+    if str(closure.get("status") or "") != "closed":
+        blockers.append("live_outcome_closed_post_submit_closure_missing")
+    table = _table(conn, "brc_ticket_bound_lifecycle_events")
+    event_types = {
+        str(row["event_type"])
+        for row in conn.execute(
+            sa.select(table.c.event_type).where(
+                table.c.lifecycle_run_id == lifecycle.get("lifecycle_run_id"),
+                table.c.ticket_id == ticket_id,
+                table.c.protected_submit_attempt_id
+                == lifecycle.get("protected_submit_attempt_id"),
+            )
+        ).mappings()
+    }
+    for event_type in (
+        "final_exit_detected",
+        "reconciliation_matched",
+        "budget_settled",
+        "review_recorded",
+        "lifecycle_closed",
+    ):
+        if event_type not in event_types:
+            blockers.append(f"live_outcome_lifecycle_event_missing:{event_type}")
+    return blockers
+
+
+def _realized_pnl(
+    *,
+    side: str,
+    entry_price: Decimal,
+    entry_qty: Decimal,
+    exits: list[tuple[Decimal | None, Decimal | None]],
+) -> Decimal | None:
+    valid = [(price, qty) for price, qty in exits if price is not None and qty is not None]
+    if entry_price <= 0 or entry_qty <= 0 or not valid:
+        return None
+    exited_qty = sum((qty for _, qty in valid), Decimal("0"))
+    if exited_qty <= 0 or exited_qty > entry_qty:
+        return None
+    if exited_qty != entry_qty:
+        return None
+    multiplier = Decimal("1") if side == "long" else Decimal("-1")
+    return sum(
+        ((price - entry_price) * qty * multiplier for price, qty in valid),
+        Decimal("0"),
+    )
+
+
+def _compatible_fee_total(*fees: Any) -> Decimal | None:
+    parsed: list[tuple[Decimal, str]] = []
+    for fee in fees:
+        if fee in (None, "", {}):
+            continue
+        if isinstance(fee, dict):
+            cost = _positive_or_zero_decimal(fee.get("cost"))
+            currency = str(fee.get("currency") or "").upper()
+        else:
+            cost = _positive_or_zero_decimal(fee)
+            currency = ""
+        if cost is None:
+            return None
+        parsed.append((cost, currency))
+    if not parsed:
+        return None
+    currencies = {currency for _, currency in parsed if currency}
+    if len(currencies) > 1:
+        return None
+    return sum((cost for cost, _ in parsed), Decimal("0"))
+
+
 def _row_by_id(
     conn: sa.engine.Connection,
     table_name: str,
@@ -337,6 +511,22 @@ def _positive_decimal(value: Any) -> Decimal | None:
     return parsed if parsed > 0 else None
 
 
+def _positive_or_zero_decimal(value: Any) -> Decimal | None:
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _first_positive_decimal(*values: Any) -> Decimal:
+    for value in values:
+        parsed = _positive_decimal(value)
+        if parsed is not None:
+            return parsed
+    return Decimal("0")
+
+
 def _decimal(value: Any) -> Decimal:
     try:
         return Decimal(str(value))
@@ -359,6 +549,17 @@ def _json_list(value: Any) -> list[str]:
                 return [str(item) for item in loaded if str(item or "").strip()]
         return [stripped]
     return [str(value)]
+
+
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped[:1] == "{":
+            loaded = json.loads(stripped)
+            return dict(loaded) if isinstance(loaded, dict) else {}
+    return {}
 
 
 def _dedupe(values: list[str]) -> list[str]:

@@ -41,7 +41,7 @@ def test_protection_reconciler_marks_complete_set_reconciled(pg_control_connecti
     assert _lifecycle_status(pg_control_connection) == "position_protected"
 
 
-def test_protection_reconciler_resolves_stale_scope_freeze_after_match(
+def test_protection_reconciler_does_not_resolve_another_sources_scope_hold(
     pg_control_connection,
 ):
     set_id = _materialized_exit_protection_set(pg_control_connection)
@@ -60,17 +60,8 @@ def test_protection_reconciler_resolves_stale_scope_freeze_after_match(
             text("SELECT * FROM brc_ticket_bound_scope_freezes")
         ).mappings().one()
     )
-    assert freeze["status"] == "resolved"
-    assert freeze["first_blocker"] == "scope_cleanup_pending_no_current_risk"
-    assert (
-        current_scope_blockers(
-            {"ticket_bound_scope_freezes": [freeze]},
-            strategy_group_id="SOR-001",
-            symbol="ETHUSDT",
-            side="long",
-        )
-        == []
-    )
+    assert freeze["status"] == "active"
+    assert freeze["first_blocker"] == "protection_missing"
 
 
 def test_protection_reconciler_flags_missing_exchange_sl(pg_control_connection):
@@ -89,7 +80,7 @@ def test_protection_reconciler_flags_missing_exchange_sl(pg_control_connection):
     assert _lifecycle_status(pg_control_connection) == "protection_reconciliation_mismatch"
 
 
-def test_protection_reconciler_ignores_unrelated_non_reduce_only_open_order(
+def test_protection_reconciler_blocks_unowned_entry_order_in_same_domain(
     pg_control_connection,
 ):
     set_id = _materialized_exit_protection_set(pg_control_connection)
@@ -111,9 +102,9 @@ def test_protection_reconciler_ignores_unrelated_non_reduce_only_open_order(
         now_ms=NOW_MS + 9000,
     )
 
-    assert payload["status"] == "reconciled"
-    assert payload["blockers"] == []
-    assert _lifecycle_status(pg_control_connection) == "position_protected"
+    assert payload["status"] == "exchange_orphan_detected"
+    assert payload["blockers"] == ["exchange_only_unknown_order"]
+    assert _lifecycle_status(pg_control_connection) == "exchange_orphan_detected"
 
 
 def test_protection_reconciler_flags_linked_protection_side_mismatch(

@@ -11,6 +11,7 @@ from src.application.action_time.exchange_command import (
 )
 from src.application.action_time.exchange_command_reconciliation import (
     reconcile_unknown_exchange_commands,
+    run_one_unknown_exchange_command_reconciliation,
 )
 from src.domain.ticket_bound_exchange_command import (
     ExchangeCommandOutcomeClass,
@@ -115,6 +116,32 @@ async def test_contradictory_client_identity_hard_stops_command(
     assert _command_state(pg_control_connection) == "hard_stopped"
 
 
+@pytest.mark.asyncio
+async def test_production_reconciliation_worker_commits_around_lookup(
+    pg_control_connection,
+):
+    command = _unknown_entry_command(pg_control_connection)
+    pg_control_connection.commit()
+    gateway = _LookupGateway(
+        SimpleNamespace(
+            exchange_order_id="exchange-safe-worker",
+            client_order_id=command["client_order_id"],
+            symbol=command["gateway_symbol"],
+        )
+    )
+
+    report = await run_one_unknown_exchange_command_reconciliation(
+        pg_control_connection.engine,
+        gateway=gateway,
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert report["status"] == "reconciled_submitted"
+    assert report["exchange_read_called"] is True
+    assert report["exchange_write_called"] is False
+    assert _command_state(pg_control_connection) == "reconciled_submitted"
+
+
 def _unknown_entry_command(conn) -> dict:
     ids = _create_ready_protected_submit(conn)
     _prepare_real_submit(conn, ids)
@@ -155,6 +182,8 @@ def _command_state(conn) -> str:
 
 class _LookupGateway:
     def __init__(self, result) -> None:
+        self.runtime_account_id = "owner-subaccount-runtime-v0"
+        self.runtime_exchange_id = "binance_usdm"
         self.result = result
         self.calls: list[tuple[str, str]] = []
         self.place_order_calls = 0
