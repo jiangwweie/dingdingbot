@@ -14,6 +14,10 @@ def test_phase_two_deploy_is_pg_gated_and_rolls_back_capability_on_failure():
     )
 
     assert "verify_ticket_lifecycle_phase_two_readiness.py" in command
+    assert "build_runtime_account_safe_facts.py" in command
+    assert command.index("build_runtime_account_safe_facts.py") < command.index(
+        "verify_ticket_lifecycle_phase_two_readiness.py"
+    )
     assert "audit_production_runtime_file_io.py --json" in command
     assert "set_ticket_lifecycle_mutation_capability.py --enable" in command
     assert "set_ticket_lifecycle_mutation_capability.py --disable" in command

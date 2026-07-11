@@ -50,6 +50,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE))
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--timeout-seconds", type=float, default=12)
+    parser.add_argument(
+        "--allow-blocked-current-projection",
+        action="store_true",
+        help=(
+            "Return success after a blocked fact projection is durably written; "
+            "intended for recurring read-only collection cadence only."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if not args.database_url:
@@ -100,7 +108,14 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if artifact["checks"]["account_safe_facts_ready"] is True else 2
+    return (
+        0
+        if (
+            artifact["checks"]["account_safe_facts_ready"] is True
+            or args.allow_blocked_current_projection
+        )
+        else 2
+    )
 
 
 def collect_account_safe_live_facts_from_pg_scope(

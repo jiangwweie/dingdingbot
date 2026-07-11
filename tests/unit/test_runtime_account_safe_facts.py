@@ -251,6 +251,41 @@ def test_runtime_account_safe_facts_cli_rejects_live_facts_json(tmp_path: Path):
     assert exc.value.code == 2
 
 
+def test_runtime_account_safe_facts_projection_cadence_can_continue_when_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    blocked = {
+        "status": "runtime_account_safe_facts_blocked",
+        "checks": {"account_safe_facts_ready": False},
+    }
+    monkeypatch.setattr(
+        module._impl,
+        "collect_account_safe_live_facts_from_pg_scope",
+        lambda *args, **kwargs: {"status": "partial"},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "build_runtime_account_safe_facts",
+        lambda **kwargs: dict(blocked),
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "write_account_safe_fact_snapshots",
+        lambda *args, **kwargs: ["fact:account-mode"],
+    )
+
+    exit_code = module.main(
+        [
+            "--database-url",
+            "sqlite:///:memory:",
+            "--allow-non-postgres-for-test",
+            "--allow-blocked-current-projection",
+        ]
+    )
+
+    assert exit_code == 0
+
+
 def _create_pg_scope_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """

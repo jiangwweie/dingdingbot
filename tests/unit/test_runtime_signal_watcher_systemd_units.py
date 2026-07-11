@@ -80,7 +80,11 @@ def test_signal_watcher_service_observes_action_time_ticket_readiness_without_ru
     assert "IOAccounting=true" in text
     assert "ExecStartPre=" in text
     assert "fetch_binance_usdm_public_facts.py" in text
+    assert "build_runtime_account_safe_facts.py" in text
+    assert "--allow-blocked-current-projection" in text
     assert text.index("fetch_binance_usdm_public_facts.py") < text.index(
+        "build_runtime_account_safe_facts.py"
+    ) < text.index(
         "runtime_signal_watcher_tick.py"
     )
     assert "--require-database-url" in text
