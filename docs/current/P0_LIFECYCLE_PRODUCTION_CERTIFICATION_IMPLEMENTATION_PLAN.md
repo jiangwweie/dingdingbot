@@ -598,13 +598,13 @@ or presenting synthetic scopes as live-market outcomes.
 
 - [x] **Step 5: Review diff against every design acceptance item**
 
-- [ ] **Step 6: Commit and push the focused branch**
+- [x] **Step 6: Commit and push the focused branch**
 
-- [ ] **Step 7: Execute controlled Tokyo phase-one deploy with migrations and timer quiescence**
+- [x] **Step 7: Execute controlled Tokyo phase-one deploy with migrations and timer quiescence**
 
-- [ ] **Step 8: Run postdeploy no-exchange-write production certification and only then phase-two capability enablement**
+- [x] **Step 8: Run postdeploy no-exchange-write production certification and only then phase-two capability enablement**
 
-- [ ] **Step 9: Verify PG current truth and document the only remaining market-dependent calibration**
+- [x] **Step 9: Verify PG current truth and document the only remaining market-dependent calibration**
 
 ## Final Completion Checklist
 
@@ -630,8 +630,8 @@ or presenting synthetic scopes as live-market outcomes.
 - [x] Application global deadline plus shutdown margin is strictly below systemd timeout, and one invocation claims at most one mutation command.
 - [x] A different natural Signal ID preempts engineering only after higher safety work and at a committed boundary; it never bypasses an incomplete capability.
 - [x] Full tests and audits pass.
-- [ ] Tokyo release and PG migration match the pushed commit.
-- [ ] Only genuine live-market calibration remains.
+- [x] Tokyo release and PG migration match the pushed commit.
+- [x] Only genuine live-market calibration remains.
 
 ## Safe Interrupt Rule
 

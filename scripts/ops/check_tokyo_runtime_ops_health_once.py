@@ -56,6 +56,32 @@ L2_L7_CHAIN_TABLES = (
     "brc_goal_status_current",
     "brc_server_monitor_runs",
 )
+EXCHANGE_COMMAND_HEALTH_COLUMNS = (
+    "exchange_command_id",
+    "ticket_id",
+    "command_kind",
+    "command_source",
+    "command_state",
+    "outcome_class",
+    "exchange_result",
+    "netting_domain_key",
+    "claim_owner",
+    "claim_expires_at_ms",
+    "updated_at_ms",
+)
+DOMAIN_HOLD_HEALTH_COLUMNS = (
+    "scope_freeze_id",
+    "strategy_group_id",
+    "symbol",
+    "side",
+    "source_ticket_id",
+    "source_kind",
+    "source_id",
+    "netting_domain_key",
+    "first_blocker",
+    "blockers",
+    "updated_at_ms",
+)
 PG_RECENT_WINDOW_MS = 10 * 60 * 1000
 LIFECYCLE_ATTENTION_STATUSES = (
     "submit_failed",
@@ -801,21 +827,7 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
         conn,
         now_ms=now_ms,
     )
-    active_domain_holds = list(
-        conn.execute(
-            sa.text(
-                """
-                SELECT scope_freeze_id, ticket_id, source_ticket_id,
-                       source_kind, source_id, netting_domain_key,
-                       first_blocker, blockers, updated_at_ms
-                FROM brc_ticket_bound_scope_freezes
-                WHERE status = 'active'
-                ORDER BY updated_at_ms DESC
-                LIMIT 20
-                """
-            )
-        ).mappings()
-    )
+    active_domain_holds = _read_active_domain_holds(conn)
     lifecycle_closed_without_live_outcome = list(
         conn.execute(
             sa.text(
@@ -955,13 +967,11 @@ def _read_exchange_command_critical_rows(
 ) -> list[dict[str, Any]]:
     """Read critical command truth from fields defined by migration 114."""
 
+    columns = ", ".join(EXCHANGE_COMMAND_HEALTH_COLUMNS)
     rows = conn.execute(
         sa.text(
-            """
-            SELECT exchange_command_id, ticket_id, command_kind,
-                   command_source, command_state, outcome_class,
-                   exchange_result, netting_domain_key, claim_owner,
-                   claim_expires_at_ms, updated_at_ms
+            f"""
+            SELECT {columns}
             FROM brc_ticket_bound_exchange_commands
             WHERE command_state IN ('outcome_unknown', 'hard_stopped')
                OR (command_state = 'dispatching'
@@ -992,6 +1002,26 @@ def _read_exchange_command_critical_rows(
         )
         results.append(row)
     return results
+
+
+def _read_active_domain_holds(
+    conn: sa.engine.Connection,
+) -> list[dict[str, Any]]:
+    """Read source-owned holds from the exact migration 101 + 113 shape."""
+
+    columns = ", ".join(DOMAIN_HOLD_HEALTH_COLUMNS)
+    rows = conn.execute(
+        sa.text(
+            f"""
+            SELECT {columns}
+            FROM brc_ticket_bound_scope_freezes
+            WHERE status = 'active'
+            ORDER BY updated_at_ms DESC
+            LIMIT 20
+            """
+        )
+    ).mappings()
+    return [dict(row) for row in rows]
 
 
 def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -1185,19 +1215,7 @@ def _current_monitor_blocker_classes(
 def _missing_tables(
     conn: sa.engine.Connection, table_names: tuple[str, ...]
 ) -> list[str]:
-    existing = set(
-        conn.execute(
-            sa.text(
-                """
-                SELECT table_name
-                FROM information_schema.tables
-                WHERE table_schema = :schema
-                  AND table_name LIKE :pattern
-                """
-            ),
-            {"schema": "public", "pattern": "brc_%"},
-        ).scalars()
-    )
+    existing = set(sa.inspect(conn).get_table_names())
     return [table_name for table_name in table_names if table_name not in existing]
 
 
