@@ -7,6 +7,12 @@ last_verified: 2026-07-08
 
 # Ticket-Bound Lifecycle Safety Core Implementation Plan
 
+This file retains the lifecycle **component invariants**. Current integration,
+progress, durable command authority, terminal closure order, and deploy
+semantics are owned by
+`docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` and
+its implementation plan.
+
 ## Purpose
 
 This document turns the ticket-bound order lifecycle design into an
@@ -70,10 +76,11 @@ This plan does not authorize:
 
 ### Current Implementation Progress
 
-As of the 2026-07-08 lifecycle cleanup and failure-matrix deployment, `dev`,
-`origin/dev`, and Tokyo are aligned on
-`f8f299f82c6cd9f456189252608bc0effe2cbb6b`. Tokyo postdeploy acceptance passed
-and PG is at `alembic=098`.
+The historical 2026-07-08 lifecycle cleanup baseline was `f8f299f` at migration
+`098`. Current Tokyo is release `5f40c62d` at migration `112`; lifecycle timer,
+first/scheduled reconciliation ticks, scope freezes, and durable protected-submit
+exchange commands are present, but active lifecycle behavior has only exercised
+the no-maintainable path and remains the current P0-LC certification target.
 
 The implementation has advanced from proof-only protection rows to a broader
 lifecycle safety core:

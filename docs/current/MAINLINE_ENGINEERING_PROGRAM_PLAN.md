@@ -30,7 +30,7 @@ repo MD/JSON/output/report files.
 
 | Fact | Current evidence |
 | --- | --- |
-| **Current Tokyo release line** | Tokyo follows focused branch `codex/p0-real-signal-ticket-closure`; the immutable deployed head is recorded by `.brc-release-manifest.json`; PG migration is `112` |
+| **Current engineering branch / Tokyo release** | Engineering is on `codex/p0-lifecycle-production-certification`; Tokyo remains at deployed head `5f40c62d`, PG migration `112`, until P0-LC acceptance |
 | **PG current state is the runtime source** | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | **Repo/output/report files are not runtime authority** | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | **Five StrategyGroups are active WIP** | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`, PG candidate scope seed |
@@ -43,9 +43,10 @@ repo MD/JSON/output/report files.
 | **Scope freeze pre-submit hard blocker is deployed** | `381aed34` blocks active real-risk freezes across promotion, lane, ticket, Runtime Safety State, FinalGate preflight, Operation Layer handoff, submit-mode decision, and protected submit; stale/no-risk freezes resolve through reconciliation/cleanup |
 | **Typed pricing / sizing / reservation closure is implemented** | Action-time facts now own a side-aware executable price, Decimal normalized quantity, and positive risk-at-stop reservation; promotion, Ticket, and protected submit reuse the same lineage rather than recomputing loose dictionary values |
 | **Atomic Ticket sequence is implemented** | Action-time facts, lightweight readiness, promotion, reservation, lane, and Ticket run under one savepoint and roll back together when any blocker or TTL boundary fails |
-| **Production-shaped certification exists** | Five StrategyGroups, 22 candidate scopes, and six current Event Specs have positive, missing, stale, malformed, conflict, and production-shaped raw-source chain coverage without exchange write |
+| **Producer-to-Ticket certification exists** | Five StrategyGroups, 22 candidate scopes, and six current Event Specs have positive, missing, stale, malformed, conflict, and raw-source-to-Ticket coverage without exchange write; it does not yet certify the full production lifecycle |
 | **Production temporal-truth acceptance found a second defect class** | A repeated watcher observation of the same closed-candle signal preserved the same `signal_event_id`; its prior promotion/lane identity was terminal, but sequence aggregation incorrectly converted child `arbitration_lost` rows into successful process outcomes and hid the parent terminal blocker |
-| **Temporal-truth correction is implemented on the focused branch** | Duplicate signal identity now preserves the first event row without mutating fact lineage or TTL; a failed parent promotion forces every affected lane outcome to remain `business_blocked`; the full suite passes with `2720 passed, 1 skipped` |
+| **Temporal-truth correction is deployed** | `5f40c62d` preserves the first signal event and parent blocker; current audit then found event-scoped historical Action-Time outcomes still override CPM/SUI and MPG/SUI after their source identities expire |
+| **Lifecycle production behavior remains uncertified** | The 30-second timer is active, but Tokyo has only exercised `no_maintainable_lifecycle`; canonical/venue identity, conditional orders, fill projection, short-transaction commands, settlement/review callers, and terminal Outcome remain P0-LC work |
 | **Test escape is proven** | Unit/full-chain fixtures inject `last_price`, `mark_price`, or `entry_price` directly, while production fact materialization does not guarantee the same typed field; downstream-complete dictionary fixtures therefore bypassed the missing producer handoff |
 | **Advanced trading quality / capital allocation remains future work** | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`; portfolio sleeve allocation, cluster exposure, cooldown, and drawdown controls remain above the per-ticket safety layer |
 
@@ -53,6 +54,7 @@ repo MD/JSON/output/report files.
 
 | Program | Priority | Goal | Primary design docs | Main acceptance |
 | --- | --- | --- | --- | --- |
+| **P0-LC Production Lifecycle Wiring And Continuous Reconciliation** | **active P0 mainline** | Unify current blocker relevance, venue truth, fill projection, durable place/cancel commands, continuous reconciliation, settlement, review, and terminal Outcome without waiting for market | `P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md`, `P0_LIFECYCLE_PRODUCTION_CERTIFICATION_IMPLEMENTATION_PLAN.md` | Every isolated production-shaped Ticket reaches simulated lifecycle closure plus one terminal Outcome or one deterministic blocker; Tokyo postdeploy proves release/schema/units/no-active zero effects/ops health without synthetic production rows |
 | **P0-RT Real Signal -> Ticket Closure** | P0 | Unify action-time pricing, normalized sizing, positive stop-risk reservation, and Ticket materialization inside freshness bounds | `PRE_TRADE_RUNTIME_CONTRACT.md`, `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, this program plan | An eligible production-shaped signal creates one PG Ticket and Runtime Safety State, or stops before lane readiness at one producer-owned blocker |
 | **P0-PC Production-Shaped Chain Certification** | P0 | Replace privileged downstream dictionary fixtures with raw-source-to-PG certification for all current Event Specs | `PRE_TRADE_RUNTIME_CONTRACT.md`, `RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `BLOCKER_CLASSIFICATION_CONTRACT.md` | Six Event Specs pass positive and negative raw-source chain cases; current projections agree on the same blocker and watermark |
 | **P0-0 Operation Layer / Exchange Capability Boundary** | P0 | Confirm the real official-path exchange capabilities that lifecycle, runner, recovery, and reconciliation may rely on | `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` | ENTRY, SL, TP1, reduce-only, query open orders/fills/position, cancel, idempotent client order id, and runner SL capability are explicitly mapped to supported / unsupported / recovery-required |
@@ -68,37 +70,40 @@ repo MD/JSON/output/report files.
 | **P2-E Advanced Capital Risk Allocation** | P2 | Allocate capital by portfolio exposure, StrategyGroup sleeve, symbol/side cap, cluster exposure, cooldown, and drawdown state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Multi-strategy / multi-symbol allocation can scale or pause exposure without changing per-ticket safety facts |
 | **P2-F Frontend Read Model Integration** | P2 | Build frontend against backend explanation/read models, not raw PG internals | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, frontend `OWNER_EXPLANATION_READ_MODEL_FRONTEND_CONTRACT.md` | UI shows runtime health, signal progress, account state, ticket status, and why-no-trade from backend read models |
 
+P0-RT, P0-PC, P0-0, P0-1, P0-2, P0-C, P0-D, P0-E, and P0-F are retained
+component programs/baselines. Their remaining cross-component production work
+is absorbed into P0-LC and must not run as separate medium-scale WIP.
+
 ## Priority Order
 
 | Order | Program | Reason |
 | --- | --- | --- |
-| 1 | **P0-RT Real Signal -> Ticket Closure** | Natural production signals have already proven that Ticket pricing/risk inputs are the first real blocker |
-| 2 | **P0-PC Production-Shaped Chain Certification** | The same fixture escape can recur at FinalGate, Operation Layer, protection, and reconciliation unless producer-to-consumer proof becomes a release gate |
-| 3 | **P0-0 Operation Layer / Exchange Capability Audit** | Lifecycle and runner plans must remain grounded in official gateway capabilities |
-| 4 | **P0-1 Ticket-Bound Lifecycle Safety Core** | State machine, invariants, and failure states define downstream behavior after Ticket creation |
-| 5 | **P0-2 Full Chain Simulation Harness** | The harness must be upgraded from downstream-complete fixtures to production-shaped producer-chain proof |
-| 6 | **P0-C Production Lifecycle Wiring** | Post-entry protection and recovery remain the highest funds-safety risks after Ticket closure |
-| 7 | **P0-E Scope Freeze Pre-Submit Gate** | Current real-risk scopes must block duplicate or conflicting progression |
-| 8 | **P0-D Live Outcome Ledger** | Real results must become structured learning data |
-| 9 | **P0-F Continuous Reconciliation Tick** | Reconciliation must continue until closure, recovery, or hard stop |
-| 10 | **P1-C Owner Explanation Read Model** | Owner surfaces must explain persisted blockers without decoding internals |
-| 11 | **P1-D Performance And Retention Control** | Continuous runtime must remain bounded |
-| 12 | **P2-F Frontend Read Model Integration** | Frontend follows stable backend read models |
-| 13 | **P2-E Advanced Capital Risk Allocation** | Portfolio allocation scales only after per-ticket mechanics and real outcomes are hard |
+| 1 | **P0-LC Production Lifecycle Wiring And Continuous Reconciliation** | Existing component capabilities are present but exchange truth, command atomicity, fill projection, and terminal closure are not one production-certified path |
+| 2 | **P1-C Owner Explanation Read Model** | Owner surfaces should consume stable lifecycle truth, not compensate for incomplete backend semantics |
+| 3 | **P1 Capital Allocation V1** | Allocation requires reliable ticket stop risk, open lifecycle exposure, released reservations, and terminal outcomes |
+| 4 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one certified lifecycle through adapters |
+| 5 | **P2 Advanced Portfolio/Regime Allocation** | Portfolio-level optimization follows measured multi-strategy outcomes |
 
 ## Current Next Execution Order
 
-This is the authoritative remaining sequence for the focused
-`codex/p0-real-signal-ticket-closure` release line.
+This is the authoritative remaining sequence for
+`codex/p0-lifecycle-production-certification`.
 It supersedes ad hoc task ordering in chat summaries.
+
+A different `signal_event_id` is a P0 interrupt event. After any unprotected
+position or `outcome_unknown` is handled, P0-LC pauses only at a committed
+transaction boundary, runs natural-signal acceptance, persists the result, and
+resumes the interrupted checklist item.
 
 | Order | Next work | Priority | Acceptance |
 | --- | --- | --- | --- |
-| 1 | **RT-5 Temporal Truth Postdeploy Acceptance** | P0 | Repeated same-candle input cannot mutate the original signal event; parent terminal blocker remains visible per lane; services stay healthy and no exchange write occurs |
-| 2 | **Production lifecycle wiring and continuous reconciliation** | P0 | Non-market-dependent post-Ticket lifecycle work continues through protection, scheduled reconciliation, deterministic recovery, settlement, and review |
-| 3 | **RT-4 Next-Distinct-Signal Acceptance** | P0 | The next distinct eligible `signal_event_id` creates one Ticket and Runtime Safety State or stops at one genuine current safety/account/position/protection blocker; it preempts lower work when it arrives |
-| 4 | **Live Outcome validation** | P0/P1 | The first real ticket produces one structured outcome or one exact hard-blocked outcome row |
-| 5 | **Owner Explanation, frontend, and capital allocation** | P1/P2 | Product surfaces and portfolio allocation build on stable backend truth after the first real lifecycle outcome |
+| 1 | **LC-0 Current process-outcome relevance** | P0 | Expired source identity loses blocker/notification authority; fresh/open lineage still blocks; Signal B same lane does not inherit Signal A outcome |
+| 2 | **LC-1 Typed exchange truth and ownership** | P0 | PG instrument mapping supplies venue symbol; normal/conditional orders and side-scoped position truth are complete and netting-aware |
+| 3 | **LC-2 Fill projection and monotonic state** | P0 | ENTRY/TP1/SL/RUNNER_SL fills update canonical PG state idempotently without fixture helpers |
+| 4 | **LC-3 Existing command authority and short transactions** | P0 | `brc_ticket_bound_exchange_commands` owns lifecycle place/cancel effects, leases, unknown outcomes, and reconciliation; network I/O is outside long PG transactions |
+| 5 | **LC-4 Settlement, review, closure, terminal Outcome** | P0 | Independent settlement evidence and validated system review precede lifecycle close; one final Outcome follows closure |
+| 6 | **LC-5 Rehearsal, deploy, and ops certification** | P0 | 22 isolated scopes pass simulated lifecycle acceptance; Tokyo postdeploy verifies units/schema/no-active zero effects/ops health without synthetic production rows |
+| 7 | **Owner Explanation, frontend, and capital allocation** | P1/P2 | Product surfaces and allocation consume stable backend lifecycle truth |
 
 ## P0-RT Real Signal -> Ticket Closure
 
@@ -362,6 +367,11 @@ Golden paths:
 
 ### P0-C Production Lifecycle Wiring
 
+P0-C is now a component contract absorbed by **P0-LC**. Current integration,
+progress, command-authority, and deploy semantics come from
+`P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md`; this section
+retains non-conflicting component requirements.
+
 #### Goal
 
 Wire the already implemented lifecycle components into the production path
@@ -392,10 +402,10 @@ submitted ticket
 | **Protection reconciliation** | Implemented over caller-provided exchange snapshots |
 | **Orphan protection cleanup** | Implemented and deployed through migration `098`; cleanup only cancels PG-linked reduce-only protection refs after flat-position proof |
 | **Lifecycle maintenance API wiring** | Implemented locally through `run_ticket_bound_lifecycle_maintenance` and `/api/trading-console/runtime-ticket-bound-lifecycle-maintenance`; it can materialize protection, prepare/execute recovery, prepare/execute runner mutation, materialize runner proof, and execute linked orphan cleanup |
-| **Production exchange snapshot fetch / scheduler wiring** | Still a controlled integration task; the maintenance service accepts caller-provided exchange snapshots and does not fetch exchange truth on its own |
-| **Runner mutation plan safety** | Default `submit_new_runner_sl_then_cancel_old` is implemented locally; scheduler/live use still needs explicit cadence, exchange snapshot source, and postdeploy acceptance |
-| **First post-submit reconciliation tick** | Designed in `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md`; implementation pending |
-| **Recovery command determinism** | Owner-confirmed matrix exists; implementation must ensure every unsafe lifecycle blocker maps to one recovery command or hard stop |
+| **Production exchange snapshot fetch / scheduler wiring** | Deployed scheduler fetch exists, but canonical PG symbols can reach CCXT directly, conditional STOP views are incomplete, position side selection is not fully bound, and active behavior is not production-certified |
+| **Runner mutation plan safety** | Scheduler path exists, but TP1 exchange fills are not projected to the canonical PG TP1 row and `runner_protected` is omitted from scheduler maintainable selection |
+| **First post-submit reconciliation tick** | Implemented and deployed through migration `101+`; production has not exercised a real submitted lifecycle tick |
+| **Recovery command determinism** | Recovery/runner/cleanup plans exist, but exchange calls and PG updates still share a long transaction and their mutation results do not yet use one leased command authority |
 
 #### Runner Mutation Plan Policy
 
@@ -408,7 +418,7 @@ orders, position qty, and exchange capability facts.
 | **keep_existing_sl** | Existing SL still validly protects remaining position and is not worse than runner policy | Record runner state as protected-by-existing-SL without exchange write |
 | **submit_new_runner_sl_then_cancel_old** | Exchange allows overlapping reduce-only protection and qty cannot exceed current remaining position | Submit RUNNER_SL first, confirm it, then cleanup old SL |
 | **cancel_old_then_submit_runner_sl** | Exchange forbids overlapping reduce-only protection and old SL cannot remain | Cancel old SL, submit RUNNER_SL, and mark any submit failure as critical runner defect |
-| **emergency_reduce** | Remaining position cannot be protected by SL within allowed retry window | Submit only through the official recovery path and record critical defect |
+| **emergency_reduce** | Reserved future policy only; no current automatic authority | Current behavior is freeze + hard stop + intervention. Automatic reduce requires a future explicit Owner policy decision |
 | **manual_intervention_required** | PG/exchange identity or qty conflict cannot be safely resolved automatically | Freeze related new submits and notify Owner |
 
 The current code already has `runner_mutation_command` and
@@ -619,14 +629,14 @@ replay event as fresh live signal
 ## Current Chain Position
 
 ```text
-chain_position: daily_live_enablement_status
-strategy_group_id: active 5 StrategyGroups
-symbol: active candidate scopes
-stage: production_real_signal_reached_l7_ticket_blocked
-first_blocker: risk_reservation_entry_reference_price_missing
-evidence: `12feb47e` at migration 112 recorded 7 fresh signals, 7 promotions, and 6 real-submit lanes after deployment; every observed lane produced 0 Ticket and the reconstructed Ticket consumer returned missing entry reference, invalid intended quantity, and invalid risk-at-stop
-next_action: execute RT-1 through RT-3, then run PC-1 six-event certification before waiting for another natural market signal
-stop_condition: six current Event Specs pass raw-source-to-Ticket and Runtime Safety State certification without downstream dictionary injection; unresolved Ticket blockers persist across no-signal ticks; the next eligible natural signal no longer stops at Ticket materialization
+chain_position: post_submit_lifecycle_certification
+strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
+symbol: 22 active candidate scopes
+stage: production_lifecycle_partially_wired
+first_blocker: exchange_truth_identity_and_command_atomicity_not_production_certified
+evidence: Tokyo 5f40c62d/migration 112 has an active lifecycle timer but only no-maintainable runs; canonical symbols reach the gateway, conditional orders are incomplete, TP1 fills are not projected, exchange I/O shares a long PG transaction, and finalization has no production caller
+next_action: execute LC-0 through LC-5; a different-identity natural signal preempts at a safe transaction boundary after higher safety incidents
+stop_condition: every isolated production-shaped Ticket reaches simulated lifecycle_closed plus one terminal Outcome or one deterministic blocker; Tokyo release/schema/unit/no-active/ops acceptance passes; only venue-specific live calibration remains
 owner_action_required: no
-authority_boundary: no FinalGate bypass, no Operation Layer bypass, no exchange write bypass, no live profile or sizing mutation
+authority_boundary: no new ENTRY path, no FinalGate/Operation Layer bypass, no profile/sizing expansion, no unknown-order mutation, no synthetic-to-live authority
 ```

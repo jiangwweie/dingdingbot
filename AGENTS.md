@@ -33,6 +33,8 @@ docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
 docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/MAIN_CONTROL_ROADMAP.md
 docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md
+docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md
+docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_IMPLEMENTATION_PLAN.md
 docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md
 docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md
 docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
@@ -98,6 +100,12 @@ single daily management table.
 `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` defines active lane limits and stop
 rules. `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md` defines how architecture
 direction becomes bounded execution work.
+`docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` and
+`docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_IMPLEMENTATION_PLAN.md`
+define the current P0-LC integration: production lifecycle wiring, continuous
+reconciliation, one durable exchange-command authority, and terminal closure.
+Older P0-C/P0-D/P0-F documents remain component contracts only where they do
+not conflict with this current integration design.
 
 Do not turn generated output, historical archive material, stale roadmap text,
 or chat summaries into current authority when current code, machine config,

@@ -7,6 +7,12 @@ last_verified: 2026-07-08
 
 # P0-C Production Lifecycle Scheduler And Snapshot Source Design
 
+This file is the scheduler/snapshot **component contract**. Current integration,
+progress, durable command authority, terminal closure, and deploy semantics are
+owned by
+`docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md`.
+Where progress language conflicts, current code/runtime and P0-LC prevail.
+
 ## Purpose
 
 This document defines the production wiring that runs after an Action-Time
@@ -34,9 +40,10 @@ sizing defaults, withdrawals, transfers, or file artifacts.
 | **Maintenance coordinator** | `run_ticket_bound_lifecycle_maintenance` exists and coordinates existing materializer/recovery/runner/reconciler/cleanup modules |
 | **Default exchange write posture** | Maintenance API defaults `allow_exchange_mutation=false` |
 | **Runner mutation safety** | Default plan is `submit_new_runner_sl_then_cancel_old` |
-| **Reconciler input** | `protection_reconciler` consumes caller-provided exchange snapshots and does not call exchange directly |
+| **Reconciler input** | `protection_reconciler` consumes normalized snapshots; deployed provider currently misses some conditional-order views and requires P0-LC typed venue scope |
 | **PG truth** | Runtime and lifecycle state live in PG current tables; repo/output/report files are not authority |
-| **First tick and recovery defaults** | Defined in `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
+| **First tick and recovery defaults** | First/scheduled ticks and recovery defaults are deployed; active real lifecycle behavior has not yet been production-certified |
+| **Current command boundary** | Exchange reads/writes and PG changes still run under one CLI transaction; P0-LC must extend the existing `brc_ticket_bound_exchange_commands` authority and move network I/O outside long transactions |
 
 ## Target Components
 
@@ -82,10 +89,11 @@ Required normalized fields:
 | **recent_fills** | `exchange_order_id`, `symbol`, `side`, `qty`, `price`, `fee`, `timestamp_ms` |
 | **position** | `symbol`, `side`, `qty`, `entry_price`, `mark_price`, `unrealized_pnl`, `liquidation_price`, `position_flat` |
 
-The provider must call only:
+The provider must use the official gateway capabilities for:
 
 ```text
 fetch_open_orders
+fetch conditional/stop open-order views when required by the venue
 fetch_my_trades
 fetch_positions
 ```
@@ -100,10 +108,10 @@ timer.
 | **Timer cadence** | 30 seconds, oneshot, bounded by service timeout |
 | **No active lifecycle** | One PG read pass, zero exchange calls, zero files |
 | **Gateway binding** | Lazy: bind the official exchange gateway only after PG selection finds a lifecycle scope that needs snapshot or mutation |
-| **Max lifecycle scopes per tick** | Default 4 |
+| **Max lifecycle scopes per tick** | Readonly classification may be bounded across scopes; at most one mutation-capable scope per invocation |
 | **Max maintenance actions per scope** | Default 16 |
 | **Exchange call trigger** | Only when a selected lifecycle has a protection set and state needs reconciliation/runner/cleanup |
-| **Timeout** | Service-level `TimeoutStartSec=25s`; per exchange fetch timeout controlled in provider |
+| **Timeout** | Global worker deadline must be lower than systemd timeout with shutdown margin; every gateway call has an explicit bounded timeout |
 | **Disk behavior** | No report directory writes, no JSON/MD files, stdout summary only |
 | **PG row growth** | Only lifecycle/command/protection events created by actual state transitions; no no-op rows |
 | **Catch-up behavior** | `Persistent=false`; missed timer windows are not replayed |
