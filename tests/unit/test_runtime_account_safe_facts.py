@@ -286,6 +286,48 @@ def test_runtime_account_safe_facts_projection_cadence_can_continue_when_blocked
     assert exit_code == 0
 
 
+def test_runtime_account_safe_facts_normalizes_asyncpg_dsn_for_sync_projector(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    seen: dict[str, str] = {}
+    sqlite_engine = module.sa.create_engine("sqlite:///:memory:")
+
+    def fake_create_engine(database_url: str):
+        seen["database_url"] = database_url
+        return sqlite_engine
+
+    monkeypatch.setattr(module._impl.sa, "create_engine", fake_create_engine)
+    monkeypatch.setattr(
+        module._impl,
+        "collect_account_safe_live_facts_from_pg_scope",
+        lambda *args, **kwargs: {"status": "ready"},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "build_runtime_account_safe_facts",
+        lambda **kwargs: {
+            "status": "runtime_account_safe_facts_ready",
+            "checks": {"account_safe_facts_ready": True},
+        },
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "write_account_safe_fact_snapshots",
+        lambda *args, **kwargs: ["fact:account-mode"],
+    )
+
+    exit_code = module.main(
+        [
+            "--database-url",
+            "postgresql+asyncpg://user:pass@localhost/brc",
+            "--require-database-url",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen["database_url"] == "postgresql+psycopg://user:pass@localhost/brc"
+
+
 def _create_pg_scope_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """

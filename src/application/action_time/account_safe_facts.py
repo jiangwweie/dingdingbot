@@ -21,6 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 from src.application.action_time.runtime_pg_fact_snapshots import (  # noqa: E402
     write_account_safe_fact_snapshots,
 )
+from src.infrastructure.sync_pg_dsn import (  # noqa: E402
+    is_sync_postgres_dsn,
+    normalize_sync_postgres_dsn,
+)
 from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
     ACCOUNT_MODE_SOURCE,
     DEFAULT_BASE_URL,
@@ -66,16 +70,15 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    if not args.database_url.startswith(
-        ("postgresql://", "postgresql+psycopg://")
-    ) and not args.allow_non_postgres_for_test:
+    database_url = normalize_sync_postgres_dsn(args.database_url)
+    if not is_sync_postgres_dsn(database_url) and not args.allow_non_postgres_for_test:
         print(
             "ERROR: DB-backed account-safe facts require PostgreSQL DSN",
             file=sys.stderr,
         )
         return 2
 
-    engine = sa.create_engine(args.database_url)
+    engine = sa.create_engine(database_url)
     try:
         with engine.begin() as conn:
             live_facts = collect_account_safe_live_facts_from_pg_scope(
