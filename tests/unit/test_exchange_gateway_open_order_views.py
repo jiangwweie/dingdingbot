@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+from decimal import Decimal
+
+import ccxt
+import pytest
+
+from src.domain.models import OrderStatus, OrderType
+from src.infrastructure.exchange_gateway import ExchangeGateway
+
+
+SYMBOL = "ETH/USDT:USDT"
+
+
+def _gateway(rest_exchange, *, exchange_name: str = "binance") -> ExchangeGateway:
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = exchange_name
+    gateway.rest_exchange = rest_exchange
+    gateway._order_confirmation_retry_delays = ()
+    gateway._recent_order_updates = {}
+    gateway._recent_order_updates_by_symbol = {}
+    return gateway
+
+
+class _TwoOpenOrderViews:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def fetch_open_orders(self, symbol: str, params=None):
+        normalized_params = dict(params or {})
+        self.calls.append((symbol, normalized_params))
+        if normalized_params == {}:
+            return [
+                {
+                    "id": "normal-order-id",
+                    "clientOrderId": "normal-client-id",
+                    "symbol": symbol,
+                    "status": "open",
+                    "info": {"orderId": "normal-order-id"},
+                },
+                {
+                    "id": "normal-visible-stop-id",
+                    "clientOrderId": "shared-stop-client-id",
+                    "symbol": symbol,
+                    "type": "market",
+                    "status": "open",
+                    "info": {"orderId": "normal-visible-stop-id"},
+                },
+            ]
+        if normalized_params == {"stop": True}:
+            return [
+                {
+                    "id": "algo-visible-stop-id",
+                    "clientOrderId": "shared-stop-client-id",
+                    "symbol": symbol,
+                    "type": "STOP_MARKET",
+                    "status": "open",
+                    "stopPrice": "1900",
+                    "fees": [],
+                    "info": {
+                        "algoId": "algo-visible-stop-id",
+                        "clientAlgoId": "shared-stop-client-id",
+                        "orderType": "STOP_MARKET",
+                        "stopPrice": "1900",
+                    },
+                },
+                {
+                    "id": "stop-only-id",
+                    "clientOrderId": "stop-only-client-id",
+                    "symbol": symbol,
+                    "type": "STOP_MARKET",
+                    "status": "open",
+                    "stopPrice": "1800",
+                    "info": {"algoId": "stop-only-id"},
+                },
+            ]
+        raise AssertionError(f"unexpected open-order params: {normalized_params}")
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_open_orders_merges_binance_normal_and_stop_views():
+    rest = _TwoOpenOrderViews()
+    gateway = _gateway(rest)
+
+    orders = await gateway.fetch_all_open_orders(SYMBOL)
+
+    assert rest.calls == [
+        (SYMBOL, {}),
+        (SYMBOL, {"stop": True}),
+    ]
+    assert [order["id"] for order in orders] == [
+        "normal-order-id",
+        "algo-visible-stop-id",
+        "stop-only-id",
+    ]
+    merged_stop = orders[1]
+    assert merged_stop["type"] == "STOP_MARKET"
+    assert merged_stop["stopPrice"] == "1900"
+    assert merged_stop["fees"] == []
+    assert merged_stop["info"]["orderId"] == "normal-visible-stop-id"
+    assert merged_stop["info"]["algoId"] == "algo-visible-stop-id"
+
+
+class _SameExchangeIdAcrossViews:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def fetch_open_orders(self, symbol: str, params=None):
+        normalized_params = dict(params or {})
+        self.calls.append(normalized_params)
+        if normalized_params == {}:
+            return [{"id": "same-id", "symbol": symbol, "status": "open"}]
+        if normalized_params == {"stop": True}:
+            return [
+                {
+                    "id": "same-id",
+                    "clientOrderId": "same-client-id",
+                    "symbol": symbol,
+                    "status": "open",
+                    "stopPrice": "1900",
+                }
+            ]
+        raise AssertionError(f"unexpected open-order params: {normalized_params}")
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_open_orders_deduplicates_by_exchange_order_id():
+    rest = _SameExchangeIdAcrossViews()
+    gateway = _gateway(rest)
+
+    orders = await gateway.fetch_all_open_orders(SYMBOL)
+
+    assert len(orders) == 1
+    assert orders[0]["id"] == "same-id"
+    assert orders[0]["clientOrderId"] == "same-client-id"
+    assert orders[0]["stopPrice"] == "1900"
+
+
+class _FailingRequiredView:
+    def __init__(self, failing_params: dict) -> None:
+        self.failing_params = failing_params
+        self.calls: list[dict] = []
+
+    async def fetch_open_orders(self, symbol: str, params=None):
+        normalized_params = dict(params or {})
+        self.calls.append(normalized_params)
+        if normalized_params == self.failing_params:
+            raise RuntimeError(f"required view failed: {normalized_params}")
+        return [{"id": "visible-order", "symbol": symbol, "status": "open"}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_params", [{}, {"stop": True}])
+async def test_fetch_all_open_orders_propagates_any_required_view_failure(
+    failing_params: dict,
+):
+    gateway = _gateway(_FailingRequiredView(failing_params))
+
+    with pytest.raises(RuntimeError, match="required view failed"):
+        await gateway.fetch_all_open_orders(SYMBOL)
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_open_orders_keeps_non_binance_normal_view_compatibility():
+    rest = _FailingRequiredView({"stop": True})
+    gateway = _gateway(rest, exchange_name="okx")
+
+    orders = await gateway.fetch_all_open_orders(SYMBOL)
+
+    assert [order["id"] for order in orders] == ["visible-order"]
+    assert rest.calls == [{}]
+
+
+class _ConditionalFallbackRest(_TwoOpenOrderViews):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancel_calls: list[tuple[str, str, dict]] = []
+
+    async def fetch_order(self, exchange_order_id: str, symbol: str):
+        raise ccxt.OrderNotFound("regular order view cannot see algo order")
+
+    async def cancel_order(self, exchange_order_id: str, symbol: str, params=None):
+        normalized_params = dict(params or {})
+        self.cancel_calls.append((exchange_order_id, symbol, normalized_params))
+        if not normalized_params:
+            raise ccxt.OrderNotFound("regular cancel cannot see algo order")
+        return {
+            "id": exchange_order_id,
+            "symbol": symbol,
+            "status": "canceled",
+        }
+
+
+@pytest.mark.asyncio
+async def test_fetch_order_conditional_fallback_reuses_complete_open_order_read():
+    rest = _ConditionalFallbackRest()
+    gateway = _gateway(rest)
+
+    result = await gateway.fetch_order("algo-visible-stop-id", SYMBOL)
+
+    assert result.exchange_order_id == "algo-visible-stop-id"
+    assert result.order_type == OrderType.STOP_MARKET
+    assert rest.calls == [
+        (SYMBOL, {}),
+        (SYMBOL, {"stop": True}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_order_confirmation_reuses_complete_open_order_read():
+    rest = _ConditionalFallbackRest()
+    gateway = _gateway(rest)
+
+    confirmed = await gateway.confirm_order_exists(
+        exchange_order_id="not-visible-to-fetch-order",
+        client_order_id="shared-stop-client-id",
+        symbol=SYMBOL,
+        order_type=OrderType.STOP_MARKET,
+        side=None,
+        reduce_only=None,
+        stop_price=Decimal("1900"),
+        expected_type="STOP_MARKET",
+    )
+
+    assert confirmed is True
+    assert rest.calls == [
+        (SYMBOL, {}),
+        (SYMBOL, {"stop": True}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_conditional_fallback_reuses_complete_open_order_read():
+    rest = _ConditionalFallbackRest()
+    gateway = _gateway(rest)
+
+    result = await gateway.cancel_order("algo-visible-stop-id", SYMBOL)
+
+    assert result.status == OrderStatus.CANCELED
+    assert rest.calls == [
+        (SYMBOL, {}),
+        (SYMBOL, {"stop": True}),
+    ]
+    assert rest.cancel_calls == [
+        ("algo-visible-stop-id", SYMBOL, {}),
+        ("algo-visible-stop-id", SYMBOL, {"stop": True}),
+    ]
