@@ -25,6 +25,7 @@ from scripts import runtime_active_observation_monitor
 from src.domain.strategy_family_signal import (
     SignalSide,
     SignalType,
+    StrategyFactObservation,
     StrategyFamilySignalOutput,
 )
 
@@ -226,6 +227,403 @@ def test_action_time_fact_business_block_report_exits_process_success():
     assert fact_materializer._report_exit_code(report) == 0
 
 
+@pytest.mark.parametrize(
+    ("side", "expected_price", "expected_kind"),
+    [
+        ("long", "2000.5", "best_ask"),
+        ("short", "1999.5", "best_bid"),
+    ],
+)
+def test_action_time_fact_materializes_typed_pricing_from_production_public_shape(
+    pg_control_connection,
+    side: str,
+    expected_price: str,
+    expected_kind: str,
+):
+    strategy_group_id = "SOR-001"
+    symbol = "ETHUSDT"
+    row = _candidate_runtime_row(
+        pg_control_connection,
+        strategy_group_id,
+        symbol,
+        side,
+    )
+    values = _fact_values(pg_control_connection, row)
+    values.pop("last_price", None)
+    values.pop("take_profit_1", None)
+    values.update(
+        {
+            "public_facts_ready": True,
+            "mark_price_fresh": True,
+            "spread_ok": True,
+            "min_notional_ok": True,
+            "qty_step_ok": True,
+            "facts": {
+                "mark_price": "2000",
+                "bid_price": "1999.5",
+                "ask_price": "2000.5",
+                "qty_step": "0.001",
+                "min_notional": "5",
+            },
+        }
+    )
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        strategy_group_id,
+        symbol,
+        side,
+        insert_action_time_fact=False,
+        fact_values=values,
+    )
+
+    payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "action_time_fact_snapshots_materialized"
+    fact_values = _latest_action_time_fact_values(
+        pg_control_connection,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+    )
+    pricing = fact_values["execution_pricing"]
+    assert pricing["entry_reference_price"] == expected_price
+    assert pricing["entry_reference_kind"] == expected_kind
+    assert pricing["source_fact_snapshot_id"].endswith(":public")
+    assert fact_values["entry_reference_price"] == expected_price
+    assert Decimal(str(fact_values["take_profit_1"])) > 0
+
+
+@pytest.mark.parametrize(
+    ("strategy_group_id", "symbol", "side", "expected_price"),
+    [
+        ("CPM-RO-001", "ETHUSDT", "long", "2000.5"),
+        ("MPG-001", "SOLUSDT", "long", "2000.5"),
+        ("MI-001", "AVAXUSDT", "long", "2000.5"),
+        ("SOR-001", "ETHUSDT", "long", "2000.5"),
+        ("SOR-001", "ETHUSDT", "short", "1999.5"),
+        ("BRF2-001", "BTCUSDT", "short", "1999.5"),
+    ],
+)
+def test_each_event_spec_pricing_cannot_be_overridden_by_signal_payload_dictionary(
+    pg_control_connection,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    expected_price: str,
+):
+    row = _candidate_runtime_row(
+        pg_control_connection,
+        strategy_group_id,
+        symbol,
+        side,
+    )
+    values = _fact_values(pg_control_connection, row)
+    values.update(
+        {
+            "public_facts_ready": True,
+            "mark_price_fresh": True,
+            "spread_ok": True,
+            "min_notional_ok": True,
+            "qty_step_ok": True,
+            "facts": {
+                "mark_price": "2000",
+                "bid_price": "1999.5",
+                "ask_price": "2000.5",
+                "qty_step": "0.001",
+                "min_notional": "5",
+            },
+        }
+    )
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        strategy_group_id,
+        symbol,
+        side,
+        insert_action_time_fact=False,
+        fact_values=values,
+    )
+    signal_payload = pg_control_connection.execute(
+        text(
+            "SELECT signal_payload FROM brc_live_signal_events "
+            "WHERE strategy_group_id = :strategy_group_id AND symbol = :symbol "
+            "AND side = :side"
+        ),
+        {
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+        },
+    ).scalar_one()
+    if isinstance(signal_payload, str):
+        signal_payload = json.loads(signal_payload)
+    signal_payload["action_time_fact_values"] = {
+        "public_facts_ready": True,
+        "mark_price_fresh": True,
+        "spread_ok": True,
+        "min_notional_ok": True,
+        "qty_step_ok": True,
+        "facts": {
+            "mark_price": "2099.5",
+            "bid_price": "2099",
+            "ask_price": "2100",
+            "qty_step": "0.1",
+            "min_notional": "100",
+        },
+    }
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_live_signal_events SET signal_payload = :signal_payload "
+            "WHERE strategy_group_id = :strategy_group_id AND symbol = :symbol "
+            "AND side = :side"
+        ),
+        {
+            "signal_payload": json.dumps(signal_payload),
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+        },
+    )
+
+    payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "action_time_fact_snapshots_materialized"
+    fact_values = _latest_action_time_fact_values(
+        pg_control_connection,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+    )
+    pricing = fact_values["execution_pricing"]
+    assert pricing["entry_reference_price"] == expected_price
+    assert pricing["qty_step"] == "0.001"
+    assert pricing["min_notional"] == "5"
+
+
+def test_missing_side_quote_blocks_action_time_fact_before_lane(
+    pg_control_connection,
+):
+    row = _candidate_runtime_row(
+        pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+    )
+    values = _fact_values(pg_control_connection, row)
+    values.pop("last_price", None)
+    values.pop("take_profit_1", None)
+    values.update(
+        {
+            "public_facts_ready": True,
+            "mark_price_fresh": True,
+            "spread_ok": True,
+            "min_notional_ok": True,
+            "qty_step_ok": True,
+            "facts": {
+                "mark_price": "2000",
+                "bid_price": "1999.5",
+                "ask_price": None,
+                "qty_step": "0.001",
+                "min_notional": "5",
+            },
+        }
+    )
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+        fact_values=values,
+    )
+
+    payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "action_time_fact_snapshots_blocked"
+    assert "action_time_entry_reference_missing:best_ask" in payload["blockers"]
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert lane_payload["status"] == "promotion_candidates_blocked"
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+
+
+@pytest.mark.parametrize(
+    ("strategy_group_id", "symbol", "side", "quote_key", "expected_blocker"),
+    [
+        ("CPM-RO-001", "ETHUSDT", "long", "ask_price", "action_time_ask_price_invalid"),
+        ("MPG-001", "SOLUSDT", "long", "ask_price", "action_time_ask_price_invalid"),
+        ("MI-001", "AVAXUSDT", "long", "ask_price", "action_time_ask_price_invalid"),
+        ("SOR-001", "ETHUSDT", "long", "ask_price", "action_time_ask_price_invalid"),
+        ("SOR-001", "ETHUSDT", "short", "bid_price", "action_time_bid_price_invalid"),
+        ("BRF2-001", "BTCUSDT", "short", "bid_price", "action_time_bid_price_invalid"),
+    ],
+)
+def test_each_event_spec_malformed_side_quote_blocks_before_lane(
+    pg_control_connection,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    quote_key: str,
+    expected_blocker: str,
+):
+    row = _candidate_runtime_row(
+        pg_control_connection,
+        strategy_group_id,
+        symbol,
+        side,
+    )
+    values = _fact_values(pg_control_connection, row)
+    values.update(
+        {
+            "public_facts_ready": True,
+            "mark_price_fresh": True,
+            "spread_ok": True,
+            "min_notional_ok": True,
+            "qty_step_ok": True,
+            "facts": {
+                "mark_price": "2000",
+                "bid_price": "1999.5",
+                "ask_price": "2000.5",
+                "qty_step": "0.001",
+                "min_notional": "5",
+            },
+        }
+    )
+    values["facts"][quote_key] = "not-a-decimal"
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        strategy_group_id,
+        symbol,
+        side,
+        insert_action_time_fact=False,
+        fact_values=values,
+    )
+
+    payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "action_time_fact_snapshots_blocked"
+    assert expected_blocker in payload["blockers"]
+    blocker_class = pg_control_connection.execute(
+        text(
+            "SELECT blocker_class FROM brc_runtime_fact_snapshots "
+            "WHERE fact_surface = 'action_time'"
+        )
+    ).scalar_one()
+    assert blocker_class == "action_time_boundary_not_reproduced"
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert lane_payload["status"] == "promotion_candidates_blocked"
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+
+
+@pytest.mark.parametrize(
+    ("side", "expected_qty"),
+    [
+        ("long", Decimal("0.009")),
+        ("short", Decimal("0.010")),
+    ],
+)
+def test_promotion_persists_one_step_normalized_risk_decision_before_lane(
+    pg_control_connection,
+    side: str,
+    expected_qty: Decimal,
+):
+    row = _candidate_runtime_row(
+        pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        side,
+    )
+    values = _fact_values(pg_control_connection, row)
+    values.pop("last_price", None)
+    values.pop("take_profit_1", None)
+    values.update(
+        {
+            "public_facts_ready": True,
+            "mark_price_fresh": True,
+            "spread_ok": True,
+            "min_notional_ok": True,
+            "qty_step_ok": True,
+            "facts": {
+                "mark_price": "2000",
+                "bid_price": "1999.5",
+                "ask_price": "2000.5",
+                "qty_step": "0.001",
+                "min_notional": "5",
+            },
+        }
+    )
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        side,
+        insert_action_time_fact=False,
+        fact_values=values,
+    )
+    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert fact_payload["status"] == "action_time_fact_snapshots_materialized"
+
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert lane_payload["status"] == "promotion_action_time_lane_created"
+    budget = pg_control_connection.execute(
+        text(
+            """
+            SELECT entry_reference_price, stop_price, intended_qty,
+                   risk_at_stop, risk_reservation_basis
+            FROM brc_budget_reservations
+            """
+        )
+    ).mappings().one()
+    assert Decimal(str(budget["entry_reference_price"])) > 0
+    assert Decimal(str(budget["stop_price"])) > 0
+    assert Decimal(str(budget["intended_qty"])) == expected_qty
+    assert Decimal(str(budget["risk_at_stop"])) > 0
+    assert budget["risk_reservation_basis"] == "entry_reference_stop_distance_v0"
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 1
+
+    reserved_before_ticket = dict(budget)
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+    assert ticket_payload["status"] == "action_time_ticket_created", ticket_payload
+    reserved_after_ticket = dict(
+        pg_control_connection.execute(
+            text(
+                """
+                SELECT entry_reference_price, stop_price, intended_qty,
+                       risk_at_stop, risk_reservation_basis
+                FROM brc_budget_reservations
+                """
+            )
+        ).mappings().one()
+    )
+    assert reserved_after_ticket == reserved_before_ticket
+
+
 def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_connection):
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
 
@@ -234,7 +632,7 @@ def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_con
         now_ms=NOW_MS,
     )
 
-    assert payload["status"] == "promotion_action_time_lane_created"
+    assert payload["status"] == "promotion_action_time_lane_created", payload
     assert payload["strategy_group_id"] == "SOR-001"
     assert payload["symbol"] == "ETHUSDT"
     assert payload["side"] == "long"
@@ -977,6 +1375,29 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
             confidence=Decimal("0.82"),
             reason_codes=["writer_repository_lane_contract"],
             human_summary="MPG unit would enter long.",
+            fact_observations=[
+                StrategyFactObservation(
+                    fact_key="momentum_persistence_confirmed",
+                    observed_value=True,
+                    observed_at_ms=trigger_candle_close_time_ms,
+                    valid_until_ms=NOW_MS + 600_000,
+                    source_ref="unit:mpg:momentum_persistence_confirmed",
+                ),
+                StrategyFactObservation(
+                    fact_key="leader_strength_confirmed",
+                    observed_value=True,
+                    observed_at_ms=trigger_candle_close_time_ms,
+                    valid_until_ms=NOW_MS + 600_000,
+                    source_ref="unit:mpg:leader_strength_confirmed",
+                ),
+                StrategyFactObservation(
+                    fact_key="momentum_floor_reference",
+                    observed_value="1800",
+                    observed_at_ms=trigger_candle_close_time_ms,
+                    valid_until_ms=NOW_MS + 600_000,
+                    source_ref="unit:mpg:momentum_floor_reference",
+                ),
+            ],
             evidence_payload={
                 "trigger_candle_open_time_ms": trigger_candle_open_time_ms,
                 "trigger_candle_close_time_ms": trigger_candle_close_time_ms,
@@ -1041,12 +1462,18 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
     assert signal_event["trigger_candle_close_time_ms"] == NOW_MS - 30_000
     assert signal_event["event_time_ms"] != NOW_MS - 3_630_000
 
+    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert fact_payload["status"] == "action_time_fact_snapshots_materialized"
+
     payload = lane_materializer.materialize_pg_promotion_action_time_lane(
         pg_control_connection,
         now_ms=NOW_MS,
     )
 
-    assert payload["status"] == "promotion_action_time_lane_created"
+    assert payload["status"] == "promotion_action_time_lane_created", payload
     assert payload["strategy_group_id"] == "MPG-001"
     assert payload["symbol"] == "OPUSDT"
     assert payload["side"] == "long"
@@ -1861,6 +2288,10 @@ def _insert_ready_fresh_signal(
     readiness_row_id = f"readiness:{suffix}"
     expires_at_ms = NOW_MS + 600_000
     fact_values = fact_values or _fact_values(conn, row)
+    public_fact_values = _production_public_fact_values(
+        row=row,
+        semantic_values=fact_values,
+    )
 
     if execution_eligible:
         conn.execute(
@@ -1882,21 +2313,11 @@ def _insert_ready_fresh_signal(
         fact_snapshot_id=public_fact_id,
         row=row,
         fact_surface="pretrade_public",
-        fact_values=fact_values,
+        fact_values=public_fact_values,
         observed_at_ms=NOW_MS - 20_000,
         valid_until_ms=expires_at_ms,
         source_kind="live_market",
     )
-    if insert_action_time_fact:
-        _insert_fact(
-            conn,
-            fact_snapshot_id=action_time_fact_id,
-            row=row,
-            fact_surface="action_time",
-            fact_values=fact_values,
-            observed_at_ms=NOW_MS - 10_000,
-            valid_until_ms=expires_at_ms,
-        )
     _insert_fact(
         conn,
         fact_snapshot_id=account_safe_fact_id,
@@ -1929,6 +2350,15 @@ def _insert_ready_fresh_signal(
             execution_eligible=execution_eligible,
             fact_values=fact_values,
         )
+    if insert_action_time_fact and insert_signal:
+        action_time_result = fact_materializer.materialize_action_time_fact_snapshots(
+            conn,
+            now_ms=NOW_MS,
+        )
+        assert action_time_result["status"] in {
+            "action_time_fact_snapshots_materialized",
+            "action_time_fact_snapshots_blocked",
+        }
     conn.execute(
         text(
             """
@@ -2233,13 +2663,74 @@ def _fact_values(conn, row) -> dict:
             result[key] = True
     if row["side"] == "short":
         result[row["protection_ref_type"]] = "2000"
-        result["last_price"] = "1800"
-        result["take_profit_1"] = "1600"
     else:
         result[row["protection_ref_type"]] = "1800"
-        result["last_price"] = "2000"
-        result["take_profit_1"] = "2200"
     return result
+
+
+def _production_public_fact_values(*, row, semantic_values: dict) -> dict:
+    values = dict(semantic_values)
+    supplied_facts = values.get("facts")
+    if isinstance(supplied_facts, dict):
+        facts = dict(supplied_facts)
+    elif row["side"] == "short":
+        facts = {
+            "mark_price": "1800",
+            "bid_price": "1800",
+            "ask_price": "1801",
+            "qty_step": "0.001",
+            "min_notional": "5",
+        }
+    else:
+        facts = {
+            "mark_price": "2000",
+            "bid_price": "1999",
+            "ask_price": "2000",
+            "qty_step": "0.001",
+            "min_notional": "5",
+        }
+    values.update(
+        {
+            "public_facts_ready": values.get("public_facts_ready", True),
+            "mark_price_fresh": values.get("mark_price_fresh", True),
+            "spread_ok": values.get("spread_ok", True),
+            "min_notional_ok": values.get("min_notional_ok", True),
+            "qty_step_ok": values.get("qty_step_ok", True),
+            "facts": facts,
+        }
+    )
+    return values
+
+
+def _latest_action_time_fact_values(
+    conn,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> dict:
+    raw = conn.execute(
+        text(
+            """
+            SELECT fact_values
+            FROM brc_runtime_fact_snapshots
+            WHERE strategy_group_id = :strategy_group_id
+              AND symbol = :symbol
+              AND side = :side
+              AND fact_surface = 'action_time'
+            ORDER BY created_at_ms DESC
+            LIMIT 1
+            """
+        ),
+        {
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+        },
+    ).scalar_one()
+    while isinstance(raw, str):
+        raw = json.loads(raw)
+    return dict(raw)
 
 
 def _count(conn, table_name: str) -> int:

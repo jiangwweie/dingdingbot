@@ -19,14 +19,11 @@ from typing import Any, Callable
 
 import sqlalchemy as sa
 
-from src.application.action_time import action_time_ticket
 from src.application.action_time import exit_protection_materializer
-from src.application.action_time import fact_snapshots
 from src.application.action_time import finalgate_preflight
 from src.application.action_time import orphan_protection_cleanup_command
 from src.application.action_time import operation_layer_handoff
 from src.application.action_time import post_submit_closure
-from src.application.action_time import promotion_action_time_lane
 from src.application.action_time import protection_reconciler
 from src.application.action_time import protection_recovery_command
 from src.application.action_time import protected_submit_attempt
@@ -34,6 +31,9 @@ from src.application.action_time import runner_mutation_command
 from src.application.action_time import runner_mutation_executor
 from src.application.action_time import runner_protection_adjuster
 from src.application.action_time import runtime_safety_state
+from src.application.action_time.ticket_materialization_sequence import (
+    materialize_action_time_ticket_sequence,
+)
 
 
 ACTIVE_CANDIDATE_SCOPES: tuple[tuple[str, str, str], ...] = (
@@ -103,19 +103,21 @@ def run_ticket_bound_full_chain_simulation(
         now_ms=now_ms,
     )
 
-    fact_payload = fact_snapshots.materialize_action_time_fact_snapshots(
+    sequence_payload = materialize_action_time_ticket_sequence(
         conn,
         now_ms=now_ms,
+        projection_publisher=projection_publisher,
+        completion_clock_ms=lambda: now_ms + 2,
     )
-    projection_payload = projection_publisher(conn)
-    lane_payload = promotion_action_time_lane.materialize_pg_promotion_action_time_lane(
-        conn,
-        now_ms=now_ms + 1,
+    _require_payload_status(
+        stage="atomic_ticket_sequence",
+        payload=sequence_payload,
+        expected_status="action_time_ticket_sequence_committed",
     )
-    ticket_payload = action_time_ticket.materialize_action_time_ticket(
-        conn,
-        now_ms=now_ms + 2,
-    )
+    fact_payload = sequence_payload["fact"]
+    projection_payload = sequence_payload["projection"]
+    lane_payload = sequence_payload["promotion"]
+    ticket_payload = sequence_payload["ticket"]
     _require_payload_status(
         stage="ticket",
         payload=ticket_payload,
@@ -271,6 +273,7 @@ def run_ticket_bound_full_chain_simulation(
         "strategy_group_id": simulation_input.strategy_group_id,
         "symbol": simulation_input.symbol,
         "side": simulation_input.side,
+        "sequence": sequence_payload,
         "fact": fact_payload,
         "projection": projection_payload,
         "lane": lane_payload,
@@ -553,19 +556,21 @@ def _prepare_full_chain_submit_context(
         fact_values=simulation_input.fact_values or _fact_values(conn, row),
         now_ms=now_ms,
     )
-    fact_payload = fact_snapshots.materialize_action_time_fact_snapshots(
+    sequence_payload = materialize_action_time_ticket_sequence(
         conn,
         now_ms=now_ms,
+        projection_publisher=projection_publisher,
+        completion_clock_ms=lambda: now_ms + 2,
     )
-    projection_payload = projection_publisher(conn)
-    lane_payload = promotion_action_time_lane.materialize_pg_promotion_action_time_lane(
-        conn,
-        now_ms=now_ms + 1,
+    _require_payload_status(
+        stage="atomic_ticket_sequence",
+        payload=sequence_payload,
+        expected_status="action_time_ticket_sequence_committed",
     )
-    ticket_payload = action_time_ticket.materialize_action_time_ticket(
-        conn,
-        now_ms=now_ms + 2,
-    )
+    fact_payload = sequence_payload["fact"]
+    projection_payload = sequence_payload["projection"]
+    lane_payload = sequence_payload["promotion"]
+    ticket_payload = sequence_payload["ticket"]
     _require_payload_status(
         stage="ticket",
         payload=ticket_payload,
@@ -625,6 +630,7 @@ def _prepare_full_chain_submit_context(
         now_ms=now_ms + 6,
     )
     return {
+        "sequence": sequence_payload,
         "fact": fact_payload,
         "projection": projection_payload,
         "lane": lane_payload,
@@ -773,6 +779,15 @@ def _insert_constructed_raw_input(
     fact_values: dict[str, Any],
     now_ms: int,
 ) -> None:
+    semantic_fact_values = dict(fact_values)
+    last_price = semantic_fact_values.pop(
+        "last_price",
+        "1800" if row["side"] == "short" else "2000",
+    )
+    public_fact_values = _production_public_fact_values(
+        side=str(row["side"]),
+        last_price=last_price,
+    )
     conn.execute(
         sa.text(
             """
@@ -794,7 +809,7 @@ def _insert_constructed_raw_input(
         fact_snapshot_id=public_fact_id,
         row=row,
         fact_surface="pretrade_public",
-        fact_values=fact_values,
+        fact_values=public_fact_values,
         observed_at_ms=now_ms - 20_000,
         valid_until_ms=expires_at_ms,
         source_kind="live_market",
@@ -828,10 +843,36 @@ def _insert_constructed_raw_input(
         public_fact_id=public_fact_id,
         signal_event_id=f"signal:{suffix}",
         now_ms=now_ms,
-        fact_values=fact_values,
+        fact_values=semantic_fact_values,
     )
     conn.execute(sa.text("DELETE FROM brc_pretrade_readiness_rows"))
     _insert_readiness(conn, row, public_fact_id=public_fact_id, now_ms=now_ms)
+
+
+def _production_public_fact_values(*, side: str, last_price: Any) -> dict[str, Any]:
+    entry = Decimal(str(last_price))
+    spread = Decimal("0.01")
+    bid = entry if side == "short" else entry - spread
+    ask = entry if side == "long" else entry + spread
+    return {
+        "public_facts_ready": True,
+        "exchange_contract_exists": True,
+        "mark_price_fresh": True,
+        "funding_not_extreme": True,
+        "spread_ok": True,
+        "min_notional_ok": True,
+        "qty_step_ok": True,
+        "leverage_available": True,
+        "facts": {
+            "mark_price": str(entry),
+            "bid_price": str(bid),
+            "ask_price": str(ask),
+            "qty_step": "0.001",
+            "min_notional": "5",
+            "contract_status": "TRADING",
+            "contract_type": "PERPETUAL",
+        },
+    }
 
 
 def _candidate_runtime_row(

@@ -37,6 +37,7 @@ from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 DEFAULT_PYTHON = "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_ENV_FILE = Path("/home/ubuntu/brc-deploy/env/live-readonly.env")
+DEFAULT_STEP_TIMEOUT_SECONDS = 45
 REFRESH_MODES = {
     "watcher_tick_summary",
     "action_time_if_needed",
@@ -202,7 +203,9 @@ def run_server_product_state_refresh_sequence(
         if result["status"] == "skipped_after_required_failure"
     ]
     current_projection_publish_attempted = any(
-        str(result["name"]).startswith("publish_runtime_control_current_projections")
+        str(result["name"]).startswith(
+            "publish_runtime_control_current_projections"
+        )
         and result["returncode"] is not None
         for result in step_results
     )
@@ -259,6 +262,9 @@ def run_server_product_state_refresh_sequence(
             "calls_ticket_bound_finalgate_preflight": (
                 "materialize_action_time_finalgate_preflight"
                 in attempted_step_names
+            ),
+            "calls_atomic_action_time_ticket_sequence": (
+                "materialize_action_time_ticket_sequence" in attempted_step_names
             ),
             "calls_ticket_bound_operation_layer_handoff": (
                 "materialize_action_time_operation_layer_handoff"
@@ -737,36 +743,10 @@ def _refresh_steps(
             ),
         ),
         RefreshStep(
-            "materialize_action_time_fact_snapshots",
+            "materialize_action_time_ticket_sequence",
             (
                 python,
-                "scripts/materialize_action_time_fact_snapshots.py",
-                *pg_required,
-                *action_time_now_args,
-            ),
-        ),
-        RefreshStep(
-            "publish_runtime_control_current_projections_before_lane",
-            (
-                python,
-                "scripts/publish_runtime_control_current_projections.py",
-                *pg_required,
-            ),
-        ),
-        RefreshStep(
-            "materialize_pg_promotion_action_time_lane",
-            (
-                python,
-                "scripts/materialize_pg_promotion_action_time_lane.py",
-                *pg_required,
-                *action_time_now_args,
-            ),
-        ),
-        RefreshStep(
-            "materialize_action_time_ticket",
-            (
-                python,
-                "scripts/materialize_action_time_ticket.py",
+                "scripts/materialize_action_time_ticket_sequence.py",
                 *pg_required,
                 *action_time_now_args,
             ),
@@ -826,10 +806,7 @@ def _steps_for_mode(steps: list[RefreshStep], *, mode: str) -> list[RefreshStep]
         },
         "action_time": {
             "build_account_safe_facts",
-            "materialize_action_time_fact_snapshots",
-            "publish_runtime_control_current_projections_before_lane",
-            "materialize_pg_promotion_action_time_lane",
-            "materialize_action_time_ticket",
+            "materialize_action_time_ticket_sequence",
             "materialize_action_time_finalgate_preflight",
             "materialize_action_time_operation_layer_handoff",
             "materialize_ticket_bound_runtime_safety_state",
@@ -857,14 +834,25 @@ def _run_command(
     *,
     env: dict[str, str] | None = None,
 ) -> CommandResult:
-    completed = subprocess.run(
-        command,
-        check=False,
-        env=env,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=DEFAULT_STEP_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return CommandResult(
+            returncode=124,
+            stdout=str(exc.stdout or ""),
+            stderr=(
+                f"step_timeout_after_{DEFAULT_STEP_TIMEOUT_SECONDS}s:"
+                f"{command[1] if len(command) > 1 else command[0]}"
+            ),
+        )
     return CommandResult(
         returncode=completed.returncode,
         stdout=completed.stdout,

@@ -32,6 +32,9 @@ from src.application.action_time.full_chain_simulation_harness import (
     run_ticket_bound_full_chain_simulation,
     run_ticket_bound_full_chain_failure_scenario,
 )
+from src.application.action_time.ticket_materialization_sequence import (
+    materialize_action_time_ticket_sequence,
+)
 from src.interfaces import api as trading_api_module
 from src.interfaces import api_trading_console
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
@@ -384,7 +387,7 @@ def test_seed_contains_exact_active_candidate_scope_contract(pg_control_connecti
     ("strategy_group_id", "symbol", "side"),
     ACTIVE_CANDIDATE_SCOPES,
 )
-def test_each_active_candidate_scope_reaches_disabled_smoke_from_raw_pg_input(
+def test_six_event_specs_across_all_active_scopes_reach_disabled_smoke_from_production_shape(
     pg_control_connection,
     monkeypatch,
     strategy_group_id: str,
@@ -406,6 +409,34 @@ def test_each_active_candidate_scope_reaches_disabled_smoke_from_raw_pg_input(
         signal_summary=signal_summary,
     )
 
+    public_values = _fact_values_for_surface(
+        pg_control_connection,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+        fact_surface="pretrade_public",
+    )
+    assert "last_price" not in public_values
+    assert "entry_reference_price" not in public_values
+    assert "mark_price" not in public_values
+    assert set(public_values["facts"]) >= {
+        "mark_price",
+        "bid_price",
+        "ask_price",
+        "qty_step",
+        "min_notional",
+    }
+    action_values = _fact_values_for_surface(
+        pg_control_connection,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+        fact_surface="action_time",
+    )
+    assert action_values["execution_pricing"]["entry_reference_kind"] == (
+        "best_ask" if side == "long" else "best_bid"
+    )
+
     submit_payload = protected_submit.prepare_ticket_bound_protected_submit_attempt(
         pg_control_connection,
         ticket_id=str(payloads["ticket"]["ticket_id"]),
@@ -419,6 +450,22 @@ def test_each_active_candidate_scope_reaches_disabled_smoke_from_raw_pg_input(
     assert submit_payload["exchange_write_called"] is False
     assert submit_payload["order_created"] is False
     assert submit_payload["order_lifecycle_called"] is False
+    budget = pg_control_connection.execute(
+        text(
+            """
+            SELECT intended_qty, risk_at_stop
+            FROM brc_budget_reservations
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {"ticket_id": str(payloads["ticket"]["ticket_id"])},
+    ).mappings().one()
+    reserved_qty = Decimal(str(budget["intended_qty"]))
+    assert reserved_qty > 0
+    assert Decimal(str(budget["risk_at_stop"])) > 0
+    assert Decimal(submit_payload["submit_request"]["amount"]) == reserved_qty
+    assert Decimal(submit_payload["submit_request"]["orders"][0]["amount"]) == reserved_qty
+    assert Decimal(submit_payload["submit_request"]["orders"][1]["amount"]) == reserved_qty
 
     assert _count(pg_control_connection, "brc_live_signal_events") == 1
     assert _count(pg_control_connection, "brc_promotion_candidates") == 1
@@ -511,32 +558,47 @@ def test_evaluator_typed_fact_transport_fails_closed_before_lane(
     assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
 
 
-def test_stale_evaluator_typed_fact_blocks_action_time_materialization(
+@pytest.mark.parametrize(
+    ("strategy_group_id", "symbol", "side", "fact_key"),
+    [
+        ("CPM-RO-001", "ETHUSDT", "long", "reclaim_confirmed"),
+        ("MPG-001", "SOLUSDT", "long", "leader_strength_confirmed"),
+        ("MI-001", "AVAXUSDT", "long", "relative_strength_confirmed"),
+        ("SOR-001", "ETHUSDT", "long", "breakout_confirmed"),
+        ("SOR-001", "ETHUSDT", "short", "breakdown_confirmed"),
+        ("BRF2-001", "BTCUSDT", "short", "rally_high_reference"),
+    ],
+)
+def test_each_event_spec_stale_typed_fact_blocks_before_lane(
     pg_control_connection,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    fact_key: str,
 ):
     signal_summary, last_price = _evaluator_signal_summary(
-        strategy_group_id="CPM-RO-001",
-        symbol="ETHUSDT",
-        side="long",
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
     )
     for observation in signal_summary["fact_observations"]:
-        if observation["fact_key"] == "reclaim_confirmed":
+        if observation["fact_key"] == fact_key:
             observation["valid_until_ms"] = NOW_MS
 
     _insert_ready_fresh_signal(
         pg_control_connection,
-        "CPM-RO-001",
-        "ETHUSDT",
-        "long",
+        strategy_group_id,
+        symbol,
+        side,
         insert_action_time_fact=False,
         insert_signal=False,
         fact_values={"last_price": last_price},
     )
     _write_monitor_signal_summary_to_pg(
         pg_control_connection,
-        strategy_group_id="CPM-RO-001",
-        symbol="ETHUSDT",
-        side="long",
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
         signal_summary=signal_summary,
     )
     pg_control_connection.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
@@ -547,7 +609,7 @@ def test_stale_evaluator_typed_fact_blocks_action_time_materialization(
     )
 
     assert fact_payload["status"] == "action_time_fact_snapshots_blocked"
-    assert "required_fact_missing:reclaim_confirmed" in fact_payload["blockers"]
+    assert f"required_fact_missing:{fact_key}" in fact_payload["blockers"]
     assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
 
 
@@ -1154,6 +1216,15 @@ def _run_raw_pg_input_to_runtime_safety(
     fact_values: dict | None = None,
     signal_summary: dict | None = None,
 ) -> dict[str, dict]:
+    semantic_fact_values = dict(fact_values or {})
+    last_price = semantic_fact_values.pop(
+        "last_price",
+        "100" if side == "long" else "99",
+    )
+    public_fact_values = _production_public_fact_values(
+        side=side,
+        last_price=last_price,
+    )
     _insert_ready_fresh_signal(
         conn,
         strategy_group_id,
@@ -1161,18 +1232,7 @@ def _run_raw_pg_input_to_runtime_safety(
         side,
         insert_action_time_fact=False,
         insert_signal=False,
-        fact_values=fact_values,
-    )
-    effective_fact_values = (
-        fact_values
-        if fact_values is not None
-        else _fact_values_for_surface(
-            conn,
-            strategy_group_id=strategy_group_id,
-            symbol=symbol,
-            side=side,
-            fact_surface="pretrade_public",
-        )
+        fact_values=public_fact_values,
     )
     signal_payload = _write_monitor_signal_summary_to_pg(
         conn,
@@ -1180,27 +1240,29 @@ def _run_raw_pg_input_to_runtime_safety(
         symbol=symbol,
         side=side,
         signal_summary=signal_summary,
-        fact_values=effective_fact_values,
+        fact_values=semantic_fact_values,
     )
     assert signal_payload["status"] == "pg_live_signal_events_written"
     assert signal_payload["written_count"] == 1
     conn.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
 
-    fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
+    monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
+    sequence_payload = materialize_action_time_ticket_sequence(
         conn,
         now_ms=NOW_MS,
+        projection_publisher=publisher.publish_action_time_pretrade_readiness,
+        completion_clock_ms=lambda: NOW_MS + 2,
     )
+    assert sequence_payload["status"] == "action_time_ticket_sequence_committed"
+    fact_payload = sequence_payload["fact"]
+    readiness_projection_payload = sequence_payload["projection"]
+    lane_payload = sequence_payload["promotion"]
+    ticket_payload = sequence_payload["ticket"]
     assert fact_payload["status"] == "action_time_fact_snapshots_materialized"
     assert fact_payload["materialized_count"] == 1
     assert fact_payload["blocked_count"] == 0
-
-    monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
-    projection_payload = publisher.publish_runtime_control_current_projections(conn)
-    assert projection_payload["status"] == "current_projections_published"
-
-    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
-        conn,
-        now_ms=NOW_MS + 1,
+    assert readiness_projection_payload["status"] == (
+        "action_time_pretrade_readiness_published"
     )
     assert lane_payload["status"] == "promotion_action_time_lane_created"
     assert lane_payload["strategy_group_id"] == strategy_group_id
@@ -1208,15 +1270,14 @@ def _run_raw_pg_input_to_runtime_safety(
     assert lane_payload["side"] == side
     assert lane_payload["forbidden_effects"] == lane_materializer.FORBIDDEN_EFFECTS
 
-    ticket_payload = ticket_materializer.materialize_action_time_ticket(
-        conn,
-        now_ms=NOW_MS + 2,
-    )
     assert ticket_payload["status"] == "action_time_ticket_created"
     assert ticket_payload["strategy_group_id"] == strategy_group_id
     assert ticket_payload["symbol"] == symbol
     assert ticket_payload["side"] == side
     assert ticket_payload["forbidden_effects"] == ticket_materializer.FORBIDDEN_EFFECTS
+
+    projection_payload = publisher.publish_runtime_control_current_projections(conn)
+    assert projection_payload["status"] == "current_projections_published"
 
     finalgate_payload = finalgate.materialize_action_time_finalgate_preflight(
         conn,
@@ -1251,13 +1312,41 @@ def _run_raw_pg_input_to_runtime_safety(
 
     return {
         "signal": signal_payload,
+        "sequence": sequence_payload,
         "fact": fact_payload,
+        "readiness_projection": readiness_projection_payload,
         "projection": projection_payload,
         "lane": lane_payload,
         "ticket": ticket_payload,
         "finalgate": finalgate_payload,
         "handoff": handoff_payload,
         "safety": safety_payload,
+    }
+
+
+def _production_public_fact_values(*, side: str, last_price) -> dict:
+    entry = Decimal(str(last_price))
+    spread = Decimal("0.01")
+    bid = entry if side == "short" else entry - spread
+    ask = entry if side == "long" else entry + spread
+    return {
+        "public_facts_ready": True,
+        "exchange_contract_exists": True,
+        "mark_price_fresh": True,
+        "funding_not_extreme": True,
+        "spread_ok": True,
+        "min_notional_ok": True,
+        "qty_step_ok": True,
+        "leverage_available": True,
+        "facts": {
+            "mark_price": str(entry),
+            "bid_price": str(bid),
+            "ask_price": str(ask),
+            "qty_step": "0.001",
+            "min_notional": "5",
+            "contract_status": "TRADING",
+            "contract_type": "PERPETUAL",
+        },
     }
 
 

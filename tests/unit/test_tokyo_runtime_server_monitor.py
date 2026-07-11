@@ -206,6 +206,53 @@ def _pg_args(module, tmp_path: Path):
     )
 
 
+def _remove_tp1_from_action_time_fact(conn, *, ticket_id: str) -> None:
+    fact_values = conn.execute(
+        text(
+            """
+            SELECT fact_values
+            FROM brc_runtime_fact_snapshots
+            WHERE fact_surface = 'action_time'
+              AND fact_snapshot_id IN (
+                SELECT action_time_fact_snapshot_id
+                FROM brc_action_time_tickets
+                WHERE ticket_id = :ticket_id
+              )
+            """
+        ),
+        {"ticket_id": ticket_id},
+    ).scalar_one()
+    while isinstance(fact_values, str):
+        fact_values = json.loads(fact_values)
+    fact_values = dict(fact_values)
+    assert "execution_pricing" in fact_values
+    for key in (
+        "take_profit_1",
+        "tp1_price",
+        "tp1_reference_price",
+        "first_take_profit_price",
+    ):
+        fact_values.pop(key, None)
+    conn.execute(
+        text(
+            """
+            UPDATE brc_runtime_fact_snapshots
+            SET fact_values = :fact_values
+            WHERE fact_surface = 'action_time'
+              AND fact_snapshot_id IN (
+                SELECT action_time_fact_snapshot_id
+                FROM brc_action_time_tickets
+                WHERE ticket_id = :ticket_id
+              )
+            """
+        ),
+        {
+            "ticket_id": ticket_id,
+            "fact_values": json.dumps(fact_values),
+        },
+    )
+
+
 def _seed_pg_engine():
     migration = _load_file_module(MIGRATION_PATH, "migration_086_server_monitor")
     risk_reservation_migration = _load_file_module(
@@ -831,30 +878,9 @@ def test_pg_blocked_protected_submit_attempt_notifies_owner(
     try:
         with engine.begin() as conn:
             ids = _create_ready_protected_submit(conn)
-            conn.execute(
-                text(
-                    """
-                    UPDATE brc_runtime_fact_snapshots
-                    SET fact_values = :fact_values
-                    WHERE fact_surface = 'action_time'
-                      AND fact_snapshot_id IN (
-                        SELECT action_time_fact_snapshot_id
-                        FROM brc_action_time_tickets
-                        WHERE ticket_id = :ticket_id
-                      )
-                    """
-                ),
-                {
-                    "ticket_id": ids["ticket_id"],
-                    "fact_values": json.dumps(
-                        {
-                            "opening_range_defined": True,
-                            "breakout_confirmed": True,
-                            "opening_range_low_reference": "1800",
-                            "last_price": "2000",
-                        }
-                    ),
-                },
+            _remove_tp1_from_action_time_fact(
+                conn,
+                ticket_id=ids["ticket_id"],
             )
             prepared = submit.prepare_ticket_bound_protected_submit_attempt(
                 conn,
@@ -895,30 +921,9 @@ def test_pg_expired_blocked_attempt_is_quiet_and_resolves_historical_notificatio
     try:
         with engine.begin() as conn:
             ids = _create_ready_protected_submit(conn)
-            conn.execute(
-                text(
-                    """
-                    UPDATE brc_runtime_fact_snapshots
-                    SET fact_values = :fact_values
-                    WHERE fact_surface = 'action_time'
-                      AND fact_snapshot_id IN (
-                        SELECT action_time_fact_snapshot_id
-                        FROM brc_action_time_tickets
-                        WHERE ticket_id = :ticket_id
-                      )
-                    """
-                ),
-                {
-                    "ticket_id": ids["ticket_id"],
-                    "fact_values": json.dumps(
-                        {
-                            "opening_range_defined": True,
-                            "breakout_confirmed": True,
-                            "opening_range_low_reference": "1800",
-                            "last_price": "2000",
-                        }
-                    ),
-                },
+            _remove_tp1_from_action_time_fact(
+                conn,
+                ticket_id=ids["ticket_id"],
             )
             prepared = submit.prepare_ticket_bound_protected_submit_attempt(
                 conn,

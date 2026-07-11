@@ -753,8 +753,12 @@ def test_runtime_safety_selector_ignores_handoffs_without_current_ticket():
     assert selected["handoff"]["operation_layer_handoff_id"] == "handoff:current"
 
 
-def _create_handoff_ready(conn) -> dict[str, str]:
-    lane_id = _insert_action_time_lane_graph(conn)
+def _create_handoff_ready(
+    conn,
+    *,
+    fact_values: dict | None = None,
+) -> dict[str, str]:
+    lane_id = _insert_action_time_lane_graph(conn, fact_values=fact_values)
     ticket_payload = ticket_materializer.materialize_action_time_ticket(
         conn,
         now_ms=NOW_MS,

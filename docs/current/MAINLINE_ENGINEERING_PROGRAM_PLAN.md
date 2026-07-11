@@ -2,7 +2,7 @@
 title: MAINLINE_ENGINEERING_PROGRAM_PLAN
 status: CURRENT_PROGRAM_PLAN
 authority: docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md
-last_verified: 2026-07-09
+last_verified: 2026-07-11
 ---
 
 # Mainline Engineering Program Plan
@@ -30,25 +30,29 @@ repo MD/JSON/output/report files.
 
 | Fact | Current evidence |
 | --- | --- |
-| **dev and Tokyo are aligned on post-submit first tick** | `dev`, `origin/dev`, and Tokyo release head are `4b0b8a272814b2458fafc1913f8d7c63219ff321`; Tokyo postdeploy acceptance passed; PG migration is at `alembic=101` |
+| **Current Tokyo release** | Tokyo runs focused release `12feb47e2cd777a93c314c781dbafdcd69930cfc`; PG migration is `112`; backend, watcher timer, and monitor timer are active |
 | **PG current state is the runtime source** | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | **Repo/output/report files are not runtime authority** | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | **Five StrategyGroups are active WIP** | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`, PG candidate scope seed |
 | **Multi-symbol and side-specific action-time path exists** | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
 | **Ticket identity and TP1 are PG-backed** | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` |
 | **Initial order lifecycle/protection PG objects exist** | `brc_ticket_bound_*` tables and current ticket-bound materializers |
-| **Runner dynamic management is code-covered and deployed as lifecycle repair** | `runner_mutation_command`, `runner_mutation_executor`, `runner_protection_adjuster`, lifecycle tests, and Tokyo release `4b0b8a27` cover TP1 filled -> RUNNER_SL submit -> old SL cleanup -> runner proof through official-path records |
+| **Runner dynamic management is code-covered and deployed as lifecycle repair** | `runner_mutation_command`, `runner_mutation_executor`, `runner_protection_adjuster`, lifecycle tests, and the current Tokyo release cover TP1 filled -> RUNNER_SL submit -> old SL cleanup -> runner proof through official-path records |
 | **Exchange protection reconciliation is code-covered and deployed as readonly comparison logic** | `protection_reconciler` compares PG protection rows with caller-provided exchange snapshots, including missing order, side mismatch, qty mismatch, orphan reduce-only order, TP1-fill runner gap, and flat-position live protection |
-| **First tick and recovery-command defaults are deployed** | Tokyo release `4b0b8a27` creates `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, max 3 recovery attempts, and scope freeze records at `strategy_group_id + symbol + side` |
-| **Scope freeze pre-submit hard blocker is implemented locally** | `codex/p0-capital-safety-closure` blocks active real-risk freezes across promotion, lane, ticket, Runtime Safety State, FinalGate preflight, Operation Layer handoff, submit-mode decision, and protected submit; stale/no-risk freezes resolve through reconciliation/cleanup |
-| **No recent postdeploy signal or ticket exists** | Latest server health after deploy showed `recent signals/promotions/lanes/tickets/attempts = 0`; this is market/no-event state, not a current engineering blocker |
-| **Ticket stop-risk reservation is implemented locally** | `codex/p0-capital-safety-closure` computes `risk_at_stop = abs(entry_price - stop_price) * quantity` at Action-Time Ticket creation and rechecks it at FinalGate, Operation Layer handoff, Runtime Safety State, and protected submit |
+| **First tick and recovery-command defaults are deployed** | The current Tokyo release includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, max 3 recovery attempts, and scope freeze records at `strategy_group_id + symbol + side` |
+| **Scope freeze pre-submit hard blocker is deployed** | `381aed34` blocks active real-risk freezes across promotion, lane, ticket, Runtime Safety State, FinalGate preflight, Operation Layer handoff, submit-mode decision, and protected submit; stale/no-risk freezes resolve through reconciliation/cleanup |
+| **Production signals reached L7** | After `12feb47e`, PG recorded 7 fresh signals, 7 promotions, and 6 real-submit action-time lanes across CPM and BRF2; all lanes expired without a Ticket |
+| **Risk Reservation implementation is consumer-complete but producer-incomplete** | Ticket code computes `risk_at_stop = abs(entry_price - stop_price) * quantity`, but production action-time facts did not provide a canonical entry reference, so all six observed lanes failed with missing entry reference, invalid quantity, and invalid stop risk |
+| **Current projections hide the unresolved blocker** | After signals expired, Readiness and Goal Status returned to market wait even though Ticket materialization had repeatedly failed; blocker persistence and projection consistency are not closed |
+| **Test escape is proven** | Unit/full-chain fixtures inject `last_price`, `mark_price`, or `entry_price` directly, while production fact materialization does not guarantee the same typed field; downstream-complete dictionary fixtures therefore bypassed the missing producer handoff |
 | **Advanced trading quality / capital allocation remains future work** | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`; portfolio sleeve allocation, cluster exposure, cooldown, and drawdown controls remain above the per-ticket safety layer |
 
 ## Program Map
 
 | Program | Priority | Goal | Primary design docs | Main acceptance |
 | --- | --- | --- | --- | --- |
+| **P0-RT Real Signal -> Ticket Closure** | P0 | Unify action-time pricing, normalized sizing, positive stop-risk reservation, and Ticket materialization inside freshness bounds | `PRE_TRADE_RUNTIME_CONTRACT.md`, `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, this program plan | An eligible production-shaped signal creates one PG Ticket and Runtime Safety State, or stops before lane readiness at one producer-owned blocker |
+| **P0-PC Production-Shaped Chain Certification** | P0 | Replace privileged downstream dictionary fixtures with raw-source-to-PG certification for all current Event Specs | `PRE_TRADE_RUNTIME_CONTRACT.md`, `RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `BLOCKER_CLASSIFICATION_CONTRACT.md` | Six Event Specs pass positive and negative raw-source chain cases; current projections agree on the same blocker and watermark |
 | **P0-0 Operation Layer / Exchange Capability Boundary** | P0 | Confirm the real official-path exchange capabilities that lifecycle, runner, recovery, and reconciliation may rely on | `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` | ENTRY, SL, TP1, reduce-only, query open orders/fills/position, cancel, idempotent client order id, and runner SL capability are explicitly mapped to supported / unsupported / recovery-required |
 | **P0-1 Ticket-Bound Lifecycle Safety Core** | P0 | Keep lifecycle state machine, hard invariants, sequential submit recovery, runner mutation, exchange protection reconciliation, and closure under one model | `TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` | A submitted ticket can prove ENTRY, SL, TP1, RUNNER_SL, final exit, reconciliation, settlement, and review, or stop at one exact lifecycle hard blocker |
 | **P0-2 Full Chain Simulation Harness** | P0 | Verify the lifecycle model with constructed raw inputs, two golden paths, and a failure matrix without real exchange writes | `PRE_TRADE_RUNTIME_CONTRACT.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` | AVAX short and CPM long golden paths plus failure matrix prove lifecycle correctness; broader active event specs remain impact coverage |
@@ -56,7 +60,7 @@ repo MD/JSON/output/report files.
 | **P0-E Scope Freeze Pre-Submit Gate** | P0 | Turn active real-risk scope freezes into hard blockers before any new promotion, lane, ticket, Runtime Safety State, FinalGate preflight, or protected submit can proceed | `P0_CAPITAL_SAFETY_CLOSURE_DESIGN.md`, `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md`, `BLOCKER_CLASSIFICATION_CONTRACT.md`, `PRE_TRADE_RUNTIME_CONTRACT.md` | An active real-risk `brc_ticket_bound_scope_freezes` row blocks the exact `strategy_group_id + symbol + side`; stale no-risk residue becomes cleanup/outcome and does not block |
 | **P0-D Live Outcome Ledger** | P0 | Turn real tickets and orders into structured strategy-learning rows without becoming submit authority | `P0_CAPITAL_SAFETY_CLOSURE_DESIGN.md`, `LIVE_OUTCOME_LEDGER_CONTRACT.md`, `STRATEGY_OPPORTUNITY_REVIEW_LEDGER.md` | Every real ticket can bind entry, stop, TP1, runner, final exit, fees, funding, PnL, MAE/MFE, R multiple, lifecycle defects, and review decision |
 | **P0-F Continuous Reconciliation Tick** | P0 | Continue exchange-truth reconciliation after the first post-submit tick until lifecycle closure, exact recovery, or hard stop | `P0_CAPITAL_SAFETY_CLOSURE_DESIGN.md`, `POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md`, `TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `P0_C_PRODUCTION_LIFECYCLE_SCHEDULER_AND_SNAPSHOT_SOURCE_DESIGN.md` | Scheduled/event-driven ticks refresh open orders, fills, positions, protection refs, runner state, and final exit without creating report files or duplicate lifecycle actions |
-| **P1 Risk Reservation v0** | P1 | Require ticket-level stop-risk estimate and budget reservation before FinalGate-ready state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Closed locally on `codex/p0-capital-safety-closure`: `risk_at_stop = abs(entry_price - stop_price) * quantity` is computed and rechecked before submit |
+| **P1 Risk Reservation v0** | P1 | Require ticket-level stop-risk estimate and budget reservation before FinalGate-ready state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Consumer calculation is deployed; closure now requires RT-1 to prove the production price/quantity producer chain and a positive reservation before Ticket creation |
 | **P1-C Owner Explanation Read Model** | P1 | Make no-trade, signal, ticket, submit, runner, and closure states human-readable | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, `RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` | Owner can see whether the system is waiting, processing, blocked, protected, or closed without decoding internal terms |
 | **P1-D Performance And Retention Control** | P1 | Keep no-signal ticks, monitor runs, PG rows, logs, and reports bounded | `SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md`, `PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` | No recurring report growth; no restart storm; PG/file-authority validators remain clear |
 | **P2-E Advanced Capital Risk Allocation** | P2 | Allocate capital by portfolio exposure, StrategyGroup sleeve, symbol/side cap, cluster exposure, cooldown, and drawdown state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Multi-strategy / multi-symbol allocation can scale or pause exposure without changing per-ticket safety facts |
@@ -66,34 +70,91 @@ repo MD/JSON/output/report files.
 
 | Order | Program | Reason |
 | --- | --- | --- |
-| 1 | **P0-0 Operation Layer / Exchange Capability Audit** | Lifecycle and runner plans must be grounded in what the official gateway can actually submit, cancel, query, and reconcile |
-| 2 | **P0-1 Ticket-Bound Lifecycle Safety Core** | State machine, invariants, and failure states define what the harness must prove |
-| 3 | **P0-2 Full Chain Simulation Harness** | It verifies the lifecycle model with constructed market/fact/order inputs before waiting for live market events |
-| 4 | **P0-C Production Lifecycle Wiring** | TP1-filled residual position protection and post-entry recovery are the highest post-entry funds-safety risks |
-| 5 | **P0-E Scope Freeze Pre-Submit Gate** | A current-risk frozen scope must stop new promotion / ticket / submit before the same lifecycle defect can recur; stale no-risk residue must not block valid opportunities |
-| 6 | **P0-D Live Outcome Ledger** | Real trade results must become structured learning data, not narrative review only |
-| 7 | **P0-F Continuous Reconciliation Tick** | First tick catches immediate exchange truth; continued ticks are required until closure, recovery, or hard stop |
-| 8 | **P1 Risk Reservation v0** | Closed locally; pending review/deploy approval |
-| 9 | **P1-C Owner Explanation Read Model** | The Owner surface must explain the chain without exposing raw internal blockers |
-| 10 | **P1-D Performance And Retention Control** | Server health must remain stable while watcher/monitor run continuously without deleting trade lineage |
-| 11 | **P2-F Frontend Read Model Integration** | Frontend becomes durable only after backend read models are stable |
-| 12 | **P2-E Advanced Capital Risk Allocation** | Portfolio-level sizing and capital quality should scale only after per-ticket lifecycle mechanics are hard |
+| 1 | **P0-RT Real Signal -> Ticket Closure** | Natural production signals have already proven that Ticket pricing/risk inputs are the first real blocker |
+| 2 | **P0-PC Production-Shaped Chain Certification** | The same fixture escape can recur at FinalGate, Operation Layer, protection, and reconciliation unless producer-to-consumer proof becomes a release gate |
+| 3 | **P0-0 Operation Layer / Exchange Capability Audit** | Lifecycle and runner plans must remain grounded in official gateway capabilities |
+| 4 | **P0-1 Ticket-Bound Lifecycle Safety Core** | State machine, invariants, and failure states define downstream behavior after Ticket creation |
+| 5 | **P0-2 Full Chain Simulation Harness** | The harness must be upgraded from downstream-complete fixtures to production-shaped producer-chain proof |
+| 6 | **P0-C Production Lifecycle Wiring** | Post-entry protection and recovery remain the highest funds-safety risks after Ticket closure |
+| 7 | **P0-E Scope Freeze Pre-Submit Gate** | Current real-risk scopes must block duplicate or conflicting progression |
+| 8 | **P0-D Live Outcome Ledger** | Real results must become structured learning data |
+| 9 | **P0-F Continuous Reconciliation Tick** | Reconciliation must continue until closure, recovery, or hard stop |
+| 10 | **P1-C Owner Explanation Read Model** | Owner surfaces must explain persisted blockers without decoding internals |
+| 11 | **P1-D Performance And Retention Control** | Continuous runtime must remain bounded |
+| 12 | **P2-F Frontend Read Model Integration** | Frontend follows stable backend read models |
+| 13 | **P2-E Advanced Capital Risk Allocation** | Portfolio allocation scales only after per-ticket mechanics and real outcomes are hard |
 
 ## Current Next Execution Order
 
-This is the authoritative remaining sequence after Tokyo release `4b0b8a27`.
+This is the authoritative remaining sequence after Tokyo release `12feb47e`.
 It supersedes ad hoc task ordering in chat summaries.
 
 | Order | Next work | Priority | Acceptance |
 | --- | --- | --- | --- |
-| 1 | **P0 Capital Safety Closure design-to-implementation** | P0 | `P0_CAPITAL_SAFETY_CLOSURE_DESIGN.md` is implemented: current-risk freeze blocks, stale no-risk residue does not block, reconciliation continues, recovery is deterministic, and outcome rows are produced |
-| 2 | **Scope freeze pre-submit hard blocker** | P0 | Active real-risk `brc_ticket_bound_scope_freezes` blocks matching `strategy_group_id + symbol + side` before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit |
-| 3 | **Continuous reconciliation tick** | P0 | After first tick, scheduled/event-driven reconciliation continues until lifecycle closure, exact recovery command, or hard stop |
-| 4 | **Live Outcome Ledger** | P0 | Every real ticket has one structured outcome row or one exact hard-blocked outcome row |
-| 5 | **Risk-at-stop reservation** | P1 | Closed locally; Ticket writes stop-risk fields and downstream safety gates recheck them before submit |
-| 6 | **Owner Explanation Read Model** | P1 | Owner can read why the system waited, processed, blocked, protected, recovered, or closed without interpreting internal blocker codes |
-| 7 | **Frontend read-model integration** | P2 | Frontend displays backend-provided explanation/read models only; it does not classify blockers, facts, lanes, tickets, or submit authority |
-| 8 | **Trading quality / capital budget / portfolio risk model** | P2 | Advanced allocation can adjust exposure quality without weakening per-ticket hard safety, stop-risk reservation, or lifecycle reconciliation |
+| 1 | **RT-1 Typed Action-Time Pricing And Sizing** | P0 | A fresh side-aware executable price is produced with provenance/freshness; target notional becomes exchange-precision quantity; positive stop risk is computed once and reused downstream |
+| 2 | **RT-2 Atomic Ticket Materialization And TTL** | P0 | Facts, risk reservation, and Ticket complete inside one bounded application transaction before the shortest source validity expires |
+| 3 | **RT-3 Blocker Truth And Monitor Closure** | P0 | Process outcome stores lane/signal-scoped first blocker; later no-signal ticks cannot overwrite it with market wait until repair certification clears it |
+| 4 | **PC-1 Six-Event Production-Shaped Certification** | P0 | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, and BRF2-SHORT run from raw typed source facts to Ticket and Runtime Safety State without exchange write or downstream key injection |
+| 5 | **PC-2 Release Regression Gate** | P0 | CI and postdeploy acceptance reject missing/stale/malformed producer fields, fixture-only fields, projection disagreement, and action-time work exceeding freshness/timeout bounds |
+| 6 | **Continuous reconciliation and Live Outcome validation** | P0/P1 | The first real ticket proceeds through protection, reconciliation, settlement, and one structured outcome or exact hard blocker |
+| 7 | **Owner Explanation, frontend, and advanced allocation** | P1/P2 | Product surfaces and portfolio allocation build only after RT/PC gates are closed |
+
+## P0-RT Real Signal -> Ticket Closure
+
+### Root Cause
+
+The observed failure is not merely a missing dictionary key. The exact chain is:
+
+```text
+production source values
+-> action-time fact materializer does not persist canonical entry reference
+-> promotion computes requested_risk_at_stop = 0
+-> zero risk is not classified as a blocker
+-> real-submit lane is created
+-> Ticket risk reservation rejects missing price / quantity / risk
+-> action-time sequence fails and lane expires
+-> later no-signal projection hides the engineering blocker
+```
+
+### Task Packages
+
+| Task | Scope | Acceptance | Stop condition |
+| --- | --- | --- | --- |
+| **RT-1 Typed Action-Time Pricing And Sizing** | Define one typed entry reference with source, side, observed time, validity, and instrument; derive Decimal quantity from PG policy and quantize through PG exchange-instrument rules | Ticket, risk reservation, and protected submit consume the same normalized quantity and price lineage; no component recomputes identity from loose dictionaries | Stop if this requires changing Owner notional, leverage, loss unit, symbol/side scope, or execution order type |
+| **RT-2 Atomic Ticket Materialization And TTL** | Collapse action-time fact refresh, lightweight readiness refresh, sizing/risk reservation, and Ticket creation into one bounded application service/transaction; move Candidate Pool, Daily Table, Goal Status, and Owner snapshots after the critical path | Critical path completes before the shortest trusted fact expiry; timeouts fail with lane-scoped PG process outcomes; no JSON/MD output | Stop on multiple open real-submit lanes, stale facts, missing account facts, or PG transaction ambiguity |
+| **RT-3 Blocker Truth And Monitor Closure** | Reuse PG runtime process outcomes and state events with signal/lane scope; project unresolved engineering blocker into Readiness, Tradeability, Goal Status, and Monitor | Every affected signal/lane has one first blocker and watermark across all views; no-signal ticks do not erase unresolved repair state; fresh signals may re-certify and clear it; business blockers do not mark watcher infrastructure failed | Stop when a newer successful certification for the same capability clears the blocker |
+| **RT-4 Natural-Signal Acceptance** | Observe the next eligible production signal after deployment | Signal creates Ticket and Runtime Safety State or stops at a genuine action-time safety/account/position/protection blocker | Do not bypass FinalGate, Operation Layer, protection, or exchange-write authority |
+
+## P0-PC Production-Shaped Chain Certification
+
+### Certification Rule
+
+Tests must start before the field producer boundary. A fixture may model raw
+venue/account/strategy observations, but it may not pre-fill the exact
+downstream dictionary keys whose production materialization is under test.
+
+### Mandatory Matrix
+
+| Dimension | Required cases |
+| --- | --- |
+| **Event Specs** | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, BRF2-SHORT |
+| **Price facts** | valid best-side reference, stale, missing, malformed, cross-source conflict |
+| **Sizing facts** | valid precision, below minimum quantity, step-size rounding, invalid notional, missing instrument mapping |
+| **Protection facts** | valid stop direction, missing stop, wrong-side stop, expired protection, missing TP1 |
+| **Account facts** | fresh safe account, stale, open-order conflict, active-position conflict, unavailable private facts |
+| **Projection truth** | success, computed-not-satisfied, engineering blocker, runtime safety blocker, later no-signal tick |
+
+### Release Gate
+
+Completion requires all of the following:
+
+1. No consumer-required runtime field exists only in test fixtures.
+2. Every field has typed producer ownership, PG lineage, observed time, and validity.
+3. A missing field blocks at the earliest responsible stage, before a later consumer fails.
+4. Six Event Specs reach Ticket and Runtime Safety State in non-exchange-write certification.
+5. Candidate Pool, Readiness, Tradeability, Goal Status, Server Monitor, and process outcomes agree.
+6. No-signal cadence writes zero JSON/MD files; heavy work is event-triggered and timeout-bounded.
+7. Postdeploy acceptance verifies PG lineage, not only service health and test-suite success.
 
 ## Program Details
 
@@ -134,8 +195,8 @@ idempotent client order id
 | **Audit complete and absorbed** | Capability boundary is reflected in `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` and `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`; original audit packet is archived under `docs/archive/2026-07-09-docs-current-consolidation/OPERATION_LAYER_EXCHANGE_CAPABILITY_AUDIT.md` |
 | **Gateway readiness method gap closed** | Runtime gateway readiness now requires lifecycle methods, not only `place_order` |
 | **Recent fills wrapper added** | `ExchangeGateway.fetch_my_trades` is available as a read-only capability |
-| **Remaining first blocker** | `production_lifecycle_wiring_and_live_outcome_ledger_not_complete` after local P0-2 failure-matrix closure |
-| **Orphan protection cleanup command** | Implemented locally on the P0-1 branch through migration `098`, `orphan_protection_cleanup_command`, and focused tests; deploy remains Owner-approved |
+| **Remaining first blocker** | `action_time_fact_blocked_outcome_marks_watcher_failed`; the lifecycle path is deployed, but fact-blocked fresh signals must not terminate watcher health |
+| **Orphan protection cleanup command** | Deployed through migration `098`, `orphan_protection_cleanup_command`, and focused tests |
 
 ### P0-1 Ticket-Bound Lifecycle Safety Core
 
@@ -360,6 +421,7 @@ risk_at_stop = abs(entry_price - stop_price) * quantity
 | **Budget reservation exists** | No FinalGate-ready ticket without active reservation matching ticket scope |
 | **Exposure conflict checked** | Same symbol, same side, and same strategy open-risk checks run before reservation |
 | **Versioned policy bound** | Ticket binds risk policy and budget/sleeve version used at creation |
+| **Production producer bound** | Entry reference and quantity come from typed, fresh, production-shaped action-time pricing/sizing producers rather than fixture-only dictionary keys |
 
 ### P1-C Owner Explanation Read Model
 
@@ -507,11 +569,11 @@ replay event as fresh live signal
 chain_position: daily_live_enablement_status
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scopes
-stage: p0_capital_safety_local_closure
-first_blocker: review_validation_and_deploy_approval_pending
-evidence: local branch codex/p0-capital-safety-closure implements current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, and Live Outcome Ledger PG projection; Tokyo remains on 4b0b8a27 until Owner-approved deploy
-next_action: finish review and validation, then deploy only with explicit Owner approval; after deployment, continue Owner Explanation Read Model, frontend read-model integration, and trading-quality capital allocation
-stop_condition: active real-risk brc_ticket_bound_scope_freezes blocks matching StrategyGroup + symbol + side before promotion, lane, ticket, Runtime Safety State, FinalGate preflight, and protected submit; stale/no-risk freezes resolve after current risk is disproved; continuous ticks and outcome rows are present; each ticket has stop-risk reservation before submit
+stage: production_real_signal_reached_l7_ticket_blocked
+first_blocker: risk_reservation_entry_reference_price_missing
+evidence: `12feb47e` at migration 112 recorded 7 fresh signals, 7 promotions, and 6 real-submit lanes after deployment; every observed lane produced 0 Ticket and the reconstructed Ticket consumer returned missing entry reference, invalid intended quantity, and invalid risk-at-stop
+next_action: execute RT-1 through RT-3, then run PC-1 six-event certification before waiting for another natural market signal
+stop_condition: six current Event Specs pass raw-source-to-Ticket and Runtime Safety State certification without downstream dictionary injection; unresolved Ticket blockers persist across no-signal ticks; the next eligible natural signal no longer stops at Ticket materialization
 owner_action_required: no
 authority_boundary: no FinalGate bypass, no Operation Layer bypass, no exchange write bypass, no live profile or sizing mutation
 ```

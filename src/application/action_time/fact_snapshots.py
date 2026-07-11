@@ -35,6 +35,9 @@ from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     normalize_sync_postgres_dsn,
 )
 from src.domain.strategy_family_signal import StrategyFactObservation  # noqa: E402
+from src.application.action_time.pricing_sizing import (  # noqa: E402
+    materialize_action_time_pricing_reference,
+)
 from src.application.runtime_process_outcome import (  # noqa: E402
     materialize_runtime_process_outcome,
     runtime_process_exit_code,
@@ -152,6 +155,29 @@ def _materialize_one(
         public_fact=public_fact,
         now_ms=now_ms,
     )
+    execution_eligible = _truthy(event.get("execution_eligibility_enabled"))
+    production_public_values = _as_dict(public_fact.get("fact_values"))
+    pricing_result = materialize_action_time_pricing_reference(
+        side=str(signal.get("side") or ""),
+        source_values=production_public_values,
+        source_fact_snapshot_id=str(public_fact.get("fact_snapshot_id") or ""),
+        observed_at_ms=int(public_fact.get("observed_at_ms") or 0),
+        valid_until_ms=int(public_fact.get("valid_until_ms") or 0),
+        now_ms=now_ms,
+    ) if execution_eligible else None
+    if pricing_result is not None and pricing_result.reference is not None:
+        pricing_values = pricing_result.reference.fact_values()
+        source_values = {
+            **source_values,
+            "execution_pricing": pricing_values,
+            "entry_reference_price": pricing_values["entry_reference_price"],
+            "entry_reference_kind": pricing_values["entry_reference_kind"],
+            "mark_price": pricing_values["mark_price"],
+            "bid_price": pricing_values["bid_price"],
+            "ask_price": pricing_values["ask_price"],
+            "qty_step": pricing_values["qty_step"],
+            "min_notional": pricing_values["min_notional"],
+        }
     fact_values, missing = _fact_values(
         event=event,
         signal=signal,
@@ -159,12 +185,27 @@ def _materialize_one(
         source_values=source_values,
         required_typed_fact_keys=(
             set(typed_valid_until_by_key)
-            if _truthy(event.get("execution_eligibility_enabled"))
+            if execution_eligible
             else None
         ),
     )
+    if pricing_result is not None and pricing_result.reference is not None:
+        pricing_values = pricing_result.reference.fact_values()
+        fact_values.update(
+            {
+                "execution_pricing": pricing_values,
+                "entry_reference_price": pricing_values["entry_reference_price"],
+                "entry_reference_kind": pricing_values["entry_reference_kind"],
+                "mark_price": pricing_values["mark_price"],
+                "bid_price": pricing_values["bid_price"],
+                "ask_price": pricing_values["ask_price"],
+                "qty_step": pricing_values["qty_step"],
+                "min_notional": pricing_values["min_notional"],
+            }
+        )
     failed = _failed_facts(required_facts, fact_values)
     blockers = [
+        *(pricing_result.blockers if pricing_result is not None else ()),
         *(f"required_fact_missing:{key}" for key in missing),
         *(f"required_fact_not_satisfied:{key}" for key in failed),
     ]
@@ -186,6 +227,8 @@ def _materialize_one(
         int(signal.get("expires_at_ms") or 0),
         int(public_fact.get("valid_until_ms") or 0),
     ]
+    if pricing_result is not None and pricing_result.reference is not None:
+        valid_until_candidates.append(pricing_result.reference.valid_until_ms)
     required_fact_keys = {
         str(row.get("fact_key") or "")
         for row in required_facts
@@ -228,7 +271,13 @@ def _materialize_one(
                 "source": "materialize_action_time_fact_snapshots",
             }
         ),
-        "blocker_class": None if satisfied else "computed_not_satisfied",
+        "blocker_class": (
+            None
+            if satisfied
+            else "action_time_boundary_not_reproduced"
+            if pricing_result is not None and pricing_result.blockers
+            else "computed_not_satisfied"
+        ),
         "observed_at_ms": observed_at_ms,
         "valid_until_ms": valid_until_ms,
         "created_at_ms": now_ms,
@@ -444,8 +493,15 @@ def _fact_values(
             continue
         values[key] = resolved
     for optional_key in (
+        "execution_pricing",
+        "entry_reference_price",
+        "entry_reference_kind",
         "last_price",
         "mark_price",
+        "bid_price",
+        "ask_price",
+        "qty_step",
+        "min_notional",
         "current_price",
         "entry_price",
         "take_profit_1",
@@ -567,6 +623,8 @@ def _derive_tp1_reference(
     source_values: dict[str, Any],
 ) -> Decimal:
     entry = _first_positive_decimal(
+        fact_values.get("entry_reference_price"),
+        source_values.get("entry_reference_price"),
         fact_values.get("entry_price"),
         source_values.get("entry_price"),
         fact_values.get("last_price"),

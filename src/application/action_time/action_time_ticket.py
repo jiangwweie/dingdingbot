@@ -36,8 +36,9 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
-from src.application.action_time.budget_stop_risk import (  # noqa: E402
-    compute_stop_risk_reservation,
+from src.application.action_time.pricing_sizing import (  # noqa: E402
+    pricing_reference_from_action_time_fact_values,
+    sizing_risk_decision_from_budget,
 )
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
@@ -593,14 +594,29 @@ def _build_ticket_bundle(
     blockers.extend(required_fact_blockers)
     if _tp1_price(action_time_fact=action_time_fact) <= 0:
         blockers.append("tp1_reference_missing")
-    risk_reservation = compute_stop_risk_reservation(
-        action_time_fact=action_time_fact,
-        protection=protection,
-        budget=budget,
+    pricing_result = pricing_reference_from_action_time_fact_values(
+        _as_dict(action_time_fact.get("fact_values"))
     )
-    blockers.extend(risk_reservation["blockers"])
+    blockers.extend(pricing_result.blockers)
+    sizing_result = (
+        sizing_risk_decision_from_budget(
+            budget=budget,
+            pricing_reference=pricing_result.reference,
+        )
+        if pricing_result.reference is not None
+        else None
+    )
+    if sizing_result is not None:
+        blockers.extend(sizing_result.blockers)
+    decision = sizing_result.decision if sizing_result is not None else None
+    if decision is not None and decision.stop_price != _decimal(
+        protection.get("reference_price")
+    ):
+        blockers.append("risk_reservation_stop_price_mismatch")
     if blockers:
         raise TicketMaterializationBlocked(_dedupe(blockers))
+    assert decision is not None
+    risk_reservation = decision.reservation_values()
 
     owner_policy_version = _owner_policy_version(control_state, policy)
     if not owner_policy_version:
@@ -958,7 +974,6 @@ def _insert_ticket_bundle(
 ) -> None:
     ticket = bundle["ticket"]
     event = bundle["ticket_event"]
-    risk = bundle.get("risk_reservation") or {}
     conn.execute(
         text(
             """
@@ -1026,23 +1041,13 @@ def _insert_ticket_bundle(
             """
             UPDATE brc_budget_reservations
             SET ticket_id = :ticket_id,
-                status = 'consumed',
-                entry_reference_price = :entry_reference_price,
-                stop_price = :stop_price,
-                intended_qty = :intended_qty,
-                risk_at_stop = :risk_at_stop,
-                risk_reservation_basis = :risk_reservation_basis
+                status = 'consumed'
             WHERE budget_reservation_id = :budget_reservation_id
             """
         ),
         {
             "ticket_id": ticket["ticket_id"],
             "budget_reservation_id": ticket["budget_reservation_id"],
-            "entry_reference_price": _db_decimal(risk.get("entry_reference_price")),
-            "stop_price": _db_decimal(risk.get("stop_price")),
-            "intended_qty": _db_decimal(risk.get("intended_qty")),
-            "risk_at_stop": _db_decimal(risk.get("risk_at_stop")),
-            "risk_reservation_basis": risk.get("risk_reservation_basis"),
         },
     )
 
@@ -1269,11 +1274,6 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return Decimal("-1")
-
-
-def _db_decimal(value: Any) -> str | None:
-    parsed = _decimal(value)
-    return str(parsed) if parsed > 0 else None
 
 
 def compute_action_time_ticket_hash(ticket: dict[str, Any]) -> str:

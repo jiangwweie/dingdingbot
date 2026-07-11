@@ -63,6 +63,8 @@ NOOP_STATUSES = {
 TEMPORARILY_UNAVAILABLE_BUSINESS_STATUSES = {
     "action_time_fact_snapshots_blocked",
     "promotion_candidates_blocked",
+    "action_time_ticket_sequence_blocked",
+    "action_time_ticket_sequence_rolled_back",
 }
 PROCESS_FAILURE_PREFIXES = (
     "runtime_control_state_invalid",
@@ -70,6 +72,8 @@ PROCESS_FAILURE_PREFIXES = (
     "pg_",
     "watcher_or_service_failure",
     "exchange_command_lookup_failed",
+    "action_time_sequence_exception",
+    "action_time_current_projection_publish_failed",
 )
 HARD_FAILURE_PREFIXES = (
     "identity_mismatch",
@@ -123,7 +127,7 @@ def classify_process_outcome(
         )
     business_state = (
         "completed"
-        if result_status.endswith(("completed", "submitted", "created"))
+        if result_status.endswith(("completed", "submitted", "created", "committed"))
         else "processing"
     )
     return RuntimeProcessOutcome(

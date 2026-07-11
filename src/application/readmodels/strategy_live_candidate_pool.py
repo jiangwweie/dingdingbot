@@ -197,6 +197,7 @@ def build_strategy_live_candidate_pool_from_control_state(
     control_state: dict[str, Any],
     *,
     generated_at_utc: str | None = None,
+    suppress_persistent_action_time_outcomes: bool = False,
 ) -> dict[str, Any]:
     """Build Candidate Pool from DB-backed runtime control state.
 
@@ -209,6 +210,9 @@ def build_strategy_live_candidate_pool_from_control_state(
     inputs = _candidate_pool_inputs_from_control_state(
         control_state,
         generated_at_utc=generated,
+        suppress_persistent_action_time_outcomes=(
+            suppress_persistent_action_time_outcomes
+        ),
     )
     artifact = build_strategy_live_candidate_pool(
         daily_table=inputs["daily_table"],
@@ -239,11 +243,15 @@ def build_strategy_live_candidate_pool_inputs_from_control_state(
     control_state: dict[str, Any],
     *,
     generated_at_utc: str | None = None,
+    suppress_persistent_action_time_outcomes: bool = False,
 ) -> dict[str, dict[str, Any]]:
     generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
     return _candidate_pool_inputs_from_control_state(
         control_state,
         generated_at_utc=generated,
+        suppress_persistent_action_time_outcomes=(
+            suppress_persistent_action_time_outcomes
+        ),
     )
 
 
@@ -251,6 +259,7 @@ def _candidate_pool_inputs_from_control_state(
     control_state: dict[str, Any],
     *,
     generated_at_utc: str,
+    suppress_persistent_action_time_outcomes: bool = False,
 ) -> dict[str, dict[str, Any]]:
     if control_state.get("source_mode") != "db_backed":
         raise ValueError("Candidate Pool production path requires DB-backed state")
@@ -305,7 +314,12 @@ def _candidate_pool_inputs_from_control_state(
         for row in _dict_rows(control_state.get("owner_policy_current"))
     }
     strategy_groups = _strategy_group_rows(control_state)
-    readiness_by_lane = _current_pretrade_readiness_by_lane(control_state)
+    readiness_by_lane = _current_pretrade_readiness_by_lane(
+        control_state,
+        suppress_persistent_action_time_outcomes=(
+            suppress_persistent_action_time_outcomes
+        ),
+    )
     fact_by_lane = _current_fact_snapshot_by_lane(
         control_state,
         fact_surface="pretrade_public",
@@ -504,13 +518,64 @@ def _require_pg_policy_runtime_scope(
 
 def _current_pretrade_readiness_by_lane(
     control_state: dict[str, Any],
+    *,
+    suppress_persistent_action_time_outcomes: bool = False,
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
     now_ms = _control_state_now_ms(control_state)
-    return {
+    readiness = {
         _lane_key(row): row
         for row in _dict_rows(control_state.get("pretrade_readiness_rows"))
         if is_current_pretrade_readiness(row, now_ms)
     }
+    if suppress_persistent_action_time_outcomes:
+        return readiness
+    for key, outcome in _unresolved_action_time_sequence_outcomes(control_state).items():
+        strategy_group_id, symbol, side = key
+        current = readiness.get(key, {})
+        readiness[key] = {
+            **current,
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+            "readiness_state": "blocked",
+            "signal_lifecycle_status": "engineering_blocked",
+            "signal_freshness_state": "absent",
+            "promotion_state": "blocked",
+            "first_blocker_class": "action_time_boundary_not_reproduced",
+            "first_blocker_detail": str(outcome.get("first_blocker") or ""),
+            "next_action": "repair_non_executing_action_time_rehearsal_path",
+            "persistent_engineering_blocker": True,
+            "process_outcome_id": str(outcome.get("process_outcome_id") or ""),
+            "process_outcome_updated_at_ms": int(outcome.get("updated_at_ms") or 0),
+        }
+    return readiness
+
+
+def _unresolved_action_time_sequence_outcomes(
+    control_state: dict[str, Any],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    unresolved: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in _dict_rows(control_state.get("runtime_process_outcomes")):
+        if row.get("process_name") != "action_time_ticket_sequence":
+            continue
+        if row.get("process_state") not in {
+            "business_blocked",
+            "retryable_failure",
+            "hard_failure",
+        }:
+            continue
+        if not str(row.get("first_blocker") or ""):
+            continue
+        scope_parts = str(row.get("scope_key") or "").split(":")
+        if len(scope_parts) != 4 or scope_parts[0] != "lane":
+            continue
+        key = (scope_parts[1], scope_parts[2], scope_parts[3])
+        current = unresolved.get(key)
+        if current is None or int(row.get("updated_at_ms") or 0) >= int(
+            current.get("updated_at_ms") or 0
+        ):
+            unresolved[key] = row
+    return unresolved
 
 
 def _current_fact_snapshot_by_lane(
@@ -815,6 +880,12 @@ def _pg_replay_live_parity_projection(
                 "symbol": str(candidate.get("symbol") or ""),
                 "side": str(candidate.get("side") or ""),
                 "blocker_class": blocker_class,
+                "first_blocker_detail": str(
+                    readiness.get("first_blocker_detail") or ""
+                ),
+                "persistent_engineering_blocker": (
+                    readiness.get("persistent_engineering_blocker") is True
+                ),
                 "detector_attached": computed,
                 "watcher_tick_present": facts.get("freshness_state") == "fresh"
                 or readiness.get("watcher_state") == "fresh",
@@ -846,7 +917,8 @@ def _pg_replay_live_blocker_class(
     fact_blocker = str(facts.get("blocker_class") or "")
     current_signal_present = bool(signal)
     if readiness_blocker and (
-        current_signal_present
+        readiness.get("persistent_engineering_blocker") is True
+        or current_signal_present
         or readiness_blocker not in ACTION_TIME_CURRENT_ONLY_BLOCKERS
     ):
         return readiness_blocker
@@ -934,6 +1006,9 @@ def _pg_action_time_boundary_projection(
                 ),
                 "action_time_path_ready": path_ready,
                 "first_blocker": first_blocker,
+                "first_blocker_detail": str(
+                    readiness.get("first_blocker_detail") or ""
+                ),
                 "next_action": _pg_next_action(first_blocker),
                 "required_facts_readiness": {
                     "public_facts_ready": public_facts_ready,
@@ -2418,6 +2493,11 @@ def _symbol_readiness_row(
         "owner_authorization": owner_authorization,
         "promotion_state": promotion_state,
         "first_blocker": first_blocker,
+        "first_blocker_detail": str(
+            parity_row.get("first_blocker_detail")
+            or action_row.get("first_blocker_detail")
+            or ""
+        ),
         "next_action": _symbol_next_action(first_blocker, candidate, action_row),
         "stop_condition": _symbol_stop_condition(first_blocker),
         "evidence_ref": _symbol_evidence_ref(

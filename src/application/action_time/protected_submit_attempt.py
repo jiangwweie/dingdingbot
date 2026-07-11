@@ -40,6 +40,10 @@ from src.application.action_time.capital_safety_guard import (  # noqa: E402
 from src.application.action_time.budget_stop_risk import (  # noqa: E402
     budget_stop_risk_blockers,
 )
+from src.application.action_time.pricing_sizing import (  # noqa: E402
+    pricing_reference_from_action_time_fact_values,
+    sizing_risk_decision_from_budget,
+)
 from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
     classify_sequential_submit_result,
 )
@@ -826,6 +830,33 @@ def _graph_blockers(graph: dict[str, Any], *, now_ms: int) -> list[str]:
     if budget.get("status") != "consumed":
         blockers.append(f"budget_reservation_status_not_consumed:{budget.get('status')}")
     blockers.extend(budget_stop_risk_blockers(budget))
+    pricing_result = pricing_reference_from_action_time_fact_values(
+        _as_dict(action_time_fact.get("fact_values"))
+    )
+    blockers.extend(pricing_result.blockers)
+    sizing_result = (
+        sizing_risk_decision_from_budget(
+            budget=budget,
+            pricing_reference=pricing_result.reference,
+        )
+        if pricing_result.reference is not None
+        else None
+    )
+    if sizing_result is not None:
+        blockers.extend(sizing_result.blockers)
+        if (
+            sizing_result.decision is not None
+            and sizing_result.decision.stop_price
+            != _decimal(protection.get("reference_price"))
+        ):
+            blockers.append("risk_reservation_stop_price_mismatch")
+        if sizing_result.decision is not None:
+            blockers.extend(
+                _tp1_quantity_blockers(
+                    amount=sizing_result.decision.intended_qty,
+                    qty_step=sizing_result.decision.qty_step,
+                )
+            )
     if _tp1_price(action_time_fact=action_time_fact) <= 0:
         blockers.append("tp1_reference_missing")
     if execution_policy.get("status") != "current":
@@ -1137,16 +1168,34 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
     action_time_fact = _as_dict(graph.get("action_time_fact"))
     budget = _as_dict(graph.get("budget"))
     exchange_instrument = _as_dict(graph.get("exchange_instrument"))
-    price = _execution_reference_price(
-        action_time_fact=action_time_fact,
-        protection=protection,
-    )
     tp1_price = _tp1_price(action_time_fact=action_time_fact)
     target_notional = _decimal(ticket.get("target_notional"))
-    if price <= 0 or target_notional <= 0 or tp1_price <= 0:
+    pricing_result = pricing_reference_from_action_time_fact_values(
+        _as_dict(action_time_fact.get("fact_values"))
+    )
+    sizing_result = (
+        sizing_risk_decision_from_budget(
+            budget=budget,
+            pricing_reference=pricing_result.reference,
+        )
+        if pricing_result.reference is not None
+        else None
+    )
+    decision = sizing_result.decision if sizing_result is not None else None
+    price = decision.entry_reference_price if decision is not None else Decimal("0")
+    amount = decision.intended_qty if decision is not None else Decimal("0")
+    qty_step = decision.qty_step if decision is not None else Decimal("0")
+    if (
+        price <= 0
+        or amount <= 0
+        or qty_step <= 0
+        or target_notional <= 0
+        or tp1_price <= 0
+    ):
         return {}
-    amount = target_notional / price
-    tp1_amount = amount / Decimal("2")
+    tp1_amount = _tp1_amount(amount=amount, qty_step=qty_step)
+    if tp1_amount <= 0:
+        return {}
     direction = "LONG" if ticket.get("side") == "long" else "SHORT"
     entry_side = "buy" if direction == "LONG" else "sell"
     protection_side = "sell" if direction == "LONG" else "buy"
@@ -1186,6 +1235,7 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
         "side": ticket.get("side"),
         "direction": direction,
         "target_notional": str(target_notional),
+        "reserved_notional": str(amount * price),
         "reference_price": str(price),
         "amount": str(amount),
         "created_at_ms": now_ms,
@@ -1248,6 +1298,26 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
             },
         ],
     }
+
+
+def _floor_to_step(value: Decimal, step: Decimal) -> Decimal:
+    if value <= 0 or step <= 0:
+        return Decimal("0")
+    return (value // step) * step
+
+
+def _tp1_amount(*, amount: Decimal, qty_step: Decimal) -> Decimal:
+    return _floor_to_step(amount / Decimal("2"), qty_step)
+
+
+def _tp1_quantity_blockers(
+    *,
+    amount: Decimal,
+    qty_step: Decimal,
+) -> list[str]:
+    if _tp1_amount(amount=amount, qty_step=qty_step) <= 0:
+        return ["tp1_quantity_below_exchange_step"]
+    return []
 
 
 def _attempt_row(

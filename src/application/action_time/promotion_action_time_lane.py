@@ -37,8 +37,10 @@ from src.application.readmodels.daily_live_enablement_table import WIP_LANES  # 
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
-from src.application.action_time.budget_stop_risk import (  # noqa: E402
-    compute_stop_risk_reservation,
+from src.application.action_time.pricing_sizing import (  # noqa: E402
+    TicketSizingRiskDecision,
+    materialize_ticket_sizing_risk_decision,
+    pricing_reference_from_action_time_fact_values,
 )
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
@@ -98,6 +100,7 @@ class CandidateBundle:
     owner_policy_version: str
     account_id: str
     blockers: tuple[str, ...]
+    sizing_risk_decision: TicketSizingRiskDecision | None = None
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -1179,21 +1182,23 @@ def _allocation_decision_row(
 
 
 def _requested_risk_at_stop(bundle: CandidateBundle) -> Decimal:
-    if not bundle.action_time_fact or not bundle.event_spec:
-        return Decimal("0")
-    try:
-        budget = _budget_row(bundle, now_ms=0)
-        protection = _protection_row(bundle)
-    except (KeyError, TypeError, ValueError):
-        return Decimal("0")
-    reservation = compute_stop_risk_reservation(
-        action_time_fact=bundle.action_time_fact,
-        protection=protection,
-        budget=budget,
+    decision = bundle.sizing_risk_decision
+    return decision.risk_at_stop if decision is not None else Decimal("0")
+
+
+def _sizing_risk_decision_result(bundle: CandidateBundle):
+    pricing_result = pricing_reference_from_action_time_fact_values(
+        _as_dict(bundle.action_time_fact.get("fact_values"))
     )
-    if reservation.get("blockers"):
-        return Decimal("0")
-    return _decimal(reservation.get("risk_at_stop"))
+    if pricing_result.reference is None:
+        return None, list(pricing_result.blockers)
+    protection = _protection_row(bundle)
+    result = materialize_ticket_sizing_risk_decision(
+        pricing_reference=pricing_result.reference,
+        target_notional=_decimal(bundle.policy.get("max_notional")),
+        stop_price=_decimal(protection.get("reference_price")),
+    )
+    return result.decision, list(result.blockers)
 
 
 def _apply_allocation_capital_scope(
@@ -1202,16 +1207,20 @@ def _apply_allocation_capital_scope(
     guarded: list[CandidateBundle] = []
     for bundle in bundles:
         blockers = list(bundle.blockers)
-        requested = _requested_risk_at_stop(bundle)
+        decision, decision_blockers = _sizing_risk_decision_result(bundle)
+        blockers.extend(decision_blockers)
+        requested = decision.risk_at_stop if decision is not None else Decimal("0")
         owner_loss_unit = _decimal(bundle.policy.get("loss_unit"))
-        if requested > 0 and (
-            owner_loss_unit <= 0 or requested > owner_loss_unit
-        ):
+        if decision is not None and owner_loss_unit <= 0:
+            blockers.append("allocation_owner_loss_unit_invalid")
+        elif requested > owner_loss_unit:
             blockers.append("allocation_risk_exceeds_owner_capital_scope")
         guarded.append(
-            replace(bundle, blockers=tuple(_dedupe(blockers)))
-            if tuple(blockers) != bundle.blockers
-            else bundle
+            replace(
+                bundle,
+                blockers=tuple(_dedupe(blockers)),
+                sizing_risk_decision=decision,
+            )
         )
     return guarded
 
@@ -1252,6 +1261,9 @@ def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
 
 
 def _budget_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
+    decision = bundle.sizing_risk_decision
+    if decision is None:
+        raise ValueError("selected promotion has no sizing/risk decision")
     target_notional = _decimal(bundle.policy.get("max_notional"))
     leverage = _decimal(bundle.policy.get("leverage"))
     reserved_margin = target_notional / leverage
@@ -1270,10 +1282,16 @@ def _budget_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
         "target_notional": target_notional,
         "leverage": leverage,
         "reserved_margin": reserved_margin,
+        "entry_reference_price": decision.entry_reference_price,
+        "stop_price": decision.stop_price,
+        "intended_qty": decision.intended_qty,
+        "risk_at_stop": decision.risk_at_stop,
+        "risk_reservation_basis": decision.risk_reservation_basis,
         "reserved_at_ms": now_ms,
         "expires_at_ms": min(
             int(bundle.signal["expires_at_ms"]),
             int(bundle.action_time_fact["valid_until_ms"]),
+            decision.pricing_valid_until_ms,
         ),
         "status": "active",
         "release_reason": None,

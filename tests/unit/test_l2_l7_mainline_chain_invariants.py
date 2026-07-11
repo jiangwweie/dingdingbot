@@ -242,10 +242,7 @@ def test_l2_l7_refresh_sequence_preserves_state_machine_order_and_light_tick() -
 
     assert action_time_steps == [
         "build_account_safe_facts",
-        "materialize_action_time_fact_snapshots",
-        "publish_runtime_control_current_projections_before_lane",
-        "materialize_pg_promotion_action_time_lane",
-        "materialize_action_time_ticket",
+        "materialize_action_time_ticket_sequence",
         "materialize_action_time_finalgate_preflight",
         "materialize_action_time_operation_layer_handoff",
         "materialize_ticket_bound_runtime_safety_state",

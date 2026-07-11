@@ -42,6 +42,7 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 
 PROJECTOR_NAME = "pg_current_projection_publisher"
 SCHEMA = "brc.runtime_control_current_projection_publish.v1"
+ACTION_TIME_READINESS_SCHEMA = "brc.action_time_pretrade_readiness_publish.v1"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -81,31 +82,28 @@ def publish_runtime_control_current_projections(
 ) -> dict[str, Any]:
     started_ms = int(time.time() * 1000)
     generated = datetime.now(timezone.utc).isoformat()
-    repository = PgBackedRuntimeControlStateRepository(conn, now_ms=started_ms)
-    control_state = repository.read_monitor_control_state()
-    projection_control_state = {
-        **control_state,
-        # Build the new current readiness projection from base facts/scope,
-        # not from the previous current projection row set.
-        "pretrade_readiness_rows": [],
-    }
-
-    candidate_pool = build_strategy_live_candidate_pool_from_control_state(
+    (
+        control_state,
         projection_control_state,
+        candidate_pool,
+        readiness_rows,
+    ) = _build_candidate_readiness(
+        conn,
+        started_ms=started_ms,
         generated_at_utc=generated,
+        suppress_persistent_action_time_outcomes=False,
     )
     daily_table = build_daily_live_enablement_table_from_control_state(
-        projection_control_state,
+        {
+            **projection_control_state,
+            "pretrade_readiness_rows": readiness_rows,
+        },
         generated_at_utc=generated,
     )
     goal_status = build_goal_status_artifact_from_control_state(
         control_state={
             **projection_control_state,
-            "pretrade_readiness_rows": _readiness_rows_for_control_state(
-                candidate_pool,
-                control_state=control_state,
-                computed_at_ms=started_ms,
-            ),
+            "pretrade_readiness_rows": readiness_rows,
         },
     )
 
@@ -129,11 +127,6 @@ def publish_runtime_control_current_projections(
             input_watermark=_input_watermark(control_state, goal_status),
         ),
     ]
-    readiness_rows = _readiness_rows_for_control_state(
-        candidate_pool,
-        control_state=control_state,
-        computed_at_ms=started_ms,
-    )
     _validate_projection_ownership(conn, projector_runs)
     snapshots = [
         _snapshot_row(
@@ -196,7 +189,9 @@ def publish_runtime_control_current_projections(
         "candidate_pool": {
             "status": candidate_pool.get("status"),
             "symbol_readiness_count": len(candidate_pool.get("symbol_readiness_rows") or []),
-            "action_time_lane_input_count": len(candidate_pool.get("action_time_lane_inputs") or []),
+            "action_time_lane_input_count": len(
+                candidate_pool.get("action_time_lane_inputs") or []
+            ),
         },
         "goal_status": {
             "status": goal_status.get("status"),
@@ -218,6 +213,78 @@ def publish_runtime_control_current_projections(
             "order_sizing_changed": False,
         },
     }
+
+
+def publish_action_time_pretrade_readiness(
+    conn: sa.engine.Connection,
+) -> dict[str, Any]:
+    """Refresh only the PG readiness rows required before lane arbitration."""
+
+    started_ms = int(time.time() * 1000)
+    generated = datetime.now(timezone.utc).isoformat()
+    _, _, candidate_pool, readiness_rows = _build_candidate_readiness(
+        conn,
+        started_ms=started_ms,
+        generated_at_utc=generated,
+        suppress_persistent_action_time_outcomes=True,
+    )
+    _replace_pretrade_readiness_rows(conn, readiness_rows)
+    return {
+        "schema": ACTION_TIME_READINESS_SCHEMA,
+        "status": "action_time_pretrade_readiness_published",
+        "generated_at_utc": generated,
+        "published_row_count": len(readiness_rows),
+        "candidate_pool_status": candidate_pool.get("status"),
+        "authority_boundary": (
+            "action_time_readiness_pg_projection_only; "
+            "no_owner_snapshot_no_finalgate_no_operation_layer_no_exchange_write"
+        ),
+        "safety_invariants": {
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+        },
+    }
+
+
+def _build_candidate_readiness(
+    conn: sa.engine.Connection,
+    *,
+    started_ms: int,
+    generated_at_utc: str,
+    suppress_persistent_action_time_outcomes: bool,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    repository = PgBackedRuntimeControlStateRepository(conn, now_ms=started_ms)
+    control_state = repository.read_monitor_control_state()
+    projection_control_state = {
+        **control_state,
+        # Build current readiness from base facts/scope, never from the
+        # previous readiness projection row set.
+        "pretrade_readiness_rows": [],
+    }
+    candidate_pool = build_strategy_live_candidate_pool_from_control_state(
+        projection_control_state,
+        generated_at_utc=generated_at_utc,
+        suppress_persistent_action_time_outcomes=(
+            suppress_persistent_action_time_outcomes
+        ),
+    )
+    readiness_rows = _readiness_rows_for_control_state(
+        candidate_pool,
+        control_state=control_state,
+        computed_at_ms=started_ms,
+    )
+    return (
+        control_state,
+        projection_control_state,
+        candidate_pool,
+        readiness_rows,
+    )
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -397,6 +464,9 @@ def _signal_lifecycle_status(row: dict[str, Any]) -> str:
 
 
 def _first_blocker_detail(row: dict[str, Any]) -> str:
+    explicit = str(row.get("first_blocker_detail") or "")
+    if explicit:
+        return explicit
     public_facts = _dict(row.get("public_facts_state"))
     failed = public_facts.get("computed_not_satisfied") or []
     failed_text = ",".join(str(item) for item in failed if str(item or ""))

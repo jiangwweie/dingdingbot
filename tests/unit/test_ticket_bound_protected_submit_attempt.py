@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
@@ -67,6 +68,70 @@ def test_protected_submit_attempt_disabled_smoke_records_ticket_bound_pg_attempt
     assert _json_value(row["submit_result"])["status"] == (
         "exchange_submit_execution_disabled"
     )
+
+
+def test_protected_submit_reuses_reserved_step_normalized_quantity_for_all_legs(
+    pg_control_connection,
+):
+    ids = _create_handoff_ready(
+        pg_control_connection,
+        fact_values={
+            "opening_range_defined": True,
+            "breakout_confirmed": True,
+            "opening_range_low_reference": "1800",
+            "last_price": "2000.5",
+            "take_profit_1": "2201",
+        },
+    )
+    safety_payload = safety.materialize_ticket_bound_runtime_safety_state(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_layer_handoff_id=ids["operation_layer_handoff_id"],
+        now_ms=NOW_MS + 3000,
+    )
+    assert safety_payload["submit_allowed"] is True
+    reserved_qty = Decimal(
+        str(
+            pg_control_connection.execute(
+                text(
+                    """
+                    SELECT intended_qty
+                    FROM brc_budget_reservations
+                    WHERE ticket_id = :ticket_id
+                    """
+                ),
+                {"ticket_id": ids["ticket_id"]},
+            ).scalar_one()
+        )
+    )
+    assert reserved_qty == Decimal("0.009")
+
+    payload = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+
+    assert payload["status"] == "disabled_smoke_passed"
+    request = payload["submit_request"]
+    assert Decimal(request["amount"]) == reserved_qty
+    assert Decimal(request["orders"][0]["amount"]) == reserved_qty
+    assert Decimal(request["orders"][1]["amount"]) == reserved_qty
+    assert Decimal(request["orders"][2]["amount"]) == Decimal("0.004")
+    assert Decimal(request["orders"][2]["amount"]) <= reserved_qty / Decimal("2")
+
+
+def test_tp1_quantity_blocker_is_exact_when_half_cannot_fill_one_step():
+    assert submit._impl._tp1_quantity_blockers(
+        amount=Decimal("0.001"),
+        qty_step=Decimal("0.001"),
+    ) == ["tp1_quantity_below_exchange_step"]
+    assert submit._impl._tp1_quantity_blockers(
+        amount=Decimal("0.009"),
+        qty_step=Decimal("0.001"),
+    ) == []
 
 
 def test_next_protected_submit_attempt_selects_unique_handoff_ready(

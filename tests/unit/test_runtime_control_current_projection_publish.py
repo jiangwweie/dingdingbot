@@ -97,6 +97,48 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
         engine.dispose()
 
 
+def test_action_time_readiness_refresh_skips_owner_projection_snapshots():
+    module = _load_module(
+        SCRIPT_PATH,
+        "publish_action_time_pretrade_readiness",
+    )
+    engine = _seeded_engine()
+    try:
+        with engine.begin() as conn:
+            before_goal_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_goal_status_current")
+            ).scalar_one()
+            before_snapshot_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_control_read_model_snapshots")
+            ).scalar_one()
+            before_projection_run_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_projection_runs")
+            ).scalar_one()
+            report = module.publish_action_time_pretrade_readiness(conn)
+            readiness_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_pretrade_readiness_rows")
+            ).scalar_one()
+            goal_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_goal_status_current")
+            ).scalar_one()
+            snapshot_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_control_read_model_snapshots")
+            ).scalar_one()
+            projection_run_count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_projection_runs")
+            ).scalar_one()
+
+        assert report["status"] == "action_time_pretrade_readiness_published"
+        assert readiness_count == report["published_row_count"]
+        assert readiness_count > 0
+        assert goal_count == before_goal_count
+        assert snapshot_count == before_snapshot_count
+        assert projection_run_count == before_projection_run_count
+        assert report["safety_invariants"]["calls_exchange_write"] is False
+    finally:
+        engine.dispose()
+
+
 def test_publish_current_projections_keeps_one_current_snapshot_per_model(tmp_path: Path):
     module = _load_module(SCRIPT_PATH, "publish_runtime_control_current_projections")
     engine = _seeded_engine()

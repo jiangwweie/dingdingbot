@@ -462,14 +462,16 @@ def test_materializer_blocks_missing_tp1_reference(pg_control_connection):
 
 
 def test_materializer_blocks_missing_stop_risk_entry_reference(pg_control_connection):
-    _insert_action_time_lane_graph(
-        pg_control_connection,
-        fact_values={
-            "opening_range_defined": True,
-            "breakout_confirmed": True,
-            "opening_range_low_reference": None,
-            "take_profit_1": "2200",
-        },
+    _insert_action_time_lane_graph(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_budget_reservations
+            SET entry_reference_price = NULL,
+                intended_qty = NULL,
+                risk_at_stop = NULL
+            """
+        )
     )
 
     payload = ticket_materializer.materialize_action_time_ticket(
@@ -492,6 +494,15 @@ def test_materializer_blocks_stop_risk_wrong_side(pg_control_connection):
             UPDATE brc_protection_references
             SET reference_price = 2200
             WHERE protection_ref_id = 'protection:SOR-001:ETHUSDT:long:unit'
+            """
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_budget_reservations
+            SET stop_price = 2200,
+                risk_at_stop = 2
             """
         )
     )
@@ -785,6 +796,53 @@ def _insert_action_time_lane_graph(
             "last_price": "2000",
             "take_profit_1": "2200",
         }
+    fact_values = dict(fact_values)
+    entry_reference_price = Decimal(
+        str(
+            fact_values.get("last_price")
+            or ("1800" if row["side"] == "short" else "2000")
+        )
+    )
+    bid_price = (
+        entry_reference_price
+        if row["side"] == "short"
+        else entry_reference_price - Decimal("0.5")
+    )
+    ask_price = (
+        entry_reference_price
+        if row["side"] == "long"
+        else entry_reference_price + Decimal("0.5")
+    )
+    pricing_values = {
+        "side": row["side"],
+        "entry_reference_price": str(entry_reference_price),
+        "entry_reference_kind": (
+            "best_ask" if row["side"] == "long" else "best_bid"
+        ),
+        "mark_price": str(entry_reference_price),
+        "bid_price": str(bid_price),
+        "ask_price": str(ask_price),
+        "qty_step": "0.001",
+        "min_notional": "5",
+        "source_fact_snapshot_id": public_fact_id,
+        "observed_at_ms": NOW_MS - 10_000,
+        "valid_until_ms": expires_at_ms,
+    }
+    fact_values.update(
+        {
+            "execution_pricing": pricing_values,
+            "entry_reference_price": str(entry_reference_price),
+            "entry_reference_kind": pricing_values["entry_reference_kind"],
+            "mark_price": str(entry_reference_price),
+            "bid_price": str(bid_price),
+            "ask_price": str(ask_price),
+            "qty_step": "0.001",
+            "min_notional": "5",
+        }
+    )
+    intended_qty = (Decimal("20") / entry_reference_price // Decimal("0.001")) * Decimal("0.001")
+    stop_price = Decimal(default_protection_price)
+    risk_at_stop = abs(entry_reference_price - stop_price) * intended_qty
 
     _insert_fact(
         conn,
@@ -1001,13 +1059,15 @@ def _insert_action_time_lane_graph(
                   ticket_id, signal_event_id, event_spec_id, runtime_profile_id, account_id,
                   strategy_group_id, symbol, side, target_notional, leverage,
                   reserved_margin, reserved_at_ms, expires_at_ms, status, release_reason,
-                  policy_version
+                  policy_version, entry_reference_price, stop_price,
+                  intended_qty, risk_at_stop, risk_reservation_basis
                 ) VALUES (
                   :budget_reservation_id, :promotion_candidate_id, :lane_id,
                   NULL, :signal_event_id, :event_spec_id, :runtime_profile_id,
                   'owner-subaccount-runtime-v0', :strategy_group_id, :symbol, :side,
                   20, 2, 10, :reserved_at_ms, :expires_at_ms, 'active', NULL,
-                  'owner-policy-v1'
+                  'owner-policy-v1', :entry_reference_price, :stop_price,
+                  :intended_qty, :risk_at_stop, 'entry_reference_stop_distance_v0'
                 )
                 """
             ),
@@ -1023,6 +1083,10 @@ def _insert_action_time_lane_graph(
                 "side": row["side"],
                 "reserved_at_ms": NOW_MS - 400,
                 "expires_at_ms": expires_at_ms,
+                "entry_reference_price": str(entry_reference_price),
+                "stop_price": str(stop_price),
+                "intended_qty": str(intended_qty),
+                "risk_at_stop": str(risk_at_stop),
             },
         )
     if insert_protection:
