@@ -68,7 +68,7 @@ they are not separate concurrent WIP programs.
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` currently points to release `5f40c62d`, migration `112` |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
 | **PG migration** | Tokyo is at migration `112` (`2026-07-10-112_version_live_signal_identity.py`) |
-| **Current branch verification** | P0-LC started from 148 passing lifecycle/action-time baseline tests; Task 1 targeted tests pass; full-suite verification remains a pre-deploy gate |
+| **Current branch verification** | P0-LC started from 148 passing lifecycle/action-time baseline tests; LC-0 projection/monitor suite passes `202 passed`; full-suite verification remains a pre-deploy gate |
 | **Backend / watcher / monitor** | Backend and both timers are active; watcher and monitor oneshot services complete with `Result=success` outside signal-time blocked runs |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
 | **Post-submit first tick** | Deployed release includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, retry limit, scope freeze writes, and stop-risk reservation rechecks |

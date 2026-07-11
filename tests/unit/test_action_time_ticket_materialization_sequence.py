@@ -517,7 +517,7 @@ def test_readiness_projection_failure_is_process_failure_not_business_blocker(
     assert payload["process_outcome"]["process_state"] == "retryable_failure"
 
 
-def test_no_signal_global_outcome_cannot_overwrite_lane_engineering_blocker(
+def test_expired_signal_outcome_remains_provenance_without_current_blocker_authority(
     pg_control_connection,
     monkeypatch,
 ):
@@ -594,8 +594,8 @@ def test_no_signal_global_outcome_cannot_overwrite_lane_engineering_blocker(
             """
         )
     ).mappings().one()
-    assert readiness["first_blocker_class"] == "action_time_boundary_not_reproduced"
-    assert "unit_persisted_engineering_blocker" in readiness["first_blocker_detail"]
+    assert readiness["first_blocker_class"] == "market_wait_validated"
+    assert "unit_persisted_engineering_blocker" not in readiness["first_blocker_detail"]
 
     snapshots = pg_control_connection.execute(
         text(
@@ -619,7 +619,129 @@ def test_no_signal_global_outcome_cannot_overwrite_lane_engineering_blocker(
         while isinstance(payload, str):
             payload = json.loads(payload)
         rendered = json.dumps(payload, sort_keys=True)
-        assert "action_time_boundary_not_reproduced" in rendered
+        assert "unit_persisted_engineering_blocker" not in rendered
+
+
+def test_distinct_same_lane_signal_does_not_inherit_previous_signal_outcome(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    old_signal_id = pg_control_connection.execute(
+        text(
+            """
+            SELECT signal_event_id
+            FROM brc_live_signal_events
+            WHERE strategy_group_id = 'SOR-001'
+              AND symbol = 'ETHUSDT'
+              AND side = 'long'
+            """
+        )
+    ).scalar_one()
+    blocked = materialize_action_time_ticket_sequence(
+        pg_control_connection,
+        now_ms=NOW_MS,
+        projection_publisher=_projection_ready,
+        ticket_materializer=lambda conn, now_ms: {
+            "status": "blocked",
+            "blockers": ["unit_signal_a_ticket_failure"],
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+        },
+        completion_clock_ms=lambda: NOW_MS + 1,
+    )
+    assert blocked["status"] == "action_time_ticket_sequence_rolled_back"
+    lane_outcome = next(
+        row
+        for row in blocked["process_outcomes"]
+        if row["scope_key"] == "lane:SOR-001:ETHUSDT:long"
+    )
+    assert lane_outcome["source_watermark"] == old_signal_id
+
+    new_signal_id = f"{old_signal_id}:distinct"
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_live_signal_events (
+              signal_event_id, candidate_scope_id, event_spec_id,
+              strategy_group_id, symbol, side, detector_key, signal_type,
+              source_kind, status, freshness_state, confidence,
+              fact_snapshot_id, reason_codes, signal_payload,
+              signal_grade, required_execution_mode, execution_eligible,
+              authority_source_ref,
+              event_time_ms, trigger_candle_close_time_ms, observed_at_ms,
+              expires_at_ms, invalidated_at_ms, created_at_ms
+            )
+            SELECT
+              :new_signal_id, candidate_scope_id, event_spec_id,
+              strategy_group_id, symbol, side, detector_key, signal_type,
+              source_kind, 'facts_validated', 'fresh', confidence,
+              fact_snapshot_id, reason_codes, signal_payload,
+              signal_grade, required_execution_mode, execution_eligible,
+              authority_source_ref,
+              :event_time_ms, :event_time_ms, :observed_at_ms,
+              :expires_at_ms, NULL, :created_at_ms
+            FROM brc_live_signal_events
+            WHERE signal_event_id = :old_signal_id
+            """
+        ),
+        {
+            "new_signal_id": new_signal_id,
+            "old_signal_id": old_signal_id,
+            "event_time_ms": NOW_MS + 1_000,
+            "observed_at_ms": NOW_MS + 2_000,
+            "created_at_ms": NOW_MS + 2_000,
+            "expires_at_ms": NOW_MS + 600_000,
+        },
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_live_signal_events
+            SET status = 'stale',
+                freshness_state = 'expired',
+                expires_at_ms = :expires_at_ms
+            WHERE signal_event_id = :old_signal_id
+            """
+        ),
+        {"old_signal_id": old_signal_id, "expires_at_ms": NOW_MS - 1},
+    )
+
+    control_state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 10_000,
+    ).read_monitor_control_state()
+    assert candidate_pool._unresolved_action_time_sequence_outcomes(
+        control_state
+    ) == {}
+
+    resumed = materialize_action_time_ticket_sequence(
+        pg_control_connection,
+        now_ms=NOW_MS + 10_000,
+        projection_publisher=_projection_ready,
+        completion_clock_ms=lambda: NOW_MS + 10_001,
+    )
+
+    assert resumed["status"] == "action_time_ticket_sequence_committed", resumed[
+        "blockers"
+    ]
+    assert pg_control_connection.execute(
+        text(
+            """
+            SELECT signal_event_id
+            FROM brc_action_time_tickets
+            WHERE strategy_group_id = 'SOR-001'
+              AND symbol = 'ETHUSDT'
+              AND side = 'long'
+            """
+        )
+    ).scalar_one() == new_signal_id
 
 
 def _projection_ready(conn):

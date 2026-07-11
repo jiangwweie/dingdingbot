@@ -39,6 +39,9 @@ from src.application.readmodels.daily_live_enablement_table import (  # noqa: E4
     CONTRACT_BLOCKER_CLASSES,
     WIP_LANES,
 )
+from src.application.action_time.process_outcome_relevance import (  # noqa: E402
+    process_outcome_has_current_blocking_authority,
+)
 
 
 SCHEMA = "brc.strategy_live_candidate_pool.v1"
@@ -565,6 +568,8 @@ def _unresolved_action_time_sequence_outcomes(
         }:
             continue
         if not str(row.get("first_blocker") or ""):
+            continue
+        if not process_outcome_has_current_blocking_authority(control_state, row):
             continue
         scope_parts = str(row.get("scope_key") or "").split(":")
         if len(scope_parts) != 4 or scope_parts[0] != "lane":

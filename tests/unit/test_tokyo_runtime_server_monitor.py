@@ -136,6 +136,108 @@ def test_retryable_process_failure_is_temporarily_unavailable_and_notified():
     assert decision["blocker_class"] == "runtime_process_failure"
 
 
+def test_expired_event_scoped_retryable_failure_does_not_notify_monitor():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "runtime_process_outcomes": [
+            {
+                "process_name": "action_time_ticket_sequence",
+                "scope_key": "lane:SOR-001:ETHUSDT:long",
+                "process_state": "retryable_failure",
+                "business_state": "temporarily_unavailable",
+                "first_blocker": "action_time_sequence_exception:TimeoutError",
+                "source_watermark": (
+                    "signal:SOR-001:ETHUSDT:long:expired-and-filtered"
+                ),
+                "updated_at_ms": PG_TEST_NOW_MS - 120_000,
+            }
+        ],
+        "live_signal_events": [],
+        "promotion_candidates": [],
+        "action_time_lane_inputs": [],
+        "action_time_tickets": [],
+        "runtime_safety_state": [],
+        "ticket_bound_order_lifecycle_runs": [],
+        "ticket_bound_exchange_commands": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+    candidate_pool = {
+        "server_runtime_coverage": {
+            "status": "complete",
+            "expected_row_count": 1,
+            "active_matched_row_count": 1,
+            "missing_row_count": 0,
+        }
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={
+            "status": "waiting_for_signal",
+            "checks": {"watcher_liveness_healthy": True},
+        },
+        candidate_pool=candidate_pool,
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "healthy_waiting_quiet"
+    assert decision["notify"] is False
+
+
+def test_fresh_matching_event_scoped_retryable_failure_still_notifies_monitor():
+    module = _load_module()
+    signal_id = "signal:SOR-001:ETHUSDT:long:current"
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "runtime_process_outcomes": [
+            {
+                "process_name": "action_time_ticket_sequence",
+                "scope_key": "lane:SOR-001:ETHUSDT:long",
+                "process_state": "retryable_failure",
+                "business_state": "temporarily_unavailable",
+                "first_blocker": "action_time_sequence_exception:TimeoutError",
+                "source_watermark": signal_id,
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            }
+        ],
+        "live_signal_events": [
+            {
+                "signal_event_id": signal_id,
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "status": "facts_validated",
+                "freshness_state": "fresh",
+                "source_kind": "live_market",
+                "invalidated_at_ms": None,
+                "event_time_ms": PG_TEST_NOW_MS - 10_000,
+                "observed_at_ms": PG_TEST_NOW_MS - 1_000,
+                "created_at_ms": PG_TEST_NOW_MS - 500,
+                "expires_at_ms": PG_TEST_NOW_MS + 60_000,
+            }
+        ],
+        "promotion_candidates": [],
+        "action_time_lane_inputs": [],
+        "action_time_tickets": [],
+        "runtime_safety_state": [],
+        "ticket_bound_order_lifecycle_runs": [],
+        "ticket_bound_exchange_commands": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "waiting_for_signal", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "temporarily_unavailable"
+    assert decision["notify"] is True
+    assert decision["blocker_class"] == "runtime_process_failure"
+
+
 def test_submitted_but_unprotected_lifecycle_notifies_owner():
     module = _load_module()
     control_state = {

@@ -84,26 +84,26 @@ the only runtime authority.
 - Produces: `process_outcome_has_current_blocking_authority(control_state, outcome) -> bool`.
 - Daily Table, Goal Status, and Tradeability remain downstream Candidate Pool consumers; they must not duplicate this predicate.
 
-- [ ] **Step 1: Write failing expired-source tests**
+- [x] **Step 1: Write failing expired-source tests**
 
   Prove an expired/stale source with no open promotion/lane/Ticket remains the latest process row but does not override `market_wait_validated` or notify the monitor.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
   Run targeted Candidate Pool, Goal Status, Daily Table, and Tradeability tests; expected failure is the current unconditional persistent blocker.
 
-- [ ] **Step 3: Implement one shared relevance predicate**
+- [x] **Step 3: Implement one shared relevance predicate**
 
   Match `source_watermark` exactly against the current chain identity. A new
   Signal ID on the same lane is a different event. Hard failures without an
   event-scoped watermark remain current until a newer successful outcome
   supersedes the process+scope current row.
 
-- [ ] **Step 4: Verify current and expired cases GREEN**
+- [x] **Step 4: Verify current and expired cases GREEN**
 
   Include a fresh/open source that still blocks and a later success that clears current authority.
 
-- [ ] **Step 5: Run PG projection-consistency tests**
+- [x] **Step 5: Run PG projection-consistency tests**
 
   Candidate Pool, Daily Table, Goal Status, Tradeability, and Monitor must agree
   on current readiness. Add the explicit Signal A failure -> A expiry -> Signal

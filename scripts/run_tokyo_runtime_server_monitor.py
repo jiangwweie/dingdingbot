@@ -37,6 +37,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
+from src.application.action_time.process_outcome_relevance import (  # noqa: E402
+    process_outcome_has_current_blocking_authority,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -288,9 +291,7 @@ def _first_pg_focus_row(candidate_pool: dict[str, Any]) -> dict[str, Any]:
 
 def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
     now_ms = int(control_state.get("read_now_ms") or time.time() * 1000)
-    process_failure = _runtime_process_failure_event(
-        _pg_rows(control_state.get("runtime_process_outcomes"))
-    )
+    process_failure = _runtime_process_failure_event(control_state)
     if process_failure:
         return process_failure
     lifecycle_event = _lifecycle_safety_event(
@@ -422,13 +423,18 @@ def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _runtime_process_failure_event(
-    outcomes: list[dict[str, Any]],
+    control_state: dict[str, Any],
 ) -> dict[str, Any]:
     failures = [
         row
-        for row in outcomes
+        for row in _pg_rows(control_state.get("runtime_process_outcomes"))
         if str(row.get("process_state") or "")
         in {"retryable_failure", "hard_failure"}
+        and (
+            str(row.get("process_name") or "")
+            != "action_time_ticket_sequence"
+            or process_outcome_has_current_blocking_authority(control_state, row)
+        )
     ]
     if not failures:
         return {}
