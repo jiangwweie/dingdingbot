@@ -797,25 +797,9 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             {"attention_statuses": LIFECYCLE_ATTENTION_STATUSES},
         ).mappings()
     )
-    exchange_command_critical_rows = list(
-        conn.execute(
-            sa.text(
-                """
-                SELECT exchange_command_id, ticket_id, command_kind,
-                       command_source, command_state, first_blocker,
-                       netting_domain_key, claim_owner, claim_expires_at_ms,
-                       updated_at_ms
-                FROM brc_ticket_bound_exchange_commands
-                WHERE command_state IN ('outcome_unknown', 'hard_stopped')
-                   OR (command_state = 'dispatching'
-                       AND claim_expires_at_ms IS NOT NULL
-                       AND claim_expires_at_ms <= :now_ms)
-                ORDER BY updated_at_ms DESC
-                LIMIT 20
-                """
-            ),
-            {"now_ms": now_ms},
-        ).mappings()
+    exchange_command_critical_rows = _read_exchange_command_critical_rows(
+        conn,
+        now_ms=now_ms,
     )
     active_domain_holds = list(
         conn.execute(
@@ -962,6 +946,52 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
         "unadvanced_fresh_signals": [dict(row) for row in unadvanced_fresh_signals],
         "recent_duplicate_lanes": [dict(row) for row in recent_duplicate_lanes],
     }
+
+
+def _read_exchange_command_critical_rows(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> list[dict[str, Any]]:
+    """Read critical command truth from fields defined by migration 114."""
+
+    rows = conn.execute(
+        sa.text(
+            """
+            SELECT exchange_command_id, ticket_id, command_kind,
+                   command_source, command_state, outcome_class,
+                   exchange_result, netting_domain_key, claim_owner,
+                   claim_expires_at_ms, updated_at_ms
+            FROM brc_ticket_bound_exchange_commands
+            WHERE command_state IN ('outcome_unknown', 'hard_stopped')
+               OR (command_state = 'dispatching'
+                   AND claim_expires_at_ms IS NOT NULL
+                   AND claim_expires_at_ms <= :now_ms)
+            ORDER BY updated_at_ms DESC
+            LIMIT 20
+            """
+        ),
+        {"now_ms": now_ms},
+    ).mappings()
+    results: list[dict[str, Any]] = []
+    for raw in rows:
+        row = dict(raw)
+        exchange_result = row.get("exchange_result")
+        if isinstance(exchange_result, str):
+            try:
+                exchange_result = json.loads(exchange_result)
+            except json.JSONDecodeError:
+                exchange_result = {}
+        if not isinstance(exchange_result, dict):
+            exchange_result = {}
+        row["first_blocker"] = str(
+            exchange_result.get("error_code")
+            or row.get("outcome_class")
+            or row.get("command_state")
+            or "ticket_bound_exchange_command_critical_state"
+        )
+        results.append(row)
+    return results
 
 
 def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
