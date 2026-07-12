@@ -166,6 +166,37 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
     assert all(value is False for value in report["safety_invariants"].values())
 
 
+def test_postdeploy_http_check_retries_only_transport_failure_inside_one_ssh_call():
+    module = _load_module()
+    commands = []
+
+    def runner(command):
+        commands.append(command)
+        return module.CommandResult(
+            '{"error_code":"401"}\nHTTP_STATUS:401\n',
+            "",
+            0,
+        )
+
+    result = module._remote_http(
+        "tokyo",
+        method="GET",
+        url="http://127.0.0.1:18080/api/example",
+        expected_status=401,
+        expect_json=True,
+        name="bounded_retry",
+        connect_timeout_seconds=8,
+        runner=runner,
+    )
+
+    remote_command = commands[0][-1]
+    assert "for attempt in 1 2 3" in remote_command
+    assert "sleep 1" in remote_command
+    assert "curl -sS -m 8" in remote_command
+    assert result["http_status"] == 401
+    assert result["body_json"] == {"error_code": "401"}
+
+
 def test_postdeploy_verifier_defaults_track_current_stage_migration_head():
     module = _load_module()
 

@@ -451,9 +451,17 @@ def _remote_http(
     connect_timeout_seconds: int,
     runner: Runner,
 ) -> dict[str, Any]:
-    command = (
+    curl_command = (
         f"curl -sS -m 8 -X {shlex.quote(method)} "
         f"-w '\\nHTTP_STATUS:%{{http_code}}' {shlex.quote(url)}"
+    )
+    command = (
+        "for attempt in 1 2 3; do "
+        f"if RESPONSE=$({curl_command}); then "
+        "printf '%s\\n' \"$RESPONSE\"; break; "
+        "fi; "
+        "test \"$attempt\" != 3; sleep 1; "
+        "done"
     )
     raw = _ssh_text(
         host,
