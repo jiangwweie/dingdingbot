@@ -217,7 +217,9 @@ def project_owner_notification_intents(
     notifications = _rows(control_state.get("server_monitor_notifications"))
     sent_by_identity = {
         (
-            str(row.get("correlation_id") or ""),
+            normalize_owner_correlation_id(
+                str(row.get("correlation_id") or "")
+            ),
             str(row.get("notification_kind") or ""),
         ): row
         for row in notifications
@@ -231,7 +233,7 @@ def project_owner_notification_intents(
         signal_id = str(signal.get("signal_event_id") or "")
         if not signal_id or signal_id in handled_signal_ids:
             continue
-        correlation = f"signal:{signal_id}"
+        correlation = owner_correlation_id("signal", signal_id)
         fresh = (
             signal.get("source_kind") == "live_market"
             and signal.get("status") == "facts_validated"
@@ -348,7 +350,7 @@ def _ticket_material_intent(
     return OwnerNotificationIntent(
         notification_kind=values["kind"],
         severity=values["severity"],
-        correlation_id=f"ticket:{ticket_id}",
+        correlation_id=owner_correlation_id("ticket", ticket_id),
         strategy_group_id=_group(row),
         symbol=_symbol(row),
         side=_side(row),
@@ -520,3 +522,17 @@ def _symbol(row: Mapping[str, Any]) -> str:
 def _side(row: Mapping[str, Any]) -> Literal["long", "short"] | None:
     value = str(row.get("side") or "")
     return value if value in {"long", "short"} else None
+
+
+def owner_correlation_id(prefix: str, identity: str) -> str:
+    value = str(identity or "")
+    return value if value.startswith(f"{prefix}:") else f"{prefix}:{value}"
+
+
+def normalize_owner_correlation_id(value: str) -> str:
+    normalized = str(value or "")
+    for prefix in ("signal", "ticket"):
+        doubled = f"{prefix}:{prefix}:"
+        while normalized.startswith(doubled):
+            normalized = normalized.removeprefix(f"{prefix}:")
+    return normalized

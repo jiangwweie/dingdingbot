@@ -6,6 +6,8 @@ from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.application.owner_notification import owner_correlation_id
+
 
 class RuntimeSignalForensicsQuery(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -439,9 +441,9 @@ def _latest(value: Any, key: str, expected: str) -> dict[str, Any]:
 
 
 def _notification_state(rows: list[dict[str, Any]], signal_id: str, ticket_id: str) -> str:
-    correlations = {f"signal:{signal_id}"}
+    correlations = {owner_correlation_id("signal", signal_id)}
     if ticket_id:
-        correlations.add(f"ticket:{ticket_id}")
+        correlations.add(owner_correlation_id("ticket", ticket_id))
     matches = [row for row in rows if str(row.get("correlation_id") or "") in correlations]
     if not matches:
         return "not_recorded"

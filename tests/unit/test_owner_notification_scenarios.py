@@ -79,6 +79,18 @@ def test_one_fresh_signal_emits_one_opportunity_despite_candidate_lane_and_ticke
     assert intents[0].correlation_id == "signal:signal-001"
 
 
+def test_prefixed_production_signal_identity_is_not_double_prefixed() -> None:
+    signal = _signal()
+    signal["signal_event_id"] = "signal:signal-001"
+
+    intents = project_owner_notification_intents(
+        {"live_signal_events": [signal]},
+        now_ms=NOW_MS,
+    )
+
+    assert intents[0].correlation_id == "signal:signal-001"
+
+
 def test_previously_sent_signal_terminal_without_submit_emits_not_executed() -> None:
     state = {
         "live_signal_events": [_signal(status="stale", freshness="stale")],

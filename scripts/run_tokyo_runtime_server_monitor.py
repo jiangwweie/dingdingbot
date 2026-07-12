@@ -44,6 +44,7 @@ from src.application.owner_notification import (  # noqa: E402
     OwnerNotificationIntent,
     OwnerNotificationKind,
     OwnerNotificationSeverity,
+    normalize_owner_correlation_id,
     owner_notification_dedupe_key,
     project_owner_notification_intents,
     render_owner_notification_card,
@@ -999,6 +1000,8 @@ def _monitor_decision_owner_intent(
     if not decision.get("notify"):
         return None
     blocker_class = str(decision.get("blocker_class") or "runtime_unavailable")
+    if blocker_class == "fresh_signal":
+        return None
     strategy_group_id = str(decision.get("strategy_group_id") or "runtime")
     symbol = str(decision.get("symbol") or "all")
     temporary = blocker_class in {
@@ -1095,7 +1098,11 @@ def _apply_pg_owner_notifications(
     retry_exhausted_count = 0
     for intent in intents:
         dedupe_key = owner_notification_dedupe_key(automation_id, intent)
-        existing = _pg_notification_row(conn, dedupe_key)
+        existing = _pg_owner_notification_row(
+            conn,
+            dedupe_key=dedupe_key,
+            intent=intent,
+        )
         attempts = int(existing.get("send_attempts") or 0)
         previous_state = str(existing.get("notification_state") or "")
         attempted = False
@@ -1168,36 +1175,38 @@ def _apply_pg_owner_notifications(
             "occurred_at_ms": intent.occurred_at_ms,
             "resolved_at_ms": None,
         }
-        if existing:
-            conn.execute(
-                table.update()
-                .where(table.c.dedupe_key == dedupe_key)
-                .values(**{
-                    key: value
-                    for key, value in values.items()
-                    if key not in {"notification_id", "dedupe_key", "created_at_ms"}
-                })
-            )
-        else:
-            conn.execute(table.insert().values(**values))
-        if sent and intent.notification_kind is OwnerNotificationKind.INCIDENT_RECOVERED:
-            conn.execute(
-                table.update()
-                .where(table.c.correlation_id == intent.correlation_id)
-                .where(
-                    table.c.notification_kind.in_(
-                        (
-                            OwnerNotificationKind.INTERVENTION_REQUIRED.value,
-                            OwnerNotificationKind.SYSTEM_TEMPORARILY_UNAVAILABLE.value,
+        if not notification_dry_run:
+            if existing:
+                existing_dedupe_key = str(existing.get("dedupe_key") or dedupe_key)
+                conn.execute(
+                    table.update()
+                    .where(table.c.dedupe_key == existing_dedupe_key)
+                    .values(**{
+                        key: value
+                        for key, value in values.items()
+                        if key not in {"notification_id", "dedupe_key", "created_at_ms"}
+                    })
+                )
+            else:
+                conn.execute(table.insert().values(**values))
+            if sent and intent.notification_kind is OwnerNotificationKind.INCIDENT_RECOVERED:
+                conn.execute(
+                    table.update()
+                    .where(table.c.correlation_id == intent.correlation_id)
+                    .where(
+                        table.c.notification_kind.in_(
+                            (
+                                OwnerNotificationKind.INTERVENTION_REQUIRED.value,
+                                OwnerNotificationKind.SYSTEM_TEMPORARILY_UNAVAILABLE.value,
+                            )
                         )
                     )
+                    .values(
+                        notification_state="resolved",
+                        resolved_at_ms=now_ms,
+                        updated_at_ms=now_ms,
+                    )
                 )
-                .values(
-                    notification_state="resolved",
-                    resolved_at_ms=now_ms,
-                    updated_at_ms=now_ms,
-                )
-            )
         results.append(
             {
                 "notification_kind": intent.notification_kind.value,
@@ -1225,6 +1234,39 @@ def _apply_pg_owner_notifications(
         ),
         "source": "pg:brc_server_monitor_notifications",
     }
+
+
+def _pg_owner_notification_row(
+    conn: sa.engine.Connection,
+    *,
+    dedupe_key: str,
+    intent: OwnerNotificationIntent,
+) -> dict[str, Any]:
+    exact = _pg_notification_row(conn, dedupe_key)
+    if exact:
+        return exact
+    correlation = normalize_owner_correlation_id(intent.correlation_id)
+    legacy_correlations = {correlation}
+    for prefix in ("signal", "ticket"):
+        if correlation.startswith(f"{prefix}:"):
+            legacy_correlations.add(f"{prefix}:{correlation}")
+    row = conn.execute(
+        sa.text(
+            """
+            SELECT *
+            FROM brc_server_monitor_notifications
+            WHERE notification_kind = :notification_kind
+              AND correlation_id IN :correlation_ids
+            ORDER BY updated_at_ms DESC
+            LIMIT 1
+            """
+        ).bindparams(sa.bindparam("correlation_ids", expanding=True)),
+        {
+            "notification_kind": intent.notification_kind.value,
+            "correlation_ids": sorted(legacy_correlations),
+        },
+    ).mappings().first()
+    return dict(row) if row else {}
 
 
 def _apply_pg_notification(
