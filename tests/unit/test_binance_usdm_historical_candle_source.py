@@ -83,3 +83,30 @@ def test_public_source_rejects_unsupported_timeframe_before_network() -> None:
     else:
         raise AssertionError("unsupported timeframe must fail")
     assert called is False
+
+
+def test_public_source_stops_before_next_cursor_would_exceed_end_time() -> None:
+    calls = 0
+
+    def requester(url: str, timeout_seconds: float):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise AssertionError("requester must not receive startTime greater than endTime")
+        query = parse_qs(urlparse(url).query)
+        start = int(query["startTime"][0])
+        return [_row(start), _row(start + 3_600_000)]
+
+    source = BinanceUsdMPublicHistoricalCandleSource(
+        page_limit=2,
+        requester=requester,
+    )
+    rows = source.fetch_closed_candles(
+        symbol="BTCUSDT",
+        timeframe="1h",
+        start_time_ms=1_000,
+        end_time_ms=7_200_500,
+    )
+
+    assert calls == 1
+    assert [item["open_time_ms"] for item in rows] == [1_000]

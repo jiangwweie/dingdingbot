@@ -85,7 +85,11 @@ class BinanceUsdMPublicHistoricalCandleSource:
             next_cursor = last_open_time_ms + interval_ms
             if next_cursor <= cursor:
                 raise RuntimeError("binance_historical_candle_cursor_not_advancing")
-            if len(payload) < self._page_limit or last_open_time_ms >= end_time_ms:
+            if (
+                len(payload) < self._page_limit
+                or last_open_time_ms >= end_time_ms
+                or next_cursor > end_time_ms
+            ):
                 break
             cursor = next_cursor
         else:
