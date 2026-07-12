@@ -30,8 +30,8 @@ repo MD/JSON/output/report files.
 
 | Fact | Current evidence |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs `97efab6f8f7cbad9a062b3f798ea2e34a0decec2`, PG migration `116`; postdeploy acceptance passes and watcher, monitor, and lifecycle timers are active, but no natural real Ticket has completed live exchange calibration |
-| **Current engineering branch** | `codex/p1-opportunity-feedback-calibration` contains the exact deployed OFC implementation at `97efab6f` |
+| **Live Candidate Baseline** | Tokyo runs `dbb7e650d4e2b979f147ee91ed68fb2a8cb363c6`, PG migration `116`; 22 lanes are release-certified and market-wait validated, but no natural real Ticket has completed live exchange calibration |
+| **Current engineering branch** | `codex/p0-action-time-projection-truth` contains the exact deployed implementation at `dbb7e650` |
 | **PG current state is the runtime source** | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | **Repo/output/report files are not runtime authority** | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | **Five StrategyGroups are active WIP** | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`, PG candidate scope seed |
@@ -50,7 +50,7 @@ repo MD/JSON/output/report files.
 | **Lifecycle engineering certification is deployed** | Canonical/venue identity, conditional orders, fill projection, short-transaction commands, continuous reconciliation, settlement/review callers, terminal Outcome, account-mode bootstrap, and migration-shaped ops health run on Tokyo; no-active result is currently expected |
 | **Trade feedback core is consolidated** | P1-TFC maps lifecycle phase, protection, reconciliation, control, recovery, and Owner feedback through one typed decision and is a deployed baseline |
 | **Opportunity feedback is calibrated historically** | Five groups, six Event Specs, and 22 scopes completed 90/365-day Replay with zero invalid observations; all scopes produced signals, so long-run market absence and empty symbol scope are rejected as explanations |
-| **Current first blocker is not validated market wait** | PG has 22 watcher-coverage rows and no live signal/lane/Ticket, but Daily Table records `action_time_path=false` and `action_time_boundary_not_reproduced`; Goal Status still compresses this to waiting for market, so cross-projection blocker truth and Action-Time reproduction are next |
+| **Current first blocker is validated market wait** | PG has one exact-head release activation, 22 matching Action-Time capability certifications, and 22 `market_wait_validated` readiness rows; Goal Status is `waiting_for_signal`, with no fresh signal, open lane, active Ticket, or exchange command |
 | **Test escape is proven** | Unit/full-chain fixtures inject `last_price`, `mark_price`, or `entry_price` directly, while production fact materialization does not guarantee the same typed field; downstream-complete dictionary fixtures therefore bypassed the missing producer handoff |
 | **Advanced trading quality / capital allocation remains future work** | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`; portfolio sleeve allocation, cluster exposure, cooldown, and drawdown controls remain above the per-ticket safety layer |
 
@@ -83,9 +83,9 @@ deployed component baselines. They must not run as separate medium-scale WIP.
 
 | Order | Program | Reason |
 | --- | --- | --- |
-| 1 | **Action-Time Boundary Reproduction And Projection Truth** | OFC proved non-zero historical opportunity and complete watcher scope, while PG projections disagree whether the unreproduced Action-Time path is an engineering blocker or valid market wait |
+| 1 | **Action-Time Boundary Reproduction And Projection Truth** | Deployed and accepted at `dbb7e650`; retained as a release-bound PG capability baseline |
 | P0 interrupt | **Natural Live Lifecycle Calibration** | A different-identity fresh signal or active safety incident preempts P1-OFC at the next committed transaction boundary |
-| 2 | **Owner Supervision Product Integration** | Product surfaces should consume the stable feedback vocabulary, not infer raw lifecycle state |
+| 2 | **Owner Supervision Product Integration** | Next non-market-dependent mainline; product surfaces should consume the now-stable PG capability and blocker truth |
 | 3 | **P1 Capital Allocation V1** | Allocation requires reliable real ticket outcomes, not rehearsal-only closure |
 | 4 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one live-calibrated lifecycle through adapters |
 
@@ -635,11 +635,11 @@ replay event as fresh live signal
 chain_position: replay_live_parity
 strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
 symbol: 22 active candidate scopes
-stage: historical_opportunity_calibrated_action_time_boundary_unreproduced
-first_blocker: action_time_boundary_not_reproduced
-evidence: Tokyo runs 97efab6f / migration 116; 22/22 scopes produced historical signals with invalid=0; PG watcher coverage=22 and live signal/lane/Ticket=0; Daily Table action_time_path=false while Goal Status says waiting for market
-next_action: design and certify Action-Time boundary reproduction plus cross-projection first-blocker conservation
-stop_condition: Daily Table, Goal Status, Tradeability, Candidate Pool, and Server Monitor agree on one blocker and one production-shaped event reaches lane/Ticket or one exact earlier blocker without exchange write
+stage: release_certified_waiting_for_natural_signal
+first_blocker: market_wait_validated
+evidence: Tokyo runs dbb7e650 / migration 116; 22/22 production-shaped scopes pass; PG has one matching release activation and 22 capability certifications; all 22 readiness rows are market_wait_validated; fresh signal/open lane/active Ticket/exchange command counts are zero
+next_action: continue Owner Supervision Product Integration while the next distinct natural signal remains a P0 interrupt for real Ticket and venue-outcome acceptance
+stop_condition: a distinct natural signal appears, a safety incident occurs, or release/lineage drift invalidates certification
 owner_action_required: no
 authority_boundary: no new ENTRY path, no FinalGate/Operation Layer bypass, no profile/sizing/strategy expansion, no unknown-order mutation, no synthetic-to-live authority
 ```

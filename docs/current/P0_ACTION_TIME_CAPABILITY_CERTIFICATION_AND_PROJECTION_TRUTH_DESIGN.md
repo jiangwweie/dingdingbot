@@ -1,6 +1,6 @@
 ---
 title: P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_DESIGN
-status: IMPLEMENTED_PENDING_PRODUCTION_ACCEPTANCE
+status: DEPLOYED_AND_ACCEPTED
 authority: docs/current/P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_DESIGN.md
 last_verified: 2026-07-12
 ---
@@ -193,11 +193,11 @@ fresh-signal-absent checks.
 chain_position: action_time_boundary
 strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
 symbol: 22 active candidate scopes
-stage: implementation_complete_production_acceptance_pending
-first_blocker: action_time_boundary_not_reproduced
-evidence: local full suite and focused projection tests pass; Tokyo 22-scope matrix passes; production PG certification remains fail-closed until the deployment projector records exact-head release activation truth
-next_action: deploy the corrected release-activation projector, certify 22 lanes, and verify projection conservation
-stop_condition: 22 current lanes are certified for the deployed head and all current projections conserve one blocker
+stage: release_certified_waiting_for_natural_signal
+first_blocker: market_wait_validated
+evidence: Tokyo runs dbb7e650d4e2b979f147ee91ed68fb2a8cb363c6; PG has one matching runtime_release_activation and 22 matching capability certifications; all 22 readiness rows are market_wait_validated; fresh signal/open lane/active Ticket/exchange command counts are zero
+next_action: preserve production observation and preempt ordinary engineering on the next distinct natural signal for real Ticket and venue-outcome acceptance
+stop_condition: a distinct natural signal enters the certified boundary or a current release/lineage change invalidates certification
 owner_action_required: no
 authority_boundary: no strategy/policy/risk/scope/FinalGate/Operation Layer/exchange-write expansion
 ```

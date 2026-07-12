@@ -1,6 +1,6 @@
 ---
 title: P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_IMPLEMENTATION_PLAN
-status: IMPLEMENTED_PENDING_PRODUCTION_ACCEPTANCE
+status: COMPLETE
 authority: docs/current/P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-12
 ---
@@ -133,3 +133,20 @@ Tradeability, Daily Table, Goal Status, and Server Monitor agree on one first
 blocker; market wait cannot be claimed with stale/missing certification; all
 tests and validators pass; and only a natural Live event remains for venue
 outcome calibration.
+
+## Completion Evidence
+
+- Production head: `dbb7e650d4e2b979f147ee91ed68fb2a8cb363c6`.
+- Local full suite: `2887 passed, 1 skipped`; post-discovery focused suites:
+  `286/286`, `218/218`, `20/20`, and deploy-route `9/9` passed.
+- Tokyo production-shaped matrix: `22/22` active scopes passed with zero
+  exchange write.
+- PG current truth: one `runtime_release_activation` plus 22
+  `action_time_capability_certification` rows, all bound to the deployed head.
+- Projection truth: all 22 readiness rows are `market_wait_validated`; Goal
+  Status is `waiting_for_signal`, `owner_action_required=false`.
+- Runtime safety: no fresh signal, open lane, active Ticket, or exchange command
+  exists at acceptance time; backend and runtime/watcher/lifecycle timers are
+  active.
+- Production file-I/O audit: `performance_risk.status=clear`, risk count zero,
+  and no recurring JSON/MD output was introduced.

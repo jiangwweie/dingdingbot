@@ -49,9 +49,9 @@ design documents and acceptance proof.
 
 | Order | Program | State | Primary design surface |
 | --- | --- | --- | --- |
-| 1 | **Action-Time Boundary Reproduction And Projection Truth** | **next medium-scale engineering mainline** | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`, `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` |
+| 1 | **Action-Time Boundary Reproduction And Projection Truth** | **deployed baseline at `dbb7e650`** | `docs/current/P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_DESIGN.md` |
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
-| 2 | **Owner Supervision Product Integration** | P1/P2 after OFC feedback vocabulary stabilizes | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
+| 2 | **Owner Supervision Product Integration** | **next non-market-dependent engineering mainline** | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | 3 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 4 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
@@ -61,17 +61,17 @@ deployed component baselines. P1-TFC is also a deployed component baseline, not
 concurrent WIP. Real venue calibration remains **R1B**, while engineering uses
 the deployed P1-OFC baseline to distinguish market absence, near misses,
 coverage gaps, and replay/live mismatches without waiting idly for market
-opportunity. OFC rejected long-run opportunity absence and empty scope as the
-current explanation; the next mainline must reproduce the Action-Time boundary
-and make Daily Table, Goal Status, and Tradeability conserve one first blocker.
+opportunity. The Action-Time release certification now proves that all 22
+current lanes share the same deployed capability truth and may be classified as
+validated market wait while Owner-facing product integration continues.
 
 ## Current Verified Progress
 
 | Area | Current fact |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs `97efab6f8f7cbad9a062b3f798ea2e34a0decec2`; it is deployed and no-active accepted, but no natural real Ticket has completed exchange lifecycle calibration |
-| **Active delivery branch** | `codex/p1-opportunity-feedback-calibration` contains the deployed OFC baseline and completion evidence |
-| **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` points to `brc-runtime-governance-97efab6f-20260712T114500Z` |
+| **Live Candidate Baseline** | Tokyo runs `dbb7e650d4e2b979f147ee91ed68fb2a8cb363c6`; 22 lanes are release-certified and market-wait validated, but no natural real Ticket has completed exchange lifecycle calibration |
+| **Active delivery branch** | `codex/p0-action-time-projection-truth` contains the deployed capability-truth implementation and completion evidence |
+| **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` points to `brc-runtime-governance-dbb7e650-20260712T140529Z` |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
 | **PG migration** | Tokyo is at migration `116` (`2026-07-12-116_add_opportunity_feedback_economics.py`) |
 | **P0-LC deployment acceptance** | Postdeploy verification passes; backend HTTP checks, schema count, lifecycle units, and no-active lifecycle service are accepted without exchange write |
@@ -81,7 +81,7 @@ and make Daily Table, Goal Status, and Tradeability conserve one first blocker.
 | **P0 capital-safety closure** | `381aed34` deploys current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, Live Outcome Ledger projection, and protective stop-risk direction validation |
 | **Current runtime coverage** | Five StrategyGroups, 22 candidate scopes, and six current v2 Event Specs have current watcher coverage and execution-eligibility declarations |
 | **Typed Ticket boundary** | Side-aware price, normalized quantity, positive stop risk, one reservation, atomic fact-to-Ticket transaction, and six-Event-Spec production-shaped certification are deployed |
-| **Current tradeability** | Watcher coverage is complete for 22 scopes and no current signal, promotion, lane, Ticket, or active lifecycle exists; Daily Table records `action_time_boundary_not_reproduced`, so `market_wait_validated` is not yet a conserved cross-projection conclusion |
+| **Current tradeability** | One exact-head `runtime_release_activation` and 22 matching capability certifications exist; all 22 readiness rows are `market_wait_validated`, Goal Status is `waiting_for_signal`, and no fresh signal, open lane, active Ticket, or exchange command exists |
 | **Opportunity calibration** | All 22 scopes produced historical signals with zero invalid observations; Replay was stdout-only and created no PG/file/runtime/exchange authority |
 | **Lifecycle production capability** | Typed exchange truth, fill projection, durable short-transaction commands, continuous reconciliation, settlement, finalization, terminal Outcome, account-mode bootstrap, and migration-shaped ops health are deployed |
 | **Trade feedback core** | P1-TFC uses one typed lifecycle decision across production callers, rehearsal, and Owner feedback; it is deployed rather than active WIP |
@@ -89,8 +89,8 @@ and make Daily Table, Goal Status, and Tradeability conserve one first blocker.
 
 ## Current Next Execution Order
 
-P1-OFC engineering is complete. This is the next execution order for
-**Action-Time Boundary Reproduction And Projection Truth**. A new different
+Action-Time Boundary Reproduction And Projection Truth is deployed and
+accepted. A new different
 `signal_event_id` is a P0 interrupt event: after any unprotected position or
 unknown exchange outcome is handled, engineering pauses at the next committed
 transaction boundary, runs natural-signal acceptance, persists the result, and
@@ -98,10 +98,10 @@ then resumes this order.
 
 | Order | Work | Priority | Done when |
 | --- | --- | --- | --- |
-| 1 | **Cross-projection blocker conservation** | P0 | Daily Table, Goal Status, Tradeability, Candidate Pool, and Server Monitor preserve the same first blocker and watermark |
-| 2 | **Production-shaped Action-Time reproduction** | P0 | One fresh constructed event traverses the production-shaped path to lane/Ticket or one exact earlier blocker without exchange write |
+| 1 | **Cross-projection blocker conservation** | P0 complete | Daily Table, Goal Status, Tradeability, Candidate Pool, and Server Monitor preserve the same first blocker and watermark |
+| 2 | **Production-shaped Action-Time reproduction** | P0 complete | All 22 active scopes traverse the production-shaped path to the disabled-smoke boundary without exchange write and bind to the deployed head |
 | 3 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome |
-| 4 | **Planning closure** | P0 | `market_wait_validated` is allowed only when `action_time_path=true`; otherwise the engineering blocker remains visible |
+| 4 | **Owner Supervision Product Integration** | P1 next | Owner-facing product state consumes the conserved PG truth without exposing internal gate vocabulary |
 
 ## Why This Was Not Detected Before Production Signals
 
