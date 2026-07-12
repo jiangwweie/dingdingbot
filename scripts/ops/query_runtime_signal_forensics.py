@@ -116,7 +116,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (ValueError, TypeError) as exc:
         raise SystemExit(str(exc)) from exc
-    database_url = args.database_url or os.environ.get("BRC_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    database_url = (
+        args.database_url
+        or os.environ.get("PG_DATABASE_URL")
+        or os.environ.get("BRC_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+    )
     if not database_url:
         raise SystemExit("PG database configuration is required")
     database_url = normalize_sync_postgres_dsn(database_url)

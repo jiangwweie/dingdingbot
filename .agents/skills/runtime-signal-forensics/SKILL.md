@@ -87,7 +87,7 @@ call FinalGate, call Operation Layer, or call exchange-write endpoints.
 Use the deployed bounded command before writing ad hoc PG or systemd queries:
 
 ```bash
-ssh tokyo "cd /home/ubuntu/brc-deploy/app/current && set -a && source /home/ubuntu/brc-deploy/env/runtime-monitor.env && set +a && timeout 20s .venv/bin/python scripts/ops/query_runtime_signal_forensics.py --start '<ISO-8601 start with offset>' --end '<ISO-8601 end with offset>' --include-systemd"
+ssh tokyo "cd /home/ubuntu/brc-deploy/app/current && set -a && source /home/ubuntu/brc-deploy/env/live-readonly.env && source /home/ubuntu/brc-deploy/env/runtime-monitor.env && set +a && timeout 25s /home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/ops/query_runtime_signal_forensics.py --start '<ISO-8601 start with offset>' --end '<ISO-8601 end with offset>' --include-systemd"
 ```
 
 Map optional Owner scope into `--strategy-group-id`, `--symbol`, and `--side`.

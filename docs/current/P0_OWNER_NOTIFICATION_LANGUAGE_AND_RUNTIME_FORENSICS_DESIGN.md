@@ -247,7 +247,7 @@ scripts/ops/query_runtime_signal_forensics.py
 Arguments:
 
 ```text
---database-url / BRC_DATABASE_URL / DATABASE_URL
+--database-url / PG_DATABASE_URL / DATABASE_URL
 --start <ISO-8601 with timezone>
 --end <ISO-8601 with timezone>
 --strategy-group-id <optional>

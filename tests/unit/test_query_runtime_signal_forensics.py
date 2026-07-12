@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -27,8 +28,6 @@ def test_cli_emits_stdout_only_json_and_masks_database_configuration(tmp_path: P
         [
             sys.executable,
             str(SCRIPT),
-            "--database-url",
-            f"sqlite+pysqlite:///{database}",
             "--start",
             "2026-07-11T00:00:00+08:00",
             "--end",
@@ -39,6 +38,10 @@ def test_cli_emits_stdout_only_json_and_masks_database_configuration(tmp_path: P
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env={
+            **os.environ,
+            "PG_DATABASE_URL": f"sqlite+pysqlite:///{database}",
+        },
     )
     payload = json.loads(completed.stdout)
     assert payload["schema"] == "brc.runtime_signal_forensics.v1"
