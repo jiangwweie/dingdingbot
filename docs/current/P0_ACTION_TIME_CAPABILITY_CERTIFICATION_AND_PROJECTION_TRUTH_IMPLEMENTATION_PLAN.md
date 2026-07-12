@@ -96,9 +96,9 @@ last_verified: 2026-07-12
 
 **Files:**
 - Modify: `scripts/run_tokyo_runtime_server_monitor.py`
-- Modify: `scripts/execute_tokyo_runtime_governance_git_deploy.py`
+- Modify: `scripts/plan_tokyo_runtime_governance_git_deploy.py`
 - Test: `tests/unit/test_tokyo_runtime_server_monitor.py`
-- Test: `tests/unit/test_tokyo_runtime_governance_deploy_docs.py`
+- Test: `tests/unit/test_tokyo_lifecycle_phase_two_deploy.py`
 
 **Interfaces:**
 - Server Monitor classifies stale/missing certification as engineering progress, not service failure or market wait.

@@ -11,6 +11,9 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, text
 
+from src.application.action_time.capability_certification import (
+    build_action_time_capability_identities,
+)
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
 )
@@ -2352,7 +2355,7 @@ def test_tradeability_ignores_expired_invalidated_and_non_live_pg_signals(
     assert sor["decision"] != "tradable_now"
 
 
-def test_pg_tradeability_classifies_all_five_as_validated_market_wait_when_ready(
+def test_pg_tradeability_classifies_all_five_as_validated_market_wait_when_ready_and_release_certified(
     tmp_path: Path,
 ) -> None:
     module = _load_module()
@@ -2366,6 +2369,7 @@ def test_pg_tradeability_classifies_all_five_as_validated_market_wait_when_ready
                 now_ms=now_ms,
             ).read_control_state()
         _attach_satisfied_pg_observation(control_state, now_ms=now_ms)
+        _attach_current_action_time_capability(control_state, now_ms=now_ms)
 
         packet = module.build_tradeability_decision_from_control_state(control_state)
     finally:
@@ -2384,6 +2388,37 @@ def test_pg_tradeability_classifies_all_five_as_validated_market_wait_when_ready
     assert {
         row["next_action"] for row in packet["decision_rows"]
     } == {"continue_watcher_observation_until_fresh_signal"}
+
+
+def _attach_current_action_time_capability(
+    control_state: dict,
+    *,
+    now_ms: int,
+    runtime_head: str = "f" * 40,
+) -> None:
+    control_state["server_monitor_runs"] = [
+        {
+            "monitor_run_id": "monitor:capability-test",
+            "runtime_head": runtime_head,
+            "status": "quiet",
+            "created_at_ms": now_ms,
+        }
+    ]
+    control_state["runtime_process_outcomes"] = [
+        {
+            "process_name": "action_time_capability_certification",
+            "scope_key": identity.scope_key,
+            "run_id": "certification:pytest:22-scope",
+            "process_state": "succeeded",
+            "business_state": "completed",
+            "first_blocker": None,
+            "runtime_head": runtime_head,
+            "source_watermark": identity.source_watermark,
+            "projector_owner": "runtime_process_outcome_projector",
+            "updated_at_ms": now_ms,
+        }
+        for identity in build_action_time_capability_identities(control_state)
+    ]
 
 
 def _attach_satisfied_pg_observation(control_state: dict, *, now_ms: int) -> None:

@@ -277,3 +277,45 @@ def test_publisher_normalizes_asyncpg_dsn_for_direct_cli_use():
     assert module._normalized_database_url(
         "postgresql+asyncpg://user:pass@localhost:5432/brc"
     ) == "postgresql+psycopg://user:pass@localhost:5432/brc"
+
+
+def test_projection_publisher_rejects_cross_projection_first_blocker_drift():
+    module = _load_module(
+        SCRIPT_PATH,
+        "publish_runtime_control_current_projections_blocker_guard",
+    )
+    candidate = {
+        "symbol_readiness_rows": [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "first_blocker": "action_time_boundary_not_reproduced",
+            }
+        ]
+    }
+    daily = {
+        "rows": [
+            {
+                "strategy_group_id": "CPM-RO-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "first_blocker": "market_wait_validated",
+            }
+        ]
+    }
+    goal = {
+        "evidence": {
+            "pg_blocker_counts": {"action_time_boundary_not_reproduced": 1}
+        }
+    }
+
+    with pytest.raises(
+        RuntimeError,
+        match="current projection first blocker mismatch",
+    ):
+        module._validate_projection_blocker_consistency(
+            candidate_pool=candidate,
+            daily_table=daily,
+            goal_status=goal,
+        )

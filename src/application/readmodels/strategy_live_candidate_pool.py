@@ -42,6 +42,11 @@ from src.application.readmodels.daily_live_enablement_table import (  # noqa: E4
 from src.application.action_time.process_outcome_relevance import (  # noqa: E402
     process_outcome_has_current_blocking_authority,
 )
+from src.application.action_time.capability_certification import (  # noqa: E402
+    ActionTimeCapabilityTruth,
+    current_action_time_capability_truth_by_lane,
+    current_runtime_head,
+)
 
 
 SCHEMA = "brc.strategy_live_candidate_pool.v1"
@@ -361,6 +366,16 @@ def _candidate_pool_inputs_from_control_state(
             policy=policy_by_id[policy_current_id],
         )
 
+    capability_truth_by_lane = current_action_time_capability_truth_by_lane(
+        control_state,
+        current_runtime_head=current_runtime_head(control_state),
+    )
+    _apply_action_time_capability_truth(
+        readiness_by_lane,
+        capability_truth_by_lane=capability_truth_by_lane,
+        fact_by_lane=fact_by_lane,
+    )
+
     return {
         "daily_table": _pg_daily_table_projection(
             generated_at_utc=generated_at_utc,
@@ -403,6 +418,7 @@ def _candidate_pool_inputs_from_control_state(
             account_safe_fact_by_lane=account_safe_fact_by_lane,
             signal_by_lane=signal_by_lane,
             action_lane_by_lane=action_lane_by_lane,
+            capability_truth_by_lane=capability_truth_by_lane,
         ),
         "single_lane_task_packet": _pg_single_lane_packet_projection(
             action_lane_by_lane=action_lane_by_lane,
@@ -961,6 +977,9 @@ def _pg_action_time_boundary_projection(
     account_safe_fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     action_lane_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    capability_truth_by_lane: dict[
+        tuple[str, str, str], ActionTimeCapabilityTruth
+    ],
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for candidate in candidate_rows:
@@ -974,6 +993,7 @@ def _pg_action_time_boundary_projection(
         lane_account_safe_fact = account_safe_fact_by_lane.get(key, {})
         signal = signal_by_lane.get(key, {})
         action_lane = action_lane_by_lane.get(key, {})
+        capability_truth = capability_truth_by_lane[key]
         fresh_signal_present = bool(signal)
         public_facts_ready = (
             readiness.get("public_facts_state") == "satisfied"
@@ -1018,6 +1038,16 @@ def _pg_action_time_boundary_projection(
                     _signal_trigger_candle_close_time_ms(signal)
                 ),
                 "action_time_path_ready": path_ready,
+                "action_time_capability_certified": capability_truth.certified,
+                "action_time_capability_reason": capability_truth.reason,
+                "action_time_capability_source_watermark": (
+                    capability_truth.identity.source_watermark
+                    if capability_truth.identity is not None
+                    else ""
+                ),
+                "action_time_capability_runtime_head": (
+                    capability_truth.certified_runtime_head
+                ),
                 "first_blocker": first_blocker,
                 "first_blocker_detail": str(
                     readiness.get("first_blocker_detail") or ""
@@ -1044,6 +1074,43 @@ def _pg_action_time_boundary_projection(
         "generated_at_utc": generated_at_utc,
         "strategy_rows": rows,
     }
+
+
+def _apply_action_time_capability_truth(
+    readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    *,
+    capability_truth_by_lane: dict[
+        tuple[str, str, str], ActionTimeCapabilityTruth
+    ],
+    fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> None:
+    for lane_key, truth in capability_truth_by_lane.items():
+        readiness = readiness_by_lane.get(lane_key)
+        if truth.certified:
+            continue
+        if readiness and str(
+            readiness.get("first_blocker_class") or ""
+        ) != "market_wait_validated":
+            continue
+        facts = fact_by_lane.get(lane_key, {})
+        if facts and facts.get("satisfied") is not True:
+            continue
+        readiness_by_lane[lane_key] = {
+            **(readiness or {}),
+            "strategy_group_id": lane_key[0],
+            "symbol": lane_key[1],
+            "side": lane_key[2],
+            "readiness_state": "blocked",
+            "promotion_state": "blocked",
+            "first_blocker_class": "action_time_boundary_not_reproduced",
+            "first_blocker_detail": (
+                "release-bound Action-Time capability certification is not current: "
+                + truth.reason
+            ),
+            "next_action": "certify_current_release_action_time_capability",
+            "persistent_engineering_blocker": True,
+            "action_time_capability": truth.model_dump(mode="json"),
+        }
 
 
 def _pg_single_lane_packet_projection(
@@ -3346,6 +3413,8 @@ def _action_time_readiness(action_row: dict[str, Any]) -> dict[str, Any]:
         return {
             "status": "not_applicable_current_stage",
             "action_time_path_ready": False,
+            "action_time_capability_certified": False,
+            "action_time_capability_reason": "action_time_boundary_row_missing",
             "public_facts_ready": False,
             "private_action_time_facts_ready": False,
         }
@@ -3364,6 +3433,18 @@ def _action_time_readiness(action_row: dict[str, Any]) -> dict[str, Any]:
     return {
         "status": status,
         "action_time_path_ready": path_ready,
+        "action_time_capability_certified": (
+            action_row.get("action_time_capability_certified") is True
+        ),
+        "action_time_capability_reason": str(
+            action_row.get("action_time_capability_reason") or ""
+        ),
+        "action_time_capability_source_watermark": str(
+            action_row.get("action_time_capability_source_watermark") or ""
+        ),
+        "action_time_capability_runtime_head": str(
+            action_row.get("action_time_capability_runtime_head") or ""
+        ),
         "public_facts_ready": public_ready,
         "private_action_time_facts_ready": private_ready,
         "first_blocker": str(action_row.get("first_blocker") or ""),

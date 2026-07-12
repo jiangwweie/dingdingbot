@@ -106,6 +106,11 @@ def publish_runtime_control_current_projections(
             "pretrade_readiness_rows": readiness_rows,
         },
     )
+    _validate_projection_blocker_consistency(
+        candidate_pool=candidate_pool,
+        daily_table=daily_table,
+        goal_status=goal_status,
+    )
 
     projector_runs = [
         _projection_run(
@@ -651,6 +656,53 @@ def _lane_key(row: dict[str, Any]) -> tuple[str, str, str]:
         str(row.get("symbol") or row.get("symbol_or_basket") or ""),
         str(row.get("side") or ""),
     )
+
+
+def _validate_projection_blocker_consistency(
+    *,
+    candidate_pool: dict[str, Any],
+    daily_table: dict[str, Any],
+    goal_status: dict[str, Any],
+) -> None:
+    candidate_rows = {
+        _lane_key(row): row
+        for row in _dict_rows(candidate_pool.get("symbol_readiness_rows"))
+    }
+    mismatches: list[str] = []
+    for row in _dict_rows(daily_table.get("rows")):
+        lane_key = _lane_key(row)
+        candidate = candidate_rows.get(lane_key)
+        if candidate is None:
+            mismatches.append("daily_lane_missing_in_candidate_pool:" + ":".join(lane_key))
+            continue
+        daily_blocker = str(row.get("first_blocker") or "")
+        candidate_blocker = str(candidate.get("first_blocker") or "")
+        if daily_blocker != candidate_blocker:
+            mismatches.append(
+                "lane_blocker_drift:"
+                + ":".join(lane_key)
+                + f":candidate={candidate_blocker}:daily={daily_blocker}"
+            )
+    candidate_counts: dict[str, int] = {}
+    for row in candidate_rows.values():
+        blocker = str(row.get("first_blocker") or "unknown")
+        candidate_counts[blocker] = candidate_counts.get(blocker, 0) + 1
+    goal_counts = {
+        str(key): int(value)
+        for key, value in _dict(
+            _dict(goal_status.get("evidence")).get("pg_blocker_counts")
+        ).items()
+    }
+    if goal_counts != candidate_counts:
+        mismatches.append(
+            "goal_blocker_counts_drift:"
+            f"candidate={json.dumps(candidate_counts, sort_keys=True)}:"
+            f"goal={json.dumps(goal_counts, sort_keys=True)}"
+        )
+    if mismatches:
+        raise RuntimeError(
+            "current projection first blocker mismatch: " + "; ".join(mismatches)
+        )
 
 
 def _dict(value: Any) -> dict[str, Any]:

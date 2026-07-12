@@ -891,6 +891,8 @@ def _market_wait_action_time_path_ready(
     action_time: dict[str, Any],
     signal_state: str,
 ) -> bool:
+    if "action_time_capability_certified" in action_time:
+        return action_time.get("action_time_capability_certified") is True
     if action_time.get("action_time_path_ready") is True:
         return True
     first_blocker = str(action_time.get("first_blocker") or "")

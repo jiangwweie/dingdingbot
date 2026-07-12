@@ -455,6 +455,12 @@ def _plan_phases(
         venv_python=venv_python,
         certification_ref=f"tokyo-release:{target_commit}",
     )
+    action_time_capability_command = action_time_capability_certification_command(
+        remote_release_path=remote_release_path,
+        env_path=env_path,
+        venv_python=venv_python,
+        runtime_head=target_commit,
+    )
 
     return [
         {
@@ -584,6 +590,21 @@ def _plan_phases(
                 "an active real lifecycle, unknown command, or domain hold exists",
                 "no-active lifecycle run calls the exchange or creates state",
                 "capability enablement cannot be committed to PG current truth",
+            ],
+        },
+        {
+            "phase": "6_certify_action_time_capability_truth",
+            "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
+            "requires_confirmation_phrase": CONFIRMATION_PHRASE,
+            "commands": [_ssh(host, action_time_capability_command)],
+            "stop_if": [
+                "22-scope production-shaped disabled-smoke matrix fails",
+                "release-bound capability identity is incomplete",
+                "capability certification cannot be committed to PG current truth",
+                "current projections disagree on first blocker",
             ],
         },
     ]
@@ -869,6 +890,36 @@ def ticket_lifecycle_pre_switch_readiness_command(
         f"PYTHONPATH=$PWD {q(venv_python)} "
         "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
         "--require-database-url --deploy-quiescence --json"
+    )
+
+
+def action_time_capability_certification_command(
+    *,
+    remote_release_path: str,
+    env_path: str,
+    venv_python: str,
+    runtime_head: str,
+) -> str:
+    """Build the bounded postdeploy matrix -> PG certification sequence."""
+
+    q = shlex.quote
+    test_node = (
+        "tests/unit/test_action_time_full_chain_impact.py::"
+        "test_six_event_specs_across_all_active_scopes_reach_disabled_smoke_"
+        "from_production_shape"
+    )
+    certification_ref = f"tokyo-release:{runtime_head}:22-scope-disabled-smoke"
+    return (
+        "set -eu; "
+        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        f"PYTHONPATH=$PWD timeout 300 {q(venv_python)} -m pytest -q {q(test_node)}; "
+        f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
+        "scripts/certify_action_time_capability.py "
+        f"--runtime-head {q(runtime_head)} "
+        f"--certification-ref {q(certification_ref)} "
+        "--expected-lane-count 22; "
+        f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
+        "scripts/publish_runtime_control_current_projections.py --json"
     )
 
 

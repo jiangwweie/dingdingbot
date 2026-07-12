@@ -901,6 +901,47 @@ def test_pg_stale_action_time_boundary_without_current_signal_is_quiet(
         engine.dispose()
 
 
+def test_monitor_preserves_current_action_time_capability_blocker_without_notifying() -> None:
+    module = _load_module()
+    decision = module._decision_from_pg_sources(
+        control_state={"read_now_ms": 1_770_001_000_000},
+        goal_status={
+            "status": "missing_fact",
+            "blockers": [
+                "candidate_pool_blocker:action_time_boundary_not_reproduced:22"
+            ],
+            "checks": {"fresh_signal_present": False},
+            "owner_action_required": False,
+            "non_authority_checkpoint": "repair_pg_pretrade_readiness_projection",
+        },
+        candidate_pool={
+            "server_runtime_coverage": {
+                "status": "complete",
+                "expected_row_count": 22,
+                "active_matched_row_count": 22,
+                "missing_row_count": 0,
+            },
+            "symbol_readiness_rows": [
+                {
+                    "strategy_group_id": "CPM-RO-001",
+                    "symbol": "ETHUSDT",
+                    "side": "long",
+                    "first_blocker": "action_time_boundary_not_reproduced",
+                }
+            ],
+        },
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["decision"] == "quiet"
+    assert decision["notify"] is False
+    assert decision["status"] == "healthy_waiting_quiet"
+    assert decision["blocker_class"] == "action_time_boundary_not_reproduced"
+    assert decision["checkpoint"] == (
+        "certify_current_release_action_time_capability"
+    )
+
+
 def test_pg_completed_disabled_smoke_attempt_is_quiet_not_boundary_blocked(
     tmp_path: Path,
 ) -> None:

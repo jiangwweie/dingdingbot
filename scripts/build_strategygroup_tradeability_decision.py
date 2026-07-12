@@ -49,6 +49,10 @@ from src.application.readmodels.runtime_safety_truth import (  # noqa: E402
 from src.application.readmodels.strategy_live_candidate_pool import (  # noqa: E402
     build_strategy_live_candidate_pool_from_control_state,
 )
+from src.application.action_time.capability_certification import (  # noqa: E402
+    current_action_time_capability_truth_by_lane,
+    current_runtime_head,
+)
 from scripts.strategygroup_non_executing_projection import (  # noqa: E402
     recursive_true_key_paths,
 )
@@ -924,50 +928,16 @@ def _pg_action_time_capability_certified(
     *,
     strategy_group_id: str,
 ) -> bool:
-    candidates = [
-        row
-        for row in _active_candidate_scope_rows(control_state)
-        if str(row.get("strategy_group_id") or "") == strategy_group_id
+    truths = current_action_time_capability_truth_by_lane(
+        control_state,
+        current_runtime_head=current_runtime_head(control_state),
+    )
+    group_truths = [
+        truth
+        for lane_key, truth in truths.items()
+        if lane_key[0] == strategy_group_id
     ]
-    bindings = _active_event_binding_by_candidate(control_state)
-    events = _current_event_rows_by_id(control_state)
-    runtime_by_candidate = _active_runtime_scope_by_candidate(control_state)
-    policy_by_id = _policy_rows_by_id(control_state)
-    required_fact_event_ids = {
-        str(row.get("event_spec_id") or "")
-        for row in _dict_rows(control_state.get("strategy_event_required_facts"))
-        if str(row.get("event_spec_id") or "")
-    }
-    if not candidates:
-        return False
-    for candidate in candidates:
-        candidate_id = str(candidate.get("candidate_scope_id") or "")
-        binding = bindings.get(candidate_id, {})
-        event = events.get(str(binding.get("event_spec_id") or ""), {})
-        runtime = runtime_by_candidate.get(candidate_id, {})
-        policy = policy_by_id.get(str(candidate.get("policy_current_id") or ""), {})
-        event_eligible = (
-            event.get("execution_eligibility_enabled") is True
-            and event.get("declared_signal_grade")
-            in {"trial_grade_signal", "production_grade_signal"}
-            and event.get("declared_required_execution_mode")
-            in {"trial_live", "production_live"}
-        )
-        if not (
-            event_eligible
-            and str(event.get("event_spec_id") or "") in required_fact_event_ids
-            and runtime.get("live_submit_allowed") is True
-            and runtime.get("selected_strategygroup_scope") is True
-            and runtime.get("symbol_side_scope_closed") is True
-            and runtime.get("notional_leverage_scope_closed") is True
-            and policy.get("enabled_state") == "enabled"
-            and policy.get("pretrade_candidate_allowed") is True
-            and policy.get("action_time_rehearsal_allowed") is True
-            and policy.get("live_submit_allowed")
-            in {"scoped", "conditional_hard_gated"}
-        ):
-            return False
-    return True
+    return bool(group_truths) and all(truth.certified for truth in group_truths)
 
 
 def _pg_current_policy_scope(

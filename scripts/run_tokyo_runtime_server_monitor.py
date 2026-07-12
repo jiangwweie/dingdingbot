@@ -723,16 +723,21 @@ def _decision_from_pg_sources(
         and coverage_complete
         and systemd.get("ready")
     ):
+        preserved_blocker = _first_meaningful_blocker(blockers)
         return {
             "decision": "quiet",
             "notify": False,
             "status": "healthy_waiting_quiet",
-            "reasons": [],
+            "reasons": blockers,
             "automation_id": "tokyo-runtime-server-monitor",
             "strategy_group_id": strategy_group_id,
             "symbol": symbol,
-            "blocker_class": "none",
-            "checkpoint": "server_runtime_monitor",
+            "blocker_class": preserved_blocker,
+            "checkpoint": (
+                "certify_current_release_action_time_capability"
+                if preserved_blocker == "action_time_boundary_not_reproduced"
+                else checkpoint
+            ),
             "owner_message": "当前无新信号，前置工程阻断已记录，无需操作",
         }
     elif status == "protected_submit_rehearsal_completed":
