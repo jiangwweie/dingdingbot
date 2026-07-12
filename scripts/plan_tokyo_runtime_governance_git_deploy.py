@@ -426,24 +426,19 @@ def _plan_phases(
         f"mv {q(remote_tmp_release_path)} {q(remote_release_path)}; "
         f"test $(readlink -f {q(app_current)}) = {q(previous_release_path)}"
     )
-    quiesce_and_migrate_command = (
-        f"set -eu; timeout 30 sudo -n systemctl stop {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
-        f"timeout 30 sudo -n systemctl stop {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
-        f"timeout 30 sudo -n systemctl stop {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
-        f"timeout 60 sudo -n systemctl stop {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME)}; "
-        f"timeout 60 sudo -n systemctl stop {q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)}; "
-        f"timeout 60 sudo -n systemctl stop {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME)}; "
-        f"timeout 60 sudo -n systemctl stop {q(service_name)}; "
-        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
-        f"test ! -f requirements.txt || {q(venv_python)} -m pip install "
-        "--disable-pip-version-check -r requirements.txt; "
-        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
-        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
-        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head; "
-        f"PYTHONPATH=$PWD {q(venv_python)} "
-        "scripts/seed_runtime_control_state_foundation.py --apply --json; "
-        f"PYTHONPATH=$PWD {q(venv_python)} "
-        "scripts/validate_runtime_control_state_repository.py --json"
+    pre_switch_lifecycle_safety_command = (
+        ticket_lifecycle_pre_switch_readiness_command(
+            remote_release_path=remote_release_path,
+            env_path=env_path,
+            venv_python=venv_python,
+        )
+    )
+    quiesce_and_migrate_command = ticket_lifecycle_quiesce_and_migrate_command(
+        remote_release_path=remote_release_path,
+        env_path=env_path,
+        venv_python=venv_python,
+        service_name=service_name,
+        certification_ref=f"deploy-quiesce:{target_commit}",
     )
     switch_start_and_smoke_command = (
         f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}; "
@@ -522,6 +517,16 @@ def _plan_phases(
             ],
         },
         {
+            "phase": "2b_pre_switch_lifecycle_safety",
+            "remote_mutation": False,
+            "commands": [_ssh(host, pre_switch_lifecycle_safety_command)],
+            "stop_if": [
+                "current account-mode truth is not exactly one fresh safe account",
+                "an active real lifecycle, unknown command, or domain hold exists",
+                "an unprotected real attempt exists",
+            ],
+        },
+        {
             "phase": "3_quiesce_and_migrate",
             "remote_mutation": True,
             "remote_mutation_authorization": (
@@ -531,6 +536,7 @@ def _plan_phases(
             "commands": [_ssh(host, quiesce_and_migrate_command)],
             "stop_if": [
                 "service cannot be stopped with non-interactive sudo",
+                "lifecycle capability cannot be quiesced before code switch",
                 "alembic upgrade fails",
             ],
         },
@@ -846,6 +852,109 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"sudo -n systemctl is-enabled {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
         f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
         f"sudo -n systemctl is-active {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}"
+    )
+
+
+def ticket_lifecycle_pre_switch_readiness_command(
+    *,
+    remote_release_path: str,
+    env_path: str,
+    venv_python: str,
+) -> str:
+    """Build a read-only gate that accepts the prior certified capability state."""
+
+    q = shlex.quote
+    return (
+        "set -eu; "
+        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
+        "--require-database-url --allow-capability-enabled --json"
+    )
+
+
+def ticket_lifecycle_quiesce_and_migrate_command(
+    *,
+    remote_release_path: str,
+    env_path: str,
+    venv_python: str,
+    service_name: str,
+    certification_ref: str,
+) -> str:
+    """Quiesce capability before switching code and restore it on failure."""
+
+    q = shlex.quote
+    watcher_timer = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)
+    monitor_timer = q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)
+    lifecycle_timer = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)
+    watcher_service = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME)
+    monitor_service = q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)
+    lifecycle_service = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME)
+    backend_service = q(service_name)
+    capability_status = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --status "
+        "--require-database-url --json"
+    )
+    capability_disable = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --disable "
+        f"--require-database-url --certification-ref {q(certification_ref)} --json"
+    )
+    quiesced_readiness = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
+        "--require-database-url --allow-capability-enabled --json"
+    )
+    capability_restore = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --enable "
+        "--require-database-url --certification-ref "
+        f"{q('rollback:' + certification_ref)} --json"
+    )
+    return (
+        "set -eu; SUCCESS=0; "
+        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        f"CAPABILITY_BEFORE=$({capability_status}); export CAPABILITY_BEFORE; "
+        f"CAPABILITY_WAS_ENABLED=$({q(venv_python)} -c "
+        + q(
+            "import json,os; "
+            "print(1 if json.loads(os.environ['CAPABILITY_BEFORE'])['enabled'] else 0)"
+        )
+        + "); "
+        "rollback_quiesce() { "
+        'if [ "$SUCCESS" != 1 ] && [ "$CAPABILITY_WAS_ENABLED" = 1 ]; then '
+        f"{capability_restore} >/dev/null 2>&1 || true; fi; "
+        f"sudo -n systemctl start {backend_service} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {watcher_timer} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {monitor_timer} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {lifecycle_timer} >/dev/null 2>&1 || true; "
+        "}; trap rollback_quiesce EXIT; "
+        f"timeout 30 sudo -n systemctl stop {watcher_timer}; "
+        f"timeout 30 sudo -n systemctl stop {monitor_timer}; "
+        f"timeout 30 sudo -n systemctl stop {lifecycle_timer}; "
+        f"timeout 60 sudo -n systemctl stop {watcher_service}; "
+        f"timeout 60 sudo -n systemctl stop {monitor_service}; "
+        f"timeout 60 sudo -n systemctl stop {lifecycle_service}; "
+        f"timeout 60 sudo -n systemctl stop {backend_service}; "
+        f"{quiesced_readiness}; "
+        f"{capability_disable}; "
+        f"test ! -f requirements.txt || {q(venv_python)} -m pip install "
+        "--disable-pip-version-check -r requirements.txt; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/seed_runtime_control_state_foundation.py --apply --json; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/validate_runtime_control_state_repository.py --json; "
+        f"QUIESCED_CAPABILITY=$({capability_status}); export QUIESCED_CAPABILITY; "
+        f"{q(venv_python)} -c "
+        + q(
+            "import json,os; p=json.loads(os.environ['QUIESCED_CAPABILITY']); "
+            "assert p['enabled'] is False; assert p['exchange_write_called'] is False"
+        )
+        + "; SUCCESS=1; trap - EXIT"
     )
 
 

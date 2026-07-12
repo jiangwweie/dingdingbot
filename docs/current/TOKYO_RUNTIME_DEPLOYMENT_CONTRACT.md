@@ -2,7 +2,7 @@
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
 status: CURRENT
 authority: docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md
-last_verified: 2026-07-03
+last_verified: 2026-07-12
 ---
 
 # Tokyo Runtime Deployment Contract
@@ -95,6 +95,39 @@ If a deploy includes PG cutover, deploy apply may run bounded migration and seed
 commands only when the task explicitly scopes them. It must not import old
 fresh signals, old action-time lanes, old packets, generated timestamps, replay
 opportunities, or output artifacts as current live state.
+
+## Repeated Deploy Capability Interlock
+
+An already-enabled **ticket lifecycle mutation capability** is a valid deployed
+pre-state, not proof that a repeat deployment is unsafe. It must nevertheless
+be quiesced before new code is switched into the production timer path.
+
+The controlled repeat-deploy sequence is:
+
+```text
+target release exported
+-> read-only pre-switch check accepts enabled or disabled capability
+-> reject active real lifecycle / critical command / domain hold /
+   unprotected real attempt
+-> stop watcher, monitor, lifecycle, and backend units
+-> repeat the same safety check under quiescence
+-> disable lifecycle capability in PG current state
+-> migrate / seed / validate
+-> switch release and run postdeploy checks while capability is disabled
+-> mechanically certify and re-enable capability
+-> run one no-active, zero-exchange-write lifecycle invocation
+-> restore timers
+```
+
+`--allow-capability-enabled` is valid only for the read-only pre-switch and
+post-stop safety checks. It does not enable capability, authorize exchange
+mutation, bypass phase-two certification, or weaken any active-risk blocker.
+
+If quiesce or migration fails before the symlink switch, deployment must restore
+the prior enabled/disabled capability state and restart the previous release's
+allowed services. If phase-two recertification fails after the switch, the new
+release remains fail-closed with lifecycle capability disabled until the
+official certification path succeeds or the release is rolled back.
 
 ## Postdeploy Acceptance
 

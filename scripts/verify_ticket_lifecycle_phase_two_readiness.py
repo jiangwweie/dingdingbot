@@ -42,6 +42,7 @@ def evaluate_phase_two_readiness(
     conn: sa.engine.Connection,
     *,
     now_ms: int,
+    allow_capability_enabled: bool = False,
 ) -> dict[str, Any]:
     inspector = sa.inspect(conn)
     blockers: list[str] = []
@@ -51,7 +52,7 @@ def evaluate_phase_two_readiness(
         return _result(blockers, {})
 
     capability = lifecycle_mutation_capability_decision(conn)
-    if capability.get("enabled") is True:
+    if capability.get("enabled") is True and not allow_capability_enabled:
         blockers.append("phase_two_capability_already_enabled")
     blockers.extend(
         blocker
@@ -122,6 +123,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--now-ms", type=int, default=None)
+    parser.add_argument(
+        "--allow-capability-enabled",
+        action="store_true",
+        help=(
+            "Read-only pre-switch safety mode: accept an already-enabled "
+            "capability while still rejecting active lifecycle risk."
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     database_url = normalize_sync_postgres_dsn(args.database_url or "")
@@ -137,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = evaluate_phase_two_readiness(
                 conn,
                 now_ms=int(args.now_ms or time.time() * 1000),
+                allow_capability_enabled=args.allow_capability_enabled,
             )
     except sa.exc.SQLAlchemyError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

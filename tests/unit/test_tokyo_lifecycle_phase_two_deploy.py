@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from scripts.plan_tokyo_runtime_governance_git_deploy import (
+    ticket_lifecycle_pre_switch_readiness_command,
     ticket_lifecycle_phase_two_enable_command,
+    ticket_lifecycle_quiesce_and_migrate_command,
 )
 
 
@@ -32,4 +34,39 @@ def test_phase_two_deploy_is_pg_gated_and_rolls_back_capability_on_failure():
     )
     assert command.index("set_ticket_lifecycle_mutation_capability.py --enable") < (
         command.index("set_ticket_lifecycle_mutation_capability.py --status")
+    )
+
+
+def test_repeat_deploy_checks_enabled_capability_before_quiescing_it():
+    pre_switch = ticket_lifecycle_pre_switch_readiness_command(
+        remote_release_path="/home/ubuntu/brc-deploy/releases/release-2",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python="/venv/bin/python",
+    )
+    quiesce = ticket_lifecycle_quiesce_and_migrate_command(
+        remote_release_path="/home/ubuntu/brc-deploy/releases/release-2",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python="/venv/bin/python",
+        service_name="brc-owner-console-backend.service",
+        certification_ref="deploy-quiesce:abc123",
+    )
+
+    assert "verify_ticket_lifecycle_phase_two_readiness.py" in pre_switch
+    assert "--allow-capability-enabled" in pre_switch
+    assert "set_ticket_lifecycle_mutation_capability.py --disable" not in pre_switch
+    assert "set_ticket_lifecycle_mutation_capability.py --enable" not in pre_switch
+    assert "rollback_quiesce" in quiesce
+    assert "CAPABILITY_WAS_ENABLED" in quiesce
+    assert "--allow-capability-enabled" in quiesce
+    assert "set_ticket_lifecycle_mutation_capability.py --disable" in quiesce
+    assert "set_ticket_lifecycle_mutation_capability.py --enable" in quiesce
+    assert "deploy-quiesce:abc123" in quiesce
+    assert quiesce.index("systemctl stop brc-owner-console-backend.service") < (
+        quiesce.index("verify_ticket_lifecycle_phase_two_readiness.py")
+    )
+    assert quiesce.index("verify_ticket_lifecycle_phase_two_readiness.py") < (
+        quiesce.index("set_ticket_lifecycle_mutation_capability.py --disable")
+    )
+    assert quiesce.index("set_ticket_lifecycle_mutation_capability.py --disable") < (
+        quiesce.index("alembic upgrade head")
     )
