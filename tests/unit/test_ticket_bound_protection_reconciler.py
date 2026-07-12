@@ -77,6 +77,16 @@ def test_protection_reconciler_flags_missing_exchange_sl(pg_control_connection):
 
     assert payload["status"] == "protection_reconciliation_mismatch"
     assert "sl_exchange_order_missing" in payload["blockers"]
+    assert payload["lifecycle_decision"] == {
+        "status": "protection_reconciliation_mismatch",
+        "phase": "open",
+        "protection_state": "unknown",
+        "reconciliation_state": "mismatch",
+        "control_state": "recovery_required",
+        "owner_state": "processing",
+        "next_action": "run_exchange_protection_reconciler",
+        "owner_action_required": False,
+    }
     assert _lifecycle_status(pg_control_connection) == "protection_reconciliation_mismatch"
 
 
@@ -252,6 +262,10 @@ def test_protection_reconciler_blocks_missing_position_snapshot_without_flat_inf
 
     assert payload["status"] == "protection_reconciliation_mismatch"
     assert payload["first_blocker"] == "exchange_position_snapshot_missing"
+    assert payload["lifecycle_decision"]["next_action"] == (
+        "refresh_exchange_position_snapshot"
+    )
+    assert payload["lifecycle_decision"]["control_state"] == "recovery_required"
     assert "exchange_position_snapshot_missing" in payload["blockers"]
     assert "position_flat_with_live_protection_orders" not in payload["blockers"]
     assert _lifecycle_status(pg_control_connection) == "protection_reconciliation_mismatch"

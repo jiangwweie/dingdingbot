@@ -18,6 +18,11 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.lifecycle_safety_core import (
+    LifecycleDecision,
+    reduce_lifecycle_decision,
+)
+
 
 AUTHORITY_BOUNDARY = (
     "ticket_bound_protection_recovery_command; requires existing ticket-bound "
@@ -1116,11 +1121,15 @@ def _mark_recovery_failed_without_partial_orders(
         str(command["lifecycle_run_id"]),
     )
     if lifecycle:
+        decision = _recovery_failed_lifecycle_decision(
+            lifecycle,
+            blockers=blockers,
+        )
         updated_lifecycle = {
             **lifecycle,
-            "status": _recovery_failed_lifecycle_status(lifecycle),
-            "first_blocker": blockers[0] if blockers else None,
-            "blockers": blockers,
+            "status": decision.status,
+            "first_blocker": decision.first_blocker,
+            "blockers": list(decision.blockers),
             "updated_at_ms": now_ms,
         }
         _upsert_row(
@@ -1145,17 +1154,16 @@ def _update_lifecycle_after_partial_recovery(
         "lifecycle_run_id",
         str(command["lifecycle_run_id"]),
     )
-    roles = {
-        str(order.get("order_role") or "").upper()
-        for order in submitted_orders
-        if str(order.get("exchange_order_id") or "").strip()
-    }
-    status = "protection_degraded" if "SL" in roles else "protection_missing"
+    decision = _partial_recovery_lifecycle_decision(
+        current_status=str(lifecycle.get("status") or ""),
+        submitted_orders=submitted_orders,
+        blockers=blockers,
+    )
     updated = {
         **lifecycle,
-        "status": status,
-        "first_blocker": blockers[0] if blockers else None,
-        "blockers": blockers,
+        "status": decision.status,
+        "first_blocker": decision.first_blocker,
+        "blockers": list(decision.blockers),
         "updated_at_ms": now_ms,
     }
     _upsert_row(
@@ -1166,11 +1174,40 @@ def _update_lifecycle_after_partial_recovery(
     )
 
 
-def _recovery_failed_lifecycle_status(lifecycle: dict[str, Any]) -> str:
+def _recovery_failed_lifecycle_decision(
+    lifecycle: dict[str, Any],
+    *,
+    blockers: list[str],
+) -> LifecycleDecision:
     current = str(lifecycle.get("status") or "")
     if current in {"protection_missing", "protection_degraded", "protection_submit_failed"}:
-        return current
-    return "protection_degraded"
+        target = current
+    else:
+        target = "protection_degraded"
+    return reduce_lifecycle_decision(
+        current_status=current,
+        target_status=target,
+        blockers=blockers,
+    )
+
+
+def _partial_recovery_lifecycle_decision(
+    *,
+    current_status: str,
+    submitted_orders: list[dict[str, Any]],
+    blockers: list[str],
+) -> LifecycleDecision:
+    roles = {
+        str(order.get("order_role") or "").upper()
+        for order in submitted_orders
+        if str(order.get("exchange_order_id") or "").strip()
+    }
+    target = "protection_degraded" if "SL" in roles else "protection_missing"
+    return reduce_lifecycle_decision(
+        current_status=current_status,
+        target_status=target,
+        blockers=blockers,
+    )
 
 
 def _merge_orders(

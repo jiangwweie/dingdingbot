@@ -28,6 +28,8 @@ from src.application.action_time.netting_domain_hold import (
 )
 from src.application.action_time.lifecycle_safety_core import (
     classify_protection_reconciliation,
+    lifecycle_decision_for_status,
+    reduce_lifecycle_decision,
 )
 
 
@@ -273,7 +275,14 @@ def reconcile_ticket_bound_exit_protection_set(
         next_action = "run_exchange_protection_reconciler"
     success_status = "runner_protected" if runner_order else "position_protected"
     success_set_status = "runner_protected" if runner_order else "reconciled"
-    first_blocker = blockers[0] if blockers else None
+    lifecycle_decision = reduce_lifecycle_decision(
+        current_status=str(lifecycle.get("status") or "") if lifecycle else None,
+        target_status=success_status if not blockers else status,
+        event_type="exit_protection_reconciled" if not blockers else None,
+        blockers=blockers,
+        next_action=(next_action if blockers else "continue_lifecycle_monitoring"),
+    )
+    first_blocker = lifecycle_decision.first_blocker
     protection_update = {
         **protection_set,
         "status": success_set_status if not blockers else status,
@@ -284,9 +293,9 @@ def reconcile_ticket_bound_exit_protection_set(
     }
     lifecycle_update = {
         **lifecycle,
-        "status": success_status if not blockers else status,
+        "status": lifecycle_decision.status,
         "first_blocker": first_blocker,
-        "blockers": blockers,
+        "blockers": list(lifecycle_decision.blockers),
         "updated_at_ms": now_ms,
     }
     _upsert_row(
@@ -305,9 +314,7 @@ def reconcile_ticket_bound_exit_protection_set(
         _insert_event(
             conn,
             lifecycle_update,
-            "exit_protection_reconciled"
-            if not blockers
-            else _event_type_for_status(status),
+            lifecycle_decision.event_type,
             {
                 "blockers": blockers,
                 "exchange_snapshot_ref": exchange_snapshot.get("snapshot_id"),
@@ -330,7 +337,8 @@ def reconcile_ticket_bound_exit_protection_set(
         blockers=blockers,
         protection_set=protection_update,
         lifecycle=lifecycle_update,
-        next_action=next_action if blockers else "continue_lifecycle_monitoring",
+        next_action=lifecycle_decision.next_action,
+        lifecycle_decision=lifecycle_decision,
     )
 
 
@@ -720,7 +728,13 @@ def _result(
     protection_set: dict[str, Any],
     lifecycle: dict[str, Any],
     next_action: str,
+    lifecycle_decision: Any | None = None,
 ) -> dict[str, Any]:
+    decision = lifecycle_decision or lifecycle_decision_for_status(
+        str(lifecycle.get("status") or "blocked"),
+        blockers=blockers,
+        next_action=next_action,
+    )
     return {
         "schema": "brc.ticket_bound_protection_reconciler.v1",
         "status": status,
@@ -731,6 +745,16 @@ def _result(
         "first_blocker": blockers[0] if blockers else None,
         "blockers": blockers,
         "next_action": next_action,
+        "lifecycle_decision": {
+            "status": decision.status,
+            "phase": decision.phase.value,
+            "protection_state": decision.protection_state.value,
+            "reconciliation_state": decision.reconciliation_state.value,
+            "control_state": decision.control_state.value,
+            "owner_state": decision.owner_state.value,
+            "next_action": decision.next_action,
+            "owner_action_required": decision.owner_action_required,
+        },
         "authority_boundary": AUTHORITY_BOUNDARY,
         "protection_set": protection_set,
         "lifecycle": lifecycle,
@@ -740,21 +764,6 @@ def _result(
 def _stable_id(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
     return f"{prefix}:{digest}"
-
-
-def _event_type_for_status(status: str) -> str:
-    if status in {
-        "protection_missing",
-        "protection_degraded",
-        "protection_reconciliation_mismatch",
-        "exchange_orphan_detected",
-        "tp1_or_sl_orphaned",
-        "runner_mutation_pending",
-        "runner_reconciliation_mismatch",
-        "position_closed_protection_live",
-    }:
-        return status
-    return "hard_stopped"
 
 
 def _dedupe(items: list[str]) -> list[str]:

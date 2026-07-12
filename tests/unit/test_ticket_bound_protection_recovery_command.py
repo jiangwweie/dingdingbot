@@ -4,6 +4,8 @@ import pytest
 
 from scripts import materialize_ticket_bound_protected_submit_attempt as submit
 from src.application.action_time.protection_recovery_command import (
+    _partial_recovery_lifecycle_decision,
+    _recovery_failed_lifecycle_decision,
     execute_ticket_bound_protection_recovery_command,
     prepare_ticket_bound_protection_recovery_command,
 )
@@ -25,6 +27,34 @@ class _NoCallGateway:
     async def place_order(self, **kwargs):
         self.calls.append(dict(kwargs))
         raise AssertionError("legacy recovery executor must not call exchange")
+
+
+def test_failed_recovery_preserves_current_recoverable_state_through_reducer():
+    decision = _recovery_failed_lifecycle_decision(
+        {"status": "protection_missing"},
+        blockers=["protection_recovery_submit_failed:sl"],
+    )
+
+    assert decision.status == "protection_missing"
+    assert decision.phase.value == "open"
+    assert decision.protection_state.value == "missing"
+    assert decision.control_state.value == "recovery_required"
+    assert decision.next_action == "run_official_recovery_submit_sl_or_flatten"
+
+
+def test_partial_recovery_with_only_sl_is_degraded_and_uses_common_reducer():
+    decision = _partial_recovery_lifecycle_decision(
+        current_status="protection_missing",
+        submitted_orders=[
+            {"order_role": "SL", "exchange_order_id": "exchange-sl-1"}
+        ],
+        blockers=["tp1_recovery_submit_failed"],
+    )
+
+    assert decision.status == "protection_degraded"
+    assert decision.protection_state.value == "degraded"
+    assert decision.reconciliation_state.value == "mismatch"
+    assert decision.next_action == "run_official_recovery_submit_missing_tp1"
 
 
 @pytest.mark.asyncio
