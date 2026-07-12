@@ -147,6 +147,15 @@ def test_sor_replay_projects_one_session_breakout_to_each_event_side() -> None:
             close="103",
         )
     )
+    candles.append(
+        _fifteen_minute_candle(
+            start_ms + 5 * FIFTEEN_MINUTES_MS,
+            open_="103",
+            high="105",
+            low="102",
+            close="104",
+        )
+    )
     as_of_ms = int(candles[-1]["close_time_ms"])
 
     result = run_opportunity_feedback_historical_replay(
@@ -160,9 +169,9 @@ def test_sor_replay_projects_one_session_breakout_to_each_event_side() -> None:
     short_window = next(item for item in by_side["short"].calibration.windows if item.window_days == 90)
     assert long_window.replay.signal_count == 1
     assert short_window.replay.signal_count == 0
-    assert short_window.replay.near_miss_count == 1
+    assert short_window.replay.near_miss_count == 2
     assert short_window.replay.failed_fact_counts == {
-        "breakdown_confirmed": 1,
-        "event_side_matched": 1,
-        "opening_range_high_reference": 1,
+        "breakdown_confirmed": 2,
+        "event_side_matched": 2,
+        "opening_range_high_reference": 2,
     }

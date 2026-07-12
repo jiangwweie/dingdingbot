@@ -26,6 +26,7 @@ from src.domain.comparative_strength import (
 from src.domain.opportunity_feedback_calibration import (
     OpportunityCalibrationResult,
     OpportunityEvaluation,
+    OpportunityResult,
     OpportunitySource,
     calibrate_opportunity_feedback,
 )
@@ -314,19 +315,23 @@ def _sor_observations(
         for index in range(4, len(session)):
             window = session[: index + 1]
             trigger_ms = int(window[-1]["close_time_ms"])
-            observations.append(
-                evaluate_calibration_observation(
-                    signal_input=_signal_input(
-                        scope,
-                        trigger_ms=trigger_ms,
-                        windows={"15m": window},
-                        comparative=None,
-                    ),
-                    event_spec=scope.event_spec,
-                    source=OpportunitySource.REPLAY,
-                    evaluator_service=evaluator,
-                )
+            observation = evaluate_calibration_observation(
+                signal_input=_signal_input(
+                    scope,
+                    trigger_ms=trigger_ms,
+                    windows={"15m": window},
+                    comparative=None,
+                ),
+                event_spec=scope.event_spec,
+                source=OpportunitySource.REPLAY,
+                evaluator_service=evaluator,
             )
+            observations.append(observation)
+            # A session breakout is one opportunity per EventSpec side.  Later
+            # candles may remain beyond the opening range, but they are the
+            # same setup rather than fresh opportunity supply.
+            if observation.result == OpportunityResult.SIGNAL:
+                break
     return observations
 
 
