@@ -1,6 +1,6 @@
 ---
 title: P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN
-status: IN_PROGRESS_DEPLOYMENT_AND_HISTORICAL_CALIBRATION
+status: COMPLETE_DEPLOYED_AT_97EFAB6F
 authority: docs/current/P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-12
 ---
@@ -170,19 +170,32 @@ pytest.
   runtime authority/file writes.
 - [x] Implement bounded public-candle pagination and typed in-memory replay.
 - [x] Keep the command manual, stdout-only, timeout-bounded, and read-only.
-- [ ] Run all 22 current scopes and retain only terminal stdout evidence.
+- [x] Run all 22 current scopes and retain only terminal stdout evidence.
 
 ## Task 9: Push, Tokyo Deploy, Migration 116, And Watcher Acceptance
 
-- [ ] Re-run focused tests, full regression, authority validators, and file-I/O
+- [x] Re-run focused tests, full regression, authority validators, and file-I/O
   performance audit.
-- [ ] Push the exact focused branch and build a commit-bound deploy plan.
-- [ ] Require no active real lifecycle, critical command, domain hold, or
+- [x] Push the exact focused branch and build a commit-bound deploy plan.
+- [x] Require no active real lifecycle, critical command, domain hold, or
   unprotected real attempt before release switch.
-- [ ] Deploy the exact commit, apply migration 116, recertify lifecycle
+- [x] Deploy the exact commit, apply migration 116, recertify lifecycle
   mutation, and complete readonly postdeploy acceptance.
-- [ ] Confirm the Tokyo watcher and monitor timers remain active and inspect PG
+- [x] Confirm the Tokyo watcher and monitor timers remain active and inspect PG
   current signal/Ticket state; a natural signal preempts Replay work.
+
+## Completion Result
+
+- Tokyo runs `97efab6f8f7cbad9a062b3f798ea2e34a0decec2` at migration `116`.
+- Full regression passed with `2865 passed, 1 skipped`.
+- Historical calibration covered 22/22 scopes with zero invalid observations,
+  zero PG/file writes, zero runtime authority, and zero exchange writes.
+- PG/current has 22 watcher-coverage rows but no live signal, lane, Ticket, or
+  runtime safety snapshot.
+- The Daily Table reports `action_time_path=false` and
+  `action_time_boundary_not_reproduced`, while Goal Status still describes the
+  same state as waiting for market. This projection inconsistency is the next
+  engineering blocker and is outside automatic OFC strategy mutation.
 
 ## Done When
 

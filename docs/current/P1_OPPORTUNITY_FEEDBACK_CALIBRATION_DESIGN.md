@@ -1,6 +1,6 @@
 ---
 title: P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN
-status: IN_PROGRESS_DEPLOYMENT_AND_HISTORICAL_CALIBRATION
+status: DEPLOYED_HISTORICAL_CALIBRATION_COMPLETE
 authority: docs/current/P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN.md
 last_verified: 2026-07-12
 ---
@@ -33,10 +33,12 @@ fixed production semantics
 
 ## Why This Program Exists
 
-The deployed runtime is currently `market_wait_validated`: five active
-StrategyGroups and 22 scopes have no known non-market pre-submit blocker, while
-there is no current fresh signal or Ticket. A low-frequency system cannot use
-the absence of recent orders as proof that the market supplied no opportunity.
+The pre-calibration runtime called all 22 scopes `market_wait_validated`, while
+there was no current fresh signal or Ticket. The completed historical run shows
+that all 22 scopes produce signals under the current evaluator semantics, and
+PG/current shows complete watcher coverage but an unreproduced action-time
+boundary. The absence of recent orders is therefore not evidence that the
+market supplied no opportunity.
 
 P1-OFC must distinguish:
 
@@ -62,12 +64,12 @@ P1-OFC must distinguish:
 chain_position: replay_live_parity
 strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
 symbol: current 22 candidate scopes
-stage: market_wait_validated_and_live_outcome_uncalibrated
-first_blocker: natural_fresh_eligible_signal_absent_for_live_calibration
-evidence: Tokyo release 2df39c1c; active Ticket=0; latest monitor quiet; blocker_classes=[none]
-next_action: calibrate opportunity frequency and parity without modifying live authority
-stop_condition: six Event Specs have typed frequency/near-miss/parity results and post-trade economics can consume real ticket facts
-owner_action_required: no for calibration; yes only for a later semantic/scope/policy mutation
+stage: historical_opportunity_calibrated_live_action_time_boundary_unreproduced
+first_blocker: action_time_boundary_not_reproduced
+evidence: Tokyo release 97efab6f / migration 116; 22/22 historical scopes signal; invalid=0; watcher coverage=22; live signal/lane/Ticket=0; daily-table action_time_path=false
+next_action: design and certify one production-shaped Action-Time boundary reproduction and make Daily Table, Goal Status, and Tradeability preserve the same first blocker
+stop_condition: current projections agree on one first blocker and a production-shaped fresh event reaches one lane/Ticket or one exact earlier blocker without exchange write
+owner_action_required: no for engineering closure; yes only for a later semantic/scope/policy mutation
 authority_boundary: replay cannot create live signal, Ticket, FinalGate, Operation Layer, or exchange write
 ```
 
@@ -197,6 +199,8 @@ The lab evaluates all current 22 candidate scopes over 90-day and 365-day
 windows. One-hour strategies use aligned 1h/4h windows. MPG and MI compute
 comparative-strength snapshots from the complete PG-owned symbol universe.
 SOR uses each UTC session's first four closed 15m candles as its opening range.
+Once one Event Spec side first satisfies its breakout condition, later candles
+on the same side in the same UTC session are deduplicated as the same setup.
 
 Multi-side evaluators are projected through the selected Event Spec. A signal
 for the opposite side is not accepted as the selected event and does not abort
@@ -311,3 +315,25 @@ P1-OFC engineering is complete only when:
 6. full tests and required validators pass;
 7. only natural venue calibration and strategy/scope proposals remain
    dependent on market evidence or Owner policy.
+
+## Completed Historical Calibration
+
+The manual production-hosted calibration at `as_of_ms=1783855207901` evaluated
+the current **five StrategyGroups, six Event Specs, and 22 PG-owned scopes**.
+It wrote zero PG rows and zero output files, created no runtime authority, and
+made no exchange write.
+
+| StrategyGroup | 90-day signals | 365-day signals | Invalid | Dominant failed facts |
+| --- | ---: | ---: | ---: | --- |
+| `BRF2-001` | 317 | 1,557 | 0 | `rally_failure_confirmed`, short-side disable |
+| `CPM-RO-001` | 511 | 2,124 | 0 | `reclaim_confirmed`, `htf_trend_intact` |
+| `MI-001` | 224 | 1,400 | 0 | `relative_strength_confirmed`, `impulse_confirmed` |
+| `MPG-001` | 107 | 470 | 0 | `leader_strength_confirmed`, `momentum_persistence_confirmed` |
+| `SOR-001` | 581 | 2,381 | 0 | side-specific breakout/breakdown confirmation |
+
+These counts are evaluator events across scopes, not independent profitable
+trades. They prove that long-run opportunity supply is non-zero and that current
+scope is not empty; they do not prove strategy profitability or Replay/Live
+parity. Because PG/current simultaneously reports watcher coverage for all 22
+scopes but `action_time_path=false`, the current first blocker is the
+unreproduced Action-Time boundary, not validated market absence.
