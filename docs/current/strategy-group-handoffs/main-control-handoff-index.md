@@ -2,13 +2,13 @@
 title: STRATEGYGROUP_FILE_SOURCE_RETIREMENT_INDEX
 status: CURRENT_GOVERNANCE_INDEX
 authority: docs/current/strategy-group-handoffs/main-control-handoff-index.md
-last_verified: 2026-07-09
+last_verified: 2026-07-12
 ---
 
 # StrategyGroup File-Source Retirement Index
 
 Status: CURRENT_GOVERNANCE_INDEX
-Last updated: 2026-07-07
+Last updated: 2026-07-12
 
 ## Current Rule
 
@@ -60,3 +60,8 @@ monitoring.
 
 Historical review may use git history or archive-only provenance. Historical
 material must not be wired back into current runtime decisions.
+
+The active **P1-TFC Trade Feedback Core Consolidation** consumes only PG
+Ticket/lifecycle current rows and typed in-memory decisions. It does not revive
+StrategyGroup handoff files, replay JSON, or Markdown as signal, Ticket,
+recovery, or Owner-state authority.

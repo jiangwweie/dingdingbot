@@ -36,12 +36,12 @@ last_verified: 2026-07-12
 - Produces: `LifecyclePhase`, `ProtectionState`, `ReconciliationState`, `LifecycleControlState`, `OwnerLifecycleState`, `LifecycleDecision`, `lifecycle_decision_for_status(...)`, and `reduce_lifecycle_decision(...)`.
 - Preserves: `.status`, `.event_type`, `.next_action`, `.first_blocker`, and `.blockers` on existing classification results.
 
-- [ ] Write parameterized failing tests covering all 31 migration-114 statuses and exact typed projections for normal, recovery, unknown-outcome, and terminal states.
-- [ ] Run `python3 -m pytest -q tests/unit/test_ticket_bound_lifecycle_decision_reducer.py` and verify import/API failures.
-- [ ] Implement string enums, the frozen decision model, the complete status specification map, fail-closed unknown mapping, and compatibility properties.
-- [ ] Add failing tests for `lifecycle_closed` regression, hard-stop-without-blocker normalization, explicit next-action override, and Owner-required derivation.
-- [ ] Implement `reduce_lifecycle_decision` with terminal monotonicity and blocker invariants.
-- [ ] Run the reducer tests and the existing protection/submit/runner classifier tests until green.
+- [x] Write parameterized failing tests covering all 31 migration-114 statuses and exact typed projections for normal, recovery, unknown-outcome, and terminal states.
+- [x] Run `python3 -m pytest -q tests/unit/test_ticket_bound_lifecycle_decision_reducer.py` and verify import/API failures.
+- [x] Implement string enums, the frozen decision model, the complete status specification map, fail-closed unknown mapping, and compatibility properties.
+- [x] Add failing tests for `lifecycle_closed` regression, hard-stop-without-blocker normalization, explicit next-action override, and Owner-required derivation.
+- [x] Implement `reduce_lifecycle_decision` with terminal monotonicity and blocker invariants.
+- [x] Run the reducer tests and the existing protection/submit/runner classifier tests until green.
 
 ### Task 2: Reconciliation And Recovery Consumers
 
@@ -55,11 +55,11 @@ last_verified: 2026-07-12
 - Consumes: `reduce_lifecycle_decision(...)`.
 - Produces: existing PG rows and result payloads with unchanged compatibility status plus typed `lifecycle_decision` diagnostic payloads.
 
-- [ ] Add failing tests proving reconciler and recovery status, event, next action, phase, protection, reconciliation, and control state come from the common reducer.
-- [ ] Run the two focused test files and verify failures identify missing reducer consumption.
-- [ ] Replace reconciler-local event/next-action mapping and recovery-local failed/partial status mapping with reducer decisions.
-- [ ] Preserve existing netting holds, scope freezes, retry limits, durable commands, and exchange-call counts.
-- [ ] Run focused tests until green.
+- [x] Add failing tests proving reconciler and recovery status, event, next action, phase, protection, reconciliation, and control state come from the common reducer.
+- [x] Run the two focused test files and verify failures identify missing reducer consumption.
+- [x] Replace reconciler-local event/next-action mapping and recovery-local failed/partial status mapping with reducer decisions.
+- [x] Preserve existing netting holds, scope freezes, retry limits, durable commands, and exchange-call counts.
+- [x] Run focused tests until green.
 
 ### Task 3: Runner, Fill, And Finalizer Consumers
 
@@ -76,11 +76,11 @@ last_verified: 2026-07-12
 - Consumes: `reduce_lifecycle_decision(...)`.
 - Produces: current lifecycle rows/events and typed decision diagnostics without a second side-effect path.
 
-- [ ] Add failing tests for Runner pending/failure, final-exit detection, reconciliation matched, budget settled, review recorded, and lifecycle closed decisions.
-- [ ] Run focused tests and verify reducer-consumption failures.
-- [ ] Route normal and abnormal transitions through the reducer while retaining existing PG writers and durable command ordering.
-- [ ] Add source assertions that the migrated modules no longer own duplicate lifecycle event/recovery lookup maps.
-- [ ] Run focused tests until green.
+- [x] Add failing tests for Runner pending/failure, final-exit detection, reconciliation matched, budget settled, review recorded, and lifecycle closed decisions.
+- [x] Run focused tests and verify reducer-consumption failures.
+- [x] Route normal and abnormal transitions through the reducer while retaining existing PG writers and durable command ordering.
+- [x] Add source assertions that the migrated modules no longer own duplicate lifecycle event/recovery lookup maps.
+- [x] Run focused tests until green.
 
 ### Task 4: Rehearsal And Replay Decision Parity
 
@@ -93,10 +93,10 @@ last_verified: 2026-07-12
 - Consumes: persisted lifecycle rows through `lifecycle_decision_for_status(...)`.
 - Produces: `lifecycle_decision` in success/failure simulation payloads; no new authority.
 
-- [ ] Add failing tests asserting the successful golden path projects `closed/completed` and failure scenarios project the same typed decision as direct reducer replay.
-- [ ] Run the focused certification tests and observe missing projection failures.
-- [ ] Add reducer projection to simulation results without writing PG or changing exchange mocks.
-- [ ] Run golden-path, nine failure-scenario, six-Event-Spec, and 22-scope impact tests until green.
+- [x] Add failing tests asserting the successful golden path projects `closed/completed` and failure scenarios project the same typed decision as direct reducer replay.
+- [x] Run the focused certification tests and observe missing projection failures.
+- [x] Add reducer projection to simulation results without writing PG or changing exchange mocks.
+- [x] Run golden-path, nine failure-scenario, six-Event-Spec, and 22-scope impact tests until green.
 
 ### Task 5: Owner Feedback In Standard Ops Path
 
@@ -111,11 +111,11 @@ last_verified: 2026-07-12
 - Consumes: `LifecycleDecision` or a migration-114 lifecycle row.
 - Produces: one non-authority `lifecycle_owner_feedback` object in the existing Tokyo L2-L7 summary.
 
-- [ ] Add failing tests for processing, automatic recovery, temporary unavailability, Owner-required, completed, and unknown lifecycle feedback.
-- [ ] Run Owner/Ops focused tests and observe missing projection failures.
-- [ ] Implement the pure Owner projection and compose it from at most the existing 20 attention rows.
-- [ ] Prove the projection never reports submit authority, never mutates PG, and creates no file output.
-- [ ] Run Owner/Ops focused tests until green.
+- [x] Add failing tests for processing, automatic recovery, temporary unavailability, Owner-required, completed, and unknown lifecycle feedback.
+- [x] Run Owner/Ops focused tests and observe missing projection failures.
+- [x] Implement the pure Owner projection and compose it from at most the existing 20 attention rows.
+- [x] Prove the projection never reports submit authority, never mutates PG, and creates no file output.
+- [x] Run Owner/Ops focused tests until green.
 
 ### Task 6: Planning, Regression, And Completion Audit
 
@@ -131,8 +131,8 @@ last_verified: 2026-07-12
 - Consumes: verified code/test/runtime evidence.
 - Produces: one current project order and one current chain-position statement.
 
-- [ ] Update the roadmap to mark P0-LC deployed, define `Live Candidate Baseline`, make P1-TFC the sole medium-scale mainline, and retain natural fresh signal as the P0 interrupt.
-- [ ] Run targeted lifecycle, Owner, Ops, six-event, and 22-scope tests.
+- [x] Update the roadmap to mark P0-LC deployed, define `Live Candidate Baseline`, make P1-TFC the sole medium-scale mainline, and retain natural fresh signal as the P0 interrupt.
+- [x] Run targeted lifecycle, Owner, Ops, six-event, and 22-scope tests.
 - [ ] Run the full pytest suite authorized by the accepted goal.
 - [ ] Run `python3 scripts/validate_current_docs_authority.py`, `python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked`, `python3 scripts/audit_production_runtime_file_io.py`, and `git diff --check`.
 - [ ] Review `git diff`, map every design requirement to fresh evidence, and record exact tests run and skipped.

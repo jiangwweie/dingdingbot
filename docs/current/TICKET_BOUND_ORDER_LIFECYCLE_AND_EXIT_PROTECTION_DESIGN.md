@@ -534,14 +534,14 @@ mock submitted
 
 ```text
 chain_position: action_time_boundary
-strategy_group_id: active 5 StrategyGroups
-symbol: active candidate scope
-stage: p0_capital_safety_local_closure
-first_blocker: review_validation_and_deploy_approval_pending
-evidence: local branch codex/p0-capital-safety-closure implements current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, and Live Outcome Ledger PG projection; Tokyo release remains 4b0b8a27 until Owner-approved deploy
-next_action: finish review and validation, then deploy only with explicit Owner approval
-stop_condition: active real-risk brc_ticket_bound_scope_freezes blocks matching StrategyGroup + symbol + side before any new submit path can form, stale/no-risk freezes resolve after exchange truth disproves risk, continuous ticks continue until closure/recovery/hard stop, terminal real tickets produce outcome rows, and each ticket-bound submit has stop-risk reservation
-owner_action_required: no for current observation; yes before future deployment or authority expansion
+strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
+symbol: 22 active candidate scopes
+stage: production_deployed_live_candidate_feedback_core_consolidation
+first_blocker: market_wait_validated
+evidence: Tokyo runs 0368de6a / migration 114 with lifecycle timer active and postdeploy accepted; no current natural Ticket exists; P1-TFC starts from this exact baseline
+next_action: consolidate lifecycle status/event/recovery/Owner interpretation through the existing Lifecycle Safety Core while observation remains active
+stop_condition: all current lifecycle paths preserve behavior under one typed reducer and the next natural fresh signal enters live Ticket acceptance
+owner_action_required: no
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound gateway path
 ```
 
@@ -565,8 +565,15 @@ authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchang
     mutation executor for the ticket-bound Operation Layer handoff.
 12. **Implemented and deployed as lifecycle repair**: implement official missing
     SL/TP1 protection recovery command and executor.
-13. **Designed**: first post-submit reconciliation tick and deterministic
-    recovery command matrix.
-14. **Next gate**: implement first tick, recovery command determinism, scheduler
-    integration, focused tests, deploy, and observe the next real ticket through
-    read-only server health plus ticket-bound lifecycle acceptance.
+13. **Implemented and deployed**: first post-submit reconciliation tick and
+    deterministic recovery command matrix.
+14. **Implemented and deployed**: production scheduler, typed exchange truth,
+    fill projection, continuous reconciliation, settlement, review, finalizer,
+    and terminal Outcome at `0368de6a` / migration `114`.
+15. **Active P1-TFC**: extend the existing Lifecycle Safety Core into the one
+    typed phase/protection/reconciliation/control/recovery decision owner;
+    migrate production callers and standard Ops feedback without schema or
+    trading-authority changes.
+16. **Market-only gate**: observe the next natural real Ticket through the same
+    lifecycle for venue-specific latency, fill, fee, funding, protection, and
+    recovery calibration.
