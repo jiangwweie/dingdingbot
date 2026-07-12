@@ -4,6 +4,7 @@ from sqlalchemy import text
 
 from scripts.verify_ticket_lifecycle_phase_two_readiness import (
     evaluate_phase_two_readiness,
+    readiness_exit_code,
 )
 from tests.unit.test_capital_safety_scope_freeze_gate import _insert_scope_freeze
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
@@ -74,8 +75,10 @@ def test_deploy_quiescence_ignores_expired_account_mode_but_not_live_risk(
         deploy_quiescence=True,
     )
 
-    assert payload["status"] == "deploy_quiescence_ready"
+    assert payload["status"] == "phase_two_ready"
+    assert payload["mode"] == "deploy_quiescence"
     assert payload["blockers"] == []
+    assert readiness_exit_code(payload) == 0
     assert payload["counts"]["safe_account_mode_count"] == 0
     assert payload["exchange_read_called"] is False
     assert payload["exchange_write_called"] is False
@@ -108,5 +111,6 @@ def test_pre_switch_mode_still_rejects_active_lifecycle_risk(pg_control_connecti
     )
 
     assert payload["status"] == "blocked"
+    assert readiness_exit_code(payload) == 2
     assert payload["first_blocker"] == "phase_two_active_domain_holds:1"
     assert payload["counts"]["active_domain_holds"] == 1

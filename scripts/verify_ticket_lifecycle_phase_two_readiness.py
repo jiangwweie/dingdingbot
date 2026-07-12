@@ -158,7 +158,13 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.dispose()
     print(json.dumps(payload, sort_keys=True) if args.json else payload["status"])
-    return 0 if payload["status"] == "phase_two_ready" else 2
+    return readiness_exit_code(payload)
+
+
+def readiness_exit_code(payload: dict[str, Any]) -> int:
+    """Keep process success derived from blockers, not from mode-specific labels."""
+
+    return 0 if not list(payload.get("blockers") or []) else 2
 
 
 def _count(conn: sa.engine.Connection, statement: str, **params: Any) -> int:
@@ -171,12 +177,9 @@ def _result(
     *,
     deploy_quiescence: bool,
 ) -> dict[str, Any]:
-    ready_status = (
-        "deploy_quiescence_ready" if deploy_quiescence else "phase_two_ready"
-    )
     return {
         "schema": "brc.ticket_lifecycle_phase_two_readiness.v1",
-        "status": ready_status if not blockers else "blocked",
+        "status": "phase_two_ready" if not blockers else "blocked",
         "mode": "deploy_quiescence" if deploy_quiescence else "phase_two_enablement",
         "first_blocker": blockers[0] if blockers else None,
         "blockers": blockers,

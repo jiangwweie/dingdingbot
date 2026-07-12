@@ -125,6 +125,11 @@ fact is refreshed and required by phase-two enablement after the release
 switch. The mode does not enable capability, authorize exchange mutation,
 bypass phase-two certification, or weaken any active-risk blocker.
 
+The verifier keeps one success status, `phase_two_ready`, and exposes
+`mode=deploy_quiescence|phase_two_enablement` as an orthogonal field. Process
+success is derived from an empty blocker set, not from a second mode-specific
+success enum.
+
 If quiesce or migration fails before the symlink switch, deployment must restore
 the prior enabled/disabled capability state and restart the previous release's
 allowed services. If phase-two recertification fails after the switch, the new
