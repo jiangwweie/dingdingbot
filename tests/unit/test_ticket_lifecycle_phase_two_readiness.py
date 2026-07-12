@@ -65,31 +65,18 @@ def test_phase_two_rejects_enabled_capability_or_missing_account_truth(
     assert "phase_two_safe_account_mode_count:0" in payload["blockers"]
 
 
-def test_pre_switch_readiness_accepts_existing_enabled_capability_only_when_explicit(
+def test_deploy_quiescence_ignores_expired_account_mode_but_not_live_risk(
     pg_control_connection,
 ):
-    pg_control_connection.execute(
-        text(
-            "INSERT INTO brc_exchange_account_modes_current ("
-            "account_mode_current_id, account_id, exchange_id, runtime_profile_id, "
-            "position_mode, dual_side_position, position_mode_safe, status, "
-            "fact_snapshot_id, source_kind, source_ref, observed_at_ms, "
-            "valid_until_ms, updated_at_ms) VALUES ("
-            "'mode-current-pre-switch', 'account-1', 'binance_usdm', 'profile-1', "
-            "'one_way', 0, 1, 'current', 'fact-pre-switch', 'signed_get', "
-            "'unit:/positionSide/dual', :now_ms, :valid_until_ms, :now_ms)"
-        ),
-        {"now_ms": NOW_MS, "valid_until_ms": NOW_MS + 60_000},
-    )
-
     payload = evaluate_phase_two_readiness(
         pg_control_connection,
         now_ms=NOW_MS + 1_000,
-        allow_capability_enabled=True,
+        deploy_quiescence=True,
     )
 
-    assert payload["status"] == "phase_two_ready"
+    assert payload["status"] == "deploy_quiescence_ready"
     assert payload["blockers"] == []
+    assert payload["counts"]["safe_account_mode_count"] == 0
     assert payload["exchange_read_called"] is False
     assert payload["exchange_write_called"] is False
     assert payload["runtime_state_mutated"] is False
@@ -117,7 +104,7 @@ def test_pre_switch_mode_still_rejects_active_lifecycle_risk(pg_control_connecti
     payload = evaluate_phase_two_readiness(
         pg_control_connection,
         now_ms=NOW_MS + 1_000,
-        allow_capability_enabled=True,
+        deploy_quiescence=True,
     )
 
     assert payload["status"] == "blocked"

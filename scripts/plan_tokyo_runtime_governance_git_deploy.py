@@ -521,7 +521,6 @@ def _plan_phases(
             "remote_mutation": False,
             "commands": [_ssh(host, pre_switch_lifecycle_safety_command)],
             "stop_if": [
-                "current account-mode truth is not exactly one fresh safe account",
                 "an active real lifecycle, unknown command, or domain hold exists",
                 "an unprotected real attempt exists",
             ],
@@ -869,7 +868,7 @@ def ticket_lifecycle_pre_switch_readiness_command(
         f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
         f"PYTHONPATH=$PWD {q(venv_python)} "
         "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
-        "--require-database-url --allow-capability-enabled --json"
+        "--require-database-url --deploy-quiescence --json"
     )
 
 
@@ -904,7 +903,7 @@ def ticket_lifecycle_quiesce_and_migrate_command(
     quiesced_readiness = (
         f"PYTHONPATH=$PWD {q(venv_python)} "
         "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
-        "--require-database-url --allow-capability-enabled --json"
+        "--require-database-url --deploy-quiescence --json"
     )
     capability_restore = (
         f"PYTHONPATH=$PWD {q(venv_python)} "

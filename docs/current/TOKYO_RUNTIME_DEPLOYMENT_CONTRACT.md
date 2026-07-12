@@ -119,9 +119,11 @@ target release exported
 -> restore timers
 ```
 
-`--allow-capability-enabled` is valid only for the read-only pre-switch and
-post-stop safety checks. It does not enable capability, authorize exchange
-mutation, bypass phase-two certification, or weaken any active-risk blocker.
+`--deploy-quiescence` is valid only for the read-only pre-switch and post-stop
+safety checks. It deliberately does not certify account-mode freshness; that
+fact is refreshed and required by phase-two enablement after the release
+switch. The mode does not enable capability, authorize exchange mutation,
+bypass phase-two certification, or weaken any active-risk blocker.
 
 If quiesce or migration fails before the symlink switch, deployment must restore
 the prior enabled/disabled capability state and restart the previous release's

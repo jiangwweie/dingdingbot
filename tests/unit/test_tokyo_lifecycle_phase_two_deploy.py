@@ -52,12 +52,12 @@ def test_repeat_deploy_checks_enabled_capability_before_quiescing_it():
     )
 
     assert "verify_ticket_lifecycle_phase_two_readiness.py" in pre_switch
-    assert "--allow-capability-enabled" in pre_switch
+    assert "--deploy-quiescence" in pre_switch
     assert "set_ticket_lifecycle_mutation_capability.py --disable" not in pre_switch
     assert "set_ticket_lifecycle_mutation_capability.py --enable" not in pre_switch
     assert "rollback_quiesce" in quiesce
     assert "CAPABILITY_WAS_ENABLED" in quiesce
-    assert "--allow-capability-enabled" in quiesce
+    assert "--deploy-quiescence" in quiesce
     assert "set_ticket_lifecycle_mutation_capability.py --disable" in quiesce
     assert "set_ticket_lifecycle_mutation_capability.py --enable" in quiesce
     assert "deploy-quiesce:abc123" in quiesce

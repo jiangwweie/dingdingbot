@@ -343,7 +343,7 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
     assert "timeout 60 sudo -n systemctl stop brc-owner-console-backend.service" in (
         quiesce_command
     )
-    assert "--allow-capability-enabled" in pre_switch_command
+    assert "--deploy-quiescence" in pre_switch_command
     assert "set_ticket_lifecycle_mutation_capability.py --disable" in quiesce_command
     assert phases.index(
         next(phase for phase in phases if phase["phase"] == "2b_pre_switch_lifecycle_safety")

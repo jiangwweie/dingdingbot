@@ -42,17 +42,17 @@ def evaluate_phase_two_readiness(
     conn: sa.engine.Connection,
     *,
     now_ms: int,
-    allow_capability_enabled: bool = False,
+    deploy_quiescence: bool = False,
 ) -> dict[str, Any]:
     inspector = sa.inspect(conn)
     blockers: list[str] = []
     missing = sorted(REQUIRED_TABLES - set(inspector.get_table_names()))
     blockers.extend(f"phase_two_required_table_missing:{name}" for name in missing)
     if missing:
-        return _result(blockers, {})
+        return _result(blockers, {}, deploy_quiescence=deploy_quiescence)
 
     capability = lifecycle_mutation_capability_decision(conn)
-    if capability.get("enabled") is True and not allow_capability_enabled:
+    if capability.get("enabled") is True and not deploy_quiescence:
         blockers.append("phase_two_capability_already_enabled")
     blockers.extend(
         blocker
@@ -71,7 +71,7 @@ def evaluate_phase_two_readiness(
         """,
         now_ms=now_ms,
     )
-    if safe_modes != 1:
+    if safe_modes != 1 and not deploy_quiescence:
         blockers.append(f"phase_two_safe_account_mode_count:{safe_modes}")
 
     counts = {
@@ -115,7 +115,11 @@ def evaluate_phase_two_readiness(
     for name, count in counts.items():
         if count:
             blockers.append(f"phase_two_{name}:{count}")
-    return _result(blockers, {"safe_account_mode_count": safe_modes, **counts})
+    return _result(
+        blockers,
+        {"safe_account_mode_count": safe_modes, **counts},
+        deploy_quiescence=deploy_quiescence,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -124,11 +128,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--now-ms", type=int, default=None)
     parser.add_argument(
-        "--allow-capability-enabled",
+        "--deploy-quiescence",
         action="store_true",
         help=(
-            "Read-only pre-switch safety mode: accept an already-enabled "
-            "capability while still rejecting active lifecycle risk."
+            "Read-only deploy gate: ignore capability/account-mode enablement "
+            "preconditions while still rejecting active lifecycle risk."
         ),
     )
     parser.add_argument("--json", action="store_true")
@@ -146,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = evaluate_phase_two_readiness(
                 conn,
                 now_ms=int(args.now_ms or time.time() * 1000),
-                allow_capability_enabled=args.allow_capability_enabled,
+                deploy_quiescence=args.deploy_quiescence,
             )
     except sa.exc.SQLAlchemyError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -161,10 +165,19 @@ def _count(conn: sa.engine.Connection, statement: str, **params: Any) -> int:
     return int(conn.execute(sa.text(statement), params).scalar_one())
 
 
-def _result(blockers: list[str], counts: dict[str, int]) -> dict[str, Any]:
+def _result(
+    blockers: list[str],
+    counts: dict[str, int],
+    *,
+    deploy_quiescence: bool,
+) -> dict[str, Any]:
+    ready_status = (
+        "deploy_quiescence_ready" if deploy_quiescence else "phase_two_ready"
+    )
     return {
         "schema": "brc.ticket_lifecycle_phase_two_readiness.v1",
-        "status": "phase_two_ready" if not blockers else "blocked",
+        "status": ready_status if not blockers else "blocked",
+        "mode": "deploy_quiescence" if deploy_quiescence else "phase_two_enablement",
         "first_blocker": blockers[0] if blockers else None,
         "blockers": blockers,
         "counts": counts,
