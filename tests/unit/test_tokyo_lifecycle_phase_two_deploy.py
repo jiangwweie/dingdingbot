@@ -14,6 +14,7 @@ def test_postdeploy_action_time_capability_runs_matrix_before_pg_certification_a
         env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
         venv_python="/home/ubuntu/brc-deploy/venvs/runtime/bin/python",
         runtime_head="a" * 40,
+        release_name="brc-runtime-governance-test",
     )
 
     matrix = (
@@ -22,13 +23,14 @@ def test_postdeploy_action_time_capability_runs_matrix_before_pg_certification_a
     )
     assert matrix in command
     assert "timeout 300" in command
-    assert "systemctl start brc-runtime-monitor.service" in command
+    assert "scripts/record_runtime_release_activation.py" in command
+    assert "--release-name brc-runtime-governance-test" in command
     assert "scripts/certify_action_time_capability.py" in command
     assert "--runtime-head " + "a" * 40 in command
     assert "--certification-ref tokyo-release:" + "a" * 40 in command
     assert "scripts/publish_runtime_control_current_projections.py --json" in command
     assert command.index(matrix) < command.index(
-        "systemctl start brc-runtime-monitor.service"
+        "scripts/record_runtime_release_activation.py"
     ) < command.index("scripts/certify_action_time_capability.py") < command.index(
         "scripts/publish_runtime_control_current_projections.py"
     )

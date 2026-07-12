@@ -4,6 +4,7 @@ from sqlalchemy import text
 
 from src.application.action_time.capability_certification import (
     certify_action_time_capabilities,
+    record_runtime_release_activation,
 )
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
@@ -12,6 +13,47 @@ from tests.unit.test_action_time_full_chain_impact import pg_control_connection
 
 
 RUNTIME_HEAD = "c" * 40
+
+
+def test_deploy_projector_records_one_current_release_activation_without_trade_effects(
+    pg_control_connection,
+) -> None:
+    before = {
+        table: _count(pg_control_connection, table)
+        for table in (
+            "brc_live_signal_events",
+            "brc_action_time_tickets",
+            "brc_ticket_bound_exchange_commands",
+        )
+    }
+
+    result = record_runtime_release_activation(
+        pg_control_connection,
+        runtime_head=RUNTIME_HEAD,
+        release_name="brc-runtime-governance-test",
+        verification_ref="postdeploy:passed",
+        now_ms=1_800_000_000_050,
+    )
+
+    assert result["status"] == "runtime_release_activation_completed"
+    assert result["runtime_head"] == RUNTIME_HEAD
+    assert result["exchange_write_called"] is False
+    row = pg_control_connection.execute(
+        text(
+            "SELECT process_name, scope_key, process_state, runtime_head, "
+            "projector_owner FROM brc_runtime_process_outcomes"
+        )
+    ).mappings().one()
+    assert dict(row) == {
+        "process_name": "runtime_release_activation",
+        "scope_key": "production:tokyo",
+        "process_state": "succeeded",
+        "runtime_head": RUNTIME_HEAD,
+        "projector_owner": "runtime_process_outcome_projector",
+    }
+    assert before == {
+        table: _count(pg_control_connection, table) for table in before
+    }
 
 
 def _count(conn, table: str) -> int:

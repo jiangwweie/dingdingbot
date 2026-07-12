@@ -1,6 +1,6 @@
 ---
 title: P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_DESIGN
-status: APPROVED_FOR_IMPLEMENTATION
+status: IMPLEMENTED_PENDING_PRODUCTION_ACCEPTANCE
 authority: docs/current/P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_DESIGN.md
 last_verified: 2026-07-12
 ---
@@ -107,9 +107,12 @@ certification_ref
 source_watermark
 ```
 
-Certification is current only when the latest successful server-monitor
-runtime head and every bound identity still match. A missing or stale
-certification produces `action_time_boundary_not_reproduced`.
+Certification is current only when the latest successful
+`runtime_release_activation` outcome and every bound identity still match. The
+deployment projector owns this release fact after exact-head postdeploy
+verification; Server Monitor remains the owner of runtime health and
+notification facts. A missing or stale certification produces
+`action_time_boundary_not_reproduced`.
 
 ## Certification Workflow
 
@@ -117,6 +120,7 @@ certification produces `action_time_boundary_not_reproduced`.
 run 22-scope production-shaped disabled-smoke matrix
 -> verify zero exchange write and one Ticket/Runtime Safety path per scope
 -> deploy exact commit
+-> record one verified `runtime_release_activation` PG process outcome
 -> read PG current registry/policy/runtime bindings
 -> write/update 22 release-bound capability process outcomes
 -> republish Candidate Pool, Daily Table, Goal Status
@@ -150,6 +154,7 @@ fresh-signal-absent checks.
 | --- | --- |
 | 22-scope production-shaped matrix fails | No certification write; deploy is not accepted for market-wait classification |
 | Runtime head missing or changed | Certification stale; `action_time_boundary_not_reproduced` |
+| Postdeploy verification does not produce release activation truth | No lane certification write |
 | EventSpec/RequiredFacts/policy/binding changed | Lineage hash mismatch; recertification required |
 | A lane cannot build a complete identity | Exact identity blocker; no partial certification |
 | Projection blockers disagree | Publisher fails closed before replacing current snapshots |
@@ -161,7 +166,7 @@ fresh-signal-absent checks.
 | --- | --- |
 | Certification cadence | Deploy/postdeploy or bound identity version change only |
 | No-signal cadence | Pure bounded read of at most 22 current certification rows |
-| PG growth | One upserted process-outcome row per active lane; no per-tick growth |
+| PG growth | One release-activation row plus one upserted process-outcome row per active lane; no per-tick growth |
 | Files | Zero JSON/MD/report writes |
 | CPU-heavy work | 22-scope matrix is explicit deploy/test work, never watcher cadence |
 | Network | No exchange call; database calls remain transaction-bounded |
@@ -188,10 +193,10 @@ fresh-signal-absent checks.
 chain_position: action_time_boundary
 strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
 symbol: 22 active candidate scopes
-stage: test_proven_but_not_release_certified
+stage: implementation_complete_production_acceptance_pending
 first_blocker: action_time_boundary_not_reproduced
-evidence: 22-scope matrix passes locally while PG/current has no release-bound capability certification and current projections disagree
-next_action: implement release-bound certification plus shared projection truth
+evidence: local full suite and focused projection tests pass; Tokyo 22-scope matrix passes; production PG certification remains fail-closed until the deployment projector records exact-head release activation truth
+next_action: deploy the corrected release-activation projector, certify 22 lanes, and verify projection conservation
 stop_condition: 22 current lanes are certified for the deployed head and all current projections conserve one blocker
 owner_action_required: no
 authority_boundary: no strategy/policy/risk/scope/FinalGate/Operation Layer/exchange-write expansion

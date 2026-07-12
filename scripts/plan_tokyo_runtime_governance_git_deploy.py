@@ -460,6 +460,7 @@ def _plan_phases(
         env_path=env_path,
         venv_python=venv_python,
         runtime_head=target_commit,
+        release_name=release_name,
     )
 
     return [
@@ -899,6 +900,7 @@ def action_time_capability_certification_command(
     env_path: str,
     venv_python: str,
     runtime_head: str,
+    release_name: str,
 ) -> str:
     """Build the bounded postdeploy matrix -> PG certification sequence."""
 
@@ -913,7 +915,11 @@ def action_time_capability_certification_command(
         "set -eu; "
         f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
         f"PYTHONPATH=$PWD timeout 300 {q(venv_python)} -m pytest -q {q(test_node)}; "
-        "timeout 60 sudo systemctl start brc-runtime-monitor.service; "
+        f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
+        "scripts/record_runtime_release_activation.py "
+        f"--runtime-head {q(runtime_head)} "
+        f"--release-name {q(release_name)} "
+        f"--verification-ref {q('postdeploy-accepted:' + runtime_head)}; "
         f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
         "scripts/certify_action_time_capability.py "
         f"--runtime-head {q(runtime_head)} "

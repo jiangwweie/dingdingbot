@@ -1,6 +1,6 @@
 ---
 title: P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_IMPLEMENTATION_PLAN
-status: APPROVED_FOR_IMPLEMENTATION
+status: IMPLEMENTED_PENDING_PRODUCTION_ACCEPTANCE
 authority: docs/current/P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-12
 ---
@@ -11,7 +11,7 @@ last_verified: 2026-07-12
 
 **Goal:** Bind the production-shaped Action-Time capability to the deployed release and current PG lane identity, then make all current projections conserve one first blocker.
 
-**Architecture:** Reuse `brc_runtime_process_outcomes` for one release-bound certification row per lane. One pure application reducer computes identity/currentness and is consumed by Candidate Pool, Tradeability, Daily Table, Goal Status, projection publishing, and Server Monitor.
+**Architecture:** Reuse `brc_runtime_process_outcomes` for one deployment-owned release-activation row and one release-bound certification row per lane. One pure application reducer computes identity/currentness and is consumed by Candidate Pool, Tradeability, Daily Table, Goal Status, projection publishing, and Server Monitor.
 
 **Tech Stack:** Python 3.10+, Pydantic v2, `decimal.Decimal`, SQLAlchemy 2, PostgreSQL, pytest.
 
@@ -43,10 +43,11 @@ last_verified: 2026-07-12
 **Files:**
 - Modify: `src/application/action_time/capability_certification.py`
 - Create: `scripts/certify_action_time_capability.py`
+- Create: `scripts/record_runtime_release_activation.py`
 - Create: `tests/unit/test_certify_action_time_capability.py`
 
 **Interfaces:**
-- Produces: one `action_time_capability_certification` process outcome per active lane.
+- Produces: one `runtime_release_activation` outcome after exact-head postdeploy acceptance, then one `action_time_capability_certification` process outcome per active lane.
 - Requires: exact `runtime_head`, non-empty `certification_ref`, and complete current identities.
 
 - [ ] Write failing tests proving 22 bounded upserts, exact runtime head/watermark, atomic rollback, and forbidden-effect flags.

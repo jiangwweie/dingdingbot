@@ -9,6 +9,7 @@ from src.application.action_time.capability_certification import (
     ActionTimeCapabilityIdentityError,
     build_action_time_capability_identities,
     current_action_time_capability_truth_by_lane,
+    current_runtime_head,
 )
 
 
@@ -196,3 +197,21 @@ def test_incomplete_lane_identity_is_rejected_instead_of_partially_certified() -
         match="runtime_scope_binding_missing",
     ):
         build_action_time_capability_identities(state)
+
+
+def test_current_runtime_head_comes_from_deployment_release_activation_truth() -> None:
+    state = _control_state()
+    state["server_monitor_runs"] = [
+        {"runtime_head": None, "created_at_ms": 1_800_000_000_200}
+    ]
+    state["runtime_process_outcomes"] = [
+        {
+            "process_name": "runtime_release_activation",
+            "scope_key": "production:tokyo",
+            "process_state": "succeeded",
+            "runtime_head": RUNTIME_HEAD,
+            "updated_at_ms": 1_800_000_000_100,
+        }
+    ]
+
+    assert current_runtime_head(state) == RUNTIME_HEAD

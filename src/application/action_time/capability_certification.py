@@ -16,6 +16,8 @@ from src.application.runtime_process_outcome import (
 
 
 PROCESS_NAME = "action_time_capability_certification"
+RELEASE_ACTIVATION_PROCESS_NAME = "runtime_release_activation"
+RELEASE_ACTIVATION_SCOPE_KEY = "production:tokyo"
 FIRST_BLOCKER = "action_time_boundary_not_reproduced"
 
 
@@ -67,6 +69,64 @@ class ActionTimeCapabilityTruth(CapabilityModel):
     reason: str
     certification_ref: str = ""
     certified_runtime_head: str = ""
+
+
+def record_runtime_release_activation(
+    conn: sa.engine.Connection,
+    *,
+    runtime_head: str,
+    release_name: str,
+    verification_ref: str,
+    now_ms: int,
+) -> dict[str, Any]:
+    """Project an exact postdeploy-verified release into bounded PG truth."""
+
+    runtime_head = str(runtime_head or "").strip()
+    release_name = str(release_name or "").strip()
+    verification_ref = str(verification_ref or "").strip()
+    if not runtime_head or not release_name or not verification_ref:
+        return {
+            "status": "blocked",
+            "first_blocker": "release_activation_identity_incomplete",
+            "runtime_head": runtime_head,
+            "exchange_write_called": False,
+        }
+    identity = json.dumps(
+        {
+            "release_name": release_name,
+            "runtime_head": runtime_head,
+            "verification_ref": verification_ref,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    watermark = "runtime_release_activation:" + sha256(
+        identity.encode("utf-8")
+    ).hexdigest()
+    with conn.begin_nested():
+        materialize_runtime_process_outcome(
+            conn,
+            process_name=RELEASE_ACTIVATION_PROCESS_NAME,
+            scope_key=RELEASE_ACTIVATION_SCOPE_KEY,
+            run_id=f"release:{release_name}",
+            result_status="runtime_release_activation_completed",
+            blockers=[],
+            started_at_ms=now_ms,
+            completed_at_ms=now_ms,
+            runtime_head=runtime_head,
+            source_watermark=watermark,
+        )
+    return {
+        "status": "runtime_release_activation_completed",
+        "first_blocker": None,
+        "runtime_head": runtime_head,
+        "release_name": release_name,
+        "signal_created": False,
+        "ticket_created": False,
+        "exchange_write_called": False,
+        "order_created": False,
+        "runtime_authority_created": False,
+    }
 
 
 def certify_action_time_capabilities(
@@ -403,6 +463,20 @@ def _current_runtime_head(control_state: Mapping[str, Any]) -> str:
     explicit = str(control_state.get("current_runtime_head") or "").strip()
     if explicit:
         return explicit
+    activation_rows = sorted(
+        (
+            row
+            for row in _rows(control_state.get("runtime_process_outcomes"))
+            if row.get("process_name") == RELEASE_ACTIVATION_PROCESS_NAME
+            and row.get("scope_key") == RELEASE_ACTIVATION_SCOPE_KEY
+            and row.get("process_state") == "succeeded"
+            and str(row.get("runtime_head") or "").strip()
+        ),
+        key=lambda row: int(row.get("updated_at_ms") or 0),
+        reverse=True,
+    )
+    if activation_rows:
+        return str(activation_rows[0].get("runtime_head") or "")
     monitor_rows = sorted(
         (
             row
