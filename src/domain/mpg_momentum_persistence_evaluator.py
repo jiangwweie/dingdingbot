@@ -361,8 +361,44 @@ class MPG001MomentumPersistenceEvaluator:
             data_quality=signal_input.input_quality,
             evidence_payload=evidence_payload,
             review_required=False,
-            fact_observations=fact_observations or [],
+            fact_observations=(
+                fact_observations
+                if fact_observations is not None
+                else self._known_no_action_fact_observations(
+                    signal_input,
+                    evidence_payload,
+                )
+            ),
         )
+
+    def _known_no_action_fact_observations(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        evidence: dict[str, Any],
+    ) -> list[StrategyFactObservation]:
+        trigger_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+        structure = dict(evidence.get("price_action_structure") or {})
+        floor_reference = Decimal(str(structure.get("momentum_floor_reference") or "0"))
+        if trigger_ms <= 0 or floor_reference <= 0:
+            return []
+        source_ref = f"closed_ohlcv:{signal_input.symbol}:{trigger_ms}:mpg-v1"
+        valid_until_ms = trigger_ms + 3_600_000
+        return [
+            StrategyFactObservation(
+                fact_key="momentum_persistence_confirmed",
+                observed_value=bool(structure.get("momentum_persistence")),
+                observed_at_ms=trigger_ms,
+                valid_until_ms=valid_until_ms,
+                source_ref=source_ref,
+            ),
+            StrategyFactObservation(
+                fact_key="momentum_floor_reference",
+                observed_value=floor_reference,
+                observed_at_ms=trigger_ms,
+                valid_until_ms=valid_until_ms,
+                source_ref=source_ref,
+            ),
+        ]
 
     def _would_enter(
         self,

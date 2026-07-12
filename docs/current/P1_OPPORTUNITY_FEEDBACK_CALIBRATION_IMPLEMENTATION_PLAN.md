@@ -1,6 +1,6 @@
 ---
 title: P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN
-status: COMPLETED_LOCAL
+status: IN_PROGRESS_DEPLOYMENT_AND_HISTORICAL_CALIBRATION
 authority: docs/current/P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-12
 ---
@@ -137,6 +137,52 @@ pytest.
   `performance_risk.status=clear`.
 - [x] Run `git diff --check`.
 - [x] Run the full pytest suite and require zero failures.
+
+## Task 7: Event-Side Projection And No-Action Fact Observability
+
+**Files:**
+
+- Modify: `src/application/opportunity_feedback_calibration_service.py`
+- Modify: current production evaluator modules only where required to expose
+  already-computed facts
+- Test: `tests/unit/test_opportunity_feedback_calibration_service.py`
+- Test: focused evaluator tests
+
+- [x] Write failing tests proving opposite-side output cannot abort or become
+  the selected Event Spec signal.
+- [x] Write failing tests proving valid `NO_ACTION` outputs expose known false
+  Event Spec facts without changing signal semantics.
+- [x] Implement event-side projection and evaluator fact observability.
+- [x] Run focused evaluator and OFC adapter regression tests.
+
+## Task 8: Manual PG-Owned Historical Replay Lab
+
+**Files:**
+
+- Create: `src/application/opportunity_feedback_historical_replay.py`
+- Create: `src/infrastructure/binance_usdm_historical_candle_source.py`
+- Create: `scripts/run_opportunity_feedback_historical_calibration.py`
+- Test: `tests/unit/test_opportunity_feedback_historical_replay.py`
+- Test: `tests/unit/test_run_opportunity_feedback_historical_calibration.py`
+
+- [x] Write failing tests for PG scope loading, 1h/4h alignment, SOR UTC
+  session windows, MPG/MI comparative universes, 90/365 aggregation, and zero
+  runtime authority/file writes.
+- [x] Implement bounded public-candle pagination and typed in-memory replay.
+- [x] Keep the command manual, stdout-only, timeout-bounded, and read-only.
+- [ ] Run all 22 current scopes and retain only terminal stdout evidence.
+
+## Task 9: Push, Tokyo Deploy, Migration 116, And Watcher Acceptance
+
+- [ ] Re-run focused tests, full regression, authority validators, and file-I/O
+  performance audit.
+- [ ] Push the exact focused branch and build a commit-bound deploy plan.
+- [ ] Require no active real lifecycle, critical command, domain hold, or
+  unprotected real attempt before release switch.
+- [ ] Deploy the exact commit, apply migration 116, recertify lifecycle
+  mutation, and complete readonly postdeploy acceptance.
+- [ ] Confirm the Tokyo watcher and monitor timers remain active and inspect PG
+  current signal/Ticket state; a natural signal preempts Replay work.
 
 ## Done When
 

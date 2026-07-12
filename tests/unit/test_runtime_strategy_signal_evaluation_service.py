@@ -125,6 +125,13 @@ def _mpg_flat_1h() -> list[dict[str, Any]]:
     ]
 
 
+def _flat_candles(count: int) -> list[dict[str, Any]]:
+    return [
+        _candle(index, "100", "101", "99", "100")
+        for index in range(count)
+    ]
+
+
 def _mi_impulse_1h() -> list[dict[str, Any]]:
     candles: list[dict[str, Any]] = []
     for index in range(14):
@@ -432,6 +439,24 @@ def test_cpm_ro_long_emits_trial_grade_observed_facts():
     assert Decimal(str(facts["pullback_low_reference"])) > 0
 
 
+def test_cpm_ro_no_action_exposes_known_event_facts() -> None:
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            one_hour=_flat_candles(21),
+            four_hour=_flat_candles(21),
+        )
+    )
+
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.NO_ACTION
+    facts = {item.fact_key: item.observed_value for item in result.output.fact_observations}
+    assert facts["htf_trend_intact"] is False
+    assert facts["reclaim_confirmed"] is False
+    assert Decimal(str(facts["pullback_low_reference"])) > 0
+
+
 def test_mpg_momentum_persistence_route_ready_for_semantic_binding():
     result = RuntimeStrategySignalEvaluationService().evaluate(
         _signal_input(
@@ -547,6 +572,8 @@ def test_mpg_momentum_persistence_no_action_stays_observe_only():
     assert result.output is not None
     assert result.output.signal_type == SignalType.NO_ACTION
     assert result.output.side == SignalSide.NONE
+    facts = {item.fact_key: item.observed_value for item in result.output.fact_observations}
+    assert facts["momentum_persistence_confirmed"] is False
     assert result.can_call_semantic_binding is False
     assert result.order_candidate_created is False
     assert result.exchange_called is False
@@ -611,6 +638,29 @@ def test_sor_runtime_evaluator_emits_side_specific_trial_event_facts(
     assert facts["opening_range_defined"] is True
     assert facts[event_fact] is True
     assert Decimal(str(facts[protection_fact])) > 0
+
+
+def test_sor_no_action_exposes_both_event_side_false_facts() -> None:
+    opening = _sor_session_15m(side="long")[:4]
+    flat_trigger = _candle(4, "100", "101", "99", "100")
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="SOR-001",
+            version_id="SOR-001-v0",
+            one_hour=[*opening, flat_trigger],
+            four_hour=None,
+            primary_timeframe="15m",
+        )
+    )
+
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.NO_ACTION
+    facts = {item.fact_key: item.observed_value for item in result.output.fact_observations}
+    assert facts["opening_range_defined"] is True
+    assert facts["breakout_confirmed"] is False
+    assert facts["breakdown_confirmed"] is False
+    assert Decimal(str(facts["opening_range_low_reference"])) > 0
+    assert Decimal(str(facts["opening_range_high_reference"])) > 0
 
 
 def test_mainline_mi_and_brf2_routes_are_configured_and_non_executing():
@@ -713,6 +763,43 @@ def test_mi_computed_non_leader_is_market_no_action():
     assert result.output.signal_type == SignalType.NO_ACTION
     assert "mi001_no_action_relative_strength_not_confirmed" in result.output.reason_codes
     assert result.output.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
+
+
+def test_mi_below_threshold_exposes_false_impulse_fact() -> None:
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="MI-001",
+            version_id="MI-001-v0",
+            one_hour=_flat_candles(14),
+        )
+    )
+
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.NO_ACTION
+    facts = {item.fact_key: item.observed_value for item in result.output.fact_observations}
+    assert facts["impulse_confirmed"] is False
+    assert Decimal(str(facts["impulse_invalidation_reference"])) > 0
+
+
+def test_brf2_no_action_exposes_short_event_facts() -> None:
+    no_rejection = _bear_rally_failure_1h()
+    no_rejection[-1] = _candle(11, "111", "113", "110", "112")
+    result = RuntimeStrategySignalEvaluationService().evaluate(
+        _signal_input(
+            family_id="BRF2-001",
+            version_id="BRF2-001-v0",
+            one_hour=no_rejection,
+            four_hour=_down_context_4h(),
+        )
+    )
+
+    assert result.output is not None
+    assert result.output.signal_type == SignalType.NO_ACTION
+    facts = {item.fact_key: item.observed_value for item in result.output.fact_observations}
+    assert facts["rally_failure_confirmed"] is False
+    assert facts["short_side_not_disabled"] is True
+    assert facts["strong_uptrend_disable"] is False
+    assert Decimal(str(facts["rally_high_reference"])) > 0
 
 
 def test_mi_rejects_comparative_return_mismatch_as_invalid_input():

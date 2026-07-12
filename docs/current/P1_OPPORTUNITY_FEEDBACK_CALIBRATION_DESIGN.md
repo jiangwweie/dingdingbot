@@ -1,6 +1,6 @@
 ---
 title: P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN
-status: IMPLEMENTED_LOCAL
+status: IN_PROGRESS_DEPLOYMENT_AND_HISTORICAL_CALIBRATION
 authority: docs/current/P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN.md
 last_verified: 2026-07-12
 ---
@@ -129,9 +129,10 @@ fact_results
 failed_facts
 ```
 
-The core produces 90-day and 365-day counts, normalized observations per 30
-days, top failed facts, missing replay/live counterparts, result/fact parity
-mismatches, one bounded next action, and a non-authority proposal.
+The core produces 90-day and 365-day counts, normalized observations, signals,
+and near misses per 30 days, top failed facts, missing replay/live counterparts,
+result/fact parity mismatches, one bounded next action, and a non-authority
+proposal.
 
 The module is deterministic, uses `Decimal`, performs no I/O, and rejects any
 payload that claims order or execution authority.
@@ -183,6 +184,30 @@ realized_pnl - fees + funding
 Funding follows the exchange signed-income convention, so funding paid is
 negative and funding received is positive.
 
+### 5. Historical Replay Lab
+
+Historical calibration runs only as a manual, explicit lab. It reads current
+Event Spec and candidate-scope identity from PG, fetches Binance USD-M public
+closed candles, builds the same typed `StrategyFamilySignalInput` consumed by
+production evaluators, and emits one stdout result. It does not write replay
+rows, JSON/Markdown reports, live signals, candidate state, Tickets, policy, or
+execution authority.
+
+The lab evaluates all current 22 candidate scopes over 90-day and 365-day
+windows. One-hour strategies use aligned 1h/4h windows. MPG and MI compute
+comparative-strength snapshots from the complete PG-owned symbol universe.
+SOR uses each UTC session's first four closed 15m candles as its opening range.
+
+Multi-side evaluators are projected through the selected Event Spec. A signal
+for the opposite side is not accepted as the selected event and does not abort
+the replay. The observation records `event_side_matched=false` and remains
+non-authoritative.
+
+Production evaluators must emit known false facts on `NO_ACTION`, not only true
+facts on `WOULD_ENTER`. This is observability-only: fact emission must not
+change thresholds, signal type, side, grade, required execution mode, scope, or
+authority.
+
 ## Data And Authority Flow
 
 ```text
@@ -215,6 +240,7 @@ real Ticket
 | PG writes | No per-candle calibration writes; current live runtime rows remain unchanged |
 | CPU | Historical evaluation runs outside watcher cadence |
 | Exchange reads | Funding is fetched only for an existing real submitted Ticket during settlement/finalization |
+| Historical market reads | Manual Replay Lab uses public Binance USD-M closed candles only; never watcher cadence |
 | Timeout | All exchange reads remain under the existing bounded snapshot timeout |
 | Disk | No recurring report or sidecar files |
 | Retention | Real outcome rows retained; replay raw material remains research-side provenance |
@@ -243,6 +269,9 @@ real Ticket
 - 90-day and 365-day windows are deterministic;
 - proposal types never mutate authority;
 - forbidden execution fields are rejected.
+- opposite-side evaluator output is projected without becoming the selected Event Spec signal;
+- production `NO_ACTION` outputs retain each known false required fact;
+- a 22-scope historical lab run creates no PG rows and no JSON/Markdown files.
 
 ### Outcome Economics
 

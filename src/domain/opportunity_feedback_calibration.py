@@ -108,6 +108,8 @@ class OpportunitySourceSummary(CalibrationModel):
     no_signal_count: int = Field(ge=0)
     invalid_count: int = Field(ge=0)
     observations_per_30_days: Decimal = Field(ge=Decimal("0"))
+    signals_per_30_days: Decimal = Field(ge=Decimal("0"))
+    near_misses_per_30_days: Decimal = Field(ge=Decimal("0"))
     failed_fact_counts: dict[str, int] = Field(default_factory=dict)
 
 
@@ -229,21 +231,22 @@ def _source_summary(
     failed_facts: Counter[str] = Counter()
     for item in selected:
         failed_facts.update(item.failed_facts)
-    rate = (
-        (Decimal(len(selected)) * Decimal("30") / Decimal(window_days)).quantize(
+    def rate(count: int) -> Decimal:
+        if count <= 0:
+            return Decimal("0")
+        return (Decimal(count) * Decimal("30") / Decimal(window_days)).quantize(
             _RATE_QUANTUM,
             rounding=ROUND_HALF_UP,
         )
-        if selected
-        else Decimal("0")
-    )
     return OpportunitySourceSummary(
         total_evaluations=len(selected),
         signal_count=result_counts[OpportunityResult.SIGNAL],
         near_miss_count=result_counts[OpportunityResult.NEAR_MISS],
         no_signal_count=result_counts[OpportunityResult.NO_SIGNAL],
         invalid_count=result_counts[OpportunityResult.INVALID],
-        observations_per_30_days=rate,
+        observations_per_30_days=rate(len(selected)),
+        signals_per_30_days=rate(result_counts[OpportunityResult.SIGNAL]),
+        near_misses_per_30_days=rate(result_counts[OpportunityResult.NEAR_MISS]),
         failed_fact_counts=dict(sorted(failed_facts.items())),
     )
 

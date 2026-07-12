@@ -339,6 +339,9 @@ class _MI001RuntimeReferenceEvaluator:
             "closed_candle_count": len(candles),
         }
         if impulse_return_pct < self._return_threshold_pct:
+            trigger_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+            valid_until_ms = trigger_ms + 3_600_000
+            source_ref = f"closed_ohlcv:{signal_input.symbol}:{trigger_ms}:mi-v1"
             return self._output(
                 signal_input,
                 signal_type=SignalType.NO_ACTION,
@@ -351,6 +354,22 @@ class _MI001RuntimeReferenceEvaluator:
                 ),
                 evidence_payload=evidence,
                 review_required=False,
+                fact_observations=[
+                    StrategyFactObservation(
+                        fact_key="impulse_confirmed",
+                        observed_value=False,
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                    StrategyFactObservation(
+                        fact_key="impulse_invalidation_reference",
+                        observed_value=lookback["close"],
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                ],
             )
 
         comparative = signal_input.comparative_strength_snapshot
@@ -593,6 +612,50 @@ class _BRF2LiveReferenceEvaluator:
                 "reference_logic_version": output.signal_snapshot.get("logic_version"),
             },
         )
+        if retargeted.signal_type == SignalType.NO_ACTION:
+            htf_context = retargeted.evidence_payload.get("htf_context")
+            price_action = retargeted.evidence_payload.get("price_action_structure")
+            structure = price_action if isinstance(price_action, dict) else {}
+            rally_high = Decimal(str(structure.get("rally_high_reference") or "0"))
+            trigger_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+            if trigger_ms > 0 and rally_high > 0:
+                source_ref = f"closed_ohlcv:{signal_input.symbol}:{trigger_ms}:brf2-v2"
+                valid_until_ms = trigger_ms + 3_600_000
+                retargeted = retargeted.model_copy(
+                    update={
+                        "fact_observations": [
+                            StrategyFactObservation(
+                                fact_key="rally_failure_confirmed",
+                                observed_value=bool(structure.get("bear_rally_failure")),
+                                observed_at_ms=trigger_ms,
+                                valid_until_ms=valid_until_ms,
+                                source_ref=source_ref,
+                            ),
+                            StrategyFactObservation(
+                                fact_key="short_side_not_disabled",
+                                observed_value=htf_context != "strong_uptrend",
+                                observed_at_ms=trigger_ms,
+                                valid_until_ms=valid_until_ms,
+                                source_ref=source_ref,
+                            ),
+                            StrategyFactObservation(
+                                fact_key="strong_uptrend_disable",
+                                observed_value=htf_context == "strong_uptrend",
+                                observed_at_ms=trigger_ms,
+                                valid_until_ms=valid_until_ms,
+                                source_ref=source_ref,
+                            ),
+                            StrategyFactObservation(
+                                fact_key="rally_high_reference",
+                                observed_value=rally_high,
+                                observed_at_ms=trigger_ms,
+                                valid_until_ms=valid_until_ms,
+                                source_ref=source_ref,
+                            ),
+                        ]
+                    },
+                    deep=True,
+                )
         if retargeted.signal_type != SignalType.WOULD_ENTER:
             return retargeted
         if retargeted.side != SignalSide.SHORT:

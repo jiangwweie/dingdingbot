@@ -72,9 +72,13 @@ def test_calibration_aggregates_90_and_365_day_windows_and_near_misses() -> None
     assert by_days[90].replay.near_miss_count == 1
     assert by_days[90].replay.failed_fact_counts == {"reclaim_confirmed": 1}
     assert by_days[90].replay.observations_per_30_days == Decimal("0.333333")
+    assert by_days[90].replay.signals_per_30_days == Decimal("0")
+    assert by_days[90].replay.near_misses_per_30_days == Decimal("0.333333")
     assert by_days[365].replay.total_evaluations == 2
     assert by_days[365].replay.signal_count == 1
     assert by_days[365].replay.near_miss_count == 1
+    assert by_days[365].replay.signals_per_30_days == Decimal("0.082192")
+    assert by_days[365].replay.near_misses_per_30_days == Decimal("0.082192")
     assert result.proposal == CalibrationProposal.KEEP_OBSERVING
 
 

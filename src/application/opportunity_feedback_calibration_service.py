@@ -31,6 +31,8 @@ class EventSpecCalibrationIdentity(BaseModel):
     event_id: str = Field(min_length=1, max_length=128)
     side: Literal["long", "short"]
     timeframe: str = Field(min_length=1, max_length=32)
+    required_fact_keys: tuple[str, ...] = ()
+    disable_fact_keys: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _validate_current_identity(self) -> "EventSpecCalibrationIdentity":
@@ -66,6 +68,8 @@ class EventSpecCalibrationIdentity(BaseModel):
             event_id=str(row.get("event_id") or ""),
             side=str(row.get("side") or ""),
             timeframe=str(row.get("timeframe") or ""),
+            required_fact_keys=tuple(sorted(row.get("required_fact_keys") or ())),
+            disable_fact_keys=tuple(sorted(row.get("disable_fact_keys") or ())),
         )
 
 
@@ -99,20 +103,41 @@ def evaluate_calibration_observation(
     service = evaluator_service or RuntimeStrategySignalEvaluationService()
     evaluated = service.evaluate(signal_input)
     output = evaluated.output
-    fact_results = (
+    raw_fact_results = (
         {item.fact_key: item.observed_value for item in output.fact_observations}
         if output is not None
         else {}
     )
+    event_fact_keys = tuple(
+        dict.fromkeys(
+            (*event_spec.required_fact_keys, *event_spec.disable_fact_keys)
+        )
+    )
+    fact_results = (
+        {key: raw_fact_results.get(key) for key in event_fact_keys}
+        if event_fact_keys
+        else raw_fact_results
+    )
+    output_side = output.side.value if output is not None else "none"
+    event_side_mismatch = (
+        output is not None
+        and output.signal_type == SignalType.WOULD_ENTER
+        and output_side != event_spec.side
+    )
+    if event_side_mismatch:
+        fact_results["event_side_matched"] = False
     failed_facts = sorted(
         key
         for key, value in fact_results.items()
-        if value is False or value is None
+        if _fact_failed(
+            key,
+            value,
+            disable_fact_keys=event_spec.disable_fact_keys,
+        )
     )
     result = _opportunity_result(evaluated, failed_facts=failed_facts)
-    if result == OpportunityResult.SIGNAL and output is not None:
-        if output.side.value != event_spec.side:
-            raise ValueError("event_spec_output_side_mismatch")
+    if event_side_mismatch:
+        result = OpportunityResult.NEAR_MISS
 
     return OpportunityEvaluation(
         strategy_group_id=event_spec.strategy_group_id,
@@ -149,3 +174,14 @@ def _opportunity_result(
     if output.signal_type == SignalType.NO_ACTION:
         return OpportunityResult.NEAR_MISS if failed_facts else OpportunityResult.NO_SIGNAL
     return OpportunityResult.INVALID
+
+
+def _fact_failed(
+    fact_key: str,
+    value: Any,
+    *,
+    disable_fact_keys: tuple[str, ...],
+) -> bool:
+    if fact_key in disable_fact_keys:
+        return value is True or value is None
+    return value is False or value is None

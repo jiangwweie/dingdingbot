@@ -239,7 +239,45 @@ class CPMRO001HistoricalEvaluator:
             data_quality=signal_input.input_quality,
             evidence_payload=evidence,
             review_required=False,
+            fact_observations=self._long_event_fact_observations(
+                signal_input,
+                evidence,
+            ),
         )
+
+    def _long_event_fact_observations(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        evidence: dict[str, Any],
+    ) -> list[StrategyFactObservation]:
+        trigger_time_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+        pullback_low = Decimal(str(evidence.get("lookback_low") or "0"))
+        if trigger_time_ms <= 0 or pullback_low <= 0:
+            return []
+        valid_until_ms = trigger_time_ms + 3_600_000
+        return [
+            StrategyFactObservation(
+                fact_key="htf_trend_intact",
+                observed_value=evidence.get("htf_trend") == "up",
+                observed_at_ms=trigger_time_ms,
+                valid_until_ms=valid_until_ms,
+                source_ref="evaluator:cpm-ro-001-historical-v0:htf_trend",
+            ),
+            StrategyFactObservation(
+                fact_key="reclaim_confirmed",
+                observed_value=bool(evidence.get("long_reclaim_confirmed")),
+                observed_at_ms=trigger_time_ms,
+                valid_until_ms=valid_until_ms,
+                source_ref="evaluator:cpm-ro-001-historical-v0:long_reclaim",
+            ),
+            StrategyFactObservation(
+                fact_key="pullback_low_reference",
+                observed_value=pullback_low,
+                observed_at_ms=trigger_time_ms,
+                valid_until_ms=valid_until_ms,
+                source_ref="evaluator:cpm-ro-001-historical-v0:lookback_low",
+            ),
+        ]
 
     def _would_enter(
         self,

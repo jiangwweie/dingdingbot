@@ -157,6 +157,26 @@ def test_adapter_maps_false_observed_fact_to_near_miss() -> None:
     assert observation.fact_results == {"reclaim_confirmed": False}
 
 
+def test_adapter_projects_opposite_side_signal_as_event_side_near_miss() -> None:
+    output = _output(
+        signal_type=SignalType.WOULD_ENTER,
+        fact_value=True,
+    ).model_copy(update={"side": SignalSide.SHORT})
+    service = _EvaluationService(output)
+
+    observation = evaluate_calibration_observation(
+        signal_input=_input(),
+        event_spec=_event_spec(),
+        source=OpportunitySource.REPLAY,
+        evaluator_service=service,
+    )
+
+    assert observation.result == OpportunityResult.NEAR_MISS
+    assert observation.fact_results["event_side_matched"] is False
+    assert observation.failed_facts == ["event_side_matched"]
+    assert observation.exchange_write_allowed is False
+
+
 def test_adapter_rejects_event_spec_and_signal_input_semantic_mismatch() -> None:
     service = _EvaluationService(_output(signal_type=SignalType.WOULD_ENTER, fact_value=True))
 

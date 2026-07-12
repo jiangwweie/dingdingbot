@@ -116,6 +116,9 @@ class SOR001SessionRangeEvaluator:
         }
 
         if not breakout and not breakdown:
+            trigger_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+            valid_until_ms = trigger_ms + SOR_EVENT_VALIDITY_MS
+            source_ref = f"closed_ohlcv:{signal_input.symbol}:{trigger_ms}:sor-v2"
             return self._output(
                 signal_input,
                 signal_type=SignalType.NO_ACTION,
@@ -124,6 +127,43 @@ class SOR001SessionRangeEvaluator:
                 reason_codes=["sor_no_action_opening_range_intact"],
                 human_summary="SOR-001 opening range remains intact.",
                 evidence_payload=evidence,
+                fact_observations=[
+                    StrategyFactObservation(
+                        fact_key="opening_range_defined",
+                        observed_value=True,
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                    StrategyFactObservation(
+                        fact_key="breakout_confirmed",
+                        observed_value=False,
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                    StrategyFactObservation(
+                        fact_key="breakdown_confirmed",
+                        observed_value=False,
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                    StrategyFactObservation(
+                        fact_key="opening_range_low_reference",
+                        observed_value=range_low,
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                    StrategyFactObservation(
+                        fact_key="opening_range_high_reference",
+                        observed_value=range_high,
+                        observed_at_ms=trigger_ms,
+                        valid_until_ms=valid_until_ms,
+                        source_ref=source_ref,
+                    ),
+                ],
                 review_required=False,
             )
 
