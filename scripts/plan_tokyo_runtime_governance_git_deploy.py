@@ -913,6 +913,7 @@ def action_time_capability_certification_command(
         "set -eu; "
         f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
         f"PYTHONPATH=$PWD timeout 300 {q(venv_python)} -m pytest -q {q(test_node)}; "
+        "timeout 60 sudo systemctl start brc-runtime-monitor.service; "
         f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
         "scripts/certify_action_time_capability.py "
         f"--runtime-head {q(runtime_head)} "
