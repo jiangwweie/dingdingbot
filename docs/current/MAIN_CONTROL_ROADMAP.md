@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 ---
 
 # Main Control Roadmap
@@ -51,7 +51,7 @@ design documents and acceptance proof.
 | --- | --- | --- | --- |
 | 1 | **Action-Time Boundary Reproduction And Projection Truth** | **deployed baseline at `dbb7e650`** | `docs/current/P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_DESIGN.md` |
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
-| 2 | **Owner Supervision Product Integration** | **P0 notification/forensics closure locally verified; Tokyo cutover active** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
+| 2 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | 3 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 4 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
@@ -69,11 +69,11 @@ validated market wait while Owner-facing product integration continues.
 
 | Area | Current fact |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs `dbb7e650d4e2b979f147ee91ed68fb2a8cb363c6`; 22 lanes are release-certified and market-wait validated, but no natural real Ticket has completed exchange lifecycle calibration |
-| **Active delivery branch** | `codex/p0-action-time-projection-truth` contains the deployed capability-truth implementation and completion evidence |
-| **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` points to `brc-runtime-governance-dbb7e650-20260712T140529Z` |
+| **Live Candidate Baseline** | Tokyo runs `9e26de77467193b20d81b94900dd223f33c1c4bb`; 22 lanes are release-certified and market-wait validated, but no natural real Ticket has completed exchange lifecycle calibration |
+| **Active delivery branch** | `codex/p0-owner-notification-forensics` contains the deployed Owner notification and runtime forensics closure |
+| **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` points to `brc-runtime-governance-9e26de77-20260713` |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
-| **PG migration** | Tokyo is at migration `116` (`2026-07-12-116_add_opportunity_feedback_economics.py`) |
+| **PG migration** | Tokyo is at migration `117` (`2026-07-12-117_extend_owner_notifications.py`) |
 | **P0-LC deployment acceptance** | Postdeploy verification passes; backend HTTP checks, schema count, lifecycle units, and no-active lifecycle service are accepted without exchange write |
 | **Backend / watcher / monitor / lifecycle** | Backend, watcher timer, monitor timer, and lifecycle timer are active; latest lifecycle service result is success with zero active lifecycle scopes |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
@@ -101,7 +101,7 @@ then resumes this order.
 | 1 | **Cross-projection blocker conservation** | P0 complete | Daily Table, Goal Status, Tradeability, Candidate Pool, and Server Monitor preserve the same first blocker and watermark |
 | 2 | **Production-shaped Action-Time reproduction** | P0 complete | All 22 active scopes traverse the production-shaped path to the disabled-smoke boundary without exchange write and bind to the deployed head |
 | 3 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome |
-| 4 | **Owner Supervision Product Integration** | P1 active closure | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; Tokyo deployment and natural-event calibration remain |
+| 4 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
 
 ## Why This Was Not Detected Before Production Signals
 

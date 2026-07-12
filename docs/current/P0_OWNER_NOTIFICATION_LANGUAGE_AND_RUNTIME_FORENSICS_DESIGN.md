@@ -1,8 +1,8 @@
 ---
 title: P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN
-status: IMPLEMENTED_LOCAL_VERIFIED_DEPLOY_PENDING
+status: DEPLOYED_ACCEPTED
 authority: docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 ---
 
 # P0 Owner Notification Language And Runtime Forensics Design
@@ -26,11 +26,21 @@ report path.
 
 ## Implementation Checkpoint
 
-As of **2026-07-12**, the typed notification boundary, static cards, PG ledger
+As of **2026-07-13**, the typed notification boundary, static cards, PG ledger
 extension, material lifecycle lineage, bounded retry/recovery, stdout-only
-forensics command, and Skill integration are locally implemented. The full
-suite passes **2914 tests with 1 skipped**; Tokyo migration and production
-acceptance remain the active deployment step.
+forensics command, and Skill integration are deployed at Tokyo release
+**`9e26de77`** with migration **117**. The final full suite passes **2921 tests
+with 1 skipped**. Production acceptance proves 9/9 static card kinds, zero
+callback/action elements, stdout-only PG forensics, dry-run zero delivery rows,
+22/22 `market_wait_validated`, healthy quiet monitor state, and zero active
+Ticket or critical exchange command.
+
+The first production acceptance pass exposed and corrected four defects that
+unit fixtures did not prove: the production DSN is `PG_DATABASE_URL`, terminal
+Ticket states must not be called missing exchange commands, production signal
+IDs already carry the `signal:` prefix, and notification dry-run must not write
+delivery rows. These are closed in the deployed release rather than left as
+post-deploy notes.
 
 ## Current Defect
 

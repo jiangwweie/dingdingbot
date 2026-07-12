@@ -2,7 +2,7 @@
 title: MAINLINE_ENGINEERING_PROGRAM_PLAN
 status: CURRENT_PROGRAM_PLAN
 authority: docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 ---
 
 # Mainline Engineering Program Plan
@@ -30,8 +30,8 @@ repo MD/JSON/output/report files.
 
 | Fact | Current evidence |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs `dbb7e650d4e2b979f147ee91ed68fb2a8cb363c6`, PG migration `116`; 22 lanes are release-certified and market-wait validated, but no natural real Ticket has completed live exchange calibration |
-| **Current engineering branch** | `codex/p0-action-time-projection-truth` contains the exact deployed implementation at `dbb7e650` |
+| **Live Candidate Baseline** | Tokyo runs `9e26de77467193b20d81b94900dd223f33c1c4bb`, PG migration `117`; 22 lanes are release-certified and market-wait validated, but no natural real Ticket has completed live exchange calibration |
+| **Current engineering branch** | `codex/p0-owner-notification-forensics` contains the deployed Owner notification and runtime forensics closure |
 | **PG current state is the runtime source** | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | **Repo/output/report files are not runtime authority** | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | **Five StrategyGroups are active WIP** | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`, PG candidate scope seed |
@@ -60,6 +60,7 @@ repo MD/JSON/output/report files.
 | --- | --- | --- | --- | --- |
 | **P1-OFC Strategy Opportunity And Live Feedback Calibration** | deployed engineering baseline | Measure version-pinned opportunity frequency, near misses, replay/live parity, and ticket-bound real economics without changing strategy or submit authority | `P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN.md`, `P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN.md` | Closed at deployed `97efab6f` / migration `116`; natural Live counterpart and venue economics remain event-driven calibration |
 | **P1-TFC Trade Feedback Core Consolidation** | deployed baseline | Unify lifecycle phase, protection, reconciliation, control, recovery, Replay/Rehearsal parity, and Owner feedback | `P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_DESIGN.md`, `P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_IMPLEMENTATION_PLAN.md` | Closed at deployed `2df39c1c`; real venue calibration remains the natural-signal interrupt |
+| **P0-ONF Owner Notification And Runtime Forensics** | deployed baseline | Translate material PG transitions into static Owner cards and provide one bounded read-only signal-chain query | `P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_IMPLEMENTATION_PLAN.md` | Closed at deployed `9e26de77` / migration `117`; 9 card kinds, typed delivery/recovery, PG forensics, and Skill integration accepted |
 | **P0-LC Production Lifecycle Wiring And Continuous Reconciliation** | deployed baseline | Preserve current blocker relevance, venue truth, fill projection, durable place/cancel commands, continuous reconciliation, settlement, review, and terminal Outcome | `P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md`, `P0_LIFECYCLE_PRODUCTION_CERTIFICATION_IMPLEMENTATION_PLAN.md` | Closed at deployed `0368de6a` / migration `114`; live venue calibration remains the natural-signal interrupt |
 | **P0-RT Real Signal -> Ticket Closure** | P0 | Unify action-time pricing, normalized sizing, positive stop-risk reservation, and Ticket materialization inside freshness bounds | `PRE_TRADE_RUNTIME_CONTRACT.md`, `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, this program plan | An eligible production-shaped signal creates one PG Ticket and Runtime Safety State, or stops before lane readiness at one producer-owned blocker |
 | **P0-PC Production-Shaped Chain Certification** | P0 | Replace privileged downstream dictionary fixtures with raw-source-to-PG certification for all current Event Specs | `PRE_TRADE_RUNTIME_CONTRACT.md`, `RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `BLOCKER_CLASSIFICATION_CONTRACT.md` | Six Event Specs pass positive and negative raw-source chain cases; current projections agree on the same blocker and watermark |

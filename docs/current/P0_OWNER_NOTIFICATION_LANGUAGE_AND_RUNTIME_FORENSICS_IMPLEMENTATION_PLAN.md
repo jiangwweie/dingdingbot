@@ -1,8 +1,8 @@
 ---
 title: P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_IMPLEMENTATION_PLAN
-status: LOCAL_VERIFIED_DEPLOY_PENDING
+status: COMPLETE_DEPLOYED_ACCEPTED
 authority: docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_IMPLEMENTATION_PLAN.md
-last_verified: 2026-07-12
+last_verified: 2026-07-13
 ---
 
 # P0 Owner Notification Language And Runtime Forensics Implementation Plan
@@ -33,7 +33,7 @@ pytest, Feishu custom-robot Webhook.
 | **3. Delivery closure** | **complete** | Static card payload, stable dedupe, three-attempt cap, recovery, schema compatibility, and no-jargon fallback pass |
 | **4. Runtime forensics** | **complete** | Bounded read-only repository, recursive first blocker, time-window coverage proof, stdout-only CLI pass |
 | **5. Skill and docs** | **complete** | Primary SSH command, timezone mapping, diagnostic fallback, and authority index are registered |
-| **6. Deploy and production acceptance** | **in progress** | Local focused suite and full **2914 passed / 1 skipped** are complete; Tokyo cutover remains |
+| **6. Deploy and production acceptance** | **complete** | Tokyo `9e26de77`, migration 117, 22/22 market wait, 9/9 card dry-run, PG forensics, quiet monitor, and full **2921 passed / 1 skipped** |
 
 ## Global Constraints
 
