@@ -20,6 +20,7 @@ def _production_public_values(**fact_overrides: str | None) -> dict:
         "mark_price": "2000",
         "bid_price": "1999.5",
         "ask_price": "2000.5",
+        "min_qty": "0.001",
         "qty_step": "0.001",
         "min_notional": "5",
     }
@@ -60,6 +61,7 @@ def test_materializes_side_specific_reference_from_production_public_fact_shape(
     assert result.reference.entry_reference_price == expected_price
     assert result.reference.entry_reference_kind == expected_kind
     assert result.reference.mark_price == Decimal("2000")
+    assert result.reference.min_qty == Decimal("0.001")
     assert result.reference.qty_step == Decimal("0.001")
     assert result.reference.min_notional == Decimal("5")
     assert result.reference.source_fact_snapshot_id == "fact:public:1"

@@ -150,6 +150,8 @@ def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
         "facts": {
             "active_position_or_open_order_clear": True,
             "action_time_available_balance": True,
+            "total_wallet_balance": "123.45",
+            "available_balance": "100.00",
         },
         "account_mode": {
             "status": "fresh",
@@ -212,6 +214,15 @@ def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
     assert mode_values["account_mode"] == "hedge"
     assert mode_values["dual_side_position"] is True
     assert mode_values["position_mode_safe"] is True
+    account_values = next(
+        row["fact_values"]
+        for row in rows
+        if row["fact_surface"] == "account_safe"
+    )
+    if isinstance(account_values, str):
+        account_values = json.loads(account_values)
+    assert account_values["total_wallet_balance"] == "123.45"
+    assert account_values["available_balance"] == "100.00"
 
 
 def test_stale_account_mode_cannot_leave_account_safe_snapshot_satisfied():

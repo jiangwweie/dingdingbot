@@ -1329,6 +1329,7 @@ def _submit_request(graph: dict[str, Any], *, now_ms: int) -> dict[str, Any]:
                 "price": None,
                 "trigger_price": None,
                 "reduce_only": False,
+                "desired_leverage": int(_decimal(ticket.get("leverage"))),
                 "client_order_id": deterministic_client_order_id(
                     ticket_id,
                     operation_submit_command_id,

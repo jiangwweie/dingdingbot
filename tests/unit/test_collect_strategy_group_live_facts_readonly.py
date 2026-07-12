@@ -70,13 +70,20 @@ def test_collect_strategy_group_live_facts_readonly_uses_get_and_masks_values(tm
             )
         if "/fapi/v1/openOrders" in request.full_url:
             return _Response([{"symbol": "BTCUSDT", "orderId": 1}])
+        if "/fapi/v1/leverageBracket" in request.full_url:
+            return _Response(
+                [
+                    {"symbol": "BTCUSDT", "brackets": [{"initialLeverage": 125}]},
+                    {"symbol": "ETHUSDT", "brackets": [{"initialLeverage": 100}]},
+                ]
+            )
         if "/fapi/v1/positionSide/dual" in request.full_url:
             return _Response({"dualSidePosition": False})
         raise AssertionError(request.full_url)
 
     packet = collect_live_facts(
         symbols=["BTCUSDT", "ETHUSDT"],
-        max_notional_requirement_usdt="8",
+        max_notional_requirement_usdt="999",
         has_candidate_specific_protection_template=True,
         strategy_group_count=1,
         account_id="owner-subaccount-runtime-v0",
@@ -98,13 +105,21 @@ def test_collect_strategy_group_live_facts_readonly_uses_get_and_masks_values(tm
     assert packet["account"]["exchange_account_trade_permission"] is True
     assert "can_trade" not in packet["account"]
     assert packet["account"]["available_balance_present"] is True
-    assert "100.00" not in json.dumps(packet)
+    assert packet["account"]["total_wallet_balance"] == "123.45"
+    assert packet["account"]["available_balance"] == "100.00"
+    assert packet["leverage_brackets"]["max_leverage_by_symbol"] == {
+        "BTCUSDT": 125,
+        "ETHUSDT": 100,
+    }
     assert packet["active_position"]["status"] == "active_position_present"
     assert packet["active_position"]["active_symbols"] == ["ETHUSDT"]
     assert packet["open_orders"]["status"] == "open_orders_present"
     assert packet["open_orders"]["open_order_symbols"] == ["BTCUSDT"]
     assert packet["budget"]["status"] == "available_for_candidate_specific_reservation"
-    assert packet["budget"]["max_notional_requirement_usdt"] == "8"
+    assert packet["budget"]["risk_capacity_source"] == (
+        "dynamic_wallet_and_available_balance"
+    )
+    assert "max_notional_requirement_usdt" not in packet["budget"]
     assert packet["protection"]["status"] == "ready_for_candidate_specific_plan"
     assert packet["next_attempt_gate"]["status"] == "blocked"
     assert packet["next_attempt_gate"]["reason"] == "active_position_present"
@@ -157,6 +172,13 @@ def test_collect_strategy_group_live_facts_derives_candidate_prerequisites_when_
             )
         if "/fapi/v1/openOrders" in request.full_url:
             return _Response([])
+        if "/fapi/v1/leverageBracket" in request.full_url:
+            return _Response(
+                [
+                    {"symbol": "BTCUSDT", "brackets": [{"initialLeverage": 125}]},
+                    {"symbol": "ETHUSDT", "brackets": [{"initialLeverage": 100}]},
+                ]
+            )
         if "/fapi/v1/positionSide/dual" in request.full_url:
             return _Response({"dualSidePosition": False})
         raise AssertionError(request.full_url)
@@ -178,7 +200,8 @@ def test_collect_strategy_group_live_facts_derives_candidate_prerequisites_when_
     assert packet["budget"]["status"] == "available_for_candidate_specific_reservation"
     assert packet["protection"]["status"] == "ready_for_candidate_specific_plan"
     assert packet["next_attempt_gate"]["status"] == "ready_for_strategy_signal"
-    assert "9.00" not in json.dumps(packet)
+    assert packet["account"]["total_wallet_balance"] == "123.45"
+    assert packet["account"]["available_balance"] == "9.00"
 
 
 def test_collect_strategy_group_live_facts_rejects_non_boolean_position_mode(
@@ -212,6 +235,10 @@ def test_collect_strategy_group_live_facts_rejects_non_boolean_position_mode(
             return _Response([{"symbol": "BTCUSDT", "positionAmt": "0"}])
         if "/fapi/v1/openOrders" in request.full_url:
             return _Response([])
+        if "/fapi/v1/leverageBracket" in request.full_url:
+            return _Response(
+                [{"symbol": "BTCUSDT", "brackets": [{"initialLeverage": 125}]}]
+            )
         if "/fapi/v1/positionSide/dual" in request.full_url:
             return _Response({"dualSidePosition": "false"})
         raise AssertionError(request.full_url)

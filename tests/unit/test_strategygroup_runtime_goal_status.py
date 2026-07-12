@@ -35,6 +35,10 @@ EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
 )
+DYNAMIC_RISK_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 PG_TEST_NOW_MS = 1770001000000
 
@@ -94,6 +98,16 @@ def pg_control_connection():
             module_prefix="goal_status",
             now_ms=PG_TEST_NOW_MS - 1,
         )
+        dynamic_risk_migration = _load_module(
+            DYNAMIC_RISK_MIGRATION_PATH,
+            "migration_115_goal_status",
+        )
+        old_dynamic_risk_op = dynamic_risk_migration.op
+        dynamic_risk_migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            dynamic_risk_migration.upgrade()
+        finally:
+            dynamic_risk_migration.op = old_dynamic_risk_op
     with engine.connect() as conn:
         yield conn
     engine.dispose()

@@ -233,6 +233,24 @@ def _pg_non_market_blockers(candidate_pool: dict[str, Any]) -> list[str]:
     return blockers
 
 
+def _pg_blocker_details(candidate_pool: dict[str, Any]) -> list[dict[str, str]]:
+    details: list[dict[str, str]] = []
+    for row in _pg_rows(candidate_pool.get("symbol_readiness_rows")):
+        detail = str(row.get("first_blocker_detail") or "").strip()
+        if not detail:
+            continue
+        details.append(
+            {
+                "strategy_group_id": str(row.get("strategy_group_id") or ""),
+                "symbol": str(row.get("symbol") or ""),
+                "side": str(row.get("side") or ""),
+                "first_blocker": str(row.get("first_blocker") or "unknown"),
+                "first_blocker_detail": detail,
+            }
+        )
+    return details
+
+
 def _pg_runtime_coverage_complete(candidate_pool: dict[str, Any]) -> bool:
     coverage = _dict(candidate_pool.get("server_runtime_coverage"))
     if coverage.get("status") != "complete":
@@ -873,6 +891,7 @@ def _build_pg_goal_status_artifact(
             ),
             "pg_runtime_coverage_complete": coverage_complete,
             "pg_blocker_counts": _pg_blocker_counts(candidate_pool),
+            "pg_blocker_details": _pg_blocker_details(candidate_pool),
             "watcher_liveness_blockers": []
             if coverage_complete
             else ["pg_runtime_coverage_incomplete"],

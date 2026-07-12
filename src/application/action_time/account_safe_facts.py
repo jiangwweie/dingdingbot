@@ -36,6 +36,7 @@ from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
     _env_value,
     _exchange_rules,
     _next_attempt_gate_state,
+    _leverage_bracket_summary,
     _open_order_summary,
     _position_summary,
     _protection_state,
@@ -166,6 +167,9 @@ def collect_account_safe_live_facts_from_pg_scope(
     position = _position_summary(payloads["position_risk"], symbols)
     open_orders = _open_order_summary(payloads["open_orders"], symbols)
     account = _account_summary(payloads["account"])
+    leverage_brackets = _leverage_bracket_summary(
+        payloads["leverage_brackets"], symbols
+    )
     account_mode = _account_mode_summary(
         payloads["account_mode"],
         account_id=scope.get("account_id"),
@@ -195,6 +199,7 @@ def collect_account_safe_live_facts_from_pg_scope(
         "supported_symbol_count": len(symbols),
         "exchange_rules": exchange_rules,
         "account": account,
+        "leverage_brackets": leverage_brackets,
         "account_mode": account_mode,
         "active_position": position,
         "open_orders": open_orders,
@@ -226,7 +231,6 @@ def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]
                 SELECT DISTINCT
                   candidate.strategy_group_id,
                   candidate.symbol,
-                  policy.max_notional,
                   runtime.runtime_profile_id,
                   version.risk_envelope,
                   instrument.exchange_id
@@ -267,12 +271,6 @@ def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]
         ).mappings()
     ]
     symbols = sorted({str(row.get("symbol") or "").upper() for row in scope_rows if row.get("symbol")})
-    max_notional_values = [
-        value
-        for value in (_decimal_or_none(row.get("max_notional")) for row in scope_rows)
-        if value is not None
-    ]
-    max_notional = max(max_notional_values, default=None)
     runtime_profile_ids = {
         str(row.get("runtime_profile_id") or "").strip()
         for row in scope_rows
@@ -326,7 +324,7 @@ def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]
     return {
         "symbols": symbols,
         "strategy_group_count": len({str(row.get("strategy_group_id")) for row in scope_rows}),
-        "max_notional_requirement_usdt": str(max_notional) if max_notional is not None else None,
+        "risk_capacity_source": "dynamic_wallet_and_available_balance",
         "has_candidate_specific_protection_template": int(protection_count or 0) > 0,
         "account_id": next(iter(account_ids), None) if len(account_ids) == 1 else None,
         "exchange_id": (
@@ -364,15 +362,24 @@ def build_runtime_account_safe_facts(
     next_attempt_gate = _as_dict(live_facts.get("next_attempt_gate"))
     protection = _as_dict(live_facts.get("protection"))
     source_safety = _as_dict(live_facts.get("safety_invariants"))
+    leverage_brackets = _as_dict(live_facts.get("leverage_brackets"))
     account_mode = _normalized_account_mode_fact(
         _as_dict(live_facts.get("account_mode")),
         generated_at_utc=effective_generated_at_utc,
     )
+    total_wallet_balance = _decimal_or_none(account.get("total_wallet_balance"))
+    available_balance = _decimal_or_none(account.get("available_balance"))
 
     checks = {
         "source_live_facts_ready": live_facts.get("status") == "ready",
         "account_balance_present": account.get("available_balance_present") is True,
         "account_balance_positive": account.get("available_balance_positive") is True,
+        "account_wallet_balance_present": total_wallet_balance is not None,
+        "account_wallet_balance_positive": (
+            total_wallet_balance is not None
+            and total_wallet_balance.is_finite()
+            and total_wallet_balance > Decimal("0")
+        ),
         "account_trade_permission": account.get("exchange_account_trade_permission")
         is True,
         "active_position_clear": active_position.get("status")
@@ -386,6 +393,7 @@ def build_runtime_account_safe_facts(
             "ready"
         ),
         "account_mode_ready": account_mode.get("position_mode_safe") is True,
+        "leverage_brackets_ready": leverage_brackets.get("status") == "ready",
         "source_signed_get_only": source_safety.get("signed_get_only") is True,
         "source_exchange_write_called": source_safety.get("exchange_write_called")
         is True,
@@ -449,6 +457,15 @@ def build_runtime_account_safe_facts(
                 checks["account_balance_present"]
                 and checks["account_balance_positive"]
                 and checks["budget_available"]
+            ),
+            "total_wallet_balance": (
+                str(total_wallet_balance) if total_wallet_balance is not None else None
+            ),
+            "available_balance": (
+                str(available_balance) if available_balance is not None else None
+            ),
+            "exchange_max_leverage_by_symbol": dict(
+                leverage_brackets.get("max_leverage_by_symbol") or {}
             ),
             "exchange_rules_ready": checks["exchange_rules_ready"],
             "protection_template_ready": checks["protection_template_ready"],

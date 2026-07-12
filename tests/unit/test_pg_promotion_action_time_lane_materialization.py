@@ -59,6 +59,10 @@ LIFECYCLE_COMMAND_EXTENSION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
 )
+DYNAMIC_RISK_POLICY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -100,6 +104,10 @@ def pg_control_connection():
         LIFECYCLE_COMMAND_EXTENSION_MIGRATION_PATH,
         "migration_114_pg_promotion_lane",
     )
+    dynamic_risk_policy_migration = _load_module(
+        DYNAMIC_RISK_POLICY_MIGRATION_PATH,
+        "migration_115_pg_promotion_lane",
+    )
     seed = _load_module(SEED_PATH, "seed_pg_promotion_lane")
     engine = create_engine(
         "sqlite://",
@@ -137,6 +145,12 @@ def pg_control_connection():
                                 lifecycle_command_extension_migration.op = migration.op
                                 try:
                                     lifecycle_command_extension_migration.upgrade()
+                                    old_dynamic_policy_op = dynamic_risk_policy_migration.op
+                                    dynamic_risk_policy_migration.op = migration.op
+                                    try:
+                                        dynamic_risk_policy_migration.upgrade()
+                                    finally:
+                                        dynamic_risk_policy_migration.op = old_dynamic_policy_op
                                 finally:
                                     lifecycle_command_extension_migration.op = (
                                         old_command_extension_op
@@ -302,6 +316,7 @@ def test_action_time_fact_materializes_typed_pricing_from_production_public_shap
                 "mark_price": "2000",
                 "bid_price": "1999.5",
                 "ask_price": "2000.5",
+                "min_qty": "0.001",
                 "qty_step": "0.001",
                 "min_notional": "5",
             },
@@ -372,6 +387,7 @@ def test_each_event_spec_pricing_cannot_be_overridden_by_signal_payload_dictiona
                 "mark_price": "2000",
                 "bid_price": "1999.5",
                 "ask_price": "2000.5",
+                "min_qty": "0.001",
                 "qty_step": "0.001",
                 "min_notional": "5",
             },
@@ -468,6 +484,7 @@ def test_missing_side_quote_blocks_action_time_fact_before_lane(
                 "mark_price": "2000",
                 "bid_price": "1999.5",
                 "ask_price": None,
+                "min_qty": "0.001",
                 "qty_step": "0.001",
                 "min_notional": "5",
             },
@@ -534,6 +551,7 @@ def test_each_event_spec_malformed_side_quote_blocks_before_lane(
                 "mark_price": "2000",
                 "bid_price": "1999.5",
                 "ask_price": "2000.5",
+                "min_qty": "0.001",
                 "qty_step": "0.001",
                 "min_notional": "5",
             },
@@ -574,8 +592,8 @@ def test_each_event_spec_malformed_side_quote_blocks_before_lane(
 @pytest.mark.parametrize(
     ("side", "expected_qty"),
     [
-        ("long", Decimal("0.009")),
-        ("short", Decimal("0.010")),
+        ("long", Decimal("0.014")),
+        ("short", Decimal("0.45")),
     ],
 )
 def test_promotion_persists_one_step_normalized_risk_decision_before_lane(
@@ -603,6 +621,7 @@ def test_promotion_persists_one_step_normalized_risk_decision_before_lane(
                 "mark_price": "2000",
                 "bid_price": "1999.5",
                 "ask_price": "2000.5",
+                "min_qty": "0.001",
                 "qty_step": "0.001",
                 "min_notional": "5",
             },
@@ -641,7 +660,7 @@ def test_promotion_persists_one_step_normalized_risk_decision_before_lane(
     assert Decimal(str(budget["stop_price"])) > 0
     assert Decimal(str(budget["intended_qty"])) == expected_qty
     assert Decimal(str(budget["risk_at_stop"])) > 0
-    assert budget["risk_reservation_basis"] == "entry_reference_stop_distance_v0"
+    assert budget["risk_reservation_basis"] == "wallet_fraction_stop_distance_v1"
     assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 1
 
     reserved_before_ticket = dict(budget)
@@ -720,9 +739,9 @@ def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_con
         )
     ).mappings().one()
     assert budget["status"] == "active"
-    assert str(budget["target_notional"]) in {"20", "20.0000000000"}
-    assert str(budget["leverage"]) in {"2", "2.0000000000"}
-    assert str(budget["reserved_margin"]) in {"10", "10.0000000000"}
+    assert str(budget["target_notional"]) in {"30", "30.0000000000"}
+    assert str(budget["leverage"]) in {"1", "1.0000000000"}
+    assert str(budget["reserved_margin"]) in {"30", "30.0000000000"}
 
     protection = pg_control_connection.execute(
         text(
@@ -740,7 +759,7 @@ def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_con
         pg_control_connection,
         now_ms=NOW_MS,
     )
-    assert ticket_payload["status"] == "action_time_ticket_created"
+    assert ticket_payload["status"] == "action_time_ticket_created", ticket_payload
     assert ticket_payload["action_time_lane_input_id"] == payload["action_time_lane_input_id"]
     assert ticket_payload["strategy_group_id"] == "SOR-001"
     assert ticket_payload["symbol"] == "ETHUSDT"
@@ -2175,7 +2194,9 @@ def test_multiple_fresh_candidates_select_one_by_strategy_priority(pg_control_co
     ) == 1
 
 
-def test_allocation_cannot_exceed_owner_loss_unit(pg_control_connection):
+def test_legacy_owner_loss_unit_no_longer_controls_dynamic_sizing(
+    pg_control_connection,
+):
     _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
     pg_control_connection.execute(
         text(
@@ -2194,13 +2215,13 @@ def test_allocation_cannot_exceed_owner_loss_unit(pg_control_connection):
         now_ms=NOW_MS,
     )
 
-    assert payload["status"] == "promotion_candidates_blocked"
-    assert "allocation_risk_exceeds_owner_capital_scope" in payload["blockers"]
-    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
+    assert payload["status"] == "promotion_action_time_lane_created"
+    assert "allocation_risk_exceeds_owner_capital_scope" not in payload["blockers"]
+    assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 1
     decision = pg_control_connection.execute(
         text("SELECT selected_candidate_count FROM brc_allocation_decisions")
     ).scalar_one()
-    assert decision == 0
+    assert decision == 1
 
 
 def test_stale_high_priority_candidate_loses_to_fresh_lower_priority(pg_control_connection):
@@ -2368,6 +2389,9 @@ def _insert_ready_fresh_signal(
             "open_orders_clear": True,
             "active_position_or_open_order_clear": True,
             "action_time_available_balance": True,
+            "total_wallet_balance": "100",
+            "available_balance": "100",
+            "exchange_max_leverage_by_symbol": {str(row["symbol"]): 100},
         },
         observed_at_ms=NOW_MS - 8_000,
         valid_until_ms=expires_at_ms,
@@ -2718,6 +2742,7 @@ def _production_public_fact_values(*, row, semantic_values: dict) -> dict:
             "mark_price": "1800",
             "bid_price": "1800",
             "ask_price": "1801",
+            "min_qty": "0.001",
             "qty_step": "0.001",
             "min_notional": "5",
         }
@@ -2726,6 +2751,7 @@ def _production_public_fact_values(*, row, semantic_values: dict) -> dict:
             "mark_price": "2000",
             "bid_price": "1999",
             "ask_price": "2000",
+            "min_qty": "0.001",
             "qty_step": "0.001",
             "min_notional": "5",
         }
@@ -2739,6 +2765,7 @@ def _production_public_fact_values(*, row, semantic_values: dict) -> dict:
             "facts": facts,
         }
     )
+    facts.setdefault("min_qty", "0.001")
     return values
 
 

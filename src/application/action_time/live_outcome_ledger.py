@@ -165,6 +165,18 @@ def materialize_live_outcome_ledger(
         else None
     )
     initial_notional = entry_price * entry_qty if entry_price > 0 and entry_qty > 0 else None
+    budget = _row_by_id(
+        conn,
+        "brc_budget_reservations",
+        "budget_reservation_id",
+        str(ticket.get("budget_reservation_id") or ""),
+    )
+    entry_slippage = _entry_slippage(
+        side=str(ticket.get("side") or ""),
+        reference_price=_positive_decimal(budget.get("entry_reference_price")),
+        fill_price=entry_price if entry_price > 0 else None,
+        fill_qty=entry_qty if entry_qty > 0 else None,
+    )
     tp1_fill_price = _positive_decimal(tp1_fill.get("fill_price"))
     tp1_fill_qty = _positive_decimal(tp1_fill.get("fill_qty"))
     final_exit_price = _positive_decimal(final_fill.get("fill_price"))
@@ -225,6 +237,7 @@ def materialize_live_outcome_ledger(
         "final_exit_price": final_exit_price,
         "flat_reconciled_at_ms": lifecycle.get("updated_at_ms") if lifecycle_status in CLOSED_LIFECYCLE_STATUSES else None,
         "fees": fees,
+        "entry_slippage": entry_slippage,
         "funding": None,
         "realized_pnl": realized_pnl,
         "unrealized_pnl": None,
@@ -437,6 +450,22 @@ def _compatible_fee_total(*fees: Any) -> Decimal | None:
     if len(currencies) > 1:
         return None
     return sum((cost for cost, _ in parsed), Decimal("0"))
+
+
+def _entry_slippage(
+    *,
+    side: str,
+    reference_price: Decimal | None,
+    fill_price: Decimal | None,
+    fill_qty: Decimal | None,
+) -> Decimal | None:
+    if not reference_price or not fill_price or not fill_qty:
+        return None
+    if side == "long":
+        return (fill_price - reference_price) * fill_qty
+    if side == "short":
+        return (reference_price - fill_price) * fill_qty
+    return None
 
 
 def _row_by_id(

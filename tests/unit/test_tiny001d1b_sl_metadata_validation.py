@@ -20,6 +20,13 @@ class MockRestExchange:
         
         self.mocked_fetch_order_response = None
         self.mocked_fetch_open_orders_response = []
+        self.set_leverage_calls = []
+
+    async def set_leverage(self, leverage, symbol, params=None):
+        self.set_leverage_calls.append(
+            {"leverage": leverage, "symbol": symbol, "params": params or {}}
+        )
+        return {"leverage": leverage, "symbol": symbol}
 
     async def create_order(self, symbol, type, side, amount, price=None, params=None):
         self.create_order_calls.append({
@@ -210,6 +217,48 @@ async def test_place_order_omits_reduce_only_when_false(gateway, mock_exchange):
     assert "reduceOnly" not in call["params"]
     assert result.exchange_reduce_only_param_sent is False
     assert result.exchange_reduce_only_omit_reason is None
+
+
+@pytest.mark.asyncio
+async def test_entry_place_order_ensures_desired_leverage_before_order_write(
+    gateway,
+    mock_exchange,
+):
+    await gateway.place_order(
+        symbol=SYMBOL,
+        order_type="market",
+        side="buy",
+        amount=Decimal("0.01"),
+        reduce_only=False,
+        desired_leverage=7,
+        client_order_id="entry-dynamic-leverage",
+    )
+
+    assert mock_exchange.set_leverage_calls == [
+        {"leverage": 7, "symbol": SYMBOL, "params": {}}
+    ]
+    assert len(mock_exchange.create_order_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_protection_order_rejects_desired_leverage_before_exchange_write(
+    gateway,
+    mock_exchange,
+):
+    with pytest.raises(InvalidOrderError):
+        await gateway.place_order(
+            symbol=SYMBOL,
+            order_type="stop_market",
+            side="sell",
+            amount=Decimal("0.01"),
+            trigger_price=Decimal("1900"),
+            reduce_only=True,
+            desired_leverage=7,
+            client_order_id="sl-invalid-leverage-mutation",
+        )
+
+    assert mock_exchange.set_leverage_calls == []
+    assert mock_exchange.create_order_calls == []
 
 
 @pytest.mark.asyncio

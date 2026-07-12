@@ -89,6 +89,10 @@ TICKET_IDENTITY_HASH_FIELDS = (
     "protection_policy_version",
     "target_notional",
     "leverage",
+    "effective_notional",
+    "selected_leverage",
+    "planned_stop_risk_budget",
+    "planned_stop_risk",
     "expires_at_ms",
     "authority_boundary",
     "created_under_versions_hash",
@@ -97,7 +101,13 @@ TICKET_IDENTITY_HASH_FIELDS = (
     "execution_eligible",
     "authority_source_ref",
 )
-DECIMAL_HASH_FIELDS = {"target_notional", "leverage"}
+DECIMAL_HASH_FIELDS = {
+    "target_notional",
+    "leverage",
+    "effective_notional",
+    "planned_stop_risk_budget",
+    "planned_stop_risk",
+}
 INTEGER_HASH_FIELDS = {
     "event_time_ms",
     "trigger_candle_close_time_ms",
@@ -681,6 +691,19 @@ def _build_ticket_bundle(
         "protection_policy_version": protection_policy_version,
         "target_notional": str(budget["target_notional"]),
         "leverage": str(budget["leverage"]),
+        "effective_notional": str(
+            budget.get("effective_notional") or budget["target_notional"]
+        ),
+        "selected_leverage": int(
+            _decimal(budget.get("selected_leverage") or budget["leverage"])
+        ),
+        "planned_stop_risk_budget": str(
+            budget.get("planned_stop_risk_budget")
+            or risk_reservation["risk_at_stop"]
+        ),
+        "planned_stop_risk": str(
+            budget.get("planned_stop_risk") or risk_reservation["risk_at_stop"]
+        ),
         "expires_at_ms": expires_at_ms,
         "status": "created",
         "authority_boundary": AUTHORITY_BOUNDARY,
@@ -988,7 +1011,9 @@ def _insert_ticket_bundle(
               account_mode_snapshot_id, budget_reservation_id, protection_ref_id,
               execution_policy_id, execution_policy_version, owner_policy_version,
               sizing_policy_version, protection_policy_version, target_notional,
-              leverage, expires_at_ms, status, authority_boundary, ticket_hash,
+              leverage, effective_notional, selected_leverage,
+              planned_stop_risk_budget, planned_stop_risk,
+              expires_at_ms, status, authority_boundary, ticket_hash,
               created_under_versions_hash, created_at_ms, signal_grade,
               required_execution_mode, execution_eligible, authority_source_ref
             ) VALUES (
@@ -1002,7 +1027,9 @@ def _insert_ticket_bundle(
               :account_mode_snapshot_id, :budget_reservation_id, :protection_ref_id,
               :execution_policy_id, :execution_policy_version, :owner_policy_version,
               :sizing_policy_version, :protection_policy_version, :target_notional,
-              :leverage, :expires_at_ms, :status, :authority_boundary, :ticket_hash,
+              :leverage, :effective_notional, :selected_leverage,
+              :planned_stop_risk_budget, :planned_stop_risk,
+              :expires_at_ms, :status, :authority_boundary, :ticket_hash,
               :created_under_versions_hash, :created_at_ms, :signal_grade,
               :required_execution_mode, :execution_eligible, :authority_source_ref
             )
@@ -1303,7 +1330,11 @@ def _canonical_decimal_string(value: Any) -> str:
         return str(value)
     if decimal_value == 0:
         return "0"
-    return format(decimal_value.normalize(), "f")
+    # SQLite-backed regression fixtures round NUMERIC through a binary float;
+    # twelve decimal places remain far below any executable quantity/notional
+    # precision while preserving stable PG-vs-fixture identity hashes.
+    canonical = decimal_value.quantize(Decimal("0.000000000001"))
+    return format(canonical.normalize(), "f")
 
 
 def _stable_id(prefix: str, *parts: str) -> str:

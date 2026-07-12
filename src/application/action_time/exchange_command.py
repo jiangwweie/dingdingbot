@@ -144,6 +144,11 @@ def materialize_ticket_bound_exchange_commands(
             amount=_required_decimal(order.get("amount"), "amount"),
             price=_optional_decimal(order.get("price")),
             stop_price=_optional_decimal(order.get("trigger_price")),
+            desired_leverage=(
+                int(order["desired_leverage"])
+                if order.get("desired_leverage") is not None
+                else None
+            ),
             reduce_only=order.get("reduce_only") is True,
             reduce_intent=reduce_intent,
             position_mode=scope.position_mode,
@@ -197,6 +202,7 @@ def materialize_ticket_bound_exchange_commands(
                 "position_bucket",
                 "netting_domain_key",
                 "command_kind",
+                "desired_leverage",
                 "command_source",
                 "source_command_id",
             ):
@@ -521,6 +527,11 @@ def command_request_fingerprint(order: dict[str, Any]) -> str:
         "reduce_intent": str(order.get("reduce_intent") or ""),
         "command_kind": str(order.get("command_kind") or ""),
         "command_source": str(order.get("command_source") or ""),
+        "desired_leverage": (
+            int(order["desired_leverage"])
+            if order.get("desired_leverage") is not None
+            else None
+        ),
     }
     encoded = json.dumps(
         canonical,

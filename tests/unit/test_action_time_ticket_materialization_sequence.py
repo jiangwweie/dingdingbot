@@ -517,7 +517,7 @@ def test_readiness_projection_failure_is_process_failure_not_business_blocker(
     assert payload["process_outcome"]["process_state"] == "retryable_failure"
 
 
-def test_expired_signal_outcome_remains_provenance_without_current_blocker_authority(
+def test_expired_signal_preserves_unresolved_action_time_engineering_blocker(
     pg_control_connection,
     monkeypatch,
 ):
@@ -594,8 +594,12 @@ def test_expired_signal_outcome_remains_provenance_without_current_blocker_autho
             """
         )
     ).mappings().one()
-    assert readiness["first_blocker_class"] == "market_wait_validated"
-    assert "unit_persisted_engineering_blocker" not in readiness["first_blocker_detail"]
+    assert readiness["first_blocker_class"] == (
+        "action_time_boundary_not_reproduced"
+    )
+    assert readiness["first_blocker_detail"] == (
+        "unit_persisted_engineering_blocker"
+    )
 
     snapshots = pg_control_connection.execute(
         text(
@@ -619,10 +623,10 @@ def test_expired_signal_outcome_remains_provenance_without_current_blocker_autho
         while isinstance(payload, str):
             payload = json.loads(payload)
         rendered = json.dumps(payload, sort_keys=True)
-        assert "unit_persisted_engineering_blocker" not in rendered
+        assert "unit_persisted_engineering_blocker" in rendered, row["model_type"]
 
 
-def test_distinct_same_lane_signal_does_not_inherit_previous_signal_outcome(
+def test_distinct_same_lane_signal_keeps_blocker_until_new_sequence_succeeds(
     pg_control_connection,
 ):
     _insert_ready_fresh_signal(
@@ -717,9 +721,12 @@ def test_distinct_same_lane_signal_does_not_inherit_previous_signal_outcome(
         pg_control_connection,
         now_ms=NOW_MS + 10_000,
     ).read_monitor_control_state()
-    assert candidate_pool._unresolved_action_time_sequence_outcomes(
+    unresolved = candidate_pool._unresolved_action_time_sequence_outcomes(
         control_state
-    ) == {}
+    )
+    assert unresolved[("SOR-001", "ETHUSDT", "long")]["first_blocker"] == (
+        "unit_signal_a_ticket_failure"
+    )
 
     resumed = materialize_action_time_ticket_sequence(
         pg_control_connection,

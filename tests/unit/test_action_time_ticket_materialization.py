@@ -30,6 +30,10 @@ EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
 )
+DYNAMIC_RISK_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -55,6 +59,10 @@ def pg_control_connection():
         EXECUTION_ELIGIBILITY_MIGRATION_PATH,
         "migration_104_action_time_ticket",
     )
+    dynamic_risk_migration = _load_module(
+        DYNAMIC_RISK_MIGRATION_PATH,
+        "migration_115_action_time_ticket",
+    )
     seed = _load_module(SEED_PATH, "seed_action_time_ticket")
     engine = create_engine(
         "sqlite://",
@@ -74,6 +82,12 @@ def pg_control_connection():
                 execution_eligibility_migration.op = migration.op
                 try:
                     execution_eligibility_migration.upgrade()
+                    old_dynamic_risk_op = dynamic_risk_migration.op
+                    dynamic_risk_migration.op = migration.op
+                    try:
+                        dynamic_risk_migration.upgrade()
+                    finally:
+                        dynamic_risk_migration.op = old_dynamic_risk_op
                 finally:
                     execution_eligibility_migration.op = old_eligibility_op
             finally:
@@ -822,6 +836,7 @@ def _insert_action_time_lane_graph(
         "mark_price": str(entry_reference_price),
         "bid_price": str(bid_price),
         "ask_price": str(ask_price),
+        "min_qty": "0.001",
         "qty_step": "0.001",
         "min_notional": "5",
         "source_fact_snapshot_id": public_fact_id,
@@ -836,6 +851,7 @@ def _insert_action_time_lane_graph(
             "mark_price": str(entry_reference_price),
             "bid_price": str(bid_price),
             "ask_price": str(ask_price),
+            "min_qty": "0.001",
             "qty_step": "0.001",
             "min_notional": "5",
         }

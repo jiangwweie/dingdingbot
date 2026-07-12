@@ -1135,6 +1135,7 @@ class ExchangeGateway:
         trigger_price: Optional[Decimal] = None,  # 条件单触发价
         reduce_only: bool = False,  # 仅减仓（平仓单必须设置）
         position_side: Optional[str] = None,  # Binance futures hedge mode: LONG/SHORT
+        desired_leverage: Optional[int] = None,  # ENTRY-only Action-Time leverage
         client_order_id: Optional[str] = None,  # 客户端订单 ID
     ) -> OrderPlacementResult:
         """
@@ -1172,7 +1173,24 @@ class ExchangeGateway:
         if order_type == "stop_market" and trigger_price is None:
             raise InvalidOrderError("STOP_MARKET 订单必须指定触发价", "F-011")
 
+        if desired_leverage is not None:
+            if reduce_only:
+                raise InvalidOrderError(
+                    "保护/退出订单不得改变杠杆", "F-011"
+                )
+            if self.exchange_name.lower() != "binance":
+                raise InvalidOrderError(
+                    "动态杠杆当前仅支持 Binance USD-M", "F-011"
+                )
+            if isinstance(desired_leverage, bool) or not 1 <= int(desired_leverage) <= 125:
+                raise InvalidOrderError("目标杠杆必须是 1-125 的整数", "F-011")
+
         try:
+            if desired_leverage is not None:
+                await self.rest_exchange.set_leverage(
+                    int(desired_leverage),
+                    symbol,
+                )
             # 映射订单类型到 CCXT 格式
             ccxt_type = self._map_order_type_to_ccxt(order_type)
 

@@ -42,6 +42,10 @@ RUNTIME_SUPERVISION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-106_create_runtime_supervision_and_allocation.py"
 )
+DYNAMIC_RISK_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 PG_TEST_NOW_MS = 1770001000000
 
@@ -137,7 +141,7 @@ def test_retryable_process_failure_is_temporarily_unavailable_and_notified():
     assert decision["blocker_class"] == "runtime_process_failure"
 
 
-def test_expired_event_scoped_retryable_failure_does_not_notify_monitor():
+def test_expired_event_scoped_retryable_failure_remains_visible_to_monitor():
     module = _load_module()
     control_state = {
         "read_now_ms": PG_TEST_NOW_MS,
@@ -182,8 +186,9 @@ def test_expired_event_scoped_retryable_failure_does_not_notify_monitor():
         systemd={"ready": True, "blockers": []},
     )
 
-    assert decision["status"] == "healthy_waiting_quiet"
-    assert decision["notify"] is False
+    assert decision["status"] == "temporarily_unavailable"
+    assert decision["notify"] is True
+    assert decision["blocker_class"] == "runtime_process_failure"
 
 
 def test_fresh_matching_event_scoped_retryable_failure_still_notifies_monitor():
@@ -420,6 +425,16 @@ def _seed_pg_engine():
             module_prefix="server_monitor",
             now_ms=PG_TEST_NOW_MS - 1,
         )
+        dynamic_risk_migration = _load_file_module(
+            DYNAMIC_RISK_MIGRATION_PATH,
+            "migration_115_server_monitor",
+        )
+        old_dynamic_risk_op = dynamic_risk_migration.op
+        dynamic_risk_migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            dynamic_risk_migration.upgrade()
+        finally:
+            dynamic_risk_migration.op = old_dynamic_risk_op
     return engine
 
 

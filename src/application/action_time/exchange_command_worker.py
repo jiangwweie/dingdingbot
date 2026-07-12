@@ -287,6 +287,7 @@ async def _dispatch(command: dict[str, Any], gateway: Any) -> Any:
         ),
         reduce_only=command.get("reduce_intent") == "reduce_position",
         position_side=command.get("position_side"),
+        desired_leverage=command.get("desired_leverage"),
         client_order_id=str(command["client_order_id"]),
     )
 

@@ -100,6 +100,7 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
     assert len(gateway.calls) == 1
     assert gateway.calls[0]["symbol"] == "ETH/USDT:USDT"
     assert gateway.calls[0]["position_side"] is None
+    assert gateway.calls[0]["desired_leverage"] == 2
     with engine.connect() as conn:
         row = conn.execute(
             text(

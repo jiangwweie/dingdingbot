@@ -33,8 +33,19 @@ MIGRATIONS = {
     / "migrations/versions/2026-07-10-110_certify_sor_dual_side_trial_events.py",
     "111": REPO_ROOT
     / "migrations/versions/2026-07-10-111_certify_brf2_short_trial_event.py",
+    "112": REPO_ROOT
+    / "migrations/versions/2026-07-10-112_version_live_signal_identity.py",
+    "113": REPO_ROOT
+    / "migrations/versions/2026-07-11-113_create_exchange_account_mode_and_domain_holds.py",
+    "114": REPO_ROOT
+    / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py",
+    "115": REPO_ROOT
+    / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py",
 }
-REVISION_ORDER = ("086", "103", "104", "105", "106", "107", "108", "109", "110", "111")
+REVISION_ORDER = (
+    "086", "103", "104", "105", "106", "107", "108", "109", "110", "111",
+    "112", "113", "114", "115",
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -80,6 +91,27 @@ def install_runtime_control_state_schema(
             migration.op = previous_op
         if revision == through_revision:
             break
+
+
+def install_runtime_control_state_revision(
+    conn: Connection,
+    *,
+    revision: str,
+) -> None:
+    """Apply one additive test revision to an already prepared schema."""
+
+    if revision not in MIGRATIONS:
+        raise ValueError(f"unsupported runtime-control test revision: {revision}")
+    migration = _load_module(
+        MIGRATIONS[revision],
+        f"test_runtime_control_state_single_migration_{revision}_{id(conn)}",
+    )
+    previous_op = migration.op
+    migration.op = Operations(MigrationContext.configure(conn))
+    try:
+        migration.upgrade()
+    finally:
+        migration.op = previous_op
 
 
 def seed_runtime_control_state(

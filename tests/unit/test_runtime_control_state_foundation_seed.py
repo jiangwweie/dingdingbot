@@ -18,6 +18,10 @@ MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
+DYNAMIC_POLICY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -40,12 +44,19 @@ def connection():
         poolclass=StaticPool,
     )
     with engine.begin() as conn:
-        old_op = migration.op
-        migration.op = Operations(MigrationContext.configure(conn))
-        try:
-            migration.upgrade()
-        finally:
-            migration.op = old_op
+        for current in (
+            migration,
+            _load_module(
+                DYNAMIC_POLICY_MIGRATION_PATH,
+                "migration_115_runtime_control_state",
+            ),
+        ):
+            old_op = current.op
+            current.op = Operations(MigrationContext.configure(conn))
+            try:
+                current.upgrade()
+            finally:
+                current.op = old_op
     with engine.connect() as conn:
         yield conn
     engine.dispose()
@@ -109,6 +120,23 @@ def test_seed_is_idempotent(connection, seed_module):
     assert _count(connection, "brc_owner_policy_current") == 22
     assert _count(connection, "brc_candidate_scope_event_bindings") == 22
     assert _count(connection, "brc_runtime_scope_bindings") == 22
+
+
+def test_seed_writes_confirmed_dynamic_risk_policy(connection, seed_module):
+    with connection.begin():
+        seed_module.seed_runtime_control_state_foundation(connection)
+
+    rows = connection.execute(
+        text(
+            """
+            SELECT DISTINCT planned_stop_risk_fraction,
+                            max_initial_margin_utilization,
+                            max_leverage
+            FROM brc_owner_policy_current
+            """
+        )
+    ).all()
+    assert rows == [(0.03, 0.9, 10)]
 
 
 def test_seed_cli_normalizes_asyncpg_dsn_for_sync_engine(

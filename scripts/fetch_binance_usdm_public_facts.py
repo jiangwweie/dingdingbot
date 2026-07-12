@@ -360,7 +360,21 @@ def _symbol_row(
     funding_ok = funding is not None and abs(funding) <= 0.003
     spread_ok = spread_bps is not None and spread_bps <= 10
     min_notional_value = _to_float(min_notional.get("notional"))
-    qty_step = market_lot.get("stepSize") or lot.get("stepSize")
+    market_min_qty = _to_float(market_lot.get("minQty"))
+    market_step = _to_float(market_lot.get("stepSize"))
+    active_lot = (
+        market_lot
+        if market_min_qty is not None
+        and market_min_qty > 0
+        and market_step is not None
+        and market_step > 0
+        else lot
+    )
+    min_qty = active_lot.get("minQty")
+    qty_step = active_lot.get("stepSize")
+    quantity_rule_source = (
+        "MARKET_LOT_SIZE" if active_lot is market_lot else "LOT_SIZE"
+    )
     return {
         "symbol": symbol,
         "public_facts_ready": all(
@@ -370,6 +384,7 @@ def _symbol_row(
                 funding_ok,
                 spread_ok,
                 min_notional_value is not None,
+                _to_float(min_qty) is not None,
                 bool(qty_step),
             ]
         ),
@@ -395,7 +410,10 @@ def _symbol_row(
             "ask_price": book.get("askPrice"),
             "spread_bps": round(spread_bps, 4) if spread_bps is not None else None,
             "min_notional": min_notional.get("notional"),
+            "min_qty": min_qty,
             "qty_step": qty_step,
+            "quantity_rule_source": quantity_rule_source,
+            "order_rule_surface": "market_entry",
             "contract_status": exchange_symbol.get("status"),
             "contract_type": exchange_symbol.get("contractType"),
         },
@@ -608,7 +626,21 @@ def _symbol_row_from_payload(
     funding_ok = funding is not None and abs(funding) <= 0.003
     spread_ok = spread_bps is not None and spread_bps <= 10
     min_notional_value = _to_float(min_notional.get("notional"))
-    qty_step = market_lot.get("stepSize") or lot.get("stepSize")
+    market_min_qty = _to_float(market_lot.get("minQty"))
+    market_step = _to_float(market_lot.get("stepSize"))
+    active_lot = (
+        market_lot
+        if market_min_qty is not None
+        and market_min_qty > 0
+        and market_step is not None
+        and market_step > 0
+        else lot
+    )
+    min_qty = active_lot.get("minQty")
+    qty_step = active_lot.get("stepSize")
+    quantity_rule_source = (
+        "MARKET_LOT_SIZE" if active_lot is market_lot else "LOT_SIZE"
+    )
     return {
         "symbol": symbol,
         "public_facts_ready": all(
@@ -618,6 +650,7 @@ def _symbol_row_from_payload(
                 funding_ok,
                 spread_ok,
                 min_notional_value is not None,
+                _to_float(min_qty) is not None,
                 bool(qty_step),
             ]
         ),
@@ -643,7 +676,10 @@ def _symbol_row_from_payload(
             "ask_price": book.get("askPrice"),
             "spread_bps": round(spread_bps, 4) if spread_bps is not None else None,
             "min_notional": min_notional.get("notional"),
+            "min_qty": min_qty,
             "qty_step": qty_step,
+            "quantity_rule_source": quantity_rule_source,
+            "order_rule_surface": "market_entry",
             "contract_status": exchange_symbol.get("status"),
             "contract_type": exchange_symbol.get("contractType"),
         },

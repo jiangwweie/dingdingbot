@@ -33,6 +33,7 @@ READ_ONLY_ENDPOINTS = {
     "position_risk": ("GET", "/fapi/v2/positionRisk", True),
     "open_orders": ("GET", "/fapi/v1/openOrders", True),
     "account_mode": ("GET", ACCOUNT_MODE_ENDPOINT, True),
+    "leverage_brackets": ("GET", "/fapi/v1/leverageBracket", True),
 }
 UrlOpen = Callable[..., Any]
 
@@ -128,12 +129,28 @@ def _exchange_rules(exchange_info: dict[str, Any], symbols: list[str]) -> dict[s
             continue
         filters = {entry.get("filterType"): entry for entry in item.get("filters") or [] if isinstance(entry, dict)}
         lot = filters.get("LOT_SIZE") or {}
+        market_lot = filters.get("MARKET_LOT_SIZE") or {}
         price = filters.get("PRICE_FILTER") or {}
         notional = filters.get("MIN_NOTIONAL") or filters.get("NOTIONAL") or {}
+        market_min_qty = _decimal(market_lot.get("minQty"))
+        market_step = _decimal(market_lot.get("stepSize"))
+        active_lot = (
+            market_lot
+            if market_min_qty is not None
+            and market_min_qty > 0
+            and market_step is not None
+            and market_step > 0
+            else lot
+        )
         rows[symbol] = {
             "status": item.get("status") or "unknown",
             "min_notional": notional.get("notional") or notional.get("minNotional"),
-            "qty_step": lot.get("stepSize"),
+            "min_qty": active_lot.get("minQty"),
+            "qty_step": active_lot.get("stepSize"),
+            "quantity_rule_source": (
+                "MARKET_LOT_SIZE" if active_lot is market_lot else "LOT_SIZE"
+            ),
+            "order_rule_surface": "market_entry",
             "price_tick": price.get("tickSize"),
         }
     return {"status": "ready", "symbols": rows}
@@ -186,17 +203,61 @@ def _account_summary(account: dict[str, Any]) -> dict[str, Any]:
     payload = account.get("payload")
     if not isinstance(payload, dict):
         return {"status": "missing"}
+    total_wallet_balance = _decimal(payload.get("totalWalletBalance"))
     available_balance = _decimal(payload.get("availableBalance"))
     return {
         "status": "fresh",
         "exchange_account_trade_permission": bool(payload.get("canTrade")),
         "fee_tier": payload.get("feeTier"),
+        "total_wallet_balance": (
+            str(total_wallet_balance) if total_wallet_balance is not None else None
+        ),
+        "available_balance": (
+            str(available_balance) if available_balance is not None else None
+        ),
         "total_wallet_balance_present": payload.get("totalWalletBalance") is not None,
+        "total_wallet_balance_positive": (
+            total_wallet_balance is not None
+            and total_wallet_balance > Decimal("0")
+        ),
         "available_balance_present": payload.get("availableBalance") is not None,
         "available_balance_positive": (
             available_balance is not None and available_balance > Decimal("0")
         ),
         "assets_count": len(payload.get("assets") or []),
+    }
+
+
+def _leverage_bracket_summary(
+    leverage_brackets: dict[str, Any],
+    symbols: list[str],
+) -> dict[str, Any]:
+    payload = leverage_brackets.get("payload")
+    if not isinstance(payload, list):
+        return {"status": "missing", "max_leverage_by_symbol": {}}
+    symbol_scope = set(symbols)
+    values: dict[str, int] = {}
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper()
+        if symbol not in symbol_scope:
+            continue
+        brackets = row.get("brackets")
+        if not isinstance(brackets, list):
+            continue
+        leverages = [
+            int(value)
+            for item in brackets
+            if isinstance(item, dict)
+            for value in [item.get("initialLeverage")]
+            if isinstance(value, int) and 1 <= value <= 125
+        ]
+        if leverages:
+            values[symbol] = max(leverages)
+    return {
+        "status": "ready" if len(values) == len(symbol_scope) else "partial",
+        "max_leverage_by_symbol": values,
     }
 
 
@@ -283,22 +344,21 @@ def _budget_state(
             "reason": "account_cannot_trade",
         }
     available_balance = _decimal(payload.get("availableBalance"))
-    max_notional = _decimal(handoff_summary.get("max_notional_requirement_usdt"))
-    if available_balance is None or max_notional is None:
+    total_wallet_balance = _decimal(payload.get("totalWalletBalance"))
+    if available_balance is None or total_wallet_balance is None:
         return {
             "status": "missing",
-            "reason": "available_balance_or_handoff_notional_missing",
+            "reason": "wallet_or_available_balance_missing",
         }
-    if available_balance < max_notional:
+    if available_balance <= 0 or total_wallet_balance <= 0:
         return {
             "status": "blocked",
-            "reason": "available_balance_below_strategygroup_tiny_notional",
-            "max_notional_requirement_usdt": str(max_notional),
+            "reason": "wallet_or_available_balance_not_positive",
         }
     return {
         "status": "available_for_candidate_specific_reservation",
-        "reason": "account_available_balance_covers_strategygroup_tiny_notional",
-        "max_notional_requirement_usdt": str(max_notional),
+        "reason": "dynamic_account_risk_capacity_available",
+        "risk_capacity_source": "dynamic_wallet_and_available_balance",
         "reservation_created": False,
     }
 
@@ -391,6 +451,9 @@ def collect_live_facts(
     position = _position_summary(payloads["position_risk"], symbols)
     open_orders = _open_order_summary(payloads["open_orders"], symbols)
     account = _account_summary(payloads["account"])
+    leverage_brackets = _leverage_bracket_summary(
+        payloads["leverage_brackets"], symbols
+    )
     account_mode = _account_mode_summary(
         payloads["account_mode"],
         account_id=scope["account_id"],
@@ -419,6 +482,7 @@ def collect_live_facts(
         "supported_symbol_count": len(symbols),
         "exchange_rules": exchange_rules,
         "account": account,
+        "leverage_brackets": leverage_brackets,
         "account_mode": account_mode,
         "active_position": position,
         "open_orders": open_orders,

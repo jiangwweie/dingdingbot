@@ -52,7 +52,7 @@ def _control_state(**overrides):
     return state
 
 
-def test_expired_event_scoped_outcome_loses_current_blocking_authority():
+def test_expired_event_scoped_outcome_keeps_current_blocking_authority():
     state = _control_state(
         live_signal_events=[
             _signal("signal:SOR-001:ETHUSDT:long:expired", fresh=False)
@@ -62,7 +62,7 @@ def test_expired_event_scoped_outcome_loses_current_blocking_authority():
     assert process_outcome_has_current_blocking_authority(
         state,
         _outcome(),
-    ) is False
+    ) is True
 
 
 def test_fresh_matching_signal_keeps_current_blocking_authority():
@@ -122,7 +122,7 @@ def test_opaque_failure_remains_current_until_scope_outcome_is_superseded():
     ) is False
 
 
-def test_current_object_from_another_lane_cannot_keep_blocker_authority():
+def test_other_lane_activity_does_not_erase_lane_blocker_authority():
     other_lane_signal = _signal(
         "signal:SOR-001:ETHUSDT:long:current",
         fresh=True,
@@ -132,16 +132,16 @@ def test_current_object_from_another_lane_cannot_keep_blocker_authority():
     assert process_outcome_has_current_blocking_authority(
         _control_state(live_signal_events=[other_lane_signal]),
         _outcome(source_watermark="signal:SOR-001:ETHUSDT:long:current"),
-    ) is False
+    ) is True
 
 
-def test_monitor_bounded_state_without_expired_source_row_drops_event_blocker():
+def test_monitor_filtering_expired_source_does_not_drop_event_blocker():
     assert process_outcome_has_current_blocking_authority(
         _control_state(),
         _outcome(
             source_watermark="signal:SOR-001:ETHUSDT:long:expired-and-filtered"
         ),
-    ) is False
+    ) is True
 
 
 def test_open_promotion_lane_and_active_ticket_each_keep_direct_source_current():
@@ -198,7 +198,7 @@ def test_open_promotion_lane_and_active_ticket_each_keep_direct_source_current()
         ) is True
 
 
-def test_nonclosed_lifecycle_keeps_lineage_but_closed_lifecycle_releases_it():
+def test_lifecycle_closure_does_not_erase_separate_unresolved_process_outcome():
     signal_id = "signal:SOR-001:ETHUSDT:long:lifecycle"
     ticket = {
         "ticket_id": "ticket:SOR-001:ETHUSDT:long:lifecycle",
@@ -231,10 +231,10 @@ def test_nonclosed_lifecycle_keeps_lineage_but_closed_lifecycle_releases_it():
     assert process_outcome_has_current_blocking_authority(
         state,
         _outcome(source_watermark=signal_id),
-    ) is False
+    ) is True
 
 
-def test_orphan_runtime_safety_snapshot_cannot_revive_expired_outcome():
+def test_orphan_runtime_safety_snapshot_does_not_change_persisted_outcome():
     state = _control_state(
         runtime_safety_state=[
             {
@@ -258,10 +258,10 @@ def test_orphan_runtime_safety_snapshot_cannot_revive_expired_outcome():
         _outcome(
             source_watermark="signal:SOR-001:ETHUSDT:long:expired"
         ),
-    ) is False
+    ) is True
 
 
-def test_new_signal_identity_does_not_inherit_old_same_lane_outcome():
+def test_new_signal_identity_does_not_erase_old_same_lane_outcome_before_rerun():
     state = _control_state(
         live_signal_events=[
             _signal("signal:SOR-001:ETHUSDT:long:new", fresh=True)
@@ -271,4 +271,4 @@ def test_new_signal_identity_does_not_inherit_old_same_lane_outcome():
     assert process_outcome_has_current_blocking_authority(
         state,
         _outcome(source_watermark="signal:SOR-001:ETHUSDT:long:old"),
-    ) is False
+    ) is True

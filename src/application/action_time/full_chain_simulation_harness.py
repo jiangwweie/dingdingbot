@@ -930,7 +930,13 @@ def _insert_constructed_raw_input(
                 "source_exchange_write_called": False,
                 "source_order_created": False,
             },
-            "facts": {},
+            "facts": {
+                "total_wallet_balance": "100",
+                "available_balance": "100",
+                "exchange_max_leverage_by_symbol": {
+                    str(row["symbol"]): 100,
+                },
+            },
             "account_mode": {
                 "status": "fresh",
                 "account_id": "owner-subaccount-runtime-v0",
@@ -1030,6 +1036,7 @@ def _production_public_fact_values(*, side: str, last_price: Any) -> dict[str, A
             "bid_price": str(bid),
             "ask_price": str(ask),
             "qty_step": "0.001",
+            "min_qty": "0.001",
             "min_notional": "5",
             "contract_status": "TRADING",
             "contract_type": "PERPETUAL",

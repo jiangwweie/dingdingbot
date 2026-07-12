@@ -83,6 +83,10 @@ LIFECYCLE_COMMAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
 )
+DYNAMIC_RISK_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -302,6 +306,16 @@ def pg_control_connection():
                 lifecycle_migration.op = old_lifecycle_op
         finally:
             migration.op = old_op
+        dynamic_risk_migration = _load_module(
+            DYNAMIC_RISK_MIGRATION_PATH,
+            "migration_115_runtime_safety",
+        )
+        old_dynamic_risk_op = dynamic_risk_migration.op
+        dynamic_risk_migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            dynamic_risk_migration.upgrade()
+        finally:
+            dynamic_risk_migration.op = old_dynamic_risk_op
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(
@@ -844,7 +858,7 @@ def _create_handoff_ready(
         ticket_id=ticket_id,
         now_ms=NOW_MS + 1000,
     )
-    assert finalgate_payload["status"] == "finalgate_ready"
+    assert finalgate_payload["status"] == "finalgate_ready", finalgate_payload
     finalgate_pass_id = str(finalgate_payload["finalgate_pass_id"])
     handoff_payload = handoff.materialize_action_time_operation_layer_handoff(
         conn,

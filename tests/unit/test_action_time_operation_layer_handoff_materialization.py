@@ -14,6 +14,7 @@ from tests.unit.test_action_time_ticket_materialization import (
     _insert_action_time_lane_graph,
 )
 from tests.support.runtime_control_state_schema import (
+    install_runtime_control_state_revision,
     install_runtime_control_state_schema,
     seed_runtime_control_state,
 )
@@ -28,6 +29,7 @@ def pg_control_connection():
     with engine.begin() as conn:
         install_runtime_control_state_schema(conn, through_revision="104")
         seed_runtime_control_state(conn)
+        install_runtime_control_state_revision(conn, revision="115")
     with engine.connect() as conn:
         yield conn
     engine.dispose()

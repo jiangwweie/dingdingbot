@@ -65,6 +65,7 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     amount: Decimal = Field(gt=Decimal("0"))
     price: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
     stop_price: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
+    desired_leverage: Optional[int] = Field(default=None, ge=1, le=125)
     reduce_only: bool = False
     reduce_intent: str = Field(pattern="^(open_position|reduce_position)$")
     position_mode: str = Field(pattern="^(one_way|hedge)$")
@@ -122,6 +123,8 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
             raise ValueError("only ENTRY may open position")
         if self.reduce_intent == "reduce_position" and self.order_role == "ENTRY":
             raise ValueError("ENTRY may not carry reduce intent")
+        if self.desired_leverage is not None and self.order_role != "ENTRY":
+            raise ValueError("only ENTRY may carry desired leverage")
         return self
 
 

@@ -546,10 +546,12 @@ def _candidate_pool_evidence(
 ) -> str:
     coverage = _as_dict(candidate_pool_row.get("server_runtime_coverage"))
     coverage_state = str(coverage.get("state") or "unknown")
+    detail = str(candidate_pool_row.get("first_blocker_detail") or "")
     return (
         "candidate_pool_input:"
         f"{strategy_group_id}/{candidate_pool_row.get('symbol') or 'strategy_scope'} "
         f"first_blocker={first_blocker} "
+        f"first_blocker_detail={detail or first_blocker} "
         f"server_runtime_coverage={coverage_state}"
     )
 

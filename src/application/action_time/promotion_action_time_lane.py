@@ -38,9 +38,14 @@ from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
 from src.application.action_time.pricing_sizing import (  # noqa: E402
-    TicketSizingRiskDecision,
-    materialize_ticket_sizing_risk_decision,
     pricing_reference_from_action_time_fact_values,
+)
+from src.domain.execution_sizing import (  # noqa: E402
+    ExecutionAccountCapacity,
+    ExecutionInstrumentRules,
+    ExecutionSizingDecision,
+    ExecutionSizingPolicy,
+    decide_execution_sizing,
 )
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
@@ -100,7 +105,7 @@ class CandidateBundle:
     owner_policy_version: str
     account_id: str
     blockers: tuple[str, ...]
-    sizing_risk_decision: TicketSizingRiskDecision | None = None
+    sizing_risk_decision: ExecutionSizingDecision | None = None
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -222,7 +227,7 @@ def materialize_pg_promotion_action_time_lane(
         )
 
     bundles = _apply_same_session_opposite_side_conflicts(bundles)
-    bundles = _apply_allocation_capital_scope(bundles)
+    bundles = _apply_allocation_capital_scope(bundles, now_ms=now_ms)
     eligible = [bundle for bundle in bundles if not bundle.blockers]
     blocked = [bundle for bundle in bundles if bundle.blockers]
     selected = _select_winner(eligible)
@@ -1070,10 +1075,12 @@ def _candidate_blockers(
     if _tp1_price(action_time_fact=action_time_fact) <= 0:
         blockers.append("tp1_reference_missing")
 
-    if _decimal(policy.get("max_notional")) <= 0:
-        blockers.append("policy_max_notional_invalid")
-    if _decimal(policy.get("leverage")) <= 0:
-        blockers.append("policy_leverage_invalid")
+    if _decimal(policy.get("planned_stop_risk_fraction")) <= 0:
+        blockers.append("policy_planned_stop_risk_fraction_invalid")
+    if _decimal(policy.get("max_initial_margin_utilization")) <= 0:
+        blockers.append("policy_max_initial_margin_utilization_invalid")
+    if int(policy.get("max_leverage") or 0) <= 0:
+        blockers.append("policy_max_leverage_invalid")
     if account_id == "":
         blockers.append("account_id_missing")
 
@@ -1183,38 +1190,97 @@ def _allocation_decision_row(
 
 def _requested_risk_at_stop(bundle: CandidateBundle) -> Decimal:
     decision = bundle.sizing_risk_decision
-    return decision.risk_at_stop if decision is not None else Decimal("0")
+    return decision.planned_stop_risk if decision is not None else Decimal("0")
 
 
-def _sizing_risk_decision_result(bundle: CandidateBundle):
+def _sizing_risk_decision_result(
+    bundle: CandidateBundle,
+    *,
+    now_ms: int,
+):
     pricing_result = pricing_reference_from_action_time_fact_values(
         _as_dict(bundle.action_time_fact.get("fact_values"))
     )
     if pricing_result.reference is None:
         return None, list(pricing_result.blockers)
     protection = _protection_row(bundle)
-    result = materialize_ticket_sizing_risk_decision(
-        pricing_reference=pricing_result.reference,
-        target_notional=_decimal(bundle.policy.get("max_notional")),
-        stop_price=_decimal(protection.get("reference_price")),
+    pricing = pricing_result.reference
+    account_values = _as_dict(bundle.account_safe_fact.get("fact_values"))
+    leverage_by_symbol = _as_dict(
+        account_values.get("exchange_max_leverage_by_symbol")
+    )
+    try:
+        exchange_max_leverage = int(
+            leverage_by_symbol.get(str(bundle.candidate.get("symbol") or ""))
+            or 0
+        )
+    except (TypeError, ValueError):
+        exchange_max_leverage = 0
+    if not 1 <= exchange_max_leverage <= 125:
+        return None, ["exchange_leverage_bracket_missing_or_invalid"]
+    try:
+        policy = ExecutionSizingPolicy(
+            planned_stop_risk_fraction=_decimal(
+                bundle.policy.get("planned_stop_risk_fraction")
+            ),
+            max_initial_margin_utilization=_decimal(
+                bundle.policy.get("max_initial_margin_utilization")
+            ),
+            max_leverage=int(bundle.policy.get("max_leverage") or 0),
+            policy_version=bundle.owner_policy_version,
+        )
+        account = ExecutionAccountCapacity(
+            total_wallet_balance=_decimal(
+                account_values.get("total_wallet_balance")
+            ),
+            available_balance=_decimal(account_values.get("available_balance")),
+            source_fact_snapshot_id=str(
+                bundle.account_safe_fact.get("fact_snapshot_id") or ""
+            ),
+            observed_at_ms=int(
+                bundle.account_safe_fact.get("observed_at_ms") or 0
+            ),
+            valid_until_ms=int(
+                bundle.account_safe_fact.get("valid_until_ms") or 0
+            ),
+        )
+        rules = ExecutionInstrumentRules(
+            symbol=str(bundle.candidate.get("symbol") or ""),
+            side=pricing.side,
+            entry_reference_price=pricing.entry_reference_price,
+            min_qty=pricing.min_qty,
+            qty_step=pricing.qty_step,
+            min_notional=pricing.min_notional,
+            exchange_max_leverage=exchange_max_leverage,
+            source_fact_snapshot_id=pricing.source_fact_snapshot_id,
+            observed_at_ms=pricing.observed_at_ms,
+            valid_until_ms=pricing.valid_until_ms,
+        )
+    except (TypeError, ValueError) as exc:
+        return None, [f"dynamic_execution_sizing_input_invalid:{exc}"]
+    result = decide_execution_sizing(
+        rules=rules,
+        account=account,
+        policy=policy,
+        protective_stop_price=_decimal(protection.get("reference_price")),
+        now_ms=now_ms,
     )
     return result.decision, list(result.blockers)
 
 
 def _apply_allocation_capital_scope(
     bundles: list[CandidateBundle],
+    *,
+    now_ms: int,
 ) -> list[CandidateBundle]:
     guarded: list[CandidateBundle] = []
     for bundle in bundles:
         blockers = list(bundle.blockers)
-        decision, decision_blockers = _sizing_risk_decision_result(bundle)
+        decision, decision_blockers = _sizing_risk_decision_result(
+            bundle,
+            now_ms=now_ms,
+        )
         blockers.extend(decision_blockers)
-        requested = decision.risk_at_stop if decision is not None else Decimal("0")
-        owner_loss_unit = _decimal(bundle.policy.get("loss_unit"))
-        if decision is not None and owner_loss_unit <= 0:
-            blockers.append("allocation_owner_loss_unit_invalid")
-        elif requested > owner_loss_unit:
-            blockers.append("allocation_risk_exceeds_owner_capital_scope")
         guarded.append(
             replace(
                 bundle,
@@ -1264,9 +1330,9 @@ def _budget_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
     decision = bundle.sizing_risk_decision
     if decision is None:
         raise ValueError("selected promotion has no sizing/risk decision")
-    target_notional = _decimal(bundle.policy.get("max_notional"))
-    leverage = _decimal(bundle.policy.get("leverage"))
-    reserved_margin = target_notional / leverage
+    target_notional = decision.effective_notional
+    leverage = Decimal(decision.selected_leverage)
+    reserved_margin = decision.reserved_margin
     return {
         "budget_reservation_id": bundle.budget_reservation_id,
         "promotion_candidate_id": bundle.promotion_candidate_id,
@@ -1281,17 +1347,21 @@ def _budget_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
         "side": str(bundle.candidate["side"]),
         "target_notional": target_notional,
         "leverage": leverage,
+        "effective_notional": target_notional,
+        "selected_leverage": int(decision.selected_leverage),
+        "planned_stop_risk_budget": decision.planned_stop_risk_budget,
+        "planned_stop_risk": decision.planned_stop_risk,
         "reserved_margin": reserved_margin,
         "entry_reference_price": decision.entry_reference_price,
-        "stop_price": decision.stop_price,
+        "stop_price": decision.protective_stop_price,
         "intended_qty": decision.intended_qty,
-        "risk_at_stop": decision.risk_at_stop,
+        "risk_at_stop": decision.planned_stop_risk,
         "risk_reservation_basis": decision.risk_reservation_basis,
         "reserved_at_ms": now_ms,
         "expires_at_ms": min(
             int(bundle.signal["expires_at_ms"]),
             int(bundle.action_time_fact["valid_until_ms"]),
-            decision.pricing_valid_until_ms,
+            decision.valid_until_ms,
         ),
         "status": "active",
         "release_reason": None,

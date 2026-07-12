@@ -729,6 +729,10 @@ def _pg_daily_table_projection(
                 ),
                 "chain_position": "pg_runtime_control_state",
                 "first_blocker": first_blocker,
+                "first_blocker_detail": str(
+                    selected.get("first_blocker_detail")
+                    or ""
+                ),
                 "first_blocker_evidence": _pg_candidate_evidence_ref(
                     selected,
                     first_blocker=first_blocker,
@@ -815,6 +819,10 @@ def _pg_tradeability_projection(
                 ),
                 "can_trade_now": False,
                 "first_blocker": first_blocker,
+                "first_blocker_detail": str(
+                    selected.get("first_blocker_detail")
+                    or ""
+                ),
                 "blocker_owner": _blocker_owner(first_blocker),
                 "policy_scope": {
                     "live_submit_symbols": live_symbols,
@@ -3232,6 +3240,11 @@ def _sync_candidate_rows_with_symbol_readiness(
                 "selected_symbol": selected_symbol,
                 "side": str(summary.get("side") or candidate["side"]),
                 "first_blocker": first_blocker,
+                "first_blocker_detail": str(
+                    summary.get("first_blocker_detail")
+                    or candidate.get("first_blocker_detail")
+                    or ""
+                ),
                 "blocker_owner": _blocker_owner(first_blocker),
                 "evidence": str(summary.get("evidence_ref") or candidate["evidence"]),
                 "next_engineering_action": str(

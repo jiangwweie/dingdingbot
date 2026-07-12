@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -137,3 +138,49 @@ def test_public_facts_reads_default_symbols_from_pg_candidate_scope(tmp_path, mo
     assert json.loads(capsys.readouterr().out)["status"] == (
         "binance_usdm_public_facts_ready"
     )
+
+
+def test_public_fact_row_persists_market_entry_minimum_quantity(monkeypatch):
+    module = _load_module()
+    observed_at = datetime(2026, 7, 12, tzinfo=timezone.utc)
+
+    def fake_fetch(path, errors):
+        if "premiumIndex" in path:
+            return {
+                "markPrice": "100",
+                "lastFundingRate": "0.0001",
+                "time": int(observed_at.timestamp() * 1000),
+            }
+        if "bookTicker" in path:
+            return {"bidPrice": "99.99", "askPrice": "100.01"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(module, "_fetch_json", fake_fetch)
+    row = module._symbol_row(
+        "TESTUSDT",
+        {
+            "status": "TRADING",
+            "contractType": "PERPETUAL",
+            "filters": [
+                {
+                    "filterType": "LOT_SIZE",
+                    "minQty": "0.01",
+                    "stepSize": "0.01",
+                },
+                {
+                    "filterType": "MARKET_LOT_SIZE",
+                    "minQty": "0.001",
+                    "stepSize": "0.001",
+                },
+                {"filterType": "MIN_NOTIONAL", "notional": "5"},
+            ],
+        },
+        [],
+        observed_at,
+    )
+
+    assert row["public_facts_ready"] is True
+    assert row["facts"]["min_qty"] == "0.001"
+    assert row["facts"]["qty_step"] == "0.001"
+    assert row["facts"]["quantity_rule_source"] == "MARKET_LOT_SIZE"
+    assert row["facts"]["order_rule_surface"] == "market_entry"

@@ -12,9 +12,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.execution_sizing import PLANNED_STOP_RISK_BASIS
+
 
 RISK_RESERVATION_BASIS = "entry_reference_stop_distance_v0"
-NUMERIC_STORAGE_EPSILON = Decimal("0.000000000000001")
+NUMERIC_STORAGE_EPSILON = Decimal("0.000000000001")
 
 
 class ActionTimePricingReference(BaseModel):
@@ -28,6 +30,7 @@ class ActionTimePricingReference(BaseModel):
     mark_price: Decimal = Field(gt=Decimal("0"))
     bid_price: Decimal = Field(gt=Decimal("0"))
     ask_price: Decimal = Field(gt=Decimal("0"))
+    min_qty: Decimal = Field(gt=Decimal("0"))
     qty_step: Decimal = Field(gt=Decimal("0"))
     min_notional: Decimal = Field(gt=Decimal("0"))
     source_fact_snapshot_id: str = Field(min_length=1)
@@ -41,6 +44,7 @@ class ActionTimePricingReference(BaseModel):
             self.mark_price,
             self.bid_price,
             self.ask_price,
+            self.min_qty,
             self.qty_step,
             self.min_notional,
         )
@@ -104,7 +108,12 @@ class TicketSizingRiskDecision(BaseModel):
         expected_raw_qty = self.target_notional / self.entry_reference_price
         if self.raw_qty != expected_raw_qty:
             raise ValueError("raw quantity does not match target notional")
-        if self.intended_qty != _floor_to_step(expected_raw_qty, self.qty_step):
+        expected_qty = (
+            _nearest_step(expected_raw_qty, self.qty_step)
+            if self.risk_reservation_basis == PLANNED_STOP_RISK_BASIS
+            else _floor_to_step(expected_raw_qty, self.qty_step)
+        )
+        if not _decimal_equal(self.intended_qty, expected_qty):
             raise ValueError("intended quantity does not match target notional")
         if self.rounded_notional != self.intended_qty * self.entry_reference_price:
             raise ValueError("rounded notional does not match quantity and price")
@@ -118,7 +127,10 @@ class TicketSizingRiskDecision(BaseModel):
             raise ValueError("long stop must be below entry")
         if self.side == "short" and self.stop_price <= self.entry_reference_price:
             raise ValueError("short stop must be above entry")
-        if self.risk_reservation_basis != RISK_RESERVATION_BASIS:
+        if self.risk_reservation_basis not in {
+            RISK_RESERVATION_BASIS,
+            PLANNED_STOP_RISK_BASIS,
+        }:
             raise ValueError("risk reservation basis is invalid")
         return self
 
@@ -183,6 +195,7 @@ def materialize_action_time_pricing_reference(
     mark_price = _positive_decimal(facts.get("mark_price"))
     bid_price = _positive_decimal(facts.get("bid_price"))
     ask_price = _positive_decimal(facts.get("ask_price"))
+    min_qty = _positive_decimal(facts.get("min_qty"))
     qty_step = _positive_decimal(facts.get("qty_step"))
     min_notional = _positive_decimal(facts.get("min_notional"))
     if mark_price is None:
@@ -191,6 +204,8 @@ def materialize_action_time_pricing_reference(
         blockers.append("action_time_bid_price_invalid")
     if ask_price is None:
         blockers.append("action_time_ask_price_invalid")
+    if min_qty is None:
+        blockers.append("action_time_min_qty_invalid")
     if qty_step is None:
         blockers.append("action_time_qty_step_invalid")
     if min_notional is None:
@@ -211,6 +226,7 @@ def materialize_action_time_pricing_reference(
     assert mark_price is not None
     assert bid_price is not None
     assert ask_price is not None
+    assert min_qty is not None
     assert qty_step is not None
     assert min_notional is not None
     assert entry_reference_price is not None
@@ -222,6 +238,7 @@ def materialize_action_time_pricing_reference(
             mark_price=mark_price,
             bid_price=bid_price,
             ask_price=ask_price,
+            min_qty=min_qty,
             qty_step=qty_step,
             min_notional=min_notional,
             source_fact_snapshot_id=source_fact_snapshot_id,
@@ -341,9 +358,17 @@ def sizing_risk_decision_from_budget(
     if stored_target <= 0:
         lineage_blockers.append("budget_reservation_target_notional_invalid")
     if stored_target > 0 and stored_entry > 0:
-        expected_qty = _floor_to_step(
-            stored_target / stored_entry,
-            pricing_reference.qty_step,
+        expected_qty = (
+            _nearest_step(
+                stored_target / stored_entry,
+                pricing_reference.qty_step,
+            )
+            if str(budget.get("risk_reservation_basis") or "")
+            == PLANNED_STOP_RISK_BASIS
+            else _floor_to_step(
+                stored_target / stored_entry,
+                pricing_reference.qty_step,
+            )
         )
         if not _decimal_equal(canonical_qty, expected_qty):
             lineage_blockers.append(
@@ -419,7 +444,10 @@ def budget_stop_risk_blockers(budget: dict[str, Any]) -> list[str]:
         blockers.append("risk_reservation_intended_qty_invalid")
     if risk is None:
         blockers.append("risk_at_stop_invalid")
-    if str(budget.get("risk_reservation_basis") or "") != RISK_RESERVATION_BASIS:
+    if str(budget.get("risk_reservation_basis") or "") not in {
+        RISK_RESERVATION_BASIS,
+        PLANNED_STOP_RISK_BASIS,
+    }:
         blockers.append("risk_reservation_basis_missing_or_invalid")
     if entry is not None and stop is not None:
         if side == "long" and stop >= entry:

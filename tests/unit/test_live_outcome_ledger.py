@@ -188,6 +188,7 @@ def test_live_outcome_projects_actual_exit_fill_fees_pnl_and_r_multiple(
     assert outcome["final_exit_price"] == Decimal("1990")
     assert outcome["final_exit_time_ms"] == NOW_MS + 7_000
     assert outcome["fees"] == Decimal("0.03")
+    assert outcome["entry_slippage"] == Decimal("0")
     assert outcome["realized_pnl"] == expected_gross
     assert outcome["funding"] is None
     assert outcome["r_multiple"] == (

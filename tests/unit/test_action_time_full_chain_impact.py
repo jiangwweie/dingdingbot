@@ -127,6 +127,10 @@ LIFECYCLE_COMMAND_EXTENSION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py"
 )
+DYNAMIC_RISK_POLICY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -377,6 +381,10 @@ def pg_control_connection():
             (
                 LIFECYCLE_COMMAND_EXTENSION_MIGRATION_PATH,
                 "migration_114_action_time_full_chain",
+            ),
+            (
+                DYNAMIC_RISK_POLICY_MIGRATION_PATH,
+                "migration_115_action_time_full_chain",
             ),
         ):
             extension = _load_module(path, module_name)
@@ -1316,7 +1324,11 @@ def _run_raw_pg_input_to_runtime_safety(
                 "source_exchange_write_called": False,
                 "source_order_created": False,
             },
-            "facts": {},
+            "facts": {
+                "total_wallet_balance": "100",
+                "available_balance": "100",
+                "exchange_max_leverage_by_symbol": {symbol: 100},
+            },
             "account_mode": {
                 "status": "fresh",
                 "account_id": "owner-subaccount-runtime-v0",
@@ -1350,7 +1362,12 @@ def _run_raw_pg_input_to_runtime_safety(
         projection_publisher=publisher.publish_action_time_pretrade_readiness,
         completion_clock_ms=lambda: NOW_MS + 2,
     )
-    assert sequence_payload["status"] == "action_time_ticket_sequence_committed"
+    assert sequence_payload["status"] == "action_time_ticket_sequence_committed", {
+        "status": sequence_payload.get("status"),
+        "blockers": sequence_payload.get("blockers"),
+        "promotion": sequence_payload.get("promotion"),
+        "ticket": sequence_payload.get("ticket"),
+    }
     fact_payload = sequence_payload["fact"]
     readiness_projection_payload = sequence_payload["projection"]
     lane_payload = sequence_payload["promotion"]
@@ -1439,6 +1456,7 @@ def _production_public_fact_values(*, side: str, last_price) -> dict:
             "mark_price": str(entry),
             "bid_price": str(bid),
             "ask_price": str(ask),
+            "min_qty": "0.001",
             "qty_step": "0.001",
             "min_notional": "5",
             "contract_status": "TRADING",

@@ -13,9 +13,15 @@ def _live_facts() -> dict:
     return {
         "status": "ready",
         "account": {
+            "total_wallet_balance": "123.45",
+            "available_balance": "100.00",
             "available_balance_present": True,
             "available_balance_positive": True,
             "exchange_account_trade_permission": True,
+        },
+        "leverage_brackets": {
+            "status": "ready",
+            "max_leverage_by_symbol": {"TESTUSDT": 100},
         },
         "active_position": {"status": "no_active_position"},
         "open_orders": {"status": "no_open_orders"},
@@ -53,6 +59,8 @@ def test_runtime_account_safe_facts_ready_from_live_facts():
     assert artifact["checks"]["private_action_time_facts_ready"] is True
     assert artifact["checks"]["active_position_or_open_order_clear"] is True
     assert artifact["checks"]["action_time_available_balance"] is True
+    assert artifact["facts"]["total_wallet_balance"] == "123.45"
+    assert artifact["facts"]["available_balance"] == "100.00"
     assert artifact["blockers"] == []
     assert artifact["account_mode"]["account_mode"] == "one_way"
     assert artifact["account_mode"]["dual_side_position"] is False
@@ -195,6 +203,12 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
             return {"payload": [{"symbol": "ETHUSDT", "positionAmt": "0"}]}
         if path.endswith("/openOrders"):
             return {"payload": []}
+        if path.endswith("/leverageBracket"):
+            return {
+                "payload": [
+                    {"symbol": "ETHUSDT", "brackets": [{"initialLeverage": 100}]}
+                ]
+            }
         if path.endswith("/positionSide/dual"):
             return {"payload": {"dualSidePosition": False}}
         raise AssertionError(path)
@@ -227,6 +241,11 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
     assert all(row[6] == "fresh" for row in rows)
     account_mode_row = next(row for row in rows if row[0] == "account_mode")
     account_mode_values = json.loads(account_mode_row[7])
+    account_safe_row = next(row for row in rows if row[0] == "account_safe")
+    account_safe_values = json.loads(account_safe_row[7])
+    assert account_safe_values["exchange_max_leverage_by_symbol"] == {
+        "ETHUSDT": 100
+    }
     assert account_mode_values["account_id"] == "owner-subaccount-runtime-v0"
     assert account_mode_values["exchange_id"] == "binance_usdm"
     assert account_mode_values["account_mode"] == "one_way"
