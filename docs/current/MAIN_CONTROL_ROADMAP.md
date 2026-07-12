@@ -49,28 +49,28 @@ design documents and acceptance proof.
 
 | Order | Program | State | Primary design surface |
 | --- | --- | --- | --- |
-| 1 | **P1-TFC Trade Feedback Core Consolidation** | **active P1 medium-scale mainline** | `docs/current/P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_DESIGN.md`, `docs/current/P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_IMPLEMENTATION_PLAN.md` |
+| 1 | **P1-OFC Strategy Opportunity And Live Feedback Calibration** | **active P1 medium-scale mainline** | `docs/current/P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN.md`, `docs/current/P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN.md` |
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
-| 2 | **Strategy Opportunity / Replay-Live Calibration** | P1 after P1-TFC | Production Event Spec parity plus research-side opportunity frequency |
-| 3 | **Owner Supervision Product Integration** | P1/P2 after feedback vocabulary stabilizes | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
-| 4 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
-| 5 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
+| 2 | **Owner Supervision Product Integration** | P1/P2 after OFC feedback vocabulary stabilizes | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
+| 3 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
+| 4 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
 P0-RT, P0-PC, Operation Layer capability, lifecycle safety core, first tick,
 runner, recovery, Live Outcome, continuous reconciliation, and P0-LC are
-deployed component baselines. They are not concurrent WIP programs. Real venue
-calibration remains **R1B**, while engineering proceeds through P1-TFC without
-waiting for market opportunity.
+deployed component baselines. P1-TFC is also a deployed component baseline, not
+concurrent WIP. Real venue calibration remains **R1B**, while engineering uses
+P1-OFC to distinguish market absence, near misses, coverage gaps, and
+replay/live mismatches without waiting idly for market opportunity.
 
 ## Current Verified Progress
 
 | Area | Current fact |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs `0368de6a109a366658e0cf45f1012ad5c7779153`; it is deployed and no-active accepted, but no natural real Ticket has completed exchange lifecycle calibration |
-| **Active delivery branch** | `codex/p1-trade-feedback-core-consolidation` starts from the exact deployed `0368de6a` baseline |
-| **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` points to `brc-runtime-governance-0368de6a-20260711T175627Z` |
+| **Live Candidate Baseline** | Tokyo runs `2df39c1cf43645a07396c3b906ce450a2973442a`; it is deployed and no-active accepted, but no natural real Ticket has completed exchange lifecycle calibration |
+| **Active delivery branch** | `codex/p1-opportunity-feedback-calibration` starts from the exact deployed `2df39c1c` baseline |
+| **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` points to `brc-runtime-governance-2df39c1c-20260712T0643Z` |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
-| **PG migration** | Tokyo is at migration `114` (`2026-07-11-114_extend_exchange_commands_for_lifecycle.py`) |
+| **PG migration** | Tokyo is at migration `115` (`2026-07-12-115_add_dynamic_execution_risk_policy.py`) |
 | **P0-LC deployment acceptance** | Postdeploy verification passes; backend HTTP checks, schema count, lifecycle units, and no-active lifecycle service are accepted without exchange write |
 | **Backend / watcher / monitor / lifecycle** | Backend, watcher timer, monitor timer, and lifecycle timer are active; latest lifecycle service result is success with zero active lifecycle scopes |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
@@ -80,11 +80,12 @@ waiting for market opportunity.
 | **Typed Ticket boundary** | Side-aware price, normalized quantity, positive stop risk, one reservation, atomic fact-to-Ticket transaction, and six-Event-Spec production-shaped certification are deployed |
 | **Current tradeability** | The latest five-group PG acceptance classified current lanes as `market_wait_validated`; no current signal, promotion, lane, Ticket, or active lifecycle exists |
 | **Lifecycle production capability** | Typed exchange truth, fill projection, durable short-transaction commands, continuous reconciliation, settlement, finalization, terminal Outcome, account-mode bootstrap, and migration-shaped ops health are deployed |
-| **Current simplification finding** | The 31 migration-114 lifecycle statuses mix phase, protection, reconciliation, control, and recovery semantics; production callers duplicate event and next-action interpretation |
+| **Trade feedback core** | P1-TFC uses one typed lifecycle decision across production callers, rehearsal, and Owner feedback; it is deployed rather than active WIP |
+| **Dynamic execution risk** | New entry sizing uses fresh wallet/available balance, 3% planned Stop risk, 90% margin utilization, lowest sufficient leverage, and a 10x Owner ceiling |
 
 ## Current Next Execution Order
 
-This is the current execution order for **P1-TFC**. A new different
+This is the current execution order for **P1-OFC**. A new different
 `signal_event_id` is a P0 interrupt event: after any unprotected position or
 unknown exchange outcome is handled, engineering pauses at the next committed
 transaction boundary, runs natural-signal acceptance, persists the result, and
@@ -92,12 +93,10 @@ then resumes this order.
 
 | Order | Work | Priority | Done when |
 | --- | --- | --- | --- |
-| 1 | **Typed lifecycle decision model** | P1 | Every migration-114 status maps to one phase/protection/reconciliation/control/recovery/Owner decision; unknown state and terminal regression fail closed |
-| 2 | **Production caller consolidation** | P1 | Protection, recovery, Runner, Fill, and Finalizer consume the existing lifecycle core instead of local event/action maps |
-| 3 | **Replay/Rehearsal/Live decision parity** | P1 | Direct replay-shaped projection and production-shaped 22-scope/nine-failure rehearsal return the same typed decision without live authority |
-| 4 | **Owner feedback in standard Ops path** | P1 | Tokyo Ops translates current lifecycle attention into processing, automatic recovery, temporary unavailability, intervention, or completion without mutation |
-| 5 | **Regression and planning closure** | P1 | Full tests and runtime file-I/O/docs/output validators pass; current documents name one active medium-scale program |
-| 6 | **Strategy Opportunity / Replay-Live Calibration** | P1 next | Current Event Specs explain expected opportunity frequency and replay/live rule parity without modifying live authority |
+| 1 | **Typed calibration core** | P1 | 90/365-day frequency, near-miss facts, exact parity, and coverage gaps reduce into one non-authority result |
+| 2 | **Production evaluator adapter** | P1 | CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG, SOR-SHORT, and BRF2-SHORT reuse the production evaluator router without rule copies |
+| 3 | **Ticket-bound outcome economics** | P1 | Actual signed funding and entry/exit slippage enrich the existing Live Outcome without entering submit gates |
+| 4 | **Regression and planning closure** | P1 | Full tests and runtime file-I/O/docs/output validators pass; P1-OFC is the only active medium-scale program |
 
 ## Why This Was Not Detected Before Production Signals
 
@@ -158,14 +157,15 @@ platform.
 | **R1A Lifecycle Engineering Certification** | Wire exchange truth, fills, durable commands, protection/recovery, finalization, settlement, review, and terminal Outcome without waiting for market | R0 engineering baseline | 22 isolated rehearsal scopes reach simulated closure or one deterministic blocker; Tokyo no-active and ops acceptance pass |
 | **R1B Live Lifecycle Calibration** | Measure real visibility latency, partial fills, fees, funding, slippage, protection/runner acceptance, and exchange-specific behavior | R1A closed and a natural opportunity occurs | Every real ticket reaches structured closure or one exact hard blocker; measured venue behavior feeds policy review |
 | **R1C Trade Feedback Core Consolidation** | Unify post-Ticket phase, protection, reconciliation, control, recovery, and Owner feedback while R1B waits | R1A deployed | Production callers and Replay/Rehearsal use one reducer; no schema or trading-authority expansion; full regression passes |
+| **R1D Opportunity Feedback Calibration** | Measure version-pinned opportunity supply, near misses, replay/live parity, and complete nullable real-ticket economics | R1C deployed | Six Event Specs have one typed calibration path and real Outcomes can include funding and exit slippage without authority expansion |
 | **R2 Capital Allocation V1** | Allocate loss-capable capital across StrategyGroup sleeves, symbols, sides, clusters, open risk, and pending reservations | Reliable per-ticket stop risk and live outcomes exist | Simultaneous candidates receive deterministic PG-backed allocation without changing per-ticket safety semantics |
 | **R3 Multi-Asset Execution Kernel** | Add asset-neutral Instrument, Venue, TradingCalendar, MarketDataSource, ExecutionPolicy, ProtectionPolicy, and SettlementPolicy boundaries | Crypto lifecycle is stable | A new supported contract class reuses the core chain through adapters instead of copying it |
 | **R4 Strategy Portfolio And Regime Routing** | Allocate observation and risk by regime, correlation, strategy role, and future option value | Multi-strategy live outcomes exist | `current_active`, `future_option`, `support_filter`, `conditional_trigger`, and `parked` roles affect budget without widening runtime authority silently |
 | **R5 Autonomous Experiment Governance** | Produce versioned promote/downshift/park/kill and policy-change recommendations from outcomes | Versioned outcomes and regime evidence are mature | Recommendations are machine-generated but only PG Owner policy events can change authority |
 | **R6 Owner Supervision Product** | Owner sees running, waiting, processing, protected, recovering, intervention-needed, and completed states | Backend explanation and lifecycle states are stable | Owner controls policy and capital while the system performs normal operation automatically |
 
-The route is sequential by capability, not by calendar. **R1A is deployed,
-R1C continues without market opportunity, and only R1B requires a real event.** Later stages must not
+The route is sequential by capability, not by calendar. **R1A and R1C are
+deployed, R1D continues without market opportunity, and only R1B requires a real event.** Later stages must not
 become active WIP before their entry conditions, while current abstractions must
 remain asset-neutral enough that multi-asset support does not require a second
 execution chain.
@@ -185,7 +185,7 @@ execution chain.
 
 ## Current P0 Workstreams
 
-**P1-TFC is the only active medium-scale integration program.** P0-F, P0-G,
+**P1-OFC is the only active medium-scale integration program.** P0-F, P0-G,
 P0-H, P0-J, and P0-LC below are deployed component responsibilities, not
 parallel programs.
 

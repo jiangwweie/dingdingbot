@@ -158,6 +158,9 @@ def materialize_live_outcome_ledger(
         entry_fill.get("fill_qty"),
         lifecycle.get("entry_filled_qty"),
     )
+    entry_time_ms = _positive_int(
+        entry_fill.get("fill_time_ms") or entry_fill.get("timestamp_ms")
+    )
     stop_price = _decimal(sl.get("trigger_price"))
     risk_at_stop = (
         abs(entry_price - stop_price) * entry_qty
@@ -181,6 +184,9 @@ def materialize_live_outcome_ledger(
     tp1_fill_qty = _positive_decimal(tp1_fill.get("fill_qty"))
     final_exit_price = _positive_decimal(final_fill.get("fill_price"))
     final_exit_qty = _positive_decimal(final_fill.get("fill_qty"))
+    final_exit_time_ms = _positive_int(
+        final_fill.get("fill_time_ms") or final_fill.get("timestamp_ms")
+    )
     realized_pnl = _realized_pnl(
         side=str(ticket.get("side") or ""),
         entry_price=entry_price,
@@ -195,7 +201,33 @@ def materialize_live_outcome_ledger(
         tp1_fill.get("fee"),
         final_fill.get("fee"),
     )
-    net_pnl = realized_pnl - fees if realized_pnl is not None and fees is not None else realized_pnl
+    funding = _ticket_bound_funding_total(
+        final_fill.get("funding_income"),
+        ticket_id=ticket_id,
+        symbol=str(ticket.get("symbol") or ""),
+        entry_time_ms=entry_time_ms,
+        final_exit_time_ms=final_exit_time_ms,
+    )
+    exit_slippage_parts = [
+        _exit_slippage(
+            side=str(ticket.get("side") or ""),
+            reference_price=_positive_decimal(fill.get("reference_price")),
+            fill_price=_positive_decimal(fill.get("fill_price")),
+            fill_qty=_positive_decimal(fill.get("fill_qty")),
+        )
+        for fill in (tp1_fill, final_fill)
+    ]
+    known_exit_slippage = [item for item in exit_slippage_parts if item is not None]
+    exit_slippage = (
+        sum(known_exit_slippage, Decimal("0"))
+        if known_exit_slippage
+        else None
+    )
+    net_pnl = realized_pnl
+    if net_pnl is not None and fees is not None:
+        net_pnl -= fees
+    if net_pnl is not None and funding is not None:
+        net_pnl += funding
     r_multiple = (
         net_pnl / risk_at_stop
         if net_pnl is not None and risk_at_stop is not None and risk_at_stop > 0
@@ -217,7 +249,7 @@ def materialize_live_outcome_ledger(
         "signal_event_id": str(ticket.get("signal_event_id") or "") or None,
         "signal_time_ms": ticket.get("event_time_ms"),
         "ticket_created_at_ms": int(ticket.get("created_at_ms") or now_ms),
-        "entry_time_ms": lifecycle.get("updated_at_ms") if entry_qty > 0 else None,
+        "entry_time_ms": entry_time_ms if entry_qty > 0 else None,
         "entry_price": entry_price if entry_price > 0 else None,
         "entry_qty": entry_qty if entry_qty > 0 else None,
         "stop_price": stop_price if stop_price > 0 else None,
@@ -233,13 +265,15 @@ def materialize_live_outcome_ledger(
         "runner_qty": _positive_decimal(protection_set.get("runner_qty")),
         "runner_sl_price": _positive_decimal(runner_sl.get("trigger_price")),
         "runner_sl_exchange_order_id": str(runner_sl.get("exchange_order_id") or "") or None,
-        "final_exit_time_ms": final_fill.get("fill_time_ms"),
+        "final_exit_time_ms": final_exit_time_ms,
         "final_exit_price": final_exit_price,
         "flat_reconciled_at_ms": lifecycle.get("updated_at_ms") if lifecycle_status in CLOSED_LIFECYCLE_STATUSES else None,
         "fees": fees,
         "entry_slippage": entry_slippage,
-        "funding": None,
+        "exit_slippage": exit_slippage,
+        "funding": funding,
         "realized_pnl": realized_pnl,
+        "net_pnl": net_pnl,
         "unrealized_pnl": None,
         "mae": None,
         "mfe": None,
@@ -258,6 +292,8 @@ def materialize_live_outcome_ledger(
             "protected_submit_attempt_id": str(attempt["protected_submit_attempt_id"]),
             "lifecycle_run_id": lifecycle.get("lifecycle_run_id"),
             "exit_protection_set_id": protection_set.get("exit_protection_set_id"),
+            "funding_complete": funding is not None,
+            "exit_slippage_complete": exit_slippage is not None,
         },
         "authority_boundary": AUTHORITY_BOUNDARY,
         "created_at_ms": int(_existing_outcome(conn, ticket_id).get("created_at_ms") or now_ms),
@@ -468,6 +504,71 @@ def _entry_slippage(
     return None
 
 
+def _exit_slippage(
+    *,
+    side: str,
+    reference_price: Decimal | None,
+    fill_price: Decimal | None,
+    fill_qty: Decimal | None,
+) -> Decimal | None:
+    if not reference_price or not fill_price or not fill_qty:
+        return None
+    if side == "long":
+        return (reference_price - fill_price) * fill_qty
+    if side == "short":
+        return (fill_price - reference_price) * fill_qty
+    return None
+
+
+def _ticket_bound_funding_total(
+    rows: Any,
+    *,
+    ticket_id: str,
+    symbol: str,
+    entry_time_ms: int | None,
+    final_exit_time_ms: int | None,
+) -> Decimal | None:
+    if not isinstance(rows, list) or not rows:
+        return None
+    if not entry_time_ms or not final_exit_time_ms or final_exit_time_ms < entry_time_ms:
+        return None
+    by_id: dict[str, tuple[Decimal, int]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("ticket_id") or "") != ticket_id:
+            continue
+        if str(row.get("symbol") or "") != symbol:
+            continue
+        if str(row.get("income_type") or "").upper() != "FUNDING_FEE":
+            continue
+        if str(row.get("asset") or "").upper() != "USDT":
+            continue
+        if str(row.get("attribution_basis") or "") != (
+            "single_active_position_exact_symbol_time_window"
+        ):
+            continue
+        timestamp_ms = _positive_int(row.get("timestamp_ms"))
+        amount = _decimal_optional(row.get("amount"))
+        income_id = str(row.get("income_id") or "").strip()
+        if (
+            not income_id
+            or timestamp_ms is None
+            or amount is None
+            or timestamp_ms < entry_time_ms
+            or timestamp_ms > final_exit_time_ms
+        ):
+            continue
+        value = (amount, timestamp_ms)
+        existing = by_id.get(income_id)
+        if existing is not None and existing != value:
+            return None
+        by_id[income_id] = value
+    if not by_id:
+        return None
+    return sum((amount for amount, _ in by_id.values()), Decimal("0"))
+
+
 def _row_by_id(
     conn: sa.engine.Connection,
     table_name: str,
@@ -561,6 +662,25 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0")
+
+
+def _decimal_optional(value: Any) -> Decimal | None:
+    if value in {None, ""}:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _positive_int(value: Any) -> int | None:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _json_list(value: Any) -> list[str]:

@@ -30,8 +30,8 @@ repo MD/JSON/output/report files.
 
 | Fact | Current evidence |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs `0368de6a109a366658e0cf45f1012ad5c7779153`, PG migration `114`; postdeploy acceptance passes and the lifecycle timer is active, but no natural real Ticket has completed live exchange calibration |
-| **Current engineering branch** | `codex/p1-trade-feedback-core-consolidation` starts from the exact deployed `0368de6a` baseline |
+| **Live Candidate Baseline** | Tokyo runs `2df39c1cf43645a07396c3b906ce450a2973442a`, PG migration `115`; postdeploy acceptance passes and the lifecycle timer is active, but no natural real Ticket has completed live exchange calibration |
+| **Current engineering branch** | `codex/p1-opportunity-feedback-calibration` starts from the exact deployed `2df39c1c` baseline |
 | **PG current state is the runtime source** | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | **Repo/output/report files are not runtime authority** | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | **Five StrategyGroups are active WIP** | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`, PG candidate scope seed |
@@ -48,7 +48,8 @@ repo MD/JSON/output/report files.
 | **Production temporal-truth acceptance found a second defect class** | A repeated watcher observation of the same closed-candle signal preserved the same `signal_event_id`; its prior promotion/lane identity was terminal, but sequence aggregation incorrectly converted child `arbitration_lost` rows into successful process outcomes and hid the parent terminal blocker |
 | **Temporal-truth correction is deployed** | `5f40c62d` preserves the first signal event and parent blocker; current audit then found event-scoped historical Action-Time outcomes still override CPM/SUI and MPG/SUI after their source identities expire |
 | **Lifecycle engineering certification is deployed** | Canonical/venue identity, conditional orders, fill projection, short-transaction commands, continuous reconciliation, settlement/review callers, terminal Outcome, account-mode bootstrap, and migration-shaped ops health run on Tokyo; no-active result is currently expected |
-| **Trade feedback complexity is the next engineering risk** | Migration `114` persists 31 lifecycle statuses while protection, recovery, Runner, Fill, Finalizer, and Ops callers still duplicate phase/event/next-action interpretation |
+| **Trade feedback core is consolidated** | P1-TFC maps lifecycle phase, protection, reconciliation, control, recovery, and Owner feedback through one typed decision and is a deployed baseline |
+| **Opportunity feedback is the next engineering question** | Five groups and 22 scopes are `market_wait_validated`; OFC must distinguish absent opportunity, near miss, replay/live mismatch, and coverage gap without changing strategy authority |
 | **Test escape is proven** | Unit/full-chain fixtures inject `last_price`, `mark_price`, or `entry_price` directly, while production fact materialization does not guarantee the same typed field; downstream-complete dictionary fixtures therefore bypassed the missing producer handoff |
 | **Advanced trading quality / capital allocation remains future work** | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`; portfolio sleeve allocation, cluster exposure, cooldown, and drawdown controls remain above the per-ticket safety layer |
 
@@ -56,7 +57,8 @@ repo MD/JSON/output/report files.
 
 | Program | Priority | Goal | Primary design docs | Main acceptance |
 | --- | --- | --- | --- | --- |
-| **P1-TFC Trade Feedback Core Consolidation** | **active P1 mainline** | Unify lifecycle phase, protection, reconciliation, control, recovery, Replay/Rehearsal parity, and Owner feedback without changing persisted schema or trading authority | `P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_DESIGN.md`, `P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_IMPLEMENTATION_PLAN.md` | Every migration-114 state has one typed decision; production callers and Ops consume it; 22 scopes, failure matrix, full tests, and runtime audits pass |
+| **P1-OFC Strategy Opportunity And Live Feedback Calibration** | **active P1 mainline** | Measure version-pinned opportunity frequency, near misses, replay/live parity, and ticket-bound real economics without changing strategy or submit authority | `P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN.md`, `P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN.md` | Six Event Specs reuse production evaluators; calibration is typed and non-authoritative; funding/exit slippage enrich existing Outcomes; full tests and runtime audits pass |
+| **P1-TFC Trade Feedback Core Consolidation** | deployed baseline | Unify lifecycle phase, protection, reconciliation, control, recovery, Replay/Rehearsal parity, and Owner feedback | `P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_DESIGN.md`, `P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_IMPLEMENTATION_PLAN.md` | Closed at deployed `2df39c1c`; real venue calibration remains the natural-signal interrupt |
 | **P0-LC Production Lifecycle Wiring And Continuous Reconciliation** | deployed baseline | Preserve current blocker relevance, venue truth, fill projection, durable place/cancel commands, continuous reconciliation, settlement, review, and terminal Outcome | `P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md`, `P0_LIFECYCLE_PRODUCTION_CERTIFICATION_IMPLEMENTATION_PLAN.md` | Closed at deployed `0368de6a` / migration `114`; live venue calibration remains the natural-signal interrupt |
 | **P0-RT Real Signal -> Ticket Closure** | P0 | Unify action-time pricing, normalized sizing, positive stop-risk reservation, and Ticket materialization inside freshness bounds | `PRE_TRADE_RUNTIME_CONTRACT.md`, `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, this program plan | An eligible production-shaped signal creates one PG Ticket and Runtime Safety State, or stops before lane readiness at one producer-owned blocker |
 | **P0-PC Production-Shaped Chain Certification** | P0 | Replace privileged downstream dictionary fixtures with raw-source-to-PG certification for all current Event Specs | `PRE_TRADE_RUNTIME_CONTRACT.md`, `RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `BLOCKER_CLASSIFICATION_CONTRACT.md` | Six Event Specs pass positive and negative raw-source chain cases; current projections agree on the same blocker and watermark |
@@ -80,32 +82,30 @@ deployed component baselines. They must not run as separate medium-scale WIP.
 
 | Order | Program | Reason |
 | --- | --- | --- |
-| 1 | **P1-TFC Trade Feedback Core Consolidation** | Reduce duplicate lifecycle/recovery interpretation and make the first real trade faster to diagnose without destabilizing the deployed baseline |
-| P0 interrupt | **Natural Live Lifecycle Calibration** | A different-identity fresh signal or active safety incident preempts P1-TFC at the next committed transaction boundary |
-| 2 | **Strategy Opportunity / Replay-Live Calibration** | Low-frequency no-trade periods still need active evidence that strategy rules, detector rules, and current opportunity frequency agree |
-| 3 | **Owner Supervision Product Integration** | Product surfaces should consume the stable feedback vocabulary, not infer raw lifecycle state |
-| 4 | **P1 Capital Allocation V1** | Allocation requires reliable real ticket outcomes, not rehearsal-only closure |
-| 5 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one live-calibrated lifecycle through adapters |
+| 1 | **P1-OFC Strategy Opportunity And Live Feedback Calibration** | Low-frequency no-trade periods need active evidence that production semantics, opportunity supply, and near-miss facts agree |
+| P0 interrupt | **Natural Live Lifecycle Calibration** | A different-identity fresh signal or active safety incident preempts P1-OFC at the next committed transaction boundary |
+| 2 | **Owner Supervision Product Integration** | Product surfaces should consume the stable feedback vocabulary, not infer raw lifecycle state |
+| 3 | **P1 Capital Allocation V1** | Allocation requires reliable real ticket outcomes, not rehearsal-only closure |
+| 4 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one live-calibrated lifecycle through adapters |
 
 ## Current Next Execution Order
 
 This is the authoritative remaining sequence for
-`codex/p1-trade-feedback-core-consolidation`.
+`codex/p1-opportunity-feedback-calibration`.
 It supersedes ad hoc task ordering in chat summaries.
 
 A different `signal_event_id` is a P0 interrupt event. After any unprotected
-position or `outcome_unknown` is handled, P1-TFC pauses only at a committed
+position or `outcome_unknown` is handled, P1-OFC pauses only at a committed
 transaction boundary, runs natural-signal acceptance, persists the result, and
 resumes the interrupted checklist item.
 
 | Order | Next work | Priority | Acceptance |
 | --- | --- | --- | --- |
-| 1 | **TFC-1 Typed lifecycle decision model** | P1 | All 31 migration-114 statuses map to one typed phase/protection/reconciliation/control/recovery/Owner decision; unknown and terminal regression fail closed |
-| 2 | **TFC-2 Production consumer consolidation** | P1 | Protection, recovery, Runner, Fill, and Finalizer use the existing lifecycle core, with no second side-effect authority |
-| 3 | **TFC-3 Replay/Rehearsal/Live decision parity** | P1 | Direct replay-shaped decisions and the production-shaped 22-scope/nine-failure harness agree without granting live authority |
-| 4 | **TFC-4 Owner Ops feedback** | P1 | Existing Tokyo Ops rows translate into processing, automatic recovery, unavailable, intervention, or completed product state |
-| 5 | **TFC-5 Full regression and audits** | P1 | Full tests and docs/output/file-I/O validators pass; no schema, exchange-call, profile, size, or strategy change |
-| 6 | **Strategy Opportunity / Replay-Live Calibration** | P1 next | Production Event Specs and research replay explain expected opportunity frequency and near-miss facts without live authority |
+| 1 | **OFC-1 Typed calibration core** | P1 | 90/365-day opportunity supply, near misses, parity, and coverage gaps reduce into one typed non-authority result |
+| 2 | **OFC-2 Production evaluator adapter** | P1 | All six current Event Specs reuse `RuntimeStrategySignalEvaluationService` and no calibration rule copy exists |
+| 3 | **OFC-3 Ticket-bound funding snapshot** | P1 | Funding is read only for an existing real ticket/symbol/time window and API failure never blocks lifecycle truth |
+| 4 | **OFC-4 Live Outcome economics** | P1 | Signed funding, exit slippage, net PnL, and R are stored when exact facts exist; unavailable facts remain nullable |
+| 5 | **OFC-5 Full regression and audits** | P1 | Full tests and docs/output/file-I/O validators pass; no profile, size, strategy, or submit-authority change |
 
 ## P0-RT Real Signal -> Ticket Closure
 
@@ -631,14 +631,14 @@ replay event as fresh live signal
 ## Current Chain Position
 
 ```text
-chain_position: action_time_boundary
+chain_position: replay_live_parity
 strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
 symbol: 22 active candidate scopes
-stage: production_deployed_live_candidate_feedback_core_consolidation
+stage: market_wait_validated_opportunity_feedback_calibration
 first_blocker: market_wait_validated
-evidence: Tokyo runs 0368de6a / migration 114 with accepted no-active lifecycle cadence; five StrategyGroups and 22 scopes retain production-shaped Ticket/lifecycle coverage; no current natural Ticket exists
-next_action: complete P1-TFC typed reducer, production consumer migration, parity, Owner feedback, full regression, and audits while observation remains active
-stop_condition: all current lifecycle paths preserve behavior under one decision core; the next different-identity natural signal interrupts directly into live Ticket acceptance
+evidence: Tokyo runs 2df39c1c / migration 115 with accepted no-active lifecycle cadence; five StrategyGroups and 22 scopes retain production-shaped Ticket/lifecycle coverage; no current natural Ticket exists
+next_action: complete P1-OFC typed opportunity calibration and nullable real-ticket economics while observation remains active
+stop_condition: six PG-owned Event Specs share one non-authority calibration path and the next different-identity natural signal interrupts directly into live Ticket acceptance
 owner_action_required: no
 authority_boundary: no new ENTRY path, no FinalGate/Operation Layer bypass, no profile/sizing/strategy expansion, no unknown-order mutation, no synthetic-to-live authority
 ```

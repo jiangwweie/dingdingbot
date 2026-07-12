@@ -87,6 +87,10 @@ DYNAMIC_RISK_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
 )
+OFC_ECONOMICS_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-116_add_opportunity_feedback_economics.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -316,6 +320,16 @@ def pg_control_connection():
             dynamic_risk_migration.upgrade()
         finally:
             dynamic_risk_migration.op = old_dynamic_risk_op
+        ofc_economics_migration = _load_module(
+            OFC_ECONOMICS_MIGRATION_PATH,
+            "migration_116_runtime_safety",
+        )
+        old_ofc_economics_op = ofc_economics_migration.op
+        ofc_economics_migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            ofc_economics_migration.upgrade()
+        finally:
+            ofc_economics_migration.op = old_ofc_economics_op
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(

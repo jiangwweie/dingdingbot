@@ -41,10 +41,12 @@ MIGRATIONS = {
     / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py",
     "115": REPO_ROOT
     / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py",
+    "116": REPO_ROOT
+    / "migrations/versions/2026-07-12-116_add_opportunity_feedback_economics.py",
 }
 REVISION_ORDER = (
     "086", "103", "104", "105", "106", "107", "108", "109", "110", "111",
-    "112", "113", "114", "115",
+    "112", "113", "114", "115", "116",
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 

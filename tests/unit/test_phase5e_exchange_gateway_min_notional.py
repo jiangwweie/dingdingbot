@@ -12,6 +12,7 @@ class _RestExchange:
     def __init__(self, market):
         self.markets = {"BTC/USDT:USDT": market}
         self.fetch_my_trades_calls = []
+        self.income_calls = []
 
     def market(self, symbol):
         return self.markets[symbol]
@@ -21,6 +22,19 @@ class _RestExchange:
             {"symbol": symbol, "limit": limit, "params": params or {}}
         )
         return [{"id": "trade-1", "symbol": symbol}]
+
+    async def fapiPrivateGetIncome(self, params):
+        self.income_calls.append(dict(params))
+        return [
+            {
+                "tranId": "income-1",
+                "symbol": params["symbol"],
+                "incomeType": "FUNDING_FEE",
+                "income": "-0.12",
+                "asset": "USDT",
+                "time": params["startTime"] + 1,
+            }
+        ]
 
 
 def _gateway_with_market(market):
@@ -84,6 +98,33 @@ async def test_fetch_my_trades_wrapper_calls_rest_exchange():
     assert trades == [{"id": "trade-1", "symbol": "BTC/USDT:USDT"}]
     assert rest.fetch_my_trades_calls == [
         {"symbol": "BTC/USDT:USDT", "limit": 20, "params": {}}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_funding_income_uses_exact_binance_market_and_time_window():
+    rest = _RestExchange(
+        {"id": "BTCUSDT", "limits": {"cost": {"min": "100"}}}
+    )
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    gateway.rest_exchange = rest
+
+    rows = await gateway.fetch_funding_income(
+        "BTC/USDT:USDT",
+        start_time_ms=1000,
+        end_time_ms=2000,
+    )
+
+    assert rows[0]["income"] == "-0.12"
+    assert rest.income_calls == [
+        {
+            "symbol": "BTCUSDT",
+            "incomeType": "FUNDING_FEE",
+            "startTime": 1000,
+            "endTime": 2000,
+            "limit": 1000,
+        }
     ]
 
 

@@ -106,8 +106,11 @@ states.
 | Field | Rule |
 | --- | --- |
 | `fees` | Required after settlement if available |
-| `funding` | Required after settlement if available |
+| `funding` | Signed ticket-attributed funding after settlement when exact account/symbol/time attribution is available; paid is negative and received is positive |
 | `realized_pnl` | Required after final settlement |
+| `entry_slippage` | Signed entry execution cost versus the Action-Time reference when both are available |
+| `exit_slippage` | Signed exit execution cost versus the exact TP/SL/Runner order reference when both are available |
+| `net_pnl` | `realized_pnl - fees + funding` using available exact post-trade facts |
 | `unrealized_pnl` | Optional while position remains open |
 | `mae` | Maximum adverse excursion when measurable |
 | `mfe` | Maximum favorable excursion when measurable |
@@ -190,10 +193,10 @@ Allowed compaction:
 chain_position: post_submit_learning_boundary
 strategy_group_id: active 5 StrategyGroups
 symbol: active candidate scopes
-stage: live_outcome_ledger_contract
-first_blocker: live_outcome_ledger_not_implemented_as_pg_current_projection
-evidence: ticket-bound lifecycle and review concepts exist, but real order outcome rows are not yet a first-class current projection
-next_action: implement PG live outcome ledger projection after lifecycle state machine and operation capability audit are accepted
+stage: live_outcome_ledger_deployed_and_ofc_economics_enriched
+first_blocker: natural_real_ticket_not_yet_available_for_venue_calibration
+evidence: PG Live Outcome, ticket-bound fills, fees, entry/exit slippage, signed funding attribution, net PnL, and R calculation are implemented without submit authority
+next_action: keep the runtime active; use the next natural real Ticket as the venue-calibration interrupt
 stop_condition: every real submitted ticket has one structured live outcome row or one exact lifecycle hard blocker
 owner_action_required: no
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write from review rows

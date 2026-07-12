@@ -1125,6 +1125,49 @@ class ExchangeGateway:
             logger.error(f"获取成交记录失败：symbol={symbol}, error={e}")
             raise
 
+    async def fetch_funding_income(
+        self,
+        symbol: str,
+        *,
+        start_time_ms: int,
+        end_time_ms: int,
+    ) -> List[Dict[str, Any]]:
+        """Fetch signed Binance USD-M funding income for one exact market window.
+
+        This is a read-only post-trade accounting source.  It does not submit,
+        cancel, amend, withdraw, transfer, or mutate account configuration.
+        """
+
+        exchange_name = str(getattr(self, "exchange_name", "")).lower()
+        raw_fetch = getattr(self.rest_exchange, "fapiPrivateGetIncome", None)
+        if "binance" not in exchange_name or not callable(raw_fetch):
+            raise NotImplementedError("funding_income_read_not_supported")
+        if int(start_time_ms) < 0 or int(end_time_ms) < int(start_time_ms):
+            raise ValueError("funding_income_time_window_invalid")
+        market = self.rest_exchange.market(symbol)
+        market_id = str(market.get("id") or "").strip()
+        if not market_id:
+            raise ValueError("funding_income_exchange_market_id_missing")
+        params = {
+            "symbol": market_id,
+            "incomeType": "FUNDING_FEE",
+            "startTime": int(start_time_ms),
+            "endTime": int(end_time_ms),
+            "limit": 1000,
+        }
+        try:
+            rows = await raw_fetch(params)
+        except Exception as e:
+            logger.error(
+                "获取资金费收入失败：symbol=%s, start=%s, end=%s, error=%s",
+                symbol,
+                start_time_ms,
+                end_time_ms,
+                e,
+            )
+            raise
+        return list(rows or [])
+
     async def place_order(
         self,
         symbol: str,

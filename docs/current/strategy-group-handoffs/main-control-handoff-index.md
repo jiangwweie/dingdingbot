@@ -61,7 +61,9 @@ monitoring.
 Historical review may use git history or archive-only provenance. Historical
 material must not be wired back into current runtime decisions.
 
-The active **P1-TFC Trade Feedback Core Consolidation** consumes only PG
-Ticket/lifecycle current rows and typed in-memory decisions. It does not revive
-StrategyGroup handoff files, replay JSON, or Markdown as signal, Ticket,
-recovery, or Owner-state authority.
+The deployed **P1-TFC Trade Feedback Core Consolidation** baseline consumes only
+PG Ticket/lifecycle current rows and typed in-memory decisions. The active
+**P1-OFC Opportunity Feedback Calibration** program reuses PG Event Spec
+identity and the production evaluator through typed in-memory observations.
+Neither program revives StrategyGroup handoff files, replay JSON, or Markdown
+as signal, Ticket, recovery, or Owner-state authority.

@@ -73,6 +73,10 @@ async def fetch_ticket_bound_exchange_snapshot(
             protection_set=protection_set,
         )
     scope = scope_resolution.scope
+    funding_start_time_ms = _ticket_entry_fill_time_ms(
+        conn,
+        str(protection_set.get("ticket_id") or ""),
+    )
     core = await fetch_resolved_ticket_bound_exchange_snapshot(
         scope=scope,
         snapshot_identity=set_id,
@@ -80,6 +84,8 @@ async def fetch_ticket_bound_exchange_snapshot(
         timeout_seconds=timeout_seconds,
         recent_fill_limit=recent_fill_limit,
         now_ms=now_ms,
+        funding_start_time_ms=funding_start_time_ms,
+        funding_end_time_ms=now_ms if funding_start_time_ms is not None else None,
         authority_boundary=AUTHORITY_BOUNDARY,
     )
     return {
@@ -139,6 +145,10 @@ async def fetch_ticket_bound_attempt_exchange_snapshot(
             attempt=attempt,
         )
     scope = scope_resolution.scope
+    funding_start_time_ms = _ticket_entry_fill_time_ms(
+        conn,
+        str(attempt.get("ticket_id") or ""),
+    )
     core = await fetch_resolved_ticket_bound_exchange_snapshot(
         scope=scope,
         snapshot_identity=attempt_id,
@@ -146,6 +156,8 @@ async def fetch_ticket_bound_attempt_exchange_snapshot(
         timeout_seconds=timeout_seconds,
         recent_fill_limit=recent_fill_limit,
         now_ms=now_ms,
+        funding_start_time_ms=funding_start_time_ms,
+        funding_end_time_ms=now_ms if funding_start_time_ms is not None else None,
         authority_boundary=ATTEMPT_AUTHORITY_BOUNDARY,
     )
     return {
@@ -172,6 +184,8 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
     timeout_seconds: float,
     recent_fill_limit: int,
     now_ms: int,
+    funding_start_time_ms: int | None = None,
+    funding_end_time_ms: int | None = None,
     authority_boundary: str = AUTHORITY_BOUNDARY,
 ) -> dict[str, Any]:
     """Perform exchange reads without any PG connection or transaction."""
@@ -187,7 +201,14 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
             "exchange_read_called": False,
         }
     try:
-        open_orders, recent_fills, positions = await asyncio.wait_for(
+        funding_fetch = getattr(gateway, "fetch_funding_income", None)
+        should_fetch_funding = (
+            callable(funding_fetch)
+            and funding_start_time_ms is not None
+            and funding_end_time_ms is not None
+            and funding_end_time_ms >= funding_start_time_ms
+        )
+        open_orders, recent_fills, positions, funding_result = await asyncio.wait_for(
             asyncio.gather(
                 gateway.fetch_all_open_orders(scope.exchange_symbol),
                 gateway.fetch_my_trades(
@@ -195,6 +216,14 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
                     limit=recent_fill_limit,
                 ),
                 gateway.fetch_position_rows(scope.exchange_symbol),
+                _fetch_optional_funding_income(
+                    funding_fetch=funding_fetch,
+                    symbol=scope.exchange_symbol,
+                    start_time_ms=int(funding_start_time_ms or 0),
+                    end_time_ms=int(funding_end_time_ms or 0),
+                )
+                if should_fetch_funding
+                else asyncio.sleep(0, result={"rows": [], "error": None}),
             ),
             timeout=timeout_seconds,
         )
@@ -217,6 +246,8 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
             "exchange_read_called": True,
         }
     position, position_blockers = _normalize_position(scope, positions or [])
+    funding_income = list(funding_result.get("rows") or [])
+    funding_error = funding_result.get("error")
     snapshot = {
         "snapshot_id": _snapshot_id(snapshot_identity, now_ms),
         "source": "official_runtime_exchange_gateway",
@@ -232,6 +263,15 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         "netting_domain_key": scope.netting_domain_key,
         "open_orders": [_normalize_open_order(order) for order in open_orders or []],
         "recent_fills": [_normalize_fill(fill) for fill in recent_fills or []],
+        "funding_income": _normalize_funding_income(
+            funding_income or [],
+            ticket_id=scope.ticket_id,
+            canonical_symbol=scope.canonical_symbol,
+            start_time_ms=funding_start_time_ms,
+            end_time_ms=funding_end_time_ms,
+        ),
+        "funding_income_available": should_fetch_funding and funding_error is None,
+        "funding_income_error": funding_error,
         "position": position,
         "fetched_at_ms": now_ms,
         "authority_boundary": authority_boundary,
@@ -243,6 +283,24 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         "snapshot": snapshot,
         "exchange_read_called": True,
     }
+
+
+async def _fetch_optional_funding_income(
+    *,
+    funding_fetch: Any,
+    symbol: str,
+    start_time_ms: int,
+    end_time_ms: int,
+) -> dict[str, Any]:
+    try:
+        rows = await funding_fetch(
+            symbol,
+            start_time_ms=start_time_ms,
+            end_time_ms=end_time_ms,
+        )
+    except Exception as exc:
+        return {"rows": [], "error": type(exc).__name__}
+    return {"rows": list(rows or []), "error": None}
 
 
 def _gateway_method_blockers(gateway: Any) -> list[str]:
@@ -341,6 +399,52 @@ def _normalize_fill(fill: Any) -> dict[str, Any]:
         ),
         "timestamp_ms": raw.get("timestamp") or info.get("time"),
     }
+
+
+def _normalize_funding_income(
+    rows: list[Any],
+    *,
+    ticket_id: str,
+    canonical_symbol: str,
+    start_time_ms: int | None,
+    end_time_ms: int | None,
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        raw = _as_dict(row)
+        income_type = str(
+            raw.get("incomeType") or raw.get("income_type") or ""
+        ).upper()
+        symbol = str(raw.get("symbol") or "").replace("/", "").split(":")[0]
+        timestamp_ms = _int_optional(raw.get("time") or raw.get("timestamp"))
+        if income_type != "FUNDING_FEE" or symbol != canonical_symbol:
+            continue
+        if timestamp_ms is None:
+            continue
+        if start_time_ms is not None and timestamp_ms < start_time_ms:
+            continue
+        if end_time_ms is not None and timestamp_ms > end_time_ms:
+            continue
+        normalized.append(
+            {
+                "income_id": str(
+                    raw.get("tranId") or raw.get("id") or raw.get("income_id") or ""
+                ),
+                "ticket_id": ticket_id,
+                "symbol": symbol,
+                "income_type": income_type,
+                "amount": str(raw.get("income") or raw.get("amount") or ""),
+                "asset": str(raw.get("asset") or raw.get("currency") or "").upper(),
+                "timestamp_ms": timestamp_ms,
+                "attribution_basis": (
+                    "single_active_position_exact_symbol_time_window"
+                ),
+            }
+        )
+    return sorted(
+        normalized,
+        key=lambda item: (item["timestamp_ms"], item["income_id"]),
+    )
 
 
 def _normalize_position(
@@ -515,6 +619,33 @@ def _row_by_id(
     return dict(row) if row else {}
 
 
+def _ticket_entry_fill_time_ms(
+    conn: sa.engine.Connection,
+    ticket_id: str,
+) -> int | None:
+    if not ticket_id:
+        return None
+    events = sa.Table(
+        "brc_ticket_bound_lifecycle_events",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    row = conn.execute(
+        sa.select(events.c.event_payload)
+        .where(
+            events.c.ticket_id == ticket_id,
+            events.c.event_type == "entry_filled",
+        )
+        .order_by(events.c.created_at_ms.asc())
+        .limit(1)
+    ).mappings().first()
+    if not row:
+        return None
+    payload = _as_dict(row.get("event_payload"))
+    fill = _as_dict(payload.get("entry_fill") or payload.get("fill"))
+    return _int_optional(fill.get("fill_time_ms") or fill.get("timestamp_ms"))
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
@@ -557,6 +688,15 @@ def _decimal_optional(value: Any) -> Decimal | None:
     try:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _int_optional(value: Any) -> int | None:
+    if value in {None, ""}:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
         return None
 
 

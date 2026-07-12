@@ -73,6 +73,15 @@ def project_ticket_bound_exchange_fills(
                 "fill_time_ms": fill.get("timestamp_ms"),
                 "fee": fill.get("fee"),
                 "realized_pnl": fill.get("realized_pnl"),
+                "reference_price": _exit_reference_price(dict(row)),
+                "funding_income": (
+                    _ticket_attributed_funding_income(
+                        exchange_snapshot.get("funding_income", []),
+                        ticket_id=ticket_id,
+                    )
+                    if str(row.get("role") or "") in FINAL_EXIT_ROLES
+                    else []
+                ),
             }
         )
         if str(row.get("role") or "") == "TP1":
@@ -207,3 +216,35 @@ def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:
 def _stable_id(prefix: str, *parts: str) -> str:
     digest = sha256("|".join(parts).encode("utf-8")).hexdigest()[:40]
     return f"{prefix}:{digest}"
+
+
+def _exit_reference_price(order: dict[str, Any]) -> str | None:
+    role = str(order.get("role") or "")
+    value = (
+        order.get("trigger_price")
+        if role in {"SL", "RUNNER_SL"}
+        else order.get("price")
+    )
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _ticket_attributed_funding_income(
+    rows: Any,
+    *,
+    ticket_id: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+    attributed: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        item.setdefault("ticket_id", ticket_id)
+        item.setdefault(
+            "attribution_basis",
+            "single_active_position_exact_symbol_time_window",
+        )
+        attributed.append(item)
+    return attributed

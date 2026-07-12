@@ -533,14 +533,14 @@ mock submitted
 ## Chain Position
 
 ```text
-chain_position: action_time_boundary
+chain_position: replay_live_parity
 strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
 symbol: 22 active candidate scopes
-stage: production_deployed_live_candidate_feedback_core_consolidation
-first_blocker: market_wait_validated
-evidence: Tokyo runs 0368de6a / migration 114 with lifecycle timer active and postdeploy accepted; no current natural Ticket exists; P1-TFC starts from this exact baseline
-next_action: consolidate lifecycle status/event/recovery/Owner interpretation through the existing Lifecycle Safety Core while observation remains active
-stop_condition: all current lifecycle paths preserve behavior under one typed reducer and the next natural fresh signal enters live Ticket acceptance
+stage: market_wait_validated_and_live_outcome_uncalibrated
+first_blocker: natural_fresh_eligible_signal_absent_for_live_calibration
+evidence: Tokyo runs 2df39c1c / migration 115 with P1-TFC deployed, lifecycle timer active, and postdeploy accepted; no current natural Ticket exists
+next_action: run P1-OFC typed opportunity/parity calibration without changing production semantics or authority
+stop_condition: all six Event Specs have typed frequency/near-miss/parity results and the next natural fresh signal enters live Ticket acceptance
 owner_action_required: no
 authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchange write outside official ticket-bound gateway path
 ```
@@ -570,10 +570,14 @@ authority_boundary: no FinalGate bypass / no Operation Layer bypass / no exchang
 14. **Implemented and deployed**: production scheduler, typed exchange truth,
     fill projection, continuous reconciliation, settlement, review, finalizer,
     and terminal Outcome at `0368de6a` / migration `114`.
-15. **Active P1-TFC**: extend the existing Lifecycle Safety Core into the one
-    typed phase/protection/reconciliation/control/recovery decision owner;
-    migrate production callers and standard Ops feedback without schema or
-    trading-authority changes.
-16. **Market-only gate**: observe the next natural real Ticket through the same
+15. **Implemented and deployed as P1-TFC**: extend the existing Lifecycle
+    Safety Core into the one typed phase/protection/reconciliation/control/
+    recovery decision owner; migrate production callers and standard Ops
+    feedback without schema or trading-authority changes.
+16. **Active P1-OFC**: calibrate opportunity frequency, named near misses, and
+    replay/live parity through production Event Spec identity and evaluator
+    semantics; enrich terminal Outcomes with nullable funding and exit
+    slippage without creating execution authority.
+17. **Market-only gate**: observe the next natural real Ticket through the same
     lifecycle for venue-specific latency, fill, fee, funding, protection, and
     recovery calibration.
