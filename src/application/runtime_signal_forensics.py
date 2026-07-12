@@ -165,6 +165,36 @@ def _reduce_signal(
             notification_state=notification_state,
         )
     if not lane:
+        promotion_status = str(promotion.get("status") or "")
+        promotion_blockers = _string_list(promotion.get("blockers"))
+        if promotion_status == "arbitration_lost":
+            return _finding(
+                signal,
+                "promotion_candidate",
+                "not_selected_by_arbitration",
+                "arbitration_lost",
+                "信号符合候选条件，但同一时刻有更高优先级机会被选中。",
+                notification_state=notification_state,
+            )
+        if promotion_status == "blocked":
+            blocker = promotion_blockers[0] if promotion_blockers else "promotion_blocked"
+            return _finding(
+                signal,
+                "promotion_candidate",
+                "runtime_safety_or_exchange_constraint",
+                blocker,
+                "信号已经进入候选判断，但资金、交易所约束或安全条件未通过。",
+                notification_state=notification_state,
+            )
+        if promotion_status == "expired":
+            return _finding(
+                signal,
+                "promotion_candidate",
+                "opportunity_expired_before_action_time",
+                "promotion_expired",
+                "候选机会在进入下单前处理通道之前已经过期。",
+                notification_state=notification_state,
+            )
         return _finding(
             signal,
             "promotion_candidate",
@@ -183,6 +213,47 @@ def _reduce_signal(
             notification_state=notification_state,
         )
     if not command:
+        ticket_status = str(ticket.get("status") or "")
+        if ticket_status == "expired":
+            return _finding(
+                signal,
+                "ticket",
+                "opportunity_expired_before_submit",
+                "ticket_expired_before_submit",
+                "正式交易意图已经建立，但在提交真实订单前已经过期。",
+                ticket_id=ticket_id,
+                notification_state=notification_state,
+            )
+        if ticket_status == "finalgate_rejected":
+            return _finding(
+                signal,
+                "ticket",
+                "runtime_safety_or_reconciliation_gap",
+                "finalgate_rejected",
+                "正式交易意图没有通过最终交易安全检查。",
+                ticket_id=ticket_id,
+                notification_state=notification_state,
+            )
+        if ticket_status in {"invalidated", "superseded"}:
+            return _finding(
+                signal,
+                "ticket",
+                "opportunity_invalidated_before_submit",
+                f"ticket_{ticket_status}",
+                "正式交易意图在提交前被更新的市场或范围事实终止。",
+                ticket_id=ticket_id,
+                notification_state=notification_state,
+            )
+        if ticket_status in {"created", "preflight_pending", "finalgate_ready"}:
+            return _finding(
+                signal,
+                "ticket",
+                "trade_processing",
+                "final_trade_check_pending",
+                "正式交易意图已经建立，系统仍在完成下单前安全检查。",
+                ticket_id=ticket_id,
+                notification_state=notification_state,
+            )
         return _finding(
             signal,
             "ticket",
@@ -379,3 +450,7 @@ def _notification_state(rows: list[dict[str, Any]], signal_id: str, ticket_id: s
 
 def _text_or_none(value: Any) -> str | None:
     return None if value is None or str(value) == "" else str(value)
+
+
+def _string_list(value: Any) -> list[str]:
+    return [str(item) for item in value] if isinstance(value, list) else []

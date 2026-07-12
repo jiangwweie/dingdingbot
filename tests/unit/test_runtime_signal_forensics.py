@@ -83,6 +83,75 @@ def test_signal_chain_reports_first_missing_machine_object() -> None:
     assert finding.classification == "engineering_handoff_gap"
 
 
+def test_arbitration_loser_is_not_reported_as_engineering_gap() -> None:
+    result = reduce_runtime_signal_forensics(
+        _query(),
+        {
+            "live_signal_events": [_signal()],
+            "promotion_candidates": [
+                {
+                    "signal_event_id": "signal-1",
+                    "promotion_candidate_id": "p-1",
+                    "status": "arbitration_lost",
+                    "blockers": [],
+                }
+            ],
+        },
+    )
+    finding = result.findings[0]
+    assert finding.classification == "not_selected_by_arbitration"
+    assert finding.first_blocker == "arbitration_lost"
+
+
+def test_blocked_promotion_preserves_exact_business_blocker() -> None:
+    result = reduce_runtime_signal_forensics(
+        _query(),
+        {
+            "live_signal_events": [_signal()],
+            "promotion_candidates": [
+                {
+                    "signal_event_id": "signal-1",
+                    "promotion_candidate_id": "p-1",
+                    "status": "blocked",
+                    "blockers": [
+                        "risk_reservation_rounded_notional_below_exchange_minimum"
+                    ],
+                }
+            ],
+        },
+    )
+    finding = result.findings[0]
+    assert finding.classification == "runtime_safety_or_exchange_constraint"
+    assert finding.first_blocker == (
+        "risk_reservation_rounded_notional_below_exchange_minimum"
+    )
+
+
+def test_expired_ticket_is_terminal_before_submit_not_missing_exchange_command() -> None:
+    result = reduce_runtime_signal_forensics(
+        _query(),
+        {
+            "live_signal_events": [_signal()],
+            "promotion_candidates": [
+                {"signal_event_id": "signal-1", "promotion_candidate_id": "p-1"}
+            ],
+            "action_time_lane_inputs": [
+                {"signal_event_id": "signal-1", "action_time_lane_input_id": "lane-1"}
+            ],
+            "action_time_tickets": [
+                {
+                    "signal_event_id": "signal-1",
+                    "ticket_id": "ticket-1",
+                    "status": "expired",
+                }
+            ],
+        },
+    )
+    finding = result.findings[0]
+    assert finding.classification == "opportunity_expired_before_submit"
+    assert finding.first_blocker == "ticket_expired_before_submit"
+
+
 def test_closed_ticket_reports_trade_result_and_notification_state() -> None:
     result = reduce_runtime_signal_forensics(
         _query(),
