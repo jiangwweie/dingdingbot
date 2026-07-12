@@ -62,6 +62,11 @@ def test_runner_mutation_command_prepares_official_command_after_tp1_fill(
     )
     assert _command_count(pg_control_connection) == 1
     assert _lifecycle_status(pg_control_connection) == "runner_mutation_pending"
+    assert payload["lifecycle_decision"]["phase"] == "reducing"
+    assert payload["lifecycle_decision"]["control_state"] == "automated"
+    assert payload["lifecycle_decision"]["next_action"] == (
+        "run_official_runner_mutation_command"
+    )
 
 
 def test_runner_mutation_command_is_idempotent(pg_control_connection):
@@ -116,6 +121,41 @@ def test_runner_mutation_result_records_official_exchange_refs(pg_control_connec
     )
     command = _command(pg_control_connection)
     assert command["status"] == "result_recorded"
+
+
+def test_runner_mutation_failure_uses_common_lifecycle_recovery_decision(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    _mark_tp1_filled(pg_control_connection, set_id)
+    prepared = prepare_ticket_bound_runner_mutation_command(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        now_ms=NOW_MS + 7000,
+    )
+
+    payload = record_ticket_bound_runner_mutation_result(
+        pg_control_connection,
+        runner_mutation_command_id=prepared["runner_mutation_command_id"],
+        result_payload={
+            "old_sl_cancelled": False,
+            "runner_sl_submitted": False,
+            "exchange_write_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+        },
+        now_ms=NOW_MS + 8000,
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["lifecycle_decision"]["status"] == "runner_mutation_failed"
+    assert payload["lifecycle_decision"]["phase"] == "reducing"
+    assert payload["lifecycle_decision"]["control_state"] == "recovery_required"
+    assert payload["lifecycle_decision"]["next_action"] == (
+        "repair_runner_mutation_or_flatten"
+    )
+    assert _lifecycle_status(pg_control_connection) == "runner_mutation_failed"
 
 
 def _command_count(conn) -> int:

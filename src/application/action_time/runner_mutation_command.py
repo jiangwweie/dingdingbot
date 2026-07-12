@@ -15,6 +15,12 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.lifecycle_safety_core import (
+    LifecycleDecision,
+    lifecycle_decision_for_status,
+    reduce_lifecycle_decision,
+)
+
 
 AUTHORITY_BOUNDARY = (
     "ticket_bound_runner_mutation_command; PG command intent/result record only; "
@@ -98,7 +104,7 @@ def prepare_ticket_bound_runner_mutation_command(
         "runner_mutation_command_id",
         command,
     )
-    _mark_lifecycle_runner_mutation_pending(
+    lifecycle_decision = _mark_lifecycle_runner_mutation_pending(
         conn,
         protection_set=protection_set,
         command=command,
@@ -110,6 +116,7 @@ def prepare_ticket_bound_runner_mutation_command(
         command=command,
         blockers=[],
         next_action="execute_runner_mutation_through_official_operation_path",
+        extra={"lifecycle_decision": _decision_summary(lifecycle_decision)},
     )
 
 
@@ -151,8 +158,9 @@ def record_ticket_bound_runner_mutation_result(
         "runner_mutation_command_id",
         updated,
     )
+    lifecycle_decision = lifecycle_decision_for_status("runner_mutation_pending")
     if blockers:
-        _mark_runner_mutation_failed(
+        lifecycle_decision = _mark_runner_mutation_failed(
             conn,
             command=updated,
             blockers=blockers,
@@ -168,6 +176,7 @@ def record_ticket_bound_runner_mutation_result(
             if not blockers
             else "repair_runner_mutation_or_flatten"
         ),
+        extra={"lifecycle_decision": _decision_summary(lifecycle_decision)},
     )
 
 
@@ -296,7 +305,7 @@ def _mark_lifecycle_runner_mutation_pending(
     protection_set: dict[str, Any],
     command: dict[str, Any],
     now_ms: int,
-) -> None:
+) -> LifecycleDecision:
     lifecycle = _row_by_id(
         conn,
         "brc_ticket_bound_order_lifecycle_runs",
@@ -304,12 +313,17 @@ def _mark_lifecycle_runner_mutation_pending(
         str(protection_set.get("ticket_id") or ""),
     )
     if not lifecycle:
-        return
+        return lifecycle_decision_for_status("runner_mutation_pending")
+    decision = reduce_lifecycle_decision(
+        current_status=str(lifecycle.get("status") or ""),
+        target_status="runner_mutation_pending",
+        event_type="runner_mutation_pending",
+    )
     row = {
         **lifecycle,
-        "status": "runner_mutation_pending",
-        "first_blocker": None,
-        "blockers": [],
+        "status": decision.status,
+        "first_blocker": decision.first_blocker,
+        "blockers": list(decision.blockers),
         "updated_at_ms": now_ms,
     }
     _upsert_row(conn, "brc_ticket_bound_order_lifecycle_runs", "lifecycle_run_id", row)
@@ -317,20 +331,21 @@ def _mark_lifecycle_runner_mutation_pending(
         "lifecycle_event_id": _stable_id(
             "ticket_lifecycle_event",
             str(row["lifecycle_run_id"]),
-            "runner_mutation_pending",
+            decision.event_type,
             str(now_ms),
         ),
         "lifecycle_run_id": str(row["lifecycle_run_id"]),
         "ticket_id": str(row["ticket_id"]),
         "protected_submit_attempt_id": str(row["protected_submit_attempt_id"]),
-        "event_type": "runner_mutation_pending",
+        "event_type": decision.event_type,
         "event_payload": {
             "runner_mutation_command_id": command["runner_mutation_command_id"],
-            "next_action": "execute_runner_mutation_through_official_operation_path",
+            "next_action": decision.next_action,
         },
         "created_at_ms": now_ms,
     }
     _upsert_row(conn, "brc_ticket_bound_lifecycle_events", "lifecycle_event_id", event)
+    return decision
 
 
 def _mark_runner_mutation_failed(
@@ -339,7 +354,7 @@ def _mark_runner_mutation_failed(
     command: dict[str, Any],
     blockers: list[str],
     now_ms: int,
-) -> None:
+) -> LifecycleDecision:
     first_blocker = blockers[0] if blockers else "runner_mutation_failed"
     protection_set = _row_by_id(
         conn,
@@ -367,12 +382,21 @@ def _mark_runner_mutation_failed(
         str(command.get("ticket_id") or ""),
     )
     if not lifecycle:
-        return
+        return lifecycle_decision_for_status(
+            "runner_mutation_failed",
+            blockers=blockers,
+        )
+    decision = reduce_lifecycle_decision(
+        current_status=str(lifecycle.get("status") or ""),
+        target_status="runner_mutation_failed",
+        event_type="runner_mutation_failed",
+        blockers=blockers,
+    )
     lifecycle_update = {
         **lifecycle,
-        "status": "runner_mutation_failed",
-        "first_blocker": first_blocker,
-        "blockers": blockers,
+        "status": decision.status,
+        "first_blocker": decision.first_blocker,
+        "blockers": list(decision.blockers),
         "updated_at_ms": now_ms,
     }
     _upsert_row(
@@ -385,7 +409,7 @@ def _mark_runner_mutation_failed(
         "lifecycle_event_id": _stable_id(
             "ticket_lifecycle_event",
             str(lifecycle_update["lifecycle_run_id"]),
-            "runner_mutation_failed",
+            decision.event_type,
             str(now_ms),
         ),
         "lifecycle_run_id": str(lifecycle_update["lifecycle_run_id"]),
@@ -393,15 +417,16 @@ def _mark_runner_mutation_failed(
         "protected_submit_attempt_id": str(
             lifecycle_update["protected_submit_attempt_id"]
         ),
-        "event_type": "runner_mutation_failed",
+        "event_type": decision.event_type,
         "event_payload": {
             "runner_mutation_command_id": command.get("runner_mutation_command_id"),
             "blockers": blockers,
-            "next_action": "repair_runner_mutation_or_flatten",
+            "next_action": decision.next_action,
         },
         "created_at_ms": now_ms,
     }
     _upsert_row(conn, "brc_ticket_bound_lifecycle_events", "lifecycle_event_id", event)
+    return decision
 
 
 def _next_action(blockers: list[str]) -> str:
@@ -497,6 +522,19 @@ def _result(
     if extra:
         payload.update(extra)
     return payload
+
+
+def _decision_summary(decision: LifecycleDecision) -> dict[str, Any]:
+    return {
+        "status": decision.status,
+        "phase": decision.phase.value,
+        "protection_state": decision.protection_state.value,
+        "reconciliation_state": decision.reconciliation_state.value,
+        "control_state": decision.control_state.value,
+        "owner_state": decision.owner_state.value,
+        "next_action": decision.next_action,
+        "owner_action_required": decision.owner_action_required,
+    }
 
 
 def _stable_id(prefix: str, *parts: str) -> str:

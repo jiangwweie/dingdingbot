@@ -398,6 +398,24 @@ def test_tokyo_ops_l2_l7_summary_flags_exact_lifecycle_attention_state():
     assert "ticket_bound_lifecycle_attention_state" in summary["issues"]
     assert summary["lifecycle_attention_state_count"] == 1
     assert summary["lifecycle_attention_statuses"] == ["runner_mutation_pending"]
+    assert summary["lifecycle_owner_feedback"] == {
+        "status": "processing",
+        "label": "处理中",
+        "reason": "runner_sl_exchange_order_id_required",
+        "ticket_id": "ticket-1",
+        "strategy_group_id": "SOR-001",
+        "symbol": "AVAXUSDT",
+        "side": "short",
+        "lifecycle_status": "runner_mutation_pending",
+        "phase": "reducing",
+        "protection_state": "pending",
+        "reconciliation_state": "pending",
+        "control_state": "automated",
+        "next_action": "run_official_runner_mutation_command",
+        "non_authority_checkpoint": "run_official_runner_mutation_command",
+        "owner_action_required": False,
+        "exchange_write_authorized": False,
+    }
 
 
 def test_tokyo_ops_l2_l7_summary_flags_runner_mutation_command_without_runner_proof():

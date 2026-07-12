@@ -25,6 +25,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
+from src.application.readmodels.owner_projection import (  # noqa: E402
+    ticket_bound_lifecycle_owner_feedback,
+)
 
 
 SCHEMA = "brc.ops.tokyo_runtime_ops_health_once.v1"
@@ -1103,6 +1106,12 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         if any(issue in critical_issue_names for issue in issues)
         else ("warn" if issues else "ok")
     )
+    lifecycle_attention_rows = list(snapshot.get("lifecycle_attention_rows") or [])
+    lifecycle_owner_feedback = (
+        ticket_bound_lifecycle_owner_feedback(dict(lifecycle_attention_rows[0]))
+        if lifecycle_attention_rows
+        else None
+    )
     return {
         "schema": "brc.ops.l2_l7_chain_health_summary.v1",
         "status": status,
@@ -1160,6 +1169,7 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
                 if row.get("status")
             }
         ),
+        "lifecycle_owner_feedback": lifecycle_owner_feedback,
         "exchange_command_critical_count": len(
             snapshot.get("exchange_command_critical_rows") or []
         ),

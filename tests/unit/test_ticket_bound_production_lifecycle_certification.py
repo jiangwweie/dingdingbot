@@ -4,6 +4,9 @@ import inspect
 from pathlib import Path
 
 from src.application.action_time import full_chain_simulation_harness as harness
+from src.application.action_time import runner_mutation_command
+from src.application.action_time import ticket_bound_fill_projector
+from src.application.action_time import ticket_bound_lifecycle_finalizer
 from tests.unit.test_tokyo_runtime_server_monitor import _load_module
 
 
@@ -39,6 +42,16 @@ def test_legacy_lifecycle_modules_have_no_direct_gateway_mutation_call():
         source = (root / relative).read_text(encoding="utf-8")
         assert "gateway.place_order(" not in source
         assert "gateway.cancel_order(" not in source
+
+
+def test_lifecycle_transition_writers_consume_the_common_reducer():
+    runner_source = inspect.getsource(runner_mutation_command)
+    fill_source = inspect.getsource(ticket_bound_fill_projector)
+    finalizer_source = inspect.getsource(ticket_bound_lifecycle_finalizer)
+
+    assert "reduce_lifecycle_decision(" in runner_source
+    assert "reduce_lifecycle_decision(" in fill_source
+    assert "reduce_lifecycle_decision(" in finalizer_source
 
 
 def test_unprotected_real_position_preempts_new_natural_signal_acceptance():

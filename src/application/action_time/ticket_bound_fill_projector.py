@@ -7,6 +7,11 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.lifecycle_safety_core import (
+    LifecycleDecision,
+    reduce_lifecycle_decision,
+)
+
 
 FINAL_EXIT_ROLES = {"SL", "RUNNER_SL"}
 
@@ -82,19 +87,23 @@ def project_ticket_bound_exchange_fills(
         (item for item in projected if item["role"] in FINAL_EXIT_ROLES),
         None,
     )
+    lifecycle_decision: LifecycleDecision | None = None
     if final_exit:
-        _project_final_exit_detected(
+        lifecycle_decision = _project_final_exit_detected(
             conn,
             ticket_id=ticket_id,
             fill=final_exit,
             now_ms=now_ms,
         )
-    return {
+    payload = {
         "status": "fills_projected" if projected else "no_new_fills",
         "projected_roles": [item["role"] for item in projected],
         "projected_count": len(projected),
         "projected_fills": projected,
     }
+    if lifecycle_decision is not None:
+        payload["lifecycle_decision"] = lifecycle_decision.to_dict()
+    return payload
 
 
 def _project_final_exit_detected(
@@ -103,37 +112,43 @@ def _project_final_exit_detected(
     ticket_id: str,
     fill: dict[str, Any],
     now_ms: int,
-) -> None:
+) -> LifecycleDecision | None:
     lifecycle = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
     row = conn.execute(
         sa.select(lifecycle).where(lifecycle.c.ticket_id == ticket_id)
     ).mappings().first()
     if not row:
-        return
+        return None
     if str(row.get("status") or "") not in {
         "position_protected",
         "runner_protected",
         "tp1_filled",
         "runner_mutation_pending",
     }:
-        return
+        return None
+    decision = reduce_lifecycle_decision(
+        current_status=str(row.get("status") or ""),
+        target_status="final_exit_detected",
+        event_type="final_exit_detected",
+    )
     conn.execute(
         lifecycle.update()
         .where(lifecycle.c.lifecycle_run_id == row["lifecycle_run_id"])
         .values(
-            status="final_exit_detected",
-            first_blocker=None,
-            blockers=[],
+            status=decision.status,
+            first_blocker=decision.first_blocker,
+            blockers=list(decision.blockers),
             updated_at_ms=now_ms,
         )
     )
     _insert_fill_event(
         conn,
         lifecycle=dict(row),
-        event_type="final_exit_detected",
+        event_type=decision.event_type,
         fill=fill,
         now_ms=now_ms,
     )
+    return decision
 
 
 def _lifecycle_for_ticket(

@@ -41,9 +41,13 @@ def test_finalizer_closes_reconciled_flat_lifecycle_and_is_idempotent(
     )
 
     assert first["status"] == "lifecycle_closed"
+    assert first["lifecycle_decision"]["phase"] == "closed"
+    assert first["lifecycle_decision"]["control_state"] == "completed"
+    assert first["lifecycle_decision"]["owner_state"] == "completed"
     assert first["runtime_budget_mutated"] is True
     assert first["live_outcome_status"] == "recorded"
     assert second["status"] == "lifecycle_closed"
+    assert second["lifecycle_decision"]["status"] == "lifecycle_closed"
     assert second["runtime_budget_mutated"] is False
     assert second["live_outcome_status"] == "recorded"
     assert _scalar(

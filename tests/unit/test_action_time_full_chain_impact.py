@@ -33,6 +33,9 @@ from src.application.action_time.full_chain_simulation_harness import (
     run_ticket_bound_full_chain_simulation,
     run_ticket_bound_full_chain_failure_scenario,
 )
+from src.application.action_time.lifecycle_safety_core import (
+    lifecycle_decision_for_status,
+)
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
 )
@@ -958,6 +961,10 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
     assert payloads["final"]["reconciliation_state"] == "matched"
     assert payloads["final"]["settlement_state"] == "released"
     assert payloads["final"]["review_state"] == "recorded"
+    assert payloads["lifecycle_decision"]["status"] == "lifecycle_closed"
+    assert payloads["lifecycle_decision"]["phase"] == "closed"
+    assert payloads["lifecycle_decision"]["control_state"] == "completed"
+    assert payloads["lifecycle_decision"]["owner_state"] == "completed"
     assert payloads["authority_boundary"]["uses_mock_exchange_result"] is True
     assert payloads["authority_boundary"]["calls_exchange_write"] is False
     assert payloads["authority_boundary"]["uses_production_fill_projector"] is True
@@ -1090,6 +1097,11 @@ def test_full_chain_failure_matrix_stops_at_exact_lifecycle_state(
         _lifecycle_id(pg_control_connection),
     ) == expected_lifecycle_status
     assert _lifecycle_blockers(pg_control_connection) == expected_blockers
+    replay_decision = lifecycle_decision_for_status(
+        expected_lifecycle_status,
+        blockers=expected_blockers,
+    ).to_dict()
+    assert payloads["lifecycle_decision"] == replay_decision
 
     if scenario in {"entry_accepted_sl_failed", "sl_ok_tp1_failed"}:
         assert payloads["recovery_command"]["status"] == expected_aux_status

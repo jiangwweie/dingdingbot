@@ -7,6 +7,11 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.lifecycle_safety_core import (
+    lifecycle_decision_for_status,
+    reduce_lifecycle_decision,
+)
+
 from src.application.action_time.live_outcome_ledger import (
     materialize_live_outcome_ledger,
 )
@@ -50,7 +55,12 @@ def finalize_ticket_bound_lifecycle_if_ready(
             now_ms=now_ms,
         )
         return {
-            **_result("lifecycle_closed", [], False),
+            **_result(
+                "lifecycle_closed",
+                [],
+                False,
+                lifecycle_status="lifecycle_closed",
+            ),
             "live_outcome_status": outcome.get("status"),
         }
     if str(lifecycle.get("status") or "") not in {
@@ -183,7 +193,12 @@ def finalize_ticket_bound_lifecycle_if_ready(
         now_ms=now_ms,
     )
     return {
-        **_result("lifecycle_closed", [], budget_mutated),
+        **_result(
+            "lifecycle_closed",
+            [],
+            budget_mutated,
+            lifecycle_status="lifecycle_closed",
+        ),
         "closure_status": closure.get("status"),
         "live_outcome_status": outcome.get("status"),
         "reconciliation_evidence_id": reconciliation_evidence_id,
@@ -254,14 +269,18 @@ def _set_lifecycle_status(
     status: str,
     now_ms: int,
 ) -> dict[str, Any]:
+    decision = reduce_lifecycle_decision(
+        current_status=str(lifecycle.get("status") or ""),
+        target_status=status,
+    )
     table = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
     conn.execute(
         table.update()
         .where(table.c.lifecycle_run_id == lifecycle["lifecycle_run_id"])
         .values(
-            status=status,
-            first_blocker=None,
-            blockers=[],
+            status=decision.status,
+            first_blocker=decision.first_blocker,
+            blockers=list(decision.blockers),
             updated_at_ms=now_ms,
         )
     )
@@ -332,11 +351,22 @@ def _stable_id(prefix: str, *parts: str) -> str:
     return f"{prefix}:{digest}"
 
 
-def _result(status: str, blockers: list[str], budget_mutated: bool) -> dict[str, Any]:
+def _result(
+    status: str,
+    blockers: list[str],
+    budget_mutated: bool,
+    *,
+    lifecycle_status: str | None = None,
+) -> dict[str, Any]:
+    decision = lifecycle_decision_for_status(
+        lifecycle_status or ("blocked" if blockers else "blocked"),
+        blockers=blockers,
+    )
     return {
         "status": status,
         "first_blocker": blockers[0] if blockers else None,
         "blockers": blockers,
         "runtime_budget_mutated": budget_mutated,
         "exchange_write_called": False,
+        "lifecycle_decision": decision.to_dict(),
     }

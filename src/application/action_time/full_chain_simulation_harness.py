@@ -36,6 +36,9 @@ from src.application.action_time import runtime_safety_state
 from src.application.action_time.lifecycle_maintenance_scheduler import (
     run_ticket_bound_lifecycle_maintenance_scheduler,
 )
+from src.application.action_time.lifecycle_safety_core import (
+    lifecycle_decision_for_status,
+)
 from src.application.action_time.lifecycle_exchange_command_materializer import (
     materialize_lifecycle_exchange_commands,
 )
@@ -286,6 +289,10 @@ def run_ticket_bound_full_chain_simulation(
         "initial_scheduler": initial_scheduler_payload,
         "final_scheduler": final_scheduler_payload,
         "final": final_payload,
+        "lifecycle_decision": _lifecycle_decision_payload(
+            conn,
+            ticket_id=str(ticket_payload["ticket_id"]),
+        ),
         "authority_boundary": {
             "calls_finalgate": True,
             "calls_operation_layer": True,
@@ -335,6 +342,7 @@ def run_ticket_bound_full_chain_failure_scenario(
             now_ms=now_ms + 21,
         )
         return _failure_result(
+            conn,
             simulation_input,
             scenario=scenario,
             context=context,
@@ -359,6 +367,7 @@ def run_ticket_bound_full_chain_failure_scenario(
             now_ms=now_ms + 21,
         )
         return _failure_result(
+            conn,
             simulation_input,
             scenario=scenario,
             context=context,
@@ -379,6 +388,7 @@ def run_ticket_bound_full_chain_failure_scenario(
             now_ms=now_ms + 20,
         )
         return _failure_result(
+            conn,
             simulation_input,
             scenario=scenario,
             context=context,
@@ -411,6 +421,7 @@ def run_ticket_bound_full_chain_failure_scenario(
             now_ms=now_ms + 22,
         )
         return _failure_result(
+            conn,
             simulation_input,
             scenario=scenario,
             context=context,
@@ -454,6 +465,7 @@ def run_ticket_bound_full_chain_failure_scenario(
             now_ms=now_ms + 25,
         )
         return _failure_result(
+            conn,
             simulation_input,
             scenario=scenario,
             context=context,
@@ -476,6 +488,7 @@ def run_ticket_bound_full_chain_failure_scenario(
             now_ms=now_ms + 23,
         )
         return _failure_result(
+            conn,
             simulation_input,
             scenario=scenario,
             context=context,
@@ -500,6 +513,7 @@ def run_ticket_bound_full_chain_failure_scenario(
             now_ms=now_ms + 25,
         )
         return _failure_result(
+            conn,
             simulation_input,
             scenario=scenario,
             context=context,
@@ -530,6 +544,7 @@ def run_ticket_bound_full_chain_failure_scenario(
         now_ms=now_ms + 25,
     )
     return _failure_result(
+        conn,
         simulation_input,
         scenario=scenario,
         context=context,
@@ -672,12 +687,14 @@ def _mock_submit_decision_env():
 
 
 def _failure_result(
+    conn: sa.engine.Connection,
     simulation_input: FullChainSimulationInput,
     *,
     scenario: str,
     context: dict[str, Any],
     payloads: dict[str, Any],
 ) -> dict[str, Any]:
+    ticket_id = str((context.get("ticket") or {}).get("ticket_id") or "")
     return {
         "schema": "brc.ticket_bound_full_chain_failure_scenario.v1",
         "scenario": scenario,
@@ -686,6 +703,10 @@ def _failure_result(
         "side": simulation_input.side,
         **context,
         **payloads,
+        "lifecycle_decision": _lifecycle_decision_payload(
+            conn,
+            ticket_id=ticket_id,
+        ),
         "authority_boundary": {
             "calls_finalgate": False,
             "calls_operation_layer": False,
@@ -695,6 +716,42 @@ def _failure_result(
             "uses_repo_json_or_md_authority": False,
         },
     }
+
+
+def _lifecycle_decision_payload(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+) -> dict[str, Any]:
+    row = conn.execute(
+        sa.text(
+            """
+            SELECT status, blockers
+            FROM brc_ticket_bound_order_lifecycle_runs
+            WHERE ticket_id = :ticket_id
+            LIMIT 1
+            """
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().first()
+    if row is None:
+        return lifecycle_decision_for_status(
+            "blocked",
+            blockers=["ticket_bound_lifecycle_missing"],
+        ).to_dict()
+    raw_blockers = row.get("blockers") or []
+    if isinstance(raw_blockers, str):
+        try:
+            decoded = json.loads(raw_blockers)
+        except json.JSONDecodeError:
+            decoded = [raw_blockers]
+        blockers = decoded if isinstance(decoded, list) else [str(decoded)]
+    else:
+        blockers = list(raw_blockers)
+    return lifecycle_decision_for_status(
+        str(row.get("status") or "blocked"),
+        blockers=[str(item) for item in blockers],
+    ).to_dict()
 
 
 def _require_payload_status(
