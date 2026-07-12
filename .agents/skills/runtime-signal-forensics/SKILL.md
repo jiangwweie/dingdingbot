@@ -82,6 +82,37 @@ before explaining missed notifications.
 Use read-only commands only. Do not deploy, restart services, mutate files,
 call FinalGate, call Operation Layer, or call exchange-write endpoints.
 
+### Primary Forensics Command
+
+Use the deployed bounded command before writing ad hoc PG or systemd queries:
+
+```bash
+ssh tokyo "cd /home/ubuntu/brc-deploy/app/current && set -a && source /home/ubuntu/brc-deploy/env/runtime-monitor.env && set +a && timeout 20s .venv/bin/python scripts/ops/query_runtime_signal_forensics.py --start '<ISO-8601 start with offset>' --end '<ISO-8601 end with offset>' --include-systemd"
+```
+
+Map optional Owner scope into `--strategy-group-id`, `--symbol`, and `--side`.
+Use an absolute time window with an explicit offset. For Shanghai relative-date
+questions, yesterday means `00:00:00+08:00` through the next
+`00:00:00+08:00`; do not silently use server UTC day boundaries. Keep the
+default row limit at 200 and never exceed `--limit 1000`.
+
+The command is **stdout-only**, reads PG audit lineage directly, masks database
+configuration, and reports all forbidden effects as false. It has no output,
+apply, submit, policy, sizing, profile, callback, or exchange-write flags.
+
+If the command itself fails, classify that failure first:
+
+| Failure | Classification | Fallback |
+| --- | --- | --- |
+| PG unavailable or schema missing | `current_projection_gap` | Direct read-only PG table/column diagnosis |
+| SSH or timeout failure | `runtime_data_gap` | Read-only SSH/systemd/network diagnosis |
+| Invalid/reversed window | query error | Correct the absolute time window and rerun |
+| Missing deployed command | deploy/readiness gap | Verify release head and deployed script path |
+
+Only after recording that first failure may direct read-only PG and journal
+commands be used as a diagnostic fallback. Generated JSON/MD files remain
+forbidden as current-state fallback.
+
 Collect current state from PG-backed read-only sources. Required current
 objects are:
 
@@ -229,6 +260,11 @@ When explaining "why did I not receive a notification", report:
 - `notification.duplicate_suppressed`;
 - `notification.skipped_reason`;
 - whether `runtime-monitor.env` exists and contains a webhook variable name.
+
+For typed Owner notifications also report `notification_kind`, `severity`,
+`correlation_id`, `notification_state`, `send_attempts`, and
+`resolved_at_ms`. Translate these into detection, trade progress, intervention,
+or recovery before showing the exact audit fields.
 
 Do not ask the Owner to judge raw monitor objects. Translate them into one
 sentence such as:

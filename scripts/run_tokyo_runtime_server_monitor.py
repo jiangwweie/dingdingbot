@@ -40,6 +40,14 @@ from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # 
 from src.application.action_time.process_outcome_relevance import (  # noqa: E402
     process_outcome_has_current_blocking_authority,
 )
+from src.application.owner_notification import (  # noqa: E402
+    OwnerNotificationIntent,
+    OwnerNotificationKind,
+    OwnerNotificationSeverity,
+    owner_notification_dedupe_key,
+    project_owner_notification_intents,
+    render_owner_notification_card,
+)
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -134,6 +142,47 @@ def send_feishu_text(
     timeout_seconds: float,
 ) -> dict[str, Any]:
     request_body = _feishu_text_body(str(body.get("text") or ""), secret=webhook_secret)
+    payload = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        webhook_url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            response_body = response.read().decode("utf-8", errors="replace")
+            return {
+                "sent": 200 <= int(response.status) < 300,
+                "status_code": int(response.status),
+                "response_body_preview": response_body[:500],
+            }
+    except urllib.error.HTTPError as exc:
+        response_body = exc.read().decode("utf-8", errors="replace")
+        return {
+            "sent": False,
+            "status_code": int(exc.code),
+            "response_body_preview": response_body[:500],
+        }
+    except Exception as exc:  # pragma: no cover - network dependent
+        return {
+            "sent": False,
+            "status_code": None,
+            "error": f"{type(exc).__name__}:{str(exc)[:240]}",
+        }
+
+
+def send_feishu_payload(
+    webhook_url: str,
+    webhook_secret: str | None,
+    body: dict[str, Any],
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    request_body = dict(body)
+    if webhook_secret:
+        timestamp = int(time.time())
+        request_body["timestamp"] = str(timestamp)
+        request_body["sign"] = _feishu_signature(timestamp, webhook_secret)
     payload = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         webhook_url,
@@ -922,6 +971,262 @@ def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:
     return sa.Table(table_name, metadata, autoload_with=conn)
 
 
+def _typed_owner_notification_schema_available(
+    conn: sa.engine.Connection,
+) -> bool:
+    if not sa.inspect(conn).has_table("brc_server_monitor_notifications"):
+        return False
+    columns = {
+        item["name"]
+        for item in sa.inspect(conn).get_columns("brc_server_monitor_notifications")
+    }
+    return {
+        "notification_kind",
+        "severity",
+        "correlation_id",
+        "template_version",
+        "owner_action_required",
+        "occurred_at_ms",
+        "resolved_at_ms",
+    } <= columns
+
+
+def _monitor_decision_owner_intent(
+    decision: dict[str, Any],
+    *,
+    now_ms: int,
+) -> OwnerNotificationIntent | None:
+    if not decision.get("notify"):
+        return None
+    blocker_class = str(decision.get("blocker_class") or "runtime_unavailable")
+    strategy_group_id = str(decision.get("strategy_group_id") or "runtime")
+    symbol = str(decision.get("symbol") or "all")
+    temporary = blocker_class in {
+        "runtime_data_gap",
+        "watcher_or_service_failure",
+        "runtime_process_failure",
+    }
+    kind = (
+        OwnerNotificationKind.SYSTEM_TEMPORARILY_UNAVAILABLE
+        if temporary
+        else OwnerNotificationKind.INTERVENTION_REQUIRED
+    )
+    return OwnerNotificationIntent(
+        notification_kind=kind,
+        severity=(
+            OwnerNotificationSeverity.WARNING
+            if temporary
+            else OwnerNotificationSeverity.CRITICAL
+        ),
+        correlation_id="monitor:" + _dedupe_identity(decision),
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=(
+            str(decision.get("side"))
+            if str(decision.get("side") or "") in {"long", "short"}
+            else None
+        ),
+        occurred_at_ms=now_ms,
+        headline=("系统暂时不可用" if temporary else "需要你关注运行状态"),
+        current_state=(
+            "部分自动观察或处理暂时无法继续"
+            if temporary
+            else "系统已经停止相关的新交易推进"
+        ),
+        result_summary="没有新增交易动作",
+        plain_reason=_plain_monitor_reason(blocker_class),
+        next_system_action="系统继续进行只读检查，并在恢复后通知你",
+        owner_action_required=not temporary,
+        owner_action=("检查服务器或交易所状态" if not temporary else None),
+        technical_refs=(
+            f"blocker_class:{blocker_class}",
+            f"checkpoint:{str(decision.get('checkpoint') or '')}",
+        ),
+    )
+
+
+def _plain_monitor_reason(blocker_class: str) -> str:
+    if blocker_class == "watcher_or_service_failure":
+        return "服务器观察服务没有正常完成"
+    if blocker_class in {"runtime_data_gap", "runtime_process_failure"}:
+        return "系统暂时无法读取完整、可信的运行数据"
+    if blocker_class in {"hard_safety_stop", "exchange_command_outcome_unknown"}:
+        return "交易安全检查要求暂停并核对外部事实"
+    if blocker_class in {"policy_scope_missing", "budget_gap"}:
+        return "当前交易范围或资金条件尚未满足"
+    return "最新运行检查要求暂停相关推进"
+
+
+def _apply_pg_owner_notifications(
+    *,
+    conn: sa.engine.Connection,
+    automation_id: str,
+    control_state: dict[str, Any],
+    now_ms: int,
+    webhook_url: str | None,
+    webhook_secret: str | None,
+    notification_timeout_seconds: float,
+    notification_dry_run: bool,
+    notifier: Notifier | None,
+    decision: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    intents = project_owner_notification_intents(control_state, now_ms=now_ms)
+    fallback = _monitor_decision_owner_intent(decision or {}, now_ms=now_ms)
+    if fallback is not None:
+        intents = [
+            item
+            for item in intents
+            if not (
+                item.notification_kind is OwnerNotificationKind.INCIDENT_RECOVERED
+                and item.correlation_id == fallback.correlation_id
+            )
+        ]
+        if not any(
+            item.correlation_id == fallback.correlation_id
+            and item.notification_kind is fallback.notification_kind
+            for item in intents
+        ):
+            intents = [fallback, *intents][:5]
+    table = _table(conn, "brc_server_monitor_notifications")
+    sender = notifier or send_feishu_payload
+    results: list[dict[str, Any]] = []
+    sent_count = 0
+    suppressed_count = 0
+    retry_exhausted_count = 0
+    for intent in intents:
+        dedupe_key = owner_notification_dedupe_key(automation_id, intent)
+        existing = _pg_notification_row(conn, dedupe_key)
+        attempts = int(existing.get("send_attempts") or 0)
+        previous_state = str(existing.get("notification_state") or "")
+        attempted = False
+        sent = False
+        skipped_reason: str | None = None
+        response: dict[str, Any] = {}
+        if previous_state == "sent":
+            suppressed_count += 1
+            skipped_reason = "dedupe_suppressed"
+        elif attempts >= 3:
+            retry_exhausted_count += 1
+            skipped_reason = "retry_exhausted"
+        elif not webhook_url:
+            skipped_reason = "feishu_webhook_url_missing"
+        elif notification_dry_run:
+            skipped_reason = "notification_dry_run"
+        else:
+            attempted = True
+            response = sender(
+                webhook_url,
+                webhook_secret,
+                render_owner_notification_card(intent),
+                notification_timeout_seconds,
+            )
+            attempts += 1
+            sent = bool(response.get("sent"))
+            if sent:
+                sent_count += 1
+        state = (
+            "sent"
+            if sent or previous_state == "sent"
+            else "failed"
+            if attempted or skipped_reason == "retry_exhausted"
+            else "suppressed"
+            if skipped_reason == "dedupe_suppressed"
+            else "pending"
+        )
+        values = {
+            "notification_id": str(
+                existing.get("notification_id")
+                or _notification_id_from_identity(dedupe_key)
+            ),
+            "dedupe_key": dedupe_key,
+            "automation_id": automation_id,
+            "strategy_group_id": intent.strategy_group_id,
+            "symbol": intent.symbol,
+            "blocker_class": intent.notification_kind.value,
+            "checkpoint": "owner_notification",
+            "notification_state": state,
+            "first_seen_at_ms": int(existing.get("first_seen_at_ms") or now_ms),
+            "last_notified_at_ms": (
+                now_ms if sent else existing.get("last_notified_at_ms")
+            ),
+            "last_seen_at_ms": now_ms,
+            "send_attempts": attempts,
+            "last_error": response.get("error"),
+            "feishu_response": {
+                "sent": sent,
+                "status_code": response.get("status_code"),
+                "response_body_preview": response.get("response_body_preview"),
+                "skipped_reason": skipped_reason,
+            },
+            "created_at_ms": int(existing.get("created_at_ms") or now_ms),
+            "updated_at_ms": now_ms,
+            "notification_kind": intent.notification_kind.value,
+            "severity": intent.severity.value,
+            "correlation_id": intent.correlation_id,
+            "template_version": intent.template_version,
+            "owner_action_required": intent.owner_action_required,
+            "occurred_at_ms": intent.occurred_at_ms,
+            "resolved_at_ms": None,
+        }
+        if existing:
+            conn.execute(
+                table.update()
+                .where(table.c.dedupe_key == dedupe_key)
+                .values(**{
+                    key: value
+                    for key, value in values.items()
+                    if key not in {"notification_id", "dedupe_key", "created_at_ms"}
+                })
+            )
+        else:
+            conn.execute(table.insert().values(**values))
+        if sent and intent.notification_kind is OwnerNotificationKind.INCIDENT_RECOVERED:
+            conn.execute(
+                table.update()
+                .where(table.c.correlation_id == intent.correlation_id)
+                .where(
+                    table.c.notification_kind.in_(
+                        (
+                            OwnerNotificationKind.INTERVENTION_REQUIRED.value,
+                            OwnerNotificationKind.SYSTEM_TEMPORARILY_UNAVAILABLE.value,
+                        )
+                    )
+                )
+                .values(
+                    notification_state="resolved",
+                    resolved_at_ms=now_ms,
+                    updated_at_ms=now_ms,
+                )
+            )
+        results.append(
+            {
+                "notification_kind": intent.notification_kind.value,
+                "correlation_id": intent.correlation_id,
+                "attempted": attempted,
+                "sent": sent,
+                "skipped_reason": skipped_reason,
+                "send_attempts": attempts,
+            }
+        )
+    return {
+        "schema": "brc.owner_notification_delivery.v1",
+        "required": bool(intents),
+        "attempted": any(item["attempted"] for item in results),
+        "sent": sent_count > 0,
+        "sent_count": sent_count,
+        "suppressed_count": suppressed_count,
+        "retry_exhausted_count": retry_exhausted_count,
+        "intent_count": len(intents),
+        "results": results,
+        "skipped_reason": (
+            str((decision or {}).get("status") or "healthy_waiting_quiet")
+            if not intents
+            else None
+        ),
+        "source": "pg:brc_server_monitor_notifications",
+    }
+
+
 def _apply_pg_notification(
     *,
     conn: sa.engine.Connection,
@@ -1165,6 +1470,7 @@ def build_server_monitor_artifact_from_pg(
         else _systemd_status(list(args.systemd_unit or []), runner=systemd_runner)
     )
     source_errors: dict[str, Any] = {}
+    control_state: dict[str, Any] = {}
     try:
         control_state = repository.read_monitor_control_state()
         candidate_pool = build_strategy_live_candidate_pool_from_control_state(control_state)
@@ -1199,17 +1505,39 @@ def build_server_monitor_artifact_from_pg(
         }
     webhook_url = args.feishu_webhook_url or _env_value(FEISHU_WEBHOOK_URL_ENV_NAMES)
     webhook_secret = args.feishu_webhook_secret or _env_value(FEISHU_WEBHOOK_SECRET_ENV_NAMES)
-    notification, dedupe_state = _apply_pg_notification(
-        conn=conn,
-        decision=decision,
-        evidence_ref=PG_MONITOR_EVIDENCE_REF,
-        webhook_url=webhook_url,
-        webhook_secret=webhook_secret,
-        notification_timeout_seconds=args.notification_timeout_seconds,
-        notification_dry_run=bool(args.notification_dry_run),
-        notifier=notifier,
-        now_utc=now,
-    )
+    if _typed_owner_notification_schema_available(conn):
+        notification = _apply_pg_owner_notifications(
+            conn=conn,
+            automation_id=str(decision.get("automation_id") or "runtime-monitor"),
+            control_state=control_state,
+            now_ms=_utc_to_ms(now),
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
+            notification_timeout_seconds=args.notification_timeout_seconds,
+            notification_dry_run=bool(args.notification_dry_run),
+            notifier=notifier,
+            decision=decision,
+        )
+        dedupe_state = {
+            "schema": "brc.server_runtime_monitor_dedupe_state.pg.v2",
+            "source": "pg:brc_server_monitor_notifications",
+            "event_count": conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_server_monitor_notifications")
+            ).scalar_one(),
+            "trading_authority": False,
+        }
+    else:
+        notification, dedupe_state = _apply_pg_notification(
+            conn=conn,
+            decision=decision,
+            evidence_ref=PG_MONITOR_EVIDENCE_REF,
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
+            notification_timeout_seconds=args.notification_timeout_seconds,
+            notification_dry_run=bool(args.notification_dry_run),
+            notifier=notifier,
+            now_utc=now,
+        )
     source_refs = {
         "source_mode": "db_backed",
         "projection_target": "production_current",

@@ -129,6 +129,7 @@ authority.
 | Pre-Trade Runtime and Candidate Pool | `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` |
 | Runtime terminology and Owner explanation governance | `docs/current/RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | Production runtime monitor ownership | `docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` |
+| Owner notification language and runtime forensics | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, with runtime facts in PG and the read-only command at `scripts/ops/query_runtime_signal_forensics.py` |
 | Tokyo runtime deployment boundary | `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` |
 | Production runtime file I/O elimination | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | Runtime control state DB architecture and tables | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |

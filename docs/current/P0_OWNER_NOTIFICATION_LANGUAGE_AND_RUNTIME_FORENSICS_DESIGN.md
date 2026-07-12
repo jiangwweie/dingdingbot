@@ -1,6 +1,6 @@
 ---
 title: P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN
-status: OWNER_APPROVED_FOR_IMPLEMENTATION
+status: IMPLEMENTED_LOCAL_VERIFIED_DEPLOY_PENDING
 authority: docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md
 last_verified: 2026-07-12
 ---
@@ -23,6 +23,14 @@ forensics command consumed by the existing `runtime-signal-forensics` Skill.
 It does not add a frontend, MCP service, Feishu callback, policy mutation,
 runtime authority, exchange write, new trading state machine, or file-backed
 report path.
+
+## Implementation Checkpoint
+
+As of **2026-07-12**, the typed notification boundary, static cards, PG ledger
+extension, material lifecycle lineage, bounded retry/recovery, stdout-only
+forensics command, and Skill integration are locally implemented. The full
+suite passes **2914 tests with 1 skipped**; Tokyo migration and production
+acceptance remain the active deployment step.
 
 ## Current Defect
 
@@ -239,20 +247,20 @@ scripts/ops/query_runtime_signal_forensics.py
 Arguments:
 
 ```text
---database-url / PG_DATABASE_URL
---since <ISO-8601>
---until <ISO-8601>
+--database-url / BRC_DATABASE_URL / DATABASE_URL
+--start <ISO-8601 with timezone>
+--end <ISO-8601 with timezone>
 --strategy-group-id <optional>
 --symbol <optional>
 --side <optional>
 --limit <bounded; default 200; max 1000>
 --include-systemd
---json
 ```
 
 It reads PG signal, promotion, lane, Ticket, exchange command, lifecycle,
 outcome, monitor, and notification rows for the requested window. Optional
-systemd collection is local and timeout-bounded. It prints one structured
+systemd collection is local and timeout-bounded. JSON is the only stdout
+format; no format switch or output-path option exists. It prints one structured
 stdout response and creates zero files.
 
 The response separates:

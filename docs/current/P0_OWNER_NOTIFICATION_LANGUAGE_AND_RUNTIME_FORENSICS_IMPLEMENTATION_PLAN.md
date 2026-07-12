@@ -1,6 +1,6 @@
 ---
 title: P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_IMPLEMENTATION_PLAN
-status: APPROVED_FOR_IMPLEMENTATION
+status: LOCAL_VERIFIED_DEPLOY_PENDING
 authority: docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-12
 ---
@@ -24,6 +24,17 @@ runtime authority.
 **Tech Stack:** Python 3.10+, Pydantic v2, SQLAlchemy 2, PostgreSQL, Alembic,
 pytest, Feishu custom-robot Webhook.
 
+## Execution Checkpoint
+
+| Task | State | Current evidence |
+| --- | --- | --- |
+| **1. Ledger and typed intent** | **complete** | Migration 117 round-trip, indexes, models, card renderer, migration-head tests pass |
+| **2. Scenario projector** | **complete** | Signal, terminal opportunity, submit, protection, runner, close, incident, and recovery tests pass |
+| **3. Delivery closure** | **complete** | Static card payload, stable dedupe, three-attempt cap, recovery, schema compatibility, and no-jargon fallback pass |
+| **4. Runtime forensics** | **complete** | Bounded read-only repository, recursive first blocker, time-window coverage proof, stdout-only CLI pass |
+| **5. Skill and docs** | **complete** | Primary SSH command, timezone mapping, diagnostic fallback, and authority index are registered |
+| **6. Deploy and production acceptance** | **in progress** | Local focused suite and full **2914 passed / 1 skipped** are complete; Tokyo cutover remains |
+
 ## Global Constraints
 
 - PG/current and audit lineage are the only production truth.
@@ -43,7 +54,7 @@ pytest, Feishu custom-robot Webhook.
 ### Task 1: Notification Ledger Schema And Typed Intent
 
 **Files:**
-- Create: `migrations/versions/2026-07-12-117_extend_owner_notification_ledger.py`
+- Create: `migrations/versions/2026-07-12-117_extend_owner_notifications.py`
 - Create: `src/application/owner_notification.py`
 - Create: `tests/unit/test_owner_notification.py`
 - Create: `tests/unit/test_owner_notification_migration.py`

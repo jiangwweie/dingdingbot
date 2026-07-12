@@ -559,6 +559,54 @@ def test_repository_monitor_read_profile_retains_protected_submit_lineage(
     assert monitor_state["action_time_tickets"][0]["ticket_id"] == ids["ticket_id"]
 
 
+def test_monitor_material_notification_lineage_retains_terminal_signal_and_ticket(
+    pg_control_connection,
+    monkeypatch,
+):
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 120_000,
+    )
+    rows = {
+        "server_monitor_notifications": [
+            {"correlation_id": "signal:signal-terminal"},
+            {"correlation_id": "ticket:ticket-closed"},
+        ],
+        "ticket_bound_order_lifecycle_runs": [
+            {"ticket_id": "ticket-closed", "status": "lifecycle_closed"}
+        ],
+        "ticket_bound_exchange_commands": [],
+        "action_time_tickets": [],
+        "live_signal_events": [],
+    }
+
+    def fake_read(_table_name, column_name, values):
+        if column_name == "ticket_id" and "ticket-closed" in values:
+            return [
+                {
+                    "ticket_id": "ticket-closed",
+                    "signal_event_id": "signal-from-ticket",
+                }
+            ]
+        if column_name == "signal_event_id":
+            return [
+                {"signal_event_id": signal_id, "status": "stale"}
+                for signal_id in sorted(values)
+            ]
+        return []
+
+    monkeypatch.setattr(repository, "_read_rows_where_in", fake_read)
+    repository._retain_monitor_material_notification_lineage(rows)
+
+    assert rows["action_time_tickets"] == [
+        {"ticket_id": "ticket-closed", "signal_event_id": "signal-from-ticket"}
+    ]
+    assert {row["signal_event_id"] for row in rows["live_signal_events"]} == {
+        "signal-terminal",
+        "signal-from-ticket",
+    }
+
+
 def test_pg_backed_runtime_control_state_repository_rejects_non_db_modes(
     pg_control_connection,
 ):

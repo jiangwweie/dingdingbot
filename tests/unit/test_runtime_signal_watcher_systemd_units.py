@@ -244,6 +244,7 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
         repo_url="https://github.com/example/dingdingbot.git",
         git_ref="release/test",
         target_commit="abc123",
+        release_name="brc-runtime-governance-test",
         deploy_root="/home/ubuntu/brc-deploy",
         source_root="/home/ubuntu/brc-deploy/source",
         source_repo_path="/home/ubuntu/brc-deploy/source/dingdingbot",

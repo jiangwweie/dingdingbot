@@ -51,7 +51,7 @@ design documents and acceptance proof.
 | --- | --- | --- | --- |
 | 1 | **Action-Time Boundary Reproduction And Projection Truth** | **deployed baseline at `dbb7e650`** | `docs/current/P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_DESIGN.md` |
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
-| 2 | **Owner Supervision Product Integration** | **next non-market-dependent engineering mainline** | `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
+| 2 | **Owner Supervision Product Integration** | **P0 notification/forensics closure locally verified; Tokyo cutover active** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | 3 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 4 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
@@ -101,7 +101,7 @@ then resumes this order.
 | 1 | **Cross-projection blocker conservation** | P0 complete | Daily Table, Goal Status, Tradeability, Candidate Pool, and Server Monitor preserve the same first blocker and watermark |
 | 2 | **Production-shaped Action-Time reproduction** | P0 complete | All 22 active scopes traverse the production-shaped path to the disabled-smoke boundary without exchange write and bind to the deployed head |
 | 3 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome |
-| 4 | **Owner Supervision Product Integration** | P1 next | Owner-facing product state consumes the conserved PG truth without exposing internal gate vocabulary |
+| 4 | **Owner Supervision Product Integration** | P1 active closure | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; Tokyo deployment and natural-event calibration remain |
 
 ## Why This Was Not Detected Before Production Signals
 

@@ -151,6 +151,7 @@ class PgBackedRuntimeControlStateRepository:
             for key, table_name in CONTROL_STATE_TABLES.items()
         }
         self._retain_monitor_protected_submit_lineage(rows)
+        self._retain_monitor_material_notification_lineage(rows)
         self._validate_projection_ownership(rows)
         self._validate_active_event_semantics(rows)
         self._validate_candidate_scope_event_bindings(rows)
@@ -314,6 +315,53 @@ class PgBackedRuntimeControlStateRepository:
             promotion_rows,
         )
         signal_ids.update(_texts(row.get("signal_event_id") for row in promotion_rows))
+        self._merge_rows(
+            rows,
+            "live_signal_events",
+            "signal_event_id",
+            self._read_rows_where_in(
+                CONTROL_STATE_TABLES["live_signal_events"],
+                "signal_event_id",
+                signal_ids,
+            ),
+        )
+
+    def _retain_monitor_material_notification_lineage(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        notifications = rows.get("server_monitor_notifications") or []
+        lifecycle_rows = rows.get("ticket_bound_order_lifecycle_runs") or []
+        command_rows = rows.get("ticket_bound_exchange_commands") or []
+        signal_ids = {
+            correlation.removeprefix("signal:")
+            for row in notifications
+            if (correlation := str(row.get("correlation_id") or "")).startswith(
+                "signal:"
+            )
+        }
+        ticket_ids = _texts(
+            row.get("ticket_id") for row in [*lifecycle_rows, *command_rows]
+        )
+        ticket_ids.update(
+            correlation.removeprefix("ticket:")
+            for row in notifications
+            if (correlation := str(row.get("correlation_id") or "")).startswith(
+                "ticket:"
+            )
+        )
+        ticket_rows = self._read_rows_where_in(
+            CONTROL_STATE_TABLES["action_time_tickets"],
+            "ticket_id",
+            ticket_ids,
+        )
+        self._merge_rows(
+            rows,
+            "action_time_tickets",
+            "ticket_id",
+            ticket_rows,
+        )
+        signal_ids.update(_texts(row.get("signal_event_id") for row in ticket_rows))
         self._merge_rows(
             rows,
             "live_signal_events",
@@ -1038,6 +1086,8 @@ def _monitor_bounded_statement(
         return statement
     if logical_key == "server_monitor_runs" and "created_at_ms" in columns:
         return statement.order_by(columns.created_at_ms.desc()).limit(200)
+    if logical_key == "server_monitor_notifications" and "updated_at_ms" in columns:
+        return statement.order_by(columns.updated_at_ms.desc()).limit(1000)
     if logical_key == "ticket_bound_protected_submit_attempts" and "created_at_ms" in columns:
         return statement.where(
             columns.status.in_(
@@ -1059,18 +1109,17 @@ def _monitor_bounded_statement(
     if logical_key == "runtime_process_outcomes" and "updated_at_ms" in columns:
         return statement.order_by(columns.updated_at_ms.desc()).limit(200)
     if logical_key == "ticket_bound_order_lifecycle_runs" and "updated_at_ms" in columns:
-        return statement.where(
-            ~columns.status.in_(
-                [
-                    "position_protected",
-                    "runner_protected",
-                    "reconciliation_matched",
-                    "budget_settled",
-                    "review_recorded",
-                    "lifecycle_closed",
-                ]
-            )
-        ).order_by(columns.updated_at_ms.desc()).limit(200)
+        return statement.order_by(columns.updated_at_ms.desc()).limit(200)
+    if logical_key == "live_outcome_ledger":
+        time_column = (
+            columns.closed_at_ms
+            if "closed_at_ms" in columns
+            else columns.created_at_ms
+            if "created_at_ms" in columns
+            else None
+        )
+        if time_column is not None:
+            return statement.order_by(time_column.desc()).limit(200)
     return statement
 
 
