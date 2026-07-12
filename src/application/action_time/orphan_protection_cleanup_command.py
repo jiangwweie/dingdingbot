@@ -20,6 +20,9 @@ import sqlalchemy as sa
 from src.application.action_time.capital_safety_freeze_projection import (
     resolve_current_scope_freeze,
 )
+from src.application.action_time.lifecycle_safety_core import (
+    reduce_lifecycle_decision,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -652,11 +655,17 @@ def _mark_cleanup_failed(
             },
         )
     if lifecycle:
+        decision = reduce_lifecycle_decision(
+            current_status=str(lifecycle.get("status") or ""),
+            target_status="position_closed_protection_live",
+            event_type="position_closed_protection_live",
+            blockers=blockers or [first_blocker],
+        )
         lifecycle_update = {
             **lifecycle,
-            "status": "position_closed_protection_live",
-            "first_blocker": first_blocker,
-            "blockers": blockers,
+            "status": decision.status,
+            "first_blocker": decision.first_blocker,
+            "blockers": list(decision.blockers),
             "updated_at_ms": now_ms,
         }
         _upsert_row(
@@ -668,7 +677,7 @@ def _mark_cleanup_failed(
         _insert_event(
             conn,
             lifecycle_update,
-            "position_closed_protection_live",
+            decision.event_type,
             {
                 "blockers": blockers,
                 "cleanup_result": result_payload,
@@ -722,11 +731,16 @@ def _apply_successful_cleanup(
             },
         )
     if lifecycle:
+        decision = reduce_lifecycle_decision(
+            current_status=str(lifecycle.get("status") or ""),
+            target_status="reconciliation_matched",
+            event_type="reconciliation_matched",
+        )
         lifecycle_update = {
             **lifecycle,
-            "status": "reconciliation_matched",
-            "first_blocker": None,
-            "blockers": [],
+            "status": decision.status,
+            "first_blocker": decision.first_blocker,
+            "blockers": list(decision.blockers),
             "updated_at_ms": now_ms,
         }
         _upsert_row(
@@ -738,7 +752,7 @@ def _apply_successful_cleanup(
         _insert_event(
             conn,
             lifecycle_update,
-            "reconciliation_matched",
+            decision.event_type,
             {
                 "cleanup_command_id": command["orphan_protection_cleanup_command_id"],
                 "cleanup_result": result_payload,

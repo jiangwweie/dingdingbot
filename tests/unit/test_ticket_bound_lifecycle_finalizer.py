@@ -92,6 +92,10 @@ def test_finalizer_does_not_release_budget_while_residual_protection_is_live(
 
     assert payload["status"] == "finalization_blocked"
     assert payload["first_blocker"] == "position_closed_protection_live:TP1"
+    assert payload["lifecycle_decision"]["status"] == (
+        "position_closed_protection_live"
+    )
+    assert payload["lifecycle_decision"]["control_state"] == "recovery_required"
     assert payload["runtime_budget_mutated"] is False
     assert _scalar(
         pg_control_connection,

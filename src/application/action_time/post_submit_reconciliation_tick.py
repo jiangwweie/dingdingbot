@@ -17,6 +17,9 @@ from src.application.action_time.exchange_order_ownership import (
 from src.application.action_time.exchange_scope import (
     resolve_ticket_bound_exchange_scope,
 )
+from src.application.action_time.lifecycle_safety_core import (
+    reduce_lifecycle_decision,
+)
 from src.application.action_time.netting_domain_hold import (
     resolve_netting_domain_hold_source,
     upsert_netting_domain_hold,
@@ -403,11 +406,16 @@ def _update_lifecycle_if_present(
     )
     if not lifecycle:
         return
+    decision = reduce_lifecycle_decision(
+        current_status=str(lifecycle.get("status") or ""),
+        target_status=status,
+        blockers=blockers,
+    )
     updated = {
         **lifecycle,
-        "status": status,
-        "first_blocker": blockers[0] if blockers else None,
-        "blockers": blockers,
+        "status": decision.status,
+        "first_blocker": decision.first_blocker,
+        "blockers": list(decision.blockers),
         "updated_at_ms": now_ms,
     }
     _upsert_row(conn, "brc_ticket_bound_order_lifecycle_runs", "lifecycle_run_id", updated)

@@ -166,6 +166,14 @@ def test_hard_stop_gets_a_deterministic_blocker_when_caller_omits_one():
     assert decision.failure_stage == "entry"
 
 
+def test_generic_blocked_control_state_also_gets_a_deterministic_blocker():
+    decision = lifecycle_decision_for_status("blocked")
+
+    assert decision.control_state is LifecycleControlState.HARD_STOPPED
+    assert decision.first_blocker == "blocked"
+    assert decision.blockers == ("blocked",)
+
+
 def test_explicit_evidence_driven_event_and_action_override_are_preserved():
     decision = lifecycle_decision_for_status(
         "protection_reconciliation_mismatch",
@@ -218,4 +226,3 @@ def test_normal_transition_uses_target_spec_and_observed_event():
     assert decision.event_type == "runner_mutation_pending"
     assert decision.next_action == "run_official_runner_mutation_command"
     assert decision.first_blocker == "runner_sl_exchange_order_id_required"
-

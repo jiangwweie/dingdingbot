@@ -68,7 +68,12 @@ def finalize_ticket_bound_lifecycle_if_ready(
         "budget_settled",
         "review_recorded",
     }:
-        return _result("not_ready_lifecycle_active", [], False)
+        return _result(
+            "not_ready_lifecycle_active",
+            [],
+            False,
+            lifecycle_status=str(lifecycle.get("status") or "blocked"),
+        )
 
     final_order = _final_filled_order(conn, ticket_id)
     flat_tick = _latest_flat_reconciliation_tick(conn, ticket_id)
@@ -87,7 +92,20 @@ def finalize_ticket_bound_lifecycle_if_ready(
         )
     )
     if blockers:
-        return _result("finalization_blocked", blockers, False)
+        lifecycle_status = (
+            "position_closed_protection_live"
+            if any(
+                blocker.startswith("position_closed_protection_live:")
+                for blocker in blockers
+            )
+            else "final_exit_unknown"
+        )
+        return _result(
+            "finalization_blocked",
+            blockers,
+            False,
+            lifecycle_status=lifecycle_status,
+        )
 
     attempt_id = str(lifecycle.get("protected_submit_attempt_id") or "")
     reconciliation_evidence_id = str(flat_tick["reconciliation_tick_id"])
@@ -128,6 +146,7 @@ def finalize_ticket_bound_lifecycle_if_ready(
             "finalization_blocked",
             list(settlement.get("blockers") or []),
             False,
+            lifecycle_status="settlement_blocked",
         )
     budget_mutated = settlement.get("runtime_budget_mutated") is True
     lifecycle = _set_lifecycle_status(
@@ -184,6 +203,7 @@ def finalize_ticket_bound_lifecycle_if_ready(
                 "finalization_blocked",
                 list(closure.get("blockers") or []),
                 budget_mutated,
+                lifecycle_status="review_blocked",
             ),
             "closure_status": closure.get("status"),
         }

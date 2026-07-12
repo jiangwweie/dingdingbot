@@ -33,6 +33,9 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
 )
+from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
+    reduce_lifecycle_decision,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -374,11 +377,16 @@ def materialize_ticket_bound_lifecycle_closure(
         "post_submit_closure_id",
         closure_update,
     )
+    lifecycle_decision = reduce_lifecycle_decision(
+        current_status=str(lifecycle.get("status") or ""),
+        target_status="lifecycle_closed",
+        event_type="lifecycle_closed",
+    )
     lifecycle_update = {
         **lifecycle,
-        "status": "lifecycle_closed",
-        "first_blocker": None,
-        "blockers": [],
+        "status": lifecycle_decision.status,
+        "first_blocker": lifecycle_decision.first_blocker,
+        "blockers": list(lifecycle_decision.blockers),
         "updated_at_ms": now_ms,
     }
     _upsert_row(
@@ -398,7 +406,7 @@ def materialize_ticket_bound_lifecycle_closure(
         if realized_pnl_decimal is not None
         else None,
     }
-    for event_type in ("final_exit_detected", "lifecycle_closed"):
+    for event_type in ("final_exit_detected", lifecycle_decision.event_type):
         _insert_lifecycle_event(
             conn,
             lifecycle_update,
@@ -411,7 +419,8 @@ def materialize_ticket_bound_lifecycle_closure(
         now_ms=now_ms,
         blockers=[],
         closure=closure_update,
-        next_action="lifecycle_closed",
+        next_action=lifecycle_decision.next_action,
+        extra={"lifecycle_decision": lifecycle_decision.to_dict()},
     )
 
 

@@ -67,6 +67,9 @@ last_verified: 2026-07-12
 - Modify: `src/application/action_time/runner_mutation_command.py`
 - Modify: `src/application/action_time/ticket_bound_fill_projector.py`
 - Modify: `src/application/action_time/ticket_bound_lifecycle_finalizer.py`
+- Modify: `src/application/action_time/post_submit_reconciliation_tick.py`
+- Modify: `src/application/action_time/post_submit_closure.py`
+- Modify: `src/application/action_time/orphan_protection_cleanup_command.py`
 - Modify: `tests/unit/test_ticket_bound_runner_mutation_command.py`
 - Modify: `tests/unit/test_ticket_bound_runner_mutation_executor.py`
 - Modify: `tests/unit/test_ticket_bound_lifecycle_finalizer.py`
@@ -78,8 +81,11 @@ last_verified: 2026-07-12
 
 - [x] Add failing tests for Runner pending/failure, final-exit detection, reconciliation matched, budget settled, review recorded, and lifecycle closed decisions.
 - [x] Run focused tests and verify reducer-consumption failures.
-- [x] Route normal and abnormal transitions through the reducer while retaining existing PG writers and durable command ordering.
-- [x] Add source assertions that the migrated modules no longer own duplicate lifecycle event/recovery lookup maps.
+- [x] Route normal and abnormal transitions, including reconciliation Tick,
+  post-submit closure, and orphan cleanup, through the reducer while retaining
+  existing PG writers and durable command ordering.
+- [x] Add source assertions covering every production lifecycle writer and
+  proving it consumes a shared classifier or reducer entry point.
 - [x] Run focused tests until green.
 
 ### Task 4: Rehearsal And Replay Decision Parity
@@ -133,7 +139,26 @@ last_verified: 2026-07-12
 
 - [x] Update the roadmap to mark P0-LC deployed, define `Live Candidate Baseline`, make P1-TFC the sole medium-scale mainline, and retain natural fresh signal as the P0 interrupt.
 - [x] Run targeted lifecycle, Owner, Ops, six-event, and 22-scope tests.
-- [ ] Run the full pytest suite authorized by the accepted goal.
-- [ ] Run `python3 scripts/validate_current_docs_authority.py`, `python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked`, `python3 scripts/audit_production_runtime_file_io.py`, and `git diff --check`.
-- [ ] Review `git diff`, map every design requirement to fresh evidence, and record exact tests run and skipped.
-- [ ] Mark every completed checkbox only after its command evidence exists; leave market-only R1B calibration explicitly open.
+- [x] Run the full pytest suite authorized by the accepted goal.
+- [x] Run `python3 scripts/validate_current_docs_authority.py`, `python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked`, `python3 scripts/audit_production_runtime_file_io.py`, and `git diff --check`.
+- [x] Review `git diff`, map every design requirement to fresh evidence, and record exact tests run and skipped.
+- [x] Mark every completed checkbox only after its command evidence exists; leave market-only R1B calibration explicitly open.
+
+## Verification Evidence
+
+| Evidence | Result | Boundary proven |
+| --- | --- | --- |
+| Full `pytest -q` | `2815 passed, 1 skipped, 3 warnings` in `353.18s` | Existing pre-trade, Action-Time, submit, protection, recovery, reconciliation, closure, and Owner paths remain compatible |
+| Skip audit | The one skip is `legacy trading console proxy has been removed`; focused file passed `78` tests | No P1-TFC scenario was skipped |
+| Current docs authority | `current_docs_authority_valid`, `37` current docs and `9` archived-current entries | One current planning/authority order remains valid |
+| Output scope | `output_artifact_scope_valid`, `checked_path_count=0` | No generated runtime artifact entered the change |
+| Production file-I/O audit | `occurrence_count=188`, `suspicious_runtime_file_authority=0`, `frequent_report_write=0` | No new runtime JSON/Markdown authority or recurring writer |
+| Diff review | `git diff --check` passed; `11` production lifecycle writers have shared-decision-entrypoint certification | No unreviewed direct lifecycle decision writer remains in the scoped Action-Time path |
+
+## Explicitly Open Market-Only Calibration
+
+**R1B remains open** until a different-identity natural fresh signal creates a
+real Ticket and produces exchange outcomes. It calibrates live latency,
+slippage, fill/protection behavior, and Owner feedback timing; it does not
+block this engineering package, widen authority, or invalidate the completed
+replay/rehearsal/full-regression evidence.

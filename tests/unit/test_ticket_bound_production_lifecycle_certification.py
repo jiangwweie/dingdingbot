@@ -3,8 +3,16 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
+from src.application.action_time import exit_protection_materializer
 from src.application.action_time import full_chain_simulation_harness as harness
+from src.application.action_time import orphan_protection_cleanup_command
+from src.application.action_time import post_submit_closure
+from src.application.action_time import post_submit_reconciliation_tick
+from src.application.action_time import protected_submit_attempt
+from src.application.action_time import protection_reconciler
+from src.application.action_time import protection_recovery_command
 from src.application.action_time import runner_mutation_command
+from src.application.action_time import runner_protection_adjuster
 from src.application.action_time import ticket_bound_fill_projector
 from src.application.action_time import ticket_bound_lifecycle_finalizer
 from tests.unit.test_tokyo_runtime_server_monitor import _load_module
@@ -45,13 +53,22 @@ def test_legacy_lifecycle_modules_have_no_direct_gateway_mutation_call():
 
 
 def test_lifecycle_transition_writers_consume_the_common_reducer():
-    runner_source = inspect.getsource(runner_mutation_command)
-    fill_source = inspect.getsource(ticket_bound_fill_projector)
-    finalizer_source = inspect.getsource(ticket_bound_lifecycle_finalizer)
+    expected_decision_entrypoint = {
+        exit_protection_materializer: "classify_exit_protection_materialization(",
+        protected_submit_attempt: "classify_sequential_submit_result(",
+        protection_reconciler: "classify_protection_reconciliation(",
+        runner_protection_adjuster: "classify_runner_protection_adjustment(",
+        protection_recovery_command: "reduce_lifecycle_decision(",
+        runner_mutation_command: "reduce_lifecycle_decision(",
+        ticket_bound_fill_projector: "reduce_lifecycle_decision(",
+        ticket_bound_lifecycle_finalizer: "reduce_lifecycle_decision(",
+        post_submit_closure: "reduce_lifecycle_decision(",
+        orphan_protection_cleanup_command: "reduce_lifecycle_decision(",
+        post_submit_reconciliation_tick: "reduce_lifecycle_decision(",
+    }
 
-    assert "reduce_lifecycle_decision(" in runner_source
-    assert "reduce_lifecycle_decision(" in fill_source
-    assert "reduce_lifecycle_decision(" in finalizer_source
+    for module, entrypoint in expected_decision_entrypoint.items():
+        assert entrypoint in inspect.getsource(module), module.__name__
 
 
 def test_unprotected_real_position_preempts_new_natural_signal_acceptance():

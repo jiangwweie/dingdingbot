@@ -438,7 +438,10 @@ def lifecycle_decision_for_status(
         _UNKNOWN_SPECIFICATION,
     )
     normalized_blockers = _dedupe([str(item) for item in blockers])
-    if normalized_status in LIFECYCLE_HARD_STOP_STATUSES and not normalized_blockers:
+    if (
+        normalized_status in LIFECYCLE_HARD_STOP_STATUSES
+        or specification.control_state is LifecycleControlState.HARD_STOPPED
+    ) and not normalized_blockers:
         normalized_blockers = [normalized_status]
     control_state = specification.control_state
     if owner_action_required:

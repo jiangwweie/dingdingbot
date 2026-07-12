@@ -56,6 +56,9 @@ the same decision:
 | `runner_mutation_command.py` | Writes status, event, and recovery action directly |
 | `ticket_bound_fill_projector.py` | Writes final-exit transition directly |
 | `ticket_bound_lifecycle_finalizer.py` | Writes settlement/review transitions directly |
+| `post_submit_reconciliation_tick.py` | Writes protection/entry mismatch transitions directly |
+| `post_submit_closure.py` | Writes terminal closure transition directly |
+| `orphan_protection_cleanup_command.py` | Writes cleanup failure/success transitions directly |
 | Tokyo ops health | Lists attention statuses without one Owner product interpretation |
 
 The database status remains current authority in P1-TFC. The defect is that its
@@ -155,6 +158,9 @@ The following direct decision duplication is removed:
 - Runner pending/failure event and next-action lookup;
 - Fill projector final-exit decision;
 - Finalizer reconciliation/settlement/review decision;
+- first and scheduled reconciliation-tick mismatch decisions;
+- post-submit terminal closure decision;
+- orphan-protection cleanup failure/success decisions;
 - Ops health Owner-facing interpretation of attention rows.
 
 ## Replay, Rehearsal, And Live Boundary
@@ -208,8 +214,9 @@ exchange, or become lifecycle authority.
 1. Every migration-114 lifecycle status has an explicit typed projection.
 2. Unknown status and terminal regression fail closed.
 3. Existing caller-visible status/event/next-action behavior remains equivalent.
-4. Protection, recovery, Runner, Fill, Finalizer, and Ops callers consume the
-   common reducer.
+4. Protection, recovery, Runner, Fill, Finalizer, reconciliation-tick,
+   post-submit closure, orphan cleanup, and Ops callers consume the common
+   reducer.
 5. Two golden paths, the existing nine-scenario failure matrix, six Event Specs,
    and all 22 active scopes remain covered.
 6. Full tests, current-doc validation, output scope validation, and production
