@@ -204,7 +204,7 @@ This section is updated only from fresh command evidence.
 | **RCI-E1..E4** | passed | Claim crash, accepted-before-result crash, two-worker race, and ambiguous timeout produced no duplicate external order |
 | **RCI-L1..L3** | passed | Partial-fill protection, duplicate/contradictory fill handling, and restart-idempotent runner generation passed |
 | **RCI-P1..P2** | passed | Newer success clears current blocker; no-signal projection preserves unresolved engineering failure |
-| **Regression** | passed | P0-RCI `13 passed`; focused regression `104 passed`; full suite `3028 passed, 1 skipped` |
+| **Regression** | passed | P0-RCI `13 passed`; focused lifecycle/deploy additions passed; full suite `3030 passed, 1 skipped` |
 | **Runtime file-I/O audit** | passed | `suspicious_runtime_file_authority=0`, `frequent_report_write=0`, output scope valid |
 | **Deployment** | accepted | Official exact-head Tokyo flow and read-only no-active acceptance completed without exchange effect |
 | **R1B natural live calibration** | pending natural event | Cannot be replaced by fake exchange evidence |
@@ -216,5 +216,7 @@ This section is updated only from fresh command evidence.
 | **coverage_gap** | SQLite and one-process fixtures did not certify PostgreSQL locks, process death, or the exchange-accept/result-commit window | Retained all 12 bounded PostgreSQL/process scenarios as the new certification boundary |
 | **implementation_defect** | A filled exit order skipped every repeated snapshot, so contradictory quantity or price truth was silently ignored | Preserve duplicate idempotency, but hard-stop contradictory truth with immutable lifecycle evidence |
 | **implementation_defect** | Candidate projection filtered successful outcomes before selecting the latest lane outcome, so an older blocker could survive a newer success | Select the latest typed outcome per lane first, then project it only when that latest outcome still has blocking authority |
-| **architecture_gap** | None demonstrated | Existing Ticket lifecycle and PG process-outcome authority expressed both repairs without schema or state-model expansion |
+| **implementation_defect** | Lifecycle maintenance requested a gateway for every pending exchange command even though its worker owns only recovery, runner, and orphan-cleanup sources | Bind the gateway precondition to the same command-source tuple consumed by the lifecycle worker; historical `protected_submit` commands no longer cause a restart loop |
+| **implementation_defect** | Deploy preflight did not verify the non-secret account/exchange identity required by the lifecycle gateway contract | Fail before remote mutation unless the runtime order-capable overlay contains a nonblank account identity and canonical `binance_usdm` exchange identity |
+| **architecture_gap** | None demonstrated | Existing lifecycle, deploy, command-source, and PG process-outcome authority expressed all repairs without schema or state-model expansion |
 | **live_only_unknown** | Real venue latency, fills, fees, funding, slippage, and protection acceptance | Remains **R1B** and may close only from a different-identity natural live event |

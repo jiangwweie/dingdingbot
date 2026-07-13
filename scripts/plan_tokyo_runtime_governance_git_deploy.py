@@ -409,6 +409,16 @@ def _plan_phases(
         'test -n "$REMOTE_HEAD"; '
         f'test "$REMOTE_HEAD" = {q(target_commit)}'
     )
+    runtime_order_capable_env_path = (
+        f"{deploy_root.rstrip('/')}/env/runtime-order-capable.env"
+    )
+    runtime_gateway_identity_preflight_command = (
+        "set -eu; "
+        f"test -f {q(runtime_order_capable_env_path)}; "
+        f"set -a; . {q(runtime_order_capable_env_path)}; set +a; "
+        'test -n "${BRC_RUNTIME_EXCHANGE_ACCOUNT_ID:-}"; '
+        'test "${BRC_RUNTIME_EXCHANGE_ID:-}" = binance_usdm'
+    )
     remote_export_command = (
         f"set -eu; mkdir -p {q(source_root)}; "
         f"if [ ! -d {q(source_repo_path)}/.git ]; then "
@@ -501,12 +511,14 @@ def _plan_phases(
                 f"--expected-migration-count {expected_remote_migration_count} "
                 f"--expected-latest-migration {q(expected_remote_latest_migration)}",
                 _ssh(host, remote_ref_probe_command),
+                _ssh(host, runtime_gateway_identity_preflight_command),
             ],
             "stop_if": [
                 "remote current head differs from expected baseline",
                 "remote migration state differs from expected baseline",
                 "Tokyo cannot reach the GitHub branch head",
                 "Tokyo branch head differs from the target commit",
+                "runtime gateway account or exchange identity is missing",
                 "health live_ready is true",
             ],
         },

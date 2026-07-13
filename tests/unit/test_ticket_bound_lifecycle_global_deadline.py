@@ -3,8 +3,16 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from sqlalchemy import text
 
 from scripts import run_ticket_bound_lifecycle_maintenance_once as lifecycle_cli
+from tests.unit.test_ticket_bound_protected_submit_attempt import (
+    _create_ready_protected_submit,
+    _prepare_real_submit,
+)
+from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
+    pg_control_connection,
+)
 
 
 def test_cli_global_deadline_defaults_below_systemd_timeout():
@@ -37,3 +45,28 @@ async def test_awaitable_is_cancelled_when_global_deadline_expires(monkeypatch):
             )
     finally:
         coroutine.close()
+
+
+def test_gateway_probe_owns_only_lifecycle_mutation_command_sources(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+
+    assert (
+        lifecycle_cli._prepared_or_unknown_command_exists(pg_control_connection)
+        is False
+    )
+
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET command_source = 'protection_recovery' "
+            "WHERE order_role = 'SL'"
+        )
+    )
+
+    assert (
+        lifecycle_cli._prepared_or_unknown_command_exists(pg_control_connection)
+        is True
+    )

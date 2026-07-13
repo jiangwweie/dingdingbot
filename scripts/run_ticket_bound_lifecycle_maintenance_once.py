@@ -49,6 +49,13 @@ from src.infrastructure.sync_pg_dsn import (  # noqa: E402
 )
 
 
+LIFECYCLE_MUTATION_COMMAND_SOURCES = (
+    "protection_recovery",
+    "runner_mutation",
+    "orphan_cleanup",
+)
+
+
 async def _amain(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     database_url = normalize_sync_postgres_dsn(args.database_url or "")
@@ -143,11 +150,7 @@ async def _amain(argv: list[str] | None = None) -> int:
                 gateway=gateway,
                 worker_id=f"ticket-lifecycle:{os.getpid()}",
                 lease_ms=args.command_lease_ms,
-                command_sources=(
-                    "protection_recovery",
-                    "runner_mutation",
-                    "orphan_cleanup",
-                ),
+                command_sources=LIFECYCLE_MUTATION_COMMAND_SOURCES,
                 dispatch_timeout_seconds=dispatch_timeout,
             )
             _remaining_seconds(deadline_at, "durable_exchange_command_result")
@@ -298,6 +301,7 @@ def _prepared_or_unknown_command_exists(conn: sa.engine.Connection) -> bool:
     return conn.execute(
         sa.select(table.c.exchange_command_id)
         .where(
+            table.c.command_source.in_(LIFECYCLE_MUTATION_COMMAND_SOURCES),
             table.c.command_state.in_(
                 ("prepared", "dispatching", "outcome_unknown")
             )
