@@ -135,10 +135,11 @@ def test_signal_watcher_timer_does_not_persistent_catch_up():
         REPO_ROOT / "deploy" / "systemd" / "brc-runtime-signal-watcher.timer"
     ).read_text(encoding="utf-8")
 
-    assert "OnActiveSec=5min" in timer_text
+    assert "OnActiveSec=90s" in timer_text
     assert "OnBootSec=" not in timer_text
-    assert "OnUnitActiveSec=10min" in timer_text
+    assert "OnUnitActiveSec=3min" in timer_text
     assert "OnUnitActiveSec=60s" not in timer_text
+    assert "AccuracySec=15s" in timer_text
     assert "Persistent=false" in timer_text
     assert "Persistent=true" not in timer_text
 

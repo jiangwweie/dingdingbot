@@ -79,6 +79,10 @@ RUNTIME_SIGNAL_WATCHER_PRODUCT_STATE_DROPIN_REPO_PATH = (
 RUNTIME_SIGNAL_WATCHER_ACTION_TIME_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-runtime-signal-watcher.service.d/85-action-time-refresh-if-needed.conf"
 )
+BACKEND_RUNTIME_IDENTITY_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-owner-console-backend.service.d/"
+    "30-runtime-order-capable-identity.conf"
+)
 
 
 class GitDeployPlanError(RuntimeError):
@@ -452,10 +456,27 @@ def _plan_phases(
         service_name=service_name,
         certification_ref=f"deploy-quiesce:{target_commit}",
     )
+    backend_identity_install_command = (
+        backend_runtime_identity_dropin_install_command(
+            remote_release_path=remote_release_path,
+            deploy_root=deploy_root,
+            service_name=service_name,
+        )
+    )
+    backend_identity_process_check = (
+        f"MAIN_PID=$(systemctl show --property MainPID --value {q(service_name)}); "
+        'test "${MAIN_PID:-0}" -gt 0; '
+        'tr "\\000" "\\n" < "/proc/$MAIN_PID/environ" | '
+        "cut -d= -f1 | grep -Fx BRC_RUNTIME_EXCHANGE_ACCOUNT_ID >/dev/null; "
+        'tr "\\000" "\\n" < "/proc/$MAIN_PID/environ" | '
+        "cut -d= -f1 | grep -Fx BRC_RUNTIME_EXCHANGE_ID >/dev/null"
+    )
     switch_start_and_smoke_command = (
         f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}; "
+        f"{backend_identity_install_command}; "
         f"sudo -n systemctl start {q(service_name)}; "
         f"sudo -n systemctl is-active {q(service_name)}; "
+        f"{backend_identity_process_check}; "
         f"{health_wait_command}; "
         f"{runtime_signal_watcher_dispatcher_dropin_install_command(remote_release_path=remote_release_path, deploy_root=deploy_root)}; "
         f"test -f {q(release_manifest)}; "
@@ -887,6 +908,39 @@ def runtime_signal_watcher_dispatcher_dropin_install_command(
         f"sudo -n systemctl is-enabled {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
         f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
         f"sudo -n systemctl is-active {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}"
+    )
+
+
+def backend_runtime_identity_dropin_install_command(
+    *,
+    remote_release_path: str,
+    deploy_root: str = DEFAULT_DEPLOY_ROOT,
+    service_name: str = DEFAULT_SERVICE_NAME,
+) -> str:
+    """Install the server-owned runtime identity source into the backend unit."""
+
+    q = shlex.quote
+    release_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{BACKEND_RUNTIME_IDENTITY_DROPIN_REPO_PATH}"
+    )
+    target_dropin_dir = f"/etc/systemd/system/{service_name}.d"
+    target_dropin_path = (
+        f"{target_dropin_dir}/30-runtime-order-capable-identity.conf"
+    )
+    runtime_identity_env_path = (
+        f"{deploy_root.rstrip('/')}/env/runtime-order-capable.env"
+    )
+    return (
+        "set -eu; "
+        f"test -f {q(release_dropin_path)}; "
+        f"test -f {q(runtime_identity_env_path)}; "
+        f"sudo -n mkdir -p {q(target_dropin_dir)}; "
+        f"sudo -n cp {q(release_dropin_path)} {q(target_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(target_dropin_path)}; "
+        "sudo -n systemctl daemon-reload; "
+        f"systemctl cat {q(service_name)} | "
+        f"grep -F {q('EnvironmentFile=-' + runtime_identity_env_path)} >/dev/null"
     )
 
 

@@ -43,7 +43,46 @@ def process_outcome_has_current_blocking_authority(
     lane_key = _lane_key_from_scope(str(outcome.get("scope_key") or ""))
     if lane_key is None:
         return False
+    if not _is_latest_process_lane_outcome(control_state, outcome):
+        return False
 
+    return True
+
+
+def _is_latest_process_lane_outcome(
+    control_state: Mapping[str, Any],
+    outcome: Mapping[str, Any],
+) -> bool:
+    """Let newer same-process lane truth supersede historical failures.
+
+    Runtime outcome identity evolved from legacy process+scope rows to typed
+    invocation rows.  Their IDs intentionally differ, so current authority
+    must be selected by process, lane scope, and update order rather than by
+    row identity alone.
+    """
+
+    process_name = str(outcome.get("process_name") or "")
+    scope_key = str(outcome.get("scope_key") or "")
+    outcome_order = (
+        int(outcome.get("updated_at_ms") or 0),
+        str(outcome.get("process_outcome_id") or ""),
+    )
+    rows = control_state.get("runtime_process_outcomes")
+    if not isinstance(rows, list):
+        return True
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("process_name") or "") != process_name:
+            continue
+        if str(row.get("scope_key") or "") != scope_key:
+            continue
+        row_order = (
+            int(row.get("updated_at_ms") or 0),
+            str(row.get("process_outcome_id") or ""),
+        )
+        if row_order > outcome_order:
+            return False
     return True
 
 

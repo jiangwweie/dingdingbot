@@ -360,3 +360,22 @@ def test_new_signal_identity_does_not_erase_old_same_lane_outcome_before_rerun()
         state,
         _outcome(source_watermark="signal:SOR-001:ETHUSDT:long:old"),
     ) is True
+
+
+def test_newer_success_for_same_process_and_lane_supersedes_old_failure():
+    old_failure = _outcome(
+        process_outcome_id="process_outcome:old-failure",
+        updated_at_ms=NOW_MS - 100,
+    )
+    newer_success = _outcome(
+        process_outcome_id="process_outcome:new-success",
+        process_state="succeeded",
+        first_blocker=None,
+        updated_at_ms=NOW_MS,
+    )
+    state = _control_state(runtime_process_outcomes=[old_failure, newer_success])
+
+    assert process_outcome_has_current_blocking_authority(
+        state,
+        old_failure,
+    ) is False

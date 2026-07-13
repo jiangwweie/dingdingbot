@@ -1,12 +1,42 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from scripts.plan_tokyo_runtime_governance_git_deploy import (
     _plan_phases,
     action_time_capability_certification_command,
+    backend_runtime_identity_dropin_install_command,
     ticket_lifecycle_pre_switch_readiness_command,
     ticket_lifecycle_phase_two_enable_command,
     ticket_lifecycle_quiesce_and_migrate_command,
 )
+
+
+def test_backend_runtime_identity_dropin_is_repository_owned():
+    dropin = (
+        Path(__file__).resolve().parents[2]
+        / "deploy/systemd/brc-owner-console-backend.service.d/30-runtime-order-capable-identity.conf"
+    )
+
+    text = dropin.read_text(encoding="utf-8")
+
+    assert "EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env" in text
+    assert "BRC_RUNTIME_EXCHANGE_ACCOUNT_ID=" not in text
+    assert "BRC_RUNTIME_EXCHANGE_ID=" not in text
+
+
+def test_backend_identity_dropin_install_verifies_effective_process_environment():
+    command = backend_runtime_identity_dropin_install_command(
+        remote_release_path="/home/ubuntu/brc-deploy/releases/release-new",
+        deploy_root="/home/ubuntu/brc-deploy",
+        service_name="brc-owner-console-backend.service",
+    )
+
+    assert "30-runtime-order-capable-identity.conf" in command
+    assert "systemctl daemon-reload" in command
+    assert "runtime-order-capable.env" in command
+    assert "systemctl cat brc-owner-console-backend.service" in command
+    assert "BRC_RUNTIME_EXCHANGE_ACCOUNT_ID=" not in command
 
 
 def test_full_phase_builder_propagates_release_name_into_activation_command(
@@ -94,6 +124,51 @@ def test_remote_preflight_requires_explicit_runtime_gateway_identity(tmp_path):
     assert "BRC_RUNTIME_EXCHANGE_ACCOUNT_ID" in commands
     assert "BRC_RUNTIME_EXCHANGE_ID" in commands
     assert "binance_usdm" in commands
+
+
+def test_switch_installs_backend_identity_before_backend_start(tmp_path):
+    phases = _plan_phases(
+        host="tokyo",
+        repo_root=tmp_path,
+        repo_url="https://example.invalid/repo.git",
+        git_ref="codex/test",
+        target_commit="a" * 40,
+        release_name="brc-runtime-governance-full-plan",
+        deploy_root="/home/ubuntu/brc-deploy",
+        source_root="/home/ubuntu/brc-deploy/source",
+        source_repo_path="/home/ubuntu/brc-deploy/source/dingdingbot",
+        app_current="/home/ubuntu/brc-deploy/app/current",
+        remote_release_path="/home/ubuntu/brc-deploy/releases/new",
+        remote_tmp_release_path="/home/ubuntu/brc-deploy/releases/new.tmp",
+        release_manifest="/home/ubuntu/brc-deploy/releases/new/.brc-release-manifest.json",
+        service_name="brc-owner-console-backend.service",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python="/home/ubuntu/brc-deploy/venvs/runtime/bin/python",
+        api_base="http://127.0.0.1:18080",
+        previous_release_path="/home/ubuntu/brc-deploy/releases/old",
+        expected_deployed_head="b" * 40,
+        expected_remote_migration_count=116,
+        expected_remote_latest_migration="2026-07-12-116_example.py",
+        expected_latest_migration="2026-07-12-116_example.py",
+        target_migration_count=116,
+        remote_migration_revision="116",
+        target_migration_revision="116",
+        migration_gap_revision_count=0,
+        manifest_payload={"scope": "test"},
+    )
+
+    command = next(
+        item for item in phases if item["phase"] == "4_switch_start_and_smoke"
+    )["commands"][0]
+
+    assert command.index("30-runtime-order-capable-identity.conf") < command.index(
+        "systemctl start brc-owner-console-backend.service"
+    )
+    assert command.index("systemctl start brc-owner-console-backend.service") < (
+        command.index("BRC_RUNTIME_EXCHANGE_ACCOUNT_ID")
+    )
+    assert "BRC_RUNTIME_EXCHANGE_ID" in command
+    assert "cut -d= -f1" in command
 
 
 def test_postdeploy_action_time_capability_runs_matrix_before_pg_certification_and_projection_publish():

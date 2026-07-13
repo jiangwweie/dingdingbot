@@ -408,6 +408,47 @@ def test_fresh_matching_event_scoped_retryable_failure_still_notifies_monitor():
     assert decision["blocker_class"] == "runtime_process_failure"
 
 
+def test_newer_same_lane_success_prevents_historical_failure_notification():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "runtime_process_outcomes": [
+            {
+                "process_outcome_id": "process_outcome:old",
+                "process_name": "action_time_ticket_sequence",
+                "scope_key": "lane:MI-001:AVAXUSDT:long",
+                "process_state": "business_blocked",
+                "business_state": "temporarily_unavailable",
+                "first_blocker": "readiness_missing",
+                "source_watermark": "signal:old",
+                "updated_at_ms": PG_TEST_NOW_MS - 2_000,
+            },
+            {
+                "process_outcome_id": "process_outcome:new",
+                "process_name": "action_time_ticket_sequence",
+                "scope_key": "lane:MI-001:AVAXUSDT:long",
+                "process_state": "succeeded",
+                "business_state": "completed",
+                "first_blocker": None,
+                "source_watermark": "runtime:new",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            },
+        ],
+        "live_signal_events": [],
+        "promotion_candidates": [],
+        "action_time_lane_inputs": [],
+        "action_time_tickets": [],
+        "runtime_safety_state": [],
+        "ticket_bound_order_lifecycle_runs": [],
+        "ticket_bound_exchange_commands": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    event = module._runtime_process_failure_event(control_state)
+
+    assert event == {}
+
+
 def test_submitted_but_unprotected_lifecycle_notifies_owner():
     module = _load_module()
     control_state = {
