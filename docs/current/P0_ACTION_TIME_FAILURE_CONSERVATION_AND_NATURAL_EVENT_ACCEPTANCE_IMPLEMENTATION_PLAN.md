@@ -107,4 +107,4 @@ last_verified: 2026-07-13
 - [x] Run current-document and output-scope validators.
 - [x] Run compile/lint equivalents available in the workspace.
 - [x] Review the diff for authority leakage and mark plan checkboxes complete.
-- [ ] Commit, integrate into `dev`, push, deploy through the official Tokyo path, and run read-only postdeploy acceptance.
+- [x] Commit, integrate into `dev`, push, deploy through the official Tokyo path, and run read-only postdeploy acceptance.

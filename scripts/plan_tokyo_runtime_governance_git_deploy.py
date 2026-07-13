@@ -913,9 +913,13 @@ def action_time_capability_certification_command(
         "from_production_shape"
     )
     certification_ref = f"tokyo-release:{runtime_head}:22-scope-disabled-smoke"
+    watcher_timer = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)
     return (
-        "set -eu; "
+        "set -eu; SUCCESS=0; "
         f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        "restore_watcher_timer() { "
+        f"sudo -n systemctl start {watcher_timer} >/dev/null 2>&1 || true; "
+        "}; trap restore_watcher_timer EXIT; "
         f"PYTHONPATH=$PWD timeout 300 {q(venv_python)} -m pytest -q {q(test_node)}; "
         f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
         "scripts/record_runtime_release_activation.py "
@@ -928,7 +932,10 @@ def action_time_capability_certification_command(
         f"--certification-ref {q(certification_ref)} "
         "--expected-lane-count 22; "
         f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
-        "scripts/publish_runtime_control_current_projections.py --json"
+        "scripts/publish_runtime_control_current_projections.py --json; "
+        f"sudo -n systemctl start {watcher_timer}; "
+        f"systemctl is-active {watcher_timer}; "
+        "SUCCESS=1; trap - EXIT"
     )
 
 
@@ -1088,10 +1095,8 @@ def ticket_lifecycle_phase_two_enable_command(
         f"sudo -n systemctl start {lifecycle_service}; "
         f"test $(systemctl show {lifecycle_service} --property=Result --value) = success; "
         "SUCCESS=1; trap - EXIT; "
-        f"sudo -n systemctl start {watcher_timer}; "
         f"sudo -n systemctl start {monitor_timer}; "
         f"sudo -n systemctl start {lifecycle_timer}; "
-        f"systemctl is-active {watcher_timer}; "
         f"systemctl is-active {monitor_timer}; "
         f"systemctl is-active {lifecycle_timer}"
     )

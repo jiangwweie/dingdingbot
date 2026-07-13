@@ -30,8 +30,8 @@ repo MD/JSON/output/report files.
 
 | Fact | Current evidence |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs `97de14c2fb3c52b38bd04277e15ea0d7ab8487ec`, PG migration `117`; Action-Time bounded reads are deployed, but no post-fix natural real Ticket has completed live exchange calibration |
-| **Current engineering branch** | `codex/p0-action-time-failure-conservation` contains outer refresh failure conservation and six-event fixed-clock pre-exchange acceptance |
+| **Live Candidate Baseline** | Tokyo runs the accepted P0 failure-conservation release at PG migration `117`; no post-fix natural real Ticket has completed live exchange calibration |
+| **Current engineering branch** | Integrated `dev`; exact Tokyo head is read from `/home/ubuntu/brc-deploy/app/current` release manifest and PG release activation |
 | **PG current state is the runtime source** | `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`, `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` |
 | **Repo/output/report files are not runtime authority** | `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` |
 | **Five StrategyGroups are active WIP** | `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`, PG candidate scope seed |
@@ -59,7 +59,7 @@ repo MD/JSON/output/report files.
 
 | Program | Priority | Goal | Primary design docs | Main acceptance |
 | --- | --- | --- | --- | --- |
-| **P0-FC Action-Time Failure Conservation And Natural-Event Acceptance** | active P0 | Persist outer refresh failures with exact lane/source/stage/timing and certify six historical events to the durable pre-exchange boundary | `P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_DESIGN.md`, `P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_IMPLEMENTATION_PLAN.md` | Five historical Tickets reach prepared durable commands, the sixth signal passes current dynamic sizing, no exchange write occurs, and deployment preserves future natural-event failures in PG |
+| **P0-FC Action-Time Failure Conservation And Natural-Event Acceptance** | deployed P0 baseline | Persist outer refresh failures with exact lane/source/stage/timing and certify six historical events to the durable pre-exchange boundary | `P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_DESIGN.md`, `P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_IMPLEMENTATION_PLAN.md` | Five historical Tickets reach prepared durable commands, the sixth signal passes current dynamic sizing, no exchange write occurs, and deployment preserves future natural-event failures in PG |
 | **P1-OFC Strategy Opportunity And Live Feedback Calibration** | deployed engineering baseline | Measure version-pinned opportunity frequency, near misses, replay/live parity, and ticket-bound real economics without changing strategy or submit authority | `P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN.md`, `P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN.md` | Closed at deployed `97efab6f` / migration `116`; natural Live counterpart and venue economics remain event-driven calibration |
 | **P1-TFC Trade Feedback Core Consolidation** | deployed baseline | Unify lifecycle phase, protection, reconciliation, control, recovery, Replay/Rehearsal parity, and Owner feedback | `P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_DESIGN.md`, `P1_TRADE_FEEDBACK_CORE_CONSOLIDATION_IMPLEMENTATION_PLAN.md` | Closed at deployed `2df39c1c`; real venue calibration remains the natural-signal interrupt |
 | **P0-ONF Owner Notification And Runtime Forensics** | deployed baseline | Translate material PG transitions into static Owner cards and provide one bounded read-only signal-chain query | `P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_IMPLEMENTATION_PLAN.md` | Closed at deployed `9e26de77` / migration `117`; 9 card kinds, typed delivery/recovery, PG forensics, and Skill integration accepted |
@@ -86,7 +86,7 @@ deployed component baselines. They must not run as separate medium-scale WIP.
 
 | Order | Program | Reason |
 | --- | --- | --- |
-| 1 | **P0-FC Action-Time Failure Conservation And Natural-Event Acceptance** | Close the last outer-orchestrator truth gap, deploy it, then stop execution-core expansion pending natural feedback |
+| 1 | **P0-FC Action-Time Failure Conservation And Natural-Event Acceptance** | Deployed and accepted; retained as the outer-orchestrator truth and deploy-order baseline |
 | P0 interrupt | **Natural Live Lifecycle Calibration** | A different-identity fresh signal or active safety incident preempts P1-OFC at the next committed transaction boundary |
 | 2 | **Owner Supervision Product Integration** | Next non-market-dependent mainline; product surfaces should consume the now-stable PG capability and blocker truth |
 | 3 | **P1 Capital Allocation V1** | Allocation requires reliable real ticket outcomes, not rehearsal-only closure |
@@ -105,11 +105,12 @@ resumes the interrupted checklist item.
 
 | Order | Next work | Priority | Acceptance |
 | --- | --- | --- | --- |
-| 1 | **FC-1 Outer refresh failure conservation** | P0 | Triggered required-step failures persist exact lane, source identity, first blocker, and timing; later same-lane success clears current failure |
-| 2 | **FC-2 Six historical event acceptance** | P0 | Five Ticket cases and one sizing-control signal reach durable command preparation under fixed historical clocks without exchange write |
-| 3 | **FC-3 Regression, audit, integration, deploy** | P0 | Tests and production file-I/O audits pass; `dev` and Tokyo run the same commit; no migration or authority expansion occurs |
-| 4 | **FC-4 Natural-event acceptance** | P0 interrupt | The next distinct live signal automatically persists its exact Ticket-chain outcome; an engineering failure cannot become market wait |
-| 5 | **Deliberate execution-core stop** | P0 exit | After FC-3, no further execution-core expansion starts without natural outcome evidence or a concrete safety incident |
+| 1 | **FC-1 Outer refresh failure conservation** | P0 complete | Triggered required-step failures persist exact lane, source identity, first blocker, and timing; later same-lane success clears current failure |
+| 2 | **FC-2 Six historical event acceptance** | P0 complete | Five Ticket cases and one sizing-control signal reach durable command preparation under fixed historical clocks without exchange write |
+| 3 | **FC-3 Regression, audit, integration, deploy** | P0 complete | Tests and production file-I/O audits pass; `dev` and Tokyo release are integrated with no migration or authority expansion |
+| 4 | **FC-4 Deploy certification ordering** | P0 complete | Watcher timer remains stopped until exact-head Action-Time capability truth and current projections are published |
+| 5 | **FC-5 Natural-event acceptance** | P0 interrupt | The next distinct live signal automatically persists its exact Ticket-chain outcome; an engineering failure cannot become market wait |
+| 6 | **Deliberate execution-core stop** | P0 exit | No further execution-core expansion starts without natural outcome evidence or a concrete safety incident |
 
 ## P0-RT Real Signal -> Ticket Closure
 

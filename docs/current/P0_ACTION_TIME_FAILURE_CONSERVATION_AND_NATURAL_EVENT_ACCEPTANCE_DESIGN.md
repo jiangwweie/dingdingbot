@@ -114,6 +114,29 @@ Ticket expiry.
 | Historical acceptance | explicit local test/manual run | isolated DB rows only | six bounded cases; no production PG mutation |
 | Archive/output | manual only | stdout/test evidence | no recurring files |
 
+## Deployment Certification Ordering
+
+Production acceptance exposed a deploy-window race: lifecycle capability was
+enabled and the watcher timer was restarted before exact-head Action-Time
+capability truth and current projections finished publishing. A scheduled tick
+could therefore see mixed certification generations.
+
+The corrected order is:
+
+```text
+lifecycle capability enablement and no-active check
+-> watcher timer remains stopped
+-> 22-scope disabled-smoke certification
+-> runtime release activation
+-> Action-Time capability certification
+-> current projection publish
+-> watcher timer start
+```
+
+This is deployment orchestration only. Certification failure restores the
+watcher timer for observation, while missing exact-head capability truth keeps
+submit fail-closed.
+
 ## Safety And Authority Boundary
 
 This design does not:
@@ -140,6 +163,8 @@ The task is complete when:
 5. every historical case proves `exchange_write_called=false` and no gateway
    call;
 6. production no-signal cadence creates no new acceptance rows or files.
+7. deploy certification cannot expose the watcher to mixed lifecycle and
+   Action-Time capability generations.
 
 ## Chain Position
 
