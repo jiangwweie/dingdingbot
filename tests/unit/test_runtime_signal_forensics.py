@@ -232,3 +232,29 @@ def test_closed_ticket_reports_trade_result_and_notification_state() -> None:
     assert finding.notification_state == "sent"
     assert finding.net_pnl == "12.50"
     assert result.forbidden_effects["calls_exchange_write"] is False
+
+
+def test_prefixed_production_signal_id_matches_raw_notification_correlation() -> None:
+    signal = _signal(signal_event_id="signal:production-id")
+    result = reduce_runtime_signal_forensics(
+        _query(),
+        {
+            "live_signal_events": [signal],
+            "promotion_candidates": [
+                {
+                    "signal_event_id": "signal:production-id",
+                    "promotion_candidate_id": "p-1",
+                }
+            ],
+            "action_time_lane_inputs": [],
+            "server_monitor_notifications": [
+                {
+                    "correlation_id": "signal:production-id",
+                    "notification_state": "sent",
+                    "updated_at_ms": 3_000,
+                }
+            ],
+        },
+    )
+
+    assert result.findings[0].notification_state == "sent"

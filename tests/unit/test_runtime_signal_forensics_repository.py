@@ -40,26 +40,32 @@ def test_repository_is_window_bounded_filter_aware_limited_and_read_only() -> No
         sa.Column("status", sa.String),
         sa.Column("exchange_write_called", sa.Boolean),
     )
+    notifications = sa.Table(
+        "brc_server_monitor_notifications",
+        metadata,
+        sa.Column("notification_id", sa.String, primary_key=True),
+        sa.Column("correlation_id", sa.String),
+    )
     metadata.create_all(engine)
     with engine.begin() as conn:
         conn.execute(
             signals.insert(),
             [
                 {"signal_event_id": "before", "strategy_group_id": "SOR", "symbol": "BTCUSDT", "side": "long", "observed_at_ms": 999},
-                {"signal_event_id": "match", "strategy_group_id": "SOR", "symbol": "BTCUSDT", "side": "long", "observed_at_ms": 2_000},
+                {"signal_event_id": "signal:match", "strategy_group_id": "SOR", "symbol": "BTCUSDT", "side": "long", "observed_at_ms": 2_000},
                 {"signal_event_id": "wrong", "strategy_group_id": "CPM", "symbol": "ETHUSDT", "side": "long", "observed_at_ms": 2_100},
             ],
         )
         conn.execute(
             promotions.insert(),
             [
-                {"promotion_candidate_id": "p-match", "signal_event_id": "match"},
+                {"promotion_candidate_id": "p-match", "signal_event_id": "signal:match"},
                 {"promotion_candidate_id": "p-wrong", "signal_event_id": "wrong"},
             ],
         )
         conn.execute(
             tickets.insert(),
-            [{"ticket_id": "ticket-match", "signal_event_id": "match"}],
+            [{"ticket_id": "ticket-match", "signal_event_id": "signal:match"}],
         )
         conn.execute(
             attempts.insert(),
@@ -69,6 +75,15 @@ def test_repository_is_window_bounded_filter_aware_limited_and_read_only() -> No
                     "ticket_id": "ticket-match",
                     "status": "submit_failed",
                     "exchange_write_called": False,
+                }
+            ],
+        )
+        conn.execute(
+            notifications.insert(),
+            [
+                {
+                    "notification_id": "notification-match",
+                    "correlation_id": "signal:match",
                 }
             ],
         )
@@ -91,12 +106,16 @@ def test_repository_is_window_bounded_filter_aware_limited_and_read_only() -> No
         finally:
             sa.event.remove(engine, "before_cursor_execute", capture)
 
-        assert [row["signal_event_id"] for row in rows["live_signal_events"]] == ["match"]
+        assert [row["signal_event_id"] for row in rows["live_signal_events"]] == ["signal:match"]
         assert [row["promotion_candidate_id"] for row in rows["promotion_candidates"]] == ["p-match"]
         assert [
             row["protected_submit_attempt_id"]
             for row in rows["ticket_bound_protected_submit_attempts"]
         ] == ["attempt-match"]
+        assert [
+            row["notification_id"]
+            for row in rows["server_monitor_notifications"]
+        ] == ["notification-match"]
         assert all(len(value) <= 1 for value in rows.values())
         assert not any(
             statement.startswith(("INSERT", "UPDATE", "DELETE", "ALTER", "DROP"))

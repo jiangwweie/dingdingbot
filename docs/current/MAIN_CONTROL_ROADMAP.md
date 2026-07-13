@@ -108,7 +108,7 @@ then resumes this order.
 | 3 | **Deploy certification ordering** | P0 complete | Watcher starts only after exact-head capability and current projection truth publish; mixed-generation tick race is removed |
 | 4 | **Signal identity and notification truth** | P0 complete | Only named execution-eligible PG signals can produce opportunity language; materialization failures persist by lane and the server monitor owns typed deduplicated Owner notification |
 | 5 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
-| 6 | **Runtime causal integrity certification** | P0 follow-up deploy | Twelve bounded real-PostgreSQL/process scenarios pass; five demonstrated implementation defects are repaired without authority expansion; migration 120 conserves historical pre-dispatch failure truth |
+| 6 | **Runtime causal integrity certification** | P0 complete | Twelve bounded real-PostgreSQL/process scenarios pass; six demonstrated implementation defects are repaired without authority expansion; migration 120 conserves historical pre-dispatch failure truth and notification correlation preserves production identity |
 | 7 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
 
 ## Why This Was Not Detected Before Production Signals

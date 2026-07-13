@@ -237,3 +237,6 @@ project never-dispatched child commands to `reconciled_absent`; migration
 The command claimant independently rechecks current Attempt and Ticket
 authority. Forensics reads the Attempt before interpreting command presence, so
 a durable prepared row can no longer be mislabeled as an order awaiting fill.
+Notification lookup applies the same rule: a production identity such as
+`signal:<hash>` is already canonical and must not become
+`signal:signal:<hash>` when querying PG correlation rows.

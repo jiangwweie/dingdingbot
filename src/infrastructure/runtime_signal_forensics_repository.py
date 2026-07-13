@@ -52,7 +52,10 @@ class PgRuntimeSignalForensicsRepository:
             query.limit,
         )
         ticket_ids = _texts(row.get("ticket_id") for row in tickets)
-        correlations = {*(f"signal:{item}" for item in signal_ids), *(f"ticket:{item}" for item in ticket_ids)}
+        correlations = {
+            *(_correlation_id("signal", item) for item in signal_ids),
+            *(_correlation_id("ticket", item) for item in ticket_ids),
+        }
         return {
             "live_signal_events": signals,
             "promotion_candidates": promotions,
@@ -177,6 +180,11 @@ class PgRuntimeSignalForensicsRepository:
 
 def _texts(values: Iterable[Any]) -> set[str]:
     return {str(value) for value in values if value is not None and str(value)}
+
+
+def _correlation_id(kind: str, identity: str) -> str:
+    prefix = f"{kind}:"
+    return identity if identity.startswith(prefix) else f"{prefix}{identity}"
 
 
 def _json_safe(value: Any) -> Any:

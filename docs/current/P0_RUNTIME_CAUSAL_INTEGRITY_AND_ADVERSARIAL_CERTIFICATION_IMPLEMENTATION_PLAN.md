@@ -206,7 +206,7 @@ This section is updated only from fresh command evidence.
 | **RCI-P1..P2** | passed | Newer success clears current blocker; no-signal projection preserves unresolved engineering failure |
 | **Regression** | passed | P0-RCI `13 passed`; final full suite `3033 passed, 1 skipped` in 624.70 seconds; three warnings are the pre-existing SQLAlchemy Inspector deprecation |
 | **Runtime file-I/O audit** | passed | `suspicious_runtime_file_authority=0`, `frequent_report_write=0`, output scope valid |
-| **Deployment** | repair deploy pending | Baseline exact-head deploy passed; migration 120 and natural-event truth fix require one bounded follow-up deploy |
+| **Deployment** | accepted | Migration 120 and natural-event command truth are deployed; the final read-only notification-correlation correction follows the same bounded exact-head path |
 | **Natural-event acceptance** | pre-dispatch failure proven | MI-001 / AVAXUSDT / long reached Ticket, FinalGate, Operation Layer and protected-submit attempt; gateway identity blocked before exchange write |
 | **R1B natural live calibration** | pending venue effect | Natural acceptance exposed a real engineering defect but produced no exchange order, fill, protection or lifecycle calibration |
 
@@ -220,5 +220,6 @@ This section is updated only from fresh command evidence.
 | **implementation_defect** | Lifecycle maintenance requested a gateway for every pending exchange command even though its worker owns only recovery, runner, and orphan-cleanup sources | Bind the gateway precondition to the same command-source tuple consumed by the lifecycle worker; historical `protected_submit` commands no longer cause a restart loop |
 | **implementation_defect** | Deploy preflight did not verify the non-secret account/exchange identity required by the lifecycle gateway contract | Fail before remote mutation unless the runtime order-capable overlay contains a nonblank account identity and canonical `binance_usdm` exchange identity |
 | **implementation_defect** | A terminal protected-submit attempt with `exchange_write_called=false` left child commands in `prepared`; generic command claiming and Owner forensics treated command presence as continuing exchange work | Project new never-dispatched commands to `reconciled_absent`, repair the historical shape with migration 120, recheck Attempt/Ticket authority at claim time, and explain the exact pre-dispatch blocker from PG Attempt truth |
+| **implementation_defect** | Signal and Ticket IDs already include their type prefix, but the forensics repository added the prefix again when querying notification correlations | Normalize already-prefixed production identities before the PG notification query; preserve compatibility with unprefixed test identities |
 | **architecture_gap** | None demonstrated | Existing lifecycle, deploy, command-source, and PG process-outcome authority expressed all repairs without schema or state-model expansion |
 | **live_only_unknown** | Real venue latency, fills, fees, funding, slippage, and protection acceptance | Remains **R1B** and may close only from a natural event that actually reaches the venue |
