@@ -548,7 +548,8 @@ def _current_pretrade_readiness_by_lane(
     }
     if suppress_persistent_action_time_outcomes:
         return readiness
-    for key, outcome in _unresolved_action_time_sequence_outcomes(control_state).items():
+    unresolved_outcomes = _unresolved_action_time_sequence_outcomes(control_state)
+    for key, outcome in unresolved_outcomes.items():
         strategy_group_id, symbol, side = key
         current = readiness.get(key, {})
         readiness[key] = {
@@ -573,33 +574,37 @@ def _current_pretrade_readiness_by_lane(
 def _unresolved_action_time_sequence_outcomes(
     control_state: dict[str, Any],
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
-    unresolved: dict[tuple[str, str, str], dict[str, Any]] = {}
+    latest_by_lane: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("runtime_process_outcomes")):
         if row.get("process_name") not in {
             "action_time_ticket_sequence",
             "action_time_refresh_sequence",
         }:
             continue
-        if row.get("process_state") not in {
-            "business_blocked",
-            "retryable_failure",
-            "hard_failure",
-        }:
-            continue
-        if not str(row.get("first_blocker") or ""):
-            continue
-        if not process_outcome_has_current_blocking_authority(control_state, row):
-            continue
         scope_parts = str(row.get("scope_key") or "").split(":")
         if len(scope_parts) != 4 or scope_parts[0] != "lane":
             continue
         key = (scope_parts[1], scope_parts[2], scope_parts[3])
-        current = unresolved.get(key)
-        if current is None or int(row.get("updated_at_ms") or 0) >= int(
-            current.get("updated_at_ms") or 0
-        ):
-            unresolved[key] = row
-    return unresolved
+        current = latest_by_lane.get(key)
+        row_order = (
+            int(row.get("updated_at_ms") or 0),
+            str(row.get("process_outcome_id") or ""),
+        )
+        current_order = (
+            (
+                int(current.get("updated_at_ms") or 0),
+                str(current.get("process_outcome_id") or ""),
+            )
+            if current is not None
+            else (-1, "")
+        )
+        if row_order >= current_order:
+            latest_by_lane[key] = row
+    return {
+        key: row
+        for key, row in latest_by_lane.items()
+        if process_outcome_has_current_blocking_authority(control_state, row)
+    }
 
 
 def _current_fact_snapshot_by_lane(

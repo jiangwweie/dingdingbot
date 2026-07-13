@@ -52,9 +52,10 @@ design documents and acceptance proof.
 | 1 | **P0 Action-Time Failure Conservation And Natural-Event Acceptance** | **deployed and accepted; natural-event production calibration remains interrupt-driven** | `docs/current/P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_DESIGN.md` |
 | 2 | **P0 Signal Identity Conservation And Owner Notification Truth** | **deployed and production-accepted; anonymous readiness is conserved as a PG lane failure and only the server monitor notifies the Owner** | `docs/current/P0_SIGNAL_IDENTITY_CONSERVATION_AND_OWNER_NOTIFICATION_TRUTH_DESIGN.md` |
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
-| 3 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
-| 4 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
-| 5 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
+| 3 | **P0 Runtime Causal Integrity And Adversarial Certification** | **completed and deployed; 12 PostgreSQL/process scenarios passed and two demonstrated defects were repaired** | `docs/current/P0_RUNTIME_CAUSAL_INTEGRITY_AND_ADVERSARIAL_CERTIFICATION_DESIGN.md` |
+| 4 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
+| 5 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
+| 6 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
 P0-RT, P0-PC, Operation Layer capability, lifecycle safety core, first tick,
 runner, recovery, Live Outcome, continuous reconciliation, and P0-LC are
@@ -71,10 +72,10 @@ validated market wait while Owner-facing product integration continues.
 | Area | Current fact |
 | --- | --- |
 | **Live Candidate Baseline** | Tokyo runs the accepted P0 failure-conservation release; 22 lanes are current and no post-fix natural eligible event has yet completed real exchange lifecycle calibration |
-| **Active delivery branch** | `dev` contains the integrated Action-Time failure-conservation and deploy-order closure; focused `codex/*` work remains provenance |
+| **Active delivery branch** | `codex/p0-runtime-causal-integrity-certification` is isolated from the dirty primary workspace and starts from deployed Action-Time invocation head `ce4b90c7` |
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` and its release manifest are the exact deployed-head authority |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
-| **PG migration** | Tokyo is at migration `117` (`2026-07-12-117_extend_owner_notifications.py`) |
+| **PG migration** | Tokyo is at migration `119` (`2026-07-13-119_action_time_invocation_consistency.py`) |
 | **P0-LC deployment acceptance** | Postdeploy verification passes; backend HTTP checks, schema count, lifecycle units, and no-active lifecycle service are accepted without exchange write |
 | **Backend / watcher / monitor / lifecycle** | Backend, watcher timer, monitor timer, and lifecycle timer are active; latest lifecycle service result is success with zero active lifecycle scopes |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
@@ -89,6 +90,7 @@ validated market wait while Owner-facing product integration continues.
 | **Dynamic execution risk** | New entry sizing uses fresh wallet/available balance, 3% planned Stop risk, 90% margin utilization, lowest sufficient leverage, and a 10x Owner ceiling |
 | **Historical Action-Time acceptance** | Five 2026-07-12 CPM Tickets and the separate ETH sizing-control signal reach protected-submit preparation plus durable ENTRY/SL/TP1 commands inside their original validity windows in isolated fixed-clock tests; all stop before exchange write |
 | **Signal identity and notification truth** | Deployed `8b6cd166` conserves anonymous readiness as a lane-scoped PG process failure, removes direct watcher Feishu, and makes the Tokyo server monitor the sole typed Owner notification path; production acceptance captured `CPM-RO-001 + SOLUSDT + short` and sent one Chinese no-order card with repeated delivery suppressed by PG dedupe |
+| **Runtime causal integrity certification** | All 12 bounded PostgreSQL/process scenarios pass; contradictory repeat fill truth now hard-stops, and a newer successful Action-Time outcome clears an older current blocker without deleting history |
 
 ## Current Next Execution Order
 
@@ -106,7 +108,8 @@ then resumes this order.
 | 3 | **Deploy certification ordering** | P0 complete | Watcher starts only after exact-head capability and current projection truth publish; mixed-generation tick race is removed |
 | 4 | **Signal identity and notification truth** | P0 complete | Only named execution-eligible PG signals can produce opportunity language; materialization failures persist by lane and the server monitor owns typed deduplicated Owner notification |
 | 5 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
-| 6 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
+| 6 | **Runtime causal integrity certification** | P0 complete | Twelve bounded real-PostgreSQL/process scenarios pass; two demonstrated implementation defects are repaired without schema or authority expansion |
+| 7 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
 
 ## Why This Was Not Detected Before Production Signals
 
@@ -202,13 +205,18 @@ trading feedback or a concrete safety incident arrives. P1-OFC, P0-F, P0-G,
 P0-H, P0-J, and P0-LC are deployed component responsibilities, not parallel
 programs.
 
-**P0 Action-Time Invocation Consistency And Failure Truth is locally complete
-and deployment pending.** It is a bounded correction to the existing execution
-core, not a new execution route: migration `119` binds one typed fresh signal,
-fresh account/action facts, promotion, lane, Ticket, watcher coverage, and
-parent process outcome to the same identity. The local branch passed `3015`
-tests with `1` skipped; Tokyo has not yet applied this migration, and no order
-or exchange command was created during this work.
+**P0 Action-Time Invocation Consistency And Failure Truth is deployed and
+read-only accepted.** Migration `119` binds one typed fresh signal, fresh
+account/action facts, promotion, lane, Ticket, watcher coverage, and parent
+process outcome to the same identity. No order or exchange command was created
+during deployment acceptance.
+
+**P0 Runtime Causal Integrity And Adversarial Certification is complete and
+deployed.** It tests the deployed invariants on disposable PostgreSQL 16
+databases and independent local processes. The 12 scenarios found and closed
+two implementation defects without adding a second execution path, production
+failpoints, schema state, or trading authority. **R1B** remains the only proof
+for real venue behavior.
 
 | Priority | Workstream | Goal | Done when |
 | --- | --- | --- | --- |
@@ -224,6 +232,7 @@ or exchange command was created during this work.
 | **P0-J** | **Continuous reconciliation tick** | keep exchange-truth reconciliation alive after the first tick | lifecycle reaches closure, exact recovery command, or hard stop without recurring report files |
 | **P0-K** | **Real Signal -> Ticket closure** | make production action-time pricing, sizing, stop-risk reservation, and Ticket creation one coherent typed chain | every eligible real-submit lane either creates one Ticket inside freshness bounds or stops at one producer-owned blocker before lane readiness |
 | **P0-L** | **Production-shaped certification** | prevent complete downstream dictionaries from hiding missing production handoffs | all six Event Specs pass raw-source-to-Ticket certification and projection consistency checks without exchange write |
+| **P0-M** | **Runtime causal integrity certification** | prove transaction, process-death, retry, concurrency, lifecycle, and projection invariants at production-shaped boundaries | 12 bounded PostgreSQL/process scenarios pass; findings are fixed or explicitly retained as live-only |
 
 ## Active Runtime Loop
 

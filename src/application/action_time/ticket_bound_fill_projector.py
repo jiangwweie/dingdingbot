@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
+import json
 from typing import Any
 
 import sqlalchemy as sa
@@ -54,7 +56,25 @@ def project_ticket_bound_exchange_fills(
     for row in rows:
         exchange_order_id = str(row.get("exchange_order_id") or "")
         fill = fill_by_exchange_id.get(exchange_order_id)
-        if not fill or str(row.get("status") or "").lower() == "filled":
+        if not fill:
+            continue
+        if str(row.get("status") or "").lower() == "filled":
+            existing_fill = _recorded_fill_for_order(
+                conn,
+                lifecycle=_lifecycle_for_ticket(conn, ticket_id),
+                role=str(row.get("role") or ""),
+                exchange_order_id=exchange_order_id,
+            )
+            if existing_fill and _fill_truth_conflicts(existing_fill, fill):
+                return _hard_stop_fill_truth_contradiction(
+                    conn,
+                    ticket_id=ticket_id,
+                    role=str(row.get("role") or ""),
+                    exchange_order_id=exchange_order_id,
+                    existing_fill=existing_fill,
+                    conflicting_fill=fill,
+                    now_ms=now_ms,
+                )
             continue
         conn.execute(
             orders.update()
@@ -113,6 +133,123 @@ def project_ticket_bound_exchange_fills(
     if lifecycle_decision is not None:
         payload["lifecycle_decision"] = lifecycle_decision.to_dict()
     return payload
+
+
+def _recorded_fill_for_order(
+    conn: sa.engine.Connection,
+    *,
+    lifecycle: dict[str, Any],
+    role: str,
+    exchange_order_id: str,
+) -> dict[str, Any]:
+    if not lifecycle:
+        return {}
+    event_type = "tp1_filled" if role == "TP1" else "final_exit_detected"
+    event_id = _stable_id(
+        "ticket_lifecycle_event",
+        str(lifecycle["lifecycle_run_id"]),
+        event_type,
+        exchange_order_id,
+    )
+    events = _table(conn, "brc_ticket_bound_lifecycle_events")
+    payload = conn.execute(
+        sa.select(events.c.event_payload).where(
+            events.c.lifecycle_event_id == event_id
+        )
+    ).scalar_one_or_none()
+    mapped = _mapping(payload)
+    return _mapping(mapped.get("fill"))
+
+
+def _fill_truth_conflicts(
+    existing_fill: dict[str, Any],
+    observed_fill: dict[str, Any],
+) -> bool:
+    for existing_key, observed_key in (
+        ("fill_qty", "qty"),
+        ("fill_price", "price"),
+    ):
+        existing = _normalized_decimal(
+            existing_fill.get(existing_key, existing_fill.get(observed_key))
+        )
+        observed = _normalized_decimal(observed_fill.get(observed_key))
+        if existing is not None and observed is not None and existing != observed:
+            return True
+    return False
+
+
+def _hard_stop_fill_truth_contradiction(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    role: str,
+    exchange_order_id: str,
+    existing_fill: dict[str, Any],
+    conflicting_fill: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    lifecycle_table = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
+    lifecycle = conn.execute(
+        sa.select(lifecycle_table).where(lifecycle_table.c.ticket_id == ticket_id)
+    ).mappings().one()
+    blocker = f"contradictory_fill_truth:{role}:{exchange_order_id}"
+    decision = reduce_lifecycle_decision(
+        current_status=str(lifecycle.get("status") or ""),
+        target_status="blocked",
+        event_type="contradictory_fill_truth",
+        blockers=[blocker],
+        next_action="reconcile_contradictory_exchange_fill_truth",
+    )
+    conn.execute(
+        lifecycle_table.update()
+        .where(lifecycle_table.c.lifecycle_run_id == lifecycle["lifecycle_run_id"])
+        .values(
+            status=decision.status,
+            first_blocker=decision.first_blocker,
+            blockers=list(decision.blockers),
+            updated_at_ms=now_ms,
+        )
+    )
+    events = _table(conn, "brc_ticket_bound_lifecycle_events")
+    event_id = _stable_id(
+        "ticket_lifecycle_event",
+        str(lifecycle["lifecycle_run_id"]),
+        "hard_stopped",
+        exchange_order_id,
+    )
+    if conn.execute(
+        sa.select(events.c.lifecycle_event_id).where(
+            events.c.lifecycle_event_id == event_id
+        )
+    ).first() is None:
+        conn.execute(
+            events.insert().values(
+                lifecycle_event_id=event_id,
+                lifecycle_run_id=lifecycle["lifecycle_run_id"],
+                ticket_id=lifecycle["ticket_id"],
+                protected_submit_attempt_id=lifecycle[
+                    "protected_submit_attempt_id"
+                ],
+                event_type="hard_stopped",
+                event_payload={
+                    "reason": "contradictory_fill_truth",
+                    "role": role,
+                    "exchange_order_id": exchange_order_id,
+                    "existing_fill": existing_fill,
+                    "conflicting_fill": conflicting_fill,
+                    "first_blocker": blocker,
+                },
+                created_at_ms=now_ms,
+            )
+        )
+    return {
+        "status": "fill_truth_contradiction",
+        "projected_roles": [],
+        "projected_count": 0,
+        "first_blocker": blocker,
+        "blockers": [blocker],
+        "lifecycle_decision": decision.to_dict(),
+    }
 
 
 def _project_final_exit_detected(
@@ -216,6 +353,27 @@ def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:
 def _stable_id(prefix: str, *parts: str) -> str:
     digest = sha256("|".join(parts).encode("utf-8")).hexdigest()[:40]
     return f"{prefix}:{digest}"
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _normalized_decimal(value: Any) -> Decimal | None:
+    if value in {None, ""}:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
 
 
 def _exit_reference_price(order: dict[str, Any]) -> str | None:
