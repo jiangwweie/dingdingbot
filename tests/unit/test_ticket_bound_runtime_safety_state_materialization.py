@@ -91,6 +91,14 @@ OFC_ECONOMICS_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-12-116_add_opportunity_feedback_economics.py"
 )
+OWNER_NOTIFICATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-117_extend_owner_notifications.py"
+)
+LANE_IDENTITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -330,6 +338,26 @@ def pg_control_connection():
             ofc_economics_migration.upgrade()
         finally:
             ofc_economics_migration.op = old_ofc_economics_op
+        owner_notification_migration = _load_module(
+            OWNER_NOTIFICATION_MIGRATION_PATH,
+            "migration_117_runtime_safety",
+        )
+        old_owner_notification_op = owner_notification_migration.op
+        owner_notification_migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            owner_notification_migration.upgrade()
+        finally:
+            owner_notification_migration.op = old_owner_notification_op
+        lane_identity_migration = _load_module(
+            LANE_IDENTITY_MIGRATION_PATH,
+            "migration_118_runtime_safety",
+        )
+        old_lane_identity_op = lane_identity_migration.op
+        lane_identity_migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            lane_identity_migration.upgrade()
+        finally:
+            lane_identity_migration.op = old_lane_identity_op
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(

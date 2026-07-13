@@ -41,6 +41,7 @@ from src.domain.execution_eligibility import (  # noqa: E402
 from src.application.runtime_process_outcome import (  # noqa: E402
     materialize_runtime_process_outcome,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity  # noqa: E402
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     API_BASE_ENV as FIRST_REAL_SUBMIT_API_BASE_ENV,
     DEFAULT_API_BASE,
@@ -506,7 +507,8 @@ def write_runtime_signal_summaries_to_pg(
         }
     summaries = [row for row in artifact.get("runtime_summaries") or [] if isinstance(row, dict)]
     candidates = _live_signal_candidates_from_summaries(summaries)
-    if not candidates:
+    identity_faults = _materializable_identity_faults_from_summaries(summaries)
+    if not candidates and not identity_faults:
         return {
             "status": "pg_live_signal_events_noop",
             "reason": "would_enter_signal_summary_missing",
@@ -523,11 +525,12 @@ def write_runtime_signal_summaries_to_pg(
     skipped: list[dict[str, Any]] = []
     process_outcomes: list[dict[str, object]] = []
     if conn is not None:
-        for candidate in candidates:
+        for candidate in [*candidates, *identity_faults]:
             result = _write_live_signal_candidate(
                 conn,
                 candidate=candidate,
                 observed_ms=observed_ms,
+                enforce_identity_revalidation=not allow_non_postgres_for_test,
             )
             if result.get("written") is True:
                 written.append(str(result["signal_event_id"]))
@@ -562,11 +565,12 @@ def write_runtime_signal_summaries_to_pg(
     engine = sa.create_engine(normalized_url)
     try:
         with engine.begin() as conn:
-            for candidate in candidates:
+            for candidate in [*candidates, *identity_faults]:
                 result = _write_live_signal_candidate(
                     conn,
                     candidate=candidate,
                     observed_ms=observed_ms,
+                    enforce_identity_revalidation=not allow_non_postgres_for_test,
                 )
                 if result.get("written") is True:
                     written.append(str(result["signal_event_id"]))
@@ -649,6 +653,13 @@ def _materialize_signal_process_outcome(
     side = str(candidate.get("side") or "")
     if not strategy_group_id or not symbol or side not in {"long", "short"}:
         return {}
+    raw_identity = candidate.get("lane_identity")
+    if not isinstance(raw_identity, dict):
+        return {}
+    try:
+        lane_identity = RuntimeLaneIdentity.model_validate(raw_identity)
+    except ValueError:
+        return {}
 
     blocker = str(result.get("blocker") or "")
     if result.get("written") is True:
@@ -681,6 +692,7 @@ def _materialize_signal_process_outcome(
         completed_at_ms=observed_ms,
         runtime_head=_current_runtime_head(conn),
         source_watermark=source_watermark,
+        lane_identity=lane_identity,
     )
 
 
@@ -710,21 +722,34 @@ def _live_signal_candidates_from_summaries(
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for row in summaries:
+        if row.get("can_materialize_live_signal_event") is not True:
+            continue
+        raw_identity = row.get("lane_identity")
+        if not isinstance(raw_identity, dict):
+            continue
+        try:
+            lane_identity = RuntimeLaneIdentity.model_validate(raw_identity)
+        except ValueError:
+            continue
         signal = row.get("signal_summary")
         if not isinstance(signal, dict):
             signal = {}
         if str(signal.get("signal_type") or "") != "would_enter":
             continue
-        strategy_group_id = str(row.get("strategy_family_id") or "").strip()
-        symbol = _compact_symbol(row.get("symbol"))
-        side = _normalize_side(signal.get("side") or row.get("side"))
-        if not strategy_group_id or not symbol or side not in {"long", "short"}:
+        signal_side = _normalize_side(signal.get("side"))
+        if signal_side != lane_identity.side:
+            continue
+        evaluated_at_ms = _int_or_zero(signal.get("evaluated_at_ms"))
+        valid_until_ms = _int_or_zero(signal.get("valid_until_ms"))
+        if evaluated_at_ms <= 0 or valid_until_ms <= evaluated_at_ms:
             continue
         candidates.append(
             {
-                "strategy_group_id": strategy_group_id,
-                "symbol": symbol,
-                "side": side,
+                "strategy_group_id": lane_identity.strategy_group_id,
+                "symbol": lane_identity.symbol,
+                "side": lane_identity.side,
+                "lane_identity": lane_identity.model_dump(mode="json"),
+                "lane_identity_key": lane_identity.identity_key,
                 "signal_type": "would_enter",
                 "signal_grade": signal.get("signal_grade")
                 or SignalGrade.OBSERVE_ONLY_SIGNAL.value,
@@ -735,6 +760,8 @@ def _live_signal_candidates_from_summaries(
                 "trigger_candle_close_time_ms": _int_or_zero(
                     signal.get("trigger_candle_close_time_ms")
                 ),
+                "evaluated_at_ms": evaluated_at_ms,
+                "valid_until_ms": valid_until_ms,
                 "runtime_instance_id": row.get("runtime_instance_id"),
                 "strategy_family_version_id": row.get("strategy_family_version_id"),
                 "runtime_status": row.get("status"),
@@ -750,12 +777,96 @@ def _live_signal_candidates_from_summaries(
     return candidates
 
 
+def _materializable_identity_faults_from_summaries(
+    summaries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return malformed materialization claims as fail-closed lane faults.
+
+    A normal computed-no-signal has ``can_materialize_live_signal_event=false``
+    and never reaches this function. This path is exclusively for an envelope
+    that claims materialization while contradicting its own resolved identity.
+    """
+
+    faults: list[dict[str, Any]] = []
+    for row in summaries:
+        if row.get("can_materialize_live_signal_event") is not True:
+            continue
+        raw_identity = row.get("lane_identity")
+        if not isinstance(raw_identity, dict):
+            continue
+        try:
+            lane_identity = RuntimeLaneIdentity.model_validate(raw_identity)
+        except ValueError:
+            continue
+        signal = row.get("signal_summary")
+        if not isinstance(signal, dict):
+            signal = {}
+        signal_side = _normalize_side(signal.get("side"))
+        signal_type = str(signal.get("signal_type") or "")
+        evaluated_at_ms = _int_or_zero(signal.get("evaluated_at_ms"))
+        valid_until_ms = _int_or_zero(signal.get("valid_until_ms"))
+        blocker = ""
+        if signal_type != "would_enter" or signal_side != lane_identity.side:
+            blocker = "runtime_lane_identity_mismatch:materializable_signal"
+        elif evaluated_at_ms <= 0 or valid_until_ms <= evaluated_at_ms:
+            blocker = "stale_signal_evidence"
+        if not blocker:
+            continue
+        faults.append(
+            {
+                "strategy_group_id": lane_identity.strategy_group_id,
+                "symbol": lane_identity.symbol,
+                "side": lane_identity.side,
+                "lane_identity": lane_identity.model_dump(mode="json"),
+                "lane_identity_key": lane_identity.identity_key,
+                "identity_fault": blocker,
+                "signal_type": signal_type or "would_enter",
+                "trigger_candle_close_time_ms": _int_or_zero(
+                    signal.get("trigger_candle_close_time_ms")
+                ),
+                "evaluated_at_ms": evaluated_at_ms,
+                "valid_until_ms": valid_until_ms,
+                "runtime_instance_id": lane_identity.runtime_instance_id,
+                "strategy_family_version_id": row.get("strategy_family_version_id"),
+                "runtime_status": row.get("status"),
+                "runtime_blockers": list(row.get("blockers") or []),
+                "forbidden_effects": {},
+                "signal_summary": signal,
+                "signal_input_ref": row.get("signal_input_ref"),
+            }
+        )
+    return faults
+
+
 def _write_live_signal_candidate(
     conn: sa.engine.Connection,
     *,
     candidate: dict[str, Any],
     observed_ms: int,
+    enforce_identity_revalidation: bool = True,
 ) -> dict[str, Any]:
+    identity_fault = str(candidate.get("identity_fault") or "")
+    if identity_fault:
+        return {
+            "written": False,
+            "blocker": identity_fault,
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+        }
+    if enforce_identity_revalidation:
+        identity_blocker = _revalidate_candidate_runtime_lane_identity(
+            conn,
+            candidate=candidate,
+        )
+        if identity_blocker:
+            return {
+                "written": False,
+                "blocker": identity_blocker,
+                "strategy_group_id": candidate["strategy_group_id"],
+                "symbol": candidate["symbol"],
+                "side": candidate["side"],
+            }
     runtime_status = str(candidate.get("runtime_status") or "").strip()
     runtime_blockers = [
         str(item)
@@ -780,6 +891,17 @@ def _write_live_signal_candidate(
             "strategy_group_id": candidate["strategy_group_id"],
             "symbol": candidate["symbol"],
             "side": candidate["side"],
+        }
+
+    valid_until_ms = _int_or_zero(candidate.get("valid_until_ms"))
+    if valid_until_ms <= observed_ms:
+        return {
+            "written": False,
+            "blocker": "signal_evidence_expired",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "valid_until_ms": valid_until_ms,
         }
 
     scope = _active_candidate_scope_event(conn, candidate=candidate)
@@ -914,13 +1036,29 @@ def _write_live_signal_candidate(
         event_time_ms=event_time_ms,
     )
     created_at_ms = max(observed_ms, event_time_ms + 1)
+    lane_identity = RuntimeLaneIdentity.model_validate(candidate["lane_identity"])
     row = {
         "signal_event_id": signal_event_id,
-        "candidate_scope_id": scope["candidate_scope_id"],
-        "event_spec_id": scope["event_spec_id"],
-        "strategy_group_id": candidate["strategy_group_id"],
-        "symbol": candidate["symbol"],
-        "side": candidate["side"],
+        "candidate_scope_id": lane_identity.candidate_scope_id,
+        "candidate_scope_event_binding_id": (
+            lane_identity.candidate_scope_event_binding_id
+        ),
+        "runtime_scope_binding_id": lane_identity.runtime_scope_binding_id,
+        "runtime_instance_id": lane_identity.runtime_instance_id,
+        "runtime_profile_id": lane_identity.runtime_profile_id,
+        "policy_current_id": lane_identity.policy_current_id,
+        "strategy_group_version_id": lane_identity.strategy_group_version_id,
+        "asset_class": lane_identity.asset_class,
+        "event_spec_id": lane_identity.event_spec_id,
+        "event_spec_version": lane_identity.event_spec_version,
+        "event_id": lane_identity.event_id,
+        "timeframe": lane_identity.timeframe,
+        "time_authority": lane_identity.time_authority,
+        "lane_identity_key": lane_identity.identity_key,
+        "source_watermark": _candidate_source_watermark(candidate),
+        "strategy_group_id": lane_identity.strategy_group_id,
+        "symbol": lane_identity.symbol,
+        "side": lane_identity.side,
         "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
         "signal_type": event_id,
         "source_kind": "live_market",
@@ -933,6 +1071,8 @@ def _write_live_signal_candidate(
             {
                 "runtime_instance_id": candidate.get("runtime_instance_id"),
                 "strategy_family_version_id": candidate.get("strategy_family_version_id"),
+                "lane_identity": lane_identity.model_dump(mode="json"),
+                "lane_identity_key": lane_identity.identity_key,
                 "runtime_status": candidate.get("runtime_status"),
                 "detector_verdict": detector_verdict,
                 "signal_summary": candidate.get("signal_summary") or {},
@@ -954,6 +1094,19 @@ def _write_live_signal_candidate(
         "execution_eligible": authority.execution_eligible,
         "authority_source_ref": authority.authority_source_ref,
     }
+    if enforce_identity_revalidation:
+        identity_blocker = _revalidate_candidate_runtime_lane_identity(
+            conn,
+            candidate=candidate,
+        )
+        if identity_blocker:
+            return {
+                "written": False,
+                "blocker": identity_blocker,
+                "strategy_group_id": candidate["strategy_group_id"],
+                "symbol": candidate["symbol"],
+                "side": candidate["side"],
+            }
     inserted = _upsert_live_signal_event(conn, row)
     if not inserted:
         existing = _live_signal_event_by_identity(conn, identity=row)
@@ -996,6 +1149,41 @@ def _write_live_signal_candidate(
         "execution_eligible": authority.execution_eligible,
         "authority_source_ref": authority.authority_source_ref,
     }
+
+
+def _revalidate_candidate_runtime_lane_identity(
+    conn: sa.engine.Connection,
+    *,
+    candidate: dict[str, Any],
+) -> str | None:
+    """Re-read PG identity immediately before an insert; no summary fallback."""
+
+    raw_identity = candidate.get("lane_identity")
+    if not isinstance(raw_identity, dict):
+        return "runtime_lane_identity_mismatch:identity_envelope_missing"
+    try:
+        expected = RuntimeLaneIdentity.model_validate(raw_identity)
+    except ValueError:
+        return "runtime_lane_identity_mismatch:identity_envelope_invalid"
+    runtime_instance_id = str(candidate.get("runtime_instance_id") or "")
+    if runtime_instance_id != expected.runtime_instance_id:
+        return "runtime_lane_identity_mismatch:runtime_instance_id"
+
+    from src.application.runtime_lane_identity_service import (
+        RuntimeLaneIdentityResolutionError,
+        RuntimeLaneIdentityService,
+    )
+
+    try:
+        resolved = RuntimeLaneIdentityService().resolve(
+            conn,
+            runtime_instance_id=expected.runtime_instance_id,
+        ).identity
+    except RuntimeLaneIdentityResolutionError as exc:
+        return exc.blocker
+    if resolved != expected:
+        return "runtime_lane_identity_mismatch:pg_revalidation"
+    return None
 
 
 def _active_candidate_scope_event(
@@ -1083,60 +1271,24 @@ def _upsert_live_signal_event(
     conn: sa.engine.Connection,
     row: dict[str, Any],
 ) -> bool:
+    table = sa.Table("brc_live_signal_events", sa.MetaData(), autoload_with=conn)
+    payload = {
+        **row,
+        "invalidated_at_ms": None,
+    }
+    column_names = [name for name in payload if name in table.c]
+    columns = ",\n          ".join(column_names)
+    values = ",\n          ".join(f":{name}" for name in column_names)
     statement = sa.text(
         """
         INSERT INTO brc_live_signal_events (
-          signal_event_id,
-          candidate_scope_id,
-          event_spec_id,
-          strategy_group_id,
-          symbol,
-          side,
-          detector_key,
-          signal_type,
-          source_kind,
-          status,
-          freshness_state,
-          confidence,
-          fact_snapshot_id,
-          reason_codes,
-          signal_payload,
-          event_time_ms,
-          trigger_candle_close_time_ms,
-          observed_at_ms,
-          expires_at_ms,
-          invalidated_at_ms,
-          created_at_ms,
-          signal_grade,
-          required_execution_mode,
-          execution_eligible,
-          authority_source_ref
+          """
+        + columns
+        + """
         ) VALUES (
-          :signal_event_id,
-          :candidate_scope_id,
-          :event_spec_id,
-          :strategy_group_id,
-          :symbol,
-          :side,
-          :detector_key,
-          :signal_type,
-          :source_kind,
-          :status,
-          :freshness_state,
-          :confidence,
-          :fact_snapshot_id,
-          :reason_codes,
-          :signal_payload,
-          :event_time_ms,
-          :trigger_candle_close_time_ms,
-          :observed_at_ms,
-          :expires_at_ms,
-          NULL,
-          :created_at_ms,
-          :signal_grade,
-          :required_execution_mode,
-          :execution_eligible,
-          :authority_source_ref
+          """
+        + values
+        + """
         )
         """
     )
@@ -1154,7 +1306,7 @@ def _upsert_live_signal_event(
             statement.text.replace("INSERT INTO", "INSERT OR IGNORE INTO", 1)
             + " RETURNING signal_event_id"
         )
-    result = conn.execute(statement, row)
+    result = conn.execute(statement, payload)
     if conn.dialect.name in {"postgresql", "sqlite"}:
         return result.scalar_one_or_none() is not None
     return result.rowcount != 0
@@ -1547,7 +1699,7 @@ def _non_executing_runtime_observation_safety() -> dict[str, bool]:
     }
 
 
-def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+def _signal_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
     latest_artifact = artifact.get("latest_artifact")
     if not isinstance(latest_artifact, dict):
         latest_artifact = artifact
@@ -1558,11 +1710,18 @@ def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(signal_artifact, dict):
         signal_artifact = latest_artifact.get("signal_artifact")
     if not isinstance(signal_artifact, dict):
-        signal_artifact = {}
+        return {}
+    return signal_artifact
+
+
+def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
+    signal_artifact = _signal_artifact(artifact)
     evaluation = signal_artifact.get("evaluation_result")
     if not isinstance(evaluation, dict):
         evaluation = {}
-    output = evaluation.get("output")
+    output = evaluation.get("signal")
+    if not isinstance(output, dict):
+        output = evaluation.get("output")
     if not isinstance(output, dict):
         output = {}
     signal_snapshot = output.get("signal_snapshot")
@@ -1580,16 +1739,23 @@ def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
     return {
         "evaluation_status": evaluation.get("status"),
         "evaluator_id": evaluation.get("evaluator_id"),
+        "evaluated_at_ms": evaluation.get("evaluated_at_ms"),
+        "valid_until_ms": evaluation.get("valid_until_ms"),
         "signal_type": output.get("signal_type"),
         "signal_grade": output.get("signal_grade"),
         "required_execution_mode": output.get("required_execution_mode"),
         "side": output.get("side"),
-        "reason_codes": list(output.get("reason_codes") or []),
+        "reason_codes": list(
+            output.get("reason_codes") or evaluation.get("reason_codes") or []
+        ),
         "human_summary": output.get("human_summary"),
         "confidence": output.get("confidence"),
         "data_quality_status": data_quality.get("status"),
         "context_tags": context_tags,
         "can_call_semantic_binding": evaluation.get("can_call_semantic_binding"),
+        "can_materialize_live_signal_event": signal_artifact.get(
+            "can_materialize_live_signal_event"
+        ),
         "semantics_binding_found": evaluation.get("semantics_binding_found"),
         "strategy_candidate_mode": evaluation.get("strategy_candidate_mode"),
         "timestamp_ms": output.get("timestamp_ms"),
@@ -1618,17 +1784,50 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
     )
     status = str(artifact.get("status") or "")
     signal_input_ref = artifact.get("signal_input_ref") or plan.get("signal_input_ref")
+    signal_artifact = _signal_artifact(artifact)
+    raw_lane_identity = signal_artifact.get("lane_identity")
+    lane_identity: RuntimeLaneIdentity | None = None
+    if isinstance(raw_lane_identity, dict):
+        try:
+            lane_identity = RuntimeLaneIdentity.model_validate(raw_lane_identity)
+        except ValueError:
+            lane_identity = None
 
     return {
-        "runtime_instance_id": _runtime_value(runtime, "runtime_instance_id", "runtime_id"),
+        "runtime_instance_id": (
+            lane_identity.runtime_instance_id
+            if lane_identity is not None
+            else _runtime_value(runtime, "runtime_instance_id", "runtime_id")
+        ),
         "status": status,
-        "symbol": _runtime_value(runtime, "symbol"),
-        "side": _runtime_value(runtime, "side"),
-        "strategy_family_id": _runtime_value(runtime, "strategy_family_id", "family"),
+        "symbol": (
+            lane_identity.symbol
+            if lane_identity is not None
+            else _runtime_value(runtime, "symbol")
+        ),
+        "side": (
+            lane_identity.side
+            if lane_identity is not None
+            else _runtime_value(runtime, "side")
+        ),
+        "strategy_family_id": (
+            lane_identity.strategy_group_id
+            if lane_identity is not None
+            else _runtime_value(runtime, "strategy_family_id", "family")
+        ),
         "strategy_family_version_id": _runtime_value(
             runtime,
             "strategy_family_version_id",
             "carrier_id",
+        ),
+        "lane_identity": (
+            lane_identity.model_dump(mode="json") if lane_identity is not None else None
+        ),
+        "lane_identity_key": (
+            lane_identity.identity_key if lane_identity is not None else None
+        ),
+        "can_materialize_live_signal_event": (
+            signal_artifact.get("can_materialize_live_signal_event") is True
         ),
         "ready_for_action_time_ticket_materialization": artifact.get(
             "ready_for_action_time_ticket_materialization"

@@ -6,9 +6,11 @@ from typing import Any
 import pytest
 
 from src.application.runtime_strategy_signal_evaluation_service import (
+    RuntimeLaneEventEvaluationStatus,
     RuntimeStrategySignalEvaluationService,
     RuntimeStrategySignalEvaluationStatus,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 from src.domain.strategy_family_signal import (
     AccountFactsSnapshot,
     MarketSnapshot,
@@ -321,6 +323,27 @@ class _FakeShortEvaluator:
         )
 
 
+def _cpm_long_lane_identity(*, timeframe: str = "1h") -> RuntimeLaneIdentity:
+    return RuntimeLaneIdentity(
+        candidate_scope_id="scope:CPM-RO-001:ETHUSDT:long",
+        candidate_scope_event_binding_id="binding:CPM-RO-001:ETHUSDT:long:CPM-LONG",
+        runtime_scope_binding_id="runtime_scope:CPM-RO-001:ETHUSDT:long",
+        runtime_instance_id="runtime-cpm-eth-long",
+        runtime_profile_id="runtime-profile:pilot",
+        policy_current_id="policy:CPM-RO-001:ETHUSDT:long",
+        strategy_group_id="CPM-RO-001",
+        strategy_group_version_id="sgv:CPM-RO-001:v2",
+        symbol="ETHUSDT",
+        asset_class="crypto_perpetual",
+        side="long",
+        event_spec_id="event_spec:CPM-RO-001:CPM-LONG:v2",
+        event_spec_version="v2",
+        event_id="CPM-LONG",
+        timeframe=timeframe,
+        time_authority="trigger_candle_close_time_ms",
+    )
+
+
 def test_brf_evaluator_route_ready_for_semantic_binding():
     result = RuntimeStrategySignalEvaluationService().evaluate(
         _signal_input(
@@ -377,6 +400,89 @@ def test_cpm_short_output_blocks_before_semantic_binding():
     assert result.order_candidate_created is False
     assert result.execution_intent_created is False
     assert result.exchange_called is False
+
+
+def test_event_scoped_cpm_long_discards_generic_short_pattern_as_no_signal():
+    result = RuntimeStrategySignalEvaluationService(
+        evaluators={
+            ("CPM-RO-001", "CPM-RO-001-v0"): _FakeShortEvaluator(),
+        }
+    ).evaluate_for_runtime_lane(
+        _signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+        ),
+        lane_identity=_cpm_long_lane_identity(),
+        freshness_window_ms=3_600_000,
+    )
+
+    assert result.status == RuntimeLaneEventEvaluationStatus.COMPUTED_NOT_SATISFIED
+    assert result.can_materialize_live_signal_event is False
+    assert result.signal is None
+    assert result.blockers == []
+    assert result.reason_codes == [
+        "computed_not_satisfied",
+        "event_side_not_satisfied",
+    ]
+    assert result.lane_identity.side == "long"
+
+
+def test_event_scoped_cpm_long_preserves_exact_long_signal_for_materialization():
+    result = RuntimeStrategySignalEvaluationService().evaluate_for_runtime_lane(
+        _signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            one_hour=_cpm_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+        ),
+        lane_identity=_cpm_long_lane_identity(),
+        freshness_window_ms=3_600_000,
+    )
+
+    assert result.status == RuntimeLaneEventEvaluationStatus.EVENT_SATISFIED
+    assert result.can_materialize_live_signal_event is True
+    assert result.signal is not None
+    assert result.signal.side == SignalSide.LONG
+    assert result.lane_identity.identity_key
+    assert result.evaluated_at_ms == NOW_MS
+    assert result.valid_until_ms == NOW_MS + 3_600_000
+
+
+def test_event_scoped_evaluation_blocks_materialization_without_freshness_window():
+    result = RuntimeStrategySignalEvaluationService().evaluate_for_runtime_lane(
+        _signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            one_hour=_cpm_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+        ),
+        lane_identity=_cpm_long_lane_identity(),
+        freshness_window_ms=None,
+    )
+
+    assert result.status == RuntimeLaneEventEvaluationStatus.BLOCKED
+    assert result.can_materialize_live_signal_event is False
+    assert result.signal is None
+    assert result.blockers == ["event_spec_freshness_window_missing"]
+    assert result.valid_until_ms == 0
+
+
+def test_event_scoped_evaluation_blocks_timeframe_identity_mismatch():
+    result = RuntimeStrategySignalEvaluationService().evaluate_for_runtime_lane(
+        _signal_input(
+            family_id="CPM-RO-001",
+            version_id="CPM-RO-001-v0",
+            primary_timeframe="1h",
+            one_hour=_cpm_long_1h(),
+            four_hour=_cpm_up_context_4h(),
+        ),
+        lane_identity=_cpm_long_lane_identity(timeframe="15m"),
+        freshness_window_ms=3_600_000,
+    )
+
+    assert result.status == RuntimeLaneEventEvaluationStatus.BLOCKED
+    assert result.can_materialize_live_signal_event is False
+    assert result.blockers == ["runtime_lane_identity_mismatch:primary_timeframe"]
 
 
 def test_cpm_live_reference_route_ready_for_semantic_binding():

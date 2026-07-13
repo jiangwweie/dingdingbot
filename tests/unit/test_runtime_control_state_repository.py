@@ -23,6 +23,7 @@ from src.infrastructure.runtime_control_state_repository import (
     is_current_promotion_candidate,
     runtime_safety_submit_authorized,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 from scripts import runtime_active_observation_monitor
 from scripts import materialize_ticket_bound_protected_submit_attempt as submit
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
@@ -48,6 +49,10 @@ EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
 DYNAMIC_RISK_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
+LANE_IDENTITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 VALIDATOR_PATH = REPO_ROOT / "scripts/validate_runtime_control_state_repository.py"
@@ -288,7 +293,149 @@ def test_monitor_read_profile_keeps_current_readiness_with_null_validity(
 
     assert monitor_state["table_counts"]["pretrade_readiness_rows"] == 1
 
+def test_repository_rejects_typed_live_signal_with_altered_identity_key(
+    pg_control_connection,
+):
+    identity = RuntimeLaneIdentity(
+        candidate_scope_id="candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG",
+        candidate_scope_event_binding_id="binding:SOR-001:ETHUSDT:long",
+        runtime_scope_binding_id="runtime_scope:SOR-001:ETHUSDT:long",
+        runtime_instance_id="runtime:SOR-001:ETHUSDT:long",
+        runtime_profile_id="owner-runtime-console-v1",
+        policy_current_id="policy:SOR-001",
+        strategy_group_id="SOR-001",
+        strategy_group_version_id="sgv:SOR-001:v2",
+        symbol="ETHUSDT",
+        asset_class="crypto_perpetual",
+        side="long",
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+        event_spec_version="v2",
+        event_id="SOR-LONG",
+        timeframe="15m",
+        time_authority="trigger_candle_close_time_ms",
+    )
+    signal = {
+        **identity.model_dump(mode="json"),
+        "signal_event_id": "signal:typed-identity-mismatch",
+        "lane_identity_key": "tampered-lane-identity-key",
+        "source_watermark": "runtime:SOR-001:ETHUSDT:long:1770000000000",
+        "signal_type": identity.event_id,
+        "status": "facts_validated",
+        "freshness_state": "fresh",
+        "source_kind": "live_market",
+        "invalidated_at_ms": None,
+        "event_time_ms": NOW_MS - 60_000,
+        "trigger_candle_close_time_ms": NOW_MS - 60_000,
+        "observed_at_ms": NOW_MS - 55_000,
+        "created_at_ms": NOW_MS - 54_000,
+        "expires_at_ms": NOW_MS + 600_000,
+    }
+    rows = {
+        "candidate_scope": [
+            {
+                "candidate_scope_id": identity.candidate_scope_id,
+                "strategy_group_id": identity.strategy_group_id,
+                "symbol": identity.symbol,
+                "side": identity.side,
+                "status": "active",
+            }
+        ],
+        "candidate_scope_event_bindings": [
+            {
+                "candidate_scope_id": identity.candidate_scope_id,
+                "event_spec_id": identity.event_spec_id,
+                "status": "active",
+            }
+        ],
+        "strategy_side_event_specs": [
+            {
+                "event_spec_id": identity.event_spec_id,
+                "event_id": identity.event_id,
+                "status": "current",
+            }
+        ],
+        "live_signal_events": [signal],
+    }
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    with pytest.raises(
+        RuntimeControlStateRepositoryError,
+        match="runtime_lane_identity_mismatch:live_signal_identity_key",
+    ):
+        repository._validate_live_signal_events(rows)
+
+
 def test_live_signal_writer_output_is_readable_by_repository(pg_control_connection):
+    lane_identity_migration = _load_module(
+        LANE_IDENTITY_MIGRATION_PATH,
+        "migration_118_repository_writer_consumer",
+    )
+    old_lane_identity_op = lane_identity_migration.op
+    lane_identity_migration.op = Operations(
+        MigrationContext.configure(pg_control_connection)
+    )
+    try:
+        lane_identity_migration.upgrade()
+    finally:
+        lane_identity_migration.op = old_lane_identity_op
+
+    lane_row = pg_control_connection.execute(
+        text(
+            """
+            SELECT c.candidate_scope_id,
+                   c.policy_current_id,
+                   c.strategy_group_id,
+                   c.symbol,
+                   c.asset_class,
+                   c.side,
+                   b.binding_id,
+                   r.runtime_scope_binding_id,
+                   r.runtime_profile_id,
+                   e.strategy_group_version_id,
+                   e.event_spec_id,
+                   e.event_spec_version,
+                   e.event_id,
+                   e.timeframe,
+                   e.time_authority
+            FROM brc_strategy_group_candidate_scope c
+            JOIN brc_candidate_scope_event_bindings b
+              ON b.candidate_scope_id = c.candidate_scope_id
+             AND b.status = 'active'
+            JOIN brc_runtime_scope_bindings r
+              ON r.candidate_scope_id = c.candidate_scope_id
+             AND r.status = 'active'
+            JOIN brc_strategy_side_event_specs e
+              ON e.event_spec_id = b.event_spec_id
+             AND e.status = 'current'
+            WHERE c.strategy_group_id = 'MPG-001'
+              AND c.symbol = 'OPUSDT'
+              AND c.side = 'long'
+              AND c.status = 'active'
+            """
+        )
+    ).mappings().one()
+    runtime_instance_id = "runtime:MPG-001:OPUSDT:long"
+    lane_identity = RuntimeLaneIdentity(
+        candidate_scope_id=str(lane_row["candidate_scope_id"]),
+        candidate_scope_event_binding_id=str(lane_row["binding_id"]),
+        runtime_scope_binding_id=str(lane_row["runtime_scope_binding_id"]),
+        runtime_instance_id=runtime_instance_id,
+        runtime_profile_id=str(lane_row["runtime_profile_id"]),
+        policy_current_id=str(lane_row["policy_current_id"]),
+        strategy_group_id=str(lane_row["strategy_group_id"]),
+        strategy_group_version_id=str(lane_row["strategy_group_version_id"]),
+        symbol=str(lane_row["symbol"]),
+        asset_class=str(lane_row["asset_class"]),
+        side=str(lane_row["side"]),
+        event_spec_id=str(lane_row["event_spec_id"]),
+        event_spec_version=str(lane_row["event_spec_version"]),
+        event_id=str(lane_row["event_id"]),
+        timeframe=str(lane_row["timeframe"]),
+        time_authority=str(lane_row["time_authority"]),
+    )
     pg_control_connection.execute(
         text(
             """
@@ -313,18 +460,24 @@ def test_live_signal_writer_output_is_readable_by_repository(pg_control_connecti
         {
             "runtime_summaries": [
                 {
-                    "runtime_instance_id": "runtime:MPG-001:OPUSDT:long",
+                    "runtime_instance_id": runtime_instance_id,
                     "strategy_family_id": "MPG-001",
-                    "strategy_family_version_id": "sgv:MPG-001:v1",
+                    "strategy_family_version_id": "MPG-001-v0",
                     "symbol": "OPUSDT",
                     "side": "long",
                     "status": "ready_for_prepare",
+                    "lane_identity": lane_identity.model_dump(mode="json"),
+                    "can_materialize_live_signal_event": True,
                     "signal_summary": {
                         "signal_type": "would_enter",
                         "side": "long",
                         "timestamp_ms": 1770000120000,
                         "trigger_candle_close_time_ms": 1770000120000,
+                        "evaluated_at_ms": 1770000120000,
+                        "valid_until_ms": 1770003720000,
                         "confidence": "0.82",
+                        "signal_grade": "trial_grade_signal",
+                        "required_execution_mode": "trial_live",
                         "reason_codes": ["writer_consumer_contract"],
                     },
                 }
@@ -338,7 +491,8 @@ def test_live_signal_writer_output_is_readable_by_repository(pg_control_connecti
 
     assert result["status"] == "pg_live_signal_events_written"
     state = PgBackedRuntimeControlStateRepository(
-        pg_control_connection
+        pg_control_connection,
+        now_ms=1770000120100,
     ).read_control_state()
     signal = next(row for row in state["live_signal_events"])
     payload = signal["signal_payload"]
@@ -348,6 +502,8 @@ def test_live_signal_writer_output_is_readable_by_repository(pg_control_connecti
     assert signal["symbol"] == "OPUSDT"
     assert signal["side"] == "long"
     assert signal["signal_type"] == "MPG-LONG"
+    assert signal["lane_identity_key"] == lane_identity.identity_key
+    assert signal["source_watermark"] == f"{runtime_instance_id}:1770000120000"
     assert payload["detector_verdict"] == "would_enter"
 
 

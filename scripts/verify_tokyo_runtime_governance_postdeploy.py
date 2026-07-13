@@ -23,9 +23,9 @@ from typing import Any, Callable
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 117
+DEFAULT_EXPECTED_MIGRATION_COUNT = 118
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-12-117_extend_owner_notifications.py"
+    "2026-07-13-118_conserve_runtime_lane_identity.py"
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
 

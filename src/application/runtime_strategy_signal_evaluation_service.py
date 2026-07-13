@@ -31,6 +31,7 @@ from src.domain.reference_price_action_evaluators import (
     TEQ001PilotReferenceEvaluator,
     VCB001PriceActionEvaluator,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 from src.domain.sor_session_range_evaluator import SOR001SessionRangeEvaluator
 from src.domain.strategy_family_signal import (
     ExpectedRiskShape,
@@ -53,6 +54,14 @@ from src.domain.strategy_semantics import (
 class RuntimeStrategySignalEvaluationStatus(str, Enum):
     READY_FOR_SEMANTIC_BINDING = "ready_for_semantic_binding"
     OBSERVE_ONLY = "observe_only"
+    BLOCKED = "blocked"
+
+
+class RuntimeLaneEventEvaluationStatus(str, Enum):
+    """Event-Spec scoped outcome for one immutable runtime lane."""
+
+    EVENT_SATISFIED = "event_satisfied"
+    COMPUTED_NOT_SATISFIED = "computed_not_satisfied"
     BLOCKED = "blocked"
 
 
@@ -92,6 +101,31 @@ class RuntimeStrategySignalEvaluationResult(BaseModel):
     not_order: Literal[True] = True
     not_execution_intent: Literal[True] = True
     not_execution_authority: Literal[True] = True
+    metadata: dict = Field(default_factory=dict)
+
+
+class RuntimeLaneEventEvaluationResult(BaseModel):
+    """Production-facing evaluator result that cannot redefine its lane."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lane_identity: RuntimeLaneIdentity
+    status: RuntimeLaneEventEvaluationStatus
+    signal: StrategyFamilySignalOutput | None = None
+    blockers: list[str] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    raw_evaluation_status: RuntimeStrategySignalEvaluationStatus
+    evaluator_id: str | None = Field(default=None, max_length=128)
+    evaluated_at_ms: int = Field(default=0, ge=0)
+    valid_until_ms: int = Field(default=0, ge=0)
+    can_materialize_live_signal_event: bool = False
+    signal_evaluation_created: Literal[False] = False
+    order_candidate_created: Literal[False] = False
+    execution_intent_created: Literal[False] = False
+    order_created: Literal[False] = False
+    order_lifecycle_called: Literal[False] = False
+    exchange_called: Literal[False] = False
     metadata: dict = Field(default_factory=dict)
 
 
@@ -210,6 +244,135 @@ class RuntimeStrategySignalEvaluationService:
             ),
         )
 
+    def evaluate_for_runtime_lane(
+        self,
+        signal_input: StrategyFamilySignalInput,
+        *,
+        lane_identity: RuntimeLaneIdentity,
+        freshness_window_ms: int | None = None,
+    ) -> RuntimeLaneEventEvaluationResult:
+        """Evaluate one input only for the PG-resolved Event-Spec lane.
+
+        Generic evaluators may recognize market patterns outside the registered
+        Event-Spec direction. Those patterns are ordinary no-signal evidence for
+        this lane, rather than a blocker or authority to create another lane.
+        """
+
+        evaluated_at_ms = int(signal_input.timestamp_ms)
+        resolved_freshness_window_ms = int(freshness_window_ms or 0)
+        if resolved_freshness_window_ms <= 0:
+            return self._lane_result(
+                lane_identity=lane_identity,
+                status=RuntimeLaneEventEvaluationStatus.BLOCKED,
+                blockers=["event_spec_freshness_window_missing"],
+                reason_codes=[],
+                raw_evaluation_status=RuntimeStrategySignalEvaluationStatus.BLOCKED,
+                evaluated_at_ms=evaluated_at_ms,
+                valid_until_ms=0,
+            )
+        trigger_candle_close_time_ms = int(signal_input.trigger_candle_close_time_ms or 0)
+        valid_until_ms = (
+            trigger_candle_close_time_ms + resolved_freshness_window_ms
+            if trigger_candle_close_time_ms > 0
+            else 0
+        )
+        input_mismatch = _input_lane_identity_mismatch(
+            signal_input=signal_input,
+            lane_identity=lane_identity,
+        )
+        if input_mismatch:
+            return self._lane_result(
+                lane_identity=lane_identity,
+                status=RuntimeLaneEventEvaluationStatus.BLOCKED,
+                blockers=[input_mismatch],
+                reason_codes=[],
+                raw_evaluation_status=RuntimeStrategySignalEvaluationStatus.BLOCKED,
+                evaluated_at_ms=evaluated_at_ms,
+                valid_until_ms=valid_until_ms,
+            )
+
+        evaluation = self.evaluate(signal_input)
+        output = evaluation.output
+        if output is not None:
+            output_mismatch = _output_lane_identity_mismatch(
+                output=output,
+                lane_identity=lane_identity,
+            )
+            if output_mismatch:
+                return self._lane_result(
+                    lane_identity=lane_identity,
+                    status=RuntimeLaneEventEvaluationStatus.BLOCKED,
+                    blockers=[output_mismatch],
+                    reason_codes=[],
+                    raw_evaluation_status=evaluation.status,
+                    evaluator_id=evaluation.evaluator_id,
+                    warnings=evaluation.warnings,
+                    evaluated_at_ms=evaluated_at_ms,
+                    valid_until_ms=valid_until_ms,
+                )
+
+            if output.signal_type == SignalType.WOULD_ENTER:
+                if output.side.value != lane_identity.side:
+                    return self._lane_result(
+                        lane_identity=lane_identity,
+                        status=RuntimeLaneEventEvaluationStatus.COMPUTED_NOT_SATISFIED,
+                        blockers=[],
+                        reason_codes=[
+                            "computed_not_satisfied",
+                            "event_side_not_satisfied",
+                        ],
+                        raw_evaluation_status=evaluation.status,
+                        evaluator_id=evaluation.evaluator_id,
+                        warnings=evaluation.warnings,
+                        evaluated_at_ms=evaluated_at_ms,
+                        valid_until_ms=valid_until_ms,
+                    )
+                if (
+                    evaluation.status
+                    == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
+                ):
+                    return self._lane_result(
+                        lane_identity=lane_identity,
+                        status=RuntimeLaneEventEvaluationStatus.EVENT_SATISFIED,
+                        signal=output,
+                        blockers=[],
+                        reason_codes=list(output.reason_codes),
+                        raw_evaluation_status=evaluation.status,
+                        evaluator_id=evaluation.evaluator_id,
+                        warnings=evaluation.warnings,
+                        can_materialize_live_signal_event=True,
+                        evaluated_at_ms=evaluated_at_ms,
+                        valid_until_ms=valid_until_ms,
+                    )
+
+        if evaluation.status == RuntimeStrategySignalEvaluationStatus.BLOCKED:
+            return self._lane_result(
+                lane_identity=lane_identity,
+                status=RuntimeLaneEventEvaluationStatus.BLOCKED,
+                blockers=list(evaluation.blockers),
+                reason_codes=[],
+                raw_evaluation_status=evaluation.status,
+                evaluator_id=evaluation.evaluator_id,
+                warnings=evaluation.warnings,
+                evaluated_at_ms=evaluated_at_ms,
+                valid_until_ms=valid_until_ms,
+            )
+
+        return self._lane_result(
+            lane_identity=lane_identity,
+            status=RuntimeLaneEventEvaluationStatus.COMPUTED_NOT_SATISFIED,
+            signal=output,
+            blockers=[],
+            reason_codes=_dedupe(
+                ["computed_not_satisfied", *(output.reason_codes if output else [])]
+            ),
+            raw_evaluation_status=evaluation.status,
+            evaluator_id=evaluation.evaluator_id,
+            warnings=evaluation.warnings,
+            evaluated_at_ms=evaluated_at_ms,
+            valid_until_ms=valid_until_ms,
+        )
+
     def route_configured(
         self,
         *,
@@ -220,6 +383,41 @@ class RuntimeStrategySignalEvaluationService:
             strategy_family_id,
             strategy_family_version_id,
         ) in self._evaluators
+
+    @staticmethod
+    def _lane_result(
+        *,
+        lane_identity: RuntimeLaneIdentity,
+        status: RuntimeLaneEventEvaluationStatus,
+        blockers: list[str],
+        reason_codes: list[str],
+        raw_evaluation_status: RuntimeStrategySignalEvaluationStatus,
+        signal: StrategyFamilySignalOutput | None = None,
+        evaluator_id: str | None = None,
+        warnings: list[str] | None = None,
+        can_materialize_live_signal_event: bool = False,
+        evaluated_at_ms: int = 0,
+        valid_until_ms: int = 0,
+    ) -> RuntimeLaneEventEvaluationResult:
+        return RuntimeLaneEventEvaluationResult(
+            lane_identity=lane_identity,
+            status=status,
+            signal=signal,
+            blockers=_dedupe(blockers),
+            reason_codes=_dedupe(reason_codes),
+            warnings=_dedupe(warnings or []),
+            raw_evaluation_status=raw_evaluation_status,
+            evaluator_id=evaluator_id,
+            evaluated_at_ms=evaluated_at_ms,
+            valid_until_ms=valid_until_ms,
+            can_materialize_live_signal_event=can_materialize_live_signal_event,
+            metadata={
+                "source": "runtime_strategy_signal_evaluation_service",
+                "event_spec_scoped": True,
+                "identity_key": lane_identity.identity_key,
+                "non_executing_evaluator_route": True,
+            },
+        )
 
     def _result(
         self,
@@ -814,6 +1012,38 @@ def _output_mismatches(
     if output.symbol != signal_input.symbol:
         mismatches.append("strategy_output_symbol_mismatch")
     return mismatches
+
+
+def _input_lane_identity_mismatch(
+    *,
+    signal_input: StrategyFamilySignalInput,
+    lane_identity: RuntimeLaneIdentity,
+) -> str | None:
+    if signal_input.strategy_family_id != lane_identity.strategy_group_id:
+        return "runtime_lane_identity_mismatch:strategy_group_id"
+    if _normalized_symbol(signal_input.symbol) != lane_identity.symbol:
+        return "runtime_lane_identity_mismatch:symbol"
+    if signal_input.primary_timeframe != lane_identity.timeframe:
+        return "runtime_lane_identity_mismatch:primary_timeframe"
+    return None
+
+
+def _output_lane_identity_mismatch(
+    *,
+    output: StrategyFamilySignalOutput,
+    lane_identity: RuntimeLaneIdentity,
+) -> str | None:
+    if output.strategy_family_id != lane_identity.strategy_group_id:
+        return "runtime_lane_identity_mismatch:output_strategy_group_id"
+    if _normalized_symbol(output.symbol) != lane_identity.symbol:
+        return "runtime_lane_identity_mismatch:output_symbol"
+    if output.timeframe != lane_identity.timeframe:
+        return "runtime_lane_identity_mismatch:output_timeframe"
+    return None
+
+
+def _normalized_symbol(value: str) -> str:
+    return str(value or "").upper().split(":", 1)[0].replace("/", "")
 
 
 def _candles_from_input(signal_input: StrategyFamilySignalInput) -> list[dict]:

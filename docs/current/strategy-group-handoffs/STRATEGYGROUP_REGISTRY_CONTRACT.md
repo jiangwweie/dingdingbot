@@ -2,7 +2,7 @@
 title: STRATEGYGROUP_REGISTRY_CONTRACT
 status: CURRENT_PILOT_CONTRACT
 authority: docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
-last_verified: 2026-06-23
+last_verified: 2026-07-13
 ---
 
 # StrategyGroup Registry Contract
@@ -191,6 +191,12 @@ missed a fixed target or used a higher leverage scenario in research.
 to attempt the official real-order path when Tradeability Decision and Runtime
 Safety State both allow the action-time path.
 
+`L1` observe-only terminology is a research-asset tier. It must not describe a
+currently admitted production StrategyGroup merely because its watcher is
+non-executing. The current five Event-Spec scopes below are binary: they are
+admitted into the bounded official path, or a future variant remains outside
+production in research/parked state.
+
 ## Current Active Runtime Event Registry
 
 The current active pre-trade runtime uses these Owner-confirmed StrategyGroup
@@ -210,6 +216,27 @@ Unsupported opposite sides are not dormant permissions. They are rejected
 runtime scope. A future unsupported side requires a new StrategyGroup or a
 versioned strategy variant with its own event spec, RequiredFacts, scope,
 policy, protection, and negative tests.
+
+### Production Lane Identity And Admission
+
+The registry represents **22 active candidate lanes** across the five rows
+above and **6 versioned Event Specs**. Each current lane is
+`trial_grade_capable`, and each current Event Spec declares
+`trial_grade_signal + trial_live` with execution eligibility enabled.
+
+Before production evaluation, PG resolves one immutable lane identity:
+
+```text
+candidate scope + Event-Spec binding + Event Spec + runtime scope +
+runtime instance + current policy/profile
+```
+
+The identity's canonical direction, Event Spec, and timeframe are authoritative
+over evaluator output. Only the explicit `SOR-LONG` and `SOR-SHORT` bindings
+permit their respective directions. **CPM-RO-001 is long-only**; no CPM short
+scope is retained as a dormant, observe-only, or retryable production lane.
+Source: `PRE_TRADE_RUNTIME_CONTRACT.md`, migration **118**, and current PG
+registry seed.
 
 ### Event Meanings
 

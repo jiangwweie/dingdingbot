@@ -59,6 +59,7 @@ from src.application.action_time.runtime_pg_fact_snapshots import (
 from src.application.action_time.ticket_bound_fill_projector import (
     project_ticket_bound_exchange_fills,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 
 
 ACTIVE_CANDIDATE_SCOPES: tuple[tuple[str, str, str], ...] = (
@@ -1203,30 +1204,52 @@ def _insert_constructed_raw_input(
             {"event_spec_id": row["event_spec_id"]},
         ).mappings()
     }
+    runtime_instance_id = (
+        f"simulation:{row['strategy_group_id']}:{row['symbol']}:{row['side']}"
+    )
+    lane_identity = RuntimeLaneIdentity(
+        candidate_scope_id=str(row["candidate_scope_id"]),
+        candidate_scope_event_binding_id=str(
+            row["candidate_scope_event_binding_id"]
+        ),
+        runtime_scope_binding_id=str(row["runtime_scope_binding_id"]),
+        runtime_instance_id=runtime_instance_id,
+        runtime_profile_id=str(row["runtime_profile_id"]),
+        policy_current_id=str(row["policy_current_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        strategy_group_version_id=str(row["strategy_group_version_id"]),
+        symbol=str(row["symbol"]),
+        asset_class=str(row["asset_class"]),
+        side=str(row["side"]),
+        event_spec_id=str(row["event_spec_id"]),
+        event_spec_version=str(row["event_spec_version"]),
+        event_id=str(row["event_id"]),
+        timeframe=str(row["timeframe"]),
+        time_authority=str(row["time_authority"]),
+    )
     signal = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
         {
             "runtime_summaries": [
                 {
-                    "runtime_instance_id": (
-                        f"simulation:{row['strategy_group_id']}:"
-                        f"{row['symbol']}:{row['side']}"
-                    ),
+                    "runtime_instance_id": runtime_instance_id,
                     "strategy_family_id": row["strategy_group_id"],
                     "strategy_family_version_id": (
-                        f"sgv:{row['strategy_group_id']}:v1"
+                        f"simulation-evaluator:{row['strategy_group_id']}:v1"
                     ),
-                    "symbol": row["symbol"],
-                    "side": row["side"],
+                    "lane_identity": lane_identity.model_dump(mode="json"),
+                    "can_materialize_live_signal_event": True,
                     "status": "waiting_for_signal",
                     "signal_summary": {
                         "signal_type": "would_enter",
                         "signal_grade": "trial_grade_signal",
                         "required_execution_mode": "trial_live",
-                        "side": row["side"],
+                        "side": lane_identity.side,
                         "confidence": "0.90",
                         "reason_codes": ["simulation_producer_input"],
                         "trigger_candle_close_time_ms": event_time_ms,
-                        "time_authority": "trigger_candle_close_time_ms",
+                        "evaluated_at_ms": event_time_ms,
+                        "valid_until_ms": valid_until_ms,
+                        "time_authority": lane_identity.time_authority,
                         "fact_observations": [
                             {
                                 "fact_key": key,
@@ -1293,13 +1316,19 @@ def _candidate_runtime_row(
             SELECT c.candidate_scope_id,
                    c.strategy_group_id,
                    c.symbol,
+                   c.asset_class,
                    c.side,
                    c.policy_current_id,
                    c.priority_rank,
                    r.runtime_scope_binding_id,
                    r.runtime_profile_id,
                    b.event_spec_id,
+                   b.binding_id AS candidate_scope_event_binding_id,
+                   e.strategy_group_version_id,
+                   e.event_spec_version,
                    e.event_id,
+                   e.timeframe,
+                   e.time_authority,
                    e.protection_ref_type
             FROM brc_strategy_group_candidate_scope c
             JOIN brc_runtime_scope_bindings r

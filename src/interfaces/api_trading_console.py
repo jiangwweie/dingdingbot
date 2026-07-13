@@ -5646,14 +5646,16 @@ async def _runtime_next_attempt_observation_cycle_payload(
     request: RuntimeNextAttemptObservationCycleRequest,
 ) -> dict[str, Any]:
     from src.application.readmodels import runtime_strategy_signal_input as signal_builder
+    from src.application.runtime_lane_identity_service import (
+        RuntimeLaneIdentityResolutionError,
+    )
     from src.application.runtime_strategy_signal_evaluation_service import (
+        RuntimeLaneEventEvaluationStatus,
         RuntimeStrategySignalEvaluationService,
-        RuntimeStrategySignalEvaluationStatus,
     )
 
     runtime = await (await _strategy_runtime_service()).get_runtime(runtime_instance_id)
-    if request.symbol and request.symbol != runtime.symbol:
-        raise ValueError("signal symbol override must match runtime symbol")
+    _assert_runtime_observation_request_matches_runtime(runtime=runtime, request=request)
     owner_scope = _runtime_next_attempt_owner_scope(runtime, request)
     owner_flow_response = await _service(
         include_exchange=request.include_exchange,
@@ -5701,15 +5703,71 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "safety_invariants": _runtime_next_attempt_observation_safety(),
         }
 
+    try:
+        lane_resolution = await _resolve_runtime_lane_resolution(runtime=runtime)
+    except RuntimeLaneIdentityResolutionError as exc:
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "blocked",
+            "blocked_stage": "runtime_lane_identity",
+            "runtime_instance_id": runtime_instance_id,
+            "owner_action_scope": owner_scope,
+            "include_exchange": request.include_exchange,
+            "next_attempt_gate": next_attempt_gate,
+            "just_in_time_lifecycle_audit": jit_audit,
+            "signal_artifact": None,
+            "action_time_ticket": None,
+            "blockers": [exc.blocker],
+            "warnings": [],
+            "observation_cycle_plan": {
+                "next_step": "repair_runtime_lane_identity",
+                "not_executed": True,
+                "creates_action_time_ticket": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _runtime_next_attempt_observation_safety(),
+        }
+    lane_identity = lane_resolution.identity
+    runtime_identity_mismatches = _runtime_object_lane_identity_mismatches(
+        runtime=runtime,
+        lane_resolution=lane_resolution,
+    )
+    if runtime_identity_mismatches:
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "blocked",
+            "blocked_stage": "runtime_lane_identity",
+            "runtime_instance_id": runtime_instance_id,
+            "owner_action_scope": owner_scope,
+            "include_exchange": request.include_exchange,
+            "next_attempt_gate": next_attempt_gate,
+            "just_in_time_lifecycle_audit": jit_audit,
+            "signal_artifact": None,
+            "action_time_ticket": None,
+            "blockers": runtime_identity_mismatches,
+            "warnings": [],
+            "observation_cycle_plan": {
+                "next_step": "repair_runtime_lane_identity",
+                "not_executed": True,
+                "creates_action_time_ticket": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _runtime_next_attempt_observation_safety(),
+        }
+
     source = signal_builder.market_source(
         SimpleNamespace(
             source=request.source,
             timeout_seconds=request.timeout_seconds,
         )
     )
-    one_hour = source.latest_closed_candles(
+    primary_candles = source.latest_closed_candles(
         symbol=runtime.symbol,
-        timeframe="1h",
+        timeframe=lane_identity.timeframe,
         limit=request.one_hour_limit,
     )
     four_hour = source.latest_closed_candles(
@@ -5721,13 +5779,13 @@ async def _runtime_next_attempt_observation_cycle_payload(
     comparative_strength_snapshot = (
         await signal_builder.load_runtime_comparative_strength_snapshot(
             runtime=runtime,
-            trigger_candle_close_time_ms=int(one_hour[-1].close_time_ms),
+            trigger_candle_close_time_ms=int(primary_candles[-1].close_time_ms),
             now_ms=now_ms,
         )
     )
     signal_input = signal_builder.build_signal_input(
         runtime=runtime,
-        one_hour=one_hour,
+        one_hour=primary_candles,
         four_hour=four_hour,
         source_id=getattr(source, "source_id", "unknown_read_only_market_source"),
         source_type=getattr(source, "source_type", "read_only_market_source"),
@@ -5735,21 +5793,35 @@ async def _runtime_next_attempt_observation_cycle_payload(
         playbook_id=request.playbook_id,
         now_ms=now_ms,
         comparative_strength_snapshot=comparative_strength_snapshot,
+        primary_timeframe=lane_identity.timeframe,
     )
-    evaluation = RuntimeStrategySignalEvaluationService().evaluate(signal_input)
+    evaluation = RuntimeStrategySignalEvaluationService().evaluate_for_runtime_lane(
+        signal_input,
+        lane_identity=lane_identity,
+        freshness_window_ms=lane_resolution.freshness_window_ms,
+    )
     signal_artifact = {
         "scope": "runtime_next_attempt_observation_cycle_signal_artifact",
         "status": (
             "ready_for_action_time_ticket_materialization"
-            if evaluation.status
-            == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
-            else evaluation.status.value
+            if evaluation.status == RuntimeLaneEventEvaluationStatus.EVENT_SATISFIED
+            else (
+                "waiting_for_opportunity"
+                if evaluation.status
+                == RuntimeLaneEventEvaluationStatus.COMPUTED_NOT_SATISFIED
+                else "temporarily_unavailable"
+            )
         ),
-        "runtime_instance_id": runtime.runtime_instance_id,
-        "strategy_family_id": runtime.strategy_family_id,
-        "strategy_family_version_id": runtime.strategy_family_version_id,
-        "symbol": runtime.symbol,
-        "side": runtime.side,
+        "runtime_instance_id": lane_identity.runtime_instance_id,
+        "strategy_family_id": lane_identity.strategy_group_id,
+        "strategy_family_version_id": lane_resolution.evaluator_version_id,
+        "symbol": lane_identity.symbol,
+        "side": lane_identity.side,
+        "lane_identity": lane_identity.model_dump(mode="json"),
+        "lane_identity_key": lane_identity.identity_key,
+        "can_materialize_live_signal_event": (
+            evaluation.can_materialize_live_signal_event
+        ),
         "source": getattr(source, "source_id", "unknown_read_only_market_source"),
         "source_type": getattr(source, "source_type", "read_only_market_source"),
         "signal_input": signal_input.model_dump(mode="json"),
@@ -5766,14 +5838,11 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "withdrawal_or_transfer_created": False,
         },
     }
-    ready = (
-        evaluation.status
-        == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
-    )
-    if not ready:
+    ready = evaluation.can_materialize_live_signal_event
+    if evaluation.status == RuntimeLaneEventEvaluationStatus.BLOCKED:
         return {
             "scope": "runtime_next_attempt_observation_cycle_api",
-            "status": "waiting_for_signal",
+            "status": "temporarily_unavailable",
             "blocked_stage": "strategy_signal",
             "runtime_instance_id": runtime_instance_id,
             "owner_action_scope": owner_scope,
@@ -5782,10 +5851,34 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "just_in_time_lifecycle_audit": jit_audit,
             "signal_artifact": signal_artifact,
             "action_time_ticket": None,
-            "blockers": ["strategy_signal_not_ready_for_action_time_ticket"],
+            "blockers": list(evaluation.blockers),
             "warnings": list(evaluation.warnings),
             "observation_cycle_plan": {
-                "next_step": "observe_only_or_wait_for_next_closed_bar",
+                "next_step": "repair_runtime_signal_input_or_event_scope",
+                "not_executed": True,
+                "creates_action_time_ticket": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _runtime_next_attempt_observation_safety(),
+        }
+    if not ready:
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "waiting_for_opportunity",
+            "blocked_stage": None,
+            "runtime_instance_id": runtime_instance_id,
+            "owner_action_scope": owner_scope,
+            "include_exchange": request.include_exchange,
+            "next_attempt_gate": next_attempt_gate,
+            "just_in_time_lifecycle_audit": jit_audit,
+            "signal_artifact": signal_artifact,
+            "action_time_ticket": None,
+            "blockers": [],
+            "warnings": list(evaluation.warnings),
+            "observation_cycle_plan": {
+                "next_step": "wait_for_next_event_spec_closed_bar",
                 "not_executed": True,
                 "creates_action_time_ticket": False,
                 "creates_execution_intent": False,
@@ -5831,6 +5924,67 @@ async def _runtime_next_attempt_observation_cycle_payload(
     }
 
 
+async def _resolve_runtime_lane_resolution(*, runtime: Any) -> Any:
+    """Resolve the active PG lane on the API boundary without file fallback."""
+
+    from src.application.runtime_lane_identity_service import RuntimeLaneIdentityService
+    from src.infrastructure.database import get_pg_engine
+
+    async with get_pg_engine().connect() as conn:
+        return await conn.run_sync(
+            lambda sync_conn: RuntimeLaneIdentityService().resolve(
+                sync_conn,
+                runtime_instance_id=str(runtime.runtime_instance_id),
+            )
+        )
+
+
+def _assert_runtime_observation_request_matches_runtime(
+    *,
+    runtime: StrategyRuntimeInstance,
+    request: RuntimeNextAttemptObservationCycleRequest,
+) -> None:
+    expected_symbol = _normalized_runtime_symbol(runtime.symbol)
+    if request.symbol and _normalized_runtime_symbol(request.symbol) != expected_symbol:
+        raise ValueError("signal symbol override must match runtime symbol")
+    if request.side and request.side.lower() != str(runtime.side).lower():
+        raise ValueError("signal side override must match runtime side")
+    if request.family and request.family != runtime.strategy_family_id:
+        raise ValueError("signal family override must match runtime strategy group")
+    if (
+        request.strategy_family_id
+        and request.strategy_family_id != runtime.strategy_family_id
+    ):
+        raise ValueError("strategy family override must match runtime strategy group")
+    expected_carrier = runtime.carrier_id or runtime.strategy_family_version_id
+    if request.carrier_id and request.carrier_id != expected_carrier:
+        raise ValueError("carrier override must match runtime evaluator version")
+
+
+def _runtime_object_lane_identity_mismatches(
+    *,
+    runtime: StrategyRuntimeInstance,
+    lane_resolution: Any,
+) -> list[str]:
+    identity = lane_resolution.identity
+    mismatches: list[str] = []
+    if runtime.runtime_instance_id != identity.runtime_instance_id:
+        mismatches.append("runtime_lane_identity_mismatch:runtime_instance_id")
+    if runtime.strategy_family_id != identity.strategy_group_id:
+        mismatches.append("runtime_lane_identity_mismatch:strategy_group_id")
+    if _normalized_runtime_symbol(runtime.symbol) != identity.symbol:
+        mismatches.append("runtime_lane_identity_mismatch:symbol")
+    if str(runtime.side).lower() != identity.side:
+        mismatches.append("runtime_lane_identity_mismatch:side")
+    if runtime.strategy_family_version_id != lane_resolution.evaluator_version_id:
+        mismatches.append("runtime_lane_identity_mismatch:evaluator_version_id")
+    return sorted(dict.fromkeys(mismatches))
+
+
+def _normalized_runtime_symbol(value: str) -> str:
+    return str(value or "").upper().split(":", 1)[0].replace("/", "")
+
+
 def _runtime_next_attempt_owner_scope(
     runtime: StrategyRuntimeInstance,
     request: RuntimeNextAttemptObservationCycleRequest,
@@ -5839,14 +5993,11 @@ def _runtime_next_attempt_owner_scope(
     return {
         key: value
         for key, value in {
-            "symbol": request.symbol or runtime.symbol,
-            "side": request.side or runtime.side,
-            "family": request.family,
-            "strategy_family_id": request.strategy_family_id
-            or runtime.strategy_family_id,
-            "carrier_id": request.carrier_id
-            or runtime.carrier_id
-            or runtime.strategy_family_version_id,
+            "symbol": runtime.symbol,
+            "side": runtime.side,
+            "family": runtime.strategy_family_id,
+            "strategy_family_id": runtime.strategy_family_id,
+            "carrier_id": runtime.carrier_id or runtime.strategy_family_version_id,
             "quantity": request.quantity,
             "target_notional_usdt": request.target_notional_usdt,
             "max_notional": request.max_notional

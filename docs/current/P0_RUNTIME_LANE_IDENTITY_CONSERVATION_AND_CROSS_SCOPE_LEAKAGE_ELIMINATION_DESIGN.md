@@ -1,6 +1,6 @@
 ---
 title: P0_RUNTIME_LANE_IDENTITY_CONSERVATION_AND_CROSS_SCOPE_LEAKAGE_ELIMINATION_DESIGN
-status: PROPOSED_FOR_OWNER_CONFIRMATION
+status: IMPLEMENTED_LOCAL_VERIFIED_PENDING_TOKYO_DEPLOY
 authority: docs/current/P0_RUNTIME_LANE_IDENTITY_CONSERVATION_AND_CROSS_SCOPE_LEAKAGE_ELIMINATION_DESIGN.md
 last_verified: 2026-07-13
 ---
@@ -42,6 +42,23 @@ The implementation must not:
 - expand symbol, side, profile, leverage, notional, capital, or submit authority;
 - create a second JSON/Markdown authority path;
 - add a broad `SignalDisposition` lifecycle model.
+
+## Execution State
+
+The Owner confirmed this design before implementation. Local implementation is
+complete and verified; Tokyo rollout and the bounded runtime smoke remain
+pending at this document revision.
+
+| Verification surface | Local result | Remaining boundary |
+| --- | --- | --- |
+| Runtime identity transport | Immutable typed identity is carried from PG resolution through signal, promotion, action-time lane, and Ticket | Verify the same path against Tokyo PG after migration `118` |
+| Cross-scope rejection | Wrong side/symbol/Event-Spec/timeframe materialization is fail-closed and cannot create a false lane | Observe three production watcher/monitor ticks |
+| Known CPM short incident | Migration reconciles the legacy false process outcome without creating a CPM short lane | Confirm no new false outcome or notification on Tokyo |
+| Regression and cadence safety | `3001 passed, 1 skipped`; production file-I/O audit is `clear` with zero recurring JSON/MD report-file risk | Natural eligible event remains the next live acceptance proof |
+
+This state does not expand StrategyGroup, symbol, side, profile, leverage,
+notional, capital, or exchange-write authority. FinalGate and Operation Layer
+remain mandatory for every real order.
 
 ## Owner Confirmation Scope
 

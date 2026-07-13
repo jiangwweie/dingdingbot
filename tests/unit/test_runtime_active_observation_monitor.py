@@ -10,6 +10,52 @@ import sqlalchemy as sa
 from scripts import runtime_active_observation_monitor
 
 
+def test_cpm_long_lane_rejects_nested_short_output_without_materialization() -> None:
+    summary = {
+        "runtime_instance_id": "strategy-runtime-cpm-sol-long",
+        "strategy_family_id": "CPM-RO-001",
+        "strategy_family_version_id": "sgv:CPM-RO-001:v2",
+        "symbol": "SOLUSDT",
+        "side": "long",
+        "status": "waiting_for_signal",
+        "lane_identity": {
+            "candidate_scope_id": "scope:CPM-RO-001:SOLUSDT:long",
+            "candidate_scope_event_binding_id": (
+                "binding:scope:CPM-RO-001:SOLUSDT:long:event:CPM-LONG:v2"
+            ),
+            "runtime_scope_binding_id": (
+                "runtime_scope:scope:CPM-RO-001:SOLUSDT:long:pilot"
+            ),
+            "runtime_instance_id": "strategy-runtime-cpm-sol-long",
+            "runtime_profile_id": "runtime-profile:pilot",
+            "policy_current_id": "policy:CPM-RO-001:SOLUSDT:long",
+            "strategy_group_id": "CPM-RO-001",
+            "strategy_group_version_id": "sgv:CPM-RO-001:v2",
+            "symbol": "SOLUSDT",
+            "asset_class": "crypto_perpetual",
+            "side": "long",
+            "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
+            "event_spec_version": "v2",
+            "event_id": "CPM-LONG",
+            "timeframe": "1h",
+            "time_authority": "trigger_candle_close_time_ms",
+        },
+        "can_materialize_live_signal_event": False,
+        "signal_summary": {
+            "signal_type": "would_enter",
+            "side": "short",
+            "computed_not_satisfied": True,
+        },
+    }
+
+    candidates = runtime_active_observation_monitor._live_signal_candidates_from_summaries(
+        [summary]
+    )
+
+    assert candidates == []
+    assert summary["lane_identity"]["side"] == "long"
+
+
 class _FakeClient:
     def __init__(self, items):
         self.items = items
@@ -124,6 +170,114 @@ def _runtime(
     return payload
 
 
+def _legacy_writer_lane_identity(summary: dict) -> dict:
+    """Make legacy writer fixtures explicit about the now-required PG lane."""
+
+    strategy_group_id = str(summary["strategy_family_id"])
+    symbol = str(summary["symbol"]).upper().split(":", 1)[0].replace("/", "")
+    side = str(summary["side"])
+    event = {
+        "MPG-001": ("event-mpg-long", "MPG-LONG", "v1", "sgv:MPG-001:v2", "1h"),
+        "CPM-RO-001": (
+            "event_spec:CPM-RO-001:CPM-LONG:v2",
+            "CPM-LONG",
+            "v2",
+            "sgv:CPM-RO-001:v2",
+            "1h",
+        ),
+    }[strategy_group_id]
+    event_spec_id, event_id, event_spec_version, group_version, timeframe = event
+    candidate_scope_id = (
+        "scope-mpg-op-long"
+        if strategy_group_id == "MPG-001"
+        else f"scope:{strategy_group_id}:{symbol}:{side}"
+    )
+    return {
+        "candidate_scope_id": candidate_scope_id,
+        "candidate_scope_event_binding_id": f"binding:{candidate_scope_id}:{event_spec_id}",
+        "runtime_scope_binding_id": f"runtime_scope:{candidate_scope_id}",
+        "runtime_instance_id": str(summary["runtime_instance_id"]),
+        "runtime_profile_id": "runtime-profile:pilot",
+        "policy_current_id": f"policy:{strategy_group_id}:{symbol}:{side}",
+        "strategy_group_id": strategy_group_id,
+        "strategy_group_version_id": group_version,
+        "symbol": symbol,
+        "asset_class": "crypto_perpetual",
+        "side": side,
+        "event_spec_id": event_spec_id,
+        "event_spec_version": event_spec_version,
+        "event_id": event_id,
+        "timeframe": timeframe,
+        "time_authority": "trigger_candle_close_time_ms",
+    }
+
+
+def _legacy_writer_artifact_with_explicit_lane_identity(artifact: dict) -> dict:
+    summaries: list[dict] = []
+    for raw_summary in artifact.get("runtime_summaries") or []:
+        if not isinstance(raw_summary, dict):
+            summaries.append(raw_summary)
+            continue
+        summary = dict(raw_summary)
+        signal = summary.get("signal_summary")
+        if (
+            isinstance(signal, dict)
+            and signal.get("signal_type") == "would_enter"
+            and "lane_identity" not in summary
+        ):
+            summary["lane_identity"] = _legacy_writer_lane_identity(summary)
+            summary["can_materialize_live_signal_event"] = True
+            trigger_candle_close_time_ms = int(
+                signal.get("trigger_candle_close_time_ms")
+                or signal.get("timestamp_ms")
+                or 1_000
+            )
+            summary["signal_summary"] = {
+                **signal,
+                "evaluated_at_ms": trigger_candle_close_time_ms,
+                "valid_until_ms": trigger_candle_close_time_ms + 3_600_000,
+            }
+        summaries.append(summary)
+    return {**artifact, "runtime_summaries": summaries}
+
+
+@pytest.fixture(autouse=True)
+def _legacy_writer_fixtures_carry_explicit_lane_identity(monkeypatch):
+    """Keep old writer-focused fixtures on the new explicit input contract."""
+
+    writer = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg
+
+    def write_with_explicit_identity(artifact: dict, *args, **kwargs):
+        return writer(
+            _legacy_writer_artifact_with_explicit_lane_identity(artifact),
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        runtime_active_observation_monitor,
+        "write_runtime_signal_summaries_to_pg",
+        write_with_explicit_identity,
+    )
+
+
+def test_live_signal_candidate_requires_explicit_complete_lane_identity() -> None:
+    candidates = runtime_active_observation_monitor._live_signal_candidates_from_summaries(
+        [
+            {
+                "runtime_instance_id": "runtime-mpg-op",
+                "strategy_family_id": "MPG-001",
+                "symbol": "OPUSDT",
+                "side": "long",
+                "can_materialize_live_signal_event": True,
+                "signal_summary": {"signal_type": "would_enter", "side": "long"},
+            }
+        ]
+    )
+
+    assert candidates == []
+
+
 def test_signal_summary_preserves_typed_fact_observations():
     fact_observations = [
         {
@@ -164,6 +318,47 @@ def test_signal_summary_preserves_typed_fact_observations():
     summary = runtime_active_observation_monitor._signal_summary(artifact)
 
     assert summary["fact_observations"] == fact_observations
+
+
+def test_runtime_summary_copies_api_lane_identity_without_runtime_side_fallback():
+    identity = {
+        "candidate_scope_id": "scope:CPM-RO-001:SOLUSDT:long",
+        "candidate_scope_event_binding_id": "binding:CPM-RO-001:SOLUSDT:long:CPM-LONG",
+        "runtime_scope_binding_id": "runtime_scope:CPM-RO-001:SOLUSDT:long",
+        "runtime_instance_id": "runtime-cpm-sol-long",
+        "runtime_profile_id": "runtime-profile:pilot",
+        "policy_current_id": "policy:CPM-RO-001:SOLUSDT:long",
+        "strategy_group_id": "CPM-RO-001",
+        "strategy_group_version_id": "sgv:CPM-RO-001:v2",
+        "symbol": "SOLUSDT",
+        "asset_class": "crypto_perpetual",
+        "side": "long",
+        "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
+        "event_spec_version": "v2",
+        "event_id": "CPM-LONG",
+        "timeframe": "1h",
+        "time_authority": "trigger_candle_close_time_ms",
+    }
+    summary = runtime_active_observation_monitor._summary(
+        _runtime("runtime-cpm-sol-long", side="short", strategy_family_id="legacy"),
+        {
+            "status": "waiting_for_opportunity",
+            "signal_artifact": {
+                "lane_identity": identity,
+                "can_materialize_live_signal_event": False,
+                "evaluation_result": {
+                    "status": "computed_not_satisfied",
+                    "signal": None,
+                },
+            },
+        },
+    )
+
+    assert summary["lane_identity"] == identity
+    assert summary["can_materialize_live_signal_event"] is False
+    assert summary["strategy_family_id"] == "CPM-RO-001"
+    assert summary["symbol"] == "SOLUSDT"
+    assert summary["side"] == "long"
 
 
 def test_active_monitor_runs_only_active_runtimes_without_side_effects(tmp_path):
@@ -1477,7 +1672,13 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
                     SELECT strategy_group_id, symbol, side, status, freshness_state,
                            fact_snapshot_id, signal_type, signal_payload,
                            signal_grade, required_execution_mode,
-                           execution_eligible, authority_source_ref
+                           execution_eligible, authority_source_ref,
+                           candidate_scope_event_binding_id,
+                           runtime_scope_binding_id, runtime_instance_id,
+                           runtime_profile_id, policy_current_id,
+                           strategy_group_version_id, asset_class,
+                           event_spec_version, event_id, timeframe,
+                           time_authority, lane_identity_key, source_watermark
                     FROM brc_live_signal_events
                     """
                 )
@@ -1496,7 +1697,44 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
         engine.dispose()
 
     actual = dict(row)
+    assert {
+        key: actual.pop(key)
+        for key in (
+            "candidate_scope_event_binding_id",
+            "runtime_scope_binding_id",
+            "runtime_instance_id",
+            "runtime_profile_id",
+            "policy_current_id",
+            "strategy_group_version_id",
+            "asset_class",
+            "event_spec_version",
+            "event_id",
+            "timeframe",
+            "time_authority",
+            "source_watermark",
+        )
+    } == {
+        "candidate_scope_event_binding_id": "binding:scope-mpg-op-long:event-mpg-long",
+        "runtime_scope_binding_id": "runtime_scope:scope-mpg-op-long",
+        "runtime_instance_id": "runtime-mpg-op",
+        "runtime_profile_id": "runtime-profile:pilot",
+        "policy_current_id": "policy:MPG-001:OPUSDT:long",
+        "strategy_group_version_id": "sgv:MPG-001:v2",
+        "asset_class": "crypto_perpetual",
+        "event_spec_version": "v1",
+        "event_id": "MPG-LONG",
+        "timeframe": "1h",
+        "time_authority": "trigger_candle_close_time_ms",
+        "source_watermark": "runtime-mpg-op:1000",
+    }
+    assert actual.pop("lane_identity_key").startswith("runtime_lane:")
     actual["signal_payload"] = json.loads(str(actual["signal_payload"]))
+    assert actual["signal_payload"]["lane_identity"]["strategy_group_id"] == "MPG-001"
+    assert actual["signal_payload"]["lane_identity"]["symbol"] == "OPUSDT"
+    assert actual["signal_payload"]["lane_identity"]["side"] == "long"
+    assert actual["signal_payload"]["lane_identity_key"].startswith("runtime_lane:")
+    actual["signal_payload"].pop("lane_identity")
+    actual["signal_payload"].pop("lane_identity_key")
     assert actual == {
         "strategy_group_id": "MPG-001",
         "symbol": "OPUSDT",
@@ -1518,11 +1756,13 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
             "event_time_authority_ref": "trigger_candle_close_time_ms",
             "signal_summary": {
                 "confidence": "0.72",
+                "evaluated_at_ms": 1000,
                 "reason_codes": ["unit_ready"],
                 "side": "long",
                 "signal_type": "would_enter",
                 "timestamp_ms": 1000,
                 "trigger_candle_close_time_ms": 1000,
+                "valid_until_ms": 3601000,
             },
             "source": "runtime_active_observation_monitor",
             "strategy_family_version_id": "MPG-001:v1",
@@ -2691,7 +2931,20 @@ def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
             CREATE TABLE brc_live_signal_events (
               signal_event_id TEXT PRIMARY KEY,
               candidate_scope_id TEXT,
+              candidate_scope_event_binding_id TEXT,
+              runtime_scope_binding_id TEXT,
+              runtime_instance_id TEXT,
+              runtime_profile_id TEXT,
+              policy_current_id TEXT,
+              strategy_group_version_id TEXT,
+              asset_class TEXT,
               event_spec_id TEXT,
+              event_spec_version TEXT,
+              event_id TEXT,
+              timeframe TEXT,
+              time_authority TEXT,
+              lane_identity_key TEXT,
+              source_watermark TEXT,
               strategy_group_id TEXT,
               symbol TEXT,
               side TEXT,

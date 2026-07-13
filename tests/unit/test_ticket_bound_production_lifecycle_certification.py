@@ -132,6 +132,8 @@ def test_different_natural_signal_identity_is_exact_acceptance_event():
                     "source_kind": "live_market",
                     "status": "facts_validated",
                     "freshness_state": "fresh",
+                    "execution_eligible": True,
+                    "required_execution_mode": "trial_live",
                 }
             ],
             "runtime_process_outcomes": [],

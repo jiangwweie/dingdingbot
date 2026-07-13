@@ -16,6 +16,7 @@ from src.application.runtime_process_outcome import (
     materialize_runtime_process_outcome,
     runtime_process_exit_code,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 
 
 def test_action_time_stage_timeout_is_retryable_engineering_failure():
@@ -40,6 +41,7 @@ FOUNDATION = REPO_ROOT / "migrations/versions/2026-07-04-086_create_pg_runtime_c
 MIGRATION_104 = REPO_ROOT / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
 MIGRATION_105 = REPO_ROOT / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
 MIGRATION_106 = REPO_ROOT / "migrations/versions/2026-07-10-106_create_runtime_supervision_and_allocation.py"
+MIGRATION_118 = REPO_ROOT / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
 
 
 def test_valid_no_fresh_signal_is_business_noop_not_process_failure():
@@ -198,6 +200,122 @@ def test_migration_106_creates_supervision_semantics_and_allocation_tables():
             "allocated_risk_at_stop",
             "allocation_state",
         } <= promotion_columns
+    engine.dispose()
+
+
+def test_runtime_lane_process_outcome_uses_typed_identity_and_source_watermark():
+    modules = [
+        _load(FOUNDATION, "migration_086_lane_outcome"),
+        _load(MIGRATION_104, "migration_104_lane_outcome"),
+        _load(MIGRATION_105, "migration_105_lane_outcome"),
+        _load(MIGRATION_106, "migration_106_lane_outcome"),
+        _load(MIGRATION_118, "migration_118_lane_outcome"),
+    ]
+    identity = RuntimeLaneIdentity(
+        candidate_scope_id="scope:CPM-RO-001:SOLUSDT:long",
+        candidate_scope_event_binding_id="binding:CPM-RO-001:SOLUSDT:long:CPM-LONG",
+        runtime_scope_binding_id="runtime_scope:CPM-RO-001:SOLUSDT:long",
+        runtime_instance_id="runtime-cpm-sol-long",
+        runtime_profile_id="runtime-profile:pilot",
+        policy_current_id="policy:CPM-RO-001:SOLUSDT:long",
+        strategy_group_id="CPM-RO-001",
+        strategy_group_version_id="sgv:CPM-RO-001:v2",
+        symbol="SOLUSDT",
+        asset_class="crypto_perpetual",
+        side="long",
+        event_spec_id="event_spec:CPM-RO-001:CPM-LONG:v2",
+        event_spec_version="v2",
+        event_id="CPM-LONG",
+        timeframe="1h",
+        time_authority="trigger_candle_close_time_ms",
+    )
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        operations = Operations(MigrationContext.configure(conn))
+        for module in modules:
+            old_op = module.op
+            module.op = operations
+            try:
+                module.upgrade()
+            finally:
+                module.op = old_op
+
+        first = materialize_runtime_process_outcome(
+            conn,
+            process_name="live_signal_materialization",
+            scope_key=None,
+            lane_identity=identity,
+            run_id="lane-run-1",
+            result_status="live_signal_materialization_completed",
+            blockers=[],
+            started_at_ms=100,
+            completed_at_ms=120,
+            runtime_head="head-1",
+            source_watermark="runtime-cpm-sol-long:100",
+        )
+        duplicate = materialize_runtime_process_outcome(
+            conn,
+            process_name="live_signal_materialization",
+            scope_key=None,
+            lane_identity=identity,
+            run_id="lane-run-2",
+            result_status="live_signal_materialization_completed",
+            blockers=[],
+            started_at_ms=200,
+            completed_at_ms=220,
+            runtime_head="head-1",
+            source_watermark="runtime-cpm-sol-long:100",
+        )
+        second_watermark = materialize_runtime_process_outcome(
+            conn,
+            process_name="live_signal_materialization",
+            scope_key=None,
+            lane_identity=identity,
+            run_id="lane-run-3",
+            result_status="live_signal_materialization_completed",
+            blockers=[],
+            started_at_ms=300,
+            completed_at_ms=320,
+            runtime_head="head-1",
+            source_watermark="runtime-cpm-sol-long:200",
+        )
+
+        assert first["process_outcome_id"] == duplicate["process_outcome_id"]
+        assert first["process_outcome_id"] != second_watermark["process_outcome_id"]
+        rows = list(
+            conn.execute(
+                sa.text(
+                    """
+                    SELECT scope_kind, candidate_scope_id,
+                           candidate_scope_event_binding_id, runtime_scope_binding_id,
+                           runtime_instance_id, strategy_group_version_id,
+                           event_spec_version, event_id, timeframe, lane_identity_key,
+                           source_watermark, run_id
+                    FROM brc_runtime_process_outcomes
+                    ORDER BY source_watermark
+                    """
+                )
+            ).mappings()
+        )
+        assert len(rows) == 2
+        assert dict(rows[0]) == {
+            "scope_kind": "runtime_lane",
+            "candidate_scope_id": identity.candidate_scope_id,
+            "candidate_scope_event_binding_id": identity.candidate_scope_event_binding_id,
+            "runtime_scope_binding_id": identity.runtime_scope_binding_id,
+            "runtime_instance_id": identity.runtime_instance_id,
+            "strategy_group_version_id": identity.strategy_group_version_id,
+            "event_spec_version": identity.event_spec_version,
+            "event_id": identity.event_id,
+            "timeframe": identity.timeframe,
+            "lane_identity_key": identity.identity_key,
+            "source_watermark": "runtime-cpm-sol-long:100",
+            "run_id": "lane-run-2",
+        }
     engine.dispose()
 
 

@@ -44,6 +44,7 @@ from src.application.action_time.ticket_materialization_sequence import (
 from src.application.action_time.runtime_pg_fact_snapshots import (
     write_account_safe_fact_snapshots,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 from src.interfaces import api as trading_api_module
 from src.interfaces import api_trading_console
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
@@ -132,6 +133,10 @@ LIFECYCLE_COMMAND_EXTENSION_MIGRATION_PATH = (
 DYNAMIC_RISK_POLICY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
+LANE_IDENTITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
@@ -602,6 +607,10 @@ def pg_control_connection():
             (
                 DYNAMIC_RISK_POLICY_MIGRATION_PATH,
                 "migration_115_action_time_full_chain",
+            ),
+            (
+                LANE_IDENTITY_MIGRATION_PATH,
+                "migration_118_action_time_full_chain",
             ),
         ):
             extension = _load_module(path, module_name)
@@ -1397,12 +1406,10 @@ def test_raw_pg_input_for_unsupported_side_is_rejected_before_signal_creation(
         side=unsupported_side,
     )
 
-    assert signal_payload["status"] == "pg_live_signal_events_blocked"
+    assert signal_payload["status"] == "pg_live_signal_events_noop"
     assert signal_payload["written_count"] == 0
     assert signal_payload["signal_event_ids"] == []
-    assert [
-        item["blocker"] for item in signal_payload["skipped"]
-    ] == ["candidate_scope_event_binding_missing"]
+    assert signal_payload["reason"] == "would_enter_signal_summary_missing"
     assert _count(pg_control_connection, "brc_live_signal_events") == 0
 
     fact_payload = fact_materializer.materialize_action_time_fact_snapshots(
@@ -1568,7 +1575,7 @@ def _run_raw_pg_input_to_runtime_safety(
         signal_summary=signal_summary,
         fact_values=semantic_fact_values,
     )
-    assert signal_payload["status"] == "pg_live_signal_events_written"
+    assert signal_payload["status"] == "pg_live_signal_events_written", signal_payload
     assert signal_payload["written_count"] == 1
     conn.execute(text("DELETE FROM brc_pretrade_readiness_rows"))
 
@@ -1778,24 +1785,112 @@ def _write_monitor_signal_summary_to_pg(
                 if key in observed_values
             ],
         }
+    summary = dict(summary)
+    if summary.get("evaluated_at_ms") is None:
+        summary["evaluated_at_ms"] = NOW_MS - 60_000
+    if summary.get("valid_until_ms") is None:
+        summary["valid_until_ms"] = NOW_MS + 600_000
+    lane_identity = _runtime_lane_identity_for_registered_scope(
+        conn,
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+    )
+    runtime_instance_id = (
+        lane_identity.runtime_instance_id
+        if lane_identity is not None
+        else f"unregistered:{strategy_group_id}:{symbol}:{side}"
+    )
+    runtime_summary = {
+        "runtime_instance_id": runtime_instance_id,
+        "strategy_family_id": strategy_group_id,
+        "strategy_family_version_id": f"test-evaluator:{strategy_group_id}:v1",
+        "status": "waiting_for_signal",
+        "signal_summary": summary,
+        "can_materialize_live_signal_event": lane_identity is not None,
+    }
+    if lane_identity is not None:
+        runtime_summary["lane_identity"] = lane_identity.model_dump(mode="json")
     return runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
         {
-            "runtime_summaries": [
-                {
-                    "runtime_instance_id": f"runtime:{strategy_group_id}:{symbol}:{side}",
-                    "strategy_family_id": strategy_group_id,
-                    "strategy_family_version_id": f"sgv:{strategy_group_id}:v1",
-                    "symbol": symbol,
-                    "side": side,
-                    "status": "waiting_for_signal",
-                    "signal_summary": summary,
-                }
-            ],
+            "runtime_summaries": [runtime_summary],
         },
         database_url="unused://pg-control-test",
         allow_non_postgres_for_test=True,
         now_ms=NOW_MS,
         conn=conn,
+    )
+
+
+def _runtime_lane_identity_for_registered_scope(
+    conn,
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> RuntimeLaneIdentity | None:
+    row = conn.execute(
+        text(
+            """
+            SELECT c.candidate_scope_id,
+                   c.strategy_group_id,
+                   c.symbol,
+                   c.asset_class,
+                   c.side,
+                   c.policy_current_id,
+                   r.runtime_scope_binding_id,
+                   r.runtime_profile_id,
+                   b.binding_id AS candidate_scope_event_binding_id,
+                   b.event_spec_id,
+                   e.strategy_group_version_id,
+                   e.event_spec_version,
+                   e.event_id,
+                   e.timeframe,
+                   e.time_authority
+            FROM brc_strategy_group_candidate_scope c
+            JOIN brc_runtime_scope_bindings r
+              ON r.candidate_scope_id = c.candidate_scope_id
+             AND r.status = 'active'
+            JOIN brc_candidate_scope_event_bindings b
+              ON b.candidate_scope_id = c.candidate_scope_id
+             AND b.status = 'active'
+            JOIN brc_strategy_side_event_specs e
+              ON e.event_spec_id = b.event_spec_id
+             AND e.status = 'current'
+            WHERE c.strategy_group_id = :strategy_group_id
+              AND c.symbol = :symbol
+              AND c.side = :side
+              AND c.status = 'active'
+            """
+        ),
+        {
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+        },
+    ).mappings().one_or_none()
+    if row is None:
+        return None
+    runtime_instance_id = f"test-runtime:{row['candidate_scope_id']}"
+    return RuntimeLaneIdentity(
+        candidate_scope_id=str(row["candidate_scope_id"]),
+        candidate_scope_event_binding_id=str(
+            row["candidate_scope_event_binding_id"]
+        ),
+        runtime_scope_binding_id=str(row["runtime_scope_binding_id"]),
+        runtime_instance_id=runtime_instance_id,
+        runtime_profile_id=str(row["runtime_profile_id"]),
+        policy_current_id=str(row["policy_current_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        strategy_group_version_id=str(row["strategy_group_version_id"]),
+        symbol=str(row["symbol"]),
+        asset_class=str(row["asset_class"]),
+        side=str(row["side"]),
+        event_spec_id=str(row["event_spec_id"]),
+        event_spec_version=str(row["event_spec_version"]),
+        event_id=str(row["event_id"]),
+        timeframe=str(row["timeframe"]),
+        time_authority=str(row["time_authority"]),
     )
 
 

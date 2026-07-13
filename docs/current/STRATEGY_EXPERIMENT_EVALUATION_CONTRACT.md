@@ -2,7 +2,7 @@
 title: STRATEGY_EXPERIMENT_EVALUATION_CONTRACT
 status: CURRENT
 authority: docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md
-last_verified: 2026-07-10
+last_verified: 2026-07-13
 ---
 
 # Strategy Experiment Evaluation Contract
@@ -135,6 +135,31 @@ Examples include wrong account or profile, stale action-time facts, missing
 protection, duplicate-submit risk, conflicting exposure, FinalGate bypass,
 Operation Layer bypass, exchange-write bypass, withdrawal or transfer,
 credential mutation, and order-sizing expansion.
+
+### Current Production Admission Boundary
+
+For the five currently admitted StrategyGroups, `observe_only_signal` may
+describe research evidence or a fail-closed evaluator result, but it must not
+become a durable production governance tier. The production decision is binary:
+
+```text
+research / Replay
+-> admit the versioned StrategyGroup + Event Spec scope
+or do not admit it
+
+admitted + enabled
+-> runtime scans the scope
+-> matching event may continue through the official bounded path
+```
+
+An admitted watcher remains non-executing and cannot call an exchange directly.
+That is an implementation safety boundary, not a reason to keep the StrategyGroup
+in an indefinite observe-only probation. Active admission requires machine
+evidence of `trial_grade_capable`, `trial_grade_signal`, `trial_live`, and
+enabled execution eligibility. This distinction preserves research freedom
+without allowing a generic detector result to invent a live direction or
+Event-Spec scope. Source: `PRE_TRADE_RUNTIME_CONTRACT.md` and the StrategyGroup
+registry contract.
 
 ## Return Target Semantics
 

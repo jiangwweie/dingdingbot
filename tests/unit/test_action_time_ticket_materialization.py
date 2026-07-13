@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
 
 from scripts import materialize_action_time_ticket as ticket_materializer
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
 )
@@ -739,13 +740,18 @@ def _insert_action_time_lane_graph(
             SELECT c.candidate_scope_id,
                    c.strategy_group_id,
                    c.symbol,
+                   c.asset_class,
                    c.side,
                    c.policy_current_id,
                    r.runtime_scope_binding_id,
                    r.runtime_profile_id,
                    b.event_spec_id,
+                   b.binding_id AS candidate_scope_event_binding_id,
                    e.event_id,
                    e.strategy_group_version_id,
+                   e.event_spec_version,
+                   e.timeframe,
+                   e.time_authority,
                    e.protection_ref_type
             FROM brc_strategy_group_candidate_scope c
             JOIN brc_runtime_scope_bindings r
@@ -779,6 +785,33 @@ def _insert_action_time_lane_graph(
     expires_at_ms = NOW_MS + 600_000
     signal_grade = "trial_grade_signal" if execution_eligible else "observe_only_signal"
     required_execution_mode = "trial_live" if execution_eligible else "observe_only"
+    has_runtime_lane_identity = _has_runtime_lane_identity_schema(conn)
+    runtime_instance_id = f"test-runtime:{row['candidate_scope_id']}"
+    lane_identity = (
+        RuntimeLaneIdentity(
+            candidate_scope_id=str(row["candidate_scope_id"]),
+            candidate_scope_event_binding_id=str(
+                row["candidate_scope_event_binding_id"]
+            ),
+            runtime_scope_binding_id=str(row["runtime_scope_binding_id"]),
+            runtime_instance_id=runtime_instance_id,
+            runtime_profile_id=str(row["runtime_profile_id"]),
+            policy_current_id=str(row["policy_current_id"]),
+            strategy_group_id=str(row["strategy_group_id"]),
+            strategy_group_version_id=str(row["strategy_group_version_id"]),
+            symbol=str(row["symbol"]),
+            asset_class=str(row["asset_class"]),
+            side=str(row["side"]),
+            event_spec_id=str(row["event_spec_id"]),
+            event_spec_version=str(row["event_spec_version"]),
+            event_id=str(row["event_id"]),
+            timeframe=str(row["timeframe"]),
+            time_authority=str(row["time_authority"]),
+        )
+        if has_runtime_lane_identity
+        else None
+    )
+    source_watermark = f"{runtime_instance_id}:{NOW_MS - 60_000}"
     if execution_eligible:
         conn.execute(
             text(
@@ -949,56 +982,115 @@ def _insert_action_time_lane_graph(
         observed_at_ms=NOW_MS - 3_000,
         valid_until_ms=expires_at_ms,
     )
-    conn.execute(
-        text(
-            """
-            INSERT INTO brc_live_signal_events (
-              signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
-              symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
-              confidence, fact_snapshot_id, reason_codes, signal_payload,
-              event_time_ms, trigger_candle_close_time_ms, observed_at_ms,
-              expires_at_ms, invalidated_at_ms, created_at_ms,
-              signal_grade, required_execution_mode, execution_eligible,
-              authority_source_ref
-            ) VALUES (
-              :signal_event_id, :candidate_scope_id, :event_spec_id, :strategy_group_id,
-              :symbol, :side, :detector_key, :signal_type,
-              'live_market', 'facts_validated', 'fresh', 0.9, :fact_snapshot_id,
-              :reason_codes, :signal_payload, :event_time_ms,
-              :trigger_candle_close_time_ms, :observed_at_ms, :expires_at_ms,
-              NULL, :created_at_ms, :signal_grade, :required_execution_mode,
-              :execution_eligible, :authority_source_ref
-            )
-            """
-        ),
-        {
-            "signal_event_id": signal_event_id,
-            "candidate_scope_id": row["candidate_scope_id"],
-            "event_spec_id": row["event_spec_id"],
-            "strategy_group_id": row["strategy_group_id"],
-            "symbol": row["symbol"],
-            "side": row["side"],
-            "detector_key": f"detector:{strategy_group_id}:{side}",
-            "signal_type": row["event_id"],
-            "fact_snapshot_id": public_fact_id,
-            "reason_codes": _json(["unit_fresh_signal"]),
-            "signal_payload": _json(
-                {
-                    "time_authority": "trigger_candle_close_time_ms",
-                    "trigger_candle_close_time_ms": NOW_MS - 60_000,
-                }
+    signal_payload = {
+        "time_authority": "trigger_candle_close_time_ms",
+        "trigger_candle_close_time_ms": NOW_MS - 60_000,
+    }
+    if lane_identity is not None:
+        signal_payload.update(
+            {
+                "lane_identity": lane_identity.model_dump(mode="json"),
+                "lane_identity_key": lane_identity.identity_key,
+                "source_watermark": source_watermark,
+            }
+        )
+    signal_params = {
+        "signal_event_id": signal_event_id,
+        "candidate_scope_id": row["candidate_scope_id"],
+        "event_spec_id": row["event_spec_id"],
+        "strategy_group_id": row["strategy_group_id"],
+        "symbol": row["symbol"],
+        "side": row["side"],
+        "detector_key": f"detector:{strategy_group_id}:{side}",
+        "signal_type": row["event_id"],
+        "fact_snapshot_id": public_fact_id,
+        "reason_codes": _json(["unit_fresh_signal"]),
+        "signal_payload": _json(signal_payload),
+        "event_time_ms": NOW_MS - 60_000,
+        "trigger_candle_close_time_ms": NOW_MS - 60_000,
+        "observed_at_ms": NOW_MS - 55_000,
+        "expires_at_ms": expires_at_ms,
+        "created_at_ms": NOW_MS - 54_000,
+        "signal_grade": signal_grade,
+        "required_execution_mode": required_execution_mode,
+        "execution_eligible": execution_eligible,
+        "authority_source_ref": f"event-spec:{row['event_spec_id']}",
+    }
+    if lane_identity is None:
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_live_signal_events (
+                  signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
+                  symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
+                  confidence, fact_snapshot_id, reason_codes, signal_payload,
+                  event_time_ms, trigger_candle_close_time_ms, observed_at_ms,
+                  expires_at_ms, invalidated_at_ms, created_at_ms,
+                  signal_grade, required_execution_mode, execution_eligible,
+                  authority_source_ref
+                ) VALUES (
+                  :signal_event_id, :candidate_scope_id, :event_spec_id, :strategy_group_id,
+                  :symbol, :side, :detector_key, :signal_type,
+                  'live_market', 'facts_validated', 'fresh', 0.9, :fact_snapshot_id,
+                  :reason_codes, :signal_payload, :event_time_ms,
+                  :trigger_candle_close_time_ms, :observed_at_ms, :expires_at_ms,
+                  NULL, :created_at_ms, :signal_grade, :required_execution_mode,
+                  :execution_eligible, :authority_source_ref
+                )
+                """
             ),
-            "event_time_ms": NOW_MS - 60_000,
-            "trigger_candle_close_time_ms": NOW_MS - 60_000,
-            "observed_at_ms": NOW_MS - 55_000,
-            "expires_at_ms": expires_at_ms,
-            "created_at_ms": NOW_MS - 54_000,
-            "signal_grade": signal_grade,
-            "required_execution_mode": required_execution_mode,
-            "execution_eligible": execution_eligible,
-            "authority_source_ref": f"event-spec:{row['event_spec_id']}",
-        },
-    )
+            signal_params,
+        )
+    else:
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_live_signal_events (
+                  signal_event_id, candidate_scope_id, candidate_scope_event_binding_id,
+                  runtime_scope_binding_id, runtime_instance_id, runtime_profile_id,
+                  policy_current_id, strategy_group_version_id, asset_class,
+                  event_spec_id, event_spec_version, event_id, timeframe, time_authority,
+                  lane_identity_key, source_watermark, strategy_group_id,
+                  symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
+                  confidence, fact_snapshot_id, reason_codes, signal_payload,
+                  event_time_ms, trigger_candle_close_time_ms, observed_at_ms,
+                  expires_at_ms, invalidated_at_ms, created_at_ms,
+                  signal_grade, required_execution_mode, execution_eligible,
+                  authority_source_ref
+                ) VALUES (
+                  :signal_event_id, :candidate_scope_id, :candidate_scope_event_binding_id,
+                  :runtime_scope_binding_id, :runtime_instance_id, :runtime_profile_id,
+                  :policy_current_id, :strategy_group_version_id, :asset_class,
+                  :event_spec_id, :event_spec_version, :event_id, :timeframe, :time_authority,
+                  :lane_identity_key, :source_watermark, :strategy_group_id,
+                  :symbol, :side, :detector_key, :signal_type,
+                  'live_market', 'facts_validated', 'fresh', 0.9, :fact_snapshot_id,
+                  :reason_codes, :signal_payload, :event_time_ms,
+                  :trigger_candle_close_time_ms, :observed_at_ms, :expires_at_ms,
+                  NULL, :created_at_ms, :signal_grade, :required_execution_mode,
+                  :execution_eligible, :authority_source_ref
+                )
+                """
+            ),
+            {
+                **signal_params,
+                "candidate_scope_event_binding_id": (
+                    lane_identity.candidate_scope_event_binding_id
+                ),
+                "runtime_scope_binding_id": lane_identity.runtime_scope_binding_id,
+                "runtime_instance_id": lane_identity.runtime_instance_id,
+                "runtime_profile_id": lane_identity.runtime_profile_id,
+                "policy_current_id": lane_identity.policy_current_id,
+                "strategy_group_version_id": lane_identity.strategy_group_version_id,
+                "asset_class": lane_identity.asset_class,
+                "event_spec_version": lane_identity.event_spec_version,
+                "event_id": lane_identity.event_id,
+                "timeframe": lane_identity.timeframe,
+                "time_authority": lane_identity.time_authority,
+                "lane_identity_key": lane_identity.identity_key,
+                "source_watermark": source_watermark,
+            },
+        )
     conn.execute(
         text(
             """
@@ -1029,47 +1121,98 @@ def _insert_action_time_lane_graph(
             "valid_until_ms": expires_at_ms,
         },
     )
+    promotion_lineage_columns = (
+        ", lane_identity_key, source_watermark" if lane_identity is not None else ""
+    )
+    promotion_lineage_values = (
+        ", :lane_identity_key, :source_watermark"
+        if lane_identity is not None
+        else ""
+    )
+    promotion_params = {
+        "promotion_candidate_id": promotion_candidate_id,
+        "signal_event_id": signal_event_id,
+        "readiness_row_id": readiness_row_id,
+        "strategy_group_id": row["strategy_group_id"],
+        "symbol": row["symbol"],
+        "side": row["side"],
+        "facts_snapshot_id": public_fact_id,
+        "blockers": _json([]),
+        "created_at_ms": NOW_MS - 1_000,
+        "expires_at_ms": expires_at_ms,
+        "authority_boundary": "promotion_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "signal_grade": signal_grade,
+        "required_execution_mode": required_execution_mode,
+        "execution_eligible": execution_eligible,
+        "authority_source_ref": f"event-spec:{row['event_spec_id']}",
+    }
+    if lane_identity is not None:
+        promotion_params.update(
+            {
+                "lane_identity_key": lane_identity.identity_key,
+                "source_watermark": source_watermark,
+            }
+        )
     conn.execute(
         text(
-            """
+            f"""
             INSERT INTO brc_promotion_candidates (
               promotion_candidate_id, signal_event_id, readiness_row_id,
               strategy_group_id, symbol, side, promotion_scope, status, scope_state,
               risk_state, facts_snapshot_id, blockers, arbitration_rank, created_at_ms,
               expires_at_ms, closed_at_ms, authority_boundary,
               signal_grade, required_execution_mode, execution_eligible,
-              authority_source_ref
+              authority_source_ref{promotion_lineage_columns}
             ) VALUES (
               :promotion_candidate_id, :signal_event_id, :readiness_row_id,
               :strategy_group_id, :symbol, :side, 'live_submit_candidate', 'arbitration_won',
               'live_submit_allowed', 'acceptable', :facts_snapshot_id, :blockers,
               1, :created_at_ms, :expires_at_ms, NULL, :authority_boundary,
               :signal_grade, :required_execution_mode, :execution_eligible,
-              :authority_source_ref
+              :authority_source_ref{promotion_lineage_values}
             )
             """
         ),
-        {
-            "promotion_candidate_id": promotion_candidate_id,
-            "signal_event_id": signal_event_id,
-            "readiness_row_id": readiness_row_id,
-            "strategy_group_id": row["strategy_group_id"],
-            "symbol": row["symbol"],
-            "side": row["side"],
-            "facts_snapshot_id": public_fact_id,
-            "blockers": _json([]),
-            "created_at_ms": NOW_MS - 1_000,
-            "expires_at_ms": expires_at_ms,
-            "authority_boundary": "promotion_only; no_finalgate_no_operation_layer_no_exchange_write",
-            "signal_grade": signal_grade,
-            "required_execution_mode": required_execution_mode,
-            "execution_eligible": execution_eligible,
-            "authority_source_ref": f"event-spec:{row['event_spec_id']}",
-        },
+        promotion_params,
     )
+    lane_lineage_columns = (
+        ", lane_identity_key, source_watermark" if lane_identity is not None else ""
+    )
+    lane_lineage_values = (
+        ", :lane_identity_key, :source_watermark"
+        if lane_identity is not None
+        else ""
+    )
+    lane_params = {
+        "lane_id": lane_id,
+        "promotion_candidate_id": promotion_candidate_id,
+        "strategy_group_id": row["strategy_group_id"],
+        "symbol": row["symbol"],
+        "side": row["side"],
+        "runtime_profile_id": row["runtime_profile_id"],
+        "signal_event_id": signal_event_id,
+        "public_fact_snapshot_id": public_fact_id,
+        "action_time_fact_snapshot_id": action_time_fact_id,
+        "runtime_scope_binding_id": row["runtime_scope_binding_id"],
+        "candidate_authorization_ref": candidate_authorization_ref,
+        "created_at_ms": NOW_MS - 500,
+        "expires_at_ms": expires_at_ms,
+        "authority_boundary": "real_submit_candidate_identity_only; no_finalgate_no_operation_layer_no_exchange_write",
+        "signal_grade": signal_grade,
+        "required_execution_mode": required_execution_mode,
+        "execution_eligible": execution_eligible,
+        "authority_source_ref": f"event-spec:{row['event_spec_id']}",
+    }
+    if lane_identity is not None:
+        lane_params.update(
+            {
+                "lane_identity_key": lane_identity.identity_key,
+                "source_watermark": source_watermark,
+            }
+        )
     conn.execute(
         text(
-            """
+            f"""
             INSERT INTO brc_action_time_lane_inputs (
               action_time_lane_input_id, promotion_candidate_id, strategy_group_id,
               symbol, side, runtime_profile_id, lane_scope, status, signal_event_id,
@@ -1078,7 +1221,7 @@ def _insert_action_time_lane_graph(
               runtime_safety_snapshot_id, first_blocker_class, created_at_ms,
               expires_at_ms, closed_at_ms, authority_boundary,
               signal_grade, required_execution_mode, execution_eligible,
-              authority_source_ref
+              authority_source_ref{lane_lineage_columns}
             ) VALUES (
               :lane_id, :promotion_candidate_id, :strategy_group_id, :symbol, :side,
               :runtime_profile_id, 'real_submit_candidate', 'ticket_pending',
@@ -1086,30 +1229,11 @@ def _insert_action_time_lane_graph(
               :runtime_scope_binding_id, :candidate_authorization_ref, NULL,
               'action_time_preflight_ready', :created_at_ms, :expires_at_ms, NULL,
               :authority_boundary, :signal_grade, :required_execution_mode,
-              :execution_eligible, :authority_source_ref
+              :execution_eligible, :authority_source_ref{lane_lineage_values}
             )
             """
         ),
-        {
-            "lane_id": lane_id,
-            "promotion_candidate_id": promotion_candidate_id,
-            "strategy_group_id": row["strategy_group_id"],
-            "symbol": row["symbol"],
-            "side": row["side"],
-            "runtime_profile_id": row["runtime_profile_id"],
-            "signal_event_id": signal_event_id,
-            "public_fact_snapshot_id": public_fact_id,
-            "action_time_fact_snapshot_id": action_time_fact_id,
-            "runtime_scope_binding_id": row["runtime_scope_binding_id"],
-            "candidate_authorization_ref": candidate_authorization_ref,
-            "created_at_ms": NOW_MS - 500,
-            "expires_at_ms": expires_at_ms,
-            "authority_boundary": "real_submit_candidate_identity_only; no_finalgate_no_operation_layer_no_exchange_write",
-            "signal_grade": signal_grade,
-            "required_execution_mode": required_execution_mode,
-            "execution_eligible": execution_eligible,
-            "authority_source_ref": f"event-spec:{row['event_spec_id']}",
-        },
+        lane_params,
     )
     if insert_budget:
         conn.execute(
@@ -1224,6 +1348,26 @@ def _insert_fact(
             "created_at_ms": observed_at_ms,
         },
     )
+
+
+def _has_runtime_lane_identity_schema(conn) -> bool:
+    """Keep the shared test graph valid for its deliberately versioned fixtures.
+
+    This is test-fixture compatibility only. Production inserts always run
+    after migration 118 and must carry the complete typed identity.
+    """
+
+    columns = {
+        column["name"]
+        for column in inspect(conn).get_columns("brc_live_signal_events")
+    }
+    return {
+        "candidate_scope_event_binding_id",
+        "runtime_scope_binding_id",
+        "runtime_instance_id",
+        "lane_identity_key",
+        "source_watermark",
+    }.issubset(columns)
 
 
 def _ticket_count(conn) -> int:

@@ -9,6 +9,8 @@ from hashlib import sha256
 from pydantic import BaseModel, ConfigDict
 import sqlalchemy as sa
 
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
+
 
 class RuntimeProcessOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -78,6 +80,7 @@ PROCESS_FAILURE_PREFIXES = (
 HARD_FAILURE_PREFIXES = (
     "identity_mismatch",
     "cross_scope",
+    "runtime_lane_identity_mismatch",
     "forbidden_effect",
     "exchange_command_hard_stopped",
 )
@@ -143,7 +146,7 @@ def materialize_runtime_process_outcome(
     conn: sa.engine.Connection,
     *,
     process_name: str,
-    scope_key: str,
+    scope_key: str | None,
     run_id: str,
     result_status: str,
     blockers: list[str],
@@ -152,20 +155,64 @@ def materialize_runtime_process_outcome(
     runtime_head: str,
     source_watermark: str,
     projector_owner: str = "runtime_process_outcome_projector",
+    lane_identity: RuntimeLaneIdentity | None = None,
 ) -> dict[str, object]:
     outcome = classify_process_outcome(
         process_name=process_name,
         result_status=result_status,
         blockers=blockers,
     )
-    identity = f"{process_name}|{scope_key}"
+    table = sa.Table(
+        "brc_runtime_process_outcomes",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    typed_lane_storage = {
+        "scope_kind",
+        "lane_identity_key",
+    }.issubset(table.c.keys())
+    if lane_identity is not None:
+        resolved_scope_key = scope_key or (
+            f"lane:{lane_identity.strategy_group_id}:{lane_identity.symbol}:"
+            f"{lane_identity.side}"
+        )
+        identity = (
+            f"{process_name}|{lane_identity.identity_key}|{source_watermark}"
+            if typed_lane_storage
+            else f"{process_name}|{resolved_scope_key}"
+        )
+        typed_identity: dict[str, object] = {
+            "scope_kind": "runtime_lane",
+            "candidate_scope_id": lane_identity.candidate_scope_id,
+            "candidate_scope_event_binding_id": (
+                lane_identity.candidate_scope_event_binding_id
+            ),
+            "runtime_scope_binding_id": lane_identity.runtime_scope_binding_id,
+            "runtime_instance_id": lane_identity.runtime_instance_id,
+            "strategy_group_id": lane_identity.strategy_group_id,
+            "strategy_group_version_id": lane_identity.strategy_group_version_id,
+            "symbol": lane_identity.symbol,
+            "asset_class": lane_identity.asset_class,
+            "side": lane_identity.side,
+            "event_spec_id": lane_identity.event_spec_id,
+            "event_spec_version": lane_identity.event_spec_version,
+            "event_id": lane_identity.event_id,
+            "timeframe": lane_identity.timeframe,
+            "lane_identity_key": lane_identity.identity_key,
+        }
+    else:
+        resolved_scope_key = str(scope_key or "").strip()
+        if not resolved_scope_key:
+            raise ValueError("scope_key is required for an unscoped process outcome")
+        identity = f"{process_name}|{resolved_scope_key}"
+        typed_identity = {"scope_kind": "legacy_unscoped"}
     row: dict[str, object] = {
         "process_outcome_id": (
             "process_outcome:"
             + sha256(identity.encode("utf-8")).hexdigest()[:32]
         ),
         "process_name": process_name,
-        "scope_key": scope_key,
+        "scope_key": resolved_scope_key,
         "run_id": run_id,
         "process_state": outcome.process_state,
         "business_state": outcome.business_state,
@@ -176,12 +223,9 @@ def materialize_runtime_process_outcome(
         "source_watermark": source_watermark,
         "projector_owner": projector_owner,
         "updated_at_ms": completed_at_ms,
+        **typed_identity,
     }
-    table = sa.Table(
-        "brc_runtime_process_outcomes",
-        sa.MetaData(),
-        autoload_with=conn,
-    )
+    row = {key: value for key, value in row.items() if key in table.c}
     existing = conn.execute(
         sa.select(table.c.process_outcome_id).where(
             table.c.process_outcome_id == row["process_outcome_id"]

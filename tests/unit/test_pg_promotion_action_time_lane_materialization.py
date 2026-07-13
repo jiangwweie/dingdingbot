@@ -28,6 +28,11 @@ from src.domain.strategy_family_signal import (
     StrategyFactObservation,
     StrategyFamilySignalOutput,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
+from src.infrastructure.runtime_control_state_repository import (
+    PgBackedRuntimeControlStateRepository,
+    RuntimeControlStateRepositoryError,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -63,8 +68,41 @@ DYNAMIC_RISK_POLICY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
 )
+LANE_IDENTITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
+
+
+# This is intentionally explicit rather than inferred from evaluator output.
+# The registered production matrix is the authority for the all-lane
+# action-time conservation certification.
+ALL_REGISTERED_RUNTIME_LANES = (
+    ("CPM-RO-001", "ETHUSDT", "long"),
+    ("CPM-RO-001", "SOLUSDT", "long"),
+    ("CPM-RO-001", "AVAXUSDT", "long"),
+    ("CPM-RO-001", "SUIUSDT", "long"),
+    ("MPG-001", "OPUSDT", "long"),
+    ("MPG-001", "SOLUSDT", "long"),
+    ("MPG-001", "AVAXUSDT", "long"),
+    ("MPG-001", "SUIUSDT", "long"),
+    ("MI-001", "AVAXUSDT", "long"),
+    ("MI-001", "ETHUSDT", "long"),
+    ("MI-001", "SOLUSDT", "long"),
+    ("SOR-001", "ETHUSDT", "long"),
+    ("SOR-001", "SOLUSDT", "long"),
+    ("SOR-001", "AVAXUSDT", "long"),
+    ("SOR-001", "BTCUSDT", "long"),
+    ("SOR-001", "ETHUSDT", "short"),
+    ("SOR-001", "SOLUSDT", "short"),
+    ("SOR-001", "AVAXUSDT", "short"),
+    ("SOR-001", "BTCUSDT", "short"),
+    ("BRF2-001", "BTCUSDT", "short"),
+    ("BRF2-001", "AVAXUSDT", "short"),
+    ("BRF2-001", "ETHUSDT", "short"),
+)
 
 
 def _load_module(path: Path, name: str):
@@ -107,6 +145,10 @@ def pg_control_connection():
     dynamic_risk_policy_migration = _load_module(
         DYNAMIC_RISK_POLICY_MIGRATION_PATH,
         "migration_115_pg_promotion_lane",
+    )
+    lane_identity_migration = _load_module(
+        LANE_IDENTITY_MIGRATION_PATH,
+        "migration_118_pg_promotion_lane",
     )
     seed = _load_module(SEED_PATH, "seed_pg_promotion_lane")
     engine = create_engine(
@@ -169,6 +211,12 @@ def pg_control_connection():
                 risk_reservation_migration.op = old_risk_op
         finally:
             migration.op = old_op
+        old_lane_identity_op = lane_identity_migration.op
+        lane_identity_migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            lane_identity_migration.upgrade()
+        finally:
+            lane_identity_migration.op = old_lane_identity_op
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(
@@ -764,6 +812,181 @@ def test_materializes_promotion_lane_budget_protection_and_ticket(pg_control_con
     assert ticket_payload["strategy_group_id"] == "SOR-001"
     assert ticket_payload["symbol"] == "ETHUSDT"
     assert ticket_payload["side"] == "long"
+
+
+def test_runtime_lane_identity_lineage_is_conserved_from_signal_to_ticket(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert lane_payload["status"] == "promotion_action_time_lane_created"
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+    assert ticket_payload["status"] == "action_time_ticket_created"
+
+    source = pg_control_connection.execute(
+        text(
+            "SELECT lane_identity_key, source_watermark "
+            "FROM brc_live_signal_events"
+        )
+    ).mappings().one()
+    promotion = pg_control_connection.execute(
+        text(
+            "SELECT lane_identity_key, source_watermark "
+            "FROM brc_promotion_candidates"
+        )
+    ).mappings().one()
+    lane = pg_control_connection.execute(
+        text(
+            "SELECT lane_identity_key, source_watermark "
+            "FROM brc_action_time_lane_inputs"
+        )
+    ).mappings().one()
+    ticket = pg_control_connection.execute(
+        text(
+            "SELECT lane_identity_key, source_watermark "
+            "FROM brc_action_time_tickets"
+        )
+    ).mappings().one()
+
+    assert dict(promotion) == dict(source)
+    assert dict(lane) == dict(source)
+    assert dict(ticket) == dict(source)
+
+
+@pytest.mark.parametrize(
+    ("strategy_group_id", "symbol", "side"),
+    ALL_REGISTERED_RUNTIME_LANES,
+)
+def test_every_registered_runtime_lane_conserves_identity_to_ticket_without_exchange_write(
+    pg_control_connection,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+):
+    """Certify the complete non-executing path for every registered lane."""
+
+    _insert_ready_fresh_signal(
+        pg_control_connection,
+        strategy_group_id,
+        symbol,
+        side,
+    )
+
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert lane_payload["status"] == "promotion_action_time_lane_created"
+    assert lane_payload["strategy_group_id"] == strategy_group_id
+    assert lane_payload["symbol"] == symbol
+    assert lane_payload["side"] == side
+    assert lane_payload["forbidden_effects"] == lane_materializer.FORBIDDEN_EFFECTS
+
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+    assert ticket_payload["status"] == "action_time_ticket_created"
+    assert ticket_payload["strategy_group_id"] == strategy_group_id
+    assert ticket_payload["symbol"] == symbol
+    assert ticket_payload["side"] == side
+    assert ticket_payload["forbidden_effects"] == ticket_materializer.FORBIDDEN_EFFECTS
+
+    signal = pg_control_connection.execute(
+        text(
+            "SELECT signal_event_id, lane_identity_key, source_watermark "
+            "FROM brc_live_signal_events"
+        )
+    ).mappings().one()
+    expected_lineage = dict(signal)
+    for table_name in (
+        "brc_promotion_candidates",
+        "brc_action_time_lane_inputs",
+        "brc_action_time_tickets",
+    ):
+        row = pg_control_connection.execute(
+            text(
+                "SELECT signal_event_id, lane_identity_key, source_watermark "
+                f"FROM {table_name}"
+            )
+        ).mappings().one()
+        assert dict(row) == expected_lineage
+
+
+def test_tampered_action_time_lane_lineage_blocks_ticket_at_first_boundary(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert lane_payload["status"] == "promotion_action_time_lane_created"
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_action_time_lane_inputs "
+            "SET source_watermark = 'tampered:source-watermark' "
+            "WHERE action_time_lane_input_id = :lane_id"
+        ),
+        {"lane_id": lane_payload["action_time_lane_input_id"]},
+    )
+
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+
+    assert ticket_payload["status"] == "blocked"
+    assert any(
+        "runtime_lane_identity_mismatch:promotion_to_action_time_lane" in blocker
+        for blocker in ticket_payload["blockers"]
+    )
+    assert pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_action_time_tickets")
+    ).scalar_one() == 0
+
+
+def test_requested_ticket_read_rejects_tampered_ticket_lineage(
+    pg_control_connection,
+):
+    _insert_ready_fresh_signal(pg_control_connection, "SOR-001", "ETHUSDT", "long")
+    lane_payload = lane_materializer.materialize_pg_promotion_action_time_lane(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    )
+    assert lane_payload["status"] == "promotion_action_time_lane_created"
+    ticket_payload = ticket_materializer.materialize_action_time_ticket(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+    assert ticket_payload["status"] == "action_time_ticket_created"
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_action_time_tickets "
+            "SET source_watermark = 'tampered:ticket-watermark' "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_payload["ticket_id"]},
+    )
+
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 1,
+    )
+
+    with pytest.raises(
+        RuntimeControlStateRepositoryError,
+        match="runtime_lane_identity_mismatch:action_time_lane_to_ticket",
+    ):
+        repository.read_action_time_control_state(ticket_id=ticket_payload["ticket_id"])
 
 
 def test_observe_only_signal_cannot_materialize_real_submit_promotion(
@@ -1363,6 +1586,33 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
         "declared_required_execution_mode": "trial_live",
         "execution_eligibility_enabled": 1,
     }
+    lane_row = _candidate_runtime_row(
+        pg_control_connection,
+        "MPG-001",
+        "OPUSDT",
+        "long",
+    )
+    runtime_instance_id = "runtime:MPG-001:OPUSDT:long"
+    lane_identity = RuntimeLaneIdentity(
+        candidate_scope_id=str(lane_row["candidate_scope_id"]),
+        candidate_scope_event_binding_id=str(
+            lane_row["candidate_scope_event_binding_id"]
+        ),
+        runtime_scope_binding_id=str(lane_row["runtime_scope_binding_id"]),
+        runtime_instance_id=runtime_instance_id,
+        runtime_profile_id=str(lane_row["runtime_profile_id"]),
+        policy_current_id=str(lane_row["policy_current_id"]),
+        strategy_group_id=str(lane_row["strategy_group_id"]),
+        strategy_group_version_id=str(lane_row["strategy_group_version_id"]),
+        symbol=str(lane_row["symbol"]),
+        asset_class=str(lane_row["asset_class"]),
+        side=str(lane_row["side"]),
+        event_spec_id=str(lane_row["event_spec_id"]),
+        event_spec_version=str(lane_row["event_spec_version"]),
+        event_id=str(lane_row["event_id"]),
+        timeframe=str(lane_row["timeframe"]),
+        time_authority=str(lane_row["time_authority"]),
+    )
 
     class _FakeClient:
         def request_json(self, method, path, *, query=None, body=None):
@@ -1372,7 +1622,7 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
                     {
                         "runtime_instance_id": "runtime:MPG-001:OPUSDT:long",
                         "strategy_family_id": "MPG-001",
-                        "strategy_family_version_id": "sgv:MPG-001:v1",
+                        "strategy_family_version_id": "MPG-001-v0",
                         "symbol": "OPUSDT",
                         "side": "long",
                         "status": "active",
@@ -1422,7 +1672,7 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
             signal_id="signal:MPG-001:OPUSDT:long:unit",
             evaluation_id="eval:MPG-001:OPUSDT:long:unit",
             strategy_family_id="MPG-001",
-            strategy_family_version_id="sgv:MPG-001:v1",
+            strategy_family_version_id="MPG-001-v0",
             symbol="OPUSDT",
             timestamp_ms=trigger_candle_close_time_ms,
             trigger_candle_close_time_ms=trigger_candle_close_time_ms,
@@ -1469,9 +1719,13 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
             "latest_artifact": {
                 "observation_payload": {
                     "signal_artifact": {
+                        "lane_identity": lane_identity.model_dump(mode="json"),
+                        "can_materialize_live_signal_event": True,
                         "evaluation_result": {
-                            "status": "observe_only",
+                            "status": "event_satisfied",
                             "evaluator_id": "MPG001UnitEvaluator",
+                            "evaluated_at_ms": trigger_candle_close_time_ms,
+                            "valid_until_ms": NOW_MS + 600_000,
                             "can_call_semantic_binding": True,
                             "semantics_binding_found": True,
                             "strategy_candidate_mode": "shadow_order_candidate_allowed",
@@ -2504,12 +2758,18 @@ def _candidate_runtime_row(conn, strategy_group_id: str, symbol: str, side: str)
                    c.strategy_group_id,
                    c.symbol,
                    c.side,
+                   c.asset_class,
                    c.policy_current_id,
                    c.priority_rank,
                    r.runtime_scope_binding_id,
                    r.runtime_profile_id,
+                   b.binding_id AS candidate_scope_event_binding_id,
                    b.event_spec_id,
                    e.event_id,
+                   e.event_spec_version,
+                   e.strategy_group_version_id,
+                   e.timeframe,
+                   e.time_authority,
                    e.protection_ref_type
             FROM brc_strategy_group_candidate_scope c
             JOIN brc_runtime_scope_bindings r
@@ -2601,11 +2861,37 @@ def _insert_signal(
         for key in sorted(required_fact_keys)
         if key in observed_fact_values
     ]
+    runtime_instance_id = f"runtime:unit:{row['candidate_scope_id']}"
+    identity = RuntimeLaneIdentity(
+        candidate_scope_id=str(row["candidate_scope_id"]),
+        candidate_scope_event_binding_id=str(
+            row["candidate_scope_event_binding_id"]
+        ),
+        runtime_scope_binding_id=str(row["runtime_scope_binding_id"]),
+        runtime_instance_id=runtime_instance_id,
+        runtime_profile_id=str(row["runtime_profile_id"]),
+        policy_current_id=str(row["policy_current_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        strategy_group_version_id=str(row["strategy_group_version_id"]),
+        symbol=str(row["symbol"]),
+        asset_class=str(row["asset_class"]),
+        side=str(row["side"]),
+        event_spec_id=str(row["event_spec_id"]),
+        event_spec_version=str(row["event_spec_version"]),
+        event_id=str(row["event_id"]),
+        timeframe=str(row["timeframe"]),
+        time_authority=str(row["time_authority"]),
+    )
+    source_watermark = f"{runtime_instance_id}:{event_time_ms}"
     conn.execute(
         text(
             """
             INSERT INTO brc_live_signal_events (
-              signal_event_id, candidate_scope_id, event_spec_id, strategy_group_id,
+              signal_event_id, candidate_scope_id, candidate_scope_event_binding_id,
+              runtime_scope_binding_id, runtime_instance_id, runtime_profile_id,
+              policy_current_id, strategy_group_version_id, asset_class,
+              event_spec_id, event_spec_version, event_id, timeframe, time_authority,
+              lane_identity_key, source_watermark, strategy_group_id,
               symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
               confidence, fact_snapshot_id, reason_codes, signal_payload,
               event_time_ms, trigger_candle_close_time_ms, observed_at_ms,
@@ -2613,7 +2899,11 @@ def _insert_signal(
               signal_grade, required_execution_mode, execution_eligible,
               authority_source_ref
             ) VALUES (
-              :signal_event_id, :candidate_scope_id, :event_spec_id, :strategy_group_id,
+              :signal_event_id, :candidate_scope_id, :candidate_scope_event_binding_id,
+              :runtime_scope_binding_id, :runtime_instance_id, :runtime_profile_id,
+              :policy_current_id, :strategy_group_version_id, :asset_class,
+              :event_spec_id, :event_spec_version, :event_id, :timeframe, :time_authority,
+              :lane_identity_key, :source_watermark, :strategy_group_id,
               :symbol, :side, :detector_key, :signal_type,
               :source_kind, 'facts_validated', 'fresh', 0.9, :fact_snapshot_id,
               :reason_codes, :signal_payload, :event_time_ms,
@@ -2626,7 +2916,20 @@ def _insert_signal(
         {
             "signal_event_id": signal_event_id,
             "candidate_scope_id": row["candidate_scope_id"],
+            "candidate_scope_event_binding_id": identity.candidate_scope_event_binding_id,
+            "runtime_scope_binding_id": identity.runtime_scope_binding_id,
+            "runtime_instance_id": identity.runtime_instance_id,
+            "runtime_profile_id": identity.runtime_profile_id,
+            "policy_current_id": identity.policy_current_id,
+            "strategy_group_version_id": identity.strategy_group_version_id,
+            "asset_class": identity.asset_class,
             "event_spec_id": row["event_spec_id"],
+            "event_spec_version": identity.event_spec_version,
+            "event_id": identity.event_id,
+            "timeframe": identity.timeframe,
+            "time_authority": identity.time_authority,
+            "lane_identity_key": identity.identity_key,
+            "source_watermark": source_watermark,
             "strategy_group_id": row["strategy_group_id"],
             "symbol": row["symbol"],
             "side": row["side"],
@@ -2639,6 +2942,9 @@ def _insert_signal(
                 {
                     "time_authority": "trigger_candle_close_time_ms",
                     "trigger_candle_close_time_ms": event_time_ms,
+                    "lane_identity": identity.model_dump(mode="json"),
+                    "lane_identity_key": identity.identity_key,
+                    "source_watermark": source_watermark,
                     "signal_summary": {
                         "fact_observations": fact_observations,
                     },

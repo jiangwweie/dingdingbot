@@ -2,10 +2,34 @@
 title: STRATEGY_ENGINEERING_INTAKE_CONTRACT
 status: CURRENT
 authority: docs/current/STRATEGY_ENGINEERING_INTAKE_CONTRACT.md
-last_verified: 2026-07-01
+last_verified: 2026-07-13
 ---
 
 # Strategy Engineering Intake Contract
+
+## Current Production Boundary
+
+The strategy-intake labels in this document govern research and engineering
+priority. They do not redefine the current production registry. The current
+production candidate set is exactly **5 admitted StrategyGroups**, **22 active
+candidate lanes**, and **6 Event Specs** defined by PG/current registry rows.
+
+For a current admitted lane, the decision is not "observe for an unspecified
+period." It is:
+
+```text
+admitted Event-Spec scope
+-> non-executing runtime scan
+-> exact fresh event
+-> official Ticket path when action-time gates pass
+```
+
+An unadmitted strategy variant remains research, `future_option`,
+`support_filter`, or `parked`. It may not create an active production lane only
+to collect observe-only signals. The engineering intake work must preserve the
+same registered StrategyGroup, symbol, side, Event Spec, and timeframe at every
+runtime boundary; an evaluator output may not infer a new direction. Source:
+`PRE_TRADE_RUNTIME_CONTRACT.md` and `STRATEGYGROUP_REGISTRY_CONTRACT.md`.
 
 ## Purpose
 

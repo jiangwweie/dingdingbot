@@ -1,6 +1,6 @@
 ---
 title: P0_RUNTIME_LANE_IDENTITY_CONSERVATION_AND_CROSS_SCOPE_LEAKAGE_ELIMINATION_IMPLEMENTATION_PLAN
-status: PROPOSED_FOR_OWNER_CONFIRMATION
+status: IMPLEMENTED_LOCAL_VERIFIED_PENDING_TOKYO_DEPLOY
 authority: docs/current/P0_RUNTIME_LANE_IDENTITY_CONSERVATION_AND_CROSS_SCOPE_LEAKAGE_ELIMINATION_IMPLEMENTATION_PLAN.md
 design: docs/current/P0_RUNTIME_LANE_IDENTITY_CONSERVATION_AND_CROSS_SCOPE_LEAKAGE_ELIMINATION_DESIGN.md
 last_verified: 2026-07-13
@@ -908,23 +908,32 @@ as a quick recovery.
 
 This task is complete only when all of the following are true:
 
-- [ ] One immutable PG-resolved lane identity exists.
-- [ ] Production evaluation is Event-Spec/side/timeframe scoped.
-- [ ] Evaluator evidence cannot overwrite lane identity.
-- [ ] Monitor and PG projection reject every cross-scope mismatch.
-- [ ] Process outcomes carry typed identity and cannot encode a false current lane.
-- [ ] The known false CPM-short row is exactly reconciled.
-- [ ] Promotion, lane, and Ticket conserve identity and event watermark.
-- [ ] All 22 current lanes pass positive and negative certification.
-- [ ] No durable Observe-only StrategyGroup tier exists.
-- [ ] Full regression and production file-I/O audit pass.
+- [x] One immutable PG-resolved lane identity exists.
+- [x] Production evaluation is Event-Spec/side/timeframe scoped.
+- [x] Evaluator evidence cannot overwrite lane identity.
+- [x] Monitor and PG projection reject every cross-scope mismatch.
+- [x] Process outcomes carry typed identity and cannot encode a false current lane.
+- [x] The known false CPM-short row is exactly reconciled.
+- [x] Promotion, lane, and Ticket conserve identity and event watermark.
+- [x] All 22 current lanes pass positive and negative certification.
+- [x] No durable Observe-only StrategyGroup tier exists.
+- [x] Full regression and production file-I/O audit pass.
 - [ ] Tokyo postdeploy checks pass within 3 ticks / 60 minutes.
 - [ ] Natural-event acceptance remains the next live proof, not an engineering blocker.
 
-## Implementation Pause
+## Execution State
 
-The design and this execution plan are documentation-only. No production code,
-migration, deploy, runtime mutation, or exchange action may start until the
-Owner confirms this package. After confirmation, implementation proceeds
-without a second design loop unless a real authority, schema, strategy-scope,
-or safety uncertainty violates an explicit stop condition above.
+The Owner confirmed this package and implementation proceeded without a second
+design loop. Local evidence at this revision is:
+
+- migration `118` with
+  `2026-07-13-118_conserve_runtime_lane_identity.py` as the migration head;
+- `3001 passed, 1 skipped` from the complete test suite;
+- `performance_risk.status=clear` and zero recurring JSON/MD report-file risk
+  from the production file-I/O audit;
+- current docs authority and output-artifact scope validation passing.
+
+The remaining work is restricted to the official Tokyo deployment, its
+read-only postdeploy checks, and the bounded three-tick/60-minute smoke. A
+natural eligible event remains a live acceptance event, not a prerequisite for
+this local engineering closure.

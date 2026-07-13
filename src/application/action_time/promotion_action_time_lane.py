@@ -37,6 +37,14 @@ from src.application.readmodels.daily_live_enablement_table import WIP_LANES  # 
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
+from src.application.action_time.identity_conservation import (  # noqa: E402
+    RuntimeLaneIdentityConservationError,
+    RuntimeLaneLineage,
+    require_runtime_lane_identity_match,
+    require_runtime_lane_lineage_match,
+    runtime_lane_identity_from_live_signal,
+    runtime_lane_lineage_from_record,
+)
 from src.application.action_time.pricing_sizing import (  # noqa: E402
     pricing_reference_from_action_time_fact_values,
 )
@@ -59,6 +67,10 @@ from src.application.runtime_process_outcome import (  # noqa: E402
 )
 from src.application.strategy_semantic_admission import (  # noqa: E402
     materialize_active_strategy_semantic_admissions,
+)
+from src.domain.runtime_lane_identity import (  # noqa: E402
+    RuntimeLaneIdentity,
+    RuntimeLaneIdentityMismatch,
 )
 
 
@@ -106,6 +118,8 @@ class CandidateBundle:
     account_id: str
     blockers: tuple[str, ...]
     sizing_risk_decision: ExecutionSizingDecision | None = None
+    lane_identity: RuntimeLaneIdentity | None = None
+    source_lineage: RuntimeLaneLineage | None = None
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -782,6 +796,9 @@ def _fresh_signal_bundles(
         )
         if not signal:
             continue
+        lane_identity, source_lineage, identity_blockers = (
+            _signal_lane_identity_and_lineage(signal)
+        )
         runtime_scope = runtime_by_candidate.get(candidate_scope_id, {})
         policy = policy_by_id.get(str(candidate.get("policy_current_id") or ""), {})
         readiness = readiness_by_lane.get(_lane_key(candidate), {})
@@ -816,7 +833,9 @@ def _fresh_signal_bundles(
         )
         account_id = _account_id(control_state, candidate)
         blockers = tuple(
-            _candidate_blockers(
+            [
+                *identity_blockers,
+                *_candidate_blockers(
                 control_state,
                 now_ms=now_ms,
                 candidate=candidate,
@@ -833,7 +852,9 @@ def _fresh_signal_bundles(
                 coverage=coverage,
                 owner_policy_version=owner_policy_version,
                 account_id=account_id,
-            )
+                lane_identity=lane_identity,
+                ),
+            ]
         )
         bundles.append(
             CandidateBundle(
@@ -852,6 +873,8 @@ def _fresh_signal_bundles(
                 owner_policy_version=owner_policy_version,
                 account_id=account_id,
                 blockers=blockers,
+                lane_identity=lane_identity,
+                source_lineage=source_lineage,
             )
         )
     return bundles
@@ -898,6 +921,100 @@ def _apply_same_session_opposite_side_conflicts(
     return out
 
 
+def _signal_lane_identity_and_lineage(
+    signal: dict[str, Any],
+) -> tuple[RuntimeLaneIdentity | None, RuntimeLaneLineage | None, list[str]]:
+    """Require typed identity for migrated current signal rows.
+
+    A pre-118 test schema has no identity columns at all. It is not a runtime
+    fallback: after migration the columns are present on every row and a blank
+    value becomes a first-boundary fail-closed blocker.
+    """
+
+    if "lane_identity_key" not in signal:
+        return None, None, []
+    try:
+        identity = runtime_lane_identity_from_live_signal(signal)
+        lineage = runtime_lane_lineage_from_record(signal)
+    except RuntimeLaneIdentityConservationError as exc:
+        return None, None, [exc.blocker]
+    if lineage.lane_identity_key != identity.identity_key:
+        return None, None, ["runtime_lane_identity_mismatch:signal_lineage_key"]
+    return identity, lineage, []
+
+
+def _signal_identity_matches_current_lane(
+    *,
+    lane_identity: RuntimeLaneIdentity | None,
+    candidate: dict[str, Any],
+    runtime_scope: dict[str, Any],
+    policy: dict[str, Any],
+    event_binding: dict[str, Any],
+    event_spec: dict[str, Any],
+) -> list[str]:
+    if lane_identity is None:
+        return []
+    try:
+        current_identity = RuntimeLaneIdentity(
+            candidate_scope_id=str(candidate.get("candidate_scope_id") or ""),
+            candidate_scope_event_binding_id=str(
+                event_binding.get("binding_id") or ""
+            ),
+            runtime_scope_binding_id=str(
+                runtime_scope.get("runtime_scope_binding_id") or ""
+            ),
+            runtime_instance_id=lane_identity.runtime_instance_id,
+            runtime_profile_id=str(runtime_scope.get("runtime_profile_id") or ""),
+            policy_current_id=str(runtime_scope.get("policy_current_id") or ""),
+            strategy_group_id=str(candidate.get("strategy_group_id") or ""),
+            strategy_group_version_id=str(
+                event_spec.get("strategy_group_version_id") or ""
+            ),
+            symbol=str(candidate.get("symbol") or ""),
+            asset_class=str(candidate.get("asset_class") or ""),
+            side=str(candidate.get("side") or ""),
+            event_spec_id=str(event_spec.get("event_spec_id") or ""),
+            event_spec_version=str(event_spec.get("event_spec_version") or ""),
+            event_id=str(event_spec.get("event_id") or ""),
+            timeframe=str(event_spec.get("timeframe") or ""),
+            time_authority=str(event_spec.get("time_authority") or ""),
+        )
+        if str(policy.get("policy_current_id") or "") != current_identity.policy_current_id:
+            return ["runtime_lane_identity_mismatch:signal_to_promotion_policy"]
+        require_runtime_lane_identity_match(
+            expected=lane_identity,
+            actual=current_identity,
+            boundary="signal_to_promotion",
+        )
+    except RuntimeLaneIdentityMismatch as exc:
+        return [str(exc)]
+    except (TypeError, ValueError):
+        return ["runtime_lane_identity_mismatch:signal_to_promotion_current_scope"]
+    return []
+
+
+def _lineage_match_blocker(
+    *,
+    expected: RuntimeLaneLineage | None,
+    actual_row: dict[str, Any],
+    boundary: str,
+) -> str | None:
+    if expected is None:
+        return None
+    try:
+        actual = runtime_lane_lineage_from_record(actual_row)
+        require_runtime_lane_lineage_match(
+            expected=expected,
+            actual=actual,
+            boundary=boundary,
+        )
+    except RuntimeLaneIdentityConservationError as exc:
+        return exc.blocker
+    except RuntimeLaneIdentityMismatch as exc:
+        return str(exc)
+    return None
+
+
 def _candidate_blockers(
     control_state: dict[str, Any],
     *,
@@ -916,6 +1033,7 @@ def _candidate_blockers(
     coverage: dict[str, Any],
     owner_policy_version: str,
     account_id: str,
+    lane_identity: RuntimeLaneIdentity | None,
 ) -> list[str]:
     blockers: list[str] = []
     blockers.extend(
@@ -934,6 +1052,16 @@ def _candidate_blockers(
     _require_identity_match(blockers, candidate, readiness, "readiness")
     _require_identity_match(blockers, candidate, public_fact, "public_fact")
     _require_identity_match(blockers, candidate, action_time_fact, "action_time_fact")
+    blockers.extend(
+        _signal_identity_matches_current_lane(
+            lane_identity=lane_identity,
+            candidate=candidate,
+            runtime_scope=runtime_scope,
+            policy=policy,
+            event_binding=event_binding,
+            event_spec=event_spec,
+        )
+    )
 
     if not event_binding:
         blockers.append("candidate_event_binding_missing")
@@ -1115,7 +1243,7 @@ def _promotion_row(
         if selected
         else "deferred"
     )
-    return {
+    row = {
         "promotion_candidate_id": bundle.promotion_candidate_id,
         "signal_event_id": str(bundle.signal["signal_event_id"]),
         "readiness_row_id": str(bundle.readiness.get("readiness_row_id") or ""),
@@ -1149,6 +1277,9 @@ def _promotion_row(
         "execution_eligible": bool(bundle.signal["execution_eligible"]),
         "authority_source_ref": str(bundle.signal["authority_source_ref"]),
     }
+    if bundle.source_lineage is not None:
+        row.update(bundle.source_lineage.model_dump(mode="json"))
+    return row
 
 
 def _allocation_decision_row(
@@ -1299,7 +1430,7 @@ def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
         int(bundle.account_safe_fact["valid_until_ms"]),
         int(bundle.account_mode_fact["valid_until_ms"]),
     )
-    return {
+    row = {
         "action_time_lane_input_id": bundle.action_time_lane_input_id,
         "promotion_candidate_id": bundle.promotion_candidate_id,
         "strategy_group_id": str(bundle.candidate["strategy_group_id"]),
@@ -1324,6 +1455,9 @@ def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
         "execution_eligible": bool(bundle.signal["execution_eligible"]),
         "authority_source_ref": str(bundle.signal["authority_source_ref"]),
     }
+    if bundle.source_lineage is not None:
+        row.update(bundle.source_lineage.model_dump(mode="json"))
+    return row
 
 
 def _budget_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:

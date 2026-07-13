@@ -12,6 +12,14 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.identity_conservation import (
+    RuntimeLaneIdentityConservationError,
+    require_runtime_lane_lineage_match,
+    runtime_lane_identity_from_live_signal,
+    runtime_lane_lineage_from_record,
+)
+from src.domain.runtime_lane_identity import RuntimeLaneIdentityMismatch
+
 
 class RuntimeControlStateRepositoryError(RuntimeError):
     """Raised when a runtime control-state source is malformed."""
@@ -89,6 +97,13 @@ OPEN_REAL_LANE_STATUSES = {
     "ticket_pending",
     "ticket_created",
 }
+
+RUNTIME_LANE_IDENTITY_COLUMN_SENTINELS = (
+    "candidate_scope_event_binding_id",
+    "runtime_instance_id",
+    "lane_identity_key",
+    "source_watermark",
+)
 
 
 class PgBackedRuntimeControlStateRepository:
@@ -194,6 +209,7 @@ class PgBackedRuntimeControlStateRepository:
         self._validate_candidate_scope_event_bindings(rows)
         self._validate_runtime_scope_bindings(rows)
         self._validate_live_signal_events(rows)
+        self._validate_runtime_lane_lineage_chain(rows)
         if not any(str(value or "") for value in (requested_lineage or {}).values()):
             self._validate_promotion_and_lane_identity(rows)
         return {
@@ -1088,6 +1104,14 @@ class PgBackedRuntimeControlStateRepository:
                 raise RuntimeControlStateRepositoryError(
                     f"{signal_id} fresh signal must be live_market"
                 )
+            if _tracks_runtime_lane_identity(signal):
+                try:
+                    runtime_lane_identity_from_live_signal(signal)
+                    runtime_lane_lineage_from_record(signal)
+                except RuntimeLaneIdentityConservationError as exc:
+                    raise RuntimeControlStateRepositoryError(
+                        f"{signal_id} {exc.blocker}"
+                    ) from exc
 
     def _validate_promotion_and_lane_identity(
         self,
@@ -1152,7 +1176,6 @@ class PgBackedRuntimeControlStateRepository:
                     raise RuntimeControlStateRepositoryError(
                         f"{promotion_id} winner signal is not live_market"
                     )
-
         open_real_lanes = [
             row
             for row in rows["action_time_lane_inputs"]
@@ -1189,6 +1212,152 @@ class PgBackedRuntimeControlStateRepository:
                     raise RuntimeControlStateRepositoryError(
                         f"{lane_id} mismatches promotion {key}"
                     )
+
+    def _validate_runtime_lane_lineage_chain(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Apply the immutable lane lineage guard on every current handoff.
+
+        This check stays active for requested Ticket reads.  The hot path may
+        retain a narrow lineage instead of the full current pool, but it may
+        never skip identity conservation merely because a Ticket ID was passed
+        to the repository.
+        """
+
+        signals = {
+            str(row.get("signal_event_id") or ""): row
+            for row in rows["live_signal_events"]
+        }
+        promotions = {
+            str(row.get("promotion_candidate_id") or ""): row
+            for row in rows["promotion_candidates"]
+        }
+        lanes = {
+            str(row.get("action_time_lane_input_id") or ""): row
+            for row in rows["action_time_lane_inputs"]
+        }
+
+        for promotion in rows["promotion_candidates"]:
+            if not is_current_promotion_candidate(promotion, self.now_ms):
+                continue
+            promotion_id = str(promotion.get("promotion_candidate_id") or "")
+            signal = signals.get(str(promotion.get("signal_event_id") or ""))
+            if signal is None:
+                if _tracks_runtime_lane_identity(promotion):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{promotion_id} "
+                        "runtime_lane_identity_mismatch:signal_to_promotion_signal_missing"
+                    )
+                continue
+            _require_current_runtime_lane_lineage(
+                signal=signal,
+                downstream=promotion,
+                boundary="signal_to_promotion",
+                entity_id=promotion_id,
+            )
+
+        for lane in rows["action_time_lane_inputs"]:
+            if not is_current_action_time_lane(lane, self.now_ms):
+                continue
+            lane_id = str(lane.get("action_time_lane_input_id") or "")
+            promotion = promotions.get(str(lane.get("promotion_candidate_id") or ""))
+            signal = signals.get(str(lane.get("signal_event_id") or ""))
+            if promotion is None or signal is None:
+                if _tracks_runtime_lane_identity(lane):
+                    missing = "promotion" if promotion is None else "signal"
+                    raise RuntimeControlStateRepositoryError(
+                        f"{lane_id} runtime_lane_identity_mismatch:"
+                        f"promotion_to_action_time_lane_{missing}_missing"
+                    )
+                continue
+            _require_current_runtime_lane_lineage(
+                signal=signal,
+                downstream=promotion,
+                boundary="signal_to_promotion",
+                entity_id=str(promotion.get("promotion_candidate_id") or ""),
+            )
+            _require_current_runtime_lane_lineage(
+                signal=signal,
+                downstream=lane,
+                boundary="promotion_to_action_time_lane",
+                entity_id=lane_id,
+            )
+
+        for ticket in rows["action_time_tickets"]:
+            if ticket.get("status") not in {
+                "created",
+                "preflight_pending",
+                "finalgate_ready",
+            } or not is_current_action_time_ticket(ticket, self.now_ms):
+                continue
+            ticket_id = str(ticket.get("ticket_id") or "")
+            lane = lanes.get(str(ticket.get("action_time_lane_input_id") or ""))
+            signal = signals.get(str(ticket.get("signal_event_id") or ""))
+            if lane is None or signal is None:
+                if _tracks_runtime_lane_identity(ticket):
+                    missing = "lane" if lane is None else "signal"
+                    raise RuntimeControlStateRepositoryError(
+                        f"{ticket_id} runtime_lane_identity_mismatch:"
+                        f"action_time_lane_to_ticket_{missing}_missing"
+                    )
+                continue
+            _require_current_runtime_lane_lineage(
+                signal=signal,
+                downstream=lane,
+                boundary="promotion_to_action_time_lane",
+                entity_id=str(lane.get("action_time_lane_input_id") or ""),
+            )
+            _require_current_runtime_lane_lineage(
+                signal=signal,
+                downstream=ticket,
+                boundary="action_time_lane_to_ticket",
+                entity_id=ticket_id,
+            )
+
+
+def _tracks_runtime_lane_identity(row: dict[str, Any]) -> bool:
+    """Return whether this row comes from a schema with migrated lane identity.
+
+    Older test schemas do not contain the new columns at all.  A migrated
+    production row always contains these keys, even if a corrupt value is NULL,
+    so it must fail closed instead of taking a compatibility path.
+    """
+
+    return any(field in row for field in RUNTIME_LANE_IDENTITY_COLUMN_SENTINELS)
+
+
+def _require_current_runtime_lane_lineage(
+    *,
+    signal: dict[str, Any],
+    downstream: dict[str, Any],
+    boundary: str,
+    entity_id: str,
+) -> None:
+    """Reject a current Promotion or Lane whose lineage differs from its signal."""
+
+    if not _tracks_runtime_lane_identity(signal) and not _tracks_runtime_lane_identity(
+        downstream
+    ):
+        return
+    try:
+        source_identity = runtime_lane_identity_from_live_signal(signal)
+        source_lineage = runtime_lane_lineage_from_record(signal)
+        if source_lineage.lane_identity_key != source_identity.identity_key:
+            raise RuntimeLaneIdentityConservationError(
+                "runtime_lane_identity_mismatch:signal_lineage_key"
+            )
+        require_runtime_lane_lineage_match(
+            expected=source_lineage,
+            actual=runtime_lane_lineage_from_record(downstream),
+            boundary=boundary,
+        )
+    except RuntimeLaneIdentityConservationError as exc:
+        raise RuntimeControlStateRepositoryError(
+            f"{entity_id} {exc.blocker}"
+        ) from exc
+    except RuntimeLaneIdentityMismatch as exc:
+        raise RuntimeControlStateRepositoryError(f"{entity_id} {exc}") from exc
 
 
 def _json_safe(value: Any) -> Any:

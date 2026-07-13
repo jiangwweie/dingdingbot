@@ -2,7 +2,7 @@
 title: PRE_TRADE_RUNTIME_CONTRACT
 status: CURRENT
 authority: docs/current/PRE_TRADE_RUNTIME_CONTRACT.md
-last_verified: 2026-07-02
+last_verified: 2026-07-13
 ---
 
 # Pre-Trade Runtime Contract
@@ -72,6 +72,41 @@ generated JSON, output artifacts, local cache, Single Lane Packet, or code
 fallbacks. Those may exist only as exports, diagnostics, archives, fixtures, or
 curated seed inputs.
 
+## Runtime Lane Identity Conservation
+
+Every current production observation is owned by one immutable
+`RuntimeLaneIdentity`, resolved from current PG rows before strategy evaluation:
+
+```text
+candidate scope
++ candidate-scope/Event-Spec binding
++ Event Spec/version/time authority
++ runtime-scope binding/profile
++ selected runtime instance
++ current Owner policy
+-> RuntimeLaneIdentity
+-> Event-Spec-scoped evaluation
+-> named signal
+-> promotion
+-> Action-Time Lane
+-> Ticket
+```
+
+The identity includes the candidate scope, Event-Spec binding, runtime scope,
+runtime instance, policy/profile, StrategyGroup/version, canonical symbol,
+asset class, side, Event Spec/version/event ID, timeframe, and time authority.
+Its stable `lane_identity_key`, source signal event ID, and source watermark
+must remain unchanged from named signal through Ticket.
+
+Evaluator output is evidence about the resolved lane. It cannot create or
+overwrite a StrategyGroup, symbol, side, Event Spec, timeframe, or runtime
+identity. A generic opposite-side pattern is normal
+`computed_not_satisfied` evidence for the resolved lane; a malformed claim that
+it is materializable fails closed with a typed identity blocker. A monitor may
+write a live signal only after revalidating the same current PG identity in its
+insert transaction. Source: `RuntimeLaneIdentity`, migration **118**, and the
+22-lane identity certification tests.
+
 ## Active StrategyGroups
 
 The V0 pre-trade runtime carries these active StrategyGroups:
@@ -89,6 +124,26 @@ one of these active StrategyGroups.
 
 Unsupported opposite sides must not be created by mirroring. They require a new
 StrategyGroup or a versioned strategy variant.
+
+### Current Production Admission Boundary
+
+The current set is **5 admitted StrategyGroups**, **22 active candidate lanes**,
+and **6 current Event Specs**. Every active lane requires all of:
+
+```text
+semantic admission = trial_grade_capable
+Event Spec signal grade = trial_grade_signal
+Event Spec execution mode = trial_live
+execution eligibility = enabled
+```
+
+There is no durable production `Observe-only StrategyGroup` state for these
+five admitted groups. A detector or watcher remains non-executing by design;
+that technical boundary does not downshift an admitted StrategyGroup into a
+non-trading governance tier. An unadmitted variant belongs in Replay/research
+or is parked. In particular, **CPM-RO-001 has four long lanes and no short
+lane**; a computed CPM short pattern cannot create runtime state or an Owner
+notification.
 
 ## Candidate Universe
 
@@ -261,9 +316,16 @@ event_spec_version_id
 event_time_ms
 trigger_candle_close_time_ms
 signal_event_id
+lane_identity_key
+source_watermark
 promotion_candidate_id
 action_time_lane_input_id
+candidate_scope_id
+candidate_scope_event_binding_id
+runtime_scope_binding_id
+runtime_instance_id
 runtime_profile_id
+policy_current_id
 owner_policy_version
 sizing_policy_version
 execution_policy_version

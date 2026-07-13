@@ -40,6 +40,14 @@ from src.application.action_time.pricing_sizing import (  # noqa: E402
     pricing_reference_from_action_time_fact_values,
     sizing_risk_decision_from_budget,
 )
+from src.application.action_time.identity_conservation import (  # noqa: E402
+    RuntimeLaneIdentityConservationError,
+    RuntimeLaneLineage,
+    require_runtime_lane_lineage_match,
+    runtime_lane_identity_from_live_signal,
+    runtime_lane_lineage_from_record,
+)
+from src.domain.runtime_lane_identity import RuntimeLaneIdentityMismatch  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -100,6 +108,8 @@ TICKET_IDENTITY_HASH_FIELDS = (
     "required_execution_mode",
     "execution_eligible",
     "authority_source_ref",
+    "lane_identity_key",
+    "source_watermark",
 )
 DECIMAL_HASH_FIELDS = {
     "target_notional",
@@ -595,6 +605,12 @@ def _build_ticket_bundle(
         execution_policy=execution_policy,
         now_ms=now_ms,
     )
+    source_lineage = _runtime_lane_lineage_for_ticket(
+        signal=signal,
+        promotion=promotion,
+        lane=lane,
+        blockers=blockers,
+    )
 
     required_fact_blockers = _required_fact_blockers(
         control_state,
@@ -714,6 +730,18 @@ def _build_ticket_bundle(
         "execution_eligible": signal["execution_eligible"],
         "authority_source_ref": signal["authority_source_ref"],
     }
+    if source_lineage is not None:
+        ticket.update(source_lineage.model_dump(mode="json"))
+        try:
+            require_runtime_lane_lineage_match(
+                expected=source_lineage,
+                actual=runtime_lane_lineage_from_record(ticket),
+                boundary="action_time_lane_to_ticket",
+            )
+        except RuntimeLaneIdentityConservationError as exc:
+            raise TicketMaterializationBlocked([exc.blocker]) from exc
+        except RuntimeLaneIdentityMismatch as exc:
+            raise TicketMaterializationBlocked([str(exc)]) from exc
     ticket["ticket_hash"] = compute_action_time_ticket_hash(ticket)
     ticket_event = {
         "ticket_event_id": _stable_id("ticket_event", ticket_id, "created"),
@@ -738,6 +766,52 @@ def _build_ticket_bundle(
         "budget": budget,
         "risk_reservation": risk_reservation,
     }
+
+
+def _runtime_lane_lineage_for_ticket(
+    *,
+    signal: dict[str, Any],
+    promotion: dict[str, Any],
+    lane: dict[str, Any],
+    blockers: list[str],
+) -> RuntimeLaneLineage | None:
+    """Conserve migrated signal identity and source watermark through Ticket.
+
+    Pre-118 unit schemas intentionally have none of the lineage columns.  That
+    compatibility branch is not a production fallback: a migrated row with a
+    blank or altered lineage is rejected at the first downstream boundary.
+    """
+
+    lineage_columns_present = any(
+        "lane_identity_key" in row or "source_watermark" in row
+        for row in (signal, promotion, lane)
+    )
+    if not lineage_columns_present:
+        return None
+    try:
+        source_identity = runtime_lane_identity_from_live_signal(signal)
+        source_lineage = runtime_lane_lineage_from_record(signal)
+        if source_lineage.lane_identity_key != source_identity.identity_key:
+            raise RuntimeLaneIdentityConservationError(
+                "runtime_lane_identity_mismatch:signal_lineage_key"
+            )
+        require_runtime_lane_lineage_match(
+            expected=source_lineage,
+            actual=runtime_lane_lineage_from_record(promotion),
+            boundary="signal_to_promotion",
+        )
+        require_runtime_lane_lineage_match(
+            expected=source_lineage,
+            actual=runtime_lane_lineage_from_record(lane),
+            boundary="promotion_to_action_time_lane",
+        )
+    except RuntimeLaneIdentityConservationError as exc:
+        blockers.append(exc.blocker)
+        return None
+    except RuntimeLaneIdentityMismatch as exc:
+        blockers.append(str(exc))
+        return None
+    return source_lineage
 
 
 def _validate_lineage(blockers: list[str], **items: Any) -> None:
@@ -997,46 +1071,17 @@ def _insert_ticket_bundle(
 ) -> None:
     ticket = bundle["ticket"]
     event = bundle["ticket_event"]
-    conn.execute(
-        text(
-            """
-            INSERT INTO brc_action_time_tickets (
-              ticket_id, action_time_lane_input_id, promotion_candidate_id,
-              signal_event_id, event_spec_id, event_spec_version_id,
-              candidate_scope_id, runtime_scope_binding_id, strategy_group_id,
-              strategy_group_version_id, symbol, exchange_instrument_id, side,
-              event_id, event_time_ms, trigger_candle_close_time_ms,
-              runtime_profile_id, public_fact_snapshot_id,
-              action_time_fact_snapshot_id, account_safe_fact_snapshot_id,
-              account_mode_snapshot_id, budget_reservation_id, protection_ref_id,
-              execution_policy_id, execution_policy_version, owner_policy_version,
-              sizing_policy_version, protection_policy_version, target_notional,
-              leverage, effective_notional, selected_leverage,
-              planned_stop_risk_budget, planned_stop_risk,
-              expires_at_ms, status, authority_boundary, ticket_hash,
-              created_under_versions_hash, created_at_ms, signal_grade,
-              required_execution_mode, execution_eligible, authority_source_ref
-            ) VALUES (
-              :ticket_id, :action_time_lane_input_id, :promotion_candidate_id,
-              :signal_event_id, :event_spec_id, :event_spec_version_id,
-              :candidate_scope_id, :runtime_scope_binding_id, :strategy_group_id,
-              :strategy_group_version_id, :symbol, :exchange_instrument_id, :side,
-              :event_id, :event_time_ms, :trigger_candle_close_time_ms,
-              :runtime_profile_id, :public_fact_snapshot_id,
-              :action_time_fact_snapshot_id, :account_safe_fact_snapshot_id,
-              :account_mode_snapshot_id, :budget_reservation_id, :protection_ref_id,
-              :execution_policy_id, :execution_policy_version, :owner_policy_version,
-              :sizing_policy_version, :protection_policy_version, :target_notional,
-              :leverage, :effective_notional, :selected_leverage,
-              :planned_stop_risk_budget, :planned_stop_risk,
-              :expires_at_ms, :status, :authority_boundary, :ticket_hash,
-              :created_under_versions_hash, :created_at_ms, :signal_grade,
-              :required_execution_mode, :execution_eligible, :authority_source_ref
-            )
-            """
-        ),
-        ticket,
+    ticket_table = sa.Table(
+        "brc_action_time_tickets",
+        sa.MetaData(),
+        autoload_with=conn,
     )
+    ticket_values = {
+        column.name: ticket[column.name]
+        for column in ticket_table.columns
+        if column.name in ticket
+    }
+    conn.execute(ticket_table.insert().values(**ticket_values))
     conn.execute(
         text(
             """
