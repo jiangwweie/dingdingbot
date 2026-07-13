@@ -1,6 +1,6 @@
 ---
 title: P0_SIGNAL_IDENTITY_CONSERVATION_AND_OWNER_NOTIFICATION_TRUTH_IMPLEMENTATION_PLAN
-status: CURRENT_IMPLEMENTATION_PLAN
+status: COMPLETED_AND_DEPLOYED
 authority: docs/current/P0_SIGNAL_IDENTITY_CONSERVATION_AND_OWNER_NOTIFICATION_TRUTH_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-13
 ---
@@ -78,7 +78,24 @@ last_verified: 2026-07-13
 - [x] Run targeted watcher and process-outcome tests.
 - [x] Run six-Event-Spec and Action-Time regression suites.
 - [x] Run `validate_current_docs_authority.py`, output-scope validation, and production file-I/O audit.
-- [ ] Commit the focused branch, integrate into `dev`, and push.
-- [ ] Run Tokyo deploy dry-run and apply.
-- [ ] Verify exact release head, PG migration count, watcher/monitor health, no-signal zero-write behavior, and plain notification dry-run shapes.
-- [ ] Mark this plan complete only from fresh verification evidence.
+- [x] Commit the focused branch, integrate into `dev`, and push.
+- [x] Run Tokyo deploy dry-run and apply.
+- [x] Verify exact release head, PG migration count, watcher/monitor health, no-signal zero-write behavior, and plain notification dry-run shapes.
+- [x] Mark this plan complete only from fresh verification evidence.
+
+## Completion Evidence
+
+- Deployed release: `brc-runtime-governance-8b6cd166-20260713`.
+- Exact deployed head: `8b6cd1661b2d39ce29610eaf9dbbd1b907e7a1d7`.
+- PG migration count: `117`; latest migration remains `2026-07-12-117_extend_owner_notifications.py`.
+- Targeted identity, watcher, server-monitor, notification, and process-outcome regression: `140 passed`.
+- Six-Event-Spec and Action-Time regression: `409 passed`.
+- Production file-I/O performance risk: `clear`; recurring JSON/MD risk count: `0`.
+- Production acceptance captured `CPM-RO-001 + SOLUSDT + short` as a durable
+  `live_signal_materialization` failure with
+  `pg_live_signal_event_materialization_failed:runtime_summary_blocked:waiting_for_signal`.
+- The watcher made no Feishu attempt. The PG-backed server monitor sent one
+  plain Chinese `signal_identity_gap` notification, and the repeated monitor
+  run was suppressed by durable PG dedupe.
+- No Ticket, order, FinalGate, Operation Layer, exchange write, profile change,
+  or sizing change occurred during deployment or acceptance.
