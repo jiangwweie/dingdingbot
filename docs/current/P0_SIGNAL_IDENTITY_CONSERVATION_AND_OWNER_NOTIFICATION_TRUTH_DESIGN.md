@@ -106,15 +106,32 @@ for the same lane replaces the current failed outcome. An expired repeated
 event records a non-failure market/noop result rather than a persistent
 engineering failure.
 
+## Owner Notification Ownership
+
+The production watcher must not send Owner Feishu messages directly. The
+watcher's in-process dedupe state disappears on every systemd oneshot restart
+and is not PG authority. Production notification ownership remains exclusively:
+
+```text
+watcher writes PG signal or process outcome
+-> Tokyo server monitor reads PG current state
+-> typed Owner notification intent
+-> PG dedupe
+-> Feishu
+```
+
+The watcher may emit structured stdout for developer diagnostics, but webhook
+configuration does not make it an Owner notifier.
+
 ## Owner Notification Contract
 
-The watcher message must be generated from the authoritative post-observation
-state, not from `runtime_ready_signal_count` alone.
+The server-monitor message must be generated from the authoritative PG
+post-observation state, not from `runtime_ready_signal_count` alone.
 
 | Current fact | Owner message | Owner action |
 | --- | --- | --- |
 | Healthy and no PG signal | No message | None |
-| Anonymous ready, no PG signal identity | `系统发现信号状态不一致，未下单。系统将继续处理，无需操作。` | None |
+| Anonymous ready, no PG signal identity | `信号状态不一致，未下单。系统将继续处理，无需操作。` | None |
 | Named fresh PG signal | `发现交易机会：<StrategyGroup> / <symbol> / <direction>。系统正在检查并处理，无需操作。` | None |
 | Named pre-submit blocker | `该机会未执行：<plain reason>。系统未下单，无需操作。` | None unless policy/safety says otherwise |
 | Submitted/protected lifecycle state | Use the existing typed Owner notification templates | According to lifecycle state |
@@ -143,7 +160,8 @@ exchange-write authority. Notification state is never trading authority.
 ## Acceptance
 
 1. The captured `ready_count=1` and empty `signal_event_ids` shape produces a
-   named identity-gap result and plain Chinese notification.
+   named identity-gap result; the watcher sends no direct Feishu message and
+   the server monitor sends the plain Chinese notification.
 2. A named PG signal produces an opportunity message containing StrategyGroup,
    symbol, and direction.
 3. Expired, observe-only, and no-action rows never produce an opportunity

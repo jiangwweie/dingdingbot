@@ -459,6 +459,8 @@ def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
             str(signal.get("source_kind") or "") == "live_market"
             and str(signal.get("status") or "") == "facts_validated"
             and str(signal.get("freshness_state") or "") == "fresh"
+            and signal.get("execution_eligible") is True
+            and str(signal.get("required_execution_mode") or "") != "observe_only"
         ):
             return {
                 "event_type": "fresh_signal",
@@ -491,6 +493,28 @@ def _runtime_process_failure_event(
     row = max(failures, key=lambda item: int(item.get("updated_at_ms") or 0))
     hard = str(row.get("process_state") or "") == "hard_failure"
     blocker = str(row.get("first_blocker") or "runtime_process_failure")
+    process_name = str(row.get("process_name") or "runtime_process")
+    scope_key = str(row.get("scope_key") or "")
+    scope_parts = scope_key.split(":")
+    if (
+        process_name == "live_signal_materialization"
+        and len(scope_parts) == 4
+        and scope_parts[0] == "lane"
+    ):
+        return {
+            "event_type": "signal_identity_gap",
+            "notify": True,
+            "decision_status": "temporarily_unavailable",
+            "strategy_group_id": scope_parts[1],
+            "symbol": scope_parts[2],
+            "side": scope_parts[3],
+            "checkpoint": process_name,
+            "blocker_class": "runtime_data_gap",
+            "reasons": ["signal_identity_gap", blocker],
+            "owner_message": (
+                "信号状态不一致，未下单；系统将继续处理，无需操作"
+            ),
+        }
     return {
         "event_type": "runtime_process_failure",
         "notify": True,
@@ -499,7 +523,7 @@ def _runtime_process_failure_event(
         else "temporarily_unavailable",
         "strategy_group_id": "runtime",
         "symbol": str(row.get("scope_key") or "all"),
-        "checkpoint": str(row.get("process_name") or "runtime_process"),
+        "checkpoint": process_name,
         "blocker_class": "runtime_process_failure",
         "reasons": ["runtime_process_failure", blocker],
         "owner_message": (
@@ -720,6 +744,7 @@ def _decision_from_pg_sources(
         event_symbol = str(chain_event.get("symbol") or symbol)
         notify = chain_event.get("notify") is not False
         return {
+            "event_type": str(chain_event.get("event_type") or ""),
             "decision": "notify" if notify else "quiet",
             "notify": notify,
             "status": str(
@@ -731,11 +756,8 @@ def _decision_from_pg_sources(
             "strategy_group_id": str(
                 chain_event.get("strategy_group_id") or strategy_group_id
             ),
-            "symbol": (
-                f"{event_symbol}:{event_side}"
-                if event_side and event_symbol
-                else event_symbol or symbol
-            ),
+            "symbol": event_symbol or symbol,
+            "side": event_side if event_side in {"long", "short"} else None,
             "blocker_class": str(chain_event.get("blocker_class") or "fresh_signal"),
             "checkpoint": str(chain_event.get("checkpoint") or checkpoint),
             "owner_message": str(
@@ -1009,6 +1031,9 @@ def _monitor_decision_owner_intent(
         "watcher_or_service_failure",
         "runtime_process_failure",
     }
+    signal_identity_gap = str(decision.get("event_type") or "") == (
+        "signal_identity_gap"
+    )
     kind = (
         OwnerNotificationKind.SYSTEM_TEMPORARILY_UNAVAILABLE
         if temporary
@@ -1030,15 +1055,29 @@ def _monitor_decision_owner_intent(
             else None
         ),
         occurred_at_ms=now_ms,
-        headline=("系统暂时不可用" if temporary else "需要你关注运行状态"),
+        headline=(
+            "信号状态不一致，未下单"
+            if signal_identity_gap
+            else ("系统暂时不可用" if temporary else "需要你关注运行状态")
+        ),
         current_state=(
-            "部分自动观察或处理暂时无法继续"
+            "系统没有为这次观察建立正式交易信号"
+            if signal_identity_gap
+            else "部分自动观察或处理暂时无法继续"
             if temporary
             else "系统已经停止相关的新交易推进"
         ),
-        result_summary="没有新增交易动作",
-        plain_reason=_plain_monitor_reason(blocker_class),
-        next_system_action="系统继续进行只读检查，并在恢复后通知你",
+        result_summary=("没有下单" if signal_identity_gap else "没有新增交易动作"),
+        plain_reason=(
+            "市场观察结果和正式交易事实没有成功衔接"
+            if signal_identity_gap
+            else _plain_monitor_reason(blocker_class)
+        ),
+        next_system_action=(
+            "系统继续核对信号事实并等待下一次有效机会"
+            if signal_identity_gap
+            else "系统继续进行只读检查，并在恢复后通知你"
+        ),
         owner_action_required=not temporary,
         owner_action=("检查服务器或交易所状态" if not temporary else None),
         technical_refs=(

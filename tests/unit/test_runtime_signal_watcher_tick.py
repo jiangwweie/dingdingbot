@@ -101,6 +101,14 @@ def _summary(
                 "status": "pg_live_signal_events_written",
                 "written_count": 1,
                 "signal_event_ids": ["signal-unit-ready"],
+                "signals": [
+                    {
+                        "signal_event_id": "signal-unit-ready",
+                        "strategy_group_id": "CPM-001",
+                        "symbol": "BNBUSDT",
+                        "side": "long",
+                    }
+                ],
             }
             if pg_signal_ready
             else {
@@ -560,7 +568,7 @@ def test_watcher_tick_does_not_notify_when_operator_evidence_needs_review_but_wa
     assert sent == []
 
 
-def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
+def test_watcher_tick_routes_named_signal_notification_to_server_monitor(tmp_path):
     calls = []
 
     def notifier(webhook_url, webhook_secret, body, timeout):
@@ -577,7 +585,7 @@ def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
         notifier=notifier,
     )
 
-    assert artifact["status"] == "owner_notified"
+    assert artifact["status"] == "signal_ready"
     assert artifact["wakeup_status"] == "runtime_signal_ready_for_action_time_ticket"
     assert artifact["post_signal_auto_resume"]["status"] == (
         "ready_for_action_time_ticket_materialization"
@@ -587,22 +595,22 @@ def test_watcher_tick_sends_feishu_on_ready_signal(tmp_path):
     assert artifact["post_signal_auto_resume"]["non_authority_checkpoint"] == (
         "materialize_pg_action_time_ticket"
     )
-    assert artifact["notification"]["sent"] is True
-    assert calls[0][0] == "https://example.test/hook"
-    assert calls[0][1] == "secret-value"
-    assert "monitored runtimes: 1" in calls[0][2]["text"]
-    assert "signal-unit-ready" in calls[0][2]["text"]
-    assert "auth-ready-1" not in calls[0][2]["text"]
+    assert artifact["notification"]["required"] is False
+    assert artifact["notification"]["sent"] is False
+    assert artifact["notification"]["skipped_reason"] == (
+        "owner_notification_owned_by_server_monitor"
+    )
+    assert calls == []
     assert "secret-value" not in json.dumps(artifact)
 
 
-def test_watcher_tick_suppresses_duplicate_ready_event(tmp_path):
+def test_watcher_tick_never_uses_process_local_notification_dedupe(tmp_path):
     first = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
         supervisor_builder=_fake_supervisor("ready_for_action_time_ticket_materialization", pg_signal_ready=True),
         notifier=lambda *items: {"sent": True, "status_code": 200},
     )
-    assert first["notification"]["sent"] is True
+    assert first["notification"]["sent"] is False
 
     calls = []
     second = runtime_signal_watcher_tick.build_watcher_tick_artifact(
@@ -611,12 +619,14 @@ def test_watcher_tick_suppresses_duplicate_ready_event(tmp_path):
         notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
     )
 
-    assert second["notification"]["duplicate_suppressed"] is True
-    assert second["notification"]["skipped_reason"] == "event_already_notified"
+    assert second["notification"]["duplicate_suppressed"] is False
+    assert second["notification"]["skipped_reason"] == (
+        "owner_notification_owned_by_server_monitor"
+    )
     assert calls == []
 
 
-def test_watcher_tick_reuses_feishu_webhook_from_env_file(tmp_path, monkeypatch):
+def test_watcher_tick_does_not_use_feishu_webhook_from_env_file(tmp_path, monkeypatch):
     monkeypatch.delenv("BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_URL", raising=False)
     monkeypatch.delenv("FEISHU_WEBHOOK_URL", raising=False)
     env_file = tmp_path / "deploy.env"
@@ -639,11 +649,12 @@ def test_watcher_tick_reuses_feishu_webhook_from_env_file(tmp_path, monkeypatch)
         notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
     )
 
-    assert artifact["status"] == "owner_notified"
-    assert artifact["notification"]["configured"] is True
-    assert artifact["notification"]["secret_configured"] is True
-    assert calls[0][0] == "https://example.test/from-env-file"
-    assert calls[0][1] == "env-file-secret"
+    assert artifact["status"] == "signal_ready"
+    assert artifact["notification"]["configured"] is False
+    assert artifact["notification"]["secret_configured"] is False
+    assert artifact["notification"]["required"] is False
+    assert artifact["notification"]["sent"] is False
+    assert calls == []
     assert "env-file-secret" not in json.dumps(artifact)
 
 
@@ -692,10 +703,11 @@ def test_watcher_tick_blocks_legacy_ready_without_pg_live_signal_event(tmp_path)
         "skipped": [{"blocker": "fresh_public_fact_snapshot_missing"}],
     }
 
+    calls = []
     artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(tmp_path, feishu_webhook_url="https://example.test/hook"),
         supervisor_builder=_fake_supervisor_from_latest(latest),
-        notifier=lambda *items: {"sent": True, "status_code": 200},
+        notifier=lambda *items: calls.append(items) or {"sent": True, "status_code": 200},
     )
 
     assert artifact["post_signal_auto_resume"]["status"] == (
@@ -706,6 +718,12 @@ def test_watcher_tick_blocks_legacy_ready_without_pg_live_signal_event(tmp_path)
         "materialize_pg_live_signal_event"
     )
     assert artifact["watcher_tick_plan"]["can_continue_without_owner_chat"] is False
+    assert artifact["notification"]["required"] is False
+    assert artifact["notification"]["sent"] is False
+    assert artifact["notification"]["skipped_reason"] == (
+        "owner_notification_owned_by_server_monitor"
+    )
+    assert calls == []
 
 
 def test_watcher_tick_treats_only_expired_pg_signals_as_market_wait(tmp_path):
@@ -914,7 +932,7 @@ def test_watcher_tick_blocks_retired_prepare_record_side_effects(tmp_path):
     assert "action_time_ticket_created" in artifact["safety_invariants"]["forbidden_effects"]
 
 
-def test_notification_dry_run_does_not_mark_event_as_notified(tmp_path):
+def test_notification_dry_run_still_routes_owner_notification_to_server_monitor(tmp_path):
     first = runtime_signal_watcher_tick.build_watcher_tick_artifact(
         _args(
             tmp_path,
@@ -923,7 +941,9 @@ def test_notification_dry_run_does_not_mark_event_as_notified(tmp_path):
         ),
         supervisor_builder=_fake_supervisor("ready_for_action_time_ticket_materialization", pg_signal_ready=True),
     )
-    assert first["notification"]["skipped_reason"] == "notification_dry_run"
+    assert first["notification"]["skipped_reason"] == (
+        "owner_notification_owned_by_server_monitor"
+    )
 
     calls = []
     second = runtime_signal_watcher_tick.build_watcher_tick_artifact(
@@ -933,15 +953,5 @@ def test_notification_dry_run_does_not_mark_event_as_notified(tmp_path):
     )
 
     assert second["notification"]["duplicate_suppressed"] is False
-    assert second["notification"]["sent"] is True
-    assert calls
-
-
-def test_feishu_text_body_supports_signed_custom_bot_payload():
-    body = runtime_signal_watcher_tick._feishu_text_body("hello", secret="top-secret")
-
-    assert body["msg_type"] == "text"
-    assert body["content"] == {"text": "hello"}
-    assert body["timestamp"]
-    assert body["sign"]
-    assert "top-secret" not in json.dumps(body)
+    assert second["notification"]["sent"] is False
+    assert calls == []

@@ -44,6 +44,8 @@ def _fresh_signal(now_ms: int) -> dict:
                 "source_kind": "live_market",
                 "status": "facts_validated",
                 "freshness_state": "fresh",
+                "execution_eligible": True,
+                "required_execution_mode": "trial_live",
                 "observed_at_ms": now_ms - 1_000,
                 "expires_at_ms": now_ms + 60_000,
             }

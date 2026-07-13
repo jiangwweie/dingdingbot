@@ -29,6 +29,7 @@ def _operator_evidence(
     ready_count: int = 0,
     prepared_authorization_id: str | None = None,
     shadow_candidate_id: str | None = None,
+    signal_event_ids: list[str] | None = None,
     forbidden: bool = False,
 ) -> dict:
     return {
@@ -51,6 +52,7 @@ def _operator_evidence(
         "runtime_action_time_context": {
             "prepared_authorization_id": prepared_authorization_id,
             "shadow_candidate_id": shadow_candidate_id,
+            "signal_event_ids": list(signal_event_ids or []),
             "allowed_non_executing_followups": [
                 "materialize_pg_promotion_action_time_lane",
                 "materialize_action_time_ticket",
@@ -96,19 +98,39 @@ def test_wakeup_evidence_allows_owner_sleep_when_no_signal():
     assert artifact["safety_invariants"]["exchange_write_called"] is False
 
 
-def test_wakeup_evidence_surfaces_ready_signal_without_submit_authority():
+def test_wakeup_evidence_classifies_anonymous_ready_as_identity_gap():
     module = _load_module()
 
     artifact = module.build_wakeup_evidence(
         _operator_evidence(status="runtime_signal_attention", ready_count=1)
     )
 
-    assert artifact["status"] == "runtime_signal_ready_for_action_time_ticket"
+    assert artifact["status"] == "runtime_signal_identity_gap"
     assert artifact["owner_attention"] == "review_when_available"
-    assert "materialize_action_time_ticket" in artifact["allowed_while_owner_asleep"]
-    assert "run_disabled_ticket_bound_protected_submit_smoke" in artifact["allowed_while_owner_asleep"]
+    assert artifact["summary"]["signal_event_ids"] == []
+    assert artifact["summary"]["next_step"] == (
+        "repair_pg_live_signal_identity_handoff"
+    )
+    assert artifact["allowed_while_owner_asleep"] == []
     assert "place_exchange_order" not in artifact["allowed_while_owner_asleep"]
     assert "exchange_order_placement" in artifact["requires_owner_before"]
+
+
+def test_wakeup_evidence_surfaces_named_pg_signal_without_submit_authority():
+    module = _load_module()
+
+    artifact = module.build_wakeup_evidence(
+        _operator_evidence(
+            status="runtime_signal_attention",
+            ready_count=1,
+            signal_event_ids=["signal:unit-ready"],
+        )
+    )
+
+    assert artifact["status"] == "runtime_signal_ready_for_action_time_ticket"
+    assert artifact["summary"]["signal_event_ids"] == ["signal:unit-ready"]
+    assert "materialize_action_time_ticket" in artifact["allowed_while_owner_asleep"]
+    assert "run_disabled_ticket_bound_protected_submit_smoke" in artifact["allowed_while_owner_asleep"]
 
 
 def test_wakeup_evidence_ignores_retired_prepare_shadow_identity():

@@ -38,6 +38,9 @@ from src.domain.execution_eligibility import (  # noqa: E402
     SignalGrade,
     resolve_execution_eligibility,
 )
+from src.application.runtime_process_outcome import (  # noqa: E402
+    materialize_runtime_process_outcome,
+)
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     API_BASE_ENV as FIRST_REAL_SUBMIT_API_BASE_ENV,
     DEFAULT_API_BASE,
@@ -508,12 +511,17 @@ def write_runtime_signal_summaries_to_pg(
             "status": "pg_live_signal_events_noop",
             "reason": "would_enter_signal_summary_missing",
             "written_count": 0,
+            "signal_event_ids": [],
+            "signals": [],
+            "process_outcomes": [],
         }
 
     observed_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     written: list[str] = []
+    written_signals: list[dict[str, str]] = []
     write_dispositions: list[dict[str, str]] = []
     skipped: list[dict[str, Any]] = []
+    process_outcomes: list[dict[str, object]] = []
     if conn is not None:
         for candidate in candidates:
             result = _write_live_signal_candidate(
@@ -523,6 +531,7 @@ def write_runtime_signal_summaries_to_pg(
             )
             if result.get("written") is True:
                 written.append(str(result["signal_event_id"]))
+                written_signals.append(_signal_identity(result))
                 write_dispositions.append(
                     {
                         "signal_event_id": str(result["signal_event_id"]),
@@ -531,10 +540,20 @@ def write_runtime_signal_summaries_to_pg(
                 )
             else:
                 skipped.append(result)
+            process_outcome = _materialize_signal_process_outcome(
+                conn,
+                candidate=candidate,
+                result=result,
+                observed_ms=observed_ms,
+            )
+            if process_outcome:
+                process_outcomes.append(process_outcome)
         return _pg_live_signal_events_result(
             written=written,
+            written_signals=written_signals,
             write_dispositions=write_dispositions,
             skipped=skipped,
+            process_outcomes=process_outcomes,
         )
 
     normalized_url = normalize_sync_postgres_dsn(database_url)
@@ -551,6 +570,7 @@ def write_runtime_signal_summaries_to_pg(
                 )
                 if result.get("written") is True:
                     written.append(str(result["signal_event_id"]))
+                    written_signals.append(_signal_identity(result))
                     write_dispositions.append(
                         {
                             "signal_event_id": str(result["signal_event_id"]),
@@ -559,20 +579,32 @@ def write_runtime_signal_summaries_to_pg(
                     )
                 else:
                     skipped.append(result)
+                process_outcome = _materialize_signal_process_outcome(
+                    conn,
+                    candidate=candidate,
+                    result=result,
+                    observed_ms=observed_ms,
+                )
+                if process_outcome:
+                    process_outcomes.append(process_outcome)
     finally:
         engine.dispose()
     return _pg_live_signal_events_result(
         written=written,
+        written_signals=written_signals,
         write_dispositions=write_dispositions,
         skipped=skipped,
+        process_outcomes=process_outcomes,
     )
 
 
 def _pg_live_signal_events_result(
     *,
     written: list[str],
+    written_signals: list[dict[str, str]],
     write_dispositions: list[dict[str, str]],
     skipped: list[dict[str, Any]],
+    process_outcomes: list[dict[str, object]],
 ) -> dict[str, Any]:
     return {
         "status": (
@@ -583,13 +615,94 @@ def _pg_live_signal_events_result(
         "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
         "written_count": len(written),
         "signal_event_ids": written,
+        "signals": written_signals,
         "write_dispositions": write_dispositions,
         "skipped": skipped,
+        "process_outcomes": process_outcomes,
         "authority_boundary": (
             "live_signal_event_projection_only; "
             "no_finalgate_no_operation_layer_no_exchange_write"
         ),
     }
+
+
+def _signal_identity(result: dict[str, Any]) -> dict[str, str]:
+    return {
+        "signal_event_id": str(result.get("signal_event_id") or ""),
+        "strategy_group_id": str(result.get("strategy_group_id") or ""),
+        "symbol": str(result.get("symbol") or ""),
+        "side": str(result.get("side") or ""),
+    }
+
+
+def _materialize_signal_process_outcome(
+    conn: sa.engine.Connection,
+    *,
+    candidate: dict[str, Any],
+    result: dict[str, Any],
+    observed_ms: int,
+) -> dict[str, object]:
+    if not sa.inspect(conn).has_table("brc_runtime_process_outcomes"):
+        return {}
+    strategy_group_id = str(candidate.get("strategy_group_id") or "")
+    symbol = str(candidate.get("symbol") or "")
+    side = str(candidate.get("side") or "")
+    if not strategy_group_id or not symbol or side not in {"long", "short"}:
+        return {}
+
+    blocker = str(result.get("blocker") or "")
+    if result.get("written") is True:
+        result_status = "live_signal_materialization_completed"
+        blockers: list[str] = []
+        source_watermark = str(result.get("signal_event_id") or "")
+    elif blocker in {"signal_event_expired", "signal_event_identity_terminal"}:
+        result_status = "no_current_fresh_live_signal"
+        blockers = []
+        source_watermark = _candidate_source_watermark(candidate)
+    else:
+        result_status = "pg_live_signal_event_materialization_failed"
+        blockers = [
+            "pg_live_signal_event_materialization_failed:"
+            + (blocker or "unknown")
+        ]
+        source_watermark = _candidate_source_watermark(candidate)
+
+    return materialize_runtime_process_outcome(
+        conn,
+        process_name="live_signal_materialization",
+        scope_key=f"lane:{strategy_group_id}:{symbol}:{side}",
+        run_id=(
+            f"live-signal-materialization:{observed_ms}:"
+            f"{str(candidate.get('runtime_instance_id') or 'unknown')}"
+        ),
+        result_status=result_status,
+        blockers=blockers,
+        started_at_ms=observed_ms,
+        completed_at_ms=observed_ms,
+        runtime_head=_current_runtime_head(conn),
+        source_watermark=source_watermark,
+    )
+
+
+def _candidate_source_watermark(candidate: dict[str, Any]) -> str:
+    runtime_instance_id = str(candidate.get("runtime_instance_id") or "unknown")
+    event_time_ms = _int_or_zero(candidate.get("trigger_candle_close_time_ms"))
+    return f"{runtime_instance_id}:{event_time_ms}"
+
+
+def _current_runtime_head(conn: sa.engine.Connection) -> str:
+    row = conn.execute(
+        sa.text(
+            """
+            SELECT runtime_head
+            FROM brc_runtime_process_outcomes
+            WHERE process_name = 'runtime_release_activation'
+            ORDER BY updated_at_ms DESC
+            LIMIT 1
+            """
+        )
+    ).first()
+    return str(row[0]) if row and str(row[0] or "").strip() else "runtime-head-unavailable"
 
 
 def _live_signal_candidates_from_summaries(

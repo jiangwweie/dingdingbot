@@ -23,7 +23,12 @@ def _load_module():
     return module
 
 
-def _status_artifact(*, status="waiting_for_signal", signal_type="no_action"):
+def _status_artifact(
+    *,
+    status="waiting_for_signal",
+    signal_type="no_action",
+    signal_event_ids=None,
+):
     return {
         "status": status,
         "latest_status": status,
@@ -38,6 +43,15 @@ def _status_artifact(*, status="waiting_for_signal", signal_type="no_action"):
         "action_time_lane_input_id": None,
         "promotion_candidate_id": None,
         "signal_event_id": None,
+        "pg_live_signal_events": {
+            "status": (
+                "pg_live_signal_events_written"
+                if signal_event_ids
+                else "pg_live_signal_events_blocked"
+            ),
+            "written_count": len(signal_event_ids or []),
+            "signal_event_ids": list(signal_event_ids or []),
+        },
         "runtime_signal_summaries": [
             {
                 "runtime_instance_id": "runtime-1",
@@ -150,7 +164,7 @@ def test_operator_evidence_summarizes_no_signal_without_execution():
     assert "operator_packet_only" not in evidence["safety_invariants"]
 
 
-def test_operator_evidence_surfaces_runtime_ready_attention():
+def test_operator_evidence_classifies_anonymous_runtime_ready_as_identity_gap():
     module = _load_module()
 
     evidence = module.build_operator_evidence(
@@ -161,12 +175,31 @@ def test_operator_evidence_surfaces_runtime_ready_attention():
         strategy_preview_artifact=_strategy_preview(),
     )
 
-    assert evidence["status"] == "runtime_signal_attention"
-    assert evidence["watch_status"] == "runtime_signal_ready"
+    assert evidence["status"] == "runtime_signal_identity_gap"
+    assert evidence["watch_status"] == "runtime_signal_identity_gap"
     assert evidence["operator_review_plan"]["next_step"] == (
-        "materialize_pg_action_time_ticket"
+        "repair_pg_live_signal_identity_handoff"
     )
     assert evidence["safety_invariants"]["order_created"] is False
+
+
+def test_operator_evidence_surfaces_named_pg_runtime_ready_attention():
+    module = _load_module()
+
+    evidence = module.build_operator_evidence(
+        active_status_artifact=_status_artifact(
+            status="ready_for_action_time_ticket_materialization",
+            signal_type="would_enter",
+            signal_event_ids=["signal:unit-btpc-avax"],
+        ),
+        strategy_preview_artifact=_strategy_preview(),
+    )
+
+    assert evidence["status"] == "runtime_signal_attention"
+    assert evidence["watch_status"] == "runtime_signal_ready"
+    assert evidence["runtime_action_time_context"]["signal_event_ids"] == [
+        "signal:unit-btpc-avax"
+    ]
 
 
 def test_operator_evidence_blocks_forbidden_preview_effect():

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Run one read-only runtime signal watcher tick with optional Feishu wake-up.
+"""Run one read-only runtime signal watcher tick.
 
 The watcher is intentionally one-shot so it can be driven by a systemd timer.
-It builds runtime status in memory, persists current coverage to PG, emits a
-stdout summary, and only sends a notification when owner attention is required.
+It builds runtime status in memory, persists current coverage and signal
+materialization outcomes to PG, and emits a stdout summary. Production Owner
+notification belongs exclusively to the PG-backed Tokyo server monitor.
 It never writes recurring JSON/MD reports, submits, places orders, calls
 OrderLifecycle, mutates runtime budget, or transfers funds.
 """
@@ -11,18 +12,11 @@ OrderLifecycle, mutates runtime budget, or transfers funds.
 from __future__ import annotations
 
 import argparse
-import base64
-import hashlib
-import hmac
 import json
 import os
 from pathlib import Path
-import shlex
 import sys
-import time
 from typing import Any, Callable
-import urllib.error
-import urllib.request
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -41,11 +35,6 @@ from scripts.build_runtime_observation_wakeup_evidence import (  # noqa: E402
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 
 
-OWNER_ATTENTION_STATUSES = {
-    "blocked_forbidden_effect",
-    "runtime_signal_ready_for_action_time_ticket",
-    "operator_evidence_needs_review",
-}
 WAITING_STATUS = "waiting_for_signal"
 STOP_STATUSES = {
     "ready_for_action_time_ticket_materialization",
@@ -54,163 +43,7 @@ STOP_STATUSES = {
     "mixed",
     "no_active_runtimes",
 }
-STATUS_ARTIFACT_ATTENTION_STATUSES = {
-    "attention",
-    "blocked",
-    "blocked_forbidden_effect",
-    "stale",
-}
-
-
-Notifier = Callable[[str, str | None, dict[str, Any], float], dict[str, Any]]
 SupervisorBuilder = Callable[[argparse.Namespace], dict[str, Any]]
-FEISHU_WEBHOOK_URL_ENV_NAMES = (
-    "BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_URL",
-    "FEISHU_WEBHOOK_URL",
-)
-FEISHU_WEBHOOK_SECRET_ENV_NAMES = (
-    "BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_SECRET",
-    "FEISHU_WEBHOOK_SECRET",
-)
-_PROCESS_NOTIFICATION_STATE: dict[str, dict[str, Any]] = {}
-
-
-def _env_file_values(path_value: str | None, names: tuple[str, ...]) -> dict[str, str]:
-    if not path_value:
-        return {}
-    path = Path(path_value).expanduser()
-    if not path.exists():
-        return {}
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, raw_value = line.split("=", 1)
-        key = key.strip()
-        if key not in names or key in values:
-            continue
-        try:
-            parsed = shlex.split(raw_value, comments=False, posix=True)
-        except ValueError:
-            parsed = []
-        value = parsed[0] if len(parsed) == 1 else raw_value.strip().strip("\"'")
-        if value:
-            values[key] = value
-    return values
-
-
-def _first_env_value(
-    names: tuple[str, ...],
-    *,
-    env_file: str | None = None,
-) -> str | None:
-    for name in names:
-        value = os.environ.get(name)
-        if value:
-            return value
-    env_values = _env_file_values(env_file, names)
-    for name in names:
-        value = env_values.get(name)
-        if value:
-            return value
-    return None
-
-
-def _webhook_url(args: argparse.Namespace) -> str | None:
-    return (
-        args.feishu_webhook_url
-        or _first_env_value(FEISHU_WEBHOOK_URL_ENV_NAMES, env_file=args.env_file)
-        or None
-    )
-
-
-def _webhook_secret(args: argparse.Namespace) -> str | None:
-    return (
-        args.feishu_webhook_secret
-        or _first_env_value(FEISHU_WEBHOOK_SECRET_ENV_NAMES, env_file=args.env_file)
-        or None
-    )
-
-
-def _feishu_signature(timestamp: int, secret: str) -> str:
-    key = f"{timestamp}\n{secret}".encode("utf-8")
-    digest = hmac.new(key, b"", hashlib.sha256).digest()
-    return base64.b64encode(digest).decode("utf-8")
-
-
-def _feishu_text_body(text: str, *, secret: str | None = None) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "msg_type": "text",
-        "content": {"text": text},
-    }
-    if secret:
-        timestamp = int(time.time())
-        body["timestamp"] = str(timestamp)
-        body["sign"] = _feishu_signature(timestamp, secret)
-    return body
-
-
-def send_feishu_text(
-    webhook_url: str,
-    webhook_secret: str | None,
-    body: dict[str, Any],
-    timeout_seconds: float,
-) -> dict[str, Any]:
-    request_body = _feishu_text_body(body["text"], secret=webhook_secret)
-    payload = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        webhook_url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            response_body = response.read().decode("utf-8", errors="replace")
-            return {
-                "sent": 200 <= int(response.status) < 300,
-                "status_code": int(response.status),
-                "response_body_preview": response_body[:500],
-            }
-    except urllib.error.HTTPError as exc:
-        response_body = exc.read().decode("utf-8", errors="replace")
-        return {
-            "sent": False,
-            "status_code": int(exc.code),
-            "response_body_preview": response_body[:500],
-        }
-    except Exception as exc:  # pragma: no cover - network dependent
-        return {
-            "sent": False,
-            "status_code": None,
-            "error": f"{type(exc).__name__}:{str(exc)[:240]}",
-        }
-
-
-def _event_key(
-    *,
-    status_artifact: dict[str, Any],
-    operator_evidence: dict[str, Any],
-    wakeup_evidence: dict[str, Any],
-) -> str:
-    summary = wakeup_evidence.get("summary") if isinstance(wakeup_evidence.get("summary"), dict) else {}
-    pg_live_signal_events = (
-        status_artifact.get("pg_live_signal_events")
-        if isinstance(status_artifact.get("pg_live_signal_events"), dict)
-        else {}
-    )
-    signal_event_ids = ",".join(
-        sorted(str(item) for item in pg_live_signal_events.get("signal_event_ids") or [])
-    )
-    parts = [
-        str(wakeup_evidence.get("status") or ""),
-        str(operator_evidence.get("status") or ""),
-        str(status_artifact.get("latest_status") or ""),
-        signal_event_ids,
-        str(summary.get("runtime_ready_signal_count") or ""),
-    ]
-    return "|".join(parts)
 
 
 def _notification_required(
@@ -223,53 +56,7 @@ def _notification_required(
     auto_resume_status = str((auto_resume or {}).get("status") or "")
     if auto_resume_status == "waiting_for_market":
         return False, "waiting_for_market_no_owner_attention_needed"
-    wakeup_status = str(wakeup_evidence.get("status") or "")
-    status_status = str(status_artifact.get("status") or "")
-    if args.notify_no_signal and wakeup_status in {
-        "owner_sleep_safe_observation_running",
-        "observation_window_complete_no_signal",
-    }:
-        return True, "notify_no_signal_enabled"
-    if wakeup_status in OWNER_ATTENTION_STATUSES:
-        return True, f"wakeup_status:{wakeup_status}"
-    if status_status in STATUS_ARTIFACT_ATTENTION_STATUSES:
-        return True, f"status_artifact:{status_status}"
-    return False, "no_owner_attention_needed"
-
-
-def _notification_text(
-    *,
-    args: argparse.Namespace,
-    status_artifact: dict[str, Any],
-    operator_evidence: dict[str, Any],
-    wakeup_evidence: dict[str, Any],
-    paths: dict[str, str],
-) -> str:
-    summary = wakeup_evidence.get("summary") if isinstance(wakeup_evidence.get("summary"), dict) else {}
-    monitored_count = summary.get("monitored_runtime_count")
-    active_count = summary.get("active_runtime_count")
-    if monitored_count is None:
-        runtime_count_line = f"active runtimes: {active_count}"
-    elif active_count is not None and active_count != monitored_count:
-        runtime_count_line = f"monitored runtimes: {monitored_count} (active total: {active_count})"
-    else:
-        runtime_count_line = f"monitored runtimes: {monitored_count}"
-    operator_plan = operator_evidence.get("operator_review_plan") or {}
-    lines = [
-        f"BRC runtime signal watcher: {wakeup_evidence.get('status')}",
-        f"env: {args.label}",
-        f"operator: {operator_evidence.get('status')}",
-        runtime_count_line,
-        f"ready runtime signals: {summary.get('runtime_ready_signal_count')}",
-        "pg signal events: "
-        + (", ".join(str(item) for item in (summary.get("signal_event_ids") or [])) or "-"),
-        f"next: {summary.get('next_step') or operator_plan.get('next_step') or '-'}",
-        f"evidence: {paths.get('wakeup_evidence_ref')}",
-    ]
-    blockers = status_artifact.get("blockers") or operator_evidence.get("blockers") or []
-    if blockers:
-        lines.append("blockers: " + ", ".join(str(item) for item in blockers[:6]))
-    return "\n".join(lines)
+    return False, "owner_notification_owned_by_server_monitor"
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -987,11 +774,10 @@ def build_watcher_tick_artifact(
     args: argparse.Namespace,
     *,
     supervisor_builder: SupervisorBuilder | None = None,
-    notifier: Notifier | None = None,
+    notifier: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     output_dir = Path(args.output_dir).expanduser()
-    state_key = f"{args.label}:{output_dir}"
-    previous_state = dict(_PROCESS_NOTIFICATION_STATE.get(state_key) or {})
+    _ = notifier
 
     supervisor_builder = supervisor_builder or _build_in_memory_supervisor_artifact
     supervisor_artifact = supervisor_builder(_supervisor_args(args, output_dir))
@@ -1034,20 +820,12 @@ def build_watcher_tick_artifact(
         status_safety.get("observed_protection_plan_created")
     )
 
-    event_key = _event_key(
-        status_artifact=status_artifact,
-        operator_evidence=operator_evidence,
-        wakeup_evidence=wakeup_evidence,
-    )
     required, reason = _notification_required(
         args=args,
         status_artifact=status_artifact,
         wakeup_evidence=wakeup_evidence,
         auto_resume=auto_resume,
     )
-    duplicate = previous_state.get("last_notified_event_key") == event_key
-    webhook_url = _webhook_url(args)
-    webhook_secret = _webhook_secret(args)
     paths = {
         "status_artifact_ref": "memory:runtime_signal_watcher_in_memory_status",
         "operator_evidence_ref": "memory:runtime_observation_operator_evidence",
@@ -1058,57 +836,16 @@ def build_watcher_tick_artifact(
         "required": required,
         "reason": reason,
         "duplicate_suppressed": False,
-        "configured": bool(webhook_url),
-        "secret_configured": bool(webhook_secret),
+        "configured": False,
+        "secret_configured": False,
         "attempted": False,
         "sent": False,
-        "skipped_reason": None,
-    }
-    if not required:
-        notification["skipped_reason"] = "no_owner_attention_needed"
-    elif duplicate:
-        notification["duplicate_suppressed"] = True
-        notification["skipped_reason"] = "event_already_notified"
-    elif not webhook_url:
-        notification["skipped_reason"] = "feishu_webhook_url_missing"
-    else:
-        message = _notification_text(
-            args=args,
-            status_artifact=status_artifact,
-            operator_evidence=operator_evidence,
-            wakeup_evidence=wakeup_evidence,
-            paths=paths,
-        )
-        if args.notification_dry_run:
-            notification.update(
-                {
-                    "attempted": False,
-                    "sent": False,
-                    "skipped_reason": "notification_dry_run",
-                    "message_preview": message[:1000],
-                }
-            )
-        else:
-            sender = notifier or send_feishu_text
-            result = sender(
-                webhook_url,
-                webhook_secret,
-                {"text": message},
-                args.notification_timeout_seconds,
-            )
-            notification.update({"attempted": True, **result})
-
-    state = {
-        "last_event_key": event_key,
-        "last_wakeup_status": wakeup_evidence.get("status"),
-        "last_operator_status": operator_evidence.get("status"),
-        "last_watcher_status_evidence_status": status_artifact.get("status"),
-        "last_observed_at_ms": int(time.time() * 1000),
-        "last_notified_event_key": (
-            event_key if notification.get("sent") else previous_state.get("last_notified_event_key")
+        "skipped_reason": (
+            reason
+            if reason == "owner_notification_owned_by_server_monitor"
+            else "no_owner_attention_needed"
         ),
     }
-    _PROCESS_NOTIFICATION_STATE[state_key] = state
 
     artifact = {
         "scope": "runtime_signal_watcher_tick",
@@ -1120,7 +857,6 @@ def build_watcher_tick_artifact(
         ),
         "output_dir": str(output_dir),
         "paths": paths,
-        "event_key": event_key,
         "supervisor_status": supervisor_artifact.get("status"),
         "watcher_status_evidence_status": status_artifact.get("status"),
         "operator_status": operator_evidence.get("status"),
@@ -1196,6 +932,10 @@ def _tick_status(
 ) -> str:
     if str((auto_resume or {}).get("status") or "") == "waiting_for_market":
         return "watching_no_signal"
+    if str((auto_resume or {}).get("status") or "") == (
+        "ready_for_action_time_ticket_materialization"
+    ):
+        return "signal_ready"
     if wakeup_evidence.get("status") == "blocked_forbidden_effect":
         return "blocked_forbidden_effect"
     if status_artifact.get("status") in {"blocked", "blocked_forbidden_effect", "stale"}:
@@ -1240,11 +980,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--one-hour-limit", type=int, default=25)
     parser.add_argument("--four-hour-limit", type=int, default=25)
     parser.add_argument("--include-artifacts", action="store_true")
-    parser.add_argument("--notify-no-signal", action="store_true")
-    parser.add_argument("--notification-dry-run", action="store_true")
-    parser.add_argument("--notification-timeout-seconds", type=float, default=10.0)
-    parser.add_argument("--feishu-webhook-url")
-    parser.add_argument("--feishu-webhook-secret")
     parser.add_argument("--label", default="tokyo-runtime-signal-watcher")
     return parser.parse_args(argv)
 

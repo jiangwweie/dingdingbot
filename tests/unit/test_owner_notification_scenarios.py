@@ -9,7 +9,12 @@ from src.application.owner_notification import (
 NOW_MS = 1_800_000_000_000
 
 
-def _signal(*, status: str = "facts_validated", freshness: str = "fresh") -> dict:
+def _signal(
+    *,
+    status: str = "facts_validated",
+    freshness: str = "fresh",
+    execution_eligible: bool = True,
+) -> dict:
     return {
         "signal_event_id": "signal-001",
         "strategy_group_id": "SOR-001",
@@ -18,6 +23,10 @@ def _signal(*, status: str = "facts_validated", freshness: str = "fresh") -> dic
         "source_kind": "live_market",
         "status": status,
         "freshness_state": freshness,
+        "execution_eligible": execution_eligible,
+        "required_execution_mode": (
+            "trial_live" if execution_eligible else "observe_only"
+        ),
         "event_time_ms": NOW_MS - 60_000,
         "observed_at_ms": NOW_MS - 50_000,
         "expires_at_ms": NOW_MS + 60_000 if freshness == "fresh" else NOW_MS - 1,
@@ -77,6 +86,15 @@ def test_one_fresh_signal_emits_one_opportunity_despite_candidate_lane_and_ticke
         OwnerNotificationKind.OPPORTUNITY_DETECTED
     ]
     assert intents[0].correlation_id == "signal:signal-001"
+
+
+def test_observe_only_fresh_signal_does_not_emit_trading_opportunity() -> None:
+    intents = project_owner_notification_intents(
+        {"live_signal_events": [_signal(execution_eligible=False)]},
+        now_ms=NOW_MS,
+    )
+
+    assert intents == []
 
 
 def test_prefixed_production_signal_identity_is_not_double_prefixed() -> None:

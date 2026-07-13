@@ -42,6 +42,31 @@ def build_watch_evidence(
         for row in runtime_ready
         if row.get("status") == "ready_for_final_gate_preflight"
     ]
+    pg_live_signal_events = (
+        active_status_artifact.get("pg_live_signal_events")
+        if isinstance(active_status_artifact.get("pg_live_signal_events"), dict)
+        else {}
+    )
+    signal_event_ids = [
+        str(item)
+        for item in pg_live_signal_events.get("signal_event_ids") or []
+        if str(item or "").strip()
+    ]
+    runtime_identity_gap_signals = (
+        [
+            {
+                "runtime_instance_id": row.get("runtime_instance_id"),
+                "strategy_family_id": row.get("strategy_family_id"),
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "signal_type": row.get("signal_type"),
+                "reason_codes": list(row.get("reason_codes") or []),
+            }
+            for row in runtime_ready
+        ]
+        if runtime_ready and not signal_event_ids
+        else []
+    )
     strategy_would_enter = [
         _strategy_summary(row)
         for row in strategy_preview_artifact.get("would_enter_signals") or []
@@ -59,7 +84,10 @@ def build_watch_evidence(
     status = "blocked_forbidden_effect"
     next_step = "resolve_signal_watch_forbidden_effects"
     if not forbidden_effects:
-        if runtime_ready_for_preflight:
+        if runtime_identity_gap_signals:
+            status = "runtime_signal_identity_gap"
+            next_step = "repair_pg_live_signal_identity_handoff"
+        elif runtime_ready_for_preflight:
             status = "runtime_signal_ready_for_action_time_ticket"
             next_step = "materialize_pg_action_time_ticket"
         elif runtime_ready:
@@ -101,17 +129,11 @@ def build_watch_evidence(
         },
         "runtime_signals": runtime_summaries,
         "runtime_ready_signals": runtime_ready,
+        "runtime_identity_gap_signals": runtime_identity_gap_signals,
         "runtime_action_time_context": {
             "ready_for_prepare_count": len(runtime_ready_for_prepare),
             "ready_for_final_gate_preflight_count": len(runtime_ready_for_preflight),
-            "signal_event_ids": list(
-                (
-                    active_status_artifact.get("pg_live_signal_events")
-                    if isinstance(active_status_artifact.get("pg_live_signal_events"), dict)
-                    else {}
-                ).get("signal_event_ids")
-                or []
-            ),
+            "signal_event_ids": signal_event_ids,
             "allowed_non_executing_followups": [
                 "materialize_pg_promotion_action_time_lane",
                 "materialize_action_time_ticket",
@@ -208,6 +230,8 @@ def _strategy_summary(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _allowed_review_checkpoints(status: str) -> list[str]:
+    if status == "runtime_signal_identity_gap":
+        return []
     if status == "runtime_signal_ready":
         return [
             "review_runtime_ready_signal",

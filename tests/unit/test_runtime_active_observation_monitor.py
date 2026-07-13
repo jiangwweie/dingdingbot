@@ -1459,6 +1459,14 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
 
     assert result["status"] == "pg_live_signal_events_written"
     assert result["written_count"] == 1
+    assert result["signals"] == [
+        {
+            "signal_event_id": result["signal_event_ids"][0],
+            "strategy_group_id": "MPG-001",
+            "symbol": "OPUSDT",
+            "side": "long",
+        }
+    ]
 
     engine = sa.create_engine(database_url)
     try:
@@ -1471,6 +1479,16 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
                            signal_grade, required_execution_mode,
                            execution_eligible, authority_source_ref
                     FROM brc_live_signal_events
+                    """
+                )
+            ).mappings().one()
+            process_outcome = conn.execute(
+                sa.text(
+                    """
+                    SELECT process_name, scope_key, process_state, business_state,
+                           first_blocker, source_watermark
+                    FROM brc_runtime_process_outcomes
+                    WHERE process_name = 'live_signal_materialization'
                     """
                 )
             ).mappings().one()
@@ -1509,6 +1527,14 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
             "source": "runtime_active_observation_monitor",
             "strategy_family_version_id": "MPG-001:v1",
         },
+    }
+    assert dict(process_outcome) == {
+        "process_name": "live_signal_materialization",
+        "scope_key": "lane:MPG-001:OPUSDT:long",
+        "process_state": "succeeded",
+        "business_state": "completed",
+        "first_blocker": None,
+        "source_watermark": result["signal_event_ids"][0],
     }
 
 
@@ -1956,6 +1982,31 @@ def test_write_runtime_signal_summaries_to_pg_blocks_without_public_fact(tmp_pat
     assert result["status"] == "pg_live_signal_events_blocked"
     assert result["written_count"] == 0
     assert result["skipped"][0]["blocker"] == "fresh_public_fact_snapshot_missing"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            process_outcome = conn.execute(
+                sa.text(
+                    """
+                    SELECT scope_key, process_state, business_state, first_blocker,
+                           source_watermark
+                    FROM brc_runtime_process_outcomes
+                    WHERE process_name = 'live_signal_materialization'
+                    """
+                )
+            ).mappings().one()
+    finally:
+        engine.dispose()
+    assert dict(process_outcome) == {
+        "scope_key": "lane:MPG-001:OPUSDT:long",
+        "process_state": "retryable_failure",
+        "business_state": "temporarily_unavailable",
+        "first_blocker": (
+            "pg_live_signal_event_materialization_failed:"
+            "fresh_public_fact_snapshot_missing"
+        ),
+        "source_watermark": "runtime-mpg-op:1000",
+    }
 
 
 def test_write_runtime_signal_summaries_to_pg_blocks_ambiguous_event_binding(tmp_path):
@@ -2497,9 +2548,80 @@ def test_write_runtime_signal_summaries_to_pg_blocks_expired_event_spec_window(t
     assert result["status"] == "pg_live_signal_events_blocked"
     assert result["skipped"][0]["blocker"] == "signal_event_expired"
     assert result["skipped"][0]["freshness_window_ms"] == 1000
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            process_outcome = conn.execute(
+                sa.text(
+                    """
+                    SELECT process_state, business_state, first_blocker
+                    FROM brc_runtime_process_outcomes
+                    WHERE process_name = 'live_signal_materialization'
+                    """
+                )
+            ).mappings().one()
+    finally:
+        engine.dispose()
+    assert dict(process_outcome) == {
+        "process_state": "noop",
+        "business_state": "waiting_for_opportunity",
+        "first_blocker": None,
+    }
+
+
+def test_write_runtime_signal_summaries_to_pg_no_signal_creates_no_process_outcome(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+    finally:
+        engine.dispose()
+
+    result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
+        {"runtime_summaries": []},
+        database_url=database_url,
+        allow_non_postgres_for_test=True,
+        now_ms=3000,
+    )
+
+    assert result["status"] == "pg_live_signal_events_noop"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            count = conn.execute(
+                sa.text("SELECT COUNT(*) FROM brc_runtime_process_outcomes")
+            ).scalar_one()
+    finally:
+        engine.dispose()
+    assert count == 0
 
 
 def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_runtime_process_outcomes (
+              process_outcome_id TEXT PRIMARY KEY,
+              process_name TEXT NOT NULL,
+              scope_key TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              process_state TEXT NOT NULL,
+              business_state TEXT NOT NULL,
+              first_blocker TEXT,
+              started_at_ms INTEGER NOT NULL,
+              completed_at_ms INTEGER NOT NULL,
+              runtime_head TEXT NOT NULL,
+              source_watermark TEXT NOT NULL,
+              projector_owner TEXT NOT NULL,
+              updated_at_ms INTEGER NOT NULL,
+              UNIQUE (process_name, scope_key)
+            )
+            """
+        )
+    )
     conn.execute(
         sa.text(
             """
