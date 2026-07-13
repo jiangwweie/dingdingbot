@@ -116,7 +116,9 @@ target release exported
 -> switch release and run postdeploy checks while capability is disabled
 -> mechanically certify and re-enable capability
 -> run one no-active, zero-exchange-write lifecycle invocation
--> restore timers
+-> keep watcher timer stopped while release activation, 22-scope Action-Time
+   capability certification, and current projection truth are published
+-> restore watcher timer only after capability truth publication succeeds
 ```
 
 `--deploy-quiescence` is valid only for the read-only pre-switch and post-stop
@@ -135,6 +137,14 @@ the prior enabled/disabled capability state and restart the previous release's
 allowed services. If phase-two recertification fails after the switch, the new
 release remains fail-closed with lifecycle capability disabled until the
 official certification path succeeds or the release is rolled back.
+
+The monitor and lifecycle timers may resume after their own certification, but
+the watcher timer must not run between lifecycle capability enablement and final
+Action-Time capability/current-projection publication. Otherwise one timer tick
+can observe mixed old/new certification truth and create a transient projection
+consistency failure. The final certification command owns watcher-timer restore
+and uses an exit trap so observation resumes even when final certification
+fails; missing exact-head capability truth continues to fail-close submit.
 
 ## Postdeploy Acceptance
 

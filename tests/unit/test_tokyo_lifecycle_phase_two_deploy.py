@@ -79,6 +79,33 @@ def test_postdeploy_action_time_capability_runs_matrix_before_pg_certification_a
     assert "exchange" not in command.lower()
 
 
+def test_watcher_timer_starts_only_after_action_time_capability_truth_publish():
+    phase_two = ticket_lifecycle_phase_two_enable_command(
+        remote_release_path="/home/ubuntu/brc-deploy/releases/release-new",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python="/home/ubuntu/brc-deploy/venvs/runtime/bin/python",
+        certification_ref="tokyo-release:" + "a" * 40,
+    )
+    certification = action_time_capability_certification_command(
+        remote_release_path="/home/ubuntu/brc-deploy/releases/release-new",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python="/home/ubuntu/brc-deploy/venvs/runtime/bin/python",
+        runtime_head="a" * 40,
+        release_name="brc-runtime-governance-test",
+    )
+
+    phase_two_success_tail = phase_two.split("SUCCESS=1; trap - EXIT", 1)[1]
+    assert (
+        "systemctl start brc-runtime-signal-watcher.timer"
+        not in phase_two_success_tail
+    )
+    assert "restore_watcher_timer" in certification
+    assert "trap restore_watcher_timer EXIT" in certification
+    assert certification.index(
+        "scripts/publish_runtime_control_current_projections.py --json"
+    ) < certification.rindex("systemctl start brc-runtime-signal-watcher.timer")
+
+
 def test_phase_two_deploy_is_pg_gated_and_rolls_back_capability_on_failure():
     command = ticket_lifecycle_phase_two_enable_command(
         remote_release_path="/home/ubuntu/brc-deploy/releases/release-1",
