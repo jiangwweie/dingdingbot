@@ -49,7 +49,7 @@ design documents and acceptance proof.
 
 | Order | Program | State | Primary design surface |
 | --- | --- | --- | --- |
-| 1 | **Action-Time Boundary Reproduction And Projection Truth** | **deployed baseline at `dbb7e650`** | `docs/current/P0_ACTION_TIME_CAPABILITY_CERTIFICATION_AND_PROJECTION_TRUTH_DESIGN.md` |
+| 1 | **P0 Action-Time Failure Conservation And Natural-Event Acceptance** | **implementation and six-event isolated acceptance complete; integration/deploy pending** | `docs/current/P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_DESIGN.md` |
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
 | 2 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | 3 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
@@ -69,9 +69,9 @@ validated market wait while Owner-facing product integration continues.
 
 | Area | Current fact |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs `9e26de77467193b20d81b94900dd223f33c1c4bb`; 22 lanes are release-certified and market-wait validated, but no natural real Ticket has completed exchange lifecycle calibration |
-| **Active delivery branch** | `codex/p0-owner-notification-forensics` contains the deployed Owner notification and runtime forensics closure |
-| **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` points to `brc-runtime-governance-9e26de77-20260713` |
+| **Live Candidate Baseline** | Tokyo runs `97de14c2fb3c52b38bd04277e15ea0d7ab8487ec`; Action-Time bounded reads are deployed, but no post-fix natural eligible event has yet completed real exchange lifecycle calibration |
+| **Active delivery branch** | `codex/p0-action-time-failure-conservation` contains outer refresh failure conservation and six-event fixed-clock pre-exchange acceptance |
+| **Tokyo release line** | Current deployed release is `brc-runtime-governance-97de14c2-20260713` |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
 | **PG migration** | Tokyo is at migration `117` (`2026-07-12-117_extend_owner_notifications.py`) |
 | **P0-LC deployment acceptance** | Postdeploy verification passes; backend HTTP checks, schema count, lifecycle units, and no-active lifecycle service are accepted without exchange write |
@@ -86,6 +86,7 @@ validated market wait while Owner-facing product integration continues.
 | **Lifecycle production capability** | Typed exchange truth, fill projection, durable short-transaction commands, continuous reconciliation, settlement, finalization, terminal Outcome, account-mode bootstrap, and migration-shaped ops health are deployed |
 | **Trade feedback core** | P1-TFC uses one typed lifecycle decision across production callers, rehearsal, and Owner feedback; it is deployed rather than active WIP |
 | **Dynamic execution risk** | New entry sizing uses fresh wallet/available balance, 3% planned Stop risk, 90% margin utilization, lowest sufficient leverage, and a 10x Owner ceiling |
+| **Historical Action-Time acceptance** | Five 2026-07-12 CPM Tickets and the separate ETH sizing-control signal reach protected-submit preparation plus durable ENTRY/SL/TP1 commands inside their original validity windows in isolated fixed-clock tests; all stop before exchange write |
 
 ## Current Next Execution Order
 
@@ -98,9 +99,9 @@ then resumes this order.
 
 | Order | Work | Priority | Done when |
 | --- | --- | --- | --- |
-| 1 | **Cross-projection blocker conservation** | P0 complete | Daily Table, Goal Status, Tradeability, Candidate Pool, and Server Monitor preserve the same first blocker and watermark |
-| 2 | **Production-shaped Action-Time reproduction** | P0 complete | All 22 active scopes traverse the production-shaped path to the disabled-smoke boundary without exchange write and bind to the deployed head |
-| 3 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome |
+| 1 | **Outer Action-Time failure conservation** | P0 integration/deploy | Required-step failure persists exact lane, Ticket/source watermark, first blocker, and timing; false market wait is impossible |
+| 2 | **Six-event historical pre-exchange acceptance** | P0 local complete | Five Ticket cases and one sizing-control signal reach durable prepared commands without exchange write inside original validity windows |
+| 3 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
 | 4 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
 
 ## Why This Was Not Detected Before Production Signals
@@ -191,9 +192,11 @@ execution chain.
 
 ## Current P0 Workstreams
 
-**Action-Time Boundary Reproduction And Projection Truth is the next
-medium-scale integration program.** P1-OFC, P0-F, P0-G, P0-H, P0-J, and P0-LC
-are deployed component responsibilities, not parallel programs.
+**P0 Action-Time Failure Conservation And Natural-Event Acceptance is the
+active bounded integration program.** It closes the outer refresh failure gap
+and then deliberately stops new execution-core expansion until natural trading
+feedback arrives. P1-OFC, P0-F, P0-G, P0-H, P0-J, and P0-LC are deployed
+component responsibilities, not parallel programs.
 
 | Priority | Workstream | Goal | Done when |
 | --- | --- | --- | --- |

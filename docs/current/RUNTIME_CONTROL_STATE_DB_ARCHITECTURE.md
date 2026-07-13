@@ -680,6 +680,31 @@ and not a reason to extend stale market or account facts. No-signal ticks do
 not invoke the hot path and create no JSON/MD files or additional Action-Time
 PG rows.
 
+## Action-Time Refresh Failure Conservation Contract
+
+The outer server refresh sequence is part of the production Action-Time chain,
+not an unowned shell wrapper. Every triggered Action-Time refresh must write one
+lane-scoped `brc_runtime_process_outcomes` current row with:
+
+```text
+process_name=action_time_refresh_sequence
+scope_key=lane:<StrategyGroup>:<symbol>:<side>
+source_watermark=<Ticket, lane, promotion, or signal identity>
+first_blocker=<first failed required stage and exact failure>
+started_at_ms / completed_at_ms
+```
+
+Required-step timeouts are retryable engineering failures. They remain
+`action_time_boundary_not_reproduced` after the source signal or Ticket expires;
+they must not be rewritten to `market_wait_validated`. A later successful
+refresh for the same process and lane replaces the current failed outcome while
+the PG audit lineage remains inspectable.
+
+No-signal ticks write no refresh outcome. Historical acceptance uses an
+isolated fixed-clock connection and may reach protected-submit preparation plus
+durable exchange-command preparation, but must stop before Operation Layer
+submit or `gateway.place_order()` and must not mutate production PG.
+
 ## Acceptance Criteria
 
 DB migration design is accepted only when all of these are true:
@@ -696,6 +721,7 @@ DB migration design is accepted only when all of these are true:
 | Action-time narrowing | At most one action-time lane input is active for real submit |
 | Ticket identity | FinalGate consumes `ticket_id`; Operation Layer consumes `ticket_id + finalgate_pass_id` |
 | Action-Time latency | Current-state bounded reads keep the pre-dispatch refresh within the 30-second operational budget while exact terminal lineage remains queryable |
+| Action-Time failure conservation | Triggered outer refresh failures persist the exact lane, source identity, stage, blocker, and timing until a newer same-lane success clears the current failure |
 | Safety boundary | No FinalGate bypass, Operation Layer bypass, exchange write bypass, live profile mutation, or sizing mutation |
 | Rollback | PG failure stops or disables trading progression; production does not fall back to old file authority |
 

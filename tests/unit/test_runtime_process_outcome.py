@@ -16,6 +16,20 @@ from src.application.runtime_process_outcome import (
     materialize_runtime_process_outcome,
     runtime_process_exit_code,
 )
+
+
+def test_action_time_stage_timeout_is_retryable_engineering_failure():
+    outcome = classify_process_outcome(
+        process_name="action_time_refresh_sequence",
+        result_status="action_time_refresh_sequence_failed",
+        blockers=["materialize_action_time_finalgate_preflight_timeout"],
+    )
+
+    assert outcome.process_state == "retryable_failure"
+    assert outcome.business_state == "temporarily_unavailable"
+    assert outcome.first_blocker == (
+        "materialize_action_time_finalgate_preflight_timeout"
+    )
 from scripts.validate_current_projection_ownership import (
     _validate_runtime_process_outcomes,
 )

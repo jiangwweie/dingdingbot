@@ -191,6 +191,48 @@ def test_expired_event_scoped_retryable_failure_remains_visible_to_monitor():
     assert decision["blocker_class"] == "runtime_process_failure"
 
 
+def test_outer_action_time_refresh_timeout_remains_visible_to_monitor():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "runtime_process_outcomes": [
+            {
+                "process_name": "action_time_refresh_sequence",
+                "scope_key": "lane:CPM-RO-001:SUIUSDT:long",
+                "process_state": "retryable_failure",
+                "business_state": "temporarily_unavailable",
+                "first_blocker": (
+                    "materialize_action_time_finalgate_preflight_timeout"
+                ),
+                "source_watermark": "ticket:exact",
+                "updated_at_ms": PG_TEST_NOW_MS - 120_000,
+            }
+        ],
+        "live_signal_events": [],
+        "promotion_candidates": [],
+        "action_time_lane_inputs": [],
+        "action_time_tickets": [],
+        "runtime_safety_state": [],
+        "ticket_bound_order_lifecycle_runs": [],
+        "ticket_bound_exchange_commands": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "waiting_for_signal", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "temporarily_unavailable"
+    assert decision["notify"] is True
+    assert decision["reasons"] == [
+        "runtime_process_failure",
+        "materialize_action_time_finalgate_preflight_timeout",
+    ]
+
+
 def test_fresh_matching_event_scoped_retryable_failure_still_notifies_monitor():
     module = _load_module()
     signal_id = "signal:SOR-001:ETHUSDT:long:current"

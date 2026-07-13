@@ -30,6 +30,8 @@ from src.application.runtime_strategy_signal_evaluation_service import (
 from src.application.action_time.full_chain_simulation_harness import (
     FULL_CHAIN_FAILURE_SCENARIOS,
     FullChainSimulationInput,
+    HistoricalActionTimeAcceptanceCase,
+    run_ticket_bound_pre_exchange_acceptance,
     run_ticket_bound_full_chain_simulation,
     run_ticket_bound_full_chain_failure_scenario,
 )
@@ -157,6 +159,221 @@ ACTIVE_CANDIDATE_SCOPES = [
     ("SOR-001", "BTCUSDT", "long"),
     ("SOR-001", "BTCUSDT", "short"),
 ]
+
+HISTORICAL_ACTION_TIME_ACCEPTANCE_CASES = (
+    HistoricalActionTimeAcceptanceCase(
+        source_signal_event_id="signal:5bb26bea50c2f6a94503e7b265573bae",
+        source_ticket_id=(
+            "ticket:e0c3a9d496f79f64983e7efc1bac1528054f3a8a"
+            "ced4e32948f3293fd7a8896c"
+        ),
+        strategy_group_id="CPM-RO-001",
+        symbol="AVAXUSDT",
+        side="long",
+        event_time_ms=1_783_792_799_999,
+        observed_at_ms=1_783_793_005_767,
+        expires_at_ms=1_783_793_279_000,
+        fact_values={
+            "htf_trend_intact": True,
+            "reclaim_confirmed": True,
+            "pullback_low_reference": "6.6820",
+            "last_price": "6.7560",
+        },
+    ),
+    HistoricalActionTimeAcceptanceCase(
+        source_signal_event_id="signal:3b3a9b3f2e47401c38f188701fcd4d66",
+        source_ticket_id=(
+            "ticket:999fe1c427c105bde3c1c8a2da833c6dc8294a3"
+            "dcb5ad030de39db9f35972331"
+        ),
+        strategy_group_id="CPM-RO-001",
+        symbol="SUIUSDT",
+        side="long",
+        event_time_ms=1_783_843_199_999,
+        observed_at_ms=1_783_843_277_585,
+        expires_at_ms=1_783_843_549_009,
+        fact_values={
+            "htf_trend_intact": True,
+            "reclaim_confirmed": True,
+            "pullback_low_reference": "0.721100",
+            "last_price": "0.738400",
+        },
+    ),
+    HistoricalActionTimeAcceptanceCase(
+        source_signal_event_id="signal:24e6194f62ac955403b07a13edac46d5",
+        source_ticket_id=(
+            "ticket:24e323b0bfd6a9bb90f1dad96abac236471e5f584"
+            "325c04ca35ffe0ca24df23d"
+        ),
+        strategy_group_id="CPM-RO-001",
+        symbol="SUIUSDT",
+        side="long",
+        event_time_ms=1_783_846_799_999,
+        observed_at_ms=1_783_846_892_096,
+        expires_at_ms=1_783_847_163_000,
+        fact_values={
+            "htf_trend_intact": True,
+            "reclaim_confirmed": True,
+            "pullback_low_reference": "0.721100",
+            "last_price": "0.739900",
+        },
+    ),
+    HistoricalActionTimeAcceptanceCase(
+        source_signal_event_id="signal:fe4b54bf2ea7328cc711831d11d303aa",
+        source_ticket_id=(
+            "ticket:9e41ab89baac01a830d5160b7ace230070356231"
+            "e95ef8bb54128902c0512c54"
+        ),
+        strategy_group_id="CPM-RO-001",
+        symbol="SUIUSDT",
+        side="long",
+        event_time_ms=1_783_861_199_999,
+        observed_at_ms=1_783_861_767_205,
+        expires_at_ms=1_783_862_039_000,
+        fact_values={
+            "htf_trend_intact": True,
+            "reclaim_confirmed": True,
+            "pullback_low_reference": "0.721100",
+            "last_price": "0.742300",
+        },
+    ),
+    HistoricalActionTimeAcceptanceCase(
+        source_signal_event_id="signal:225cf22a6e943ab581d564ae4586f18d",
+        source_ticket_id=(
+            "ticket:3d7cda73572ec04d0c00d73a55e364518223e00"
+            "b11306aac6e26f7c1eed487c8"
+        ),
+        strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
+        side="long",
+        event_time_ms=1_783_868_399_999,
+        observed_at_ms=1_783_868_609_563,
+        expires_at_ms=1_783_868_880_000,
+        fact_values={
+            "htf_trend_intact": True,
+            "reclaim_confirmed": True,
+            "pullback_low_reference": "1778.26",
+            "last_price": "1818.73",
+        },
+    ),
+    HistoricalActionTimeAcceptanceCase(
+        source_signal_event_id="signal:7dce92f66756ee63fa5612b45cee3ebb",
+        source_ticket_id=None,
+        strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
+        side="long",
+        event_time_ms=1_783_828_799_999,
+        observed_at_ms=1_783_829_348_983,
+        expires_at_ms=1_783_829_620_002,
+        fact_values={
+            "htf_trend_intact": True,
+            "reclaim_confirmed": True,
+            "pullback_low_reference": "1778.26",
+            "last_price": "1810.83",
+        },
+    ),
+)
+
+
+def test_historical_ticket_reaches_durable_pre_exchange_boundary_without_gateway(
+    pg_control_connection,
+    monkeypatch,
+):
+    _arm_submit_decision_env(monkeypatch)
+    case = HistoricalActionTimeAcceptanceCase(
+        source_signal_event_id="signal:5bb26bea50c2f6a94503e7b265573bae",
+        source_ticket_id=(
+            "ticket:e0c3a9d496f79f64983e7efc1bac1528054f3a8a"
+            "ced4e32948f3293fd7a8896c"
+        ),
+        strategy_group_id="CPM-RO-001",
+        symbol="AVAXUSDT",
+        side="long",
+        event_time_ms=1_783_792_799_999,
+        observed_at_ms=1_783_793_005_767,
+        expires_at_ms=1_783_793_279_000,
+        fact_values={
+            "htf_trend_intact": True,
+            "reclaim_confirmed": True,
+            "pullback_low_reference": "6.6820",
+            "last_price": "6.7560",
+        },
+    )
+
+    result = run_ticket_bound_pre_exchange_acceptance(
+        pg_control_connection,
+        case,
+        projection_publisher=publisher.publish_runtime_control_current_projections,
+    )
+
+    assert result["status"] == "pre_exchange_acceptance_ready"
+    assert result["source_lineage"] == {
+        "signal_event_id": case.source_signal_event_id,
+        "ticket_id": case.source_ticket_id,
+        "event_time_ms": case.event_time_ms,
+    }
+    assert result["ticket"]["ticket_id"] != case.source_ticket_id
+    assert [row["order_role"] for row in result["exchange_commands"]] == [
+        "ENTRY",
+        "SL",
+        "TP1",
+    ]
+    assert result["completed_at_ms"] <= case.expires_at_ms
+    assert result["authority_boundary"] == {
+        "calls_finalgate": True,
+        "calls_operation_layer_handoff": True,
+        "prepares_protected_submit": True,
+        "prepares_durable_exchange_commands": True,
+        "calls_operation_layer_submit": False,
+        "calls_exchange_gateway": False,
+        "calls_exchange_write": False,
+        "uses_repo_json_or_md_authority": False,
+        "mutates_production_pg": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "acceptance_case",
+    HISTORICAL_ACTION_TIME_ACCEPTANCE_CASES,
+    ids=lambda case: (
+        f"{case.symbol}-{case.source_signal_event_id.removeprefix('signal:')[:8]}"
+    ),
+)
+def test_six_historical_events_reach_current_pre_exchange_boundary(
+    pg_control_connection,
+    monkeypatch,
+    acceptance_case: HistoricalActionTimeAcceptanceCase,
+):
+    _arm_submit_decision_env(monkeypatch)
+
+    result = run_ticket_bound_pre_exchange_acceptance(
+        pg_control_connection,
+        acceptance_case,
+        projection_publisher=publisher.publish_runtime_control_current_projections,
+    )
+
+    assert result["status"] == "pre_exchange_acceptance_ready"
+    assert result["source_lineage"]["signal_event_id"] == (
+        acceptance_case.source_signal_event_id
+    )
+    assert result["completed_at_ms"] <= acceptance_case.expires_at_ms
+    assert result["prepared_submit"]["status"] == "submit_prepared"
+    assert result["prepared_submit"]["exchange_write_called"] is False
+    assert result["submit_mode_decision"]["decision"] == "real_gateway_action"
+    assert result["total_stage_duration_ms"] == sum(
+        stage["duration_ms"] for stage in result["stages"]
+    )
+    assert all(stage["duration_ms"] >= 0 for stage in result["stages"])
+    assert {row["command_state"] for row in result["exchange_commands"]} == {
+        "prepared"
+    }
+    assert result["authority_boundary"]["calls_exchange_gateway"] is False
+    assert result["authority_boundary"]["calls_exchange_write"] is False
+    if acceptance_case.source_ticket_id is None:
+        sizing = result["budget_reservation"]
+        assert Decimal(str(sizing["intended_qty"])) > 0
+        assert Decimal(str(sizing["risk_at_stop"])) > 0
+        assert Decimal(str(sizing["reserved_margin"])) > 0
 
 
 def _load_module(path: Path, name: str):

@@ -239,6 +239,105 @@ def test_action_time_refresh_reports_step_and_total_latency_budget(tmp_path: Pat
     ]
 
 
+def test_action_time_refresh_conserves_required_step_timeout_with_lane_lineage(
+    tmp_path: Path,
+):
+    module = _load_module()
+    outcomes: list[dict[str, object]] = []
+
+    def runner(command: tuple[str, ...]):
+        if command[1] == "scripts/materialize_action_time_finalgate_preflight.py":
+            return module.CommandResult(
+                returncode=124,
+                stdout="",
+                stderr=(
+                    "step_timeout_after_45s:"
+                    "scripts/materialize_action_time_finalgate_preflight.py"
+                ),
+                duration_ms=45_001,
+            )
+        return module.CommandResult(
+            returncode=0,
+            stdout="ok",
+            stderr="",
+            duration_ms=100,
+        )
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time_if_needed",
+        action_time_trigger_state={
+            "status": "triggered",
+            "triggered": True,
+            "now_ms": 1_783_843_277_585,
+            "blocker": "",
+            "counts": {"open_action_time_tickets": 1},
+            "trigger_identity": {
+                "strategy_group_id": "CPM-RO-001",
+                "symbol": "SUIUSDT",
+                "side": "long",
+                "signal_event_id": "signal:3b3a9b3f2e47401c38f188701fcd4d66",
+                "ticket_id": (
+                    "ticket:999fe1c427c105bde3c1c8a2da833c6d"
+                    "c8294a3dcb5ad030de39db9f35972331"
+                ),
+            },
+        },
+        runner=runner,
+        process_outcome_writer=lambda payload: outcomes.append(dict(payload)),
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_failed"
+    assert outcomes == [
+        {
+            "process_name": "action_time_refresh_sequence",
+            "scope_key": "lane:CPM-RO-001:SUIUSDT:long",
+            "run_id": "action_time_refresh:1783843277585",
+            "result_status": "action_time_refresh_sequence_failed",
+            "blockers": [
+                "materialize_action_time_finalgate_preflight_timeout"
+            ],
+            "started_at_ms": 1_783_843_277_585,
+            "completed_at_ms": 1_783_843_322_786,
+            "source_watermark": (
+                "ticket:999fe1c427c105bde3c1c8a2da833c6d"
+                "c8294a3dcb5ad030de39db9f35972331"
+            ),
+        }
+    ]
+    assert report["process_outcome"]["first_blocker"] == (
+        "materialize_action_time_finalgate_preflight_timeout"
+    )
+
+
+def test_action_time_refresh_no_trigger_does_not_write_process_outcome(tmp_path: Path):
+    module = _load_module()
+    outcomes: list[dict[str, object]] = []
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time_if_needed",
+        action_time_trigger_state={
+            "status": "not_triggered",
+            "triggered": False,
+            "blocker": "",
+            "counts": {},
+        },
+        runner=lambda command: module.CommandResult(
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        ),
+        process_outcome_writer=lambda payload: outcomes.append(dict(payload)),
+    )
+
+    assert report["effective_mode"] == "none"
+    assert outcomes == []
+    assert "process_outcome" not in report
+
+
 def test_server_product_state_refresh_sequence_action_time_if_needed_skips_without_pg_trigger(
     tmp_path: Path,
 ):
@@ -594,6 +693,116 @@ def test_action_time_trigger_counts_ignore_expired_handoff_ready_ticket():
         engine.dispose()
 
     assert counts["operation_layer_handoffs_ready_without_protected_submit"] == 0
+
+
+def test_action_time_trigger_identity_prefers_exact_open_ticket_lineage():
+    module = _load_module()
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_action_time_tickets (
+                        ticket_id TEXT PRIMARY KEY,
+                        action_time_lane_input_id TEXT,
+                        promotion_candidate_id TEXT,
+                        signal_event_id TEXT,
+                        strategy_group_id TEXT,
+                        symbol TEXT,
+                        side TEXT,
+                        status TEXT,
+                        expires_at_ms INTEGER,
+                        created_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_action_time_tickets VALUES (
+                        'ticket:exact', 'lane:exact', 'promotion:exact',
+                        'signal:exact', 'CPM-RO-001', 'ETHUSDT', 'long',
+                        'preflight_pending', :expires_at_ms, :created_at_ms
+                    )
+                    """
+                ),
+                {
+                    "expires_at_ms": now_ms + 60_000,
+                    "created_at_ms": now_ms - 1_000,
+                },
+            )
+
+            identity = module._action_time_trigger_identity(conn, now_ms=now_ms)
+    finally:
+        engine.dispose()
+
+    assert identity == {
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "signal_event_id": "signal:exact",
+        "promotion_candidate_id": "promotion:exact",
+        "action_time_lane_input_id": "lane:exact",
+        "ticket_id": "ticket:exact",
+    }
+
+
+def test_refresh_outcome_rebinds_to_post_sequence_ticket_identity():
+    module = _load_module()
+    payload = {
+        "process_name": "action_time_refresh_sequence",
+        "scope_key": "lane:CPM-RO-001:ETHUSDT:long",
+        "run_id": "action_time_refresh:1000000",
+        "result_status": "action_time_refresh_sequence_failed",
+        "blockers": ["materialize_action_time_finalgate_preflight_timeout"],
+        "started_at_ms": 1_000_000,
+        "completed_at_ms": 1_045_000,
+        "source_watermark": "signal:before-ticket",
+    }
+
+    rebound = module._with_current_trigger_identity(
+        payload,
+        {
+            "strategy_group_id": "CPM-RO-001",
+            "symbol": "SUIUSDT",
+            "side": "long",
+            "signal_event_id": "signal:before-ticket",
+            "action_time_lane_input_id": "lane:after-sequence",
+            "ticket_id": "ticket:after-sequence",
+        },
+    )
+
+    assert rebound["scope_key"] == "lane:CPM-RO-001:SUIUSDT:long"
+    assert rebound["source_watermark"] == "ticket:after-sequence"
+
+
+def test_refresh_failure_conserves_structured_blocker_without_raw_stderr():
+    module = _load_module()
+    report = {
+        "summary": {
+            "blocked_by_required_step": "materialize_action_time_ticket_sequence",
+            "blocked_required_stdout_tail": (
+                '{"process_outcome":{"first_blocker":'
+                '"runtime_control_state_invalid:connection_lost"}}'
+            ),
+            "blocked_required_stderr_tail": "database_url=secret-value",
+        }
+    }
+
+    blocker = module._refresh_step_failure_blocker(report)
+
+    assert blocker == (
+        "materialize_action_time_ticket_sequence_failed:"
+        "runtime_control_state_invalid:connection_lost"
+    )
+    assert "secret-value" not in blocker
 
 
 def test_action_time_trigger_counts_ignore_non_live_fresh_signal():

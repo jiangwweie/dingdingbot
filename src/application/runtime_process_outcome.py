@@ -104,7 +104,9 @@ def classify_process_outcome(
             business_state="needs_intervention",
             first_blocker=first,
         )
-    if any(first.startswith(prefix) for prefix in PROCESS_FAILURE_PREFIXES):
+    if first.endswith("_timeout") or any(
+        first.startswith(prefix) for prefix in PROCESS_FAILURE_PREFIXES
+    ):
         return RuntimeProcessOutcome(
             process_name=process_name,
             process_state="retryable_failure",
