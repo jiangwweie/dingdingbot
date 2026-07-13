@@ -647,6 +647,39 @@ Those exports remain non-authority.
 | P2 | Generic read-model snapshot table | Useful after core sources are stable |
 | P2 | Historical artifact import | Provenance only; not needed for first closure |
 
+## Action-Time Hot-Path Read Contract
+
+Production `Action-Time` materializers must use the repository profile
+`action_time_hot_path_current`. The profile reads current PG rows plus exact
+requested Ticket/attempt lineage; it must not scan complete historical watcher,
+fact, projection, monitor, or notification tables.
+
+The contract applies to:
+
+```text
+fresh signal promotion
+-> Action-Time Ticket
+-> FinalGate preflight
+-> Operation Layer handoff
+-> Runtime Safety State
+-> protected submit preparation
+-> post-submit closure
+```
+
+The full `read_control_state` profile remains available for explicit audit and
+offline validation. It is forbidden inside the production Action-Time cadence.
+The bounded profile must retain terminal rows when an exact `ticket_id`,
+`protected_submit_attempt_id`, `operation_submit_command_id`, or
+`operation_layer_handoff_id` is requested so that performance optimization does
+not erase failure diagnosis or idempotency evidence.
+
+The refresh orchestrator records per-step and total elapsed milliseconds. The
+current Action-Time refresh budget is **30 seconds**; exceeding it is an
+operational defect for engineering review, not an independent submit authority
+and not a reason to extend stale market or account facts. No-signal ticks do
+not invoke the hot path and create no JSON/MD files or additional Action-Time
+PG rows.
+
 ## Acceptance Criteria
 
 DB migration design is accepted only when all of these are true:
@@ -662,6 +695,7 @@ DB migration design is accepted only when all of these are true:
 | Promotion safety | Fresh satisfied symbols can become promotion candidates without exchange-write authority |
 | Action-time narrowing | At most one action-time lane input is active for real submit |
 | Ticket identity | FinalGate consumes `ticket_id`; Operation Layer consumes `ticket_id + finalgate_pass_id` |
+| Action-Time latency | Current-state bounded reads keep the pre-dispatch refresh within the 30-second operational budget while exact terminal lineage remains queryable |
 | Safety boundary | No FinalGate bypass, Operation Layer bypass, exchange write bypass, live profile mutation, or sizing mutation |
 | Rollback | PG failure stops or disables trading progression; production does not fall back to old file authority |
 

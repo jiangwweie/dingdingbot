@@ -69,6 +69,36 @@ def test_finalgate_preflight_selects_single_eligible_ticket(pg_control_connectio
     assert payload["ticket_id"] == ticket_id
 
 
+def test_finalgate_auto_selector_uses_one_bounded_action_time_read(
+    pg_control_connection,
+    monkeypatch,
+):
+    ticket_id = _create_ticket(pg_control_connection)
+    repository = finalgate.PgBackedRuntimeControlStateRepository
+    original = repository.read_action_time_control_state
+    calls = 0
+
+    def counted_read(self):
+        nonlocal calls
+        calls += 1
+        return original(self)
+
+    def forbidden_full_read(_self):
+        raise AssertionError("Action-Time hot path must not read unbounded control state")
+
+    monkeypatch.setattr(repository, "read_action_time_control_state", counted_read)
+    monkeypatch.setattr(repository, "read_control_state", forbidden_full_read)
+
+    payload = finalgate.materialize_next_action_time_finalgate_preflight(
+        pg_control_connection,
+        now_ms=NOW_MS + 1000,
+    )
+
+    assert payload["status"] == "finalgate_ready"
+    assert payload["ticket_id"] == ticket_id
+    assert calls == 1
+
+
 def test_finalgate_preflight_auto_selector_ignores_expired_ticket(
     pg_control_connection,
 ):

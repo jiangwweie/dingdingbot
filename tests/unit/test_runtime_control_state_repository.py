@@ -527,6 +527,55 @@ def test_repository_monitor_read_profile_bounds_high_growth_tables(pg_control_co
     assert monitor_state["table_counts"]["action_time_tickets"] == 0
 
 
+def test_repository_action_time_read_profile_reuses_bounded_current_truth(
+    pg_control_connection,
+):
+    now_ms = 1770001000000
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_watcher_runtime_coverage (
+              runtime_coverage_id, strategy_group_id, symbol, side, detector_key,
+              runtime_profile_id, coverage_state, liveness_state,
+              last_tick_at_ms, valid_until_ms, is_current, created_at_ms
+            ) VALUES (
+              'coverage:historical:action-time-hot-path', 'MPG-001', 'OPUSDT',
+              'long', 'detector:MPG-001:long', 'owner-runtime-console-v1',
+              'covered', 'healthy', 1770000000000, 1770003600000, 0,
+              1770000000000
+            )
+            """
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_runtime_fact_snapshots (
+              fact_snapshot_id, strategy_group_id, symbol, side,
+              runtime_profile_id, fact_surface, source_kind, source_ref,
+              computed, satisfied, freshness_state, failed_facts, fact_values,
+              blocker_class, observed_at_ms, valid_until_ms, created_at_ms
+            ) VALUES (
+              'fact:historical:action-time-hot-path', 'MPG-001', 'OPUSDT',
+              'long', 'owner-runtime-console-v1', 'pretrade_public',
+              'live_market', 'unit', 1, 1, 'fresh', '[]', '{}', NULL,
+              1770000000000, 1770000000001, 1770000000000
+            )
+            """
+        )
+    )
+    pg_control_connection.commit()
+
+    state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    ).read_action_time_control_state()
+
+    assert state["read_profile"] == "action_time_hot_path_current"
+    assert state["table_counts"]["watcher_runtime_coverage"] == 0
+    assert state["table_counts"]["runtime_fact_snapshots"] == 0
+
+
 def test_repository_monitor_read_profile_retains_protected_submit_lineage(
     pg_control_connection,
 ):

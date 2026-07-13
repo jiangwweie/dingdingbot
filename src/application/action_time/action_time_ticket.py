@@ -142,7 +142,7 @@ def materialize_action_time_ticket(
         control_state = PgBackedRuntimeControlStateRepository(
             conn,
             now_ms=now_ms,
-        ).read_control_state()
+        ).read_action_time_control_state()
     except RuntimeControlStateRepositoryError as exc:
         return _blocked([f"runtime_control_state_invalid:{exc}"], now_ms=now_ms)
 

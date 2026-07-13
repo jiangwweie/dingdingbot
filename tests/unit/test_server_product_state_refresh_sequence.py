@@ -207,6 +207,38 @@ def test_server_product_state_refresh_sequence_action_time_mode_skips_submit_and
     assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
 
 
+def test_action_time_refresh_reports_step_and_total_latency_budget(tmp_path: Path):
+    module = _load_module()
+    durations = iter([100, 200, 300, 400, 500, 600])
+
+    def runner(_command: tuple[str, ...]):
+        return module.CommandResult(
+            returncode=0,
+            stdout="ok",
+            stderr="",
+            duration_ms=next(durations),
+        )
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time",
+        runner=runner,
+    )
+
+    assert report["summary"]["total_step_duration_ms"] == 2100
+    assert report["summary"]["latency_budget_ms"] == 30_000
+    assert report["summary"]["latency_budget_status"] == "within_budget"
+    assert [row["duration_ms"] for row in report["step_results"]] == [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+    ]
+
+
 def test_server_product_state_refresh_sequence_action_time_if_needed_skips_without_pg_trigger(
     tmp_path: Path,
 ):

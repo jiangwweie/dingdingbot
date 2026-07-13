@@ -128,7 +128,13 @@ def prepare_ticket_bound_protected_submit_attempt(
         )
 
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_action_time_control_state(
+            ticket_id=ticket_id,
+            operation_submit_command_id=operation_submit_command_id,
+        )
     except RuntimeControlStateRepositoryError as exc:
         return _result(
             "blocked",
@@ -270,7 +276,13 @@ def materialize_ticket_bound_submit_mode_decision(
             next_action="provide_operation_submit_command_id",
         )
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_action_time_control_state(
+            ticket_id=ticket_id,
+            operation_submit_command_id=operation_submit_command_id,
+        )
     except RuntimeControlStateRepositoryError as exc:
         return _submit_mode_decision_result(
             {},
@@ -347,7 +359,10 @@ def materialize_next_ticket_bound_protected_submit_attempt(
         )
 
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_action_time_control_state()
     except RuntimeControlStateRepositoryError as exc:
         return _result(
             "blocked",

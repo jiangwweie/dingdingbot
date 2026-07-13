@@ -78,7 +78,13 @@ def materialize_ticket_bound_runtime_safety_state(
     ticket_id = str(ticket_id or "").strip()
     operation_layer_handoff_id = str(operation_layer_handoff_id or "").strip()
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_action_time_control_state(
+            ticket_id=ticket_id,
+            operation_layer_handoff_id=operation_layer_handoff_id,
+        )
     except RuntimeControlStateRepositoryError as exc:
         return _result(
             "blocked",

@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Any, Callable
 
 import sqlalchemy as sa
@@ -38,6 +39,7 @@ DEFAULT_PYTHON = "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/pyt
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_ENV_FILE = Path("/home/ubuntu/brc-deploy/env/live-readonly.env")
 DEFAULT_STEP_TIMEOUT_SECONDS = 45
+ACTION_TIME_LATENCY_BUDGET_MS = 30_000
 REFRESH_MODES = {
     "watcher_tick_summary",
     "action_time_if_needed",
@@ -58,6 +60,7 @@ class CommandResult:
     returncode: int
     stdout: str = ""
     stderr: str = ""
+    duration_ms: int = 0
 
 
 Runner = Callable[[tuple[str, ...]], CommandResult]
@@ -90,6 +93,12 @@ def main(argv: list[str] | None = None) -> int:
                 ],
                 "blocked_required_stderr_tail": report["summary"][
                     "blocked_required_stderr_tail"
+                ],
+                "total_step_duration_ms": report["summary"][
+                    "total_step_duration_ms"
+                ],
+                "latency_budget_status": report["summary"][
+                    "latency_budget_status"
                 ],
             },
             ensure_ascii=False,
@@ -178,6 +187,7 @@ def run_server_product_state_refresh_sequence(
                 "command": list(step.command),
                 "stdout_tail": _tail(result.stdout),
                 "stderr_tail": _tail(result.stderr),
+                "duration_ms": int(result.duration_ms),
             }
         )
         if step.required and result.returncode != 0:
@@ -249,6 +259,28 @@ def run_server_product_state_refresh_sequence(
                 str(failed_required[0].get("stderr_tail") or "")
                 if failed_required
                 else ""
+            ),
+            "total_step_duration_ms": sum(
+                int(result.get("duration_ms") or 0)
+                for result in step_results
+                if result["returncode"] is not None
+            ),
+            "latency_budget_ms": (
+                ACTION_TIME_LATENCY_BUDGET_MS
+                if effective_mode == "action_time"
+                else None
+            ),
+            "latency_budget_status": (
+                "within_budget"
+                if effective_mode == "action_time"
+                and sum(
+                    int(result.get("duration_ms") or 0)
+                    for result in step_results
+                    if result["returncode"] is not None
+                ) <= ACTION_TIME_LATENCY_BUDGET_MS
+                else "exceeded"
+                if effective_mode == "action_time"
+                else "not_applicable"
             ),
         },
         "step_results": step_results,
@@ -356,6 +388,17 @@ def _empty_refresh_report(
                 str(step_results[0].get("stderr_tail") or "")
                 if step_results
                 else ""
+            ),
+            "total_step_duration_ms": 0,
+            "latency_budget_ms": (
+                ACTION_TIME_LATENCY_BUDGET_MS
+                if effective_mode == "action_time"
+                else None
+            ),
+            "latency_budget_status": (
+                "within_budget"
+                if effective_mode == "action_time"
+                else "not_applicable"
             ),
         },
         "step_results": step_results,
@@ -834,6 +877,7 @@ def _run_command(
     *,
     env: dict[str, str] | None = None,
 ) -> CommandResult:
+    started = time.perf_counter()
     try:
         completed = subprocess.run(
             command,
@@ -852,11 +896,13 @@ def _run_command(
                 f"step_timeout_after_{DEFAULT_STEP_TIMEOUT_SECONDS}s:"
                 f"{command[1] if len(command) > 1 else command[0]}"
             ),
+            duration_ms=int((time.perf_counter() - started) * 1000),
         )
     return CommandResult(
         returncode=completed.returncode,
         stdout=completed.stdout,
         stderr=completed.stderr,
+        duration_ms=int((time.perf_counter() - started) * 1000),
     )
 
 
