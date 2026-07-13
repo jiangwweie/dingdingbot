@@ -13,6 +13,10 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.action_time_invocation import (
+    bind_action_time_invocation_fact_refs,
+)
+
 
 PRETRADE_PUBLIC_FACT_SURFACE = "pretrade_public"
 PUBLIC_FACT_VALID_FOR_MS = 300_000
@@ -188,6 +192,7 @@ def write_account_safe_fact_snapshots(
     artifact: dict[str, Any],
     source_ref: str,
     source_kind: str = "live_account_readonly",
+    action_time_invocation_id: str | None = None,
 ) -> list[str]:
     """Persist account/action-time safety facts as PG snapshots."""
 
@@ -285,6 +290,7 @@ def write_account_safe_fact_snapshots(
     runtime_profile_id = str(account_mode.get("runtime_profile_id") or "").strip()
     account_id = str(account_mode.get("account_id") or "").strip()
     exchange_id = str(account_mode.get("exchange_id") or "").strip()
+    account_safe_fact_snapshot_id = ""
     mode_fact_snapshot_id = ""
     for row in rows:
         fact_surface = str(row["fact_surface"])
@@ -355,6 +361,8 @@ def write_account_safe_fact_snapshots(
             },
         )
         inserted.append(fact_snapshot_id)
+        if fact_surface == "account_safe":
+            account_safe_fact_snapshot_id = fact_snapshot_id
         if fact_surface == "account_mode":
             mode_fact_snapshot_id = fact_snapshot_id
     if account_id and exchange_id and mode_fact_snapshot_id:
@@ -376,6 +384,14 @@ def write_account_safe_fact_snapshots(
                 else generated_at_ms
             ),
             updated_at_ms=generated_at_ms,
+        )
+    if action_time_invocation_id:
+        bind_action_time_invocation_fact_refs(
+            conn,
+            action_time_invocation_id=action_time_invocation_id,
+            account_safe_fact_snapshot_id=account_safe_fact_snapshot_id or None,
+            account_mode_fact_snapshot_id=mode_fact_snapshot_id or None,
+            stage_at_ms=generated_at_ms,
         )
     return inserted
 

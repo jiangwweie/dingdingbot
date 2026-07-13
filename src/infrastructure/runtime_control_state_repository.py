@@ -1146,11 +1146,22 @@ class PgBackedRuntimeControlStateRepository:
             promotion_id = str(promotion.get("promotion_candidate_id") or "")
             signal = signals.get(str(promotion.get("signal_event_id") or ""))
             row = readiness.get(str(promotion.get("readiness_row_id") or ""))
+            action_time_invocation_id = str(
+                promotion.get("action_time_invocation_id") or ""
+            ).strip()
             if not signal:
                 raise RuntimeControlStateRepositoryError(
                     f"{promotion_id} has no live signal event"
                 )
-            if not row:
+            if action_time_invocation_id:
+                expected_direct_ref = (
+                    "action_time_invocation:" + action_time_invocation_id
+                )
+                if str(promotion.get("readiness_row_id") or "") != expected_direct_ref:
+                    raise RuntimeControlStateRepositoryError(
+                        f"{promotion_id} direct invocation reference mismatch"
+                    )
+            elif not row:
                 raise RuntimeControlStateRepositoryError(
                     f"{promotion_id} has no readiness row"
                 )
@@ -1159,7 +1170,7 @@ class PgBackedRuntimeControlStateRepository:
                     raise RuntimeControlStateRepositoryError(
                         f"{promotion_id} mismatches signal {key}"
                     )
-                if str(promotion.get(key) or "") != str(row.get(key) or ""):
+                if row and str(promotion.get(key) or "") != str(row.get(key) or ""):
                     raise RuntimeControlStateRepositoryError(
                         f"{promotion_id} mismatches readiness {key}"
                     )
@@ -1206,6 +1217,16 @@ class PgBackedRuntimeControlStateRepository:
             if str(promotion.get("signal_event_id") or "") != str(lane.get("signal_event_id") or ""):
                 raise RuntimeControlStateRepositoryError(
                     f"{lane_id} mismatches promotion signal_event_id"
+                )
+            promotion_invocation_id = str(
+                promotion.get("action_time_invocation_id") or ""
+            ).strip()
+            lane_invocation_id = str(
+                lane.get("action_time_invocation_id") or ""
+            ).strip()
+            if promotion_invocation_id != lane_invocation_id:
+                raise RuntimeControlStateRepositoryError(
+                    f"{lane_id} mismatches promotion action_time_invocation_id"
                 )
             for key in ("strategy_group_id", "symbol", "side"):
                 if str(lane.get(key) or "") != str(promotion.get(key) or ""):

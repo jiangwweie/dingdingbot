@@ -8,6 +8,43 @@ import pytest
 import sqlalchemy as sa
 
 from scripts import runtime_active_observation_monitor
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
+
+
+def _typed_coverage_identity(
+    *,
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+    runtime_profile_id: str,
+    runtime_instance_id: str,
+) -> dict[str, str]:
+    identity = RuntimeLaneIdentity(
+        candidate_scope_id=f"scope:{strategy_group_id}:{symbol}:{side}",
+        candidate_scope_event_binding_id=(
+            f"binding:{strategy_group_id}:{symbol}:{side}:event"
+        ),
+        runtime_scope_binding_id=(
+            f"runtime_scope:{strategy_group_id}:{symbol}:{side}"
+        ),
+        runtime_instance_id=runtime_instance_id,
+        runtime_profile_id=runtime_profile_id,
+        policy_current_id=f"policy:{strategy_group_id}:{symbol}:{side}",
+        strategy_group_id=strategy_group_id,
+        strategy_group_version_id=f"sgv:{strategy_group_id}:v2",
+        symbol=symbol,
+        asset_class="crypto_perpetual",
+        side=side,
+        event_spec_id=f"event_spec:{strategy_group_id}:event:v2",
+        event_spec_version="v2",
+        event_id="event",
+        timeframe="1h",
+        time_authority="trigger_candle_close_time_ms",
+    )
+    return {
+        **identity.model_dump(mode="json"),
+        "lane_identity_key": identity.identity_key,
+    }
 
 
 def test_cpm_long_lane_rejects_nested_short_output_without_materialization() -> None:
@@ -793,6 +830,122 @@ def test_active_monitor_candidate_universe_from_pg_control_state_seed():
     assert source["side_scope"]["BRF2-001"] == ["short"]
 
 
+def test_active_monitor_resolves_typed_coverage_for_every_registered_lane():
+    lanes = [
+        ("CPM-RO-001", symbol, "long")
+        for symbol in ("ETHUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT")
+    ] + [
+        ("MPG-001", symbol, "long")
+        for symbol in ("OPUSDT", "SOLUSDT", "AVAXUSDT", "SUIUSDT")
+    ] + [
+        ("MI-001", symbol, "long")
+        for symbol in ("AVAXUSDT", "ETHUSDT", "SOLUSDT")
+    ] + [
+        ("SOR-001", symbol, side)
+        for symbol in ("ETHUSDT", "SOLUSDT", "AVAXUSDT", "BTCUSDT")
+        for side in ("long", "short")
+    ] + [
+        ("BRF2-001", symbol, "short")
+        for symbol in ("BTCUSDT", "AVAXUSDT", "ETHUSDT")
+    ]
+    candidate_scope = []
+    event_bindings = []
+    runtime_scope_bindings = []
+    event_specs = []
+    selected = []
+    for strategy_group_id, symbol, side in lanes:
+        candidate_scope_id = f"scope:{strategy_group_id}:{symbol}:{side}"
+        event_spec_id = f"event_spec:{strategy_group_id}:{symbol}:{side}:v2"
+        runtime_profile_id = f"profile:{strategy_group_id}:{symbol}:{side}"
+        candidate_scope.append(
+            {
+                "candidate_scope_id": candidate_scope_id,
+                "strategy_group_id": strategy_group_id,
+                "symbol": symbol,
+                "side": side,
+                "asset_class": "crypto_perpetual",
+                "policy_current_id": f"policy:{strategy_group_id}:{symbol}:{side}",
+                "status": "active",
+            }
+        )
+        event_bindings.append(
+            {
+                "binding_id": f"binding:{candidate_scope_id}",
+                "candidate_scope_id": candidate_scope_id,
+                "event_spec_id": event_spec_id,
+                "strategy_group_id": strategy_group_id,
+                "symbol": symbol,
+                "side": side,
+                "status": "active",
+            }
+        )
+        runtime_scope_bindings.append(
+            {
+                "runtime_scope_binding_id": f"runtime_scope:{candidate_scope_id}",
+                "candidate_scope_id": candidate_scope_id,
+                "runtime_profile_id": runtime_profile_id,
+                "strategy_group_id": strategy_group_id,
+                "symbol": symbol,
+                "side": side,
+                "status": "active",
+            }
+        )
+        event_specs.append(
+            {
+                "event_spec_id": event_spec_id,
+                "strategy_group_id": strategy_group_id,
+                "strategy_group_version_id": f"sgv:{strategy_group_id}:v2",
+                "side": side,
+                "event_spec_version": "v2",
+                "event_id": f"{strategy_group_id}:{side}:entry",
+                "timeframe": "1h",
+                "time_authority": "trigger_candle_close_time_ms",
+                "status": "current",
+            }
+        )
+        selected.append(
+            {
+                "runtime_instance_id": f"runtime:{candidate_scope_id}",
+                "strategy_family_id": strategy_group_id,
+                "symbol": symbol,
+                "side": side,
+                "runtime_profile": {"runtime_profile_id": runtime_profile_id},
+            }
+        )
+
+    universe, source = runtime_active_observation_monitor._candidate_universe_from_control_state(
+        {
+            "source_mode": "db_backed",
+            "projection_target": "production_current",
+            "candidate_scope": candidate_scope,
+            "candidate_scope_event_bindings": event_bindings,
+            "runtime_scope_bindings": runtime_scope_bindings,
+            "strategy_side_event_specs": event_specs,
+        }
+    )
+    coverage = runtime_active_observation_monitor._candidate_universe_coverage(
+        candidate_universe=universe,
+        source=source,
+        active=selected,
+        selected=selected,
+        side_scope=runtime_active_observation_monitor._side_scope_from_source(source),
+    )
+
+    assert len(lanes) == 22
+    assert coverage["status"] == "complete"
+    assert coverage["expected_row_count"] == 22
+    assert coverage["active_matched_row_count"] == 22
+    for row in coverage["rows"]:
+        identity = RuntimeLaneIdentity.model_validate(
+            {
+                field: row["lane_identity"].get(field)
+                for field in RuntimeLaneIdentity.model_fields
+            }
+        )
+        assert row["lane_identity"]["lane_identity_key"] == identity.identity_key
+        assert identity.runtime_instance_id in row["selected_runtime_instance_ids"]
+
+
 def test_active_monitor_rejects_extra_active_strategygroup_without_wip_audit():
     control_state = {
         "source_mode": "db_backed",
@@ -922,6 +1075,25 @@ def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
             )
             """
         )
+        for column_name in (
+            "candidate_scope_id",
+            "candidate_scope_event_binding_id",
+            "runtime_scope_binding_id",
+            "runtime_instance_id",
+            "policy_current_id",
+            "strategy_group_version_id",
+            "asset_class",
+            "event_spec_id",
+            "event_spec_version",
+            "event_id",
+            "timeframe",
+            "time_authority",
+            "lane_identity_key",
+            "source_watermark",
+        ):
+            conn.execute(
+                f"ALTER TABLE brc_watcher_runtime_coverage ADD COLUMN {column_name} TEXT"
+            )
 
     artifact = {
         "candidate_universe_coverage": {
@@ -934,6 +1106,13 @@ def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
                     "runtime_profile": {
                         "runtime_profile_id": "owner-runtime-console-v1"
                     },
+                    "lane_identity": _typed_coverage_identity(
+                        strategy_group_id="MPG-001",
+                        symbol="OPUSDT",
+                        side="long",
+                        runtime_profile_id="owner-runtime-console-v1",
+                        runtime_instance_id="runtime-mpg-op-long",
+                    ),
                 },
                 {
                     "strategy_group_id": "BRF2-001",
@@ -959,6 +1138,7 @@ def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
         rows = conn.execute(
             """
             SELECT strategy_group_id, symbol, side, detector_key, runtime_profile_id,
+                   runtime_instance_id, lane_identity_key, source_watermark,
                    coverage_state, liveness_state, last_tick_at_ms, is_current
             FROM brc_watcher_runtime_coverage
             ORDER BY strategy_group_id, symbol, side
@@ -971,6 +1151,9 @@ def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
             "short",
             "runtime_active_observation_monitor",
             None,
+            None,
+            None,
+            None,
             "missing",
             "missing",
             1770000000000,
@@ -982,6 +1165,15 @@ def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
             "long",
             "runtime_active_observation_monitor",
             "owner-runtime-console-v1",
+            "runtime-mpg-op-long",
+            _typed_coverage_identity(
+                strategy_group_id="MPG-001",
+                symbol="OPUSDT",
+                side="long",
+                runtime_profile_id="owner-runtime-console-v1",
+                runtime_instance_id="runtime-mpg-op-long",
+            )["lane_identity_key"],
+            "watcher:runtime-mpg-op-long:1770000000000",
             "covered",
             "active",
             1770000000000,

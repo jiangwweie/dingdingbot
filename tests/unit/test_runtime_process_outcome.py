@@ -81,6 +81,18 @@ def test_action_time_fact_business_block_is_temporarily_unavailable_not_interven
     )
 
 
+def test_outer_action_time_business_block_preserves_safe_stop_semantics():
+    outcome = classify_process_outcome(
+        process_name="action_time_refresh_sequence",
+        result_status="action_time_refresh_sequence_business_blocked",
+        blockers=["runtime_lane_identity_mismatch:child_stage"],
+    )
+
+    assert outcome.process_state == "business_blocked"
+    assert outcome.business_state == "temporarily_unavailable"
+    assert outcome.first_blocker == "runtime_lane_identity_mismatch:child_stage"
+
+
 def test_runtime_process_exit_code_treats_completed_process_states_as_success():
     for process_state in ("succeeded", "noop", "business_blocked"):
         assert runtime_process_exit_code({"process_state": process_state}) == 0

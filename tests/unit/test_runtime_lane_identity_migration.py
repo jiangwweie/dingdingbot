@@ -13,10 +13,25 @@ MIGRATION_PATH = (
     Path(__file__).resolve().parents[2]
     / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
 )
+ACTION_TIME_INVOCATION_MIGRATION_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
+)
 
 
 def _migration():
     spec = importlib.util.spec_from_file_location("migration_118_lane_identity", MIGRATION_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _action_time_invocation_migration():
+    spec = importlib.util.spec_from_file_location(
+        "migration_119_action_time_invocation",
+        ACTION_TIME_INVOCATION_MIGRATION_PATH,
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -112,6 +127,16 @@ def _create_legacy_schema(conn: sa.engine.Connection) -> None:
 
 def _run_upgrade(conn: sa.engine.Connection) -> None:
     migration = _migration()
+    old_op = migration.op
+    migration.op = Operations(MigrationContext.configure(conn))
+    try:
+        migration.upgrade()
+    finally:
+        migration.op = old_op
+
+
+def _run_action_time_invocation_upgrade(conn: sa.engine.Connection) -> None:
+    migration = _action_time_invocation_migration()
     old_op = migration.op
     migration.op = Operations(MigrationContext.configure(conn))
     try:
@@ -311,5 +336,116 @@ def test_migration_adds_typed_identity_and_reconciles_only_known_false_cpm_short
                     "WHERE ticket_id = 'legacy-ticket'"
                 )
             ).scalar_one() == "invalidated"
+    finally:
+        engine.dispose()
+
+
+def test_migration_119_adds_invocation_lineage_and_invalidates_untyped_current_coverage():
+    engine = sa.create_engine("sqlite://", poolclass=StaticPool)
+    try:
+        with engine.begin() as conn:
+            _create_legacy_schema(conn)
+            _run_upgrade(conn)
+            # Revision 119 is applied after the runtime-control foundation,
+            # which already owns created_at_ms on these operational tables.
+            # The compact legacy fixture above omits those unrelated columns,
+            # so add the predecessor-schema fields before exercising 119.
+            for table_name in (
+                "brc_promotion_candidates",
+                "brc_action_time_lane_inputs",
+                "brc_action_time_tickets",
+            ):
+                conn.execute(
+                    sa.text(
+                        f"ALTER TABLE {table_name} "
+                        "ADD COLUMN created_at_ms INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_watcher_runtime_coverage (
+                      runtime_coverage_id TEXT PRIMARY KEY,
+                      strategy_group_id TEXT,
+                      symbol TEXT,
+                      side TEXT,
+                      detector_key TEXT,
+                      runtime_profile_id TEXT,
+                      coverage_state TEXT,
+                      liveness_state TEXT,
+                      last_tick_at_ms INTEGER,
+                      valid_until_ms INTEGER,
+                      is_current BOOLEAN,
+                      created_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_watcher_runtime_coverage VALUES (
+                      'legacy-coverage', 'SOR-001', 'ETHUSDT', 'long',
+                      'legacy-watcher', 'owner-runtime-console-v1',
+                      'covered', 'healthy', 1000, 2000, true, 1000
+                    )
+                    """
+                )
+            )
+
+            _run_action_time_invocation_upgrade(conn)
+
+            invocation_columns = {
+                row["name"]
+                for row in sa.inspect(conn).get_columns("brc_action_time_invocations")
+            }
+            coverage_columns = {
+                row["name"]
+                for row in sa.inspect(conn).get_columns(
+                    "brc_watcher_runtime_coverage"
+                )
+            }
+            outcome_columns = {
+                row["name"]
+                for row in sa.inspect(conn).get_columns(
+                    "brc_runtime_process_outcomes"
+                )
+            }
+            assert {
+                "action_time_invocation_id",
+                "signal_event_id",
+                "lane_identity_key",
+                "source_watermark",
+                "opened_at_ms",
+                "expires_at_ms",
+            } <= invocation_columns
+            assert {
+                "candidate_scope_id",
+                "candidate_scope_event_binding_id",
+                "runtime_scope_binding_id",
+                "runtime_instance_id",
+                "policy_current_id",
+                "strategy_group_version_id",
+                "asset_class",
+                "event_spec_id",
+                "event_spec_version",
+                "event_id",
+                "timeframe",
+                "time_authority",
+                "lane_identity_key",
+                "source_watermark",
+            } <= coverage_columns
+            assert "action_time_invocation_id" in outcome_columns
+            assert not bool(
+                conn.execute(
+                    sa.text(
+                        """
+                        SELECT is_current
+                        FROM brc_watcher_runtime_coverage
+                        WHERE runtime_coverage_id = 'legacy-coverage'
+                        """
+                    )
+                ).scalar_one()
+            )
     finally:
         engine.dispose()

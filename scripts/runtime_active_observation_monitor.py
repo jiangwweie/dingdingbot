@@ -204,10 +204,105 @@ def _candidate_universe_from_control_state(
                 strategy_group_id: sorted(sides)
                 for strategy_group_id, sides in sorted(side_scope.items())
             },
+            "runtime_lane_static_identity_by_key": (
+                _runtime_lane_static_identity_by_key(control_state)
+            ),
             "source_mode": str(control_state.get("source_mode") or ""),
             "projection_target": str(control_state.get("projection_target") or ""),
         },
     )
+
+
+def _runtime_lane_static_identity_by_key(
+    control_state: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    """Build the PG-owned identity fields before watcher runtime attachment.
+
+    The active watcher supplies only the concrete runtime instance ID.  Scope,
+    policy, event, and asset identity remain PG authority, so a watcher display
+    row cannot invent or alter a lane merely because its labels look similar.
+    """
+
+    bindings_by_candidate = {
+        str(row.get("candidate_scope_id") or ""): row
+        for row in control_state.get("candidate_scope_event_bindings") or []
+        if isinstance(row, dict) and str(row.get("status") or "") == "active"
+    }
+    runtime_by_candidate = {
+        str(row.get("candidate_scope_id") or ""): row
+        for row in control_state.get("runtime_scope_bindings") or []
+        if isinstance(row, dict) and str(row.get("status") or "") == "active"
+    }
+    event_by_id = {
+        str(row.get("event_spec_id") or ""): row
+        for row in control_state.get("strategy_side_event_specs") or []
+        if isinstance(row, dict) and str(row.get("status") or "") == "current"
+    }
+    identities: dict[str, dict[str, str]] = {}
+    for candidate in control_state.get("candidate_scope") or []:
+        if not isinstance(candidate, dict) or candidate.get("status") != "active":
+            continue
+        candidate_scope_id = str(candidate.get("candidate_scope_id") or "")
+        binding = bindings_by_candidate.get(candidate_scope_id, {})
+        runtime_scope = runtime_by_candidate.get(candidate_scope_id, {})
+        event_spec = event_by_id.get(str(binding.get("event_spec_id") or ""), {})
+        strategy_group_id = str(candidate.get("strategy_group_id") or "")
+        symbol = _compact_symbol(candidate.get("symbol"))
+        side = _normalize_side(candidate.get("side"))
+        if not all((candidate_scope_id, strategy_group_id, symbol, side)):
+            continue
+        if any(
+            str(row.get(key) or "") != str(candidate.get(key) or "")
+            for row in (binding, runtime_scope)
+            if row
+            for key in ("strategy_group_id", "symbol", "side")
+        ):
+            continue
+        if event_spec and (
+            str(event_spec.get("strategy_group_id") or "") != strategy_group_id
+            or str(event_spec.get("side") or "") != side
+        ):
+            continue
+        static_identity = {
+            "candidate_scope_id": candidate_scope_id,
+            "candidate_scope_event_binding_id": str(
+                binding.get("candidate_scope_event_binding_id")
+                or binding.get("binding_id")
+                or ""
+            ),
+            "runtime_scope_binding_id": str(
+                runtime_scope.get("runtime_scope_binding_id") or ""
+            ),
+            "runtime_profile_id": str(runtime_scope.get("runtime_profile_id") or ""),
+            "policy_current_id": str(candidate.get("policy_current_id") or ""),
+            "strategy_group_id": strategy_group_id,
+            "strategy_group_version_id": str(
+                event_spec.get("strategy_group_version_id") or ""
+            ),
+            "symbol": symbol,
+            "asset_class": str(candidate.get("asset_class") or ""),
+            "side": side,
+            "event_spec_id": str(event_spec.get("event_spec_id") or ""),
+            "event_spec_version": str(event_spec.get("event_spec_version") or ""),
+            "event_id": str(event_spec.get("event_id") or ""),
+            "timeframe": str(event_spec.get("timeframe") or ""),
+            "time_authority": str(event_spec.get("time_authority") or ""),
+        }
+        if all(static_identity.values()):
+            identities[_runtime_lane_static_identity_key(
+                strategy_group_id,
+                symbol,
+                side,
+            )] = static_identity
+    return identities
+
+
+def _runtime_lane_static_identity_key(
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> str:
+    return f"{strategy_group_id}:{symbol}:{side}"
 
 
 def _read_candidate_universe_from_pg(
@@ -315,6 +410,9 @@ def _candidate_universe_coverage(
     active_lanes: dict[tuple[str, str, str], list[str]] = {}
     selected_pairs: dict[tuple[str, str], list[dict[str, str]]] = {}
     active_pairs: dict[tuple[str, str], list[dict[str, str]]] = {}
+    static_identity_by_key = _as_dict(
+        source.get("runtime_lane_static_identity_by_key")
+    )
     for lane_bucket, pair_bucket, runtimes in (
         (active_lanes, active_pairs, active),
         (selected_lanes, selected_pairs, selected),
@@ -397,6 +495,13 @@ def _candidate_universe_coverage(
                             symbol=symbol,
                             side=expected_side,
                         ),
+                        "lane_identity": _watcher_coverage_lane_identity(
+                            static_identity_by_key=static_identity_by_key,
+                            selected=selected,
+                            strategy_group_id=strategy_group_id,
+                            symbol=symbol,
+                            side=expected_side,
+                        ),
                         "next_action": next_action,
                         "authority_boundary": (
                             "candidate_universe_coverage_is_read_only; "
@@ -416,6 +521,62 @@ def _candidate_universe_coverage(
             "candidate_universe_coverage_is_read_only; "
             "does_not_create_runtime_or_expand_live_submit"
         ),
+    }
+
+
+def _watcher_coverage_lane_identity(
+    *,
+    static_identity_by_key: dict[str, Any],
+    selected: list[dict[str, Any]],
+    strategy_group_id: str,
+    symbol: str,
+    side: str,
+) -> dict[str, str]:
+    """Join one active watcher runtime to PG-owned lane identity fields."""
+
+    static = static_identity_by_key.get(
+        _runtime_lane_static_identity_key(strategy_group_id, symbol, side)
+    )
+    if not isinstance(static, dict):
+        return {}
+    matching_runtimes = [
+        runtime
+        for runtime in selected
+        if str(_runtime_value(runtime, "strategy_family_id", "family") or "")
+        == strategy_group_id
+        and _compact_symbol(_runtime_value(runtime, "symbol")) == symbol
+        and _normalize_side(_runtime_value(runtime, "side")) == side
+    ]
+    if len(matching_runtimes) != 1:
+        return {}
+    runtime = matching_runtimes[0]
+    runtime_instance_id = str(
+        _runtime_value(runtime, "runtime_instance_id", "runtime_id") or ""
+    )
+    if not runtime_instance_id:
+        return {}
+    runtime_profile = _runtime_profile_for_lane(
+        [runtime],
+        strategy_group_id=strategy_group_id,
+        symbol=symbol,
+        side=side,
+    )
+    reported_profile_id = str(runtime_profile.get("runtime_profile_id") or "")
+    expected_profile_id = str(static.get("runtime_profile_id") or "")
+    if reported_profile_id and reported_profile_id != expected_profile_id:
+        return {}
+    try:
+        identity = RuntimeLaneIdentity.model_validate(
+            {
+                **static,
+                "runtime_instance_id": runtime_instance_id,
+            }
+        )
+    except (TypeError, ValueError):
+        return {}
+    return {
+        **identity.model_dump(mode="json"),
+        "lane_identity_key": identity.identity_key,
     }
 
 
@@ -1381,6 +1542,7 @@ def _replace_current_watcher_runtime_coverage(
     rows: list[dict[str, Any]],
     observed_ms: int,
 ) -> None:
+    _require_typed_watcher_coverage_schema(conn)
     conn.execute(
         sa.text(
             """
@@ -1409,6 +1571,18 @@ def _replace_current_watcher_runtime_coverage(
         runtime_profile = row.get("runtime_profile")
         if not isinstance(runtime_profile, dict):
             runtime_profile = {}
+        lane_identity = _coverage_runtime_lane_identity(row)
+        if coverage_state == "covered" and lane_identity is None:
+            # A display-level watcher match without the immutable PG lane
+            # identity cannot certify execution coverage.  Preserve the row as
+            # a diagnostic but fail coverage closed for the Action-Time path.
+            coverage_state = "not_covered"
+            liveness_state = "identity_missing"
+        source_watermark = (
+            f"watcher:{lane_identity.runtime_instance_id}:{observed_ms}"
+            if lane_identity is not None
+            else None
+        )
         conn.execute(
             sa.text(
                 """
@@ -1418,7 +1592,21 @@ def _replace_current_watcher_runtime_coverage(
                   symbol,
                   side,
                   detector_key,
+                  candidate_scope_id,
+                  candidate_scope_event_binding_id,
+                  runtime_scope_binding_id,
+                  runtime_instance_id,
                   runtime_profile_id,
+                  policy_current_id,
+                  strategy_group_version_id,
+                  asset_class,
+                  event_spec_id,
+                  event_spec_version,
+                  event_id,
+                  timeframe,
+                  time_authority,
+                  lane_identity_key,
+                  source_watermark,
                   coverage_state,
                   liveness_state,
                   last_tick_at_ms,
@@ -1431,7 +1619,21 @@ def _replace_current_watcher_runtime_coverage(
                   :symbol,
                   :side,
                   :detector_key,
+                  :candidate_scope_id,
+                  :candidate_scope_event_binding_id,
+                  :runtime_scope_binding_id,
+                  :runtime_instance_id,
                   :runtime_profile_id,
+                  :policy_current_id,
+                  :strategy_group_version_id,
+                  :asset_class,
+                  :event_spec_id,
+                  :event_spec_version,
+                  :event_id,
+                  :timeframe,
+                  :time_authority,
+                  :lane_identity_key,
+                  :source_watermark,
                   :coverage_state,
                   :liveness_state,
                   :last_tick_at_ms,
@@ -1451,10 +1653,52 @@ def _replace_current_watcher_runtime_coverage(
                 "symbol": symbol,
                 "side": side,
                 "detector_key": WATCHER_COVERAGE_DETECTOR_KEY,
-                "runtime_profile_id": str(
-                    runtime_profile.get("runtime_profile_id") or ""
-                )
-                or None,
+                "candidate_scope_id": (
+                    lane_identity.candidate_scope_id if lane_identity else None
+                ),
+                "candidate_scope_event_binding_id": (
+                    lane_identity.candidate_scope_event_binding_id
+                    if lane_identity
+                    else None
+                ),
+                "runtime_scope_binding_id": (
+                    lane_identity.runtime_scope_binding_id if lane_identity else None
+                ),
+                "runtime_instance_id": (
+                    lane_identity.runtime_instance_id if lane_identity else None
+                ),
+                "runtime_profile_id": (
+                    lane_identity.runtime_profile_id
+                    if lane_identity
+                    else str(runtime_profile.get("runtime_profile_id") or "")
+                    or None
+                ),
+                "policy_current_id": (
+                    lane_identity.policy_current_id if lane_identity else None
+                ),
+                "strategy_group_version_id": (
+                    lane_identity.strategy_group_version_id
+                    if lane_identity
+                    else None
+                ),
+                "asset_class": (
+                    lane_identity.asset_class if lane_identity else None
+                ),
+                "event_spec_id": (
+                    lane_identity.event_spec_id if lane_identity else None
+                ),
+                "event_spec_version": (
+                    lane_identity.event_spec_version if lane_identity else None
+                ),
+                "event_id": lane_identity.event_id if lane_identity else None,
+                "timeframe": lane_identity.timeframe if lane_identity else None,
+                "time_authority": (
+                    lane_identity.time_authority if lane_identity else None
+                ),
+                "lane_identity_key": (
+                    lane_identity.identity_key if lane_identity else None
+                ),
+                "source_watermark": source_watermark,
                 "coverage_state": coverage_state,
                 "liveness_state": liveness_state,
                 "last_tick_at_ms": observed_ms,
@@ -1463,6 +1707,62 @@ def _replace_current_watcher_runtime_coverage(
                 "created_at_ms": observed_ms,
             },
         )
+
+
+def _require_typed_watcher_coverage_schema(conn: sa.engine.Connection) -> None:
+    required_columns = {
+        "candidate_scope_id",
+        "candidate_scope_event_binding_id",
+        "runtime_scope_binding_id",
+        "runtime_instance_id",
+        "runtime_profile_id",
+        "policy_current_id",
+        "strategy_group_version_id",
+        "asset_class",
+        "event_spec_id",
+        "event_spec_version",
+        "event_id",
+        "timeframe",
+        "time_authority",
+        "lane_identity_key",
+        "source_watermark",
+    }
+    columns = {
+        column["name"]
+        for column in sa.inspect(conn).get_columns("brc_watcher_runtime_coverage")
+    }
+    missing = sorted(required_columns - columns)
+    if missing:
+        raise RuntimeError(
+            "watcher_runtime_coverage_identity_schema_missing:"
+            + ",".join(missing)
+        )
+
+
+def _coverage_runtime_lane_identity(
+    row: dict[str, Any],
+) -> RuntimeLaneIdentity | None:
+    raw_identity = row.get("lane_identity")
+    if not isinstance(raw_identity, dict):
+        return None
+    try:
+        identity = RuntimeLaneIdentity.model_validate(
+            {
+                field: raw_identity.get(field)
+                for field in RuntimeLaneIdentity.model_fields
+            }
+        )
+    except (TypeError, ValueError):
+        return None
+    if str(raw_identity.get("lane_identity_key") or "") != identity.identity_key:
+        return None
+    if (
+        str(row.get("strategy_group_id") or "") != identity.strategy_group_id
+        or str(row.get("symbol") or "") != identity.symbol
+        or _normalize_side(row.get("side")) != identity.side
+    ):
+        return None
+    return identity
 
 
 def _runtime_value(runtime: dict[str, Any], *keys: str) -> Any:

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 
 from sqlalchemy import text
 
 from scripts import materialize_action_time_ticket_sequence as sequence_script
 from scripts import publish_runtime_control_current_projections as publisher
+from src.application.action_time.action_time_invocation import (
+    load_action_time_invocation,
+    start_action_time_invocation,
+)
+from src.application.action_time.runtime_pg_fact_snapshots import (
+    write_account_safe_fact_snapshots,
+)
 from src.application.readmodels import strategy_live_candidate_pool as candidate_pool
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
@@ -24,6 +32,16 @@ def test_sequence_cli_requires_database_url_and_postgres_dsn(
     assert "PG_DATABASE_URL is required" in capsys.readouterr().err
 
     assert sequence_script.main(["--database-url", "sqlite://"]) == 2
+    assert "--action-time-invocation-id is required" in capsys.readouterr().err
+
+    assert sequence_script.main(
+        [
+            "--database-url",
+            "sqlite://",
+            "--action-time-invocation-id",
+            "action_time_invocation:unit",
+        ]
+    ) == 2
     assert "requires PostgreSQL DSN" in capsys.readouterr().err
 
 
@@ -54,7 +72,13 @@ def test_sequence_cli_keeps_watcher_healthy_for_persisted_business_blocker(
         sequence_script,
         "materialize_action_time_ticket_sequence",
         lambda conn, **kwargs: (
-            seen.update({"projection_publisher": kwargs["projection_publisher"]})
+            seen.update(
+                {
+                    "action_time_invocation_id": kwargs[
+                        "action_time_invocation_id"
+                    ]
+                }
+            )
             or {
                 "status": "action_time_ticket_sequence_rolled_back",
                 "process_outcome": {
@@ -67,11 +91,15 @@ def test_sequence_cli_keeps_watcher_healthy_for_persisted_business_blocker(
     )
 
     assert sequence_script.main(
-        ["--database-url", "sqlite://", "--allow-non-postgres-for-test"]
+        [
+            "--database-url",
+            "sqlite://",
+            "--allow-non-postgres-for-test",
+            "--action-time-invocation-id",
+            "action_time_invocation:unit",
+        ]
     ) == 0
-    assert seen["projection_publisher"] is (
-        sequence_script.publish_action_time_pretrade_readiness
-    )
+    assert seen["action_time_invocation_id"] == "action_time_invocation:unit"
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
     _candidate_runtime_row,
@@ -79,6 +107,55 @@ from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     _insert_ready_fresh_signal,
     pg_control_connection,
 )
+from tests.unit.test_action_time_invocation import invocation_pg_control_connection
+
+
+def _bind_fresh_invocation_account_facts(
+    conn,
+    *,
+    action_time_invocation_id: str,
+    observed_at_ms: int,
+) -> list[str]:
+    observed_at = datetime.fromtimestamp(
+        observed_at_ms / 1000,
+        tz=timezone.utc,
+    ).isoformat()
+    return write_account_safe_fact_snapshots(
+        conn,
+        artifact={
+            "generated_at_utc": observed_at,
+            "source_status": "unit_readonly_account_fact",
+            "checks": {
+                "account_safe_facts_ready": True,
+                "account_safe": True,
+                "account_trade_permission": True,
+                "open_orders_clear": True,
+                "active_position_or_open_order_clear": True,
+                "action_time_available_balance": True,
+                "source_signed_get_only": True,
+                "source_exchange_write_called": False,
+                "source_order_created": False,
+            },
+            "facts": {
+                "total_wallet_balance": "100",
+                "available_balance": "100",
+                "exchange_max_leverage_by_symbol": {"ETHUSDT": 100},
+            },
+            "account_mode": {
+                "status": "fresh",
+                "account_id": "owner-subaccount-runtime-v0",
+                "exchange_id": "binance_usdm",
+                "runtime_profile_id": "owner-runtime-console-v1",
+                "account_mode": "one_way",
+                "dual_side_position": False,
+                "position_mode_safe": True,
+                "observed_at": observed_at,
+                "source": "binance_usdm_signed_get:/fapi/v1/positionSide/dual",
+            },
+        },
+        source_ref="unit:invocation-bound-account-facts",
+        action_time_invocation_id=action_time_invocation_id,
+    )
 
 
 def test_sequence_commits_fact_reservation_lane_and_ticket_as_one_unit(
@@ -127,6 +204,168 @@ def test_sequence_commits_fact_reservation_lane_and_ticket_as_one_unit(
     assert budget["ticket_id"] == payload["ticket"]["ticket_id"]
     assert float(budget["intended_qty"]) > 0
     assert float(budget["risk_at_stop"]) > 0
+
+
+def test_invocation_sequence_uses_exact_post_opening_facts_and_ignores_other_signal(
+    invocation_pg_control_connection,
+):
+    """The Ticket path must never reselect from generic readiness at action time."""
+
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    signal_a = "signal:SOR-001:ETHUSDT:long:unit"
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id=signal_a,
+        opened_at_ms=NOW_MS,
+    )
+    _bind_fresh_invocation_account_facts(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=NOW_MS + 1,
+    )
+
+    # Remove A's generic read-model row.  B remains a fresh eligible signal
+    # with a generic readiness row, so a global selector would deterministically
+    # be able to choose the wrong source instead of A.
+    candidate_a = _candidate_runtime_row(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+    )
+    invocation_pg_control_connection.execute(
+        text(
+            """
+            DELETE FROM brc_pretrade_readiness_rows
+            WHERE candidate_scope_id = :candidate_scope_id
+            """
+        ),
+        {"candidate_scope_id": candidate_a["candidate_scope_id"]},
+    )
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "BRF2-001",
+        "BTCUSDT",
+        "short",
+        insert_action_time_fact=False,
+    )
+
+    report = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 1,
+        completion_clock_ms=lambda: NOW_MS + 2,
+    )
+
+    assert report["status"] == "action_time_ticket_sequence_committed", report
+    assert report["projection"] == {}
+    assert report["ticket"]["ticket_id"]
+    assert invocation_pg_control_connection.execute(
+        text(
+            """
+            SELECT signal_event_id
+            FROM brc_action_time_tickets
+            """
+        )
+    ).scalar_one() == signal_a
+    assert invocation_pg_control_connection.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM brc_promotion_candidates
+            WHERE signal_event_id = 'signal:BRF2-001:BTCUSDT:short:unit'
+            """
+        )
+    ).scalar_one() == 0
+    bound_invocation = load_action_time_invocation(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+    )
+    assert bound_invocation.action_time_fact_snapshot_id
+    assert bound_invocation.ticket_id == report["ticket"]["ticket_id"]
+    outcome = invocation_pg_control_connection.execute(
+        text(
+            """
+            SELECT scope_kind, action_time_invocation_id, lane_identity_key,
+                   source_watermark, runtime_profile_id, policy_current_id,
+                   time_authority
+            FROM brc_runtime_process_outcomes
+            WHERE process_name = 'action_time_ticket_sequence'
+            """
+        )
+    ).mappings().one()
+    assert outcome == {
+        "scope_kind": "runtime_lane",
+        "action_time_invocation_id": invocation.action_time_invocation_id,
+        "lane_identity_key": invocation.lane_identity.identity_key,
+        "source_watermark": invocation.source_watermark,
+        "runtime_profile_id": invocation.lane_identity.runtime_profile_id,
+        "policy_current_id": invocation.lane_identity.policy_current_id,
+        "time_authority": invocation.lane_identity.time_authority,
+    }
+
+
+def test_invocation_sequence_rejects_coverage_from_a_different_runtime_lane(
+    invocation_pg_control_connection,
+):
+    """Display-level coverage cannot certify an Invocation after lane drift."""
+
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+    _bind_fresh_invocation_account_facts(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=NOW_MS + 1,
+    )
+    mismatched_identity = invocation.lane_identity.model_copy(
+        update={"runtime_instance_id": "runtime:unit:wrong-lane"}
+    )
+    invocation_pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_watcher_runtime_coverage
+            SET runtime_instance_id = :runtime_instance_id,
+                lane_identity_key = :lane_identity_key
+            WHERE strategy_group_id = 'SOR-001'
+              AND symbol = 'ETHUSDT'
+              AND side = 'long'
+              AND is_current = true
+            """
+        ),
+        {
+            "runtime_instance_id": mismatched_identity.runtime_instance_id,
+            "lane_identity_key": mismatched_identity.identity_key,
+        },
+    )
+
+    report = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 1,
+        completion_clock_ms=lambda: NOW_MS + 2,
+    )
+
+    assert report["status"] == "action_time_ticket_sequence_rolled_back"
+    assert "runtime_lane_identity_mismatch:invocation_to_coverage" in report[
+        "blockers"
+    ]
+    assert _count(invocation_pg_control_connection, "brc_action_time_tickets") == 0
 
 
 def test_sequence_rolls_back_all_action_rows_when_ticket_blocks(

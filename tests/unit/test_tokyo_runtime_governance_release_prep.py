@@ -94,9 +94,9 @@ def test_release_readiness_report_passes_for_clean_ancestor_release(tmp_path: Pa
 def test_release_readiness_defaults_track_current_stage_migration_head():
     module = _load_module()
 
-    assert module.DEFAULT_EXPECTED_MIN_MIGRATIONS == 118
+    assert module.DEFAULT_EXPECTED_MIN_MIGRATIONS == 119
     assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-07-13-118_conserve_runtime_lane_identity.py"
+        "2026-07-13-119_action_time_invocation_consistency.py"
     )
 
 

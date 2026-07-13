@@ -30,7 +30,7 @@ The current mainline target is:
 five active StrategyGroups
 -> multiple candidate symbols per StrategyGroup
 -> PG-backed watcher coverage and fact snapshots
--> PG-backed readiness / promotion / action-time lane rows
+-> PG-backed fresh signal / ActionTimeInvocation / promotion / action-time lane rows
 -> PG Action-Time Ticket identity
 -> ticket-bound Runtime Safety State / FinalGate / Operation Layer handoff
 -> protected submit only inside official boundaries
@@ -190,7 +190,7 @@ execution chain.
 | Candidate universe | PG candidate scopes and runtime scope bindings | Candidate Pool JSON export |
 | Facts | PG runtime fact snapshots | `latest-*facts.json` exports |
 | Readiness/promotion | PG readiness rows and promotion candidates | Daily Table / Candidate Pool JSON exports |
-| Action-time identity | PG action-time lane and Action-Time Ticket rows | resume pack or dispatch JSON identity |
+| Action-time identity | PG ActionTimeInvocation, action-time lane, and Action-Time Ticket rows | resume pack or dispatch JSON identity |
 | Safety | Runtime Safety State over PG/current facts | dry-run audit or closure evidence file |
 | Owner explanation | backend read model over current projections | frontend or MD/JSON self-interpretation |
 
@@ -202,11 +202,19 @@ trading feedback or a concrete safety incident arrives. P1-OFC, P0-F, P0-G,
 P0-H, P0-J, and P0-LC are deployed component responsibilities, not parallel
 programs.
 
+**P0 Action-Time Invocation Consistency And Failure Truth is locally complete
+and deployment pending.** It is a bounded correction to the existing execution
+core, not a new execution route: migration `119` binds one typed fresh signal,
+fresh account/action facts, promotion, lane, Ticket, watcher coverage, and
+parent process outcome to the same identity. The local branch passed `3015`
+tests with `1` skipped; Tokyo has not yet applied this migration, and no order
+or exchange command was created during this work.
+
 | Priority | Workstream | Goal | Done when |
 | --- | --- | --- | --- |
 | **P0-A** | **File-authority elimination** | remove production/current reads from repo MD/JSON, `output/**`, and report-dir proof files | validators reject reintroduced runtime file authority |
 | **P0-B** | **PG current projection closure** | make Goal Status, Candidate Pool, Daily Table, Runtime Safety State, Action-Time Ticket, and Owner Explanation read from PG/current services | one owner projector per current projection |
-| **P0-C** | **Action-time ticket path** | fresh satisfied signal becomes one explicit PG Action-Time Ticket before FinalGate / Operation Layer | ticket identity contains StrategyGroup, symbol, side, profile, policy versions, facts, risk scope |
+| **P0-C** | **Action-time ticket path** | fresh signal opens one exact PG ActionTimeInvocation and then one explicit Action-Time Ticket before FinalGate / Operation Layer | Ticket identity contains StrategyGroup, symbol, side, profile, policy versions, invocation-bound facts, and risk scope |
 | **P0-D** | **Server monitor ownership** | server-side readonly monitor classifies quiet / notify from PG/current state | no production dependency on local heartbeat or local cache |
 | **P0-E** | **Performance and retention** | no-signal ticks stay quiet and bounded in disk / CPU / PG rows | report growth and restart storms are structurally prevented |
 | **P0-F** | **Ticket-bound lifecycle hardening** | post-submit lifecycle state machine, runner mutation, protection reconciliation, and failure recovery remain one safety core | every submitted ticket reaches protected/closed state or one exact lifecycle hard blocker |
@@ -223,7 +231,8 @@ programs.
 StrategyGroup candidate scope
 -> watcher coverage
 -> public/account/action-time facts
--> per-symbol readiness row
+-> fresh live signal
+-> ActionTimeInvocation
 -> promotion candidate
 -> single action-time lane
 -> Action-Time Ticket

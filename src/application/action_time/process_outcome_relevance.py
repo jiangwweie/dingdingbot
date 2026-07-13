@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
+
 _BLOCKING_PROCESS_STATES = {
     "business_blocked",
     "retryable_failure",
@@ -35,12 +37,44 @@ def process_outcome_has_current_blocking_authority(
         return False
     if not str(outcome.get("first_blocker") or "").strip():
         return False
+    if not _invocation_outcome_has_typed_lane_identity(outcome):
+        return False
 
     lane_key = _lane_key_from_scope(str(outcome.get("scope_key") or ""))
     if lane_key is None:
         return False
 
     return True
+
+
+def _invocation_outcome_has_typed_lane_identity(
+    outcome: Mapping[str, Any],
+) -> bool:
+    """Require full immutable lane identity on invocation-backed outcomes.
+
+    Historical pre-migration outcomes remain readable for forensic continuity,
+    but any row that declares an ActionTimeInvocation is a new hot-path fact.
+    It must therefore be typed enough to prevent one lane's blocker from being
+    projected onto another lane with the same strategy/symbol display fields.
+    """
+
+    if not str(outcome.get("action_time_invocation_id") or "").strip():
+        return True
+    if str(outcome.get("scope_kind") or "") != "runtime_lane":
+        return False
+    try:
+        identity = RuntimeLaneIdentity.model_validate(
+            {
+                field: outcome.get(field)
+                for field in RuntimeLaneIdentity.model_fields
+            }
+        )
+    except (TypeError, ValueError):
+        return False
+    return (
+        str(outcome.get("lane_identity_key") or "") == identity.identity_key
+        and bool(str(outcome.get("source_watermark") or "").strip())
+    )
 
 
 def _lane_key_from_scope(scope_key: str) -> tuple[str, str, str] | None:

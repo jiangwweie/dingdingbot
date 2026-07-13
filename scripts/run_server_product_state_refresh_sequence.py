@@ -34,6 +34,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
+from src.application.action_time.action_time_invocation import (  # noqa: E402
+    ActionTimeInvocationBlocked,
+    load_action_time_invocation,
+    start_action_time_invocation,
+)
 from src.application.runtime_process_outcome import (  # noqa: E402
     classify_process_outcome,
     materialize_runtime_process_outcome,
@@ -69,6 +74,7 @@ class CommandResult:
 
 Runner = Callable[[tuple[str, ...]], CommandResult]
 ProcessOutcomeWriter = Callable[[dict[str, Any]], dict[str, Any] | None]
+ActionTimeInvocationStarter = Callable[..., dict[str, Any]]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -110,7 +116,15 @@ def main(argv: list[str] | None = None) -> int:
             sort_keys=True,
         )
     )
-    return 0 if report["status"] == "server_product_state_refresh_sequence_ready" else 1
+    return (
+        0
+        if report["status"]
+        in {
+            "server_product_state_refresh_sequence_ready",
+            "server_product_state_refresh_sequence_business_blocked",
+        }
+        else 1
+    )
 
 
 def run_server_product_state_refresh_sequence(
@@ -122,6 +136,7 @@ def run_server_product_state_refresh_sequence(
     runner: Runner | None = None,
     action_time_trigger_state: dict[str, Any] | None = None,
     process_outcome_writer: ProcessOutcomeWriter | None = None,
+    action_time_invocation_starter: ActionTimeInvocationStarter | None = None,
 ) -> dict[str, Any]:
     if mode not in REFRESH_MODES:
         raise ValueError(f"unsupported refresh mode: {mode}")
@@ -131,6 +146,7 @@ def run_server_product_state_refresh_sequence(
     effective_mode = mode
     action_time_sequence_now_ms: int | None = None
     trigger_state: dict[str, Any] | None = None
+    action_time_invocation: dict[str, Any] | None = None
     if mode == "action_time_if_needed":
         trigger_state = (
             action_time_trigger_state
@@ -159,24 +175,82 @@ def run_server_product_state_refresh_sequence(
         effective_mode = "action_time"
     elif mode == "action_time":
         action_time_sequence_now_ms = _now_ms()
+        trigger_state = action_time_trigger_state
+    if effective_mode == "action_time" and trigger_state is not None:
+        existing_invocation_id = _trigger_action_time_invocation_id(trigger_state)
+        if existing_invocation_id:
+            # A resumed Ticket/lane retains its original causal context.  A
+            # watcher tick must never create a second invocation merely to
+            # advance a later Ticket-bound stage.
+            action_time_invocation = {
+                "action_time_invocation_id": existing_invocation_id,
+            }
+        elif _trigger_requires_new_invocation(trigger_state):
+            signal_event_id = _trigger_signal_event_id(trigger_state)
+            if not signal_event_id:
+                return _action_time_invocation_start_failure_report(
+                    mode=mode,
+                    started_at_utc=started,
+                    trigger_state=trigger_state,
+                    blocker="action_time_invocation_trigger_signal_missing",
+                )
+            invocation_starter = (
+                action_time_invocation_starter
+                or _start_action_time_invocation_from_trigger
+            )
+            try:
+                action_time_invocation = invocation_starter(
+                    signal_event_id=signal_event_id,
+                    opened_at_ms=int(action_time_sequence_now_ms or _now_ms()),
+                    env=command_env,
+                )
+            except (
+                ActionTimeInvocationBlocked,
+                RuntimeError,
+                sa.exc.SQLAlchemyError,
+            ) as exc:
+                return _action_time_invocation_start_failure_report(
+                    mode=mode,
+                    started_at_utc=started,
+                    trigger_state=trigger_state,
+                    blocker=(
+                        "action_time_invocation_start_failed:"
+                        f"{type(exc).__name__}"
+                    ),
+                )
     steps = _refresh_steps(
         python=python,
         api_base=api_base,
         env_file=env_file,
         mode=effective_mode,
         action_time_sequence_now_ms=action_time_sequence_now_ms,
+        action_time_invocation_id=(
+            str(action_time_invocation.get("action_time_invocation_id") or "")
+            if action_time_invocation is not None
+            else None
+        ),
     )
     step_results: list[dict[str, Any]] = []
-    blocked_by_required_failure = ""
+    blocked_by_required_step = ""
+    required_stop_kind = ""
     for step in steps:
-        if blocked_by_required_failure:
+        allow_projection_after_business_block = (
+            required_stop_kind == "business_blocked"
+            and step.name
+            == "publish_runtime_control_current_projections_after_action_time"
+        )
+        if blocked_by_required_step and not allow_projection_after_business_block:
             step_results.append(
                 {
                     "name": step.name,
                     "required": step.required,
                     "returncode": None,
-                    "status": "skipped_after_required_failure",
-                    "blocked_by": blocked_by_required_failure,
+                    "status": (
+                        "skipped_after_business_blocked"
+                        if required_stop_kind == "business_blocked"
+                        else "skipped_after_required_failure"
+                    ),
+                    "blocked_by": blocked_by_required_step,
                     "command": list(step.command),
                     "stdout_tail": "",
                     "stderr_tail": "",
@@ -184,20 +258,37 @@ def run_server_product_state_refresh_sequence(
             )
             continue
         result = command_runner(step.command)
+        child_process_outcome = _structured_child_process_outcome(result.stdout)
+        child_business_blocked = (
+            result.returncode == 0
+            and str(child_process_outcome.get("process_state") or "")
+            == "business_blocked"
+        )
         step_results.append(
             {
                 "name": step.name,
                 "required": step.required,
                 "returncode": result.returncode,
-                "status": "passed" if result.returncode == 0 else "failed",
+                "status": (
+                    "failed"
+                    if result.returncode != 0
+                    else "business_blocked"
+                    if child_business_blocked
+                    else "passed"
+                ),
                 "command": list(step.command),
                 "stdout_tail": _tail(result.stdout),
                 "stderr_tail": _tail(result.stderr),
                 "duration_ms": int(result.duration_ms),
+                "child_process_outcome": child_process_outcome,
             }
         )
         if step.required and result.returncode != 0:
-            blocked_by_required_failure = step.name
+            blocked_by_required_step = step.name
+            required_stop_kind = "failure"
+        elif step.required and child_business_blocked:
+            blocked_by_required_step = step.name
+            required_stop_kind = "business_blocked"
 
     failed_required = [
         result
@@ -216,8 +307,24 @@ def run_server_product_state_refresh_sequence(
     skipped = [
         result
         for result in step_results
+        if str(result["status"]).startswith("skipped_after_")
+    ]
+    skipped_after_required_failure = [
+        result
+        for result in skipped
         if result["status"] == "skipped_after_required_failure"
     ]
+    skipped_after_business_blocked = [
+        result
+        for result in skipped
+        if result["status"] == "skipped_after_business_blocked"
+    ]
+    business_blocked_required = [
+        result
+        for result in step_results
+        if result["required"] and result["status"] == "business_blocked"
+    ]
+    blocking_required = [*failed_required, *business_blocked_required]
     current_projection_publish_attempted = any(
         str(result["name"]).startswith(
             "publish_runtime_control_current_projections"
@@ -235,13 +342,16 @@ def run_server_product_state_refresh_sequence(
         "scope": "server_product_state_refresh_sequence_non_authority",
         "status": (
             "server_product_state_refresh_sequence_ready"
-            if not failed_required
+            if not failed_required and not business_blocked_required
+            else "server_product_state_refresh_sequence_business_blocked"
+            if business_blocked_required and not failed_required
             else "server_product_state_refresh_sequence_failed"
         ),
         "mode": mode,
         "effective_mode": effective_mode,
         "action_time_sequence_now_ms": action_time_sequence_now_ms,
         "action_time_trigger": trigger_state,
+        "action_time_invocation": action_time_invocation,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "started_at_utc": started,
         "summary": {
@@ -250,20 +360,41 @@ def run_server_product_state_refresh_sequence(
             "optional_step_count": sum(1 for step in steps if not step.required),
             "failed_required_step_count": len(failed_required),
             "failed_optional_step_count": len(failed_optional),
-            "skipped_after_required_failure_count": len(skipped),
+            "business_blocked_required_step_count": len(business_blocked_required),
+            "skipped_after_required_failure_count": len(
+                skipped_after_required_failure
+            ),
+            "skipped_after_business_blocked_count": len(
+                skipped_after_business_blocked
+            ),
             "current_projection_publish_attempted": current_projection_publish_attempted,
             "current_projection_publish_suppressed": (
                 not current_projection_publish_attempted
             ),
-            "blocked_by_required_step": blocked_by_required_failure,
+            "blocked_by_required_step": blocked_by_required_step,
+            "business_blocked_by_required_step": (
+                blocked_by_required_step
+                if required_stop_kind == "business_blocked"
+                else ""
+            ),
+            "business_blocked_first_blocker": (
+                str(
+                    business_blocked_required[0]
+                    .get("child_process_outcome", {})
+                    .get("first_blocker")
+                    or ""
+                )
+                if business_blocked_required
+                else ""
+            ),
             "blocked_required_stdout_tail": (
-                str(failed_required[0].get("stdout_tail") or "")
-                if failed_required
+                str(blocking_required[0].get("stdout_tail") or "")
+                if blocking_required
                 else ""
             ),
             "blocked_required_stderr_tail": (
-                str(failed_required[0].get("stderr_tail") or "")
-                if failed_required
+                str(blocking_required[0].get("stderr_tail") or "")
+                if blocking_required
                 else ""
             ),
             "total_step_duration_ms": sum(
@@ -376,8 +507,24 @@ def _action_time_refresh_process_outcome_payload(
     summary = report.get("summary")
     if not isinstance(summary, Mapping):
         return None
+    invocation_payload = report.get("action_time_invocation")
+    invocation = (
+        dict(invocation_payload)
+        if isinstance(invocation_payload, Mapping)
+        else {}
+    )
+    action_time_invocation_id = str(
+        invocation.get("action_time_invocation_id")
+        or identity.get("action_time_invocation_id")
+        or ""
+    ).strip()
+    lane_identity = invocation.get("lane_identity")
+    lane_identity_payload = (
+        dict(lane_identity) if isinstance(lane_identity, Mapping) else None
+    )
     started_at_ms = int(
-        report.get("action_time_sequence_now_ms")
+        invocation.get("opened_at_ms")
+        or report.get("action_time_sequence_now_ms")
         or trigger.get("now_ms")
         or 0
     )
@@ -385,8 +532,22 @@ def _action_time_refresh_process_outcome_payload(
         return None
     duration_ms = int(summary.get("total_step_duration_ms") or 0)
     failed_step = str(summary.get("blocked_by_required_step") or "").strip()
-    blockers = [_refresh_step_failure_blocker(report)] if failed_step else []
-    source_watermark = next(
+    business_blocked_step = str(
+        summary.get("business_blocked_by_required_step") or ""
+    ).strip()
+    if business_blocked_step:
+        blockers = [
+            str(summary.get("business_blocked_first_blocker") or "").strip()
+            or "action_time_refresh_sequence_business_blocked"
+        ]
+        result_status = "action_time_refresh_sequence_business_blocked"
+    elif failed_step:
+        blockers = [_refresh_step_failure_blocker(report)]
+        result_status = "action_time_refresh_sequence_failed"
+    else:
+        blockers = []
+        result_status = "action_time_refresh_sequence_completed"
+    source_watermark = str(invocation.get("source_watermark") or "").strip() or next(
         (
             str(identity.get(key) or "").strip()
             for key in (
@@ -399,20 +560,21 @@ def _action_time_refresh_process_outcome_payload(
         ),
         f"lane:{strategy_group_id}:{symbol}:{side}",
     )
-    return {
+    payload = {
         "process_name": "action_time_refresh_sequence",
         "scope_key": f"lane:{strategy_group_id}:{symbol}:{side}",
         "run_id": f"action_time_refresh:{started_at_ms}",
-        "result_status": (
-            "action_time_refresh_sequence_failed"
-            if failed_step
-            else "action_time_refresh_sequence_completed"
-        ),
+        "result_status": result_status,
         "blockers": blockers,
         "started_at_ms": started_at_ms,
         "completed_at_ms": started_at_ms + duration_ms,
         "source_watermark": source_watermark,
     }
+    if action_time_invocation_id:
+        payload["action_time_invocation_id"] = action_time_invocation_id
+    if lane_identity_payload is not None:
+        payload["lane_identity"] = lane_identity_payload
+    return payload
 
 
 def _refresh_step_failure_blocker(report: Mapping[str, Any]) -> str:
@@ -431,6 +593,10 @@ def _refresh_step_failure_blocker(report: Mapping[str, Any]) -> str:
 
 
 def _structured_first_blocker(stdout: str) -> str:
+    outcome = _structured_child_process_outcome(stdout)
+    first = str(outcome.get("first_blocker") or "").strip()
+    if first:
+        return first
     for line in reversed(str(stdout or "").splitlines()):
         try:
             payload = json.loads(line)
@@ -454,6 +620,40 @@ def _structured_first_blocker(stdout: str) -> str:
     return ""
 
 
+def _structured_child_process_outcome(stdout: str) -> dict[str, str]:
+    """Read the child semantic outcome from its final structured JSON line.
+
+    Safe business stops deliberately exit with code zero.  The parent therefore
+    treats the typed outcome as authoritative for process semantics while it
+    continues to use the exit code for transport/runtime failure detection.
+    """
+
+    for line in reversed(str(stdout or "").splitlines()):
+        try:
+            payload = json.loads(line)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        candidate = payload.get("process_outcome")
+        if not isinstance(candidate, Mapping):
+            candidate = payload
+        process_state = str(candidate.get("process_state") or "").strip()
+        business_state = str(candidate.get("business_state") or "").strip()
+        first_blocker = str(candidate.get("first_blocker") or "").strip()
+        if not first_blocker:
+            blockers = candidate.get("blockers")
+            if isinstance(blockers, list) and blockers:
+                first_blocker = str(blockers[0] or "").strip()
+        if process_state or business_state or first_blocker:
+            return {
+                "process_state": process_state,
+                "business_state": business_state,
+                "first_blocker": first_blocker,
+            }
+    return {}
+
+
 def _persist_action_time_refresh_process_outcome(
     payload: Mapping[str, Any],
     *,
@@ -467,13 +667,38 @@ def _persist_action_time_refresh_process_outcome(
     engine = sa.create_engine(database_url)
     try:
         with engine.begin() as conn:
-            effective_payload = _with_current_trigger_identity(
-                payload,
-                _action_time_trigger_identity(
+            invocation_id = str(
+                payload.get("action_time_invocation_id") or ""
+            ).strip()
+            invocation = (
+                load_action_time_invocation(
                     conn,
-                    now_ms=int(payload["started_at_ms"]),
-                ),
+                    action_time_invocation_id=invocation_id,
+                )
+                if invocation_id
+                else None
             )
+            if invocation is not None:
+                effective_payload = dict(payload)
+                effective_payload.update(
+                    {
+                        "scope_key": (
+                            "lane:"
+                            f"{invocation.lane_identity.strategy_group_id}:"
+                            f"{invocation.lane_identity.symbol}:"
+                            f"{invocation.lane_identity.side}"
+                        ),
+                        "source_watermark": invocation.source_watermark,
+                    }
+                )
+            else:
+                effective_payload = _with_current_trigger_identity(
+                    payload,
+                    _action_time_trigger_identity(
+                        conn,
+                        now_ms=int(payload["started_at_ms"]),
+                    ),
+                )
             return dict(
                 materialize_runtime_process_outcome(
                     conn,
@@ -490,6 +715,14 @@ def _persist_action_time_refresh_process_outcome(
                     runtime_head=str(env.get("BRC_RUNTIME_HEAD") or ""),
                     source_watermark=str(effective_payload["source_watermark"]),
                     projector_owner="server_product_state_refresh_sequence",
+                    lane_identity=(
+                        invocation.lane_identity if invocation is not None else None
+                    ),
+                    action_time_invocation_id=(
+                        invocation.action_time_invocation_id
+                        if invocation is not None
+                        else None
+                    ),
                 )
             )
     finally:
@@ -562,7 +795,9 @@ def _empty_refresh_report(
             "optional_step_count": 0,
             "failed_required_step_count": len(step_results),
             "failed_optional_step_count": 0,
+            "business_blocked_required_step_count": 0,
             "skipped_after_required_failure_count": 0,
+            "skipped_after_business_blocked_count": 0,
             "current_projection_publish_attempted": False,
             "current_projection_publish_suppressed": True,
             "blocked_by_required_step": (
@@ -570,6 +805,8 @@ def _empty_refresh_report(
                 if failed
                 else ""
             ),
+            "business_blocked_by_required_step": "",
+            "business_blocked_first_blocker": "",
             "blocked_required_stdout_tail": (
                 str(step_results[0].get("stdout_tail") or "")
                 if step_results
@@ -595,6 +832,27 @@ def _empty_refresh_report(
         "step_results": step_results,
         "safety_invariants": _empty_safety_invariants(),
     }
+
+
+def _action_time_invocation_start_failure_report(
+    *,
+    mode: str,
+    started_at_utc: str,
+    trigger_state: dict[str, Any],
+    blocker: str,
+) -> dict[str, Any]:
+    report = _empty_refresh_report(
+        mode=mode,
+        effective_mode="action_time",
+        started_at_utc=started_at_utc,
+        status="server_product_state_refresh_sequence_failed",
+        action_time_trigger={**trigger_state, "status": "blocked", "blocker": blocker},
+    )
+    step = report["step_results"][0]
+    step["name"] = "start_action_time_invocation"
+    report["summary"]["blocked_by_required_step"] = "start_action_time_invocation"
+    report["action_time_invocation"] = None
+    return report
 
 
 def _empty_safety_invariants() -> dict[str, bool]:
@@ -659,6 +917,68 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
         "expiry_counts": expiry_counts,
         "trigger_identity": trigger_identity,
     }
+
+
+def _start_action_time_invocation_from_trigger(
+    *,
+    signal_event_id: str,
+    opened_at_ms: int,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    database_url = normalize_sync_postgres_dsn(
+        env.get("PG_DATABASE_URL") or env.get("DATABASE_URL") or ""
+    )
+    if not database_url:
+        raise RuntimeError("missing_action_time_invocation_database_url")
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            invocation = start_action_time_invocation(
+                conn,
+                signal_event_id=signal_event_id,
+                opened_at_ms=opened_at_ms,
+            )
+    finally:
+        engine.dispose()
+    return invocation.model_dump(mode="json")
+
+
+def _trigger_signal_event_id(trigger_state: Mapping[str, Any]) -> str:
+    identity = trigger_state.get("trigger_identity")
+    if not isinstance(identity, Mapping):
+        return ""
+    return str(identity.get("signal_event_id") or "").strip()
+
+
+def _trigger_action_time_invocation_id(trigger_state: Mapping[str, Any]) -> str:
+    identity = trigger_state.get("trigger_identity")
+    if not isinstance(identity, Mapping):
+        return ""
+    return str(identity.get("action_time_invocation_id") or "").strip()
+
+
+def _trigger_requires_new_invocation(trigger_state: Mapping[str, Any]) -> bool:
+    """Return true only for a fresh signal with no pre-existing active lane.
+
+    A refresh can be triggered by a Ticket, lane, promotion, or handoff that
+    already exists.  Those are continuation work and must retain their original
+    invocation; only the exact fresh-signal branch opens a new causal context.
+    """
+
+    counts = trigger_state.get("counts")
+    if not isinstance(counts, Mapping):
+        return False
+    if int(counts.get("fresh_live_signal_events") or 0) <= 0:
+        return False
+    active_continuation_counts = (
+        "open_promotion_candidates",
+        "open_action_time_lane_inputs",
+        "open_action_time_tickets",
+        "operation_layer_handoffs_ready_without_protected_submit",
+    )
+    return not any(
+        int(counts.get(key) or 0) > 0 for key in active_continuation_counts
+    )
 
 
 def _expire_stale_action_time_objects(
@@ -1011,6 +1331,9 @@ def _trigger_identity_row(
         "action_time_lane_input_id": str(
             row.get("action_time_lane_input_id") or ""
         ),
+        "action_time_invocation_id": str(
+            row.get("action_time_invocation_id") or ""
+        ),
         "ticket_id": str(row.get("ticket_id") or ""),
     }
     result.update(overrides)
@@ -1080,11 +1403,12 @@ def _refresh_steps(
     env_file: Path,
     mode: str,
     action_time_sequence_now_ms: int | None = None,
+    action_time_invocation_id: str | None = None,
 ) -> list[RefreshStep]:
     pg_required = ("--require-database-url",)
-    action_time_now_args = (
-        ("--now-ms", str(action_time_sequence_now_ms))
-        if action_time_sequence_now_ms is not None
+    invocation_args = (
+        ("--action-time-invocation-id", str(action_time_invocation_id))
+        if action_time_invocation_id
         else ()
     )
 
@@ -1097,6 +1421,7 @@ def _refresh_steps(
                 *pg_required,
                 "--env-file",
                 str(env_file),
+                *invocation_args,
             ),
         ),
         RefreshStep(
@@ -1105,7 +1430,7 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_ticket_sequence.py",
                 *pg_required,
-                *action_time_now_args,
+                *invocation_args,
             ),
         ),
         RefreshStep(
@@ -1114,7 +1439,6 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_finalgate_preflight.py",
                 *pg_required,
-                *action_time_now_args,
             ),
         ),
         RefreshStep(
@@ -1123,7 +1447,6 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_action_time_operation_layer_handoff.py",
                 *pg_required,
-                *action_time_now_args,
             ),
         ),
         RefreshStep(
@@ -1132,7 +1455,6 @@ def _refresh_steps(
                 python,
                 "scripts/materialize_ticket_bound_runtime_safety_state.py",
                 *pg_required,
-                *action_time_now_args,
             ),
         ),
         RefreshStep(
@@ -1153,7 +1475,18 @@ def _refresh_steps(
             ),
         ),
     ]
-    return _steps_for_mode(steps, mode=mode)
+    selected = _steps_for_mode(steps, mode=mode)
+    if not action_time_invocation_id:
+        selected = [
+            step
+            for step in selected
+            if step.name
+            not in {
+                "build_account_safe_facts",
+                "materialize_action_time_ticket_sequence",
+            }
+        ]
+    return selected
 
 
 def _steps_for_mode(steps: list[RefreshStep], *, mode: str) -> list[RefreshStep]:

@@ -305,6 +305,45 @@ def test_runtime_account_safe_facts_projection_cadence_can_continue_when_blocked
     assert exit_code == 0
 
 
+def test_runtime_account_safe_facts_cli_forwards_action_time_invocation_id(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        module._impl,
+        "collect_account_safe_live_facts_from_pg_scope",
+        lambda *args, **kwargs: {"status": "ready"},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "build_runtime_account_safe_facts",
+        lambda **kwargs: {
+            "status": "runtime_account_safe_facts_ready",
+            "checks": {"account_safe_facts_ready": True},
+        },
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "write_account_safe_fact_snapshots",
+        lambda *args, **kwargs: (
+            seen.update(kwargs) or ["fact:account-safe", "fact:account-mode"]
+        ),
+    )
+
+    exit_code = module.main(
+        [
+            "--database-url",
+            "sqlite:///:memory:",
+            "--allow-non-postgres-for-test",
+            "--action-time-invocation-id",
+            "action_time_invocation:unit",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen["action_time_invocation_id"] == "action_time_invocation:unit"
+
+
 def test_runtime_account_safe_facts_normalizes_asyncpg_dsn_for_sync_projector(
     monkeypatch: pytest.MonkeyPatch,
 ):

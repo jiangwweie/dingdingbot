@@ -247,6 +247,7 @@ def test_l2_l7_refresh_sequence_preserves_state_machine_order_and_light_tick() -
             api_base="http://127.0.0.1:18080",
             env_file=Path("/tmp/live-readonly.env"),
             mode="action_time",
+            action_time_invocation_id="action_time_invocation:unit",
         )
     ]
 
@@ -260,6 +261,22 @@ def test_l2_l7_refresh_sequence_preserves_state_machine_order_and_light_tick() -
     ]
     assert "materialize_ticket_bound_protected_submit_attempt" not in action_time_steps
     assert "materialize_ticket_bound_post_submit_closure" not in action_time_steps
+
+    continuation_steps = [
+        step.name
+        for step in refresh_sequence._refresh_steps(
+            python="python",
+            api_base="http://127.0.0.1:18080",
+            env_file=Path("/tmp/live-readonly.env"),
+            mode="action_time",
+        )
+    ]
+    assert continuation_steps == [
+        "materialize_action_time_finalgate_preflight",
+        "materialize_action_time_operation_layer_handoff",
+        "materialize_ticket_bound_runtime_safety_state",
+        "publish_runtime_control_current_projections_after_action_time",
+    ]
 
     watcher_tick_steps = [
         step.name

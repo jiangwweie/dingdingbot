@@ -51,6 +51,7 @@ repo MD/JSON/output/report files.
 | **Trade feedback core is consolidated** | P1-TFC maps lifecycle phase, protection, reconciliation, control, recovery, and Owner feedback through one typed decision and is a deployed baseline |
 | **Opportunity feedback is calibrated historically** | Five groups, six Event Specs, and 22 scopes completed 90/365-day Replay with zero invalid observations; all scopes produced signals, so long-run market absence and empty symbol scope are rejected as explanations |
 | **Current production state** | PG had no post-`97de14c2` fresh signal at the latest verified check; service health and market wait do not yet prove the new outer-refresh failure-conservation code until it is deployed and a distinct natural event arrives |
+| **Action-Time Invocation consistency local closure** | Local branch `codex/p0-runtime-lane-identity-design` at `38be9883` adds migration `119`, exact invocation-bound fact/Ticket lineage, typed watcher coverage, and failure conservation; `3015 passed, 1 skipped` locally. Tokyo remains separately verified at its prior migration `116` baseline until official deployment and read-only acceptance complete. |
 | **Six-event pre-exchange acceptance** | Five July 12 CPM Ticket lineages plus the separate ETH sizing-control signal reach protected-submit preparation and durable ENTRY/SL/TP1 commands inside their original validity windows under fixed-clock isolated tests; no exchange gateway is called |
 | **Test escape is proven** | Unit/full-chain fixtures inject `last_price`, `mark_price`, or `entry_price` directly, while production fact materialization does not guarantee the same typed field; downstream-complete dictionary fixtures therefore bypassed the missing producer handoff |
 | **Advanced trading quality / capital allocation remains future work** | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`; portfolio sleeve allocation, cluster exposure, cooldown, and drawdown controls remain above the per-ticket safety layer |
@@ -59,6 +60,7 @@ repo MD/JSON/output/report files.
 
 | Program | Priority | Goal | Primary design docs | Main acceptance |
 | --- | --- | --- | --- | --- |
+| **P0-AI Action-Time Invocation Consistency And Failure Truth** | P0 local closure; deployment pending | Bind a fresh signal, fresh account/action facts, promotion, lane, Ticket, watcher coverage, and parent outcome to one exact PG invocation identity | `P0_ACTION_TIME_INVOCATION_CONSISTENCY_AND_FAILURE_TRUTH_DESIGN.md`, `P0_ACTION_TIME_INVOCATION_CONSISTENCY_AND_FAILURE_TRUTH_IMPLEMENTATION_PLAN.md` | Official Tokyo deploy applies migration `119`; read-only verification proves typed coverage and no active Ticket/order mutation; the next natural signal yields an original-lineage Ticket or durable typed blocker |
 | **P0-FC Action-Time Failure Conservation And Natural-Event Acceptance** | deployed P0 baseline | Persist outer refresh failures with exact lane/source/stage/timing and certify six historical events to the durable pre-exchange boundary | `P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_DESIGN.md`, `P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_IMPLEMENTATION_PLAN.md` | Five historical Tickets reach prepared durable commands, the sixth signal passes current dynamic sizing, no exchange write occurs, and deployment preserves future natural-event failures in PG |
 | **P0-SIN Signal Identity Conservation And Owner Notification Truth** | deployed P0 baseline | Require named execution-eligible PG signal identity for opportunity language, persist anonymous materialization failures by lane, and keep one PG-backed Owner notification path | `P0_SIGNAL_IDENTITY_CONSERVATION_AND_OWNER_NOTIFICATION_TRUTH_DESIGN.md`, `P0_SIGNAL_IDENTITY_CONSERVATION_AND_OWNER_NOTIFICATION_TRUTH_IMPLEMENTATION_PLAN.md` | Closed at deployed `8b6cd166` / migration `117`; production captured a CPM/SOL short identity gap, sent one Chinese no-order card through the server monitor, and suppressed the repeated delivery through PG dedupe |
 | **P1-OFC Strategy Opportunity And Live Feedback Calibration** | deployed engineering baseline | Measure version-pinned opportunity frequency, near misses, replay/live parity, and ticket-bound real economics without changing strategy or submit authority | `P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN.md`, `P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN.md` | Closed at deployed `97efab6f` / migration `116`; natural Live counterpart and venue economics remain event-driven calibration |
@@ -87,12 +89,13 @@ deployed component baselines. They must not run as separate medium-scale WIP.
 
 | Order | Program | Reason |
 | --- | --- | --- |
-| 1 | **P0-FC Action-Time Failure Conservation And Natural-Event Acceptance** | Deployed and accepted; retained as the outer-orchestrator truth and deploy-order baseline |
-| 2 | **P0-SIN Signal Identity Conservation And Owner Notification Truth** | Deployed and production-accepted; prevents anonymous readiness and watcher-local messages from masquerading as tradable opportunity truth |
+| 1 | **P0-AI Action-Time Invocation Consistency And Failure Truth** | Local implementation and regression are complete; the remaining engineering action is one official Tokyo deployment plus read-only acceptance, not more execution-core expansion |
+| 2 | **P0-FC Action-Time Failure Conservation And Natural-Event Acceptance** | Deployed and accepted; retained as the outer-orchestrator truth and deploy-order baseline |
+| 3 | **P0-SIN Signal Identity Conservation And Owner Notification Truth** | Deployed and production-accepted; prevents anonymous readiness and watcher-local messages from masquerading as tradable opportunity truth |
 | P0 interrupt | **Natural Live Lifecycle Calibration** | A different-identity fresh signal or active safety incident preempts P1-OFC at the next committed transaction boundary |
-| 3 | **Owner Supervision Product Integration** | Next non-market-dependent mainline; product surfaces should consume the now-stable PG capability and blocker truth |
-| 4 | **P1 Capital Allocation V1** | Allocation requires reliable real ticket outcomes, not rehearsal-only closure |
-| 5 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one live-calibrated lifecycle through adapters |
+| 4 | **Owner Supervision Product Integration** | Next non-market-dependent mainline after the local P0 deploy boundary is accepted |
+| 5 | **P1 Capital Allocation V1** | Allocation requires reliable real ticket outcomes, not rehearsal-only closure |
+| 6 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one live-calibrated lifecycle through adapters |
 
 ## Current Next Execution Order
 
@@ -315,6 +318,8 @@ candidate scope
 -> runtime coverage
 -> fact snapshot
 -> live signal event
+-> ActionTimeInvocation
+-> invocation-bound exact action-time facts
 -> promotion candidate
 -> action-time lane
 -> Action-Time Ticket
@@ -639,14 +644,14 @@ replay event as fresh live signal
 ## Current Chain Position
 
 ```text
-chain_position: replay_live_parity
+chain_position: local_action_time_invocation_closure
 strategy_group_id: CPM-RO-001 / MPG-001 / MI-001 / SOR-001 / BRF2-001
 symbol: 22 active candidate scopes
-stage: release_certified_waiting_for_natural_signal
-first_blocker: market_wait_validated
-evidence: Tokyo runs dbb7e650 / migration 116; 22/22 production-shaped scopes pass; PG has one matching release activation and 22 capability certifications; all 22 readiness rows are market_wait_validated; fresh signal/open lane/active Ticket/exchange command counts are zero
-next_action: continue Owner Supervision Product Integration while the next distinct natural signal remains a P0 interrupt for real Ticket and venue-outcome acceptance
-stop_condition: a distinct natural signal appears, a safety incident occurs, or release/lineage drift invalidates certification
+stage: local_tested_tokyo_deployment_pending
+first_blocker: tokyo_deployment_pending
+evidence: local branch codex/p0-runtime-lane-identity-design at 38be9883 / migration 119 has 3015 passed, 1 skipped; exact signal-to-invocation-to-Ticket lineage, typed watcher coverage, and parent business-block preservation are locally verified. Tokyo remains separately verified at dbb7e650 / migration 116; no migration 119 deploy, read-only acceptance, active Ticket mutation, exchange command, or order has occurred for this closure.
+next_action: apply the exact-head official Tokyo deployment, run read-only postdeploy acceptance, then treat the next distinct natural signal as the P0 Ticket-or-typed-blocker acceptance event
+stop_condition: deployment reveals release/schema/lineage drift, a distinct natural signal appears, or a safety incident occurs
 owner_action_required: no
 authority_boundary: no new ENTRY path, no FinalGate/Operation Layer bypass, no profile/sizing/strategy expansion, no unknown-order mutation, no synthetic-to-live authority
 ```

@@ -138,6 +138,10 @@ LANE_IDENTITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
 )
+ACTION_TIME_INVOCATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -611,6 +615,10 @@ def pg_control_connection():
             (
                 LANE_IDENTITY_MIGRATION_PATH,
                 "migration_118_action_time_full_chain",
+            ),
+            (
+                ACTION_TIME_INVOCATION_MIGRATION_PATH,
+                "migration_119_action_time_full_chain",
             ),
         ):
             extension = _load_module(path, module_name)

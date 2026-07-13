@@ -14,6 +14,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "run_server_product_state_refresh_sequence.py"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_unit_process_dsn(monkeypatch):
+    """Keep command-runner unit tests from inheriting a real PG endpoint.
+
+    Production refresh persists its outcome through PG.  These tests replace
+    the child command runner with an in-memory double, so inheriting a developer
+    shell DSN would accidentally turn the unit boundary into a real connection.
+    """
+
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+
 def _load_module():
     spec = importlib.util.spec_from_file_location(
         "run_server_product_state_refresh_sequence",
@@ -25,6 +38,42 @@ def _load_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _fresh_signal_trigger(
+    *,
+    now_ms: int = 1_783_438_000_000,
+    strategy_group_id: str = "SOR-001",
+    symbol: str = "ETHUSDT",
+    side: str = "long",
+    signal_event_id: str = "signal:SOR-001:ETHUSDT:long:unit",
+) -> dict[str, object]:
+    return {
+        "status": "triggered",
+        "triggered": True,
+        "blocker": "",
+        "now_ms": now_ms,
+        "counts": {
+            "fresh_live_signal_events": 1,
+            "open_promotion_candidates": 0,
+            "open_action_time_lane_inputs": 0,
+            "open_action_time_tickets": 0,
+            "operation_layer_handoffs_ready_without_protected_submit": 0,
+        },
+        "trigger_identity": {
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+            "signal_event_id": signal_event_id,
+        },
+    }
+
+
+def _unit_invocation_starter(*, signal_event_id: str, **_kwargs):
+    return {
+        "action_time_invocation_id": "action_time_invocation:unit",
+        "signal_event_id": signal_event_id,
+    }
 
 
 def test_server_product_state_refresh_sequence_rejects_removed_file_export_modes(
@@ -174,7 +223,7 @@ def test_server_product_state_refresh_sequence_default_mode_is_watcher_tick_summ
     ]
 
 
-def test_server_product_state_refresh_sequence_action_time_mode_skips_submit_and_closure(
+def test_server_product_state_refresh_sequence_action_time_mode_continues_existing_ticket_only(
     tmp_path: Path,
 ):
     module = _load_module()
@@ -193,8 +242,8 @@ def test_server_product_state_refresh_sequence_action_time_mode_skips_submit_and
 
     command_names = [command[1] for command in calls]
     assert report["status"] == "server_product_state_refresh_sequence_ready"
-    assert "scripts/build_runtime_account_safe_facts.py" in command_names
-    assert "scripts/materialize_action_time_ticket_sequence.py" in command_names
+    assert "scripts/build_runtime_account_safe_facts.py" not in command_names
+    assert "scripts/materialize_action_time_ticket_sequence.py" not in command_names
     assert "scripts/materialize_action_time_fact_snapshots.py" not in command_names
     assert "scripts/materialize_pg_promotion_action_time_lane.py" not in command_names
     assert "scripts/materialize_action_time_ticket.py" not in command_names
@@ -203,13 +252,14 @@ def test_server_product_state_refresh_sequence_action_time_mode_skips_submit_and
     assert "scripts/materialize_ticket_bound_protected_submit_attempt.py" not in command_names
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
     assert report["safety_invariants"]["calls_ticket_bound_finalgate_preflight"] is True
+    assert report["safety_invariants"]["calls_atomic_action_time_ticket_sequence"] is False
     assert report["safety_invariants"]["calls_ticket_bound_protected_submit_attempt"] is False
     assert report["safety_invariants"]["calls_ticket_bound_post_submit_closure"] is False
 
 
 def test_action_time_refresh_reports_step_and_total_latency_budget(tmp_path: Path):
     module = _load_module()
-    durations = iter([100, 200, 300, 400, 500, 600])
+    durations = iter([100, 200, 300, 400])
 
     def runner(_command: tuple[str, ...]):
         return module.CommandResult(
@@ -226,7 +276,7 @@ def test_action_time_refresh_reports_step_and_total_latency_budget(tmp_path: Pat
         runner=runner,
     )
 
-    assert report["summary"]["total_step_duration_ms"] == 2100
+    assert report["summary"]["total_step_duration_ms"] == 1000
     assert report["summary"]["latency_budget_ms"] == 30_000
     assert report["summary"]["latency_budget_status"] == "within_budget"
     assert [row["duration_ms"] for row in report["step_results"]] == [
@@ -234,8 +284,6 @@ def test_action_time_refresh_reports_step_and_total_latency_budget(tmp_path: Pat
         200,
         300,
         400,
-        500,
-        600,
     ]
 
 
@@ -299,7 +347,7 @@ def test_action_time_refresh_conserves_required_step_timeout_with_lane_lineage(
                 "materialize_action_time_finalgate_preflight_timeout"
             ],
             "started_at_ms": 1_783_843_277_585,
-            "completed_at_ms": 1_783_843_322_786,
+            "completed_at_ms": 1_783_843_322_586,
             "source_watermark": (
                 "ticket:999fe1c427c105bde3c1c8a2da833c6d"
                 "c8294a3dcb5ad030de39db9f35972331"
@@ -390,19 +438,9 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
         mode="action_time_if_needed",
-        action_time_trigger_state={
-            "status": "triggered",
-            "triggered": True,
-            "blocker": "",
-            "now_ms": sequence_now_ms,
-            "counts": {
-                "fresh_live_signal_events": 1,
-                "open_promotion_candidates": 0,
-                "open_action_time_lane_inputs": 0,
-                "open_action_time_tickets": 0,
-            },
-        },
+        action_time_trigger_state=_fresh_signal_trigger(now_ms=sequence_now_ms),
         runner=runner,
+        action_time_invocation_starter=_unit_invocation_starter,
     )
 
     command_names = [command[1] for command in calls]
@@ -418,18 +456,41 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
     assert "scripts/materialize_ticket_bound_runtime_safety_state.py" in command_names
     assert "scripts/materialize_ticket_bound_protected_submit_attempt.py" not in command_names
     assert "scripts/materialize_ticket_bound_post_submit_closure.py" not in command_names
+    ticket_command = next(
+        command
+        for command in calls
+        if command[1] == "scripts/materialize_action_time_ticket_sequence.py"
+    )
+    assert ticket_command[-2:] == (
+        "--action-time-invocation-id",
+        "action_time_invocation:unit",
+    )
 
 
-def test_server_product_state_refresh_sequence_pins_action_time_materializers_to_one_batch_time(
+def test_action_time_refresh_binds_account_collection_to_triggered_invocation(
     tmp_path: Path,
 ):
     module = _load_module()
     calls: list[tuple[str, ...]] = []
-    sequence_now_ms = 1_783_438_101_132
+    started: dict[str, object] = {}
+    sequence_now_ms = 1_783_438_000_000
 
     def runner(command: tuple[str, ...]):
         calls.append(command)
         return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    def invocation_starter(*, signal_event_id: str, opened_at_ms: int, env):
+        started.update(
+            {
+                "signal_event_id": signal_event_id,
+                "opened_at_ms": opened_at_ms,
+                "env": dict(env),
+            }
+        )
+        return {
+            "action_time_invocation_id": "action_time_invocation:unit",
+            "signal_event_id": signal_event_id,
+        }
 
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
@@ -445,10 +506,112 @@ def test_server_product_state_refresh_sequence_pins_action_time_materializers_to
                 "open_promotion_candidates": 0,
                 "open_action_time_lane_inputs": 0,
                 "open_action_time_tickets": 0,
-                "operation_layer_handoffs_ready_without_protected_submit": 0,
+            },
+            "trigger_identity": {
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "signal_event_id": "signal:SOR-001:ETHUSDT:long:unit",
             },
         },
         runner=runner,
+        action_time_invocation_starter=invocation_starter,
+    )
+
+    account_command = next(
+        command
+        for command in calls
+        if command[1] == "scripts/build_runtime_account_safe_facts.py"
+    )
+    assert report["status"] == "server_product_state_refresh_sequence_ready"
+    assert report["action_time_invocation"]["action_time_invocation_id"] == (
+        "action_time_invocation:unit"
+    )
+    assert started["signal_event_id"] == "signal:SOR-001:ETHUSDT:long:unit"
+    assert started["opened_at_ms"] == sequence_now_ms
+    assert account_command[-2:] == (
+        "--action-time-invocation-id",
+        "action_time_invocation:unit",
+    )
+
+
+def test_outer_refresh_preserves_zero_exit_ticket_business_block(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        if command[1] == "scripts/materialize_action_time_ticket_sequence.py":
+            return module.CommandResult(
+                returncode=0,
+                stdout=(
+                    '{"status":"action_time_ticket_sequence_rolled_back",'
+                    '"process_outcome":{"process_state":"business_blocked",'
+                    '"business_state":"temporarily_unavailable",'
+                    '"first_blocker":"unit_exact_ticket_blocker"}}'
+                ),
+                stderr="",
+            )
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time_if_needed",
+        action_time_trigger_state={
+            "status": "triggered",
+            "triggered": True,
+            "blocker": "",
+            "now_ms": 1_783_438_000_000,
+            "counts": {"fresh_live_signal_events": 1},
+            "trigger_identity": {
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "signal_event_id": "signal:SOR-001:ETHUSDT:long:unit",
+            },
+        },
+        action_time_invocation_starter=lambda **_kwargs: {
+            "action_time_invocation_id": "action_time_invocation:unit",
+            "signal_event_id": "signal:SOR-001:ETHUSDT:long:unit",
+        },
+        runner=runner,
+    )
+
+    command_names = [command[1] for command in calls]
+    assert report["status"] == "server_product_state_refresh_sequence_business_blocked"
+    assert report["summary"]["business_blocked_by_required_step"] == (
+        "materialize_action_time_ticket_sequence"
+    )
+    assert report["summary"]["business_blocked_first_blocker"] == (
+        "unit_exact_ticket_blocker"
+    )
+    assert "scripts/materialize_action_time_finalgate_preflight.py" not in command_names
+    assert "scripts/materialize_action_time_operation_layer_handoff.py" not in command_names
+    assert "scripts/materialize_ticket_bound_runtime_safety_state.py" not in command_names
+    assert "scripts/publish_runtime_control_current_projections.py" in command_names
+
+
+def test_server_product_state_refresh_sequence_uses_stage_local_time_after_invocation_opening(
+    tmp_path: Path,
+):
+    module = _load_module()
+    calls: list[tuple[str, ...]] = []
+    sequence_now_ms = 1_783_438_101_132
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command)
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(now_ms=sequence_now_ms),
+        runner=runner,
+        action_time_invocation_starter=_unit_invocation_starter,
     )
 
     assert report["status"] == "server_product_state_refresh_sequence_ready"
@@ -463,14 +626,17 @@ def test_server_product_state_refresh_sequence_pins_action_time_materializers_to
     ]
     assert len(materializer_calls) == len(materializer_names)
     for command in materializer_calls:
-        now_index = command.index("--now-ms")
-        assert command[now_index + 1] == str(sequence_now_ms)
-    for command in calls:
-        if command[1] in {
-            "scripts/build_runtime_account_safe_facts.py",
-            "scripts/publish_runtime_control_current_projections.py",
-        }:
-            assert "--now-ms" not in command
+        assert "--now-ms" not in command
+    ticket_command = next(
+        command
+        for command in materializer_calls
+        if command[1] == "scripts/materialize_action_time_ticket_sequence.py"
+    )
+    assert ticket_command[-2:] == (
+        "--action-time-invocation-id",
+        "action_time_invocation:unit",
+    )
+    assert all("--now-ms" not in command for command in calls)
 
 
 def test_server_product_state_refresh_sequence_action_time_if_needed_fails_closed_on_pg_gap(
@@ -930,7 +1096,9 @@ def test_server_product_state_refresh_sequence_fails_closed_on_projection_publis
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 
@@ -965,7 +1133,9 @@ def test_server_product_state_refresh_sequence_fails_closed_on_action_time_fact_
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 
@@ -1008,7 +1178,9 @@ def test_server_product_state_refresh_sequence_omits_legacy_candidate_pool_mater
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 
@@ -1043,7 +1215,9 @@ def test_server_product_state_refresh_sequence_fails_closed_on_pg_lane_materiali
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 
@@ -1085,7 +1259,9 @@ def test_server_product_state_refresh_sequence_fails_closed_on_ticket_failure(
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 
@@ -1126,7 +1302,9 @@ def test_server_product_state_refresh_sequence_fails_closed_on_finalgate_failure
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 
@@ -1167,7 +1345,9 @@ def test_server_product_state_refresh_sequence_fails_closed_on_operation_handoff
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 
@@ -1208,7 +1388,9 @@ def test_server_product_state_refresh_sequence_fails_closed_on_runtime_safety_fa
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 
@@ -1245,7 +1427,9 @@ def test_server_product_state_refresh_sequence_does_not_call_protected_submit_in
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 
@@ -1322,7 +1506,9 @@ def test_server_product_state_refresh_sequence_requires_account_safe_facts(
     report = module.run_server_product_state_refresh_sequence(
         python=sys.executable,
         env_file=tmp_path / "live-readonly.env",
-        mode="action_time",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
         runner=runner,
     )
 

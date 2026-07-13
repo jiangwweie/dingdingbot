@@ -64,9 +64,19 @@ NOOP_STATUSES = {
 }
 TEMPORARILY_UNAVAILABLE_BUSINESS_STATUSES = {
     "action_time_fact_snapshots_blocked",
+    "action_time_invocation_fact_snapshot_blocked",
+    "action_time_invocation_promotion_blocked",
     "promotion_candidates_blocked",
     "action_time_ticket_sequence_blocked",
     "action_time_ticket_sequence_rolled_back",
+    "action_time_refresh_sequence_business_blocked",
+}
+# This is the one parent status that is already a structured interpretation of
+# a child's safe business stop.  Other action-time statuses still pass through
+# failure-prefix classification first, so an exception or projection failure is
+# never silently relabeled as a safe business block.
+EXPLICIT_SAFE_PARENT_BUSINESS_STATUSES = {
+    "action_time_refresh_sequence_business_blocked",
 }
 PROCESS_FAILURE_PREFIXES = (
     "runtime_control_state_invalid",
@@ -99,6 +109,16 @@ def classify_process_outcome(
             process_name=process_name,
             process_state="noop",
             business_state="waiting_for_opportunity",
+        )
+    # A parent must conserve a child's explicit safe business stop instead of
+    # reclassifying it from a blocker-code prefix.  The child already records
+    # whether a cross-scope/identity issue is a hard failure at its own stage.
+    if result_status in EXPLICIT_SAFE_PARENT_BUSINESS_STATUSES:
+        return RuntimeProcessOutcome(
+            process_name=process_name,
+            process_state="business_blocked",
+            business_state="temporarily_unavailable",
+            first_blocker=first or result_status,
         )
     if any(first.startswith(prefix) for prefix in HARD_FAILURE_PREFIXES):
         return RuntimeProcessOutcome(
@@ -156,6 +176,7 @@ def materialize_runtime_process_outcome(
     source_watermark: str,
     projector_owner: str = "runtime_process_outcome_projector",
     lane_identity: RuntimeLaneIdentity | None = None,
+    action_time_invocation_id: str | None = None,
 ) -> dict[str, object]:
     outcome = classify_process_outcome(
         process_name=process_name,
@@ -189,6 +210,8 @@ def materialize_runtime_process_outcome(
             ),
             "runtime_scope_binding_id": lane_identity.runtime_scope_binding_id,
             "runtime_instance_id": lane_identity.runtime_instance_id,
+            "runtime_profile_id": lane_identity.runtime_profile_id,
+            "policy_current_id": lane_identity.policy_current_id,
             "strategy_group_id": lane_identity.strategy_group_id,
             "strategy_group_version_id": lane_identity.strategy_group_version_id,
             "symbol": lane_identity.symbol,
@@ -198,6 +221,7 @@ def materialize_runtime_process_outcome(
             "event_spec_version": lane_identity.event_spec_version,
             "event_id": lane_identity.event_id,
             "timeframe": lane_identity.timeframe,
+            "time_authority": lane_identity.time_authority,
             "lane_identity_key": lane_identity.identity_key,
         }
     else:
@@ -225,6 +249,8 @@ def materialize_runtime_process_outcome(
         "updated_at_ms": completed_at_ms,
         **typed_identity,
     }
+    if action_time_invocation_id is not None:
+        row["action_time_invocation_id"] = str(action_time_invocation_id)
     row = {key: value for key, value in row.items() if key in table.c}
     existing = conn.execute(
         sa.select(table.c.process_outcome_id).where(

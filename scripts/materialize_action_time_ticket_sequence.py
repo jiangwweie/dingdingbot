@@ -16,9 +16,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.publish_runtime_control_current_projections import (  # noqa: E402
-    publish_action_time_pretrade_readiness,
-)
 from src.application.action_time.ticket_materialization_sequence import (  # noqa: E402
     materialize_action_time_ticket_sequence,
 )
@@ -36,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
     parser.add_argument("--require-database-url", action="store_true")
     parser.add_argument("--now-ms", type=int, default=None)
+    parser.add_argument("--action-time-invocation-id", default="")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--allow-non-postgres-for-test",
@@ -53,6 +51,13 @@ def main(argv: list[str] | None = None) -> int:
     if not database_url:
         print("ERROR: --database-url or PG_DATABASE_URL is required", file=sys.stderr)
         return 2
+    action_time_invocation_id = str(args.action_time_invocation_id or "").strip()
+    if not action_time_invocation_id:
+        print(
+            "ERROR: --action-time-invocation-id is required for Action-Time Ticket sequence",
+            file=sys.stderr,
+        )
+        return 2
     if not args.allow_non_postgres_for_test and not is_sync_postgres_dsn(database_url):
         print(
             "ERROR: atomic Action-Time Ticket sequence requires PostgreSQL DSN",
@@ -65,8 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         with engine.begin() as conn:
             report = materialize_action_time_ticket_sequence(
                 conn,
-                now_ms=args.now_ms,
-                projection_publisher=publish_action_time_pretrade_readiness,
+                action_time_invocation_id=action_time_invocation_id,
+                stage_at_ms=args.now_ms,
             )
     except sa.exc.SQLAlchemyError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

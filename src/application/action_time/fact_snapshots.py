@@ -38,6 +38,12 @@ from src.domain.strategy_family_signal import StrategyFactObservation  # noqa: E
 from src.application.action_time.pricing_sizing import (  # noqa: E402
     materialize_action_time_pricing_reference,
 )
+from src.application.action_time.action_time_invocation import (  # noqa: E402
+    ActionTimeInvocationBlocked,
+    bind_action_time_invocation_fact_refs,
+    load_action_time_invocation_evidence,
+    load_action_time_invocation_signal,
+)
 from src.application.runtime_process_outcome import (  # noqa: E402
     materialize_runtime_process_outcome,
     runtime_process_exit_code,
@@ -139,11 +145,82 @@ def materialize_action_time_fact_snapshots(
     )
 
 
+def materialize_action_time_invocation_fact_snapshots(
+    conn: sa.engine.Connection,
+    *,
+    action_time_invocation_id: str,
+    stage_at_ms: int,
+) -> dict[str, Any]:
+    """Materialize the event-specific fact for one exact invocation signal.
+
+    Unlike the legacy batch helper above, this function intentionally neither
+    enumerates all fresh signals nor writes/reads a Candidate Pool readiness
+    projection.  The caller already selected a typed signal when it opened the
+    invocation.
+    """
+
+    normalized_stage_at_ms = int(stage_at_ms)
+    try:
+        invocation, signal = load_action_time_invocation_signal(
+            conn,
+            action_time_invocation_id=action_time_invocation_id,
+            stage_at_ms=normalized_stage_at_ms,
+        )
+        outcome = _materialize_one(
+            conn,
+            signal=signal,
+            now_ms=normalized_stage_at_ms,
+            action_time_invocation_id=invocation.action_time_invocation_id,
+        )
+        if outcome["satisfied"] is not True:
+            return _invocation_result(
+                "action_time_invocation_fact_snapshot_blocked",
+                action_time_invocation_id=invocation.action_time_invocation_id,
+                stage_at_ms=normalized_stage_at_ms,
+                materialized=[],
+                blocked=[outcome],
+                blockers=list(outcome.get("blockers") or []),
+                next_action="preserve_exact_action_time_fact_blocker",
+            )
+        bind_action_time_invocation_fact_refs(
+            conn,
+            action_time_invocation_id=invocation.action_time_invocation_id,
+            action_time_fact_snapshot_id=str(outcome["fact_snapshot_id"]),
+            stage_at_ms=normalized_stage_at_ms,
+        )
+        evidence = load_action_time_invocation_evidence(
+            conn,
+            action_time_invocation_id=invocation.action_time_invocation_id,
+            stage_at_ms=normalized_stage_at_ms,
+        )
+        return _invocation_result(
+            "action_time_invocation_fact_snapshot_materialized",
+            action_time_invocation_id=invocation.action_time_invocation_id,
+            stage_at_ms=normalized_stage_at_ms,
+            materialized=[outcome],
+            blocked=[],
+            blockers=[],
+            next_action="materialize_invocation_promotion_action_time_lane",
+            evidence=evidence.model_dump(mode="json"),
+        )
+    except ActionTimeInvocationBlocked as exc:
+        return _invocation_result(
+            "action_time_invocation_fact_snapshot_blocked",
+            action_time_invocation_id=str(action_time_invocation_id),
+            stage_at_ms=normalized_stage_at_ms,
+            materialized=[],
+            blocked=[],
+            blockers=[exc.blocker],
+            next_action="preserve_exact_action_time_fact_blocker",
+        )
+
+
 def _materialize_one(
     conn: sa.engine.Connection,
     *,
     signal: dict[str, Any],
     now_ms: int,
+    action_time_invocation_id: str | None = None,
 ) -> dict[str, Any]:
     event = _event_spec(conn, str(signal["event_spec_id"]))
     runtime_scope = _runtime_scope(conn, signal)
@@ -282,6 +359,8 @@ def _materialize_one(
         "valid_until_ms": valid_until_ms,
         "created_at_ms": now_ms,
     }
+    if action_time_invocation_id is not None:
+        row["action_time_invocation_id"] = str(action_time_invocation_id)
     _upsert_row(conn, "brc_runtime_fact_snapshots", "fact_snapshot_id", row)
     return {
         "fact_snapshot_id": fact_snapshot_id,
@@ -293,6 +372,7 @@ def _materialize_one(
         "satisfied": satisfied,
         "blockers": blockers,
         "failed_facts": _dedupe([*missing, *failed]),
+        "action_time_invocation_id": action_time_invocation_id,
     }
 
 
@@ -904,6 +984,32 @@ def _result(
         "blocked": blocked,
         "blockers": blockers,
         "next_action": next_action,
+        "forbidden_effects": FORBIDDEN_EFFECTS,
+        "authority_boundary": AUTHORITY_BOUNDARY,
+    }
+
+
+def _invocation_result(
+    status: str,
+    *,
+    action_time_invocation_id: str,
+    stage_at_ms: int,
+    materialized: list[dict[str, Any]],
+    blocked: list[dict[str, Any]],
+    blockers: list[str],
+    next_action: str,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema": "brc.action_time_invocation_fact_snapshot_materialization.v1",
+        "status": status,
+        "action_time_invocation_id": action_time_invocation_id,
+        "stage_at_ms": stage_at_ms,
+        "materialized": materialized,
+        "blocked": blocked,
+        "blockers": _dedupe(blockers),
+        "next_action": next_action,
+        "evidence": evidence or {},
         "forbidden_effects": FORBIDDEN_EFFECTS,
         "authority_boundary": AUTHORITY_BOUNDARY,
     }

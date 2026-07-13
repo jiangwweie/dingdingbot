@@ -141,6 +141,43 @@ def test_retryable_process_failure_is_temporarily_unavailable_and_notified():
     assert decision["blocker_class"] == "runtime_process_failure"
 
 
+def test_action_time_business_block_remains_visible_not_market_wait():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "runtime_process_outcomes": [
+            {
+                "process_name": "action_time_refresh_sequence",
+                "scope_key": "lane:SOR-001:ETHUSDT:long",
+                "process_state": "business_blocked",
+                "business_state": "temporarily_unavailable",
+                "first_blocker": "unit_exact_ticket_blocker",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            }
+        ],
+        "ticket_bound_exchange_commands": [],
+        "action_time_tickets": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "waiting_for_signal", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "temporarily_unavailable"
+    assert decision["notify"] is True
+    assert decision["strategy_group_id"] == "SOR-001"
+    assert decision["symbol"] == "ETHUSDT"
+    assert decision["side"] == "long"
+    assert decision["blocker_class"] == "action_time_boundary_not_reproduced"
+    assert decision["owner_message"] == (
+        "发现交易机会；系统处理链路未完成，本次未交易，系统正在自动处理。"
+    )
+
+
 def test_signal_identity_gap_is_named_and_explained_without_owner_action():
     module = _load_module()
     control_state = {

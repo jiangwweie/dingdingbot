@@ -72,6 +72,10 @@ LANE_IDENTITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
 )
+ACTION_TIME_INVOCATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -150,6 +154,10 @@ def pg_control_connection():
         LANE_IDENTITY_MIGRATION_PATH,
         "migration_118_pg_promotion_lane",
     )
+    action_time_invocation_migration = _load_module(
+        ACTION_TIME_INVOCATION_MIGRATION_PATH,
+        "migration_119_pg_promotion_lane",
+    )
     seed = _load_module(SEED_PATH, "seed_pg_promotion_lane")
     engine = create_engine(
         "sqlite://",
@@ -217,6 +225,14 @@ def pg_control_connection():
             lane_identity_migration.upgrade()
         finally:
             lane_identity_migration.op = old_lane_identity_op
+        old_action_time_invocation_op = action_time_invocation_migration.op
+        action_time_invocation_migration.op = Operations(
+            MigrationContext.configure(conn)
+        )
+        try:
+            action_time_invocation_migration.upgrade()
+        finally:
+            action_time_invocation_migration.op = old_action_time_invocation_op
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(
@@ -2792,17 +2808,48 @@ def _candidate_runtime_row(conn, strategy_group_id: str, symbol: str, side: str)
 
 
 def _insert_coverage(conn, row, *, expires_at_ms: int) -> None:
+    runtime_instance_id = f"runtime:unit:{row['candidate_scope_id']}"
+    identity = RuntimeLaneIdentity(
+        candidate_scope_id=str(row["candidate_scope_id"]),
+        candidate_scope_event_binding_id=str(
+            row["candidate_scope_event_binding_id"]
+        ),
+        runtime_scope_binding_id=str(row["runtime_scope_binding_id"]),
+        runtime_instance_id=runtime_instance_id,
+        runtime_profile_id=str(row["runtime_profile_id"]),
+        policy_current_id=str(row["policy_current_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        strategy_group_version_id=str(row["strategy_group_version_id"]),
+        symbol=str(row["symbol"]),
+        asset_class=str(row["asset_class"]),
+        side=str(row["side"]),
+        event_spec_id=str(row["event_spec_id"]),
+        event_spec_version=str(row["event_spec_version"]),
+        event_id=str(row["event_id"]),
+        timeframe=str(row["timeframe"]),
+        time_authority=str(row["time_authority"]),
+    )
     conn.execute(
         text(
             """
             INSERT INTO brc_watcher_runtime_coverage (
               runtime_coverage_id, strategy_group_id, symbol, side, detector_key,
-              runtime_profile_id, coverage_state, liveness_state, last_tick_at_ms,
-              valid_until_ms, is_current, created_at_ms
+              candidate_scope_id, candidate_scope_event_binding_id,
+              runtime_scope_binding_id, runtime_instance_id, runtime_profile_id,
+              policy_current_id, strategy_group_version_id, asset_class,
+              event_spec_id, event_spec_version, event_id, timeframe,
+              time_authority, lane_identity_key, source_watermark,
+              coverage_state, liveness_state, last_tick_at_ms, valid_until_ms,
+              is_current, created_at_ms
             ) VALUES (
               :runtime_coverage_id, :strategy_group_id, :symbol, :side, :detector_key,
-              :runtime_profile_id, 'covered', 'healthy', :last_tick_at_ms,
-              :valid_until_ms, true, :created_at_ms
+              :candidate_scope_id, :candidate_scope_event_binding_id,
+              :runtime_scope_binding_id, :runtime_instance_id, :runtime_profile_id,
+              :policy_current_id, :strategy_group_version_id, :asset_class,
+              :event_spec_id, :event_spec_version, :event_id, :timeframe,
+              :time_authority, :lane_identity_key, :source_watermark,
+              'covered', 'healthy', :last_tick_at_ms, :valid_until_ms, true,
+              :created_at_ms
             )
             """
         ),
@@ -2812,7 +2859,9 @@ def _insert_coverage(conn, row, *, expires_at_ms: int) -> None:
             "symbol": row["symbol"],
             "side": row["side"],
             "detector_key": f"detector:{row['strategy_group_id']}:{row['side']}",
-            "runtime_profile_id": row["runtime_profile_id"],
+            **identity.model_dump(mode="json"),
+            "lane_identity_key": identity.identity_key,
+            "source_watermark": f"watcher:{runtime_instance_id}:{NOW_MS - 5_000}",
             "last_tick_at_ms": NOW_MS - 5_000,
             "valid_until_ms": expires_at_ms,
             "created_at_ms": NOW_MS - 5_000,

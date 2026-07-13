@@ -13,11 +13,19 @@ import sqlalchemy as sa
 from src.application.action_time.action_time_ticket import (
     materialize_action_time_ticket as _materialize_ticket,
 )
+from src.application.action_time.action_time_invocation import (
+    ActionTimeInvocationBlocked,
+    bind_action_time_invocation_ticket,
+    load_action_time_invocation,
+    load_action_time_invocation_evidence,
+)
 from src.application.action_time.fact_snapshots import (
     materialize_action_time_fact_snapshots as _materialize_facts,
+    materialize_action_time_invocation_fact_snapshots as _materialize_invocation_facts,
 )
 from src.application.action_time.promotion_action_time_lane import (
     materialize_pg_promotion_action_time_lane as _materialize_promotion,
+    materialize_action_time_invocation_promotion_action_time_lane as _materialize_invocation_promotion,
 )
 from src.application.runtime_process_outcome import (
     materialize_runtime_process_outcome,
@@ -53,11 +61,17 @@ def materialize_action_time_ticket_sequence(
     conn: sa.engine.Connection,
     *,
     now_ms: int | None = None,
-    projection_publisher: ProjectionPublisher,
+    projection_publisher: ProjectionPublisher | None = None,
     fact_materializer: FactMaterializer = _materialize_facts,
     promotion_materializer: PromotionMaterializer = _materialize_promotion,
     ticket_materializer: TicketMaterializer = _materialize_ticket,
     completion_clock_ms: ClockMs | None = None,
+    action_time_invocation_id: str | None = None,
+    stage_at_ms: int | None = None,
+    invocation_fact_materializer: FactMaterializer = _materialize_invocation_facts,
+    invocation_promotion_materializer: PromotionMaterializer = (
+        _materialize_invocation_promotion
+    ),
 ) -> dict[str, Any]:
     """Commit a complete fact-to-Ticket unit or no partial action rows.
 
@@ -66,7 +80,16 @@ def materialize_action_time_ticket_sequence(
     sequence-level process outcome in the outer transaction.
     """
 
-    started_at_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    invocation_mode = bool(str(action_time_invocation_id or "").strip())
+    if not invocation_mode and projection_publisher is None:
+        raise ValueError("projection_publisher is required outside invocation mode")
+    started_at_ms = int(
+        stage_at_ms
+        if invocation_mode and stage_at_ms is not None
+        else now_ms
+        if now_ms is not None
+        else time.time() * 1000
+    )
     clock = completion_clock_ms or (lambda: int(time.time() * 1000))
     fact_payload: dict[str, Any] = {}
     projection_payload: dict[str, Any] = {}
@@ -75,89 +98,136 @@ def materialize_action_time_ticket_sequence(
     scope_key = "global"
     blockers: list[str] = []
     status = "action_time_ticket_sequence_rolled_back"
+    invocation = None
 
     savepoint = conn.begin_nested()
     try:
-        fact_payload = fact_materializer(conn, now_ms=started_at_ms)
+        if invocation_mode:
+            invocation = load_action_time_invocation(
+                conn,
+                action_time_invocation_id=str(action_time_invocation_id),
+            )
+            scope_key = (
+                "lane:"
+                f"{invocation.lane_identity.strategy_group_id}:"
+                f"{invocation.lane_identity.symbol}:"
+                f"{invocation.lane_identity.side}"
+            )
+            fact_payload = invocation_fact_materializer(
+                conn,
+                action_time_invocation_id=invocation.action_time_invocation_id,
+                stage_at_ms=started_at_ms,
+            )
+        else:
+            fact_payload = fact_materializer(conn, now_ms=started_at_ms)
         fact_status = str(fact_payload.get("status") or "")
-        if fact_status == "no_current_fresh_live_signal":
+        if not invocation_mode and fact_status == "no_current_fresh_live_signal":
             savepoint.commit()
             status = fact_status
-        elif fact_status != "action_time_fact_snapshots_materialized":
+        elif fact_status not in {
+            "action_time_fact_snapshots_materialized",
+            "action_time_invocation_fact_snapshot_materialized",
+        }:
             blockers = _blockers_or_status(fact_payload)
             scope_key = _scope_key(fact=fact_payload)
             savepoint.rollback()
         else:
-            projection_payload = projection_publisher(conn)
-            if projection_payload.get("status") not in {
-                "current_projections_published",
-                "action_time_pretrade_readiness_published",
+            if invocation_mode:
+                assert invocation is not None
+                evidence = load_action_time_invocation_evidence(
+                    conn,
+                    action_time_invocation_id=invocation.action_time_invocation_id,
+                    stage_at_ms=started_at_ms,
+                )
+                promotion_payload = invocation_promotion_materializer(
+                    conn,
+                    evidence=evidence,
+                )
+            else:
+                projection_payload = projection_publisher(conn)
+                if projection_payload.get("status") not in {
+                    "current_projections_published",
+                    "action_time_pretrade_readiness_published",
+                }:
+                    blockers = _blockers_or_status(
+                        projection_payload,
+                        fallback="action_time_current_projection_publish_failed",
+                    )
+                    scope_key = _scope_key(fact=fact_payload)
+                    savepoint.rollback()
+                else:
+                    promotion_payload = promotion_materializer(
+                        conn,
+                        now_ms=started_at_ms,
+                    )
+            promotion_status = str(promotion_payload.get("status") or "")
+            scope_key = _scope_key(
+                promotion=promotion_payload,
+                fact=fact_payload,
+            )
+            if not savepoint.is_active:
+                pass
+            elif promotion_status not in {
+                "promotion_action_time_lane_created",
+                "action_time_lane_already_open",
             }:
                 blockers = _blockers_or_status(
-                    projection_payload,
-                    fallback="action_time_current_projection_publish_failed",
+                    promotion_payload,
+                    fallback=(
+                        "action_time_sequence_promotion_not_created:"
+                        f"{promotion_status or 'missing'}"
+                    ),
                 )
-                scope_key = _scope_key(fact=fact_payload)
                 savepoint.rollback()
             else:
-                promotion_payload = promotion_materializer(
+                ticket_payload = ticket_materializer(
                     conn,
                     now_ms=started_at_ms,
                 )
-                promotion_status = str(promotion_payload.get("status") or "")
+                ticket_status = str(ticket_payload.get("status") or "")
                 scope_key = _scope_key(
+                    ticket=ticket_payload,
                     promotion=promotion_payload,
                     fact=fact_payload,
                 )
-                if promotion_status not in {
-                    "promotion_action_time_lane_created",
-                    "action_time_lane_already_open",
+                if ticket_status not in {
+                    "action_time_ticket_created",
+                    "action_time_ticket_already_exists",
                 }:
                     blockers = _blockers_or_status(
-                        promotion_payload,
+                        ticket_payload,
                         fallback=(
-                            "action_time_sequence_promotion_not_created:"
-                            f"{promotion_status or 'missing'}"
+                            "action_time_sequence_ticket_not_created:"
+                            f"{ticket_status or 'missing'}"
                         ),
                     )
                     savepoint.rollback()
                 else:
-                    ticket_payload = ticket_materializer(
-                        conn,
-                        now_ms=started_at_ms,
-                    )
-                    ticket_status = str(ticket_payload.get("status") or "")
-                    scope_key = _scope_key(
-                        ticket=ticket_payload,
-                        promotion=promotion_payload,
-                        fact=fact_payload,
-                    )
-                    if ticket_status not in {
-                        "action_time_ticket_created",
-                        "action_time_ticket_already_exists",
-                    }:
-                        blockers = _blockers_or_status(
-                            ticket_payload,
-                            fallback=(
-                                "action_time_sequence_ticket_not_created:"
-                                f"{ticket_status or 'missing'}"
-                            ),
+                    if invocation_mode:
+                        assert invocation is not None
+                        bind_action_time_invocation_ticket(
+                            conn,
+                            action_time_invocation_id=invocation.action_time_invocation_id,
+                            ticket_id=str(ticket_payload.get("ticket_id") or ""),
+                            stage_at_ms=started_at_ms,
                         )
+                    completion_ms = int(clock())
+                    expires_at_ms = _ticket_expires_at_ms(
+                        conn,
+                        ticket_id=str(ticket_payload.get("ticket_id") or ""),
+                    )
+                    if expires_at_ms <= completion_ms:
+                        blockers = [
+                            "action_time_sequence_ttl_expired_before_ticket_commit"
+                        ]
                         savepoint.rollback()
                     else:
-                        completion_ms = int(clock())
-                        expires_at_ms = _ticket_expires_at_ms(
-                            conn,
-                            ticket_id=str(ticket_payload.get("ticket_id") or ""),
-                        )
-                        if expires_at_ms <= completion_ms:
-                            blockers = [
-                                "action_time_sequence_ttl_expired_before_ticket_commit"
-                            ]
-                            savepoint.rollback()
-                        else:
-                            savepoint.commit()
-                            status = "action_time_ticket_sequence_committed"
+                        savepoint.commit()
+                        status = "action_time_ticket_sequence_committed"
+    except ActionTimeInvocationBlocked as exc:
+        if savepoint.is_active:
+            savepoint.rollback()
+        blockers = [exc.blocker]
     except Exception as exc:
         if savepoint.is_active:
             savepoint.rollback()
@@ -196,7 +266,19 @@ def materialize_action_time_ticket_sequence(
             started_at_ms=started_at_ms,
             completed_at_ms=completed_at_ms,
             runtime_head=os.getenv("BRC_RUNTIME_HEAD", "runtime-head-unknown"),
-            source_watermark=spec["source_watermark"],
+            source_watermark=(
+                invocation.source_watermark
+                if invocation is not None
+                else spec["source_watermark"]
+            ),
+            lane_identity=(
+                invocation.lane_identity if invocation is not None else None
+            ),
+            action_time_invocation_id=(
+                invocation.action_time_invocation_id
+                if invocation is not None
+                else None
+            ),
         )
         for spec in outcome_specs
     ]

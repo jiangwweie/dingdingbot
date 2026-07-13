@@ -1111,6 +1111,29 @@ def _insert_constructed_raw_input(
         observed_at_ms / 1000,
         tz=timezone.utc,
     ).isoformat()
+    runtime_instance_id = (
+        f"simulation:{row['strategy_group_id']}:{row['symbol']}:{row['side']}"
+    )
+    lane_identity = RuntimeLaneIdentity(
+        candidate_scope_id=str(row["candidate_scope_id"]),
+        candidate_scope_event_binding_id=str(
+            row["candidate_scope_event_binding_id"]
+        ),
+        runtime_scope_binding_id=str(row["runtime_scope_binding_id"]),
+        runtime_instance_id=runtime_instance_id,
+        runtime_profile_id=str(row["runtime_profile_id"]),
+        policy_current_id=str(row["policy_current_id"]),
+        strategy_group_id=str(row["strategy_group_id"]),
+        strategy_group_version_id=str(row["strategy_group_version_id"]),
+        symbol=str(row["symbol"]),
+        asset_class=str(row["asset_class"]),
+        side=str(row["side"]),
+        event_spec_id=str(row["event_spec_id"]),
+        event_spec_version=str(row["event_spec_version"]),
+        event_id=str(row["event_id"]),
+        timeframe=str(row["timeframe"]),
+        time_authority=str(row["time_authority"]),
+    )
     coverage = runtime_active_observation_monitor.write_candidate_universe_coverage_to_pg(
         {
             "candidate_universe_coverage": {
@@ -1122,6 +1145,10 @@ def _insert_constructed_raw_input(
                         "state": "active_watcher_scope",
                         "runtime_profile": {
                             "runtime_profile_id": row["runtime_profile_id"]
+                        },
+                        "lane_identity": {
+                            **lane_identity.model_dump(mode="json"),
+                            "lane_identity_key": lane_identity.identity_key,
                         },
                     }
                 ]
@@ -1204,29 +1231,6 @@ def _insert_constructed_raw_input(
             {"event_spec_id": row["event_spec_id"]},
         ).mappings()
     }
-    runtime_instance_id = (
-        f"simulation:{row['strategy_group_id']}:{row['symbol']}:{row['side']}"
-    )
-    lane_identity = RuntimeLaneIdentity(
-        candidate_scope_id=str(row["candidate_scope_id"]),
-        candidate_scope_event_binding_id=str(
-            row["candidate_scope_event_binding_id"]
-        ),
-        runtime_scope_binding_id=str(row["runtime_scope_binding_id"]),
-        runtime_instance_id=runtime_instance_id,
-        runtime_profile_id=str(row["runtime_profile_id"]),
-        policy_current_id=str(row["policy_current_id"]),
-        strategy_group_id=str(row["strategy_group_id"]),
-        strategy_group_version_id=str(row["strategy_group_version_id"]),
-        symbol=str(row["symbol"]),
-        asset_class=str(row["asset_class"]),
-        side=str(row["side"]),
-        event_spec_id=str(row["event_spec_id"]),
-        event_spec_version=str(row["event_spec_version"]),
-        event_id=str(row["event_id"]),
-        timeframe=str(row["timeframe"]),
-        time_authority=str(row["time_authority"]),
-    )
     signal = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
         {
             "runtime_summaries": [

@@ -68,6 +68,7 @@ AUTHORITY_BOUNDARY = (
 )
 TICKET_IDENTITY_HASH_FIELDS = (
     "ticket_id",
+    "action_time_invocation_id",
     "action_time_lane_input_id",
     "promotion_candidate_id",
     "signal_event_id",
@@ -548,16 +549,18 @@ def _build_ticket_bundle(
         blockers,
         "action_time_fact_snapshot_missing",
     )
-    account_safe_fact = _latest_fact(
+    account_safe_fact = _lane_bound_or_latest_fact(
         control_state,
         fact_surface="account_safe",
+        lane_fact_id_key="account_safe_fact_snapshot_id",
         lane=lane,
         blockers=blockers,
         missing_blocker="account_safe_fact_snapshot_missing",
     )
-    account_mode_fact = _latest_fact(
+    account_mode_fact = _lane_bound_or_latest_fact(
         control_state,
         fact_surface="account_mode",
+        lane_fact_id_key="account_mode_fact_snapshot_id",
         lane=lane,
         blockers=blockers,
         missing_blocker="account_mode_snapshot_missing",
@@ -678,6 +681,7 @@ def _build_ticket_bundle(
     )
     ticket = {
         "ticket_id": ticket_id,
+        "action_time_invocation_id": lane.get("action_time_invocation_id"),
         "action_time_lane_input_id": lane_id,
         "promotion_candidate_id": lane["promotion_candidate_id"],
         "signal_event_id": signal["signal_event_id"],
@@ -755,6 +759,7 @@ def _build_ticket_bundle(
         "event_payload": {
             "signal_event_id": signal["signal_event_id"],
             "promotion_candidate_id": lane["promotion_candidate_id"],
+            "action_time_invocation_id": lane.get("action_time_invocation_id"),
             "authority_boundary": AUTHORITY_BOUNDARY,
         },
         "occurred_at_ms": now_ms,
@@ -862,6 +867,25 @@ def _validate_lineage(blockers: list[str], **items: Any) -> None:
         items["signal"].get("signal_event_id") or ""
     ):
         blockers.append("promotion_candidate_mismatch:signal_event_id")
+    action_time_invocation_id = str(
+        lane.get("action_time_invocation_id") or ""
+    ).strip()
+    if action_time_invocation_id:
+        if str(
+            items["promotion"].get("action_time_invocation_id") or ""
+        ) != action_time_invocation_id:
+            blockers.append("action_time_invocation_promotion_context_mismatch")
+        for fact_name in (
+            "action_time_fact",
+            "account_safe_fact",
+            "account_mode_fact",
+        ):
+            if str(
+                items[fact_name].get("action_time_invocation_id") or ""
+            ) != action_time_invocation_id:
+                blockers.append(
+                    f"action_time_invocation_{fact_name}_context_mismatch"
+                )
     if items["signal"].get("status") != "facts_validated":
         blockers.append(f"signal_event_not_facts_validated:{items['signal'].get('status') or 'missing'}")
     if items["signal"].get("freshness_state") != "fresh":
@@ -1162,6 +1186,41 @@ def _latest_fact(
         blockers.append(missing_blocker)
         return {}
     return sorted(rows, key=lambda row: int(row.get("observed_at_ms") or 0))[-1]
+
+
+def _lane_bound_or_latest_fact(
+    control_state: dict[str, Any],
+    *,
+    fact_surface: str,
+    lane_fact_id_key: str,
+    lane: dict[str, Any],
+    blockers: list[str],
+    missing_blocker: str,
+) -> dict[str, Any]:
+    """Honor exact invocation account references when the lane carries them."""
+
+    fact_snapshot_id = str(lane.get(lane_fact_id_key) or "").strip()
+    if not fact_snapshot_id:
+        return _latest_fact(
+            control_state,
+            fact_surface=fact_surface,
+            lane=lane,
+            blockers=blockers,
+            missing_blocker=missing_blocker,
+        )
+    fact = _one_by_id(
+        control_state,
+        "runtime_fact_snapshots",
+        "fact_snapshot_id",
+        fact_snapshot_id,
+        blockers,
+        missing_blocker,
+    )
+    if fact and str(fact.get("fact_surface") or "") != fact_surface:
+        blockers.append(
+            f"{fact_surface}_fact_surface_mismatch:{fact.get('fact_surface') or 'missing'}"
+        )
+    return fact
 
 
 def _active_budget_reservation(

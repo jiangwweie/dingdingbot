@@ -24,9 +24,9 @@ DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_EXPECTED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 118
+DEFAULT_EXPECTED_MIGRATION_COUNT = 119
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-13-118_conserve_runtime_lane_identity.py"
+    "2026-07-13-119_action_time_invocation_consistency.py"
 )
 BACKEND_PROCESS_MARKER = "python -m " + "src.main"
 

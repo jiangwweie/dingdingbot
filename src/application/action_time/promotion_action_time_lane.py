@@ -48,6 +48,9 @@ from src.application.action_time.identity_conservation import (  # noqa: E402
 from src.application.action_time.pricing_sizing import (  # noqa: E402
     pricing_reference_from_action_time_fact_values,
 )
+from src.domain.action_time_invocation import (  # noqa: E402
+    ActionTimeInvocationEvidence,
+)
 from src.domain.execution_sizing import (  # noqa: E402
     ExecutionAccountCapacity,
     ExecutionInstrumentRules,
@@ -120,6 +123,7 @@ class CandidateBundle:
     sizing_risk_decision: ExecutionSizingDecision | None = None
     lane_identity: RuntimeLaneIdentity | None = None
     source_lineage: RuntimeLaneLineage | None = None
+    action_time_invocation_id: str | None = None
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -349,6 +353,343 @@ def materialize_pg_promotion_action_time_lane(
         next_action="materialize_action_time_ticket",
         per_candidate_results=_candidate_results(bundles, selected=selected),
     )
+
+
+def materialize_action_time_invocation_promotion_action_time_lane(
+    conn: sa.engine.Connection,
+    *,
+    evidence: ActionTimeInvocationEvidence,
+) -> dict[str, Any]:
+    """Promote exactly one invocation; never reselect from Candidate Pool.
+
+    The bounded current PG state remains the source for policy, scope, and
+    safety checks.  Generic `brc_pretrade_readiness_rows` is intentionally not
+    read as an execution input here.
+    """
+
+    now_ms = int(evidence.stage_at_ms)
+    _expire_stale_open_promotions(conn, now_ms=now_ms)
+    _expire_stale_open_real_lanes(conn, now_ms=now_ms)
+    if sa.inspect(conn).has_table("brc_strategy_semantic_admissions"):
+        materialize_active_strategy_semantic_admissions(conn, now_ms=now_ms)
+    try:
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_action_time_control_state()
+    except RuntimeControlStateRepositoryError as exc:
+        return _invocation_promotion_result(
+            "action_time_invocation_promotion_blocked",
+            evidence=evidence,
+            blockers=[f"runtime_control_state_invalid:{exc}"],
+            next_action="repair_pg_runtime_control_state",
+        )
+
+    open_lanes = _open_real_submit_lanes(control_state)
+    if open_lanes:
+        lane = sorted(
+            open_lanes,
+            key=lambda row: str(row.get("action_time_lane_input_id") or ""),
+        )[0]
+        if (
+            str(lane.get("action_time_invocation_id") or "")
+            == evidence.invocation.action_time_invocation_id
+            and str(lane.get("signal_event_id") or "")
+            == evidence.invocation.signal_event_id
+        ):
+            return _invocation_promotion_result(
+                "action_time_lane_already_open",
+                evidence=evidence,
+                blockers=[],
+                next_action="materialize_action_time_ticket",
+                action_time_lane_input_id=str(
+                    lane.get("action_time_lane_input_id") or ""
+                ),
+                promotion_candidate_id=str(
+                    lane.get("promotion_candidate_id") or ""
+                ),
+            )
+        return _invocation_promotion_result(
+            "action_time_invocation_promotion_blocked",
+            evidence=evidence,
+            blockers=["action_time_invocation_open_lane_conflict"],
+            next_action="wait_for_current_action_time_lane_to_close",
+            action_time_lane_input_id=str(lane.get("action_time_lane_input_id") or ""),
+            promotion_candidate_id=str(lane.get("promotion_candidate_id") or ""),
+        )
+
+    bundle = _invocation_candidate_bundle(control_state, evidence=evidence)
+    bundle = _apply_allocation_capital_scope([bundle], now_ms=now_ms)[0]
+    if bundle.blockers:
+        return _invocation_promotion_result(
+            "action_time_invocation_promotion_blocked",
+            evidence=evidence,
+            blockers=list(bundle.blockers),
+            next_action="preserve_exact_invocation_promotion_blocker",
+        )
+
+    allocation = _allocation_decision_row(
+        bundles=[bundle],
+        eligible=[bundle],
+        selected=bundle,
+        now_ms=now_ms,
+    )
+    if sa.inspect(conn).has_table("brc_allocation_decisions"):
+        _upsert_row(
+            conn,
+            "brc_allocation_decisions",
+            "allocation_decision_id",
+            allocation,
+        )
+    promotion = _promotion_row(
+        bundle,
+        now_ms=now_ms,
+        status="arbitration_won",
+        arbitration_rank=1,
+        closed_at_ms=None,
+        allocation=allocation,
+    )
+    lane = _lane_row(bundle, now_ms=now_ms)
+    terminal_blockers = _terminal_identity_reuse_blockers(
+        conn,
+        promotion_row=promotion,
+        lane_row=lane,
+    )
+    if terminal_blockers:
+        return _invocation_promotion_result(
+            "terminal_action_time_identity_not_reopened",
+            evidence=evidence,
+            blockers=terminal_blockers,
+            next_action="wait_for_next_fresh_signal_observation",
+        )
+    budget = _budget_row(bundle, now_ms=now_ms)
+    protection = _protection_row(bundle)
+    _upsert_row(
+        conn,
+        "brc_promotion_candidates",
+        "promotion_candidate_id",
+        promotion,
+    )
+    _upsert_row(
+        conn,
+        "brc_action_time_lane_inputs",
+        "action_time_lane_input_id",
+        lane,
+    )
+    _upsert_row(conn, "brc_budget_reservations", "budget_reservation_id", budget)
+    _upsert_row(conn, "brc_protection_references", "protection_ref_id", protection)
+    return _invocation_promotion_result(
+        "promotion_action_time_lane_created",
+        evidence=evidence,
+        blockers=[],
+        next_action="materialize_action_time_ticket",
+        promotion_candidate_id=bundle.promotion_candidate_id,
+        action_time_lane_input_id=bundle.action_time_lane_input_id,
+        budget_reservation_id=bundle.budget_reservation_id,
+        protection_ref_id=bundle.protection_ref_id,
+        allocation_decision_id=allocation["allocation_decision_id"],
+    )
+
+
+def _invocation_candidate_bundle(
+    control_state: dict[str, Any],
+    *,
+    evidence: ActionTimeInvocationEvidence,
+) -> CandidateBundle:
+    """Assemble the one exact bundle permitted by invocation evidence."""
+
+    invocation = evidence.invocation
+    candidate = _row_with_value(
+        _rows(control_state.get("candidate_scope")),
+        "candidate_scope_id",
+        invocation.lane_identity.candidate_scope_id,
+        required_status="active",
+    )
+    runtime_scope = _row_with_value(
+        _rows(control_state.get("runtime_scope_bindings")),
+        "runtime_scope_binding_id",
+        invocation.lane_identity.runtime_scope_binding_id,
+        required_status="active",
+    )
+    policy = _row_with_value(
+        _rows(control_state.get("owner_policy_current")),
+        "policy_current_id",
+        invocation.lane_identity.policy_current_id,
+    )
+    event_binding = _row_with_value(
+        _rows(control_state.get("candidate_scope_event_bindings")),
+        "binding_id",
+        invocation.lane_identity.candidate_scope_event_binding_id,
+        required_status="active",
+    )
+    event_spec = _row_with_value(
+        _rows(control_state.get("strategy_side_event_specs")),
+        "event_spec_id",
+        invocation.lane_identity.event_spec_id,
+        required_status="current",
+    )
+    signal = _row_with_value(
+        _rows(control_state.get("live_signal_events")),
+        "signal_event_id",
+        invocation.signal_event_id,
+    )
+    public_fact = _fact_by_id(
+        control_state,
+        evidence.public_fact_snapshot_id,
+    )
+    action_time_fact = _fact_by_id(
+        control_state,
+        evidence.action_time_fact_snapshot_id,
+    )
+    account_safe_fact = _fact_by_id(
+        control_state,
+        evidence.account_safe_fact_snapshot_id,
+    )
+    account_mode_fact = _fact_by_id(
+        control_state,
+        evidence.account_mode_fact_snapshot_id,
+    )
+    coverage = _current_coverage_by_lane(control_state).get(
+        _lane_key(candidate),
+        {},
+    )
+    owner_policy_version = _owner_policy_version_by_id(control_state).get(
+        str(policy.get("policy_current_id") or ""),
+        "",
+    )
+    lane_identity, source_lineage, identity_blockers = (
+        _signal_lane_identity_and_lineage(signal)
+        if signal
+        else (None, None, ["action_time_invocation_signal_not_visible"])
+    )
+    direct_blockers: list[str] = [*identity_blockers]
+    for label, row in (
+        ("candidate", candidate),
+        ("runtime_scope", runtime_scope),
+        ("policy", policy),
+        ("event_binding", event_binding),
+        ("event_spec", event_spec),
+        ("signal", signal),
+        ("public_fact", public_fact),
+        ("action_time_fact", action_time_fact),
+        ("account_safe_fact", account_safe_fact),
+        ("account_mode_fact", account_mode_fact),
+    ):
+        if not row:
+            direct_blockers.append(f"action_time_invocation_{label}_missing")
+    if lane_identity is not None and (
+        lane_identity.identity_key != invocation.lane_identity.identity_key
+    ):
+        direct_blockers.append(
+            "runtime_lane_identity_mismatch:invocation_to_promotion_signal"
+        )
+    if source_lineage is None or (
+        source_lineage.source_watermark != invocation.source_watermark
+    ):
+        direct_blockers.append(
+            "runtime_lane_identity_mismatch:invocation_to_promotion_source_watermark"
+        )
+    for fact, surface in (
+        (action_time_fact, "action_time"),
+        (account_safe_fact, "account_safe"),
+        (account_mode_fact, "account_mode"),
+    ):
+        if fact and str(fact.get("action_time_invocation_id") or "") != (
+            invocation.action_time_invocation_id
+        ):
+            direct_blockers.append(
+                f"action_time_invocation_{surface}_fact_reference_mismatch"
+            )
+    direct_blockers.extend(
+        _candidate_blockers(
+            control_state,
+            now_ms=evidence.stage_at_ms,
+            candidate=candidate,
+            runtime_scope=runtime_scope,
+            policy=policy,
+            event_binding=event_binding,
+            event_spec=event_spec,
+            signal=signal,
+            readiness=None,
+            public_fact=public_fact,
+            action_time_fact=action_time_fact,
+            account_safe_fact=account_safe_fact,
+            account_mode_fact=account_mode_fact,
+            coverage=coverage,
+            owner_policy_version=owner_policy_version,
+            account_id=_account_id(control_state, candidate),
+            lane_identity=lane_identity,
+            require_typed_coverage=True,
+        )
+    )
+    return CandidateBundle(
+        candidate=candidate,
+        runtime_scope=runtime_scope,
+        policy=policy,
+        event_binding=event_binding,
+        event_spec=event_spec,
+        signal=signal,
+        readiness={
+            "readiness_row_id": (
+                "action_time_invocation:"
+                + invocation.action_time_invocation_id
+            ),
+            "scope_state": str(candidate.get("scope_state") or ""),
+            "risk_state": "acceptable",
+        },
+        public_fact=public_fact,
+        action_time_fact=action_time_fact,
+        account_safe_fact=account_safe_fact,
+        account_mode_fact=account_mode_fact,
+        coverage=coverage,
+        owner_policy_version=owner_policy_version,
+        account_id=_account_id(control_state, candidate),
+        blockers=tuple(_dedupe(direct_blockers)),
+        lane_identity=lane_identity,
+        source_lineage=source_lineage,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+    )
+
+
+def _row_with_value(
+    rows: list[dict[str, Any]],
+    key: str,
+    value: str,
+    *,
+    required_status: str | None = None,
+) -> dict[str, Any]:
+    for row in rows:
+        if str(row.get(key) or "") != str(value or ""):
+            continue
+        if required_status is not None and str(row.get("status") or "") != required_status:
+            continue
+        return row
+    return {}
+
+
+def _invocation_promotion_result(
+    status: str,
+    *,
+    evidence: ActionTimeInvocationEvidence,
+    blockers: list[str],
+    next_action: str,
+    **values: Any,
+) -> dict[str, Any]:
+    return {
+        "schema": "brc.action_time_invocation_promotion.v1",
+        "status": status,
+        "action_time_invocation_id": evidence.invocation.action_time_invocation_id,
+        "signal_event_id": evidence.invocation.signal_event_id,
+        "strategy_group_id": evidence.invocation.lane_identity.strategy_group_id,
+        "symbol": evidence.invocation.lane_identity.symbol,
+        "side": evidence.invocation.lane_identity.side,
+        "stage_at_ms": evidence.stage_at_ms,
+        "blockers": _dedupe(blockers),
+        "next_action": next_action,
+        "authority_boundary": PROMOTION_AUTHORITY_BOUNDARY,
+        "forbidden_effects": FORBIDDEN_EFFECTS,
+        **values,
+    }
 
 
 def _terminal_identity_reuse_blockers(
@@ -1025,7 +1366,7 @@ def _candidate_blockers(
     event_binding: dict[str, Any],
     event_spec: dict[str, Any],
     signal: dict[str, Any],
-    readiness: dict[str, Any],
+    readiness: dict[str, Any] | None,
     public_fact: dict[str, Any],
     action_time_fact: dict[str, Any],
     account_safe_fact: dict[str, Any],
@@ -1034,6 +1375,7 @@ def _candidate_blockers(
     owner_policy_version: str,
     account_id: str,
     lane_identity: RuntimeLaneIdentity | None,
+    require_typed_coverage: bool = False,
 ) -> list[str]:
     blockers: list[str] = []
     blockers.extend(
@@ -1049,7 +1391,8 @@ def _candidate_blockers(
     _require_identity_match(blockers, candidate, event_binding, "event_binding")
     _require_identity_match(blockers, candidate, event_spec, "event_spec", keys=("strategy_group_id", "side"))
     _require_identity_match(blockers, candidate, signal, "signal")
-    _require_identity_match(blockers, candidate, readiness, "readiness")
+    if readiness is not None:
+        _require_identity_match(blockers, candidate, readiness, "readiness")
     _require_identity_match(blockers, candidate, public_fact, "public_fact")
     _require_identity_match(blockers, candidate, action_time_fact, "action_time_fact")
     blockers.extend(
@@ -1138,34 +1481,49 @@ def _candidate_blockers(
 
     if candidate.get("scope_state") != "live_submit_allowed":
         blockers.append(f"candidate_scope_not_live_submit:{candidate.get('scope_state') or 'missing'}")
-    if readiness.get("readiness_state") != "action_time_lane":
-        blockers.append(
-            f"readiness_not_action_time_lane:{readiness.get('readiness_state') or 'missing'}"
-        )
-    if readiness.get("public_facts_state") != "satisfied":
-        blockers.append(f"public_facts_not_satisfied:{readiness.get('public_facts_state') or 'missing'}")
-    if readiness.get("signal_lifecycle_status") != "facts_validated":
-        blockers.append("readiness_signal_not_facts_validated")
-    if readiness.get("signal_freshness_state") != "fresh":
-        blockers.append("readiness_signal_not_fresh")
-    if readiness.get("risk_state") != "acceptable":
-        blockers.append(f"risk_state_not_acceptable:{readiness.get('risk_state') or 'missing'}")
-    readiness_scope_state = str(readiness.get("scope_state") or "")
-    candidate_scope_state = str(candidate.get("scope_state") or "")
-    if (
-        readiness_scope_state != "live_submit_allowed"
-        and not (
-            candidate_scope_state == "live_submit_allowed"
-            and readiness_scope_state == "conditional_action_time_rehearsal_allowed"
-        )
-    ):
-        blockers.append(f"readiness_scope_not_live_submit:{readiness.get('scope_state') or 'missing'}")
-    if readiness.get("promotion_state") != "action_time_lane":
-        blockers.append(f"readiness_promotion_not_action_time_lane:{readiness.get('promotion_state') or 'missing'}")
-    if readiness.get("first_blocker_class") != "action_time_preflight_ready":
-        blockers.append(
-            f"readiness_not_action_time_preflight_ready:{readiness.get('first_blocker_class') or 'missing'}"
-        )
+    if readiness is not None:
+        if readiness.get("readiness_state") != "action_time_lane":
+            blockers.append(
+                "readiness_not_action_time_lane:"
+                f"{readiness.get('readiness_state') or 'missing'}"
+            )
+        if readiness.get("public_facts_state") != "satisfied":
+            blockers.append(
+                "public_facts_not_satisfied:"
+                f"{readiness.get('public_facts_state') or 'missing'}"
+            )
+        if readiness.get("signal_lifecycle_status") != "facts_validated":
+            blockers.append("readiness_signal_not_facts_validated")
+        if readiness.get("signal_freshness_state") != "fresh":
+            blockers.append("readiness_signal_not_fresh")
+        if readiness.get("risk_state") != "acceptable":
+            blockers.append(
+                f"risk_state_not_acceptable:{readiness.get('risk_state') or 'missing'}"
+            )
+        readiness_scope_state = str(readiness.get("scope_state") or "")
+        candidate_scope_state = str(candidate.get("scope_state") or "")
+        if (
+            readiness_scope_state != "live_submit_allowed"
+            and not (
+                candidate_scope_state == "live_submit_allowed"
+                and readiness_scope_state
+                == "conditional_action_time_rehearsal_allowed"
+            )
+        ):
+            blockers.append(
+                "readiness_scope_not_live_submit:"
+                f"{readiness.get('scope_state') or 'missing'}"
+            )
+        if readiness.get("promotion_state") != "action_time_lane":
+            blockers.append(
+                "readiness_promotion_not_action_time_lane:"
+                f"{readiness.get('promotion_state') or 'missing'}"
+            )
+        if readiness.get("first_blocker_class") != "action_time_preflight_ready":
+            blockers.append(
+                "readiness_not_action_time_preflight_ready:"
+                f"{readiness.get('first_blocker_class') or 'missing'}"
+            )
 
     if coverage.get("coverage_state") != "covered":
         blockers.append(f"runtime_coverage_not_covered:{coverage.get('coverage_state') or 'missing'}")
@@ -1175,6 +1533,13 @@ def _candidate_blockers(
         blockers.append("runtime_coverage_not_current")
     if int(coverage.get("valid_until_ms") or 0) <= now_ms:
         blockers.append("runtime_coverage_expired")
+    if require_typed_coverage:
+        blockers.extend(
+            _invocation_coverage_identity_blockers(
+                coverage=coverage,
+                expected_lane_identity=lane_identity,
+            )
+        )
 
     _assert_fact_ready(blockers, "public_fact", public_fact, now_ms=now_ms)
     _assert_fact_ready(blockers, "action_time_fact", action_time_fact, now_ms=now_ms)
@@ -1213,6 +1578,50 @@ def _candidate_blockers(
         blockers.append("account_id_missing")
 
     return _dedupe(blockers)
+
+
+def _invocation_coverage_identity_blockers(
+    *,
+    coverage: dict[str, Any],
+    expected_lane_identity: RuntimeLaneIdentity | None,
+) -> list[str]:
+    """Require watcher coverage to prove the Invocation's exact runtime lane.
+
+    Coverage is an independent watcher observation, so its watermark must be
+    present but need not equal the signal watermark.  The immutable lane
+    identity, however, must match exactly; a label-level symbol/side match is
+    not sufficient evidence to create a Ticket.
+    """
+
+    if expected_lane_identity is None:
+        return [
+            "runtime_lane_identity_mismatch:invocation_coverage_expected_identity_missing"
+        ]
+    if not str(coverage.get("source_watermark") or "").strip():
+        return ["runtime_coverage_source_watermark_missing"]
+    try:
+        actual_lane_identity = RuntimeLaneIdentity.model_validate(
+            {
+                field: coverage.get(field)
+                for field in RuntimeLaneIdentity.model_fields
+            }
+        )
+    except (TypeError, ValueError):
+        return ["runtime_lane_identity_mismatch:coverage_typed_identity"]
+    if (
+        str(coverage.get("lane_identity_key") or "")
+        != actual_lane_identity.identity_key
+    ):
+        return ["runtime_lane_identity_mismatch:coverage_identity_key"]
+    try:
+        require_runtime_lane_identity_match(
+            expected=expected_lane_identity,
+            actual=actual_lane_identity,
+            boundary="invocation_to_coverage",
+        )
+    except RuntimeLaneIdentityMismatch as exc:
+        return [str(exc)]
+    return []
 
 
 def _promotion_row(
@@ -1279,6 +1688,8 @@ def _promotion_row(
     }
     if bundle.source_lineage is not None:
         row.update(bundle.source_lineage.model_dump(mode="json"))
+    if bundle.action_time_invocation_id is not None:
+        row["action_time_invocation_id"] = bundle.action_time_invocation_id
     return row
 
 
@@ -1457,6 +1868,18 @@ def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
     }
     if bundle.source_lineage is not None:
         row.update(bundle.source_lineage.model_dump(mode="json"))
+    if bundle.action_time_invocation_id is not None:
+        row.update(
+            {
+                "action_time_invocation_id": bundle.action_time_invocation_id,
+                "account_safe_fact_snapshot_id": str(
+                    bundle.account_safe_fact["fact_snapshot_id"]
+                ),
+                "account_mode_fact_snapshot_id": str(
+                    bundle.account_mode_fact["fact_snapshot_id"]
+                ),
+            }
+        )
     return row
 
 

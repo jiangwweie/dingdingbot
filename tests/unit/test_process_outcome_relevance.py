@@ -4,6 +4,7 @@ from src.application.action_time.process_outcome_relevance import (
     process_outcome_has_current_blocking_authority,
 )
 from src.application.readmodels import strategy_live_candidate_pool as candidate_pool
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 
 
 NOW_MS = 10_000
@@ -18,6 +19,36 @@ def _outcome(**overrides):
         "first_blocker": "unit_action_time_failure",
         "source_watermark": "signal:SOR-001:ETHUSDT:long:expired",
     }
+    row.update(overrides)
+    return row
+
+
+def _typed_invocation_outcome(**overrides):
+    identity = RuntimeLaneIdentity(
+        candidate_scope_id="scope:SOR-001:ETHUSDT:long",
+        candidate_scope_event_binding_id="binding:SOR-001:ETHUSDT:long:SOR-LONG",
+        runtime_scope_binding_id="runtime_scope:SOR-001:ETHUSDT:long",
+        runtime_instance_id="runtime-sor-eth-long",
+        runtime_profile_id="runtime-profile:pilot",
+        policy_current_id="policy:SOR-001:ETHUSDT:long",
+        strategy_group_id="SOR-001",
+        strategy_group_version_id="sgv:SOR-001:v2",
+        symbol="ETHUSDT",
+        asset_class="crypto_perpetual",
+        side="long",
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
+        event_spec_version="v2",
+        event_id="SOR-LONG",
+        timeframe="1h",
+        time_authority="trigger_candle_close_time_ms",
+    )
+    row = _outcome(
+        action_time_invocation_id="action_time_invocation:unit",
+        scope_kind="runtime_lane",
+        lane_identity_key=identity.identity_key,
+        source_watermark="runtime-sor-eth-long:100",
+        **identity.model_dump(mode="json"),
+    )
     row.update(overrides)
     return row
 
@@ -64,6 +95,23 @@ def test_expired_event_scoped_outcome_keeps_current_blocking_authority():
         state,
         _outcome(),
     ) is True
+
+
+def test_invocation_backed_outcome_requires_full_typed_lane_identity():
+    state = _control_state()
+
+    assert process_outcome_has_current_blocking_authority(
+        state,
+        _outcome(action_time_invocation_id="action_time_invocation:missing-identity"),
+    ) is False
+    assert process_outcome_has_current_blocking_authority(
+        state,
+        _typed_invocation_outcome(),
+    ) is True
+    assert process_outcome_has_current_blocking_authority(
+        state,
+        _typed_invocation_outcome(lane_identity_key="runtime_lane:wrong"),
+    ) is False
 
 
 def test_fresh_matching_signal_keeps_current_blocking_authority():

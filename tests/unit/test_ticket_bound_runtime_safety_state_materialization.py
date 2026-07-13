@@ -99,6 +99,10 @@ LANE_IDENTITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
 )
+ACTION_TIME_INVOCATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -358,6 +362,18 @@ def pg_control_connection():
             lane_identity_migration.upgrade()
         finally:
             lane_identity_migration.op = old_lane_identity_op
+        action_time_invocation_migration = _load_module(
+            ACTION_TIME_INVOCATION_MIGRATION_PATH,
+            "migration_119_runtime_safety",
+        )
+        old_action_time_invocation_op = action_time_invocation_migration.op
+        action_time_invocation_migration.op = Operations(
+            MigrationContext.configure(conn)
+        )
+        try:
+            action_time_invocation_migration.upgrade()
+        finally:
+            action_time_invocation_migration.op = old_action_time_invocation_op
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(

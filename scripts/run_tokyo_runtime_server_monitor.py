@@ -480,13 +480,7 @@ def _runtime_process_failure_event(
     failures = [
         row
         for row in _pg_rows(control_state.get("runtime_process_outcomes"))
-        if str(row.get("process_state") or "")
-        in {"retryable_failure", "hard_failure"}
-        and (
-            str(row.get("process_name") or "")
-            != "action_time_ticket_sequence"
-            or process_outcome_has_current_blocking_authority(control_state, row)
-        )
+        if _runtime_process_outcome_requires_monitor_attention(control_state, row)
     ]
     if not failures:
         return {}
@@ -496,6 +490,33 @@ def _runtime_process_failure_event(
     process_name = str(row.get("process_name") or "runtime_process")
     scope_key = str(row.get("scope_key") or "")
     scope_parts = scope_key.split(":")
+    if (
+        str(row.get("process_state") or "") == "business_blocked"
+        and process_name in {"action_time_ticket_sequence", "action_time_refresh_sequence"}
+    ):
+        return {
+            "event_type": "action_time_processing_blocked",
+            "notify": True,
+            "decision_status": "temporarily_unavailable",
+            "strategy_group_id": str(
+                row.get("strategy_group_id")
+                or (scope_parts[1] if len(scope_parts) == 4 else "runtime")
+            ),
+            "symbol": str(
+                row.get("symbol")
+                or (scope_parts[2] if len(scope_parts) == 4 else "all")
+            ),
+            "side": str(
+                row.get("side")
+                or (scope_parts[3] if len(scope_parts) == 4 else "")
+            ),
+            "checkpoint": process_name,
+            "blocker_class": "action_time_boundary_not_reproduced",
+            "reasons": ["action_time_processing_blocked", blocker],
+            "owner_message": (
+                "发现交易机会；系统处理链路未完成，本次未交易，系统正在自动处理。"
+            ),
+        }
     if (
         process_name == "live_signal_materialization"
         and len(scope_parts) == 4
@@ -532,6 +553,25 @@ def _runtime_process_failure_event(
             else "运行流程暂时不可用，系统需要恢复"
         ),
     }
+
+
+def _runtime_process_outcome_requires_monitor_attention(
+    control_state: dict[str, Any],
+    row: dict[str, Any],
+) -> bool:
+    process_state = str(row.get("process_state") or "")
+    process_name = str(row.get("process_name") or "")
+    if process_state in {"retryable_failure", "hard_failure"}:
+        return (
+            process_name != "action_time_ticket_sequence"
+            or process_outcome_has_current_blocking_authority(control_state, row)
+        )
+    return (
+        process_state == "business_blocked"
+        and process_name
+        in {"action_time_ticket_sequence", "action_time_refresh_sequence"}
+        and process_outcome_has_current_blocking_authority(control_state, row)
+    )
 
 
 def _lifecycle_safety_event(

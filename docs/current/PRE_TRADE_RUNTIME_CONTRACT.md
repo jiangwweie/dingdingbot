@@ -13,7 +13,9 @@ The current live-enablement management model is:
 
 ```text
 multi-StrategyGroup, multi-symbol pre-trade readiness
--> fresh-signal promotion
+-> fresh signal
+-> ActionTimeInvocation with exact signal and actual-time facts
+-> promotion
 -> single action-time lane input
 -> single protected submit intent through FinalGate and Operation Layer
 ```
@@ -46,6 +48,7 @@ L2 Candidate Universe
 -> L3 Runtime Coverage
 -> L4 Event-Specific Facts
 -> L5 Live Signal Event
+-> ActionTimeInvocation
 -> L6 Promotion Candidate
 -> L7 Action-Time Lane
 -> Action-Time Ticket
@@ -63,6 +66,7 @@ L2 Candidate Universe
 | L3 Runtime Coverage | 服务器运行覆盖 | watcher coverage writer |
 | L4 Market / Account Facts | 事实快照 | fact writer |
 | L5 Live Signal Event | 实时事件信号 | live detector |
+| ActionTimeInvocation | 行情触发的因果上下文 | action-time invocation materializer |
 | L6 Promotion Candidate | 可升级候选 | promotion projector |
 | L7 Action-Time Lane | 临近交易通道 | arbitration projector |
 | Action-Time Ticket | 交易前正式票据 | ticket issuer |
@@ -97,6 +101,39 @@ runtime instance, policy/profile, StrategyGroup/version, canonical symbol,
 asset class, side, Event Spec/version/event ID, timeframe, and time authority.
 Its stable `lane_identity_key`, source signal event ID, and source watermark
 must remain unchanged from named signal through Ticket.
+
+A watcher coverage row is independently sourced but must also carry a complete
+`RuntimeLaneIdentity`, its matching `lane_identity_key`, and a nonblank watcher
+source watermark before it can certify an Action-Time Invocation. Source:
+`RuntimeLaneIdentity`, migrations **118** and **119**, and the 22-lane identity
+certification tests.
+
+## Action-Time Invocation Boundary
+
+The production action-time path is not allowed to reselect a generic Candidate
+Pool/readiness row after a natural signal has already been identified. Its only
+valid execution input is:
+
+```text
+typed fresh signal
+-> ActionTimeInvocation
+-> actual-time account-safe/account-mode facts
+-> exact event-specific action fact
+-> transient invocation evidence
+-> one promotion candidate and one action-time lane
+-> Ticket
+```
+
+`ActionTimeInvocation` is a PG-backed causal context, not a trade lifecycle
+owner. It stores the exact signal, immutable lane identity, signal watermark,
+opening/expiry time, bound fact references, and eventual Ticket reference. A
+Ticket remains the sole lifecycle owner after trade intent exists.
+
+The invocation stage time is actual time for that stage. Account facts and
+action facts must never be backdated to the invocation opening time. A current
+coverage row can certify this path only if its full lane identity exactly equals
+the invocation identity and it has its own nonblank source watermark; matching
+only StrategyGroup, symbol, or side is insufficient.
 
 Evaluator output is evidence about the resolved lane. It cannot create or
 overwrite a StrategyGroup, symbol, side, Event Spec, timeframe, or runtime
@@ -242,8 +279,10 @@ and event_time_ms comes from the strategy event time authority
 
 ## Action-Time Narrowing
 
-Only an `action_time_lane` row may generate action-time lane input, and that
-input must name:
+Only a bound `ActionTimeInvocation` with exact transient evidence may generate
+an action-time lane input. The generic `action_time_lane` readiness projection
+may display the same state but is never an execution input. The generated lane
+must name:
 
 ```text
 StrategyGroup
@@ -316,6 +355,7 @@ event_spec_version_id
 event_time_ms
 trigger_candle_close_time_ms
 signal_event_id
+action_time_invocation_id
 lane_identity_key
 source_watermark
 promotion_candidate_id

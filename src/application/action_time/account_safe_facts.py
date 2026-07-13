@@ -55,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE))
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--timeout-seconds", type=float, default=12)
+    parser.add_argument("--action-time-invocation-id", default=None)
     parser.add_argument(
         "--allow-blocked-current-projection",
         action="store_true",
@@ -93,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
                 conn,
                 artifact=artifact,
                 source_ref="runtime_account_safe_pg_scope_readonly",
+                action_time_invocation_id=args.action_time_invocation_id,
             )
     finally:
         engine.dispose()
@@ -107,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                 "account_safe_facts_ready": artifact["checks"][
                     "account_safe_facts_ready"
                 ],
+                "action_time_invocation_id": args.action_time_invocation_id,
             },
             ensure_ascii=False,
             sort_keys=True,

@@ -88,6 +88,7 @@ PG strategy/event/scope/policy seed
 -> PG watcher coverage
 -> PG fact snapshots
 -> PG live signal events
+-> PG ActionTimeInvocation exact causal context
 -> PG promotion candidates
 -> PG action-time lane inputs
 -> PG Action-Time Tickets
@@ -161,13 +162,13 @@ JSON/MD only for compatibility.
 | Strategy detector builders | PG public fact snapshots, strategy constants, local non-authority artifacts | detector fact JSON/MD such as SOR/MI/BRF2/MPG outputs | Detector output must remain an export until detector events/facts are fully materialized in PG | `brc_live_signal_events` and fact snapshots |
 | Tradeability Decision | PG current projections through `PgBackedRuntimeControlStateRepository`; production CLI rejects repo/output JSON inputs | `latest-strategygroup-tradeability-decision.json/md` | Export can still be mistaken for an upstream source by later builders | PG-only Tradeability read model over current projections |
 | Replay/live parity diagnostics | PG detector parity / watcher coverage diagnostics only; retired replay JSON builders are archive-only | no current `latest-replay-live-parity-audit` builder | Historical parity diagnostics can be confused with current live coverage | diagnostic/read-model rows separate from watcher coverage |
-| Action-time boundary | PG current projections through `PgBackedRuntimeControlStateRepository`; no CPM/MPG/SOR strategy JSON arguments | `latest-strategy-fresh-signal-action-time-boundary.json/md` | Reintroducing detector/evidence/readiness files would create a second fresh-signal-to-action-time authority path | `brc_live_signal_events`, `brc_runtime_fact_snapshots`, `brc_promotion_candidates`, `brc_action_time_lane_inputs`, `brc_action_time_tickets` |
+| Action-time boundary | PG current projections through `PgBackedRuntimeControlStateRepository`; no CPM/MPG/SOR strategy JSON arguments | `latest-strategy-fresh-signal-action-time-boundary.json/md` | Reintroducing detector/evidence/readiness files would create a second fresh-signal-to-action-time authority path | `brc_live_signal_events`, `brc_action_time_invocations`, exact fact references, `brc_promotion_candidates`, `brc_action_time_lane_inputs`, `brc_action_time_tickets` |
 | Candidate Pool | PG control state through `PgBackedRuntimeControlStateRepository`; generated fact/readiness outputs are export/diagnostic only | `latest-strategy-live-candidate-pool.json/md` | Reintroducing file-backed inputs would let generated views recompute source priority and become authority | `brc_pretrade_readiness_rows`, `brc_promotion_candidates`, `brc_action_time_lane_inputs` |
 | Daily Table | PG control state via `PgBackedRuntimeControlStateRepository`; generated fact/readiness outputs are export/diagnostic only | `latest-daily-live-enablement-table.json/md` | Reintroducing file-backed inputs would let the management table inherit stale generated inputs | DB-backed read-model export from current projections |
 | Single Lane Packet | PG control state through `PgBackedRuntimeControlStateRepository`; Daily Table is an in-memory projection, not JSON input | `latest-single-lane-task-packet.json/md` | Reintroducing file-backed Daily Table input can accidentally wrap stale market waits as closure tasks | Task export only, not runtime authority |
 | Goal Status | PG control state via `PgBackedRuntimeControlStateRepository`; report-dir path is export location only | `strategygroup-runtime-goal-status.json` | Reintroducing file-backed Goal Status inputs would let legacy scope mismatch overrule new control state | `brc_goal_status_current` single-owner projection |
 | Server monitor | PG current projections plus readonly systemd status | server monitor JSON export; Feishu dedupe rows in PG | Reintroducing file inputs would make production notification depend on stale generated artifacts | `brc_server_monitor_runs`, `brc_server_monitor_notifications`, current projections |
-| Fresh-attempt readiness | retired file-authority bridge; previous script aggregated operator evidence, fresh-signal loop, readiness evidence, handoff, and FinalGate JSON reports | none | Reintroducing it would create a second path from signal to authorization outside PG ticket identity | PG `live_signal_event -> promotion_candidate -> action_time_lane_input -> Action-Time Ticket -> ticket-bound FinalGate -> Runtime Safety State` |
+| Fresh-attempt readiness | retired file-authority bridge; previous script aggregated operator evidence, fresh-signal loop, readiness evidence, handoff, and FinalGate JSON reports | none | Reintroducing it would create a second path from signal to authorization outside PG ticket identity | PG `live_signal_event -> ActionTimeInvocation -> exact fact references -> promotion_candidate -> action_time_lane_input -> Action-Time Ticket -> ticket-bound FinalGate -> Runtime Safety State` |
 | RequiredFacts readiness artifact | retired local/JSON projection; previous script combined local strategy semantics and optional fact-source JSON reports | none | Reintroducing it would split RequiredFacts truth between local semantics, JSON reports, and PG contracts | `brc_required_fact_contracts`, `brc_strategy_event_required_facts`, `brc_runtime_fact_snapshots`, Candidate Pool readiness projection |
 
 ## Current Conflict Cases
@@ -562,7 +563,7 @@ Create the PG schema, curated initial seed, and negative constraints for:
 - Owner policy and candidate scope;
 - runtime profile, sizing, execution, protection, and budget scope;
 - watcher coverage, fact snapshots, live signal events, promotion candidates,
-  action-time lanes, and Action-Time Tickets.
+  ActionTimeInvocation contexts, action-time lanes, and Action-Time Tickets.
 
 The initial seed must contain only confirmed clean semantics. Old live signals,
 old action-time lanes, old packets, replay opportunities, and generated
@@ -658,6 +659,7 @@ The contract applies to:
 
 ```text
 fresh signal promotion
+-> ActionTimeInvocation
 -> Action-Time Ticket
 -> FinalGate preflight
 -> Operation Layer handoff

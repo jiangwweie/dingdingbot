@@ -1028,42 +1028,83 @@ Readers: Candidate Pool, Runtime Safety State, action-time lane builder.
 
 ## Runtime Coverage And Fact Tables
 
-### `brc_watcher_runtime_coverage`
+### `brc_action_time_invocations`
 
-Purpose: current server-backed watcher/detector coverage by candidate scope.
+Purpose: durable causal context for one exact fresh signal's pre-Ticket
+Action-Time work. This table does not own a trade lifecycle state; the Ticket
+remains the only lifecycle owner after trade intent exists.
 
 | Column | Type | Rule |
 | --- | --- | --- |
-| `coverage_id` | `String(192)` PK | Stable coverage row ID |
-| `candidate_scope_id` | `String(160)` nullable | Candidate scope ref |
-| `strategy_group_id` | `String(128)` | StrategyGroup |
-| `symbol` | `String(128)` | Symbol |
-| `side` | `String(32)` | Side |
-| `timeframe` | `String(32)` nullable | Timeframe |
-| `detector_key` | `String(128)` | Detector ID |
-| `watcher_unit` | `String(128)` | Watcher service/unit |
-| `coverage_state` | `String(64)` | `covered`, `not_covered`, `stale`, `missing`, `disabled` |
-| `liveness_state` | `String(64)` | `healthy`, `degraded`, `failed`, `unknown` |
-| `last_tick_at_ms` | `BIGINT` nullable | Last watcher tick |
-| `last_fact_snapshot_id` | `String(192)` nullable | Fact snapshot ref |
-| `source_watermark` | `String(256)` nullable | Runtime head/source marker |
-| `blocker_class` | `String(128)` nullable | Contract blocker |
-| `blocker_detail` | `Text` nullable | Technical reason |
-| `observed_at_ms` | `BIGINT` | Observation time |
-| `valid_until_ms` | `BIGINT` nullable | Freshness expiry |
-| `updated_at_ms` | `BIGINT` | Update time |
+| `action_time_invocation_id` | `String(192)` PK | Stable deterministic invocation identity |
+| `signal_event_id` | `String(192)` unique | Exact fresh signal; one signal cannot open a second invocation |
+| `candidate_scope_id` through `time_authority` | Typed lane fields | Complete immutable `RuntimeLaneIdentity` copied from the signal |
+| `lane_identity_key` | `String(192)` | Must equal the identity-derived key |
+| `source_watermark` | `String(256)` | Exact signal source lineage |
+| `opened_at_ms`, `expires_at_ms` | `BIGINT` | Opening and hard expiry; expiry must follow opening |
+| `account_safe_fact_snapshot_id`, `account_mode_fact_snapshot_id`, `action_time_fact_snapshot_id` | `String(256)` nullable | Actual-time fact references bound to this invocation only |
+| `ticket_id` | `String(192)` nullable | Filled only after the direct path creates the Ticket |
+| `closed_at_ms` | `BIGINT` nullable | Causal context close; not a trade lifecycle status |
+| `created_at_ms`, `updated_at_ms` | `BIGINT` | Write audit time |
 
 Checks and indexes:
 
 | Constraint/index | Rule |
 | --- | --- |
-| `uq_brc_watcher_runtime_coverage_current` | Unique current `(strategy_group_id, symbol, side, detector_key)` |
-| `idx_brc_watcher_runtime_coverage_state` | `(coverage_state, liveness_state)` |
-| `idx_brc_watcher_runtime_coverage_tick` | `(last_tick_at_ms)` |
+| `uq_brc_action_time_invocation_signal` | Exactly one invocation for one signal event |
+| `uq_brc_action_time_invocation_lane_source` | One lane/source lineage cannot open duplicate invocation context |
+| `ck_brc_action_time_invocation_deadline` | `expires_at_ms > opened_at_ms` |
+| `idx_brc_action_time_invocation_current` | Bounded current/expiry lookup |
+
+Writer: Action-Time invocation materializer.
+
+Readers: action-time fact writer, direct promotion/lane materializer, Ticket
+sequence, process-outcome projector, and reconciliation diagnostics.
+
+### `brc_watcher_runtime_coverage`
+
+Purpose: current server-backed watcher/detector coverage for one resolved
+runtime lane. It is independent watcher evidence, not a Ticket or generic
+readiness owner.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `runtime_coverage_id` | `String(192)` PK | Stable coverage row ID |
+| `candidate_scope_id` | `String(192)` nullable | Candidate scope ref; required for current covered Action-Time authority |
+| `candidate_scope_event_binding_id`, `runtime_scope_binding_id` | `String(192)` nullable | Bound Event-Spec and runtime-scope references |
+| `runtime_instance_id`, `runtime_profile_id`, `policy_current_id` | `String(192)` nullable | Exact watcher instance, profile, and Owner-policy identity |
+| `strategy_group_id` | `String(128)` | StrategyGroup |
+| `strategy_group_version_id`, `asset_class` | `String` nullable | Versioned strategy and asset identity |
+| `symbol` | `String(128)` | Symbol |
+| `side` | `String(32)` | Side |
+| `event_spec_id`, `event_spec_version`, `event_id` | `String` nullable | Exact Event-Spec identity |
+| `timeframe`, `time_authority` | `String` nullable | Evaluation cadence and event-time authority |
+| `lane_identity_key` | `String(192)` nullable | Must equal the complete typed runtime lane identity |
+| `detector_key` | `String(128)` | Detector ID |
+| `coverage_state` | `String(64)` | `covered`, `not_covered`, `stale`, `missing`, `disabled` |
+| `liveness_state` | `String(64)` | `healthy`, `active`, `degraded`, `failed`, `unknown` |
+| `last_tick_at_ms` | `BIGINT` nullable | Last watcher tick |
+| `source_watermark` | `String(256)` nullable | Watcher source lineage; nonblank for Action-Time authority |
+| `valid_until_ms` | `BIGINT` nullable | Freshness expiry |
+| `is_current` | `Boolean` | Only the current row can be considered by Action-Time |
+| `created_at_ms` | `BIGINT` | Write time |
+
+Checks and indexes:
+
+| Constraint/index | Rule |
+| --- | --- |
+| `uq_brc_coverage_current` | Unique current `(strategy_group_id, symbol, side, detector_key)` |
+| `idx_brc_coverage_runtime_lane_lineage` | Bounded identity/watermark/current lookup |
+
+For an Invocation, a row is valid coverage only when it is current, covered,
+healthy/active, unexpired, fully typed, has a matching identity key, and its
+complete `RuntimeLaneIdentity` equals the Invocation. A StrategyGroup/symbol/
+side display match alone is non-authoritative and fails closed.
 
 Writer: Tokyo server-side monitor and watcher status collector.
 
-Readers: Candidate Pool, Daily Table, server monitor, Runtime Safety State.
+Readers: Candidate Pool, Daily Table, server monitor, Runtime Safety State,
+and direct Action-Time promotion validation.
 
 ### `brc_runtime_fact_snapshots`
 
