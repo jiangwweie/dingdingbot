@@ -389,7 +389,13 @@ def _normalize_fill(fill: Any) -> dict[str, Any]:
             or info.get("positionSide")
             or ""
         ).upper(),
-        "qty": str(raw.get("amount") or info.get("qty") or info.get("quantity") or ""),
+        "qty": str(
+            raw.get("amount")
+            or raw.get("qty")
+            or info.get("qty")
+            or info.get("quantity")
+            or ""
+        ),
         "price": str(raw.get("price") or info.get("price") or ""),
         "fee": raw.get("fee") or info.get("commission"),
         "realized_pnl": (
@@ -397,7 +403,9 @@ def _normalize_fill(fill: Any) -> dict[str, Any]:
             or raw.get("realized_pnl")
             or info.get("realizedPnl")
         ),
-        "timestamp_ms": raw.get("timestamp") or info.get("time"),
+        "timestamp_ms": (
+            raw.get("timestamp") or raw.get("timestamp_ms") or info.get("time")
+        ),
     }
 
 

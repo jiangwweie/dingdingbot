@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,11 @@ from src.application.action_time.lifecycle_maintenance_scheduler import (
     run_ticket_bound_lifecycle_maintenance_scheduler,
     select_ticket_bound_lifecycle_maintenance_scopes,
 )
+from src.application.action_time.exchange_command_worker import (
+    run_one_ticket_bound_exchange_command,
+)
 from src.application.action_time.post_submit_reconciliation_tick import (
+    _entry_execution_truth,
     materialize_ticket_bound_first_reconciliation_tick,
     select_ticket_bound_first_reconciliation_tick_scopes,
 )
@@ -111,6 +116,34 @@ def test_first_tick_freezes_scope_for_unknown_exchange_only_order(pg_control_con
     assert freeze["strategy_group_id"] == "SOR-001"
     assert freeze["symbol"] == "ETHUSDT"
     assert freeze["side"] == "long"
+
+
+def test_entry_execution_truth_aggregates_multiple_exchange_fills():
+    execution = _entry_execution_truth(
+        {
+            "exchange_order_id": "exchange-entry-multi-fill",
+            "amount": "0.010",
+            "status": "FILLED",
+        },
+        [
+            {
+                "exchange_order_id": "exchange-entry-multi-fill",
+                "qty": "0.004",
+                "price": "2000",
+                "timestamp_ms": NOW_MS + 5100,
+            },
+            {
+                "exchange_order_id": "exchange-entry-multi-fill",
+                "qty": "0.006",
+                "price": "2010",
+                "timestamp_ms": NOW_MS + 5200,
+            },
+        ],
+    )
+
+    assert Decimal(execution["filled_qty"]) == Decimal("0.010")
+    assert Decimal(execution["average_exec_price"]) == Decimal("2006")
+    assert execution["fill_time_ms"] == NOW_MS + 5200
 
 
 def test_first_tick_rechecks_pending_visibility_after_deadline(pg_control_connection):
@@ -228,6 +261,120 @@ async def test_scheduler_runs_first_tick_and_prepares_tp1_recovery(pg_control_co
 
 
 @pytest.mark.asyncio
+async def test_scheduler_recovers_exchange_accepted_entry_after_local_update_failure(
+    pg_control_connection,
+):
+    prepared = _entry_accepted_local_lifecycle_failed_attempt(pg_control_connection)
+    gateway = _FirstTickGateway(prepared, omit_roles={"SL", "TP1"})
+    gateway.snapshot["position"] = {
+        "qty": prepared["submit_request"]["orders"][0]["amount"],
+        "position_flat": False,
+    }
+
+    payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
+        pg_control_connection,
+        gateway=gateway,
+        allow_exchange_mutation=False,
+        fetch_exchange_snapshot=True,
+        now_ms=NOW_MS + 7000,
+    )
+
+    actions = [
+        action["action_type"]
+        for run in payload["runs"]
+        for action in run["actions"]
+    ]
+    lifecycle = _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")
+    attempt = _one(pg_control_connection, "brc_ticket_bound_protected_submit_attempts")
+    submit_result = (
+        json.loads(attempt["submit_result"])
+        if isinstance(attempt["submit_result"], str)
+        else attempt["submit_result"]
+    )
+    entry = next(
+        row
+        for row in submit_result["submitted_orders"]
+        if row["order_role"] == "ENTRY"
+    )
+
+    assert payload["exchange_read_called"] is True
+    assert lifecycle["status"] == "protection_missing"
+    assert lifecycle["entry_fill_confirmed"] in {True, 1}
+    assert Decimal(str(lifecycle["entry_filled_qty"])) == Decimal("0.010")
+    assert Decimal(str(lifecycle["entry_avg_price"])) == Decimal("2000")
+    assert Decimal(entry["filled_qty"]) == Decimal("0.010")
+    assert Decimal(entry["average_exec_price"]) == Decimal("2000")
+    assert "protection_recovery_prepared" in actions
+    assert "protection_recovery_exchange_commands_prepared" in actions
+    commands = list(
+        pg_control_connection.execute(
+            text(
+                "SELECT order_role, command_source, command_state "
+                "FROM brc_ticket_bound_exchange_commands "
+                "WHERE command_source = 'protection_recovery' "
+                "ORDER BY command_generation"
+            )
+        ).mappings()
+    )
+    assert [(row["order_role"], row["command_state"]) for row in commands] == [
+        ("SL", "prepared"),
+        ("TP1", "prepared"),
+    ]
+
+    pg_control_connection.commit()
+    worker_results = []
+    for index in range(2):
+        worker_results.append(
+            await run_one_ticket_bound_exchange_command(
+                pg_control_connection.engine,
+                gateway=gateway,
+                worker_id=f"entry-recovery-worker-{index}",
+                now_ms=NOW_MS + 8000 + index,
+                command_sources=("protection_recovery",),
+            )
+        )
+    assert [result["status"] for result in worker_results] == [
+        "command_confirmed",
+        "command_confirmed",
+    ]
+
+    original_protection_commands = list(
+        pg_control_connection.execute(
+            text(
+                "SELECT order_role, command_state, outcome_class, exchange_error_code "
+                "FROM brc_ticket_bound_exchange_commands "
+                "WHERE protected_submit_attempt_id = :attempt_id "
+                "AND command_source = 'protected_submit' "
+                "AND order_role IN ('SL', 'TP1') ORDER BY order_role"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        ).mappings()
+    )
+    assert [
+        (
+            row["order_role"],
+            row["command_state"],
+            row["outcome_class"],
+            row["exchange_error_code"],
+        )
+        for row in original_protection_commands
+    ] == [
+        (
+            "SL",
+            "reconciled_absent",
+            "reconciled_absence",
+            "superseded_by_protection_recovery",
+        ),
+        (
+            "TP1",
+            "reconciled_absent",
+            "reconciled_absence",
+            "superseded_by_protection_recovery",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_scheduler_materializes_scheduled_tick_for_active_lifecycle(
     pg_control_connection,
 ):
@@ -301,6 +448,45 @@ def _submitted_real_attempt(conn) -> dict:
         now_ms=NOW_MS + 5000,
     )
     assert result["status"] == "submitted"
+    return prepared
+
+
+def _entry_accepted_local_lifecycle_failed_attempt(conn) -> dict:
+    ids = _create_ready_protected_submit(conn)
+    prepared = _prepare_real_submit(conn, ids)
+    entry_request = prepared["submit_request"]["orders"][0]
+    result = submit.record_ticket_bound_protected_submit_result(
+        conn,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        submit_result={
+            "status": "entry_submit_failed",
+            "ticket_id": ids["ticket_id"],
+            "operation_submit_command_id": ids["operation_submit_command_id"],
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "blockers": [
+                "order_lifecycle_update_failed:entry:InvalidOrderStateTransition"
+            ],
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "submitted_orders": [
+                {
+                    **entry_request,
+                    "exchange_order_id": "exchange-entry-1",
+                    "status": "FILLED",
+                    "filled_qty": "",
+                    "average_exec_price": "",
+                }
+            ],
+        },
+        now_ms=NOW_MS + 5000,
+    )
+    assert result["status"] == "submit_failed"
     return prepared
 
 

@@ -86,14 +86,17 @@ def materialize_ticket_bound_exit_protection_set(
         result["idempotent_existing_protection_set"] = True
         return result
 
-    blockers = _attempt_blockers(attempt)
+    existing_lifecycle = _lifecycle_by_ticket(conn, str(attempt.get("ticket_id") or ""))
+    blockers = _attempt_blockers(
+        attempt,
+        existing_lifecycle=existing_lifecycle,
+    )
     submit_request = _as_dict(attempt.get("submit_request"))
     submit_result = _as_dict(attempt.get("submit_result"))
     entry_request = _order_by_role(submit_request.get("orders", []), "ENTRY")
     entry_order = _order_by_role(submit_result.get("submitted_orders", []), "ENTRY")
     sl_order = _order_by_role(submit_result.get("submitted_orders", []), "SL")
     tp1_order = _order_by_role(submit_result.get("submitted_orders", []), "TP1")
-    existing_lifecycle = _lifecycle_by_ticket(conn, str(attempt.get("ticket_id") or ""))
     entry_fill = _entry_fill(entry_request=entry_request, entry_order=entry_order)
     blockers.extend(entry_fill["blockers"])
     blockers.extend(_exit_order_blockers(sl_order, role="SL"))
@@ -295,9 +298,16 @@ def _lifecycle_by_ticket(conn: sa.engine.Connection, ticket_id: str) -> dict[str
     return dict(row) if row else {}
 
 
-def _attempt_blockers(attempt: dict[str, Any]) -> list[str]:
+def _attempt_blockers(
+    attempt: dict[str, Any],
+    *,
+    existing_lifecycle: dict[str, Any],
+) -> list[str]:
     blockers: list[str] = []
-    if attempt.get("status") != "submitted":
+    reconciled_entry_authority = _reconciled_entry_fill_authority(
+        existing_lifecycle
+    )
+    if attempt.get("status") != "submitted" and not reconciled_entry_authority:
         blockers.append(f"protected_submit_attempt_not_submitted:{attempt.get('status')}")
     if attempt.get("submit_mode") != "real_gateway_action":
         blockers.append(f"protected_submit_attempt_mode_not_real:{attempt.get('submit_mode')}")
@@ -312,9 +322,23 @@ def _attempt_blockers(attempt: dict[str, Any]) -> list[str]:
         if attempt.get(key) is not True:
             blockers.append(f"protected_submit_attempt_flag_false:{key}")
     submit_result = _as_dict(attempt.get("submit_result"))
-    if submit_result.get("status") != "exchange_submit_orders_submitted":
+    if (
+        submit_result.get("status") != "exchange_submit_orders_submitted"
+        and not reconciled_entry_authority
+    ):
         blockers.append(f"submit_result_not_submitted:{submit_result.get('status')}")
     return blockers
+
+
+def _reconciled_entry_fill_authority(lifecycle: dict[str, Any]) -> bool:
+    return (
+        str(lifecycle.get("status") or "")
+        in {"protection_missing", "protection_degraded", "protection_submit_failed"}
+        and lifecycle.get("entry_fill_confirmed") in {True, 1}
+        and bool(str(lifecycle.get("entry_exchange_order_id") or "").strip())
+        and _decimal(lifecycle.get("entry_filled_qty")) > 0
+        and _decimal(lifecycle.get("entry_avg_price")) > 0
+    )
 
 
 def _entry_fill(

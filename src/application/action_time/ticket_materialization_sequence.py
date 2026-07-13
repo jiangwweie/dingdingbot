@@ -167,6 +167,13 @@ def materialize_action_time_ticket_sequence(
             )
             if not savepoint.is_active:
                 pass
+            elif _promotion_is_already_processed_signal(
+                promotion_status,
+                promotion_payload,
+            ):
+                blockers = []
+                status = "action_time_ticket_sequence_signal_already_processed"
+                savepoint.rollback()
             elif promotion_status not in {
                 "promotion_action_time_lane_created",
                 "action_time_lane_already_open",
@@ -239,6 +246,7 @@ def materialize_action_time_ticket_sequence(
         if status in {
             "no_current_fresh_live_signal",
             "action_time_ticket_sequence_committed",
+            "action_time_ticket_sequence_signal_already_processed",
         }
         else "action_time_ticket_sequence_blocked"
     )
@@ -302,6 +310,31 @@ def materialize_action_time_ticket_sequence(
         "authority_boundary": AUTHORITY_BOUNDARY,
         "forbidden_effects": FORBIDDEN_EFFECTS,
     }
+
+
+def _promotion_is_already_processed_signal(
+    promotion_status: str,
+    promotion_payload: dict[str, Any],
+) -> bool:
+    """Treat exact-signal progression reuse as idempotent terminal truth.
+
+    A terminal lane/promotion identity blocker on its own remains a safety
+    conflict.  It is a harmless repeat only when PG proves that this exact
+    signal already owns a lane, Ticket, or protected-submit attempt.
+    """
+
+    if promotion_status != "terminal_action_time_identity_not_reopened":
+        return False
+    return any(
+        str(blocker).startswith(
+            (
+                "signal_event_already_has_action_time_lane:",
+                "signal_event_already_has_action_time_ticket:",
+                "signal_event_already_has_protected_submit_attempt:",
+            )
+        )
+        for blocker in promotion_payload.get("blockers") or []
+    )
 
 
 def _ticket_expires_at_ms(

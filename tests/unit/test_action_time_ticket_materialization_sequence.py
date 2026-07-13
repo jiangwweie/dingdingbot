@@ -311,6 +311,66 @@ def test_invocation_sequence_uses_exact_post_opening_facts_and_ignores_other_sig
     }
 
 
+def test_repeated_invocation_after_ticket_exists_is_terminal_noop(
+    invocation_pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+    _bind_fresh_invocation_account_facts(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=NOW_MS + 1,
+    )
+    first = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 1,
+        completion_clock_ms=lambda: NOW_MS + 2,
+    )
+    assert first["status"] == "action_time_ticket_sequence_committed"
+    invocation_pg_control_connection.execute(
+        text(
+            "UPDATE brc_action_time_tickets "
+            "SET status = 'expired', expires_at_ms = :expired_at_ms"
+        ),
+        {"expired_at_ms": NOW_MS + 2},
+    )
+    invocation_pg_control_connection.execute(
+        text(
+            "UPDATE brc_action_time_lane_inputs "
+            "SET status = 'expired', expires_at_ms = :expired_at_ms, "
+            "closed_at_ms = :closed_at_ms"
+        ),
+        {"expired_at_ms": NOW_MS + 2, "closed_at_ms": NOW_MS + 3},
+    )
+
+    repeated = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 3,
+        completion_clock_ms=lambda: NOW_MS + 4,
+    )
+
+    assert repeated["status"] == (
+        "action_time_ticket_sequence_signal_already_processed"
+    ), repeated
+    assert repeated["blockers"] == []
+    assert repeated["process_outcome"]["process_state"] == "noop"
+    assert repeated["process_outcome"]["first_blocker"] is None
+    assert _count(invocation_pg_control_connection, "brc_action_time_lane_inputs") == 1
+    assert _count(invocation_pg_control_connection, "brc_action_time_tickets") == 1
+
+
 def test_invocation_sequence_rejects_coverage_from_a_different_runtime_lane(
     invocation_pg_control_connection,
 ):

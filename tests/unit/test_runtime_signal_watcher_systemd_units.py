@@ -361,11 +361,9 @@ def test_git_deploy_plan_installs_signal_watcher_dispatcher_dropin():
         < quiesce_command.index("systemctl stop brc-ticket-lifecycle-maintenance.service")
         < quiesce_command.index("systemctl stop brc-owner-console-backend.service")
     )
-    assert (
-        switch_command.index('test "$HEALTH_READY" = 1')
-        < switch_command.index("systemctl start brc-runtime-signal-watcher.timer")
-        < switch_command.index("systemctl is-active brc-runtime-signal-watcher.timer")
-    )
+    assert "systemctl enable brc-runtime-signal-watcher.timer" in switch_command
+    assert "systemctl start brc-runtime-signal-watcher.timer" not in switch_command
+    assert "systemctl is-active brc-runtime-signal-watcher.timer" not in switch_command
     assert "systemctl start brc-runtime-monitor.service" in commands
     assert "systemctl enable --now brc-ticket-lifecycle-maintenance.timer" in commands
     assert "systemctl restart brc-ticket-lifecycle-maintenance.timer" in commands

@@ -203,6 +203,14 @@ def materialize_ticket_bound_reconciliation_tick(
     sl_state = _protection_state(sl_order, open_orders, recent_fills)
     tp1_state = _protection_state(tp1_order, open_orders, recent_fills)
     position_state = _position_state(position)
+    entry_execution = _entry_execution_truth(entry_order, recent_fills)
+    if entry_execution:
+        attempt = _conserve_entry_execution_truth(
+            conn,
+            attempt=attempt,
+            entry_execution=entry_execution,
+            now_ms=now_ms,
+        )
     blockers: list[str] = []
     warnings: list[str] = []
     status = "matched"
@@ -253,6 +261,7 @@ def materialize_ticket_bound_reconciliation_tick(
             attempt=attempt,
             status="protection_missing",
             blockers=blockers,
+            entry_execution=entry_execution,
             now_ms=now_ms,
         )
     elif position_state == "open" and sl_state == "open" and tp1_state == "missing":
@@ -264,6 +273,7 @@ def materialize_ticket_bound_reconciliation_tick(
             attempt=attempt,
             status="protection_degraded",
             blockers=blockers,
+            entry_execution=entry_execution,
             now_ms=now_ms,
         )
     elif not snapshot:
@@ -373,6 +383,93 @@ def _position_state(position: dict[str, Any]) -> str:
     return "open" if _decimal(position.get("qty") or position.get("position_qty")) > 0 else "flat"
 
 
+def _entry_execution_truth(
+    entry_order: dict[str, Any],
+    recent_fills: list[dict[str, Any]],
+) -> dict[str, Any]:
+    exchange_order_id = str(entry_order.get("exchange_order_id") or "").strip()
+    if not exchange_order_id:
+        return {}
+    matching_fills = [
+        fill
+        for fill in recent_fills
+        if str(fill.get("exchange_order_id") or "") == exchange_order_id
+    ]
+    if not matching_fills:
+        return {}
+    total_qty = Decimal("0")
+    total_notional = Decimal("0")
+    fill_time_ms: int | None = None
+    fee: Any = None
+    for fill in matching_fills:
+        qty = _decimal(fill.get("qty"))
+        price = _decimal(fill.get("price"))
+        if qty <= 0 or price <= 0:
+            return {}
+        total_qty += qty
+        total_notional += qty * price
+        if fee is None and fill.get("fee") is not None:
+            fee = fill.get("fee")
+        timestamp_ms = _int_optional(fill.get("timestamp_ms"))
+        if timestamp_ms is not None:
+            fill_time_ms = max(fill_time_ms or timestamp_ms, timestamp_ms)
+    return {
+        "exchange_order_id": exchange_order_id,
+        "filled_qty": str(total_qty),
+        "average_exec_price": str(total_notional / total_qty),
+        "fee": fee,
+        "fill_time_ms": fill_time_ms,
+    }
+
+
+def _conserve_entry_execution_truth(
+    conn: sa.engine.Connection,
+    *,
+    attempt: dict[str, Any],
+    entry_execution: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    submit_result = _as_dict(attempt.get("submit_result"))
+    submitted_orders = [
+        dict(order)
+        for order in submit_result.get("submitted_orders", [])
+        if isinstance(order, dict)
+    ]
+    repaired = False
+    for order in submitted_orders:
+        if str(order.get("order_role") or "").upper() != "ENTRY":
+            continue
+        if str(order.get("exchange_order_id") or "") != str(
+            entry_execution["exchange_order_id"]
+        ):
+            continue
+        order.update(
+            {
+                "status": "FILLED",
+                "filled_qty": entry_execution["filled_qty"],
+                "average_exec_price": entry_execution["average_exec_price"],
+                "fee": entry_execution.get("fee"),
+                "fill_time_ms": entry_execution.get("fill_time_ms"),
+            }
+        )
+        repaired = True
+        break
+    if not repaired:
+        return attempt
+    updated = {
+        **attempt,
+        "submit_result": {**submit_result, "submitted_orders": submitted_orders},
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_protected_submit_attempts",
+        "protected_submit_attempt_id",
+        updated,
+    )
+    return updated
+
+
 def _unknown_exchange_reduce_only_order(
     open_orders: list[dict[str, Any]],
     submitted_orders: list[dict[str, Any]],
@@ -396,6 +493,7 @@ def _update_lifecycle_if_present(
     attempt: dict[str, Any],
     status: str,
     blockers: list[str],
+    entry_execution: dict[str, Any] | None = None,
     now_ms: int,
 ) -> None:
     lifecycle = _row_by_id(
@@ -418,6 +516,18 @@ def _update_lifecycle_if_present(
         "blockers": list(decision.blockers),
         "updated_at_ms": now_ms,
     }
+    entry_execution = entry_execution or {}
+    if entry_execution:
+        updated.update(
+            {
+                "entry_exchange_order_id": entry_execution["exchange_order_id"],
+                "entry_fill_confirmed": True,
+                "entry_filled_qty": _decimal(entry_execution["filled_qty"]),
+                "entry_avg_price": _decimal(
+                    entry_execution["average_exec_price"]
+                ),
+            }
+        )
     _upsert_row(conn, "brc_ticket_bound_order_lifecycle_runs", "lifecycle_run_id", updated)
 
 
@@ -629,6 +739,13 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0")
+
+
+def _int_optional(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:

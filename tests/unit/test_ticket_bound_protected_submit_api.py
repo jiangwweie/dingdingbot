@@ -466,6 +466,20 @@ class _UnparseableFilledQtyGateway:
         )
 
 
+class _FilledWithoutExecutionFactsGateway:
+    runtime_account_id = "owner-subaccount-runtime-v0"
+    runtime_exchange_id = "binance_usdm"
+
+    async def place_order(self, **kwargs):
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+            status="FILLED",
+            filled_qty=None,
+            average_exec_price=None,
+        )
+
+
 class _FakeOrderLifecycle:
     def __init__(self) -> None:
         self.registered_order_ids: list[str] = []
@@ -532,6 +546,27 @@ async def test_gateway_call_occurs_without_open_command_transaction(
 
     assert result["status"] == "exchange_command_confirmed_submitted"
     assert gateway.saw_open_transaction is False
+    assert _command_state(pg_control_connection, command_id) == "confirmed_submitted"
+
+
+@pytest.mark.asyncio
+async def test_filled_response_without_execution_facts_is_confirmed_for_reconciliation(
+    pg_control_connection,
+):
+    command_id = _prepared_entry_command_id(pg_control_connection)
+    lifecycle = _FakeOrderLifecycle()
+
+    result = await api_trading_console._execute_one_ticket_bound_exchange_command(
+        engine=pg_control_connection.engine,
+        exchange_command_id=command_id,
+        gateway=_FilledWithoutExecutionFactsGateway(),
+        order_lifecycle_service=lifecycle,
+        now_ms=NOW_MS + 5000,
+    )
+
+    assert result["status"] == "exchange_command_confirmed_submitted"
+    assert lifecycle.filled_order_ids == []
+    assert len(lifecycle.confirmed_order_ids) == 1
     assert _command_state(pg_control_connection, command_id) == "confirmed_submitted"
 
 

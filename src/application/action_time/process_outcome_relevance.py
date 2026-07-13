@@ -16,6 +16,11 @@ _ACTION_TIME_PROCESS_NAMES = {
     "action_time_ticket_sequence",
     "action_time_refresh_sequence",
 }
+_SIGNAL_ALREADY_PROCESSED_PREFIXES = (
+    "signal_event_already_has_action_time_lane:",
+    "signal_event_already_has_action_time_ticket:",
+    "signal_event_already_has_protected_submit_attempt:",
+)
 
 
 def process_outcome_has_current_blocking_authority(
@@ -35,7 +40,10 @@ def process_outcome_has_current_blocking_authority(
         return False
     if outcome.get("process_state") not in _BLOCKING_PROCESS_STATES:
         return False
-    if not str(outcome.get("first_blocker") or "").strip():
+    first_blocker = str(outcome.get("first_blocker") or "").strip()
+    if not first_blocker:
+        return False
+    if first_blocker.startswith(_SIGNAL_ALREADY_PROCESSED_PREFIXES):
         return False
     if not _invocation_outcome_has_typed_lane_identity(outcome):
         return False

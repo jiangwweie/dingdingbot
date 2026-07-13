@@ -201,6 +201,38 @@ def test_postdeploy_action_time_capability_runs_matrix_before_pg_certification_a
 
 
 def test_watcher_timer_starts_only_after_action_time_capability_truth_publish():
+    phases = _plan_phases(
+        host="tokyo",
+        repo_root=Path("/tmp/repo"),
+        repo_url="https://example.invalid/repo.git",
+        git_ref="codex/test",
+        target_commit="a" * 40,
+        release_name="brc-runtime-governance-test",
+        deploy_root="/home/ubuntu/brc-deploy",
+        source_root="/home/ubuntu/brc-deploy/source",
+        source_repo_path="/home/ubuntu/brc-deploy/source/dingdingbot",
+        app_current="/home/ubuntu/brc-deploy/app/current",
+        remote_release_path="/home/ubuntu/brc-deploy/releases/release-new",
+        remote_tmp_release_path="/home/ubuntu/brc-deploy/releases/release-new.tmp",
+        release_manifest="/home/ubuntu/brc-deploy/releases/release-new/.brc-release-manifest.json",
+        service_name="brc-owner-console-backend.service",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python="/home/ubuntu/brc-deploy/venvs/runtime/bin/python",
+        api_base="http://127.0.0.1:18080",
+        previous_release_path="/home/ubuntu/brc-deploy/releases/release-old",
+        expected_deployed_head="b" * 40,
+        expected_remote_migration_count=120,
+        expected_remote_latest_migration="2026-07-13-120_example.py",
+        expected_latest_migration="2026-07-13-120_example.py",
+        target_migration_count=120,
+        remote_migration_revision="120",
+        target_migration_revision="120",
+        migration_gap_revision_count=0,
+        manifest_payload={"scope": "test"},
+    )
+    switch = next(
+        item for item in phases if item["phase"] == "4_switch_start_and_smoke"
+    )["commands"][0]
     phase_two = ticket_lifecycle_phase_two_enable_command(
         remote_release_path="/home/ubuntu/brc-deploy/releases/release-new",
         env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
@@ -216,6 +248,7 @@ def test_watcher_timer_starts_only_after_action_time_capability_truth_publish():
     )
 
     phase_two_success_tail = phase_two.split("SUCCESS=1; trap - EXIT", 1)[1]
+    assert "systemctl start brc-runtime-signal-watcher.timer" not in switch
     assert (
         "systemctl start brc-runtime-signal-watcher.timer"
         not in phase_two_success_tail

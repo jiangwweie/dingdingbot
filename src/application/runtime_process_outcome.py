@@ -61,6 +61,7 @@ NOOP_STATUSES = {
     "no_unknown_commands",
     "healthy_waiting_quiet",
     "action_time_lane_already_open",
+    "action_time_ticket_sequence_signal_already_processed",
 }
 TEMPORARILY_UNAVAILABLE_BUSINESS_STATUSES = {
     "action_time_fact_snapshots_blocked",

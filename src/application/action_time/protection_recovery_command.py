@@ -496,7 +496,57 @@ def apply_durable_protection_recovery_exchange_commands(
         result_payload=result_payload,
         now_ms=now_ms,
     )
+    _supersede_original_prepared_protection_commands(
+        conn,
+        protected_submit_attempt_id=str(command["protected_submit_attempt_id"]),
+        recovery_command_id=protection_recovery_command_id,
+        now_ms=now_ms,
+    )
     return updated
+
+
+def _supersede_original_prepared_protection_commands(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+    recovery_command_id: str,
+    now_ms: int,
+) -> None:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
+        return
+    table = _table(conn, "brc_ticket_bound_exchange_commands")
+    rows = list(
+        conn.execute(
+            sa.select(table).where(
+                table.c.protected_submit_attempt_id
+                == protected_submit_attempt_id,
+                table.c.command_source == "protected_submit",
+                table.c.order_role.in_(("SL", "TP1")),
+                table.c.command_state == "prepared",
+            )
+        ).mappings()
+    )
+    for row in rows:
+        conn.execute(
+            table.update()
+            .where(table.c.exchange_command_id == row["exchange_command_id"])
+            .values(
+                command_state="reconciled_absent",
+                outcome_class="reconciled_absence",
+                exchange_error_code="superseded_by_protection_recovery",
+                exchange_error_message=(
+                    "Protection was submitted by durable recovery command "
+                    f"{recovery_command_id}"
+                ),
+                exchange_result={
+                    "status": "superseded_by_protection_recovery",
+                    "protection_recovery_command_id": recovery_command_id,
+                    "exchange_write_called": False,
+                },
+                resolved_at_ms=now_ms,
+                updated_at_ms=now_ms,
+            )
+        )
 
 
 def _prepare_blockers(

@@ -69,6 +69,39 @@
 7. Verify current monitor state no longer reports the repaired action-time defect after bounded non-executing certification.
 8. Confirm no exchange write, order, position, transfer, withdrawal, or profile/sizing expansion occurred during certification.
 
+## Task 6: Deployment-Time Natural Signal Race Closure
+
+**Files:**
+- Modify: `scripts/plan_tokyo_runtime_governance_git_deploy.py`
+- Test: `tests/unit/test_runtime_signal_watcher_systemd_units.py`
+- Test: `tests/unit/test_tokyo_lifecycle_phase_two_deploy.py`
+
+1. Reproduce the production timeline where phase 4 starts the watcher, a signal and Ticket are created, and phase 5/6 certification delays consumption beyond Ticket validity.
+2. Prove phase 4 only installs/enables the watcher timer and never starts it.
+3. Keep the watcher stopped through lifecycle and 22-scope certification; start it only after capability truth and current projections are committed.
+4. Redeploy the exact fix and verify the first post-certification watcher tick cannot inherit a deployment-created stale Ticket.
+
+## Task 7: Natural Live Order Lifecycle Truth And Protection Recovery
+
+**Files:**
+- Modify: `src/domain/order_state_machine.py`
+- Modify: `src/application/order_lifecycle_service.py`
+- Modify: `src/interfaces/api_trading_console.py`
+- Modify: `src/application/action_time/exchange_snapshot_provider.py`
+- Modify: `src/application/action_time/post_submit_reconciliation_tick.py`
+- Modify: `src/application/action_time/exit_protection_materializer.py`
+- Modify: `src/application/action_time/protection_recovery_command.py`
+- Test: `tests/unit/test_order_lifecycle_service_pending_updates.py`
+- Test: `tests/unit/test_ticket_bound_protected_submit_api.py`
+- Test: `tests/unit/test_ticket_bound_post_submit_reconciliation_tick.py`
+
+1. Preserve legal immediate market fills by accepting `SUBMITTED -> PARTIALLY_FILLED/FILLED` transitions and emitting the existing fill audit events.
+2. Never fabricate fill quantity or average price from requested order fields when the venue reports `FILLED` without complete execution facts; persist exchange acceptance and require read-only reconciliation.
+3. Conserve confirmed Entry fill quantity, average price, fee, and fill time from the official exchange snapshot into the protected-submit attempt and lifecycle projection.
+4. Allow newer reconciled Entry facts to supersede stale aggregate attempt failure only for bounded recoverable protection states with complete Entry identity and positive execution facts.
+5. Route missing SL/TP1 through the durable recovery command path and supersede only the original still-prepared protection commands after recovery is confirmed.
+6. Certify the exact production failure shape: exchange accepted Entry, local lifecycle update failed, Entry facts recovered, SL/TP1 recovery commands prepared and confirmed, lifecycle protected, and old protection intents terminally reconciled without duplicate exchange submission.
+
 ## Performance And Safety Acceptance
 
 - **Cadence:** no-signal watcher ticks create zero JSON/MD artifacts; PG/current projections remain the only runtime truth.

@@ -288,6 +288,8 @@ class OrderLifecycleService:
             (OrderStatus.CREATED, OrderStatus.SUBMITTED): OrderAuditEventType.ORDER_SUBMITTED,
             (OrderStatus.CREATED, OrderStatus.CANCELED): OrderAuditEventType.ORDER_CANCELED,
             (OrderStatus.SUBMITTED, OrderStatus.OPEN): OrderAuditEventType.ORDER_CONFIRMED,
+            (OrderStatus.SUBMITTED, OrderStatus.PARTIALLY_FILLED): OrderAuditEventType.ORDER_PARTIAL_FILLED,
+            (OrderStatus.SUBMITTED, OrderStatus.FILLED): OrderAuditEventType.ORDER_FILLED,
             (OrderStatus.SUBMITTED, OrderStatus.REJECTED): OrderAuditEventType.ORDER_REJECTED,
             (OrderStatus.SUBMITTED, OrderStatus.CANCELED): OrderAuditEventType.ORDER_CANCELED,
             (OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED): OrderAuditEventType.ORDER_PARTIAL_FILLED,

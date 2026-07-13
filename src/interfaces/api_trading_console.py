@@ -2860,26 +2860,20 @@ async def _execute_one_ticket_bound_exchange_command(
         )
         filled_qty = getattr(placement, "filled_qty", None)
         parsed_filled_qty = _decimal_or_zero(filled_qty)
-        if (
-            str(getattr(placement, "status", "")).split(".")[-1].lower()
-            == "filled"
-            or parsed_filled_qty > Decimal("0")
-        ):
+        parsed_average_exec_price = _decimal_or_zero(
+            getattr(placement, "average_exec_price", None)
+        )
+        if parsed_filled_qty > Decimal("0") and parsed_average_exec_price > Decimal("0"):
             await order_lifecycle_service.update_order_filled(
                 str(command["local_order_id"]),
-                filled_qty=parsed_filled_qty
-                if parsed_filled_qty > 0
-                else Decimal(str(command["amount"])),
-                average_exec_price=Decimal(
-                    str(
-                        getattr(placement, "average_exec_price", None)
-                        or command.get("price")
-                        or command.get("stop_price")
-                        or "0"
-                    )
-                ),
+                filled_qty=parsed_filled_qty,
+                average_exec_price=parsed_average_exec_price,
             )
         else:
+            # A venue may report a terminal-looking market-order status before
+            # returning complete execution quantity/price fields.  Preserve
+            # exchange acceptance locally and let the read-only reconciliation
+            # snapshot establish fill truth; never fabricate a zero-price fill.
             await order_lifecycle_service.confirm_order(
                 str(command["local_order_id"]),
                 exchange_order_id=exchange_order_id,

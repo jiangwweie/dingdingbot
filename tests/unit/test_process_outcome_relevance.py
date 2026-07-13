@@ -379,3 +379,28 @@ def test_newer_success_for_same_process_and_lane_supersedes_old_failure():
         state,
         old_failure,
     ) is False
+
+
+def test_signal_already_processed_outcome_is_not_a_current_blocker():
+    state = _control_state()
+
+    assert process_outcome_has_current_blocking_authority(
+        state,
+        _outcome(
+            first_blocker=(
+                "signal_event_already_has_action_time_lane:"
+                "signal:SOR-001:ETHUSDT:long:expired:lane:existing"
+            ),
+        ),
+    ) is False
+
+
+def test_terminal_identity_reuse_remains_a_current_blocker():
+    state = _control_state()
+
+    assert process_outcome_has_current_blocking_authority(
+        state,
+        _outcome(
+            first_blocker="terminal_promotion_identity_reuse:promotion:existing",
+        ),
+    ) is True

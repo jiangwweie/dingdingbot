@@ -25,6 +25,9 @@ class _InMemoryOrderRepository:
                 return order
         return None
 
+    async def get_order(self, order_id: str):
+        return self.orders.get(order_id)
+
     async def get_orders_by_signal(self, signal_id: str):
         return [order for order in self.orders.values() if order.signal_id == signal_id]
 
@@ -53,6 +56,31 @@ def _order(
         updated_at=1,
         reduce_only=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_exchange_may_fill_directly_after_submit():
+    repo = _InMemoryOrderRepository()
+    service = OrderLifecycleService(repo)
+    order = _order(
+        order_id="market-entry",
+        exchange_order_id="",
+        status=OrderStatus.CREATED,
+        role=OrderRole.ENTRY,
+    )
+    order.reduce_only = False
+    await repo.save(order)
+
+    await service.submit_order(order.id, exchange_order_id="exchange-market-entry")
+    filled = await service.update_order_filled(
+        order.id,
+        filled_qty=Decimal("0.01"),
+        average_exec_price=Decimal("2133"),
+    )
+
+    assert filled.status == OrderStatus.FILLED
+    assert filled.filled_qty == Decimal("0.01")
+    assert filled.average_exec_price == Decimal("2133")
 
 
 @pytest.mark.asyncio
