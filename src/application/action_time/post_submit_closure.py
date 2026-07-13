@@ -83,7 +83,12 @@ def materialize_ticket_bound_post_submit_closure(
         )
 
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_action_time_control_state(
+            protected_submit_attempt_id=attempt_id,
+        )
     except RuntimeControlStateRepositoryError as exc:
         return _result(
             "blocked",
@@ -172,7 +177,10 @@ def materialize_latest_ticket_bound_post_submit_closure(
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_action_time_control_state()
     except RuntimeControlStateRepositoryError as exc:
         return _result(
             "blocked",

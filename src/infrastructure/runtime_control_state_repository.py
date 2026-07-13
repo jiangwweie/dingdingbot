@@ -140,6 +140,41 @@ class PgBackedRuntimeControlStateRepository:
         }
 
     def read_monitor_control_state(self) -> dict[str, Any]:
+        return self._read_bounded_current_state(
+            read_profile="monitor_bounded_current",
+        )
+
+    def read_action_time_control_state(
+        self,
+        *,
+        ticket_id: str = "",
+        protected_submit_attempt_id: str = "",
+        operation_submit_command_id: str = "",
+        operation_layer_handoff_id: str = "",
+    ) -> dict[str, Any]:
+        """Read only current PG rows suitable for the latency-sensitive path.
+
+        Action-Time materializers must not scan historical fact and watcher
+        tables. The bounded predicates are shared with the monitor because both
+        consumers require current truth plus retained terminal ticket lineage,
+        but the distinct profile name makes production telemetry auditable.
+        """
+        return self._read_bounded_current_state(
+            read_profile="action_time_hot_path_current",
+            requested_lineage={
+                "ticket_id": ticket_id,
+                "protected_submit_attempt_id": protected_submit_attempt_id,
+                "operation_submit_command_id": operation_submit_command_id,
+                "operation_layer_handoff_id": operation_layer_handoff_id,
+            },
+        )
+
+    def _read_bounded_current_state(
+        self,
+        *,
+        read_profile: str,
+        requested_lineage: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         self._require_tables()
         rows = {
             key: self._read_rows(
@@ -152,21 +187,228 @@ class PgBackedRuntimeControlStateRepository:
         }
         self._retain_monitor_protected_submit_lineage(rows)
         self._retain_monitor_material_notification_lineage(rows)
+        if requested_lineage:
+            self._retain_requested_action_time_lineage(rows, **requested_lineage)
         self._validate_projection_ownership(rows)
         self._validate_active_event_semantics(rows)
         self._validate_candidate_scope_event_bindings(rows)
         self._validate_runtime_scope_bindings(rows)
         self._validate_live_signal_events(rows)
-        self._validate_promotion_and_lane_identity(rows)
+        if not any(str(value or "") for value in (requested_lineage or {}).values()):
+            self._validate_promotion_and_lane_identity(rows)
         return {
             "schema": "brc.runtime_control_state_repository.v1",
             "source_mode": self.source_mode,
             "projection_target": self.projection_target,
-            "read_profile": "monitor_bounded_current",
+            "read_profile": read_profile,
             "read_now_ms": self.now_ms,
             "table_counts": {key: len(value) for key, value in rows.items()},
             **rows,
         }
+
+    def _retain_requested_action_time_lineage(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+        *,
+        ticket_id: str,
+        protected_submit_attempt_id: str,
+        operation_submit_command_id: str,
+        operation_layer_handoff_id: str,
+    ) -> None:
+        ticket_ids = _texts([ticket_id])
+        current_lane_ids = _texts(
+            row.get("action_time_lane_input_id")
+            for row in rows.get("action_time_lane_inputs") or []
+        )
+        tickets_for_current_lanes = self._read_rows_where_in(
+            CONTROL_STATE_TABLES["action_time_tickets"],
+            "action_time_lane_input_id",
+            current_lane_ids,
+        )
+        self._merge_rows(
+            rows,
+            "action_time_tickets",
+            "ticket_id",
+            tickets_for_current_lanes,
+        )
+        ticket_ids.update(
+            _texts(row.get("ticket_id") for row in tickets_for_current_lanes)
+        )
+        attempt_rows: list[dict[str, Any]] = []
+        if protected_submit_attempt_id:
+            attempt_rows.extend(
+                self._read_rows_where_in(
+                    CONTROL_STATE_TABLES["ticket_bound_protected_submit_attempts"],
+                    "protected_submit_attempt_id",
+                    {protected_submit_attempt_id},
+                )
+            )
+        if operation_submit_command_id:
+            attempt_rows.extend(
+                self._read_rows_where_in(
+                    CONTROL_STATE_TABLES["ticket_bound_protected_submit_attempts"],
+                    "operation_submit_command_id",
+                    {operation_submit_command_id},
+                )
+            )
+        self._merge_rows(
+            rows,
+            "ticket_bound_protected_submit_attempts",
+            "protected_submit_attempt_id",
+            attempt_rows,
+        )
+        ticket_ids.update(_texts(row.get("ticket_id") for row in attempt_rows))
+
+        handoff_rows: list[dict[str, Any]] = []
+        if operation_layer_handoff_id:
+            handoff_rows.extend(
+                self._read_rows_where_in(
+                    CONTROL_STATE_TABLES["operation_layer_handoffs"],
+                    "operation_layer_handoff_id",
+                    {operation_layer_handoff_id},
+                )
+            )
+        if operation_submit_command_id:
+            handoff_rows.extend(
+                self._read_rows_where_in(
+                    CONTROL_STATE_TABLES["operation_layer_handoffs"],
+                    "operation_submit_command_id",
+                    {operation_submit_command_id},
+                )
+            )
+        if ticket_ids:
+            handoff_rows.extend(
+                self._read_rows_where_in(
+                    CONTROL_STATE_TABLES["operation_layer_handoffs"],
+                    "ticket_id",
+                    ticket_ids,
+                )
+            )
+        self._merge_rows(
+            rows,
+            "operation_layer_handoffs",
+            "operation_layer_handoff_id",
+            handoff_rows,
+        )
+        ticket_ids.update(_texts(row.get("ticket_id") for row in handoff_rows))
+        ticket_rows = self._read_rows_where_in(
+            CONTROL_STATE_TABLES["action_time_tickets"],
+            "ticket_id",
+            ticket_ids,
+        )
+        self._merge_rows(rows, "action_time_tickets", "ticket_id", ticket_rows)
+        self._merge_rows(
+            rows,
+            "action_time_ticket_events",
+            "ticket_event_id",
+            self._read_rows_where_in(
+                CONTROL_STATE_TABLES["action_time_ticket_events"],
+                "ticket_id",
+                ticket_ids,
+            ),
+        )
+
+        lane_ids = _texts(row.get("action_time_lane_input_id") for row in ticket_rows)
+        lane_ids.update(
+            _texts(row.get("action_time_lane_input_id") for row in attempt_rows)
+        )
+        lane_rows = self._read_rows_where_in(
+            CONTROL_STATE_TABLES["action_time_lane_inputs"],
+            "action_time_lane_input_id",
+            lane_ids,
+        )
+        self._merge_rows(
+            rows,
+            "action_time_lane_inputs",
+            "action_time_lane_input_id",
+            lane_rows,
+        )
+        promotion_ids = _texts(
+            row.get("promotion_candidate_id") for row in [*ticket_rows, *lane_rows]
+        )
+        promotion_rows = self._read_rows_where_in(
+            CONTROL_STATE_TABLES["promotion_candidates"],
+            "promotion_candidate_id",
+            promotion_ids,
+        )
+        self._merge_rows(
+            rows,
+            "promotion_candidates",
+            "promotion_candidate_id",
+            promotion_rows,
+        )
+        signal_ids = _texts(
+            row.get("signal_event_id")
+            for row in [*ticket_rows, *lane_rows, *promotion_rows]
+        )
+        self._merge_rows(
+            rows,
+            "live_signal_events",
+            "signal_event_id",
+            self._read_rows_where_in(
+                CONTROL_STATE_TABLES["live_signal_events"],
+                "signal_event_id",
+                signal_ids,
+            ),
+        )
+        fact_ids = _texts(
+            row.get(key)
+            for row in [*ticket_rows, *lane_rows]
+            for key in (
+                "public_fact_snapshot_id",
+                "action_time_fact_snapshot_id",
+                "account_safe_fact_snapshot_id",
+                "account_mode_snapshot_id",
+            )
+        )
+        self._merge_rows(
+            rows,
+            "runtime_fact_snapshots",
+            "fact_snapshot_id",
+            self._read_rows_where_in(
+                CONTROL_STATE_TABLES["runtime_fact_snapshots"],
+                "fact_snapshot_id",
+                fact_ids,
+            ),
+        )
+        for logical_key, id_column, lookup_column, values in (
+            (
+                "budget_reservations",
+                "budget_reservation_id",
+                "budget_reservation_id",
+                _texts(row.get("budget_reservation_id") for row in ticket_rows),
+            ),
+            (
+                "protection_references",
+                "protection_ref_id",
+                "protection_ref_id",
+                _texts(row.get("protection_ref_id") for row in ticket_rows),
+            ),
+            (
+                "runtime_safety_state",
+                "runtime_safety_snapshot_id",
+                "runtime_safety_snapshot_id",
+                _texts(
+                    row.get("runtime_safety_snapshot_id") for row in attempt_rows
+                ),
+            ),
+            (
+                "ticket_bound_submit_mode_decisions",
+                "submit_mode_decision_id",
+                "operation_submit_command_id",
+                _texts([operation_submit_command_id]),
+            ),
+        ):
+            self._merge_rows(
+                rows,
+                logical_key,
+                id_column,
+                self._read_rows_where_in(
+                    CONTROL_STATE_TABLES[logical_key],
+                    lookup_column,
+                    values,
+                ),
+            )
 
     def _require_tables(self) -> None:
         inspector = sa.inspect(self.conn)
@@ -1094,6 +1336,7 @@ def _monitor_bounded_statement(
                 [
                     "blocked",
                     "disabled_smoke_passed",
+                    "submit_prepared",
                     "submitted",
                     "submit_outcome_unknown",
                     "hard_stopped",

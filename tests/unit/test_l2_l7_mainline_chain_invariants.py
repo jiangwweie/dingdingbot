@@ -100,6 +100,16 @@ MATERIALIZER_CLI_SURFACES = {
     },
 }
 
+ACTION_TIME_HOT_PATH_MODULES = [
+    "src/application/action_time/promotion_action_time_lane.py",
+    "src/application/action_time/action_time_ticket.py",
+    "src/application/action_time/finalgate_preflight.py",
+    "src/application/action_time/operation_layer_handoff.py",
+    "src/application/action_time/runtime_safety_state.py",
+    "src/application/action_time/protected_submit_attempt.py",
+    "src/application/action_time/post_submit_closure.py",
+]
+
 ACTION_TIME_SCRIPT_WRAPPERS = {
     "scripts/build_runtime_account_safe_facts.py": "src.application.action_time.account_safe_facts",
     "scripts/materialize_action_time_fact_snapshots.py": "src.application.action_time.fact_snapshots",
@@ -487,6 +497,13 @@ def test_ticket_bound_api_imports_application_action_time_services_not_scripts()
     assert "from src.application.action_time.operation_layer_handoff" in source
     assert "from src.application.action_time.protected_submit_attempt" in source
     assert "from src.application.action_time.post_submit_closure" in source
+
+
+def test_action_time_hot_path_never_uses_unbounded_control_state_reads() -> None:
+    for relative_path in ACTION_TIME_HOT_PATH_MODULES:
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        assert ".read_control_state()" not in source, relative_path
+        assert ".read_action_time_control_state(" in source, relative_path
 
 
 def _parser_args(source: str) -> set[str]:

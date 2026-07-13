@@ -63,6 +63,7 @@ def materialize_action_time_operation_layer_handoff(
     ticket_id: str,
     finalgate_pass_id: str,
     now_ms: int | None = None,
+    control_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
     ticket_id = str(ticket_id or "").strip()
@@ -71,10 +72,14 @@ def materialize_action_time_operation_layer_handoff(
         return _blocked(["ticket_id_required"], now_ms=now_ms, ticket={})
     if not finalgate_pass_id:
         return _blocked(["finalgate_pass_id_required"], now_ms=now_ms, ticket={})
-    try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
-    except RuntimeControlStateRepositoryError as exc:
-        return _blocked([f"runtime_control_state_invalid:{exc}"], now_ms=now_ms, ticket={})
+    if control_state is None:
+        try:
+            control_state = PgBackedRuntimeControlStateRepository(
+                conn,
+                now_ms=now_ms,
+            ).read_action_time_control_state(ticket_id=ticket_id)
+        except RuntimeControlStateRepositoryError as exc:
+            return _blocked([f"runtime_control_state_invalid:{exc}"], now_ms=now_ms, ticket={})
 
     ticket = _ticket_by_id(control_state, ticket_id)
     if not ticket:
@@ -129,7 +134,10 @@ def materialize_next_action_time_operation_layer_handoff(
             now_ms=now_ms,
         )
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_action_time_control_state()
     except RuntimeControlStateRepositoryError as exc:
         return _blocked([f"runtime_control_state_invalid:{exc}"], now_ms=now_ms, ticket={})
     tickets = [
@@ -165,6 +173,7 @@ def materialize_next_action_time_operation_layer_handoff(
         ticket_id=str(selected_ticket.get("ticket_id") or ""),
         finalgate_pass_id=selected_pass_id,
         now_ms=now_ms,
+        control_state=control_state,
     )
 
 

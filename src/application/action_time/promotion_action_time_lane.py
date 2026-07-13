@@ -178,7 +178,7 @@ def materialize_pg_promotion_action_time_lane(
         control_state = PgBackedRuntimeControlStateRepository(
             conn,
             now_ms=now_ms,
-        ).read_control_state()
+        ).read_action_time_control_state()
     except RuntimeControlStateRepositoryError as exc:
         return result(
             "blocked",

@@ -71,6 +71,7 @@ def materialize_action_time_finalgate_preflight(
     *,
     ticket_id: str,
     now_ms: int | None = None,
+    control_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
     ticket_id = str(ticket_id or "").strip()
@@ -81,15 +82,19 @@ def materialize_action_time_finalgate_preflight(
             ticket={},
             finalgate_pass_id=None,
         )
-    try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
-    except RuntimeControlStateRepositoryError as exc:
-        return _blocked(
-            [f"runtime_control_state_invalid:{exc}"],
-            now_ms=now_ms,
-            ticket={},
-            finalgate_pass_id=None,
-        )
+    if control_state is None:
+        try:
+            control_state = PgBackedRuntimeControlStateRepository(
+                conn,
+                now_ms=now_ms,
+            ).read_action_time_control_state(ticket_id=ticket_id)
+        except RuntimeControlStateRepositoryError as exc:
+            return _blocked(
+                [f"runtime_control_state_invalid:{exc}"],
+                now_ms=now_ms,
+                ticket={},
+                finalgate_pass_id=None,
+            )
 
     ticket = _ticket_by_id(control_state, ticket_id)
     if not ticket:
@@ -204,7 +209,10 @@ def materialize_next_action_time_finalgate_preflight(
             now_ms=now_ms,
         )
     try:
-        control_state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+        control_state = PgBackedRuntimeControlStateRepository(
+            conn,
+            now_ms=now_ms,
+        ).read_action_time_control_state()
     except RuntimeControlStateRepositoryError as exc:
         return _blocked(
             [f"runtime_control_state_invalid:{exc}"],
@@ -238,6 +246,7 @@ def materialize_next_action_time_finalgate_preflight(
         conn,
         ticket_id=str(tickets[0].get("ticket_id") or ""),
         now_ms=now_ms,
+        control_state=control_state,
     )
 
 
