@@ -53,6 +53,7 @@ design documents and acceptance proof.
 | 2 | **P0 Signal Identity Conservation And Owner Notification Truth** | **deployed and production-accepted; anonymous readiness is conserved as a PG lane failure and only the server monitor notifies the Owner** | `docs/current/P0_SIGNAL_IDENTITY_CONSERVATION_AND_OWNER_NOTIFICATION_TRUTH_DESIGN.md` |
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
 | 3 | **P0 Runtime Causal Integrity And Adversarial Certification** | **completed and deployed; 12 PostgreSQL/process scenarios passed and four demonstrated defects were repaired** | `docs/current/P0_RUNTIME_CAUSAL_INTEGRITY_AND_ADVERSARIAL_CERTIFICATION_DESIGN.md` |
+| P1 support | **Test Feedback Stratification And Release Certification Optimization** | **completed; developer-only feedback tiers preserve the complete Release gate and require no Tokyo runtime deployment** | `docs/current/P1_TEST_FEEDBACK_STRATIFICATION_AND_RELEASE_CERTIFICATION_OPTIMIZATION_DESIGN.md` |
 | 4 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | 5 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 6 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
@@ -91,6 +92,7 @@ validated market wait while Owner-facing product integration continues.
 | **Historical Action-Time acceptance** | Five 2026-07-12 CPM Tickets and the separate ETH sizing-control signal reach protected-submit preparation plus durable ENTRY/SL/TP1 commands inside their original validity windows in isolated fixed-clock tests; all stop before exchange write |
 | **Signal identity and notification truth** | Deployed `8b6cd166` conserves anonymous readiness as a lane-scoped PG process failure, removes direct watcher Feishu, and makes the Tokyo server monitor the sole typed Owner notification path; production acceptance captured `CPM-RO-001 + SOLUSDT + short` and sent one Chinese no-order card with repeated delivery suppressed by PG dedupe |
 | **Runtime causal integrity certification** | All 12 bounded PostgreSQL/process scenarios pass; contradictory repeat fill truth hard-stops, newer success clears older current blockers, and terminal pre-dispatch attempts cannot leave reclaimable or misleading command truth |
+| **Developer test feedback** | Fast is `328 passed` in `9.94s` wall; Mainline is `2462 passed`, `1 skipped` in `154.85s` wall with 18 critical-chain sentinels; complete Release is `3051 passed`, `1 skipped` in `558.25s` wall; missing dependency or PostgreSQL fails before test execution with masked diagnostics |
 
 ## Current Next Execution Order
 
