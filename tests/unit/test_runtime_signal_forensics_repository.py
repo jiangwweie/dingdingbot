@@ -26,6 +26,20 @@ def test_repository_is_window_bounded_filter_aware_limited_and_read_only() -> No
         sa.Column("promotion_candidate_id", sa.String, primary_key=True),
         sa.Column("signal_event_id", sa.String),
     )
+    tickets = sa.Table(
+        "brc_action_time_tickets",
+        metadata,
+        sa.Column("ticket_id", sa.String, primary_key=True),
+        sa.Column("signal_event_id", sa.String),
+    )
+    attempts = sa.Table(
+        "brc_ticket_bound_protected_submit_attempts",
+        metadata,
+        sa.Column("protected_submit_attempt_id", sa.String, primary_key=True),
+        sa.Column("ticket_id", sa.String),
+        sa.Column("status", sa.String),
+        sa.Column("exchange_write_called", sa.Boolean),
+    )
     metadata.create_all(engine)
     with engine.begin() as conn:
         conn.execute(
@@ -41,6 +55,21 @@ def test_repository_is_window_bounded_filter_aware_limited_and_read_only() -> No
             [
                 {"promotion_candidate_id": "p-match", "signal_event_id": "match"},
                 {"promotion_candidate_id": "p-wrong", "signal_event_id": "wrong"},
+            ],
+        )
+        conn.execute(
+            tickets.insert(),
+            [{"ticket_id": "ticket-match", "signal_event_id": "match"}],
+        )
+        conn.execute(
+            attempts.insert(),
+            [
+                {
+                    "protected_submit_attempt_id": "attempt-match",
+                    "ticket_id": "ticket-match",
+                    "status": "submit_failed",
+                    "exchange_write_called": False,
+                }
             ],
         )
         statements: list[str] = []
@@ -64,6 +93,10 @@ def test_repository_is_window_bounded_filter_aware_limited_and_read_only() -> No
 
         assert [row["signal_event_id"] for row in rows["live_signal_events"]] == ["match"]
         assert [row["promotion_candidate_id"] for row in rows["promotion_candidates"]] == ["p-match"]
+        assert [
+            row["protected_submit_attempt_id"]
+            for row in rows["ticket_bound_protected_submit_attempts"]
+        ] == ["attempt-match"]
         assert all(len(value) <= 1 for value in rows.values())
         assert not any(
             statement.startswith(("INSERT", "UPDATE", "DELETE", "ALTER", "DROP"))

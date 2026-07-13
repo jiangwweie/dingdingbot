@@ -149,6 +149,9 @@ def _reduce_signal(
     command = _first(
         rows.get("ticket_bound_exchange_commands"), "ticket_id", ticket_id
     )
+    attempt = _latest(
+        rows.get("ticket_bound_protected_submit_attempts"), "ticket_id", ticket_id
+    )
     lifecycle = _latest(
         rows.get("ticket_bound_order_lifecycle_runs"), "ticket_id", ticket_id
     )
@@ -262,6 +265,26 @@ def _reduce_signal(
             "engineering_handoff_gap",
             "exchange_command_missing",
             "正式交易意图已经建立，但没有记录到交易所命令。",
+            ticket_id=ticket_id,
+            notification_state=notification_state,
+        )
+    attempt_status = str(attempt.get("status") or "")
+    if (
+        attempt_status in {"submit_failed", "hard_stopped", "blocked"}
+        and attempt.get("exchange_write_called") is not True
+    ):
+        attempt_blockers = _string_list(attempt.get("blockers"))
+        blocker = (
+            attempt_blockers[0]
+            if attempt_blockers
+            else f"protected_submit_{attempt_status}"
+        )
+        return _finding(
+            signal,
+            "operation_layer",
+            "operation_blocked",
+            blocker,
+            "系统已经形成正式交易意图，但提交前被工程或安全条件阻断，没有调用交易所，也没有创建订单。",
             ticket_id=ticket_id,
             notification_state=notification_state,
         )

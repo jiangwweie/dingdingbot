@@ -567,6 +567,17 @@ def _project_durable_exchange_command_results(
         str(submit_result.get("status") or "")
         == "exchange_submit_orders_submitted"
     )
+    terminal_before_dispatch = (
+        not aggregate_submitted
+        and submit_result.get("exchange_write_called") is False
+        and str(attempt.get("status") or "")
+        in {"submit_failed", "hard_stopped"}
+    )
+    terminal_blockers = [
+        str(item)
+        for item in (attempt.get("blockers") or submit_result.get("blockers") or [])
+        if str(item).strip()
+    ]
     for command in commands:
         role = str(command.get("order_role") or "").upper()
         submitted = submitted_by_role.get(role)
@@ -595,6 +606,35 @@ def _project_durable_exchange_command_results(
                 .values(
                     command_state="reconciled_absent",
                     outcome_class="reconciled_absence",
+                    resolved_at_ms=now_ms,
+                    updated_at_ms=now_ms,
+                )
+            )
+        elif terminal_before_dispatch and str(command.get("command_state") or "") == "prepared":
+            conn.execute(
+                table.update()
+                .where(
+                    table.c.exchange_command_id
+                    == command["exchange_command_id"]
+                )
+                .values(
+                    command_state="reconciled_absent",
+                    outcome_class="reconciled_absence",
+                    exchange_error_code=(
+                        terminal_blockers[0]
+                        if terminal_blockers
+                        else "protected_submit_stopped_before_dispatch"
+                    ),
+                    exchange_error_message=(
+                        ",".join(terminal_blockers)[:1000]
+                        if terminal_blockers
+                        else "protected submit stopped before exchange dispatch"
+                    ),
+                    exchange_result={
+                        "exchange_write_called": False,
+                        "status": str(submit_result.get("status") or ""),
+                        "blockers": terminal_blockers,
+                    },
                     resolved_at_ms=now_ms,
                     updated_at_ms=now_ms,
                 )

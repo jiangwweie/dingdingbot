@@ -15,6 +15,7 @@ TABLES = {
     "promotion_candidates": "brc_promotion_candidates",
     "action_time_lane_inputs": "brc_action_time_lane_inputs",
     "action_time_tickets": "brc_action_time_tickets",
+    "ticket_bound_protected_submit_attempts": "brc_ticket_bound_protected_submit_attempts",
     "ticket_bound_exchange_commands": "brc_ticket_bound_exchange_commands",
     "ticket_bound_order_lifecycle_runs": "brc_ticket_bound_order_lifecycle_runs",
     "live_outcome_ledger": "brc_live_outcome_ledger",
@@ -59,6 +60,12 @@ class PgRuntimeSignalForensicsRepository:
             "action_time_tickets": tickets,
             "ticket_bound_exchange_commands": self._related(
                 "ticket_bound_exchange_commands", "ticket_id", ticket_ids, query.limit
+            ),
+            "ticket_bound_protected_submit_attempts": self._related(
+                "ticket_bound_protected_submit_attempts",
+                "ticket_id",
+                ticket_ids,
+                query.limit,
             ),
             "ticket_bound_order_lifecycle_runs": self._related(
                 "ticket_bound_order_lifecycle_runs", "ticket_id", ticket_ids, query.limit

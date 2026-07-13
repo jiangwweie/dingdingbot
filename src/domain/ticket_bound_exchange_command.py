@@ -132,7 +132,10 @@ _ALLOWED_TRANSITIONS: dict[
     ExchangeCommandState,
     set[ExchangeCommandState],
 ] = {
-    ExchangeCommandState.PREPARED: {ExchangeCommandState.DISPATCHING},
+    ExchangeCommandState.PREPARED: {
+        ExchangeCommandState.DISPATCHING,
+        ExchangeCommandState.RECONCILED_ABSENT,
+    },
     ExchangeCommandState.DISPATCHING: {
         ExchangeCommandState.CONFIRMED_SUBMITTED,
         ExchangeCommandState.CONFIRMED_REJECTED,

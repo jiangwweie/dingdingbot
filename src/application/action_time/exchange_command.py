@@ -371,6 +371,13 @@ def claim_next_exchange_command(
         if not command_sources:
             return {}
         query = query.where(table.c.command_source.in_(command_sources))
+    query = query.where(
+        _protected_submit_source_is_current(
+            conn,
+            command_table=table,
+            now_ms=now_ms,
+        )
+    )
     query = (
         query
         .order_by(
@@ -410,6 +417,45 @@ def claim_next_exchange_command(
             + 1,
             "updated_at_ms": now_ms,
         },
+    )
+
+
+def _protected_submit_source_is_current(
+    conn: sa.engine.Connection,
+    *,
+    command_table: sa.Table,
+    now_ms: int,
+) -> Any:
+    """Prevent terminal or expired submit authority from being reclaimed."""
+
+    inspector = sa.inspect(conn)
+    attempt_table_name = "brc_ticket_bound_protected_submit_attempts"
+    ticket_table_name = "brc_action_time_tickets"
+    if not (
+        inspector.has_table(attempt_table_name)
+        and inspector.has_table(ticket_table_name)
+    ):
+        return command_table.c.command_source != "protected_submit"
+    metadata = sa.MetaData()
+    attempts = sa.Table(attempt_table_name, metadata, autoload_with=conn)
+    tickets = sa.Table(ticket_table_name, metadata, autoload_with=conn)
+    current_attempt = sa.exists(
+        sa.select(sa.literal(1))
+        .select_from(attempts.join(tickets, tickets.c.ticket_id == attempts.c.ticket_id))
+        .where(
+            attempts.c.protected_submit_attempt_id
+            == command_table.c.protected_submit_attempt_id,
+            attempts.c.status == "submit_prepared",
+            attempts.c.submit_allowed.is_(True),
+            attempts.c.exchange_write_called.is_(False),
+            tickets.c.ticket_id == command_table.c.ticket_id,
+            tickets.c.expires_at_ms > now_ms,
+            tickets.c.status.not_in(("expired", "invalidated", "superseded", "closed")),
+        )
+    )
+    return sa.or_(
+        command_table.c.command_source != "protected_submit",
+        current_attempt,
     )
 
 

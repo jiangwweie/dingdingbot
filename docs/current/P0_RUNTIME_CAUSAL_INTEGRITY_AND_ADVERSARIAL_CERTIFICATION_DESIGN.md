@@ -130,7 +130,7 @@ Sources: `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`,
 ```text
 pytest controller process
 -> create unique temporary PostgreSQL database
--> run Alembic production migrations through revision 119
+-> run Alembic production migrations through revision 120
 -> seed only the minimum authoritative rows for the tested boundary
 -> spawn independent worker process where process death matters
 -> test-local fake exchange records unique client_order_id in PostgreSQL
@@ -207,4 +207,33 @@ P0-RCI is complete when:
 6. every finding is classified and either fixed or retained as live-only;
 7. no new runtime file authority or production cadence is introduced;
 8. deployment is performed only if production behavior changed;
-9. **R1B** remains explicitly pending when no natural live event occurs.
+9. **R1B** remains explicitly pending until a natural event produces real venue
+   acceptance/fill/protection facts; a natural event that fails before exchange
+   dispatch is valuable acceptance evidence but is not live lifecycle calibration.
+
+## 12. Natural-Event Causal Conservation Extension
+
+The first postdeploy natural event proved one additional invariant that the
+synthetic command-crash matrix did not cover:
+
+```text
+terminal protected-submit attempt with exchange_write_called=false
+-> every never-dispatched child command is authoritative exchange absence
+-> no worker may reclaim it
+-> Owner forensics must explain the pre-dispatch blocker
+```
+
+This is implemented without a second lifecycle state machine. New failures
+project never-dispatched child commands to `reconciled_absent`; migration
+**120** repairs the same historical shape only when all of these facts agree:
+
+1. source is `protected_submit`;
+2. source attempt is terminal;
+3. `exchange_write_called=false`;
+4. `dispatch_started_at_ms IS NULL`;
+5. `execution_attempt_count=0`;
+6. `exchange_order_id IS NULL`.
+
+The command claimant independently rechecks current Attempt and Ticket
+authority. Forensics reads the Attempt before interpreting command presence, so
+a durable prepared row can no longer be mislabeled as an order awaiting fill.

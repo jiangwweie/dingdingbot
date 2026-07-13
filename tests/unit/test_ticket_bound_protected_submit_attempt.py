@@ -705,6 +705,23 @@ def test_protected_submit_result_preserves_gateway_failure_blockers(
     lifecycle = _lifecycle_row(pg_control_connection)
     assert lifecycle["status"] == "submit_failed"
     assert lifecycle["first_blocker"] == "runtime_exchange_gateway_unavailable"
+    commands = list(
+        pg_control_connection.execute(
+            text(
+                "SELECT command_state, outcome_class, exchange_error_code "
+                "FROM brc_ticket_bound_exchange_commands "
+                "ORDER BY order_role"
+            )
+        ).mappings()
+    )
+    assert len(commands) == 3
+    assert {row["command_state"] for row in commands} == {"reconciled_absent"}
+    assert {row["outcome_class"] for row in commands} == {
+        "reconciled_absence"
+    }
+    assert {row["exchange_error_code"] for row in commands} == {
+        "runtime_exchange_gateway_unavailable"
+    }
     assert _status(pg_control_connection, "brc_action_time_tickets", "ticket_id", ids["ticket_id"]) == "finalgate_ready"
 
 

@@ -285,6 +285,43 @@ async def test_lifecycle_worker_never_dispatches_protected_submit_entry(
 
 
 @pytest.mark.asyncio
+async def test_worker_never_claims_terminal_failed_protected_submit_attempt(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_protected_submit_attempts "
+            "SET status = 'submit_failed', exchange_write_called = false "
+            "WHERE protected_submit_attempt_id = :attempt_id"
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_action_time_tickets SET status = 'expired' "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ids["ticket_id"]},
+    )
+    pg_control_connection.commit()
+    gateway = _WorkerGateway()
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="stale-protected-submit-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+
+    assert result["status"] == "no_prepared_command"
+    assert result["exchange_write_called"] is False
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
 async def test_two_concurrent_workers_cannot_dispatch_a_second_command(
     pg_control_connection,
 ):

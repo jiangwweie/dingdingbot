@@ -90,7 +90,7 @@ validated market wait while Owner-facing product integration continues.
 | **Dynamic execution risk** | New entry sizing uses fresh wallet/available balance, 3% planned Stop risk, 90% margin utilization, lowest sufficient leverage, and a 10x Owner ceiling |
 | **Historical Action-Time acceptance** | Five 2026-07-12 CPM Tickets and the separate ETH sizing-control signal reach protected-submit preparation plus durable ENTRY/SL/TP1 commands inside their original validity windows in isolated fixed-clock tests; all stop before exchange write |
 | **Signal identity and notification truth** | Deployed `8b6cd166` conserves anonymous readiness as a lane-scoped PG process failure, removes direct watcher Feishu, and makes the Tokyo server monitor the sole typed Owner notification path; production acceptance captured `CPM-RO-001 + SOLUSDT + short` and sent one Chinese no-order card with repeated delivery suppressed by PG dedupe |
-| **Runtime causal integrity certification** | All 12 bounded PostgreSQL/process scenarios pass; contradictory repeat fill truth now hard-stops, and a newer successful Action-Time outcome clears an older current blocker without deleting history |
+| **Runtime causal integrity certification** | All 12 bounded PostgreSQL/process scenarios pass; contradictory repeat fill truth hard-stops, newer success clears older current blockers, and terminal pre-dispatch attempts cannot leave reclaimable or misleading command truth |
 
 ## Current Next Execution Order
 
@@ -108,7 +108,7 @@ then resumes this order.
 | 3 | **Deploy certification ordering** | P0 complete | Watcher starts only after exact-head capability and current projection truth publish; mixed-generation tick race is removed |
 | 4 | **Signal identity and notification truth** | P0 complete | Only named execution-eligible PG signals can produce opportunity language; materialization failures persist by lane and the server monitor owns typed deduplicated Owner notification |
 | 5 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
-| 6 | **Runtime causal integrity certification** | P0 complete | Twelve bounded real-PostgreSQL/process scenarios pass; four demonstrated implementation defects are repaired without schema or authority expansion |
+| 6 | **Runtime causal integrity certification** | P0 follow-up deploy | Twelve bounded real-PostgreSQL/process scenarios pass; five demonstrated implementation defects are repaired without authority expansion; migration 120 conserves historical pre-dispatch failure truth |
 | 7 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
 
 ## Why This Was Not Detected Before Production Signals

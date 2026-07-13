@@ -152,6 +152,52 @@ def test_expired_ticket_is_terminal_before_submit_not_missing_exchange_command()
     assert finding.first_blocker == "ticket_expired_before_submit"
 
 
+def test_failed_submit_without_exchange_write_overrides_prepared_command_presence() -> None:
+    result = reduce_runtime_signal_forensics(
+        _query(),
+        {
+            "live_signal_events": [_signal()],
+            "promotion_candidates": [
+                {"signal_event_id": "signal-1", "promotion_candidate_id": "p-1"}
+            ],
+            "action_time_lane_inputs": [
+                {"signal_event_id": "signal-1", "action_time_lane_input_id": "lane-1"}
+            ],
+            "action_time_tickets": [
+                {
+                    "signal_event_id": "signal-1",
+                    "ticket_id": "ticket-1",
+                    "status": "expired",
+                }
+            ],
+            "ticket_bound_protected_submit_attempts": [
+                {
+                    "ticket_id": "ticket-1",
+                    "status": "submit_failed",
+                    "exchange_write_called": False,
+                    "blockers": ["brc_runtime_exchange_account_id_missing"],
+                    "updated_at_ms": 4_000,
+                }
+            ],
+            "ticket_bound_exchange_commands": [
+                {
+                    "ticket_id": "ticket-1",
+                    "exchange_command_id": "command-1",
+                    "command_state": "prepared",
+                    "execution_attempt_count": 0,
+                    "dispatch_started_at_ms": None,
+                }
+            ],
+        },
+    )
+
+    finding = result.findings[0]
+    assert finding.chain_stage == "operation_layer"
+    assert finding.classification == "operation_blocked"
+    assert finding.first_blocker == "brc_runtime_exchange_account_id_missing"
+    assert "没有调用交易所" in finding.explanation
+
+
 def test_closed_ticket_reports_trade_result_and_notification_state() -> None:
     result = reduce_runtime_signal_forensics(
         _query(),
