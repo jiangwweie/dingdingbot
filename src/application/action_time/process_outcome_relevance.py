@@ -10,6 +10,12 @@ _BLOCKING_PROCESS_STATES = {
     "retryable_failure",
     "hard_failure",
 }
+_ACTION_TIME_PROCESS_NAMES = {
+    "action_time_ticket_sequence",
+    "action_time_refresh_sequence",
+}
+
+
 def process_outcome_has_current_blocking_authority(
     control_state: Mapping[str, Any],
     outcome: Mapping[str, Any],
@@ -23,7 +29,7 @@ def process_outcome_has_current_blocking_authority(
     evidence; it is not a blocker-TTL switch.
     """
 
-    if outcome.get("process_name") != "action_time_ticket_sequence":
+    if outcome.get("process_name") not in _ACTION_TIME_PROCESS_NAMES:
         return False
     if outcome.get("process_state") not in _BLOCKING_PROCESS_STATES:
         return False

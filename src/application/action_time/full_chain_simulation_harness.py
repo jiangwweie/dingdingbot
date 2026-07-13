@@ -15,6 +15,7 @@ import asyncio
 from contextlib import contextmanager
 import json
 import os
+import time
 from types import SimpleNamespace
 from typing import Any, Callable
 
@@ -44,6 +45,9 @@ from src.application.action_time.lifecycle_exchange_command_materializer import 
 )
 from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
+)
+from src.application.action_time.exchange_command import (
+    list_exchange_commands_for_attempt,
 )
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
@@ -102,6 +106,235 @@ class FullChainSimulationInput:
     side: str
     fact_values: dict[str, Any] | None = None
     now_ms: int = 1_770_000_000_000
+
+
+@dataclass(frozen=True)
+class HistoricalActionTimeAcceptanceCase:
+    source_signal_event_id: str
+    source_ticket_id: str | None
+    strategy_group_id: str
+    symbol: str
+    side: str
+    event_time_ms: int
+    observed_at_ms: int
+    expires_at_ms: int
+    fact_values: dict[str, Any]
+
+
+def run_ticket_bound_pre_exchange_acceptance(
+    conn: sa.engine.Connection,
+    acceptance_case: HistoricalActionTimeAcceptanceCase,
+    *,
+    projection_publisher: Callable[..., dict[str, Any]],
+) -> dict[str, Any]:
+    """Replay one historical fact set through durable command preparation.
+
+    The caller supplies an isolated transaction or test database.  The runner
+    deliberately stops after immutable exchange commands are prepared and
+    never constructs or calls a gateway.
+    """
+
+    now_ms = int(acceptance_case.observed_at_ms)
+    if now_ms >= int(acceptance_case.expires_at_ms):
+        raise ValueError("historical_acceptance_clock_outside_original_validity")
+    row = _candidate_runtime_row(
+        conn,
+        strategy_group_id=acceptance_case.strategy_group_id,
+        symbol=acceptance_case.symbol,
+        side=acceptance_case.side,
+    )
+    _insert_constructed_raw_input(
+        conn,
+        row=row,
+        fact_values=dict(acceptance_case.fact_values),
+        now_ms=now_ms,
+        trigger_candle_close_time_ms=int(acceptance_case.event_time_ms),
+        expires_at_ms=int(acceptance_case.expires_at_ms),
+    )
+    stages: list[dict[str, Any]] = []
+
+    sequence = _execute_acceptance_stage(
+        stages,
+        name="ticket_sequence",
+        expected_status="action_time_ticket_sequence_committed",
+        completed_at_ms=now_ms + 1,
+        action=lambda: materialize_action_time_ticket_sequence(
+            conn,
+            now_ms=now_ms,
+            projection_publisher=(
+                lambda connection: projection_publisher(connection, now_ms=now_ms)
+            ),
+            completion_clock_ms=lambda: now_ms + 1,
+        ),
+    )
+    ticket = dict(sequence["ticket"])
+    _require_payload_status(
+        stage="ticket",
+        payload=ticket,
+        expected_status="action_time_ticket_created",
+    )
+    finalgate = _execute_acceptance_stage(
+        stages,
+        name="finalgate_preflight",
+        expected_status="finalgate_ready",
+        completed_at_ms=now_ms + 2,
+        action=lambda: finalgate_preflight.materialize_action_time_finalgate_preflight(
+            conn,
+            ticket_id=str(ticket["ticket_id"]),
+            now_ms=now_ms + 2,
+        ),
+    )
+    handoff = _execute_acceptance_stage(
+        stages,
+        name="operation_layer_handoff",
+        expected_status="operation_layer_handoff_ready",
+        completed_at_ms=now_ms + 3,
+        action=lambda: operation_layer_handoff.materialize_action_time_operation_layer_handoff(
+            conn,
+            ticket_id=str(ticket["ticket_id"]),
+            finalgate_pass_id=str(finalgate["finalgate_pass_id"]),
+            now_ms=now_ms + 3,
+        ),
+    )
+    safety = _execute_acceptance_stage(
+        stages,
+        name="runtime_safety",
+        expected_status="runtime_safety_state_ready",
+        completed_at_ms=now_ms + 4,
+        action=lambda: runtime_safety_state.materialize_ticket_bound_runtime_safety_state(
+            conn,
+            ticket_id=str(ticket["ticket_id"]),
+            operation_layer_handoff_id=str(handoff["operation_layer_handoff_id"]),
+            now_ms=now_ms + 4,
+        ),
+    )
+    with _mock_submit_decision_env():
+        submit_mode_decision = _execute_acceptance_stage(
+            stages,
+            name="submit_mode_decision",
+            expected_status="real_gateway_action",
+            completed_at_ms=now_ms + 5,
+            action=lambda: protected_submit_attempt.materialize_ticket_bound_submit_mode_decision(
+                conn,
+                ticket_id=str(ticket["ticket_id"]),
+                operation_submit_command_id=str(
+                    handoff["operation_submit_command_id"]
+                ),
+                production_submit_execution_policy="armed",
+                now_ms=now_ms + 5,
+            ),
+        )
+    prepared = _execute_acceptance_stage(
+        stages,
+        name="protected_submit_preparation",
+        expected_status="submit_prepared",
+        completed_at_ms=now_ms + 6,
+        action=lambda: protected_submit_attempt.prepare_ticket_bound_protected_submit_attempt(
+            conn,
+            ticket_id=str(ticket["ticket_id"]),
+            operation_submit_command_id=str(handoff["operation_submit_command_id"]),
+            submit_mode="real_gateway_action",
+            now_ms=now_ms + 6,
+        ),
+    )
+    commands = list_exchange_commands_for_attempt(
+        conn,
+        protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
+    )
+    if not commands:
+        raise ValueError("historical_acceptance_exchange_commands_missing")
+    budget_table = sa.Table(
+        "brc_budget_reservations",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    ticket_table = sa.Table(
+        "brc_action_time_tickets",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    ticket_row = dict(
+        conn.execute(
+            sa.select(ticket_table).where(
+                ticket_table.c.ticket_id == str(ticket["ticket_id"])
+            )
+        ).mappings().one()
+    )
+    budget_reservation = dict(
+        conn.execute(
+            sa.select(budget_table).where(
+                budget_table.c.budget_reservation_id
+                == str(ticket_row["budget_reservation_id"])
+            )
+        ).mappings().one()
+    )
+
+    return {
+        "schema": "brc.action_time_pre_exchange_acceptance.v1",
+        "status": "pre_exchange_acceptance_ready",
+        "source_lineage": {
+            "signal_event_id": acceptance_case.source_signal_event_id,
+            "ticket_id": acceptance_case.source_ticket_id,
+            "event_time_ms": acceptance_case.event_time_ms,
+        },
+        "strategy_group_id": acceptance_case.strategy_group_id,
+        "symbol": acceptance_case.symbol,
+        "side": acceptance_case.side,
+        "started_at_ms": now_ms,
+        "completed_at_ms": now_ms + 6,
+        "original_valid_until_ms": acceptance_case.expires_at_ms,
+        "total_stage_duration_ms": sum(
+            int(stage["duration_ms"]) for stage in stages
+        ),
+        "stages": stages,
+        "ticket": ticket,
+        "finalgate": finalgate,
+        "handoff": handoff,
+        "safety": safety,
+        "submit_mode_decision": submit_mode_decision,
+        "prepared_submit": prepared,
+        "budget_reservation": budget_reservation,
+        "exchange_commands": commands,
+        "authority_boundary": {
+            "calls_finalgate": True,
+            "calls_operation_layer_handoff": True,
+            "prepares_protected_submit": True,
+            "prepares_durable_exchange_commands": True,
+            "calls_operation_layer_submit": False,
+            "calls_exchange_gateway": False,
+            "calls_exchange_write": False,
+            "uses_repo_json_or_md_authority": False,
+            "mutates_production_pg": False,
+        },
+    }
+
+
+def _execute_acceptance_stage(
+    stages: list[dict[str, Any]],
+    *,
+    name: str,
+    expected_status: str,
+    completed_at_ms: int,
+    action: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    payload = action()
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    stages.append(
+        {
+            "name": name,
+            "status": str(payload.get("status") or ""),
+            "blockers": [str(item) for item in payload.get("blockers") or []],
+            "completed_at_ms": completed_at_ms,
+            "duration_ms": duration_ms,
+        }
+    )
+    _require_payload_status(
+        stage=name,
+        payload=payload,
+        expected_status=expected_status,
+    )
+    return payload
 
 
 def run_ticket_bound_full_chain_simulation(
@@ -846,6 +1079,8 @@ def _insert_constructed_raw_input(
     row: dict[str, Any],
     fact_values: dict[str, Any],
     now_ms: int,
+    trigger_candle_close_time_ms: int | None = None,
+    expires_at_ms: int | None = None,
 ) -> None:
     semantic_fact_values = dict(fact_values)
     last_price = semantic_fact_values.pop(
@@ -868,7 +1103,8 @@ def _insert_constructed_raw_input(
         ),
         {"event_spec_id": row["event_spec_id"]},
     )
-    expires_at_ms = now_ms + 600_000
+    valid_until_ms = int(expires_at_ms or now_ms + 600_000)
+    event_time_ms = int(trigger_candle_close_time_ms or now_ms - 60_000)
     observed_at_ms = now_ms - 20_000
     generated_at = datetime.fromtimestamp(
         observed_at_ms / 1000,
@@ -989,14 +1225,14 @@ def _insert_constructed_raw_input(
                         "side": row["side"],
                         "confidence": "0.90",
                         "reason_codes": ["simulation_producer_input"],
-                        "trigger_candle_close_time_ms": now_ms - 60_000,
+                        "trigger_candle_close_time_ms": event_time_ms,
                         "time_authority": "trigger_candle_close_time_ms",
                         "fact_observations": [
                             {
                                 "fact_key": key,
                                 "observed_value": semantic_fact_values[key],
-                                "observed_at_ms": now_ms - 60_000,
-                                "valid_until_ms": expires_at_ms,
+                                "observed_at_ms": event_time_ms,
+                                "valid_until_ms": valid_until_ms,
                                 "source_ref": (
                                     f"simulation:evaluator:{row['event_spec_id']}:{key}"
                                 ),

@@ -79,9 +79,14 @@ def main(argv: list[str] | None = None) -> int:
 
 def publish_runtime_control_current_projections(
     conn: sa.engine.Connection,
+    *,
+    now_ms: int | None = None,
 ) -> dict[str, Any]:
-    started_ms = int(time.time() * 1000)
-    generated = datetime.now(timezone.utc).isoformat()
+    started_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    generated = datetime.fromtimestamp(
+        started_ms / 1000,
+        tz=timezone.utc,
+    ).isoformat()
     (
         control_state,
         projection_control_state,
@@ -222,11 +227,16 @@ def publish_runtime_control_current_projections(
 
 def publish_action_time_pretrade_readiness(
     conn: sa.engine.Connection,
+    *,
+    now_ms: int | None = None,
 ) -> dict[str, Any]:
     """Refresh only the PG readiness rows required before lane arbitration."""
 
-    started_ms = int(time.time() * 1000)
-    generated = datetime.now(timezone.utc).isoformat()
+    started_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    generated = datetime.fromtimestamp(
+        started_ms / 1000,
+        tz=timezone.utc,
+    ).isoformat()
     _, _, candidate_pool, readiness_rows = _build_candidate_readiness(
         conn,
         started_ms=started_ms,

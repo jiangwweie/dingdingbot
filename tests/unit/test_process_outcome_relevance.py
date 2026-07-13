@@ -3,6 +3,7 @@ from __future__ import annotations
 from src.application.action_time.process_outcome_relevance import (
     process_outcome_has_current_blocking_authority,
 )
+from src.application.readmodels import strategy_live_candidate_pool as candidate_pool
 
 
 NOW_MS = 10_000
@@ -120,6 +121,45 @@ def test_opaque_failure_remains_current_until_scope_outcome_is_superseded():
             first_blocker=None,
         ),
     ) is False
+
+
+def test_outer_action_time_refresh_failure_has_same_lane_blocking_authority():
+    state = _control_state()
+
+    assert process_outcome_has_current_blocking_authority(
+        state,
+        _outcome(
+            process_name="action_time_refresh_sequence",
+            first_blocker="materialize_action_time_finalgate_preflight_timeout",
+            source_watermark="ticket:exact",
+        ),
+    ) is True
+    assert process_outcome_has_current_blocking_authority(
+        state,
+        _outcome(
+            process_name="action_time_refresh_sequence",
+            process_state="succeeded",
+            first_blocker=None,
+            source_watermark="ticket:exact",
+        ),
+    ) is False
+
+
+def test_candidate_pool_projects_outer_refresh_failure_as_action_time_blocker():
+    outcome = _outcome(
+        process_name="action_time_refresh_sequence",
+        first_blocker="materialize_action_time_finalgate_preflight_timeout",
+        source_watermark="ticket:exact",
+        updated_at_ms=NOW_MS,
+    )
+
+    unresolved = candidate_pool._unresolved_action_time_sequence_outcomes(
+        _control_state(runtime_process_outcomes=[outcome])
+    )
+
+    assert unresolved[("SOR-001", "ETHUSDT", "long")]["first_blocker"] == (
+        "materialize_action_time_finalgate_preflight_timeout"
+    )
 
 
 def test_other_lane_activity_does_not_erase_lane_blocker_authority():

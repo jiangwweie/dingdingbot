@@ -575,7 +575,10 @@ def _unresolved_action_time_sequence_outcomes(
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
     unresolved: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in _dict_rows(control_state.get("runtime_process_outcomes")):
-        if row.get("process_name") != "action_time_ticket_sequence":
+        if row.get("process_name") not in {
+            "action_time_ticket_sequence",
+            "action_time_refresh_sequence",
+        }:
             continue
         if row.get("process_state") not in {
             "business_blocked",

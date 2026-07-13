@@ -34,6 +34,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
+from src.application.runtime_process_outcome import (  # noqa: E402
+    classify_process_outcome,
+    materialize_runtime_process_outcome,
+)
 
 DEFAULT_PYTHON = "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
@@ -64,6 +68,7 @@ class CommandResult:
 
 
 Runner = Callable[[tuple[str, ...]], CommandResult]
+ProcessOutcomeWriter = Callable[[dict[str, Any]], dict[str, Any] | None]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -116,6 +121,7 @@ def run_server_product_state_refresh_sequence(
     mode: str = "watcher_tick_summary",
     runner: Runner | None = None,
     action_time_trigger_state: dict[str, Any] | None = None,
+    process_outcome_writer: ProcessOutcomeWriter | None = None,
 ) -> dict[str, Any]:
     if mode not in REFRESH_MODES:
         raise ValueError(f"unsupported refresh mode: {mode}")
@@ -329,7 +335,192 @@ def run_server_product_state_refresh_sequence(
             "order_sizing_changed": False,
         },
     }
+    outcome_payload = _action_time_refresh_process_outcome_payload(report)
+    if outcome_payload is not None:
+        writer = process_outcome_writer or (
+            lambda payload: _persist_action_time_refresh_process_outcome(
+                payload,
+                env=command_env,
+            )
+        )
+        written = writer(outcome_payload)
+        if isinstance(written, Mapping):
+            report["process_outcome"] = dict(written)
+        else:
+            classified = classify_process_outcome(
+                process_name=str(outcome_payload["process_name"]),
+                result_status=str(outcome_payload["result_status"]),
+                blockers=list(outcome_payload["blockers"]),
+            )
+            report["process_outcome"] = classified.model_dump(mode="json")
     return report
+
+
+def _action_time_refresh_process_outcome_payload(
+    report: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if report.get("effective_mode") != "action_time":
+        return None
+    trigger = report.get("action_time_trigger")
+    if not isinstance(trigger, Mapping) or trigger.get("triggered") is not True:
+        return None
+    identity = trigger.get("trigger_identity")
+    if not isinstance(identity, Mapping):
+        return None
+    strategy_group_id = str(identity.get("strategy_group_id") or "").strip()
+    symbol = str(identity.get("symbol") or "").strip()
+    side = str(identity.get("side") or "").strip()
+    if not all((strategy_group_id, symbol, side)):
+        return None
+
+    summary = report.get("summary")
+    if not isinstance(summary, Mapping):
+        return None
+    started_at_ms = int(
+        report.get("action_time_sequence_now_ms")
+        or trigger.get("now_ms")
+        or 0
+    )
+    if started_at_ms <= 0:
+        return None
+    duration_ms = int(summary.get("total_step_duration_ms") or 0)
+    failed_step = str(summary.get("blocked_by_required_step") or "").strip()
+    blockers = [_refresh_step_failure_blocker(report)] if failed_step else []
+    source_watermark = next(
+        (
+            str(identity.get(key) or "").strip()
+            for key in (
+                "ticket_id",
+                "action_time_lane_input_id",
+                "promotion_candidate_id",
+                "signal_event_id",
+            )
+            if str(identity.get(key) or "").strip()
+        ),
+        f"lane:{strategy_group_id}:{symbol}:{side}",
+    )
+    return {
+        "process_name": "action_time_refresh_sequence",
+        "scope_key": f"lane:{strategy_group_id}:{symbol}:{side}",
+        "run_id": f"action_time_refresh:{started_at_ms}",
+        "result_status": (
+            "action_time_refresh_sequence_failed"
+            if failed_step
+            else "action_time_refresh_sequence_completed"
+        ),
+        "blockers": blockers,
+        "started_at_ms": started_at_ms,
+        "completed_at_ms": started_at_ms + duration_ms,
+        "source_watermark": source_watermark,
+    }
+
+
+def _refresh_step_failure_blocker(report: Mapping[str, Any]) -> str:
+    summary = report.get("summary")
+    if not isinstance(summary, Mapping):
+        return "action_time_refresh_sequence_failed"
+    step = str(summary.get("blocked_by_required_step") or "").strip()
+    stderr = str(summary.get("blocked_required_stderr_tail") or "").strip()
+    stdout = str(summary.get("blocked_required_stdout_tail") or "").strip()
+    if "step_timeout_after_" in stderr:
+        return f"{step}_timeout"
+    detail = _structured_first_blocker(stdout)
+    if detail:
+        return f"{step}_failed:{detail}"
+    return f"{step}_failed"
+
+
+def _structured_first_blocker(stdout: str) -> str:
+    for line in reversed(str(stdout or "").splitlines()):
+        try:
+            payload = json.loads(line)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        process_outcome = payload.get("process_outcome")
+        if isinstance(process_outcome, Mapping):
+            first = str(process_outcome.get("first_blocker") or "").strip()
+            if first:
+                return first
+        first = str(payload.get("first_blocker") or "").strip()
+        if first:
+            return first
+        blockers = payload.get("blockers")
+        if isinstance(blockers, list) and blockers:
+            first = str(blockers[0] or "").strip()
+            if first:
+                return first
+    return ""
+
+
+def _persist_action_time_refresh_process_outcome(
+    payload: Mapping[str, Any],
+    *,
+    env: Mapping[str, str],
+) -> dict[str, Any] | None:
+    database_url = normalize_sync_postgres_dsn(
+        env.get("PG_DATABASE_URL") or env.get("DATABASE_URL") or ""
+    )
+    if not database_url:
+        return None
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            effective_payload = _with_current_trigger_identity(
+                payload,
+                _action_time_trigger_identity(
+                    conn,
+                    now_ms=int(payload["started_at_ms"]),
+                ),
+            )
+            return dict(
+                materialize_runtime_process_outcome(
+                    conn,
+                    process_name=str(effective_payload["process_name"]),
+                    scope_key=str(effective_payload["scope_key"]),
+                    run_id=str(effective_payload["run_id"]),
+                    result_status=str(effective_payload["result_status"]),
+                    blockers=[
+                        str(item)
+                        for item in effective_payload.get("blockers") or []
+                    ],
+                    started_at_ms=int(effective_payload["started_at_ms"]),
+                    completed_at_ms=int(effective_payload["completed_at_ms"]),
+                    runtime_head=str(env.get("BRC_RUNTIME_HEAD") or ""),
+                    source_watermark=str(effective_payload["source_watermark"]),
+                    projector_owner="server_product_state_refresh_sequence",
+                )
+            )
+    finally:
+        engine.dispose()
+
+
+def _with_current_trigger_identity(
+    payload: Mapping[str, Any],
+    identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    result = dict(payload)
+    strategy_group_id = str(identity.get("strategy_group_id") or "").strip()
+    symbol = str(identity.get("symbol") or "").strip()
+    side = str(identity.get("side") or "").strip()
+    if not all((strategy_group_id, symbol, side)):
+        return result
+    result["scope_key"] = f"lane:{strategy_group_id}:{symbol}:{side}"
+    result["source_watermark"] = next(
+        (
+            str(identity.get(key) or "").strip()
+            for key in (
+                "ticket_id",
+                "action_time_lane_input_id",
+                "promotion_candidate_id",
+                "signal_event_id",
+            )
+            if str(identity.get(key) or "").strip()
+        ),
+        result.get("source_watermark") or result["scope_key"],
+    )
+    return result
 
 
 def _empty_refresh_report(
@@ -446,6 +637,7 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
         with engine.begin() as conn:
             expiry_counts = _expire_stale_action_time_objects(conn, now_ms=now_ms)
             counts = _action_time_trigger_counts(conn, now_ms=now_ms)
+            trigger_identity = _action_time_trigger_identity(conn, now_ms=now_ms)
     except Exception as exc:  # noqa: BLE001 - fail closed on PG current read errors.
         return {
             "status": "blocked",
@@ -465,6 +657,7 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
         "now_ms": now_ms,
         "counts": counts,
         "expiry_counts": expiry_counts,
+        "trigger_identity": trigger_identity,
     }
 
 
@@ -701,6 +894,127 @@ def _action_time_trigger_counts(
             now_ms=now,
         ),
     }
+
+
+def _action_time_trigger_identity(
+    conn: sa.engine.Connection,
+    *,
+    now_ms: int,
+) -> dict[str, str]:
+    inspector = sa.inspect(conn)
+    metadata = sa.MetaData()
+    if inspector.has_table("brc_action_time_tickets"):
+        tickets = sa.Table(
+            "brc_action_time_tickets",
+            metadata,
+            autoload_with=conn,
+        )
+        ticket = conn.execute(
+            sa.select(tickets)
+            .where(
+                tickets.c.status.in_(
+                    ["created", "preflight_pending", "finalgate_ready"]
+                ),
+                tickets.c.expires_at_ms > now_ms,
+            )
+            .order_by(tickets.c.created_at_ms.desc())
+            .limit(1)
+        ).mappings().first()
+        if ticket is not None:
+            return _trigger_identity_row(ticket, ticket_id=str(ticket["ticket_id"]))
+
+    if inspector.has_table("brc_action_time_lane_inputs"):
+        lanes = sa.Table(
+            "brc_action_time_lane_inputs",
+            metadata,
+            autoload_with=conn,
+        )
+        lane = conn.execute(
+            sa.select(lanes)
+            .where(
+                lanes.c.lane_scope == "real_submit_candidate",
+                lanes.c.status.in_(
+                    ["opened", "facts_refreshing", "ticket_pending", "ticket_created"]
+                ),
+                lanes.c.expires_at_ms > now_ms,
+                lanes.c.closed_at_ms.is_(None),
+            )
+            .order_by(lanes.c.created_at_ms.desc())
+            .limit(1)
+        ).mappings().first()
+        if lane is not None:
+            return _trigger_identity_row(
+                lane,
+                action_time_lane_input_id=str(lane["action_time_lane_input_id"]),
+            )
+
+    if inspector.has_table("brc_promotion_candidates"):
+        promotions = sa.Table(
+            "brc_promotion_candidates",
+            metadata,
+            autoload_with=conn,
+        )
+        promotion = conn.execute(
+            sa.select(promotions)
+            .where(
+                promotions.c.status.in_(
+                    ["eligible", "arbitration_pending", "arbitration_won"]
+                ),
+                promotions.c.expires_at_ms > now_ms,
+                promotions.c.closed_at_ms.is_(None),
+            )
+            .order_by(promotions.c.created_at_ms.desc())
+            .limit(1)
+        ).mappings().first()
+        if promotion is not None:
+            return _trigger_identity_row(
+                promotion,
+                promotion_candidate_id=str(promotion["promotion_candidate_id"]),
+            )
+
+    if inspector.has_table("brc_live_signal_events"):
+        signals = sa.Table(
+            "brc_live_signal_events",
+            metadata,
+            autoload_with=conn,
+        )
+        signal = conn.execute(
+            sa.select(signals)
+            .where(
+                signals.c.source_kind == "live_market",
+                signals.c.status == "facts_validated",
+                signals.c.freshness_state == "fresh",
+                signals.c.expires_at_ms > now_ms,
+                signals.c.invalidated_at_ms.is_(None),
+            )
+            .order_by(signals.c.observed_at_ms.desc())
+            .limit(1)
+        ).mappings().first()
+        if signal is not None:
+            return _trigger_identity_row(
+                signal,
+                signal_event_id=str(signal["signal_event_id"]),
+            )
+    return {}
+
+
+def _trigger_identity_row(
+    row: Mapping[str, Any],
+    **overrides: str,
+) -> dict[str, str]:
+    result = {
+        "strategy_group_id": str(row.get("strategy_group_id") or ""),
+        "symbol": str(row.get("symbol") or ""),
+        "side": str(row.get("side") or ""),
+        "signal_event_id": str(row.get("signal_event_id") or ""),
+        "promotion_candidate_id": str(row.get("promotion_candidate_id") or ""),
+        "action_time_lane_input_id": str(
+            row.get("action_time_lane_input_id") or ""
+        ),
+        "ticket_id": str(row.get("ticket_id") or ""),
+    }
+    result.update(overrides)
+    return {key: value for key, value in result.items() if value}
 
 
 def _now_ms() -> int:
