@@ -51,7 +51,10 @@ def build_operator_evidence(
     status = "blocked_forbidden_effect"
     next_step = "resolve_operator_evidence_forbidden_effects"
     if not forbidden_effects:
-        if watch_status in {
+        if watch_status == "runtime_signal_identity_gap":
+            status = "runtime_signal_identity_gap"
+            next_step = "repair_pg_live_signal_identity_handoff"
+        elif watch_status in {
             "runtime_signal_ready",
             "runtime_signal_ready_for_action_time_ticket",
         }:
@@ -137,6 +140,8 @@ def _allowed_review_checkpoints(
     watch_evidence: dict[str, Any],
     diagnostic_evidence: dict[str, Any],
 ) -> list[str]:
+    if status == "runtime_signal_identity_gap":
+        return []
     if status == "runtime_signal_attention":
         watch_plan = watch_evidence.get("watch_evidence_plan")
         return list(

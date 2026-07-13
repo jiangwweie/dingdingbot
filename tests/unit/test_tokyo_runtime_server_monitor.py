@@ -141,6 +141,91 @@ def test_retryable_process_failure_is_temporarily_unavailable_and_notified():
     assert decision["blocker_class"] == "runtime_process_failure"
 
 
+def test_signal_identity_gap_is_named_and_explained_without_owner_action():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "runtime_process_outcomes": [
+            {
+                "process_name": "live_signal_materialization",
+                "scope_key": "lane:CPM-RO-001:BNBUSDT:long",
+                "process_state": "retryable_failure",
+                "business_state": "temporarily_unavailable",
+                "first_blocker": (
+                    "pg_live_signal_event_materialization_failed:"
+                    "fresh_public_fact_snapshot_missing"
+                ),
+                "source_watermark": "runtime-1:1783907999999",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            }
+        ],
+        "ticket_bound_exchange_commands": [],
+        "action_time_tickets": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "waiting_for_signal", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "temporarily_unavailable"
+    assert decision["notify"] is True
+    assert decision["strategy_group_id"] == "CPM-RO-001"
+    assert decision["symbol"] == "BNBUSDT"
+    assert decision["side"] == "long"
+    assert decision["owner_message"] == (
+        "信号状态不一致，未下单；系统将继续处理，无需操作"
+    )
+
+    intent = module._monitor_decision_owner_intent(
+        decision,
+        now_ms=PG_TEST_NOW_MS,
+    )
+    assert intent is not None
+    assert intent.headline == "信号状态不一致，未下单"
+    assert intent.current_state == "系统没有为这次观察建立正式交易信号"
+    assert intent.result_summary == "没有下单"
+    assert intent.plain_reason == "市场观察结果和正式交易事实没有成功衔接"
+    assert intent.next_system_action == "系统继续核对信号事实并等待下一次有效机会"
+    assert intent.owner_action_required is False
+
+
+def test_observe_only_pg_signal_is_not_a_trading_opportunity_event():
+    module = _load_module()
+
+    event = module._recent_pg_chain_event(
+        {
+            "read_now_ms": PG_TEST_NOW_MS,
+            "runtime_process_outcomes": [],
+            "live_signal_events": [
+                {
+                    "signal_event_id": "signal:observe-only",
+                    "strategy_group_id": "CPM-RO-001",
+                    "symbol": "ETHUSDT",
+                    "side": "long",
+                    "source_kind": "live_market",
+                    "status": "facts_validated",
+                    "freshness_state": "fresh",
+                    "execution_eligible": False,
+                    "required_execution_mode": "observe_only",
+                    "expires_at_ms": PG_TEST_NOW_MS + 60_000,
+                }
+            ],
+            "promotion_candidates": [],
+            "action_time_lane_inputs": [],
+            "action_time_tickets": [],
+            "ticket_bound_exchange_commands": [],
+            "ticket_bound_protected_submit_attempts": [],
+            "ticket_bound_order_lifecycle_runs": [],
+        }
+    )
+
+    assert event == {}
+
+
 def test_expired_event_scoped_retryable_failure_remains_visible_to_monitor():
     module = _load_module()
     control_state = {
@@ -1113,7 +1198,8 @@ def test_pg_blocked_protected_submit_attempt_notifies_owner(
                 "ticket_bound_protected_submit_attempt"
             )
             assert artifact["decision"]["strategy_group_id"] == "SOR-001"
-            assert artifact["decision"]["symbol"] == "ETHUSDT:long"
+            assert artifact["decision"]["symbol"] == "ETHUSDT"
+            assert artifact["decision"]["side"] == "long"
             assert artifact["notification"]["attempted"] is True
             assert calls
     finally:

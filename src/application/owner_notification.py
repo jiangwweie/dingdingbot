@@ -238,6 +238,8 @@ def project_owner_notification_intents(
             signal.get("source_kind") == "live_market"
             and signal.get("status") == "facts_validated"
             and signal.get("freshness_state") == "fresh"
+            and signal.get("execution_eligible") is True
+            and str(signal.get("required_execution_mode") or "") != "observe_only"
             and int(signal.get("expires_at_ms") or 0) > now_ms
         )
         if fresh:

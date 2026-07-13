@@ -23,14 +23,23 @@ def build_wakeup_evidence(operator_evidence: dict[str, Any]) -> dict[str, Any]:
     forbidden_effects = _forbidden_effects(operator_evidence)
 
     ready_count = _int(signal_counts.get("runtime_ready_signal_count"))
+    signal_event_ids = [
+        str(item)
+        for item in prepare_context.get("signal_event_ids") or []
+        if str(item or "").strip()
+    ]
     if forbidden_effects:
         status = "blocked_forbidden_effect"
         owner_attention = "immediate_review_required"
         next_step = "stop_and_review_forbidden_observation_effects"
-    elif ready_count > 0:
+    elif ready_count > 0 and signal_event_ids:
         status = "runtime_signal_ready_for_action_time_ticket"
         owner_attention = "review_when_available"
         next_step = "materialize_pg_action_time_ticket"
+    elif ready_count > 0:
+        status = "runtime_signal_identity_gap"
+        owner_attention = "review_when_available"
+        next_step = "repair_pg_live_signal_identity_handoff"
     elif operator_evidence.get("status") == "observation_running_no_signal":
         status = "owner_sleep_safe_observation_running"
         owner_attention = "no_owner_action_needed_now"
@@ -67,7 +76,7 @@ def build_wakeup_evidence(operator_evidence: dict[str, Any]) -> dict[str, Any]:
             "strategy_group_no_action_signal_count": _int(
                 signal_counts.get("strategy_group_no_action_signal_count")
             ),
-            "signal_event_ids": list(prepare_context.get("signal_event_ids") or []),
+            "signal_event_ids": signal_event_ids,
             "next_step": next_step,
         },
         "allowed_while_owner_asleep": _allowed_while_owner_asleep(
@@ -115,6 +124,8 @@ def _allowed_while_owner_asleep(
     prepare_context: dict[str, Any],
 ) -> list[str]:
     if status == "blocked_forbidden_effect":
+        return []
+    if status == "runtime_signal_identity_gap":
         return []
     if status == "owner_sleep_safe_observation_running":
         return ["continue_active_runtime_observation"]

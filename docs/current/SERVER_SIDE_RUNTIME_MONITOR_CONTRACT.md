@@ -35,6 +35,13 @@ Local owns development diagnostics only.
 FinalGate and Operation Layer remain action-time execution gates only.
 ```
 
+The runtime signal watcher is a PG producer, not an Owner notifier. It may
+write watcher coverage, live signal events, and lane-scoped process outcomes,
+and may emit structured stdout for diagnostics. It must not read a Feishu
+webhook, send Owner messages, or keep process-local notification dedupe state.
+All production Feishu delivery is owned by the server monitor and its PG
+notification ledger.
+
 After PG cutover, the server monitor reads Tokyo PG current state plus readonly
 system/process/deploy health. It may classify the current state as quiet or
 notify and may send a Feishu message. It must not create order authority or
