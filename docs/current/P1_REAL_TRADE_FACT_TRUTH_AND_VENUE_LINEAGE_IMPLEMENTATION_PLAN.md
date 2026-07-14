@@ -108,10 +108,10 @@ last_verified: 2026-07-14
 - [x] Run `python3 scripts/audit_production_runtime_file_io.py` and require `performance_risk.status=clear`.
 - [x] Run `python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked`.
 - [x] Run the complete Release suite once and require zero failures.
-- [ ] Commit and push the focused branch.
-- [ ] Deploy through the Tokyo deployment contract and run read-only PG/runtime acceptance.
-- [ ] Verify the three real Tickets: first SOL exact economics, AVAX exact SL lineage, and latest SOL automatic terminal Outcome when closed.
-- [ ] Create and push `release/brc-real-trade-fact-truth-20260714-r0` and annotated tag `brc-real-trade-fact-truth-20260714-r0` from the certified commit.
+- [x] Commit and push the focused branch.
+- [x] Deploy through the Tokyo deployment contract and run read-only PG/runtime acceptance.
+- [x] Verify the three real Tickets: first SOL exact economics, AVAX exact SL lineage, and latest SOL automatic terminal Outcome when closed.
+- [x] Create and push `release/brc-real-trade-fact-truth-20260714-r0` and annotated tag `brc-real-trade-fact-truth-20260714-r0` from the certified commit.
 
 ## Stop Condition
 

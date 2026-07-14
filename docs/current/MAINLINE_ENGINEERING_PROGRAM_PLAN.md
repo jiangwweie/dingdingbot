@@ -588,6 +588,11 @@ This work is the prerequisite truth layer for **P2-E**. It must not introduce
 portfolio sizing or multi-position policy while repairing historical/current
 Ticket facts.
 
+**Production acceptance:** complete on Tokyo. Three real Tickets now converge
+to one terminal Ticket/lifecycle/closure truth, conditional SL parent/actual
+child identities remain auditable, and closed-fact repair cannot reopen a
+terminal lifecycle.
+
 ### P2-E Advanced Capital Risk Allocation
 
 #### Goal
