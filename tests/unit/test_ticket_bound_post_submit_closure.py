@@ -123,6 +123,66 @@ def test_post_submit_closure_refreshes_blocked_after_protection_set_materialized
     assert _json_value(row["blockers"]) == ["post_submit_reconciliation_fact_missing"]
 
 
+def test_post_submit_closure_accepts_exact_protection_recovery_order_lineage(
+    pg_control_connection,
+):
+    ids, prepared = _submitted_attempt(pg_control_connection)
+    attempt_id = prepared["protected_submit_attempt_id"]
+    raw = pg_control_connection.execute(
+        text(
+            "SELECT submit_result FROM brc_ticket_bound_protected_submit_attempts "
+            "WHERE protected_submit_attempt_id = :attempt_id"
+        ),
+        {"attempt_id": attempt_id},
+    ).scalar_one()
+    submit_result = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    replacements = {
+        "SL": "ticket_protection_recovery_command:unit:SL",
+        "TP1": "ticket_protection_recovery_command:unit:TP1",
+    }
+    for order in submit_result["submitted_orders"]:
+        role = str(order.get("order_role") or "").upper()
+        if role not in replacements:
+            continue
+        order["local_order_id"] = replacements[role]
+        pg_control_connection.execute(
+            text(
+                "UPDATE brc_ticket_bound_exchange_commands "
+                "SET command_source = 'protection_recovery', "
+                "    local_order_id = :local_order_id, "
+                "    command_state = 'confirmed_submitted' "
+                "WHERE protected_submit_attempt_id = :attempt_id "
+                "  AND order_role = :role"
+            ),
+            {
+                "attempt_id": attempt_id,
+                "role": role,
+                "local_order_id": replacements[role],
+            },
+        )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_protected_submit_attempts "
+            "SET submit_result = :submit_result "
+            "WHERE protected_submit_attempt_id = :attempt_id"
+        ),
+        {
+            "attempt_id": attempt_id,
+            "submit_result": json.dumps(submit_result, sort_keys=True),
+        },
+    )
+
+    payload = closure.materialize_ticket_bound_post_submit_closure(
+        pg_control_connection,
+        protected_submit_attempt_id=attempt_id,
+        now_ms=NOW_MS + 8000,
+    )
+
+    assert payload["status"] == "reconciliation_pending"
+    assert "submit_result_order_id_not_in_ticket_request" not in payload["blockers"]
+    assert "submit_result_order_ids_incomplete" not in payload["blockers"]
+
+
 def test_post_submit_closure_refreshes_reconciliation_pending_projection(
     pg_control_connection,
 ):

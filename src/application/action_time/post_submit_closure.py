@@ -122,7 +122,7 @@ def materialize_ticket_bound_post_submit_closure(
             next_action="repair_ticket_bound_protected_submit_attempt",
         )
 
-    blockers = _attempt_blockers(attempt)
+    blockers = _attempt_blockers(conn, attempt)
     blockers.extend(_exit_protection_blockers(conn, attempt))
     protection_state = _protection_state(conn, attempt)
     if protection_state != "submitted":
@@ -290,7 +290,7 @@ def materialize_ticket_bound_lifecycle_closure(
     review_evidence_id = str(review_evidence_id or "").strip()
     realized_pnl_decimal = _decimal_or_none(realized_pnl)
 
-    blockers = _attempt_blockers(attempt)
+    blockers = _attempt_blockers(conn, attempt)
     blockers.extend(_exit_protection_blockers(conn, attempt))
     blockers.extend(
         _lifecycle_closure_blockers(
@@ -528,7 +528,10 @@ def _attempt_sort_key(attempt: dict[str, Any]) -> tuple[int, int, str]:
     )
 
 
-def _attempt_blockers(attempt: dict[str, Any]) -> list[str]:
+def _attempt_blockers(
+    conn: sa.engine.Connection,
+    attempt: dict[str, Any],
+) -> list[str]:
     blockers: list[str] = []
     if attempt.get("status") != "submitted":
         blockers.append(f"protected_submit_attempt_not_submitted:{attempt.get('status')}")
@@ -555,23 +558,38 @@ def _attempt_blockers(attempt: dict[str, Any]) -> list[str]:
     submit_result = _as_dict(attempt.get("submit_result"))
     if submit_result.get("status") != "exchange_submit_orders_submitted":
         blockers.append(f"submit_result_not_submitted:{submit_result.get('status')}")
+    request_orders = [
+        dict(order)
+        for order in _as_dict(attempt.get("submit_request")).get("orders", [])
+        if isinstance(order, dict)
+    ]
+    submitted_orders = [
+        dict(order)
+        for order in submit_result.get("submitted_orders", [])
+        if isinstance(order, dict)
+    ]
     request_order_ids = {
         str(order.get("local_order_id") or "")
-        for order in _as_dict(attempt.get("submit_request")).get("orders", [])
+        for order in request_orders
         if order.get("local_order_id")
     }
     submitted_order_ids = {
         str(order.get("local_order_id") or "")
-        for order in submit_result.get("submitted_orders", [])
+        for order in submitted_orders
         if order.get("local_order_id")
     }
     if not request_order_ids:
         blockers.append("submit_request_order_ids_missing")
     if not submitted_order_ids:
         blockers.append("submit_result_submitted_order_ids_missing")
-    if not submitted_order_ids.issubset(request_order_ids):
+    if not _submitted_order_lineage_matches_request(
+        conn,
+        attempt=attempt,
+        request_orders=request_orders,
+        submitted_orders=submitted_orders,
+    ):
         blockers.append("submit_result_order_id_not_in_ticket_request")
-    if request_order_ids and submitted_order_ids != request_order_ids:
+    if _order_roles(request_orders) != _order_roles(submitted_orders):
         blockers.append("submit_result_order_ids_incomplete")
     if not _entry_fill_confirmed(attempt):
         blockers.append("entry_fill_not_confirmed")
@@ -580,6 +598,81 @@ def _attempt_blockers(attempt: dict[str, Any]) -> list[str]:
     if not _submitted_reduce_only_role(submit_result, "TP1"):
         blockers.append("tp1_reduce_only_exchange_order_missing")
     return _dedupe(blockers)
+
+
+def _submitted_order_lineage_matches_request(
+    conn: sa.engine.Connection,
+    *,
+    attempt: dict[str, Any],
+    request_orders: list[dict[str, Any]],
+    submitted_orders: list[dict[str, Any]],
+) -> bool:
+    request_by_role = {
+        str(order.get("order_role") or "").upper(): order
+        for order in request_orders
+        if str(order.get("order_role") or "").strip()
+    }
+    if len(request_by_role) != len(request_orders):
+        return False
+    for submitted in submitted_orders:
+        role = str(submitted.get("order_role") or "").upper()
+        requested = request_by_role.get(role)
+        if not requested:
+            return False
+        submitted_local_id = str(submitted.get("local_order_id") or "").strip()
+        requested_local_id = str(requested.get("local_order_id") or "").strip()
+        if submitted_local_id and submitted_local_id == requested_local_id:
+            continue
+        if role not in {"SL", "TP1"}:
+            return False
+        if not _exact_protection_recovery_command_lineage(
+            conn,
+            attempt=attempt,
+            submitted_order=submitted,
+        ):
+            return False
+    return True
+
+
+def _exact_protection_recovery_command_lineage(
+    conn: sa.engine.Connection,
+    *,
+    attempt: dict[str, Any],
+    submitted_order: dict[str, Any],
+) -> bool:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
+        return False
+    local_order_id = str(submitted_order.get("local_order_id") or "").strip()
+    exchange_order_id = str(
+        submitted_order.get("exchange_order_id") or ""
+    ).strip()
+    role = str(submitted_order.get("order_role") or "").upper()
+    if not local_order_id or not exchange_order_id or role not in {"SL", "TP1"}:
+        return False
+    commands = _table(conn, "brc_ticket_bound_exchange_commands")
+    row = conn.execute(
+        sa.select(commands.c.exchange_command_id).where(
+            commands.c.protected_submit_attempt_id
+            == str(attempt.get("protected_submit_attempt_id") or ""),
+            commands.c.ticket_id == str(attempt.get("ticket_id") or ""),
+            commands.c.command_source == "protection_recovery",
+            commands.c.order_role == role,
+            commands.c.local_order_id == local_order_id,
+            commands.c.exchange_order_id == exchange_order_id,
+            commands.c.command_state.in_(
+                ("confirmed_submitted", "reconciled_submitted")
+            ),
+        )
+    ).first()
+    return row is not None
+
+
+def _order_roles(orders: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(order.get("order_role") or "").upper()
+        for order in orders
+        if str(order.get("order_role") or "").strip()
+    }
 
 
 def _exit_protection_blockers(
