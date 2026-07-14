@@ -55,10 +55,12 @@ MIGRATIONS = {
     / "migrations/versions/2026-07-14-123_repair_terminal_budget_reservations.py",
     "124": REPO_ROOT
     / "migrations/versions/2026-07-14-124_add_account_capacity_reservation_scope.py",
+    "125": REPO_ROOT
+    / "migrations/versions/2026-07-14-125_add_account_capacity_claim_policy_event.py",
 }
 REVISION_ORDER = (
     "086", "103", "104", "105", "106", "107", "108", "109", "110", "111",
-    "112", "113", "114", "115", "116", "117", "118", "121", "122", "123", "124",
+    "112", "113", "114", "115", "116", "117", "118", "121", "122", "123", "124", "125",
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 

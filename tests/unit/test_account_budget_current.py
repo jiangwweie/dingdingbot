@@ -28,8 +28,8 @@ def test_consumed_reservation_is_claim_ceiling_not_additive_to_open_exposure() -
         sa.text(
             """
             INSERT INTO brc_budget_reservations VALUES
-              ('budget-1', 'account-1', 'ticket-1', 'consumed', '15', '30'),
-              ('budget-2', 'account-1', 'ticket-2', 'active', '9', '18')
+              ('budget-1', 'account-1', 'ticket-1', 'consumed', '15', '30', 'exchange_reflected'),
+              ('budget-2', 'account-1', 'ticket-2', 'active', '9', '18', 'reserved_unreflected')
             """
         )
     )
@@ -72,6 +72,38 @@ def test_semantically_identical_refresh_preserves_capacity_projection_version() 
 
     assert first.projection_version == 1
     assert second.projection_version == 1
+
+
+def test_active_unreflected_claim_margin_reduces_account_margin_capacity() -> None:
+    conn = _connection()
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_budget_reservations VALUES
+              ('budget-1', 'account-1', 'ticket-1', 'active', '9', '100',
+               'reserved_unreflected')
+            """
+        )
+    )
+
+    budget = project_account_budget_current(
+        conn,
+        snapshot=_snapshot(),
+        runtime_profile_id="profile-1",
+        policy=_policy(),
+        now_ms=NOW_MS,
+    )
+
+    assert budget.unreflected_pending_margin == Decimal("100")
+    assert budget.new_entry_allowed is True
+    row = conn.execute(
+        sa.text(
+            "SELECT portfolio_margin_used, portfolio_margin_remaining "
+            "FROM brc_account_budget_current"
+        )
+    ).mappings().one()
+    assert Decimal(str(row["portfolio_margin_used"])) == Decimal("200")
+    assert Decimal(str(row["portfolio_margin_remaining"])) == Decimal("340")
 
 
 def _policy() -> AccountRiskPolicy:
@@ -127,7 +159,8 @@ def _connection() -> sa.Connection:
             """
             CREATE TABLE brc_budget_reservations (
                 budget_reservation_id TEXT PRIMARY KEY, account_id TEXT, ticket_id TEXT,
-                status TEXT, risk_at_stop NUMERIC, reserved_margin NUMERIC
+                status TEXT, risk_at_stop NUMERIC, reserved_margin NUMERIC,
+                margin_accounting_state TEXT
             )
             """
         )

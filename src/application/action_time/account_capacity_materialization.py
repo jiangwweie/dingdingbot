@@ -44,6 +44,12 @@ def materialize_account_capacity_from_snapshot(
     classification = classify_account_exchange_truth(conn, snapshot=snapshot)
     if classification.blockers:
         return _blocked(classification.blockers[0])
+    if not lock_account_budget_current(
+        conn,
+        account_id=candidate.account_id,
+        runtime_profile_id=runtime_profile_id,
+    ):
+        return _blocked("account_budget_current_missing")
     policy = load_account_risk_policy_current(
         conn, account_id=candidate.account_id, runtime_profile_id=runtime_profile_id
     )
@@ -68,3 +74,23 @@ def materialize_account_capacity_from_snapshot(
 
 def _blocked(blocker: str) -> AccountCapacityReservationResult:
     return AccountCapacityReservationResult(allowed=False, first_blocker=blocker)
+
+
+def lock_account_budget_current(
+    conn: sa.Connection,
+    *,
+    account_id: str,
+    runtime_profile_id: str,
+) -> bool:
+    """Acquire the account capacity row before any current projection is written."""
+
+    if not sa.inspect(conn).has_table("brc_account_budget_current"):
+        return False
+    budgets = sa.Table("brc_account_budget_current", sa.MetaData(), autoload_with=conn)
+    row = conn.execute(
+        sa.select(budgets.c.account_budget_current_id)
+        .where(budgets.c.account_id == account_id)
+        .where(budgets.c.runtime_profile_id == runtime_profile_id)
+        .with_for_update()
+    ).first()
+    return row is not None

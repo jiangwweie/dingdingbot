@@ -533,9 +533,12 @@ def account_capacity_current_blockers(
     """Revalidate the active account-capacity claim without network I/O."""
 
     policy_version = str(budget.get("account_risk_policy_version") or "").strip()
+    policy_event_id = str(budget.get("account_risk_policy_event_id") or "").strip()
     expected_projection_version = budget.get("account_capacity_projection_version")
     if not policy_version or expected_projection_version is None:
         return [], False
+    if not policy_event_id:
+        return ["account_risk_policy_event_missing"], True
     required_tables = {
         "brc_account_risk_policy_current",
         "brc_account_budget_current",
@@ -552,6 +555,8 @@ def account_capacity_current_blockers(
     ).mappings().one_or_none()
     if policy is None or str(policy.get("risk_policy_version") or "") != policy_version:
         return ["account_risk_policy_missing_or_changed"], True
+    if str(policy.get("source_event_id") or "") != policy_event_id:
+        return ["account_risk_policy_event_changed"], True
     if str(policy.get("activation_state") or "") != "active":
         return ["account_risk_policy_not_active"], True
     current = sa.Table(

@@ -2119,6 +2119,19 @@ def _budget_row(
             if account_capacity is not None
             else None
         ),
+        "account_risk_policy_event_id": (
+            account_capacity.account_risk_policy_event_id
+            if account_capacity is not None
+            else None
+        ),
+        "allowed_risk_budget": (
+            account_capacity.allocated_risk
+            if account_capacity is not None
+            else None
+        ),
+        "margin_accounting_state": (
+            "reserved_unreflected" if account_capacity is not None else None
+        ),
         "risk_cluster_id": (
             account_capacity.risk_cluster_id
             if account_capacity is not None

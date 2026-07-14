@@ -32,6 +32,13 @@ OrderPurpose = Literal[
 ]
 
 _TERMINAL_COMMAND_STATES = {"confirmed_rejected", "reconciled_absent"}
+_TERMINAL_TICKET_STATUSES = {
+    "expired",
+    "finalgate_rejected",
+    "invalidated",
+    "superseded",
+    "closed",
+}
 _PURPOSE_BY_ROLE: dict[str, OrderPurpose] = {
     "ENTRY": "working_entry",
     "SL": "initial_stop",
@@ -162,6 +169,13 @@ def _classify_position(
     ticket_instruments: dict[str, set[str]],
 ) -> AccountPositionClassification:
     instrument_id = _instrument_id(conn, exchange_id, position.exchange_symbol)
+    if instrument_id is None:
+        return AccountPositionClassification(
+            exchange_symbol=position.exchange_symbol,
+            exchange_instrument_id="unresolved",
+            ownership_state="external_unowned",
+            blocker="account_exchange_instrument_identity_missing",
+        )
     if position_mode == "hedge" and position.position_side not in {"LONG", "SHORT"}:
         return AccountPositionClassification(
             exchange_symbol=position.exchange_symbol,
@@ -205,7 +219,14 @@ def _command_identity_evidence(
     identity_map: dict[str, set[tuple[str, str]]] = defaultdict(set)
     ticket_instruments: dict[str, set[str]] = defaultdict(set)
     columns = table.c
-    rows = conn.execute(sa.select(table)).mappings()
+    tickets = _table_if_present(conn, "brc_action_time_tickets")
+    statement = sa.select(table)
+    if tickets is not None and {"ticket_id", "status"} <= set(tickets.c.keys()):
+        statement = (
+            statement.join(tickets, tickets.c.ticket_id == table.c.ticket_id)
+            .where(tickets.c.status.not_in(_TERMINAL_TICKET_STATUSES))
+        )
+    rows = conn.execute(statement).mappings()
     for row in rows:
         if str(row.get("command_state") or "") in _TERMINAL_COMMAND_STATES:
             continue
@@ -227,18 +248,27 @@ def _command_identity_evidence(
     return dict(identity_map), dict(ticket_instruments)
 
 
-def _instrument_id(conn: sa.Connection, exchange_id: str, symbol: str) -> str:
+def _instrument_id(conn: sa.Connection, exchange_id: str, symbol: str) -> str | None:
     mapping = _table_if_present(conn, "brc_symbol_instrument_mappings")
-    if mapping is not None and "symbol" in mapping.c and "exchange_instrument_id" in mapping.c:
-        row = conn.execute(
-            sa.select(mapping.c.exchange_instrument_id).where(
-                mapping.c.symbol == symbol,
-                mapping.c.status == "active" if "status" in mapping.c else sa.true(),
-            )
-        ).scalar_one_or_none()
-        if row:
-            return str(row)
-    return f"{exchange_id}:{symbol}"
+    instruments = _table_if_present(conn, "brc_exchange_instruments")
+    if mapping is None or instruments is None:
+        return None
+    required_mapping = {"symbol", "exchange_instrument_id", "status"}
+    required_instruments = {"exchange_instrument_id", "exchange_id", "status"}
+    if not required_mapping <= set(mapping.c.keys()) or not required_instruments <= set(instruments.c.keys()):
+        return None
+    row = conn.execute(
+        sa.select(mapping.c.exchange_instrument_id)
+        .join(
+            instruments,
+            instruments.c.exchange_instrument_id == mapping.c.exchange_instrument_id,
+        )
+        .where(mapping.c.symbol == symbol)
+        .where(mapping.c.status == "active")
+        .where(instruments.c.exchange_id == exchange_id)
+        .where(instruments.c.status == "active")
+    ).scalar_one_or_none()
+    return str(row) if row else None
 
 
 def _table_if_present(conn: sa.Connection, table_name: str) -> sa.Table | None:

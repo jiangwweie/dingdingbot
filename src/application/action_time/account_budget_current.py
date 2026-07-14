@@ -93,10 +93,20 @@ def project_account_budget_current(
     exposure_held_risk = sum(
         (_decimal(row.get("held_risk")) for row in live_exposures), _ZERO
     )
-    pending_margin = sum(
+    exposure_pending_margin = sum(
         (_decimal(row.get("unreflected_pending_margin")) for row in live_exposures),
         _ZERO,
     )
+    reservation_pending_margin = sum(
+        (
+            _decimal(row.get("reserved_margin"))
+            for row in effective_reservations
+            if str(row.get("margin_accounting_state") or "")
+            == "reserved_unreflected"
+        ),
+        _ZERO,
+    )
+    pending_margin = exposure_pending_margin + reservation_pending_margin
     blockers = sorted({str(row["first_blocker"]) for row in exposures if row.get("first_blocker")})
     # `held_risk` is the per-exposure max of actual directional risk, remaining
     # working-entry risk, and any known reservation.  Summing the rows once

@@ -8,6 +8,7 @@ from src.application.action_time.account_risk_policy import (
     AccountRiskPolicy,
     append_account_risk_policy_event,
     load_account_risk_policy_current,
+    load_account_risk_policy_current_projection,
 )
 
 
@@ -89,3 +90,63 @@ def test_append_policy_projects_account_scoped_owner_values_without_strategy_sco
     assert policy.planned_stop_risk_fraction == Decimal("0.025")
     assert policy.max_concurrent_positions == 2
     assert loaded == policy
+
+
+def test_distinct_owner_operations_append_immutable_events_and_replace_current_epoch() -> None:
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        _create_policy_tables(conn)
+        activate = AccountRiskPolicy(
+            risk_policy_version="account-risk-v0-owner-20260714",
+            planned_stop_risk_fraction=Decimal("0.025"),
+            max_concurrent_positions=2,
+            max_portfolio_open_risk_fraction=Decimal("0.06"),
+            max_cluster_open_risk_fraction=Decimal("0.04"),
+            max_portfolio_initial_margin_fraction=Decimal("0.90"),
+            max_leverage=10,
+            max_new_action_time_lanes=1,
+            automatic_downsize_enabled=True,
+            unknown_exposure_policy="global_fail_closed",
+            activation_state="active",
+        )
+        rollback = activate.model_copy(update={"max_concurrent_positions": 1})
+        append_account_risk_policy_event(
+            conn,
+            account_id="binance-subaccount-1",
+            runtime_profile_id="runtime-order-capable",
+            event_type="activate_dual_position_v0",
+            policy=activate,
+            created_by="owner",
+            operation_id="owner-operation-activate",
+            now_ms=1_752_480_000_000,
+        )
+        first = load_account_risk_policy_current_projection(
+            conn,
+            account_id="binance-subaccount-1",
+            runtime_profile_id="runtime-order-capable",
+        )
+        append_account_risk_policy_event(
+            conn,
+            account_id="binance-subaccount-1",
+            runtime_profile_id="runtime-order-capable",
+            event_type="rollback_single_position",
+            policy=rollback,
+            created_by="owner",
+            operation_id="owner-operation-rollback",
+            now_ms=1_752_480_001_000,
+        )
+        second = load_account_risk_policy_current_projection(
+            conn,
+            account_id="binance-subaccount-1",
+            runtime_profile_id="runtime-order-capable",
+        )
+
+        event_count = conn.execute(
+            sa.text("SELECT COUNT(*) FROM brc_account_risk_policy_events")
+        ).scalar_one()
+
+    assert first is not None
+    assert second is not None
+    assert first.source_event_id != second.source_event_id
+    assert second.policy.max_concurrent_positions == 1
+    assert event_count == 2

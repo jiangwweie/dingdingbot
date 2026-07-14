@@ -15,6 +15,9 @@ ACCOUNT_POLICY = ROOT / "migrations/versions/2026-07-14-121_create_account_risk_
 ACCOUNT_CAPACITY_RESERVATION_SCOPE = (
     ROOT / "migrations/versions/2026-07-14-124_add_account_capacity_reservation_scope.py"
 )
+ACCOUNT_CAPACITY_CLAIM_POLICY_EVENT = (
+    ROOT / "migrations/versions/2026-07-14-125_add_account_capacity_claim_policy_event.py"
+)
 
 
 def _load(path: Path, name: str):
@@ -94,4 +97,21 @@ def test_migration_124_binds_budget_reservations_to_account_capacity_scope() -> 
         "account_risk_policy_version",
         "risk_cluster_id",
         "account_capacity_projection_version",
+    } <= columns
+
+
+def test_migration_125_binds_capacity_claims_to_policy_event_and_margin_state() -> None:
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        _upgrade(conn, FOUNDATION, "migration_086_for_capacity_claim_event")
+        _upgrade(conn, ACCOUNT_CAPACITY_CLAIM_POLICY_EVENT, "migration_125_capacity_claim_event")
+        columns = {
+            column["name"]
+            for column in sa.inspect(conn).get_columns("brc_budget_reservations")
+        }
+
+    assert {
+        "account_risk_policy_event_id",
+        "allowed_risk_budget",
+        "margin_accounting_state",
     } <= columns

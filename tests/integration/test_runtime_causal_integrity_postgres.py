@@ -63,7 +63,7 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
 )
 
 
-def test_rci_harness_uses_postgresql_revision_124(
+def test_rci_harness_uses_postgresql_revision_125(
     postgres_certification_engine,
 ):
     assert postgres_certification_engine.dialect.name == "postgresql"
@@ -77,7 +77,7 @@ def test_rci_harness_uses_postgresql_revision_124(
             )
         ).scalar_one()
 
-    assert revision == "124"
+    assert revision == "125"
     assert invocation_table == "brc_action_time_invocations"
 
 

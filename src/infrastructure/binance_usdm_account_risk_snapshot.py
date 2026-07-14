@@ -31,8 +31,10 @@ class ExchangeOpenOrderRow(BaseModel):
     exchange_order_id: str = ""
     algo_id: str = ""
     client_order_id: str = ""
+    side: str = ""
     position_side: str = "BOTH"
     reduce_only: bool | None = None
+    close_position: bool | None = None
     order_type: str = ""
     quantity: Decimal | None = None
     price: Decimal | None = None
@@ -240,8 +242,10 @@ def _order_row(row: Any, *, algo: bool) -> ExchangeOpenOrderRow:
         exchange_order_id=str(row.get("orderId") or ""),
         algo_id=str(row.get("algoId") or "") if algo else "",
         client_order_id=str(row.get("clientOrderId") or ""),
+        side=str(row.get("side") or "").upper(),
         position_side=str(row.get("positionSide") or "BOTH").upper(),
         reduce_only=(row.get("reduceOnly") if isinstance(row.get("reduceOnly"), bool) else None),
+        close_position=(row.get("closePosition") if isinstance(row.get("closePosition"), bool) else None),
         order_type=str(row.get("type") or row.get("algoType") or ""),
         quantity=quantity,
         price=price,

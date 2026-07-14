@@ -30,6 +30,50 @@ def _connection() -> sa.Connection:
             """
         )
     )
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_symbol_instrument_mappings (
+              symbol TEXT NOT NULL,
+              exchange_instrument_id TEXT NOT NULL,
+              status TEXT NOT NULL
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_exchange_instruments (
+              exchange_instrument_id TEXT PRIMARY KEY,
+              exchange_id TEXT NOT NULL,
+              status TEXT NOT NULL
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_symbol_instrument_mappings VALUES "
+            "('ETHUSDT', 'binance_usdm:ETHUSDT', 'active')"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_exchange_instruments VALUES "
+            "('binance_usdm:ETHUSDT', 'binance_usdm', 'active')"
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_action_time_tickets (
+              ticket_id TEXT PRIMARY KEY,
+              status TEXT NOT NULL
+            )
+            """
+        )
+    )
     return conn
 
 
@@ -67,6 +111,13 @@ def _insert_command(
     role: str,
     instrument: str = "binance_usdm:ETHUSDT",
 ) -> None:
+    conn.execute(
+        sa.text(
+            "INSERT OR IGNORE INTO brc_action_time_tickets (ticket_id, status) "
+            "VALUES (:ticket_id, 'created')"
+        ),
+        {"ticket_id": ticket_id},
+    )
     conn.execute(
         sa.text(
             """
@@ -196,4 +247,65 @@ def test_hedge_order_without_position_side_is_ambiguous_and_two_ticket_position_
     conflict = classify_account_exchange_truth(conn, snapshot=_snapshot())
     assert conflict.positions[0].ownership_state == "identity_conflict"
     assert conflict.new_entry_allowed is False
+    conn.close()
+
+
+def test_closed_ticket_history_does_not_claim_a_current_position() -> None:
+    conn = _connection()
+    _insert_command(
+        conn,
+        command_id="old-command-a",
+        ticket_id="ticket-old-a",
+        exchange_order_id="old-a",
+        client_order_id="old-a",
+        role="ENTRY",
+    )
+    _insert_command(
+        conn,
+        command_id="old-command-b",
+        ticket_id="ticket-old-b",
+        exchange_order_id="old-b",
+        client_order_id="old-b",
+        role="ENTRY",
+    )
+    _insert_command(
+        conn,
+        command_id="current-command",
+        ticket_id="ticket-current",
+        exchange_order_id="current",
+        client_order_id="current",
+        role="ENTRY",
+    )
+    conn.execute(
+        sa.text(
+            "UPDATE brc_action_time_tickets SET status = 'closed' "
+            "WHERE ticket_id IN ('ticket-old-a', 'ticket-old-b')"
+        )
+    )
+
+    result = classify_account_exchange_truth(conn, snapshot=_snapshot())
+
+    assert result.positions[0].ownership_state == "owned_by_ticket"
+    assert result.positions[0].owner_ticket_id == "ticket-current"
+    assert result.new_entry_allowed is True
+    conn.close()
+
+
+def test_missing_canonical_instrument_mapping_blocks_position_ownership() -> None:
+    conn = _connection()
+    _insert_command(
+        conn,
+        command_id="current-command",
+        ticket_id="ticket-current",
+        exchange_order_id="current",
+        client_order_id="current",
+        role="ENTRY",
+    )
+    conn.execute(sa.text("DELETE FROM brc_symbol_instrument_mappings"))
+
+    result = classify_account_exchange_truth(conn, snapshot=_snapshot())
+
+    assert result.positions[0].ownership_state == "external_unowned"
+    assert result.positions[0].blocker == "account_exchange_instrument_identity_missing"
+    assert result.new_entry_allowed is False
     conn.close()

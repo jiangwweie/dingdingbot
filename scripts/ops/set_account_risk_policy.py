@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import sys
 import time
+from uuid import uuid4
 
 import sqlalchemy as sa
 
@@ -20,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.action_time.account_risk_policy import (  # noqa: E402
     AccountRiskPolicy,
     append_account_risk_policy_event,
+    load_account_risk_policy_current_projection,
     replace_risk_cluster_memberships,
 )
 from src.domain.account_risk import RiskClusterMembership  # noqa: E402
@@ -43,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
             policy=policy,
             created_by=args.created_by,
             now_ms=int(time.time() * 1000),
+            operation_id=args.operation_id,
         )
         if args.mode in {"shadow", "activate"}:
             replace_risk_cluster_memberships(
@@ -52,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
                 created_by=args.created_by,
                 now_ms=int(time.time() * 1000),
             )
+        current = load_account_risk_policy_current_projection(
+            conn,
+            account_id=args.account_id,
+            runtime_profile_id=args.runtime_profile_id,
+        )
     print(
         json.dumps(
             {
@@ -60,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
                 "account_id": args.account_id,
                 "runtime_profile_id": args.runtime_profile_id,
                 "risk_policy_version": policy.risk_policy_version,
+                "account_risk_policy_event_id": (
+                    current.source_event_id if current is not None else None
+                ),
                 "activation_state": policy.activation_state,
                 "max_concurrent_positions": policy.max_concurrent_positions,
             },
@@ -80,6 +91,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--account-id", default=DEFAULT_ACCOUNT_ID)
     parser.add_argument("--runtime-profile-id", default=DEFAULT_RUNTIME_PROFILE_ID)
     parser.add_argument("--created-by", default="codex_account_risk_policy_ops")
+    parser.add_argument("--operation-id", default=uuid4().hex)
     return parser.parse_args(argv)
 
 

@@ -17,6 +17,7 @@ def test_active_capacity_claim_requires_the_same_fresh_budget_projection() -> No
             "account_id": "account-1",
             "runtime_profile_id": "profile-1",
             "account_risk_policy_version": "policy-1",
+            "account_risk_policy_event_id": "policy-event-activate",
             "account_capacity_projection_version": 2,
         },
         now_ms=NOW_MS,
@@ -36,6 +37,7 @@ def test_active_capacity_claim_requires_the_same_fresh_budget_projection() -> No
             "account_id": "account-1",
             "runtime_profile_id": "profile-1",
             "account_risk_policy_version": "policy-1",
+            "account_risk_policy_event_id": "policy-event-activate",
             "account_capacity_projection_version": 2,
         },
         now_ms=NOW_MS,
@@ -43,6 +45,41 @@ def test_active_capacity_claim_requires_the_same_fresh_budget_projection() -> No
 
     assert active is True
     assert blockers == ["account_budget_projection_version_changed"]
+
+
+def test_active_capacity_claim_is_invalidated_when_owner_policy_event_changes() -> None:
+    conn = _connection()
+    budget = {
+        "account_id": "account-1",
+        "runtime_profile_id": "profile-1",
+        "account_risk_policy_version": "policy-1",
+        "account_risk_policy_event_id": "policy-event-activate",
+        "account_capacity_projection_version": 2,
+    }
+
+    blockers, active = subject.account_capacity_current_blockers(
+        conn,
+        budget=budget,
+        now_ms=NOW_MS,
+    )
+
+    assert active is True
+    assert blockers == []
+
+    conn.execute(
+        sa.text(
+            "UPDATE brc_account_risk_policy_current "
+            "SET source_event_id = 'policy-event-rollback'"
+        )
+    )
+    blockers, active = subject.account_capacity_current_blockers(
+        conn,
+        budget=budget,
+        now_ms=NOW_MS,
+    )
+
+    assert active is True
+    assert blockers == ["account_risk_policy_event_changed"]
 
 
 def test_legacy_budget_reservation_does_not_opt_into_capacity_gate() -> None:
@@ -95,7 +132,7 @@ def _connection() -> sa.Connection:
         sa.text(
             """CREATE TABLE brc_account_risk_policy_current (
                 account_id TEXT, runtime_profile_id TEXT, risk_policy_version TEXT,
-                activation_state TEXT
+                activation_state TEXT, source_event_id TEXT
             )"""
         )
     )
@@ -111,7 +148,7 @@ def _connection() -> sa.Connection:
     conn.execute(
         sa.text(
             """INSERT INTO brc_account_risk_policy_current VALUES
-            ('account-1', 'profile-1', 'policy-1', 'active')"""
+            ('account-1', 'profile-1', 'policy-1', 'active', 'policy-event-activate')"""
         )
     )
     conn.execute(

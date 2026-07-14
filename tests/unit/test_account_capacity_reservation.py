@@ -268,6 +268,81 @@ def test_account_capacity_can_only_downsize_existing_ticket_sizing() -> None:
     assert adapted.effective_notional == Decimal("450")
 
 
+def test_capacity_downsize_records_actual_rounded_stop_risk_and_keeps_ticket_basis() -> None:
+    conn = _connection()
+    conn.execute(
+        sa.text(
+            "CREATE TABLE brc_account_exposure_current ("
+            "account_id TEXT, exchange_instrument_id TEXT, held_risk NUMERIC, "
+            "position_slot_claimed BOOLEAN)"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_account_exposure_current VALUES "
+            "('account-1', 'binance_usdm:ETHUSDT', '15', true)"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_risk_cluster_memberships VALUES "
+            "('p1', 'binance_usdm:ETHUSDT', 'crypto_usd_beta')"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "UPDATE brc_risk_cluster_memberships "
+            "SET risk_cluster_id = 'metals' "
+            "WHERE exchange_instrument_id = 'binance_usdm:SOLUSDT'"
+        )
+    )
+    capacity = reserve_account_capacity_for_candidate(
+        conn,
+        candidate=AccountCapacityCandidate(
+            account_id="account-1",
+            runtime_profile_id="profile-1",
+            exchange_instrument_id="binance_usdm:SOLUSDT",
+            risk_cluster_id="metals",
+            per_unit_stop_risk=Decimal("2.87"),
+            entry_reference_price=Decimal("150"),
+            min_qty=Decimal("0.01"),
+            qty_step=Decimal("0.01"),
+            min_notional=Decimal("5"),
+            exchange_max_leverage=20,
+        ),
+        expected_source_snapshot_id="snapshot-1",
+        expected_projection_version=1,
+        now_ms=1_752_480_000_000,
+    )
+    base = ExecutionSizingDecision(
+        symbol="SOLUSDT",
+        side="long",
+        entry_reference_price=Decimal("150"),
+        protective_stop_price=Decimal("147.13"),
+        intended_qty=Decimal("6"),
+        effective_notional=Decimal("900"),
+        selected_leverage=3,
+        reserved_margin=Decimal("300"),
+        planned_stop_risk_budget=Decimal("17.22"),
+        planned_stop_risk=Decimal("17.22"),
+        minimum_executable_quantity=Decimal("0.01"),
+        pricing_source_fact_snapshot_id="price",
+        account_source_fact_snapshot_id="account",
+        policy_version="p1",
+        risk_reservation_basis="entry_reference_stop_distance_v0",
+        valid_until_ms=2,
+    )
+
+    adapted = apply_account_capacity_to_sizing(base, capacity)
+
+    assert capacity.allowed is True
+    assert capacity.allocated_risk == Decimal("15")
+    assert adapted.intended_qty == Decimal("5.22")
+    assert adapted.planned_stop_risk_budget == Decimal("15")
+    assert adapted.planned_stop_risk == Decimal("14.9814")
+    assert adapted.risk_reservation_basis == "entry_reference_stop_distance_v0"
+
+
 def _connection() -> sa.Connection:
     engine = sa.create_engine("sqlite://")
     conn = engine.connect()
@@ -284,13 +359,13 @@ def _connection() -> sa.Connection:
       max_portfolio_open_risk_fraction NUMERIC, max_cluster_open_risk_fraction NUMERIC,
       max_portfolio_initial_margin_fraction NUMERIC, max_leverage INTEGER,
       max_new_action_time_lanes INTEGER, automatic_downsize_enabled BOOLEAN,
-      unknown_exposure_policy TEXT, activation_state TEXT)"""))
+      unknown_exposure_policy TEXT, activation_state TEXT, source_event_id TEXT)"""))
     conn.execute(sa.text("CREATE TABLE brc_risk_cluster_memberships (risk_policy_version TEXT, exchange_instrument_id TEXT, risk_cluster_id TEXT)"))
     conn.execute(sa.text("""CREATE TABLE brc_budget_reservations (
       budget_reservation_id TEXT PRIMARY KEY, account_id TEXT, status TEXT, ticket_id TEXT,
       symbol TEXT, side TEXT, risk_at_stop NUMERIC, reserved_margin NUMERIC,
       account_risk_policy_version TEXT, risk_cluster_id TEXT)"""))
     conn.execute(sa.text("INSERT INTO brc_account_budget_current VALUES ('b','account-1','profile-1','p1','600','500','100','15','0',1,true,NULL,'snapshot-1',1752480060000,1)"))
-    conn.execute(sa.text("INSERT INTO brc_account_risk_policy_current VALUES ('account-1','profile-1','p1','.025',2,'.06','.04','.90',10,1,true,'global_fail_closed','active')"))
+    conn.execute(sa.text("INSERT INTO brc_account_risk_policy_current VALUES ('account-1','profile-1','p1','.025',2,'.06','.04','.90',10,1,true,'global_fail_closed','active','policy-event-1')"))
     conn.execute(sa.text("INSERT INTO brc_risk_cluster_memberships VALUES ('p1','binance_usdm:SOLUSDT','crypto_usd_beta')"))
     return conn

@@ -38,6 +38,8 @@ def test_owned_position_with_confirmed_stop_projects_directional_risk_once() -> 
                 exchange_order_id="stop-1",
                 quantity=Decimal("0.1"),
                 trigger_price=Decimal("1900"),
+                side="SELL",
+                reduce_only=True,
             ),
         ),
     )
@@ -78,6 +80,81 @@ def test_owned_position_with_confirmed_stop_projects_directional_risk_once() -> 
     assert first.rows[0].position_slot_claimed is True
     assert second.semantic_event_count == 0
     assert conn.execute(sa.text("SELECT COUNT(*) FROM brc_account_risk_projection_events")).scalar_one() == 1
+
+
+def test_multiple_protection_stops_preserve_quantity_specific_directional_risk() -> None:
+    conn = _connection()
+    snapshot = _snapshot(
+        positions=(
+            ExchangePositionRow(
+                exchange_symbol="ETHUSDT",
+                position_qty=Decimal("1"),
+                entry_price=Decimal("100"),
+            ),
+        ),
+        orders=(
+            ExchangeOpenOrderRow(
+                exchange_symbol="ETHUSDT",
+                exchange_order_id="runner-stop",
+                quantity=Decimal("0.5"),
+                trigger_price=Decimal("105"),
+                side="SELL",
+                reduce_only=True,
+            ),
+            ExchangeOpenOrderRow(
+                exchange_symbol="ETHUSDT",
+                exchange_order_id="initial-stop",
+                quantity=Decimal("0.5"),
+                trigger_price=Decimal("90"),
+                side="SELL",
+                reduce_only=True,
+            ),
+        ),
+    )
+    classification = AccountExchangeTruthClassification(
+        positions=(
+            AccountPositionClassification(
+                exchange_symbol="ETHUSDT",
+                exchange_instrument_id="binance_usdm:ETHUSDT",
+                ownership_state="owned_by_ticket",
+                owner_ticket_id="ticket-1",
+            ),
+        ),
+        orders=(
+            AccountOrderClassification(
+                exchange_symbol="ETHUSDT",
+                exchange_order_id="runner-stop",
+                algo_id="",
+                client_order_id="",
+                ownership_state="owned_by_ticket",
+                purpose="runner_stop",
+                owner_ticket_id="ticket-1",
+            ),
+            AccountOrderClassification(
+                exchange_symbol="ETHUSDT",
+                exchange_order_id="initial-stop",
+                algo_id="",
+                client_order_id="",
+                ownership_state="owned_by_ticket",
+                purpose="initial_stop",
+                owner_ticket_id="ticket-1",
+            ),
+        ),
+        new_entry_allowed=True,
+        blockers=(),
+    )
+
+    result = project_account_exposure_current(
+        conn,
+        snapshot=snapshot,
+        classification=classification,
+        now_ms=NOW_MS,
+    )
+
+    assert result.rows[0].exposure_state == "open_protected"
+    assert result.rows[0].stop_covered_qty == Decimal("1")
+    assert result.rows[0].actual_directional_risk == Decimal("5")
+    assert result.rows[0].held_risk == Decimal("5")
 
 
 def test_owned_position_without_confirmed_stop_is_global_fail_closed() -> None:
@@ -164,6 +241,7 @@ def test_partial_fill_with_remaining_entry_holds_the_larger_planned_risk() -> No
             ExchangeOpenOrderRow(
                 exchange_symbol="ETHUSDT", exchange_order_id="stop-1",
                 quantity=Decimal("0.1"), trigger_price=Decimal("1900"),
+                side="SELL", reduce_only=True,
             ),
             ExchangeOpenOrderRow(
                 exchange_symbol="ETHUSDT", exchange_order_id="entry-1",
@@ -255,6 +333,7 @@ def test_flat_matched_snapshot_releases_previously_projected_slot() -> None:
                 ExchangeOpenOrderRow(
                     exchange_symbol="ETHUSDT", exchange_order_id="stop-1",
                     quantity=Decimal("0.1"), trigger_price=Decimal("1900"),
+                    side="SELL", reduce_only=True,
                 ),
             ),
         ),

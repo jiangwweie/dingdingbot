@@ -149,12 +149,17 @@ def _row_for_position(
 ) -> AccountExposureCurrentRow:
     qty = abs(position.position_qty)
     side = "long" if position.position_qty > 0 else "short"
-    stop_price, stop_covered_qty = _confirmed_stop(
+    stop_segments = _confirmed_stop_segments(
         snapshot,
         classifications=classifications,
         exchange_symbol=position.exchange_symbol,
         owner_ticket_id=classified.owner_ticket_id,
+        position_side=position.position_side,
+        trade_side=side,
+        position_qty=qty,
     )
+    stop_price = stop_segments[0][0] if stop_segments else None
+    stop_covered_qty = sum((segment_qty for _, segment_qty in stop_segments), _ZERO)
     working_entry_qty, working_entry_price = _working_entry(
         snapshot,
         classifications=classifications,
@@ -177,11 +182,17 @@ def _row_for_position(
         directional_risk = _ZERO
         held_risk = planned_reserved_risk
     else:
-        directional_risk = compute_directional_risk(
-            side=side,
-            actual_average_entry_price=position.entry_price,
-            confirmed_stop_price=stop_price,
-            position_qty=qty,
+        directional_risk = sum(
+            (
+                compute_directional_risk(
+                    side=side,
+                    actual_average_entry_price=position.entry_price,
+                    confirmed_stop_price=segment_stop_price,
+                    position_qty=segment_qty,
+                )
+                for segment_stop_price, segment_qty in stop_segments
+            ),
+            _ZERO,
         )
         remaining_entry_risk = _ZERO
         if working_entry_qty > 0:
@@ -224,15 +235,18 @@ def _row_for_position(
     )
 
 
-def _confirmed_stop(
+def _confirmed_stop_segments(
     snapshot: FullAccountRiskSnapshot,
     *,
     classifications: tuple[AccountOrderClassification, ...],
     exchange_symbol: str,
     owner_ticket_id: str | None,
-) -> tuple[Decimal | None, Decimal]:
+    position_side: str,
+    trade_side: str,
+    position_qty: Decimal,
+) -> tuple[tuple[Decimal, Decimal], ...]:
     if not owner_ticket_id:
-        return None, _ZERO
+        return ()
     matching_orders = {
         _order_identity(order): order
         for order in (*snapshot.regular_open_orders, *snapshot.algo_open_orders)
@@ -245,11 +259,50 @@ def _confirmed_stop(
             and classified.purpose in _STOP_PURPOSES
         ):
             order = matching_orders.get(_classification_identity(classified))
-            if order and order.trigger_price and order.trigger_price > 0 and order.quantity:
+            if order and _is_eligible_protective_stop(
+                order,
+                position_side=position_side,
+                trade_side=trade_side,
+            ):
                 stops.append(order)
     if not stops:
-        return None, _ZERO
-    return stops[0].trigger_price, sum((item.quantity or _ZERO for item in stops), _ZERO)
+        return ()
+    ordered = sorted(
+        stops,
+        key=lambda item: item.trigger_price or _ZERO,
+        reverse=trade_side == "short",
+    )
+    remaining = position_qty
+    segments: list[tuple[Decimal, Decimal]] = []
+    for order in ordered:
+        if remaining <= 0:
+            break
+        assert order.trigger_price is not None
+        assert order.quantity is not None
+        covered_qty = min(order.quantity, remaining)
+        if covered_qty <= 0:
+            continue
+        segments.append((order.trigger_price, covered_qty))
+        remaining -= covered_qty
+    return tuple(segments)
+
+
+def _is_eligible_protective_stop(
+    order: ExchangeOpenOrderRow,
+    *,
+    position_side: str,
+    trade_side: str,
+) -> bool:
+    if not order.trigger_price or order.trigger_price <= 0:
+        return False
+    if not order.quantity or order.quantity <= 0:
+        return False
+    if order.reduce_only is not True and order.close_position is not True:
+        return False
+    expected_order_side = "SELL" if trade_side == "long" else "BUY"
+    if order.side != expected_order_side:
+        return False
+    return order.position_side == position_side
 
 
 def _working_entry(

@@ -6,7 +6,9 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 import sqlalchemy as sa
 
-from src.application.action_time.account_risk_policy import load_account_risk_policy_current
+from src.application.action_time.account_risk_policy import (
+    load_account_risk_policy_current_projection,
+)
 from src.domain.account_risk import decide_account_capacity
 from src.domain.execution_sizing import ExecutionSizingDecision
 
@@ -24,6 +26,7 @@ class AccountCapacityReservationResult(BaseModel):
     selected_leverage: int | None = None; reserved_margin: Decimal = Decimal("0")
     claimed_projection_version: int | None = None; first_blocker: str | None = None
     account_risk_policy_version: str | None = None
+    account_risk_policy_event_id: str | None = None
     risk_cluster_id: str | None = None
     exchange_instrument_id: str | None = None
 
@@ -36,8 +39,15 @@ def reserve_account_capacity_for_candidate(conn: sa.Connection, *, candidate: Ac
     if int(budget["projection_version"]) != expected_projection_version: return _blocked("account_budget_projection_version_changed")
     if int(budget["valid_until_ms"]) <= now_ms: return _blocked("account_budget_current_stale")
     if not bool(budget["new_entry_allowed"]): return _blocked(str(budget["first_blocker"] or "account_budget_new_entry_not_allowed"))
-    policy = load_account_risk_policy_current(conn, account_id=candidate.account_id, runtime_profile_id=candidate.runtime_profile_id)
-    if policy is None or policy.risk_policy_version != str(budget["risk_policy_version"]): return _blocked("account_risk_policy_missing_or_changed")
+    policy_current = load_account_risk_policy_current_projection(
+        conn,
+        account_id=candidate.account_id,
+        runtime_profile_id=candidate.runtime_profile_id,
+    )
+    if policy_current is None or policy_current.policy.risk_policy_version != str(budget["risk_policy_version"]): return _blocked("account_risk_policy_missing_or_changed")
+    policy = policy_current.policy
+    if not policy_current.source_event_id:
+        return _blocked("account_risk_policy_event_missing")
     if policy.activation_state != "active": return _blocked("account_risk_policy_not_active")
     if _cluster(conn, policy.risk_policy_version, candidate.exchange_instrument_id) != candidate.risk_cluster_id: return _blocked("risk_cluster_membership_missing_or_changed")
     if _instrument_claimed(conn, candidate.account_id, candidate.exchange_instrument_id): return _blocked("account_instrument_already_claimed")
@@ -46,7 +56,7 @@ def reserve_account_capacity_for_candidate(conn: sa.Connection, *, candidate: Ac
     claimed_version = expected_projection_version + 1
     claimed = conn.execute(budget_table.update().where(budget_table.c.account_budget_current_id == budget["account_budget_current_id"]).where(budget_table.c.projection_version == expected_projection_version).values(projection_version=claimed_version))
     if int(claimed.rowcount or 0) != 1: return _blocked("account_budget_projection_version_changed")
-    return AccountCapacityReservationResult(allowed=True, allocated_risk=decision.allowed_risk, intended_qty=decision.intended_qty, selected_leverage=decision.selected_leverage, reserved_margin=decision.reserved_margin, claimed_projection_version=claimed_version, account_risk_policy_version=policy.risk_policy_version, risk_cluster_id=candidate.risk_cluster_id, exchange_instrument_id=candidate.exchange_instrument_id)
+    return AccountCapacityReservationResult(allowed=True, allocated_risk=decision.allowed_risk, intended_qty=decision.intended_qty, selected_leverage=decision.selected_leverage, reserved_margin=decision.reserved_margin, claimed_projection_version=claimed_version, account_risk_policy_version=policy.risk_policy_version, account_risk_policy_event_id=policy_current.source_event_id, risk_cluster_id=candidate.risk_cluster_id, exchange_instrument_id=candidate.exchange_instrument_id)
 
 
 def _cluster(conn: sa.Connection, version: str, instrument: str) -> str | None:
@@ -61,14 +71,20 @@ def apply_account_capacity_to_sizing(base: ExecutionSizingDecision, capacity: Ac
         raise ValueError("account capacity must be allowed before sizing adaptation")
     if capacity.intended_qty > base.intended_qty or capacity.allocated_risk > base.planned_stop_risk:
         raise ValueError("account capacity must not expand existing ticket sizing")
+    actual_stop_risk = (
+        abs(base.entry_reference_price - base.protective_stop_price)
+        * capacity.intended_qty
+    )
+    if actual_stop_risk <= 0 or actual_stop_risk > capacity.allocated_risk:
+        raise ValueError("account capacity stop risk must fit the allocated ceiling")
     return base.model_copy(update={
         "intended_qty": capacity.intended_qty,
         "effective_notional": capacity.intended_qty * base.entry_reference_price,
         "selected_leverage": capacity.selected_leverage,
         "reserved_margin": capacity.reserved_margin,
         "planned_stop_risk_budget": capacity.allocated_risk,
-        "planned_stop_risk": capacity.allocated_risk,
-        "risk_reservation_basis": "account_capacity_hard_cap_v0",
+        "planned_stop_risk": actual_stop_risk,
+        "risk_reservation_basis": base.risk_reservation_basis,
     })
 
 def _instrument_claimed(conn: sa.Connection, account_id: str, instrument: str) -> bool:
