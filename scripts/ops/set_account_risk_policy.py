@@ -20,7 +20,9 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.action_time.account_risk_policy import (  # noqa: E402
     AccountRiskPolicy,
     append_account_risk_policy_event,
+    replace_risk_cluster_memberships,
 )
+from src.domain.account_risk import RiskClusterMembership  # noqa: E402
 
 
 DEFAULT_ACCOUNT_ID = "owner-subaccount-runtime-v0"
@@ -42,6 +44,14 @@ def main(argv: list[str] | None = None) -> int:
             created_by=args.created_by,
             now_ms=int(time.time() * 1000),
         )
+        if args.mode in {"shadow", "activate"}:
+            replace_risk_cluster_memberships(
+                conn,
+                risk_policy_version=policy.risk_policy_version,
+                memberships=_active_crypto_binance_memberships(conn),
+                created_by=args.created_by,
+                now_ms=int(time.time() * 1000),
+            )
     print(
         json.dumps(
             {
@@ -96,6 +106,42 @@ def _policy_for_mode(mode: str) -> tuple[AccountRiskPolicy, str]:
             "rollback-single-position": "rollback_single_position",
         }[mode],
     )
+
+
+def _active_crypto_binance_memberships(
+    conn: sa.Connection,
+) -> list[RiskClusterMembership]:
+    """Read the current PG Registry, never a JSON/MD symbol list."""
+
+    rows = conn.execute(
+        sa.text(
+            """
+            SELECT DISTINCT mapping.exchange_instrument_id
+            FROM brc_strategy_group_candidate_scope AS candidate
+            JOIN brc_symbol_instrument_mappings AS mapping
+              ON mapping.symbol = candidate.symbol
+             AND mapping.status = 'active'
+            JOIN brc_exchange_instruments AS instrument
+              ON instrument.exchange_instrument_id = mapping.exchange_instrument_id
+             AND instrument.status = 'active'
+            WHERE candidate.status = 'active'
+              AND candidate.asset_class = 'crypto'
+              AND instrument.exchange_id = 'binance_usdm'
+            ORDER BY mapping.exchange_instrument_id
+            """
+        )
+    ).scalars()
+    memberships = [
+        RiskClusterMembership(
+            exchange_instrument_id=str(instrument_id),
+            risk_cluster_id="crypto_usd_beta",
+        )
+        for instrument_id in rows
+        if str(instrument_id or "").strip()
+    ]
+    if not memberships:
+        raise ValueError("active_crypto_binance_instrument_registry_empty")
+    return memberships
 
 
 if __name__ == "__main__":
