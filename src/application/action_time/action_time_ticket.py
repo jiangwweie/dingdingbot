@@ -47,6 +47,11 @@ from src.application.action_time.identity_conservation import (  # noqa: E402
     runtime_lane_identity_from_live_signal,
     runtime_lane_lineage_from_record,
 )
+from src.application.action_time.ticket_exit_policy_binding import (  # noqa: E402
+    TicketExitPolicyBindingError,
+    initialize_ticket_exit_policy_projection,
+    resolve_ticket_exit_policy_binding_for_ticket,
+)
 from src.domain.runtime_lane_identity import RuntimeLaneIdentityMismatch  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
@@ -96,6 +101,9 @@ TICKET_IDENTITY_HASH_FIELDS = (
     "owner_policy_version",
     "sizing_policy_version",
     "protection_policy_version",
+    "exit_policy_id",
+    "exit_policy_version",
+    "exit_policy_hash",
     "target_notional",
     "leverage",
     "effective_notional",
@@ -198,7 +206,7 @@ def materialize_action_time_ticket(
         )
 
     try:
-        bundle = _build_ticket_bundle(control_state, lane=lane, now_ms=now_ms)
+        bundle = _build_ticket_bundle(conn, control_state, lane=lane, now_ms=now_ms)
     except TicketMaterializationBlocked as exc:
         return _blocked(exc.blockers, now_ms=now_ms, lane=lane)
 
@@ -460,6 +468,7 @@ def _control_state_now_ms(control_state: dict[str, Any]) -> int:
 
 
 def _build_ticket_bundle(
+    conn: sa.engine.Connection,
     control_state: dict[str, Any],
     *,
     lane: dict[str, Any],
@@ -588,6 +597,18 @@ def _build_ticket_bundle(
         symbol=str(lane.get("symbol") or ""),
         blockers=blockers,
     )
+    exit_policy_binding = None
+    try:
+        exit_policy_binding = resolve_ticket_exit_policy_binding_for_ticket(
+            conn,
+            strategy_group_id=str(lane.get("strategy_group_id") or ""),
+            strategy_version=str(event_spec.get("strategy_group_version_id") or ""),
+            event_spec_id=str(event_spec.get("event_spec_id") or ""),
+            event_spec_version=str(event_spec.get("event_spec_version") or ""),
+            side=str(lane.get("side") or ""),
+        )
+    except TicketExitPolicyBindingError as exc:
+        blockers.append(str(exc))
 
     _validate_lineage(
         blockers,
@@ -645,6 +666,7 @@ def _build_ticket_bundle(
     if blockers:
         raise TicketMaterializationBlocked(_dedupe(blockers))
     assert decision is not None
+    assert exit_policy_binding is not None
     risk_reservation = decision.reservation_values()
 
     owner_policy_version = _owner_policy_version(control_state, policy)
@@ -677,6 +699,9 @@ def _build_ticket_bundle(
             "owner_policy_version": owner_policy_version,
             "sizing_policy_version": sizing_policy_version,
             "protection_policy_version": protection_policy_version,
+            "exit_policy_id": exit_policy_binding.exit_policy_id,
+            "exit_policy_version": exit_policy_binding.exit_policy_version,
+            "exit_policy_hash": exit_policy_binding.exit_policy_hash,
         }
     )
     ticket = {
@@ -709,6 +734,10 @@ def _build_ticket_bundle(
         "owner_policy_version": owner_policy_version,
         "sizing_policy_version": sizing_policy_version,
         "protection_policy_version": protection_policy_version,
+        "exit_policy_id": exit_policy_binding.exit_policy_id,
+        "exit_policy_version": exit_policy_binding.exit_policy_version,
+        "exit_policy_snapshot": exit_policy_binding.exit_policy_snapshot,
+        "exit_policy_hash": exit_policy_binding.exit_policy_hash,
         "target_notional": str(budget["target_notional"]),
         "leverage": str(budget["leverage"]),
         "effective_notional": str(
@@ -761,6 +790,9 @@ def _build_ticket_bundle(
             "promotion_candidate_id": lane["promotion_candidate_id"],
             "action_time_invocation_id": lane.get("action_time_invocation_id"),
             "authority_boundary": AUTHORITY_BOUNDARY,
+            "exit_policy_id": exit_policy_binding.exit_policy_id,
+            "exit_policy_version": exit_policy_binding.exit_policy_version,
+            "exit_policy_hash": exit_policy_binding.exit_policy_hash,
         },
         "occurred_at_ms": now_ms,
         "created_at_ms": now_ms,
@@ -1106,6 +1138,11 @@ def _insert_ticket_bundle(
         if column.name in ticket
     }
     conn.execute(ticket_table.insert().values(**ticket_values))
+    initialize_ticket_exit_policy_projection(
+        conn,
+        ticket=ticket,
+        now_ms=int(ticket["created_at_ms"]),
+    )
     conn.execute(
         text(
             """
@@ -1497,6 +1534,7 @@ def _result(
         "projection_target": "production_current",
         "action_time_lane_input_id": lane.get("action_time_lane_input_id"),
         "ticket_id": ticket.get("ticket_id"),
+        "ticket": ticket,
         "strategy_group_id": lane.get("strategy_group_id") or ticket.get("strategy_group_id"),
         "symbol": lane.get("symbol") or ticket.get("symbol"),
         "side": lane.get("side") or ticket.get("side"),
