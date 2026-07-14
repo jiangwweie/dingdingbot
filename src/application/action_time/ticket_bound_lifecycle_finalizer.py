@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from hashlib import sha256
 from typing import Any
 
@@ -75,14 +76,18 @@ def finalize_ticket_bound_lifecycle_if_ready(
             lifecycle_status=str(lifecycle.get("status") or "blocked"),
         )
 
-    final_order = _final_filled_order(conn, ticket_id)
+    final_order = _final_exit_evidence(conn, ticket_id)
     flat_tick = _latest_flat_reconciliation_tick(conn, ticket_id)
     blockers: list[str] = []
     if not final_order:
         blockers.append("final_exit_filled_order_missing")
     if not flat_tick:
         blockers.append("final_position_flat_reconciliation_tick_missing")
-    if final_order and final_order.get("reduce_only") is not True:
+    if (
+        final_order
+        and final_order.get("external_close") is not True
+        and final_order.get("reduce_only") is not True
+    ):
         blockers.append("final_exit_order_reduce_only_missing")
     blockers.extend(
         _residual_live_protection_blockers(
@@ -244,6 +249,48 @@ def _final_filled_order(
     return dict(rows) if rows else {}
 
 
+def _final_exit_evidence(
+    conn: sa.engine.Connection,
+    ticket_id: str,
+) -> dict[str, Any]:
+    tracked = _final_filled_order(conn, ticket_id)
+    if tracked:
+        return {**tracked, "external_close": False}
+    lifecycle = _row_by_id(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "ticket_id",
+        ticket_id,
+    )
+    if not lifecycle:
+        return {}
+    events = _table(conn, "brc_ticket_bound_lifecycle_events")
+    rows = conn.execute(
+        sa.select(events)
+        .where(
+            events.c.lifecycle_run_id == lifecycle["lifecycle_run_id"],
+            events.c.event_type == "final_exit_detected",
+        )
+        .order_by(events.c.created_at_ms.desc())
+    ).mappings()
+    for row in rows:
+        payload = _json_dict(row.get("event_payload"))
+        fill = _json_dict(payload.get("fill"))
+        if str(fill.get("role") or "").upper() != "EXTERNAL_CLOSE":
+            continue
+        exchange_order_id = str(fill.get("exchange_order_id") or "").strip()
+        if not exchange_order_id:
+            continue
+        return {
+            "exchange_order_id": exchange_order_id,
+            "role": "EXTERNAL_CLOSE",
+            "reduce_only": None,
+            "external_close": True,
+            "lifecycle_event_id": row.get("lifecycle_event_id"),
+        }
+    return {}
+
+
 def _latest_flat_reconciliation_tick(
     conn: sa.engine.Connection,
     ticket_id: str,
@@ -369,6 +416,18 @@ def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:
 def _stable_id(prefix: str, *parts: str) -> str:
     digest = sha256("|".join(parts).encode("utf-8")).hexdigest()[:40]
     return f"{prefix}:{digest}"
+
+
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _result(

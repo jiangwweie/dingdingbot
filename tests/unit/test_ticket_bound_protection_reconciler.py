@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import text
 
 from scripts import materialize_ticket_bound_runner_protection_adjustment as runner_adjuster
@@ -269,6 +271,89 @@ def test_protection_reconciler_blocks_missing_position_snapshot_without_flat_inf
     assert "exchange_position_snapshot_missing" in payload["blockers"]
     assert "position_flat_with_live_protection_orders" not in payload["blockers"]
     assert _lifecycle_status(pg_control_connection) == "protection_reconciliation_mismatch"
+
+
+def test_protection_reconciler_rejects_ambiguous_untracked_flat_exit_fills(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    lifecycle = pg_control_connection.execute(
+        text(
+            "SELECT entry_exchange_order_id, entry_filled_qty, entry_avg_price "
+            "FROM brc_ticket_bound_order_lifecycle_runs"
+        )
+    ).mappings().one()
+    tp1 = pg_control_connection.execute(
+        text(
+            "SELECT exchange_order_id, qty, price "
+            "FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE exit_protection_set_id = :set_id AND role = 'TP1'"
+        ),
+        {"set_id": set_id},
+    ).mappings().one()
+    remaining = Decimal(str(lifecycle["entry_filled_qty"])) - Decimal(str(tp1["qty"]))
+    first_part = remaining / Decimal("2")
+    second_part = remaining - first_part
+    snapshot = {
+        "snapshot_id": f"snapshot:ambiguous-external:{set_id}",
+        "open_orders": [],
+        "recent_fills": [
+            {
+                "exchange_order_id": lifecycle["entry_exchange_order_id"],
+                "symbol": "ETH/USDT:USDT",
+                "side": "buy",
+                "position_side": "BOTH",
+                "qty": str(lifecycle["entry_filled_qty"]),
+                "price": str(lifecycle["entry_avg_price"]),
+                "timestamp_ms": NOW_MS + 5_000,
+            },
+            {
+                "exchange_order_id": tp1["exchange_order_id"],
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "position_side": "BOTH",
+                "qty": str(tp1["qty"]),
+                "price": str(tp1["price"]),
+                "timestamp_ms": NOW_MS + 7_000,
+            },
+            {
+                "exchange_order_id": "manual-exit-part-a",
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "position_side": "BOTH",
+                "qty": str(first_part),
+                "price": "2010",
+                "timestamp_ms": NOW_MS + 8_000,
+            },
+            {
+                "exchange_order_id": "manual-exit-part-b",
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "position_side": "BOTH",
+                "qty": str(second_part),
+                "price": "2011",
+                "timestamp_ms": NOW_MS + 8_100,
+            },
+        ],
+        "position": {
+            "qty": "0",
+            "position_flat": True,
+            "truth_state": "flat",
+        },
+    }
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9_000,
+    )
+
+    assert "external_close_fill_attribution_ambiguous" in payload["blockers"]
+    assert _lifecycle_status(pg_control_connection) != "reconciliation_matched"
+    assert pg_control_connection.execute(
+        text("SELECT count(*) FROM brc_ticket_bound_post_submit_closures WHERE status = 'closed'")
+    ).scalar_one() == 0
 
 
 def _materialized_runner_protection(conn) -> str:

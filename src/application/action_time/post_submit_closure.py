@@ -43,7 +43,7 @@ AUTHORITY_BOUNDARY = (
     "state only; no exchange/order/runtime authority"
 )
 PROTECTION_COMPLETE_STATUSES = {"submitted", "reconciled", "runner_protected", "closed"}
-FINAL_EXIT_ROLES = {"SL", "RUNNER_SL", "TP1"}
+FINAL_EXIT_ROLES = {"SL", "RUNNER_SL", "TP1", "EXTERNAL_CLOSE"}
 LIVE_PROTECTION_ORDER_STATUSES = {
     "planned",
     "submitted",
@@ -338,7 +338,8 @@ def materialize_ticket_bound_lifecycle_closure(
         role=final_exit_role,
         exchange_order_id=final_exit_exchange_order_id,
     )
-    _mark_protection_order_status(conn, final_order, status="filled", now_ms=now_ms)
+    if final_order:
+        _mark_protection_order_status(conn, final_order, status="filled", now_ms=now_ms)
     protection_update = {
         **protection_set,
         "status": "closed",
@@ -414,7 +415,12 @@ def materialize_ticket_bound_lifecycle_closure(
         if realized_pnl_decimal is not None
         else None,
     }
-    for event_type in ("final_exit_detected", lifecycle_decision.event_type):
+    event_types = (
+        (lifecycle_decision.event_type,)
+        if final_exit_role == "EXTERNAL_CLOSE"
+        else ("final_exit_detected", lifecycle_decision.event_type)
+    )
+    for event_type in event_types:
         _insert_lifecycle_event(
             conn,
             lifecycle_update,
@@ -710,7 +716,14 @@ def _lifecycle_closure_blockers(
         "lifecycle_closed",
     }:
         blockers.append("runner_sl_not_protected_before_final_exit")
-    if final_exit_exchange_order_id and final_exit_role in FINAL_EXIT_ROLES:
+    if final_exit_role == "EXTERNAL_CLOSE":
+        if not _external_close_final_exit_event(
+            conn,
+            lifecycle=lifecycle,
+            exchange_order_id=final_exit_exchange_order_id,
+        ):
+            blockers.append("external_close_final_exit_evidence_missing")
+    elif final_exit_exchange_order_id and final_exit_role in FINAL_EXIT_ROLES:
         final_order = _protection_order_by_role_and_exchange_id(
             protection_orders,
             role=final_exit_role,
@@ -729,6 +742,34 @@ def _lifecycle_closure_blockers(
             )
         )
     return _dedupe(blockers)
+
+
+def _external_close_final_exit_event(
+    conn: sa.engine.Connection,
+    *,
+    lifecycle: dict[str, Any],
+    exchange_order_id: str,
+) -> bool:
+    if not lifecycle or not exchange_order_id:
+        return False
+    table = _table(conn, "brc_ticket_bound_lifecycle_events")
+    rows = conn.execute(
+        sa.select(table.c.event_payload).where(
+            table.c.lifecycle_run_id == str(lifecycle.get("lifecycle_run_id") or ""),
+            table.c.ticket_id == str(lifecycle.get("ticket_id") or ""),
+            table.c.protected_submit_attempt_id
+            == str(lifecycle.get("protected_submit_attempt_id") or ""),
+            table.c.event_type == "final_exit_detected",
+        )
+    ).scalars()
+    for raw_payload in rows:
+        payload = _as_dict(raw_payload)
+        fill = _as_dict(payload.get("fill"))
+        if str(fill.get("role") or "").upper() != "EXTERNAL_CLOSE":
+            continue
+        if str(fill.get("exchange_order_id") or "") == exchange_order_id:
+            return True
+    return False
 
 
 def _closure_evidence_event_blockers(

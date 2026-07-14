@@ -22,6 +22,9 @@ from src.application.action_time.exchange_order_ownership import (
 from src.application.action_time.exchange_scope import (
     resolve_ticket_bound_exchange_scope,
 )
+from src.application.action_time.external_close_attribution import (
+    attribute_exact_ticket_bound_external_close,
+)
 from src.application.action_time.netting_domain_hold import (
     resolve_netting_domain_hold_source,
     upsert_netting_domain_hold,
@@ -146,6 +149,32 @@ def reconcile_ticket_bound_exit_protection_set(
             exchange_snapshot=exchange_snapshot,
             now_ms=now_ms,
         )
+    external_close, external_close_blockers = attribute_exact_ticket_bound_external_close(
+        conn,
+        lifecycle=lifecycle,
+        orders=orders,
+        exchange_scope=exchange_scope,
+        recent_fills=recent_fills,
+        position=position,
+    )
+    if (
+        position_flat
+        and external_close
+        and not external_close_blockers
+        and not live_protection_orders
+        and not ownership_blockers
+    ):
+        return _apply_flat_external_close_reconciliation(
+            conn,
+            protection_set=protection_set,
+            lifecycle=lifecycle,
+            orders=orders,
+            external_close=external_close,
+            exchange_scope=exchange_scope,
+            exchange_snapshot=exchange_snapshot,
+            now_ms=now_ms,
+        )
+    ownership_blockers = _dedupe(ownership_blockers + external_close_blockers)
     classification = classify_protection_reconciliation(
         position_qty=position.get("qty") or position.get("position_qty"),
         has_valid_sl=_has_valid_exchange_protection(
@@ -470,6 +499,108 @@ def _apply_flat_final_exit_reconciliation(
         source_kind="exit_protection_reconciler",
         source_id=str(protection_set.get("exit_protection_set_id") or ""),
         resolution_source="flat_final_exit_reconciliation",
+        now_ms=now_ms,
+    )
+    return _result(
+        "reconciliation_matched",
+        now_ms=now_ms,
+        blockers=[],
+        protection_set=protection_update,
+        lifecycle=lifecycle_update,
+        next_action="finalize_ticket_bound_lifecycle",
+    )
+
+
+def _apply_flat_external_close_reconciliation(
+    conn: sa.engine.Connection,
+    *,
+    protection_set: dict[str, Any],
+    lifecycle: dict[str, Any],
+    orders: list[dict[str, Any]],
+    external_close: dict[str, Any],
+    exchange_scope: Any,
+    exchange_snapshot: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    order_table = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    recent_fills = [
+        dict(fill)
+        for fill in exchange_snapshot.get("recent_fills", [])
+        if isinstance(fill, dict)
+    ]
+    for order in orders:
+        if str(order.get("status") or "") not in {
+            "planned",
+            "submitted",
+            "open",
+            "partially_filled",
+            "cancel_pending",
+            "replace_pending",
+        }:
+            continue
+        status = "filled" if _exchange_order_filled(order, recent_fills) else "cancelled"
+        conn.execute(
+            order_table.update()
+            .where(
+                order_table.c.exit_protection_order_id
+                == order["exit_protection_order_id"]
+            )
+            .values(status=status, updated_at_ms=now_ms)
+        )
+    protection_update = {
+        **protection_set,
+        "status": "closed",
+        "reconciled_with_exchange": True,
+        "first_blocker": None,
+        "blockers": [],
+        "updated_at_ms": now_ms,
+    }
+    lifecycle_update = {
+        **lifecycle,
+        "status": "reconciliation_matched",
+        "first_blocker": None,
+        "blockers": [],
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_exit_protection_sets",
+        "exit_protection_set_id",
+        protection_update,
+    )
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "lifecycle_run_id",
+        lifecycle_update,
+    )
+    _insert_event(
+        conn,
+        lifecycle_update,
+        "final_exit_detected",
+        {"fill": external_close},
+        now_ms=now_ms,
+    )
+    _insert_event(
+        conn,
+        lifecycle_update,
+        "reconciliation_matched",
+        {
+            "final_exit_exchange_order_id": external_close["exchange_order_id"],
+            "final_exit_role": "EXTERNAL_CLOSE",
+            "final_position_flat_confirmed": True,
+            "external_close_attribution_basis": external_close["attribution_basis"],
+            "exchange_snapshot_ref": exchange_snapshot.get("snapshot_ref")
+            or exchange_snapshot.get("snapshot_id"),
+        },
+        now_ms=now_ms + 1,
+    )
+    resolve_netting_domain_hold_source(
+        conn,
+        netting_domain_key=exchange_scope.netting_domain_key,
+        source_kind="exit_protection_reconciler",
+        source_id=str(protection_set.get("exit_protection_set_id") or ""),
+        resolution_source="flat_external_close_reconciliation",
         now_ms=now_ms,
     )
     return _result(
