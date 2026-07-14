@@ -36,6 +36,7 @@ class ExchangeOpenOrderRow(BaseModel):
     order_type: str = ""
     quantity: Decimal | None = None
     price: Decimal | None = None
+    trigger_price: Decimal | None = None
 
 
 class FullAccountRiskSnapshot(BaseModel):
@@ -244,6 +245,7 @@ def _order_row(row: Any, *, algo: bool) -> ExchangeOpenOrderRow:
         order_type=str(row.get("type") or row.get("algoType") or ""),
         quantity=quantity,
         price=price,
+        trigger_price=_decimal(row.get("stopPrice") or row.get("triggerPrice")),
     )
 
 
