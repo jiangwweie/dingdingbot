@@ -1,7 +1,20 @@
 # Strategy Research Document Map
 
 Status: ACTIVE_V3_DOCUMENT_MAP
-Last updated: 2026-06-16
+Last updated: 2026-07-14
+
+## Current Release-Aligned Review
+
+The current research evaluation is:
+
+```text
+strategygroup-release-rereview-20260714.md
+```
+
+It aligns the **five production StrategyGroups, six Event Specs, 22 active
+lanes, first real terminal Outcomes, and the 24-entry research cabinet**. It
+supersedes older cabinet stage labels for current evaluation, while preserving
+the underlying historical evidence and the non-execution boundary.
 
 ## Start Here
 
@@ -9,6 +22,7 @@ Use these documents as the stable entry points for the strategy research line:
 
 | Document | Role |
 | --- | --- |
+| `strategygroup-release-rereview-20260714.md` | Current release-aligned re-review of production StrategyGroups, real Outcomes, portfolio overlap, and the 24-entry research cabinet. |
 | `STRATEGY_RESEARCH_GUIDE.md` | Current rules for strategy research, evidence grading, leverage boundaries, lifecycle status, and handoff shape. |
 | `p0-p1-p2-goal-mode-plan.md` | Active goal-mode execution plan for P0 handoff hardening, P1 next handoff conversion, and P2 strategy-pool expansion. |
 | `p0-handoff-hardening-matrix-20260616.md` | P0 matrix for the 5 existing StrategyGroup handoff packs. |

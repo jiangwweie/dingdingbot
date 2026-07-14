@@ -1,7 +1,7 @@
 # BRC StrategyGroup Runtime Governance
 
 Status: CURRENT_ENTRY
-Last updated: 2026-06-23
+Last updated: 2026-07-14
 
 ## Current Meaning
 
@@ -35,6 +35,12 @@ docs/current/strategy-group-handoffs/main-control-handoff-index.md
 ```
 
 ## Strategy Research Evaluation
+
+Current release-aligned portfolio review:
+
+```text
+docs/strategy-research/strategygroup-release-rereview-20260714.md
+```
 
 When this worktree is used for strategy research, evaluate candidates through:
 
