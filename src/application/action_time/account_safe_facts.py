@@ -82,14 +82,18 @@ def main(argv: list[str] | None = None) -> int:
 
     engine = sa.create_engine(database_url)
     try:
+        # Read PG identity first, then release its transaction before any signed GET.
+        with engine.connect() as conn:
+            scope = _pg_account_safe_scope_summary(conn)
+            conn.rollback()
+        live_facts = collect_account_safe_live_facts_from_scope(
+            scope,
+            env_file=Path(args.env_file).expanduser() if args.env_file else None,
+            base_url=args.base_url,
+            timeout_seconds=args.timeout_seconds,
+        )
+        artifact = build_runtime_account_safe_facts(live_facts=live_facts)
         with engine.begin() as conn:
-            live_facts = collect_account_safe_live_facts_from_pg_scope(
-                conn,
-                env_file=Path(args.env_file).expanduser() if args.env_file else None,
-                base_url=args.base_url,
-                timeout_seconds=args.timeout_seconds,
-            )
-            artifact = build_runtime_account_safe_facts(live_facts=live_facts)
             fact_snapshot_ids = write_account_safe_fact_snapshots(
                 conn,
                 artifact=artifact,
@@ -134,6 +138,25 @@ def collect_account_safe_live_facts_from_pg_scope(
     urlopen: UrlOpen | None = None,
 ) -> dict[str, Any]:
     scope = _pg_account_safe_scope_summary(conn)
+    return collect_account_safe_live_facts_from_scope(
+        scope,
+        env_file=env_file,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        urlopen=urlopen,
+    )
+
+
+def collect_account_safe_live_facts_from_scope(
+    scope: dict[str, Any],
+    *,
+    env_file: Path | None,
+    base_url: str = DEFAULT_BASE_URL,
+    timeout_seconds: float = 12,
+    urlopen: UrlOpen | None = None,
+) -> dict[str, Any]:
+    """Collect exchange facts after the short PG scope read has completed."""
+
     symbols = list(scope["symbols"])
     api_key = _env_value(
         ("EXCHANGE_API_KEY", "BINANCE_API_KEY", "binance_exchange_key"),
