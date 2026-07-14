@@ -9,6 +9,9 @@ from src.application.action_time.capital_safety_guard import current_scope_block
 from src.application.action_time.protection_reconciler import (
     reconcile_ticket_bound_exit_protection_set,
 )
+from src.application.action_time.ticket_bound_fill_projector import (
+    project_ticket_bound_exchange_fills,
+)
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_runner_protection_adjuster import (
     _mark_tp1_filled,
@@ -41,6 +44,35 @@ def test_protection_reconciler_marks_complete_set_reconciled(pg_control_connecti
     assert protection_set["status"] == "reconciled"
     assert protection_set["reconciled_with_exchange"] in {True, 1}
     assert _lifecycle_status(pg_control_connection) == "position_protected"
+
+
+def test_protection_reconciler_does_not_append_duplicate_unchanged_events(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    snapshot = _snapshot(pg_control_connection, set_id)
+
+    first = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9_000,
+    )
+    second = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 10_000,
+    )
+
+    assert first["status"] == "reconciled"
+    assert second["status"] == "reconciled"
+    assert pg_control_connection.execute(
+        text(
+            "SELECT count(*) FROM brc_ticket_bound_lifecycle_events "
+            "WHERE event_type = 'exit_protection_reconciled'"
+        )
+    ).scalar_one() == 1
 
 
 def test_protection_reconciler_does_not_resolve_another_sources_scope_hold(
@@ -353,6 +385,169 @@ def test_protection_reconciler_rejects_ambiguous_untracked_flat_exit_fills(
     assert _lifecycle_status(pg_control_connection) != "reconciliation_matched"
     assert pg_control_connection.execute(
         text("SELECT count(*) FROM brc_ticket_bound_post_submit_closures WHERE status = 'closed'")
+    ).scalar_one() == 0
+
+
+def test_protection_reconciler_attributes_conditional_child_fill_to_sl_parent(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    lifecycle = pg_control_connection.execute(
+        text(
+            "SELECT entry_exchange_order_id, entry_filled_qty, entry_avg_price "
+            "FROM brc_ticket_bound_order_lifecycle_runs"
+        )
+    ).mappings().one()
+    sl = pg_control_connection.execute(
+        text(
+            "SELECT exit_protection_order_id, exchange_order_id, qty "
+            "FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE exit_protection_set_id = :set_id AND role = 'SL'"
+        ),
+        {"set_id": set_id},
+    ).mappings().one()
+    child_order_id = "39574198157"
+    snapshot = {
+        "snapshot_id": f"snapshot:conditional-sl:{set_id}",
+        "open_orders": [],
+        "recent_fills": [
+            {
+                "exchange_order_id": lifecycle["entry_exchange_order_id"],
+                "symbol": "ETH/USDT:USDT",
+                "side": "buy",
+                "position_side": "BOTH",
+                "qty": str(lifecycle["entry_filled_qty"]),
+                "price": str(lifecycle["entry_avg_price"]),
+                "timestamp_ms": NOW_MS + 5_000,
+            },
+            {
+                "exchange_order_id": child_order_id,
+                "parent_exchange_order_id": sl["exchange_order_id"],
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "position_side": "BOTH",
+                "qty": str(sl["qty"]),
+                "price": "1990",
+                "fee": {"cost": "0.02", "currency": "USDT"},
+                "timestamp_ms": NOW_MS + 8_000,
+            },
+        ],
+        "conditional_order_lineage_available": True,
+        "position": {
+            "qty": "0",
+            "position_flat": True,
+            "truth_state": "flat",
+            "complete": True,
+        },
+    }
+
+    projection = project_ticket_bound_exchange_fills(
+        pg_control_connection,
+        ticket_id=pg_control_connection.execute(
+            text(
+                "SELECT ticket_id FROM brc_ticket_bound_exit_protection_sets "
+                "WHERE exit_protection_set_id = :set_id"
+            ),
+            {"set_id": set_id},
+        ).scalar_one(),
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 8_500,
+    )
+    assert projection["projected_roles"] == ["SL"]
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9_000,
+    )
+
+    assert payload["status"] == "reconciliation_matched"
+    stored_sl = pg_control_connection.execute(
+        text(
+            "SELECT status FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE exit_protection_order_id = :order_id"
+        ),
+        {"order_id": sl["exit_protection_order_id"]},
+    ).scalar_one()
+    assert stored_sl == "filled"
+    final_fill = pg_control_connection.execute(
+        text(
+            "SELECT event_payload FROM brc_ticket_bound_lifecycle_events "
+            "WHERE event_type = 'final_exit_detected'"
+        )
+    ).mappings().one()
+    final_payload = final_fill["event_payload"]
+    if isinstance(final_payload, str):
+        import json
+
+        final_payload = json.loads(final_payload)
+    assert final_payload["fill"]["role"] == "SL"
+    assert final_payload["fill"]["exchange_order_id"] == (
+        child_order_id
+    )
+    assert final_payload["fill"][
+        "parent_exchange_order_id"
+    ] == sl["exchange_order_id"]
+
+
+def test_protection_reconciler_fails_closed_when_conditional_lineage_read_failed(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    lifecycle = pg_control_connection.execute(
+        text(
+            "SELECT entry_exchange_order_id, entry_filled_qty, entry_avg_price "
+            "FROM brc_ticket_bound_order_lifecycle_runs"
+        )
+    ).mappings().one()
+    snapshot = {
+        "snapshot_id": f"snapshot:conditional-lineage-failed:{set_id}",
+        "open_orders": [],
+        "recent_fills": [
+            {
+                "exchange_order_id": lifecycle["entry_exchange_order_id"],
+                "symbol": "ETH/USDT:USDT",
+                "side": "buy",
+                "position_side": "BOTH",
+                "qty": str(lifecycle["entry_filled_qty"]),
+                "price": str(lifecycle["entry_avg_price"]),
+                "timestamp_ms": NOW_MS + 5_000,
+            },
+            {
+                "exchange_order_id": "unresolved-trigger-child",
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "position_side": "BOTH",
+                "qty": str(lifecycle["entry_filled_qty"]),
+                "price": "1990",
+                "timestamp_ms": NOW_MS + 8_000,
+            },
+        ],
+        "conditional_order_lineage_available": False,
+        "conditional_order_lineage_error": "NetworkError",
+        "position": {
+            "qty": "0",
+            "position_flat": True,
+            "truth_state": "flat",
+            "complete": True,
+        },
+    }
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9_000,
+    )
+
+    assert payload["status"] != "reconciliation_matched"
+    assert payload["first_blocker"] == "conditional_order_lineage_unavailable"
+    assert pg_control_connection.execute(
+        text(
+            "SELECT count(*) FROM brc_ticket_bound_lifecycle_events "
+            "WHERE event_type = 'final_exit_detected'"
+        )
     ).scalar_one() == 0
 
 

@@ -196,10 +196,14 @@ def materialize_live_outcome_ledger(
             (final_exit_price, final_exit_qty),
         ],
     )
+    known_fill_fees = [entry_fill.get("fee")]
+    if tp1_fill:
+        known_fill_fees.append(tp1_fill.get("fee"))
+    if final_fill:
+        known_fill_fees.append(final_fill.get("fee"))
     fees = _compatible_fee_total(
-        entry_fill.get("fee"),
-        tp1_fill.get("fee"),
-        final_fill.get("fee"),
+        *known_fill_fees,
+        require_all=True,
     )
     funding = _ticket_bound_funding_total(
         final_fill.get("funding_income"),
@@ -207,6 +211,7 @@ def materialize_live_outcome_ledger(
         symbol=str(ticket.get("symbol") or ""),
         entry_time_ms=entry_time_ms,
         final_exit_time_ms=final_exit_time_ms,
+        funding_available=final_fill.get("funding_income_available"),
     )
     exit_slippage_parts = [
         _exit_slippage(
@@ -294,6 +299,8 @@ def materialize_live_outcome_ledger(
             "exit_protection_set_id": protection_set.get("exit_protection_set_id"),
             "funding_complete": funding is not None,
             "exit_slippage_complete": exit_slippage is not None,
+            "leverage_source": "ticket_selected_leverage",
+            "exchange_effective_leverage_known": False,
         },
         "authority_boundary": AUTHORITY_BOUNDARY,
         "created_at_ms": int(_existing_outcome(conn, ticket_id).get("created_at_ms") or now_ms),
@@ -466,10 +473,15 @@ def _realized_pnl(
     )
 
 
-def _compatible_fee_total(*fees: Any) -> Decimal | None:
+def _compatible_fee_total(
+    *fees: Any,
+    require_all: bool = False,
+) -> Decimal | None:
     parsed: list[tuple[Decimal, str]] = []
     for fee in fees:
         if fee in (None, "", {}):
+            if require_all:
+                return None
             continue
         if isinstance(fee, dict):
             cost = _positive_or_zero_decimal(fee.get("cost"))
@@ -527,11 +539,14 @@ def _ticket_bound_funding_total(
     symbol: str,
     entry_time_ms: int | None,
     final_exit_time_ms: int | None,
+    funding_available: bool | None = None,
 ) -> Decimal | None:
-    if not isinstance(rows, list) or not rows:
+    if not isinstance(rows, list):
         return None
     if not entry_time_ms or not final_exit_time_ms or final_exit_time_ms < entry_time_ms:
         return None
+    if not rows:
+        return Decimal("0") if funding_available is True else None
     by_id: dict[str, tuple[Decimal, int]] = {}
     for row in rows:
         if not isinstance(row, dict):

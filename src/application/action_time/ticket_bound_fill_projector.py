@@ -49,13 +49,10 @@ def project_ticket_bound_exchange_fills(
             sa.select(orders).where(orders.c.ticket_id == ticket_id)
         ).mappings()
     )
-    fill_by_exchange_id = {
-        str(fill["exchange_order_id"]): fill for fill in fills
-    }
     projected: list[dict[str, Any]] = []
     for row in rows:
         exchange_order_id = str(row.get("exchange_order_id") or "")
-        fill = fill_by_exchange_id.get(exchange_order_id)
+        fill = _fill_for_order(fills, exchange_order_id=exchange_order_id)
         if not fill:
             continue
         if str(row.get("status") or "").lower() == "filled":
@@ -75,19 +72,24 @@ def project_ticket_bound_exchange_fills(
                     conflicting_fill=fill,
                     now_ms=now_ms,
                 )
-            continue
-        conn.execute(
-            orders.update()
-            .where(
-                orders.c.exit_protection_order_id
-                == row["exit_protection_order_id"]
+            if existing_fill:
+                continue
+        else:
+            conn.execute(
+                orders.update()
+                .where(
+                    orders.c.exit_protection_order_id
+                    == row["exit_protection_order_id"]
+                )
+                .values(status="filled", updated_at_ms=now_ms)
             )
-            .values(status="filled", updated_at_ms=now_ms)
-        )
         projected.append(
             {
                 "role": str(row.get("role") or ""),
-                "exchange_order_id": exchange_order_id,
+                "exchange_order_id": str(fill.get("exchange_order_id") or ""),
+                "parent_exchange_order_id": (
+                    str(fill.get("parent_exchange_order_id") or "") or None
+                ),
                 "fill_qty": str(fill.get("qty") or ""),
                 "fill_price": str(fill.get("price") or ""),
                 "fill_time_ms": fill.get("timestamp_ms"),
@@ -102,6 +104,9 @@ def project_ticket_bound_exchange_fills(
                     if str(row.get("role") or "") in FINAL_EXIT_ROLES
                     else []
                 ),
+                "funding_income_available": (
+                    exchange_snapshot.get("funding_income_available") is True
+                ),
             }
         )
         if str(row.get("role") or "") == "TP1":
@@ -112,6 +117,12 @@ def project_ticket_bound_exchange_fills(
                 fill=projected[-1],
                 now_ms=now_ms,
             )
+    _review_closed_external_exit_lineage(
+        conn,
+        ticket_id=ticket_id,
+        exchange_snapshot=exchange_snapshot,
+        now_ms=now_ms,
+    )
     final_exit = next(
         (item for item in projected if item["role"] in FINAL_EXIT_ROLES),
         None,
@@ -135,6 +146,57 @@ def project_ticket_bound_exchange_fills(
     return payload
 
 
+def _review_closed_external_exit_lineage(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    exchange_snapshot: dict[str, Any],
+    now_ms: int,
+) -> None:
+    if exchange_snapshot.get("conditional_order_lineage_available") is not True:
+        return
+    if not sa.inspect(conn).has_table("brc_ticket_bound_post_submit_closures"):
+        return
+    closures = _table(conn, "brc_ticket_bound_post_submit_closures")
+    closure = conn.execute(
+        sa.select(closures).where(closures.c.ticket_id == ticket_id)
+    ).mappings().first()
+    if not closure:
+        return
+    evidence = _mapping(closure.get("reconciliation_evidence"))
+    if str(evidence.get("final_exit_role") or "").upper() != "EXTERNAL_CLOSE":
+        return
+    final_exit_id = str(
+        evidence.get("final_exit_exchange_order_id") or ""
+    ).strip()
+    lineage_actual_ids = {
+        str(item.get("actual_exchange_order_id") or "").strip()
+        for item in exchange_snapshot.get("conditional_order_lineage", [])
+        if isinstance(item, dict)
+    }
+    if final_exit_id and final_exit_id in lineage_actual_ids:
+        return
+    if evidence.get("conditional_lineage_reviewed_at_ms") is not None:
+        return
+    conn.execute(
+        closures.update()
+        .where(
+            closures.c.post_submit_closure_id
+            == closure["post_submit_closure_id"]
+        )
+        .values(
+            reconciliation_evidence={
+                **evidence,
+                "conditional_lineage_reviewed_at_ms": now_ms,
+                "conditional_lineage_review_result": (
+                    "external_close_confirmed_no_conditional_parent_match"
+                ),
+            },
+            updated_at_ms=now_ms,
+        )
+    )
+
+
 def _recorded_fill_for_order(
     conn: sa.engine.Connection,
     *,
@@ -145,20 +207,35 @@ def _recorded_fill_for_order(
     if not lifecycle:
         return {}
     event_type = "tp1_filled" if role == "TP1" else "final_exit_detected"
-    event_id = _stable_id(
-        "ticket_lifecycle_event",
-        str(lifecycle["lifecycle_run_id"]),
-        event_type,
-        exchange_order_id,
-    )
     events = _table(conn, "brc_ticket_bound_lifecycle_events")
-    payload = conn.execute(
+    payloads = conn.execute(
         sa.select(events.c.event_payload).where(
-            events.c.lifecycle_event_id == event_id
+            events.c.lifecycle_run_id == lifecycle["lifecycle_run_id"],
+            events.c.event_type == event_type,
         )
-    ).scalar_one_or_none()
-    mapped = _mapping(payload)
-    return _mapping(mapped.get("fill"))
+    ).scalars()
+    for payload in payloads:
+        fill = _mapping(_mapping(payload).get("fill"))
+        if exchange_order_id in {
+            str(fill.get("exchange_order_id") or ""),
+            str(fill.get("parent_exchange_order_id") or ""),
+        }:
+            return fill
+    return {}
+
+
+def _fill_for_order(
+    fills: list[dict[str, Any]],
+    *,
+    exchange_order_id: str,
+) -> dict[str, Any]:
+    for fill in fills:
+        if exchange_order_id in {
+            str(fill.get("exchange_order_id") or ""),
+            str(fill.get("parent_exchange_order_id") or ""),
+        }:
+            return dict(fill)
+    return {}
 
 
 def _fill_truth_conflicts(
@@ -265,6 +342,21 @@ def _project_final_exit_detected(
     ).mappings().first()
     if not row:
         return None
+    if str(row.get("status") or "") == "lifecycle_closed":
+        _insert_fill_event(
+            conn,
+            lifecycle=dict(row),
+            event_type="final_exit_detected",
+            fill=fill,
+            now_ms=now_ms,
+        )
+        _correct_closed_lifecycle_final_exit_lineage(
+            conn,
+            ticket_id=ticket_id,
+            fill=fill,
+            now_ms=now_ms,
+        )
+        return None
     if str(row.get("status") or "") not in {
         "position_protected",
         "runner_protected",
@@ -295,6 +387,58 @@ def _project_final_exit_detected(
         now_ms=now_ms,
     )
     return decision
+
+
+def _correct_closed_lifecycle_final_exit_lineage(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    fill: dict[str, Any],
+    now_ms: int,
+) -> None:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_post_submit_closures"):
+        return
+    role = str(fill.get("role") or "").upper()
+    exchange_order_id = str(fill.get("exchange_order_id") or "").strip()
+    if role not in FINAL_EXIT_ROLES or not exchange_order_id:
+        return
+    closures = _table(conn, "brc_ticket_bound_post_submit_closures")
+    closure = conn.execute(
+        sa.select(closures).where(closures.c.ticket_id == ticket_id)
+    ).mappings().first()
+    if not closure:
+        return
+    evidence = _mapping(closure.get("reconciliation_evidence"))
+    if (
+        str(evidence.get("final_exit_role") or "").upper() == role
+        and str(evidence.get("final_exit_exchange_order_id") or "")
+        == exchange_order_id
+    ):
+        return
+    warnings = _string_list(closure.get("warnings"))
+    correction = "final_exit_lineage_corrected_from_exchange_fact"
+    if correction not in warnings:
+        warnings.append(correction)
+    conn.execute(
+        closures.update()
+        .where(
+            closures.c.post_submit_closure_id
+            == closure["post_submit_closure_id"]
+        )
+        .values(
+            reconciliation_evidence={
+                **evidence,
+                "final_exit_exchange_order_id": exchange_order_id,
+                "final_exit_parent_exchange_order_id": (
+                    str(fill.get("parent_exchange_order_id") or "") or None
+                ),
+                "final_exit_role": role,
+                "lineage_correction_source": "exact_conditional_order_lineage",
+            },
+            warnings=warnings,
+            updated_at_ms=now_ms,
+        )
+    )
 
 
 def _lifecycle_for_ticket(
@@ -365,6 +509,19 @@ def _mapping(value: Any) -> dict[str, Any]:
             return {}
         return dict(parsed) if isinstance(parsed, dict) else {}
     return {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+    return []
 
 
 def _normalized_decimal(value: Any) -> Decimal | None:

@@ -39,6 +39,7 @@ from src.application.action_time.exchange_snapshot_provider import (  # noqa: E4
     ATTEMPT_AUTHORITY_BOUNDARY,
     AUTHORITY_BOUNDARY as SNAPSHOT_AUTHORITY_BOUNDARY,
     fetch_resolved_ticket_bound_exchange_snapshot,
+    load_ticket_conditional_parent_order_ids,
 )
 from src.application.action_time.post_submit_reconciliation_tick import (  # noqa: E402
     select_ticket_bound_first_reconciliation_tick_scopes,
@@ -185,6 +186,9 @@ async def _amain(argv: list[str] | None = None) -> int:
                         _remaining_seconds(deadline_at, "exchange_snapshot"),
                     ),
                     recent_fill_limit=50,
+                    conditional_parent_order_ids=prepared[
+                        "conditional_parent_order_ids"
+                    ],
                     now_ms=prepared["now_ms"],
                     authority_boundary=prepared["authority_boundary"],
                 ),
@@ -331,6 +335,12 @@ def _prepare_snapshot_scopes(
                         item["protected_submit_attempt_id"]
                     ),
                     "scope": resolution.scope,
+                    "conditional_parent_order_ids": (
+                        load_ticket_conditional_parent_order_ids(
+                            conn,
+                            ticket_id=str(item.get("ticket_id") or ""),
+                        )
+                    ),
                     "now_ms": now_ms,
                     "authority_boundary": ATTEMPT_AUTHORITY_BOUNDARY,
                 }
@@ -349,6 +359,12 @@ def _prepare_snapshot_scopes(
                 {
                     "snapshot_identity": str(item["exit_protection_set_id"]),
                     "scope": resolution.scope,
+                    "conditional_parent_order_ids": (
+                        load_ticket_conditional_parent_order_ids(
+                            conn,
+                            ticket_id=str(item.get("ticket_id") or ""),
+                        )
+                    ),
                     "now_ms": now_ms,
                     "authority_boundary": SNAPSHOT_AUTHORITY_BOUNDARY,
                 }

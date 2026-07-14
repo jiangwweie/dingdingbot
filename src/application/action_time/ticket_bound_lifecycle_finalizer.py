@@ -50,6 +50,7 @@ def finalize_ticket_bound_lifecycle_if_ready(
     if not lifecycle:
         return _result("not_ready_lifecycle_missing", [], False)
     if str(lifecycle.get("status") or "") == "lifecycle_closed":
+        _close_action_time_ticket(conn, ticket_id=ticket_id)
         outcome = materialize_live_outcome_ledger(
             conn,
             ticket_id=ticket_id,
@@ -212,6 +213,7 @@ def finalize_ticket_bound_lifecycle_if_ready(
             ),
             "closure_status": closure.get("status"),
         }
+    _close_action_time_ticket(conn, ticket_id=ticket_id)
     outcome = materialize_live_outcome_ledger(
         conn,
         ticket_id=ticket_id,
@@ -356,6 +358,20 @@ def _set_lifecycle_status(
         "brc_ticket_bound_order_lifecycle_runs",
         "lifecycle_run_id",
         str(lifecycle["lifecycle_run_id"]),
+    )
+
+
+def _close_action_time_ticket(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+) -> None:
+    tickets = _table(conn, "brc_action_time_tickets")
+    conn.execute(
+        tickets.update()
+        .where(tickets.c.ticket_id == ticket_id)
+        .where(tickets.c.status != "closed")
+        .values(status="closed")
     )
 
 

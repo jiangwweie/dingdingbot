@@ -3,6 +3,7 @@ from src.application.action_time.exchange_snapshot_provider import (
     fetch_ticket_bound_exchange_snapshot,
     fetch_resolved_ticket_bound_exchange_snapshot,
 )
+from src.infrastructure.exchange_gateway import ExchangeGateway
 from tests.unit.test_ticket_bound_lifecycle_scheduler import (
     NOW_MS,
     _materialized_exit_protection_set,
@@ -57,6 +58,23 @@ class _Gateway:
                 "asset": "USDT",
                 "time": start_time_ms + 11,
             },
+        ]
+
+    async def fetch_conditional_order_lineage(
+        self,
+        symbol: str,
+        parent_exchange_order_ids: list[str],
+    ):
+        self.events.append("conditional_lineage")
+        assert symbol == "ETH/USDT:USDT"
+        assert parent_exchange_order_ids == ["4000001767421460"]
+        return [
+            {
+                "parent_exchange_order_id": "4000001767421460",
+                "actual_exchange_order_id": "39574198157",
+                "client_order_id": "brc-d8c2da19c7b8338498152eb4cab97088",
+                "status": "finished",
+            }
         ]
 
 
@@ -116,6 +134,87 @@ async def test_snapshot_reads_and_normalizes_signed_funding_without_exchange_wri
     ]
     assert payload["snapshot"]["funding_income_available"] is True
     assert payload["snapshot"]["exchange_write_called"] is False
+
+
+async def test_snapshot_binds_binance_conditional_parent_to_actual_fill():
+    gateway = _Gateway()
+
+    async def fetch_my_trades(symbol: str, limit: int = 50):
+        gateway.events.append("trades")
+        return [
+            {
+                "order": "39574198157",
+                "symbol": symbol,
+                "side": "buy",
+                "amount": "215",
+                "price": "6.482",
+                "timestamp": 1783990510789,
+            }
+        ]
+
+    gateway.fetch_my_trades = fetch_my_trades
+    payload = await fetch_resolved_ticket_bound_exchange_snapshot(
+        scope=_scope(),
+        snapshot_identity="protection-1",
+        gateway=gateway,
+        timeout_seconds=1,
+        recent_fill_limit=50,
+        conditional_parent_order_ids=["4000001767421460"],
+        now_ms=1783990511000,
+    )
+
+    assert payload["status"] == "snapshot_ready"
+    assert payload["snapshot"]["conditional_order_lineage"] == [
+        {
+            "parent_exchange_order_id": "4000001767421460",
+            "actual_exchange_order_id": "39574198157",
+            "client_order_id": "brc-d8c2da19c7b8338498152eb4cab97088",
+            "status": "finished",
+        }
+    ]
+    assert payload["snapshot"]["recent_fills"][0]["exchange_order_id"] == (
+        "39574198157"
+    )
+    assert payload["snapshot"]["recent_fills"][0][
+        "parent_exchange_order_id"
+    ] == "4000001767421460"
+    assert payload["snapshot"]["exchange_write_called"] is False
+
+
+async def test_binance_gateway_reads_exact_conditional_order_lineage():
+    class _RestExchange:
+        async def fapiPrivateGetAlgoOrder(self, params):
+            assert params == {"algoId": "4000001767421460"}
+            return {
+                "algoId": 4000001767421460,
+                "clientAlgoId": "brc-d8c2da19c7b8338498152eb4cab97088",
+                "actualOrderId": "39574198157",
+                "symbol": "AVAXUSDT",
+                "side": "BUY",
+                "positionSide": "SHORT",
+                "orderType": "STOP_MARKET",
+                "algoStatus": "FINISHED",
+                "triggerPrice": "6.4790",
+                "quantity": "215",
+                "actualQty": "215",
+                "triggerTime": 1783990510788,
+                "reduceOnly": True,
+                "closePosition": False,
+            }
+
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    gateway.rest_exchange = _RestExchange()
+
+    rows = await gateway.fetch_conditional_order_lineage(
+        "AVAX/USDT:USDT",
+        ["4000001767421460"],
+    )
+
+    assert rows[0]["parent_exchange_order_id"] == "4000001767421460"
+    assert rows[0]["actual_exchange_order_id"] == "39574198157"
+    assert rows[0]["status"] == "finished"
+    assert rows[0]["reduce_only"] is True
 
 
 async def test_snapshot_keeps_funding_optional_for_existing_gateways():

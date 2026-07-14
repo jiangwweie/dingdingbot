@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -15,9 +16,13 @@ from src.application.action_time.external_close_attribution import (
 )
 from src.application.action_time.lifecycle_maintenance_scheduler import (
     run_ticket_bound_lifecycle_maintenance_scheduler,
+    select_ticket_bound_lifecycle_maintenance_scopes,
 )
 from src.application.action_time.ticket_bound_lifecycle_finalizer import (
     finalize_ticket_bound_lifecycle_if_ready,
+)
+from src.application.action_time.ticket_bound_fill_projector import (
+    project_ticket_bound_exchange_fills,
 )
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_runner_protection_adjuster import (
@@ -60,6 +65,11 @@ def test_finalizer_closes_reconciled_flat_lifecycle_and_is_idempotent(
     ) == "lifecycle_closed"
     assert _scalar(
         pg_control_connection,
+        "SELECT status FROM brc_action_time_tickets WHERE ticket_id = :ticket_id",
+        ticket_id=ticket_id,
+    ) == "closed"
+    assert _scalar(
+        pg_control_connection,
         "SELECT status FROM brc_budget_reservations WHERE ticket_id = :ticket_id",
         ticket_id=ticket_id,
     ) == "released"
@@ -78,6 +88,235 @@ def test_finalizer_closes_reconciled_flat_lifecycle_and_is_idempotent(
         "WHERE event_type IN ('reconciliation_matched', 'budget_settled', "
         "'review_recorded', 'lifecycle_closed')",
     ) == 4
+
+
+def test_scheduler_selects_closed_incomplete_outcome_until_economics_are_complete(
+    pg_control_connection,
+):
+    ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    finalize_ticket_bound_lifecycle_if_ready(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+
+    selected = select_ticket_bound_lifecycle_maintenance_scopes(
+        pg_control_connection,
+        max_lifecycle_scopes=4,
+    )
+    assert [scope["ticket_id"] for scope in selected] == [ticket_id]
+
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_live_outcome_ledger SET "
+            "final_exit_time_ms = :final_exit_time_ms, final_exit_price = 1990, "
+            "fees = 0.03, realized_pnl = -10, net_pnl = -10.03, "
+            "r_multiple = -1 WHERE ticket_id = :ticket_id"
+        ),
+        {
+            "ticket_id": ticket_id,
+            "final_exit_time_ms": NOW_MS + 15_000,
+        },
+    )
+
+    selected = select_ticket_bound_lifecycle_maintenance_scopes(
+        pg_control_connection,
+        max_lifecycle_scopes=4,
+    )
+    assert selected == []
+
+
+@pytest.mark.asyncio
+async def test_scheduler_repairs_closed_outcome_from_exact_tracked_fill(
+    pg_control_connection,
+):
+    ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    entry_event = pg_control_connection.execute(
+        text(
+            "SELECT lifecycle_event_id, event_payload FROM "
+            "brc_ticket_bound_lifecycle_events "
+            "WHERE ticket_id = :ticket_id AND event_type = 'entry_filled'"
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().one()
+    entry_payload = entry_event["event_payload"]
+    if isinstance(entry_payload, str):
+        entry_payload = json.loads(entry_payload)
+    entry_payload["entry_fill"]["fee"] = {
+        "cost": "0.01",
+        "currency": "USDT",
+    }
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_lifecycle_events SET event_payload = :payload "
+            "WHERE lifecycle_event_id = :event_id"
+        ),
+        {
+            "event_id": entry_event["lifecycle_event_id"],
+            "payload": json.dumps(entry_payload),
+        },
+    )
+    finalize_ticket_bound_lifecycle_if_ready(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+    scope = pg_control_connection.execute(
+        text(
+            "SELECT exit_protection_set_id, protected_submit_attempt_id "
+            "FROM brc_ticket_bound_exit_protection_sets "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().one()
+    sl = pg_control_connection.execute(
+        text(
+            "SELECT exchange_order_id, qty FROM "
+            "brc_ticket_bound_exit_protection_orders "
+            "WHERE ticket_id = :ticket_id AND role = 'SL'"
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().one()
+    snapshot = {
+        "snapshot_id": f"closed-repair:{ticket_id}",
+        "open_orders": [],
+        "recent_fills": [
+            {
+                "exchange_order_id": sl["exchange_order_id"],
+                "qty": str(sl["qty"]),
+                "price": "1990",
+                "fee": {"cost": "0.03", "currency": "USDT"},
+                "timestamp_ms": NOW_MS + 15_000,
+            }
+        ],
+        "funding_income": [],
+        "position": {
+            "qty": "0",
+            "position_flat": True,
+            "truth_state": "flat",
+            "complete": True,
+        },
+    }
+
+    payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
+        pg_control_connection,
+        gateway=None,
+        allow_exchange_mutation=False,
+        fetch_exchange_snapshot=False,
+        max_lifecycle_scopes=4,
+        provided_exchange_snapshots={
+            identity: {
+                "status": "snapshot_ready",
+                "snapshot": snapshot,
+                "exchange_read_called": True,
+                "blockers": [],
+            }
+            for identity in (
+                str(scope["exit_protection_set_id"]),
+                str(scope["protected_submit_attempt_id"]),
+            )
+        },
+        now_ms=NOW_MS + 30_000,
+    )
+
+    assert payload["status"] == "scheduler_complete", payload
+    outcome = pg_control_connection.execute(
+        text(
+            "SELECT final_exit_time_ms, final_exit_price, fees, realized_pnl, "
+            "net_pnl, r_multiple FROM brc_live_outcome_ledger "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().one()
+    assert outcome["final_exit_time_ms"] == NOW_MS + 15_000
+    assert outcome["final_exit_price"] == 1990
+    assert Decimal(str(outcome["fees"])) == Decimal("0.04")
+    assert outcome["realized_pnl"] is not None
+    assert outcome["net_pnl"] is not None
+    assert outcome["r_multiple"] is not None
+    assert _scalar(
+        pg_control_connection,
+        "SELECT status FROM brc_action_time_tickets WHERE ticket_id = :ticket_id",
+        ticket_id=ticket_id,
+    ) == "closed"
+
+
+def test_legitimate_external_close_stops_lineage_repair_after_exact_review(
+    pg_control_connection,
+):
+    ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    finalize_ticket_bound_lifecycle_if_ready(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_live_outcome_ledger SET "
+            "final_exit_time_ms = :final_exit_time_ms, final_exit_price = 2010, "
+            "fees = 0.03, realized_pnl = 10, net_pnl = 9.97, "
+            "r_multiple = 1 WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id, "final_exit_time_ms": NOW_MS + 15_000},
+    )
+    closure = pg_control_connection.execute(
+        text(
+            "SELECT post_submit_closure_id, reconciliation_evidence "
+            "FROM brc_ticket_bound_post_submit_closures "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().one()
+    evidence = closure["reconciliation_evidence"]
+    if isinstance(evidence, str):
+        evidence = json.loads(evidence)
+    evidence.update(
+        {
+            "final_exit_role": "EXTERNAL_CLOSE",
+            "final_exit_exchange_order_id": "manual-close-1",
+        }
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_post_submit_closures "
+            "SET reconciliation_evidence = :evidence "
+            "WHERE post_submit_closure_id = :closure_id"
+        ),
+        {
+            "closure_id": closure["post_submit_closure_id"],
+            "evidence": json.dumps(evidence),
+        },
+    )
+    assert [
+        scope["ticket_id"]
+        for scope in select_ticket_bound_lifecycle_maintenance_scopes(
+            pg_control_connection,
+            max_lifecycle_scopes=4,
+        )
+    ] == [ticket_id]
+
+    project_ticket_bound_exchange_fills(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot={
+            "recent_fills": [
+                {
+                    "exchange_order_id": "manual-close-1",
+                    "qty": "0.5",
+                    "price": "2010",
+                    "timestamp_ms": NOW_MS + 15_000,
+                }
+            ],
+            "conditional_order_lineage": [],
+            "conditional_order_lineage_available": True,
+        },
+        now_ms=NOW_MS + 30_000,
+    )
+
+    assert select_ticket_bound_lifecycle_maintenance_scopes(
+        pg_control_connection,
+        max_lifecycle_scopes=4,
+    ) == []
 
 
 def test_finalizer_does_not_release_budget_while_residual_protection_is_live(
@@ -126,6 +365,31 @@ async def test_production_scheduler_drives_final_fill_to_closed_outcome_without_
         ),
         {"set_id": set_id},
     ).mappings().one()
+    entry_event = pg_control_connection.execute(
+        text(
+            "SELECT lifecycle_event_id, event_payload FROM "
+            "brc_ticket_bound_lifecycle_events "
+            "WHERE ticket_id = :ticket_id AND event_type = 'entry_filled'"
+        ),
+        {"ticket_id": scope["ticket_id"]},
+    ).mappings().one()
+    entry_payload = entry_event["event_payload"]
+    if isinstance(entry_payload, str):
+        entry_payload = json.loads(entry_payload)
+    entry_payload["entry_fill"]["fee"] = {
+        "cost": "0.01",
+        "currency": "USDT",
+    }
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_lifecycle_events SET event_payload = :payload "
+            "WHERE lifecycle_event_id = :event_id"
+        ),
+        {
+            "event_id": entry_event["lifecycle_event_id"],
+            "payload": json.dumps(entry_payload),
+        },
+    )
     sl = pg_control_connection.execute(
         text(
             "SELECT exchange_order_id, qty FROM "

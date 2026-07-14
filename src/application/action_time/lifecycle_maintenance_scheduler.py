@@ -61,6 +61,7 @@ SNAPSHOT_STATUSES = {
     "exchange_orphan_detected",
     "runner_reconciliation_mismatch",
     "position_closed_protection_live",
+    "lifecycle_closed",
 }
 
 
@@ -362,14 +363,89 @@ def select_ticket_bound_lifecycle_maintenance_scopes(
     max_lifecycle_scopes: int,
 ) -> list[dict[str, Any]]:
     lifecycle = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
-    query = (
+    active_query = (
         sa.select(lifecycle)
         .where(lifecycle.c.status.in_(MAINTAINABLE_LIFECYCLE_STATUSES))
         .order_by(lifecycle.c.updated_at_ms.asc(), lifecycle.c.created_at_ms.asc())
         .limit(max_lifecycle_scopes)
     )
+    selected_rows = list(conn.execute(active_query).mappings())
+    remaining = max(0, max_lifecycle_scopes - len(selected_rows))
+    if remaining and sa.inspect(conn).has_table("brc_live_outcome_ledger"):
+        outcomes = _table(conn, "brc_live_outcome_ledger")
+        closures = _table(conn, "brc_ticket_bound_post_submit_closures")
+        protection_orders = _table(
+            conn,
+            "brc_ticket_bound_exit_protection_orders",
+        )
+        outcome_column_names = set(outcomes.c.keys())
+        filled_tp1_missing_conditions = []
+        if "tp1_fill_time_ms" in outcome_column_names:
+            filled_tp1_missing_conditions.append(
+                outcomes.c.tp1_fill_time_ms.is_(None)
+            )
+        if "tp1_fill_price" in outcome_column_names:
+            filled_tp1_missing_conditions.append(
+                outcomes.c.tp1_fill_price.is_(None)
+            )
+        filled_tp1_missing_outcome_fill = sa.false()
+        if filled_tp1_missing_conditions:
+            filled_tp1_missing_outcome_fill = sa.exists(
+                sa.select(protection_orders.c.exit_protection_order_id).where(
+                    protection_orders.c.ticket_id == lifecycle.c.ticket_id,
+                    protection_orders.c.role == "TP1",
+                    protection_orders.c.status == "filled",
+                    sa.or_(*filled_tp1_missing_conditions),
+                )
+            )
+        external_close_needs_lineage_review = sa.and_(
+            closures.c.reconciliation_evidence["final_exit_role"].as_string()
+            == "EXTERNAL_CLOSE",
+            closures.c.reconciliation_evidence[
+                "conditional_lineage_reviewed_at_ms"
+            ]
+            .as_string()
+            .is_(None),
+        )
+        incomplete_conditions = [
+            outcomes.c[name].is_(None)
+            for name in (
+                "live_outcome_id",
+                "final_exit_time_ms",
+                "final_exit_price",
+                "fees",
+                "realized_pnl",
+                "net_pnl",
+                "r_multiple",
+            )
+            if name in outcome_column_names
+        ]
+        incomplete = sa.or_(
+            *incomplete_conditions,
+            filled_tp1_missing_outcome_fill,
+            external_close_needs_lineage_review,
+        )
+        repair_query = (
+            sa.select(lifecycle)
+            .select_from(
+                lifecycle.outerjoin(
+                    outcomes,
+                    outcomes.c.ticket_id == lifecycle.c.ticket_id,
+                ).outerjoin(
+                    closures,
+                    closures.c.ticket_id == lifecycle.c.ticket_id,
+                )
+            )
+            .where(lifecycle.c.status == "lifecycle_closed", incomplete)
+            .order_by(
+                lifecycle.c.updated_at_ms.asc(),
+                lifecycle.c.created_at_ms.asc(),
+            )
+            .limit(remaining)
+        )
+        selected_rows.extend(conn.execute(repair_query).mappings())
     scopes: list[dict[str, Any]] = []
-    for row in conn.execute(query).mappings():
+    for row in selected_rows:
         item = dict(row)
         scopes.append(
             {

@@ -1861,6 +1861,74 @@ class ExchangeGateway:
             logger.error(f"查询订单失败：{e}")
             raise
 
+    async def fetch_conditional_order_lineage(
+        self,
+        symbol: str,
+        parent_exchange_order_ids: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Read Binance conditional parent-to-actual order identity.
+
+        Binance USDT-M exposes the submitted conditional order as ``algoId``
+        and the triggered exchange order as ``actualOrderId``.  User trades
+        contain only the latter, so both ids are required to conserve the
+        ticket-bound SL/runner role after a trigger.  This method is read-only.
+        """
+
+        parent_ids = list(
+            dict.fromkeys(
+                str(value).strip()
+                for value in parent_exchange_order_ids
+                if str(value or "").strip()
+            )
+        )
+        if not parent_ids:
+            return []
+        if self.exchange_name.lower() != "binance":
+            return []
+        rows: List[Dict[str, Any]] = []
+        for parent_id in parent_ids:
+            raw = await self.rest_exchange.fapiPrivateGetAlgoOrder(
+                {"algoId": parent_id}
+            )
+            if not isinstance(raw, dict):
+                raise ConnectionLostError(
+                    "条件订单血缘查询返回非结构化响应",
+                    "C-002",
+                )
+            observed_parent_id = str(raw.get("algoId") or "").strip()
+            if observed_parent_id != parent_id:
+                raise ConnectionLostError(
+                    "条件订单血缘返回了不一致的父订单标识",
+                    "C-002",
+                )
+            rows.append(
+                {
+                    "parent_exchange_order_id": observed_parent_id,
+                    "actual_exchange_order_id": str(
+                        raw.get("actualOrderId") or ""
+                    ).strip(),
+                    "client_order_id": str(
+                        raw.get("clientAlgoId") or ""
+                    ).strip(),
+                    "status": str(raw.get("algoStatus") or "").lower(),
+                    "symbol": str(raw.get("symbol") or ""),
+                    "side": str(raw.get("side") or "").lower(),
+                    "position_side": str(
+                        raw.get("positionSide") or ""
+                    ).upper(),
+                    "order_type": str(raw.get("orderType") or "").upper(),
+                    "qty": str(raw.get("quantity") or ""),
+                    "actual_qty": str(raw.get("actualQty") or ""),
+                    "trigger_price": str(raw.get("triggerPrice") or ""),
+                    "trigger_time_ms": raw.get("triggerTime"),
+                    "reduce_only": str(raw.get("reduceOnly")).lower()
+                    in {"true", "1", "yes"},
+                    "close_position": str(raw.get("closePosition")).lower()
+                    in {"true", "1", "yes"},
+                }
+            )
+        return rows
+
     async def find_order_by_client_id(
         self,
         client_order_id: str,

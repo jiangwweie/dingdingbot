@@ -7,7 +7,9 @@ from sqlalchemy import text
 from scripts import materialize_ticket_bound_exit_protection_set as exit_protection
 from scripts import materialize_ticket_bound_protected_submit_attempt as submit
 from src.application.action_time.live_outcome_ledger import (
+    _compatible_fee_total,
     _exit_slippage,
+    _realized_pnl,
     _ticket_bound_funding_total,
     materialize_live_outcome_ledger,
 )
@@ -274,6 +276,55 @@ def test_funding_attribution_rejects_conflicting_duplicate_and_excludes_unrelate
         entry_time_ms=1000,
         final_exit_time_ms=2000,
     ) == Decimal("-0.10")
+
+
+def test_first_real_sol_trade_exact_fee_and_net_pnl_regression():
+    gross = _realized_pnl(
+        side="short",
+        entry_price=Decimal("75.47"),
+        entry_qty=Decimal("0.8"),
+        exits=[
+            (Decimal("74.29"), Decimal("0.4")),
+            (Decimal("74.75"), Decimal("0.4")),
+        ],
+    )
+    fees = _compatible_fee_total(
+        {"cost": "0.030188", "currency": "USDT"},
+        {"cost": "0.0059432", "currency": "USDT"},
+        {"cost": "0.01495", "currency": "USDT"},
+    )
+
+    assert gross == Decimal("0.760")
+    assert fees == Decimal("0.0510812")
+    assert gross - fees == Decimal("0.7089188")
+
+
+def test_closed_outcome_fee_total_requires_every_known_fill_fee():
+    assert _compatible_fee_total(
+        {"cost": "0.030188", "currency": "USDT"},
+        None,
+        {"cost": "0.01495", "currency": "USDT"},
+        require_all=True,
+    ) is None
+
+
+def test_funding_is_exact_zero_only_when_exchange_read_was_available():
+    assert _ticket_bound_funding_total(
+        [],
+        ticket_id="ticket-1",
+        symbol="SOLUSDT",
+        entry_time_ms=1000,
+        final_exit_time_ms=2000,
+        funding_available=True,
+    ) == Decimal("0")
+    assert _ticket_bound_funding_total(
+        [],
+        ticket_id="ticket-1",
+        symbol="SOLUSDT",
+        entry_time_ms=1000,
+        final_exit_time_ms=2000,
+        funding_available=False,
+    ) is None
 
 
 def test_exit_slippage_is_signed_adverse_cost_for_long_and_short():

@@ -86,6 +86,10 @@ async def fetch_ticket_bound_exchange_snapshot(
         now_ms=now_ms,
         funding_start_time_ms=funding_start_time_ms,
         funding_end_time_ms=now_ms if funding_start_time_ms is not None else None,
+        conditional_parent_order_ids=load_ticket_conditional_parent_order_ids(
+            conn,
+            ticket_id=str(protection_set.get("ticket_id") or ""),
+        ),
         authority_boundary=AUTHORITY_BOUNDARY,
     )
     return {
@@ -158,6 +162,10 @@ async def fetch_ticket_bound_attempt_exchange_snapshot(
         now_ms=now_ms,
         funding_start_time_ms=funding_start_time_ms,
         funding_end_time_ms=now_ms if funding_start_time_ms is not None else None,
+        conditional_parent_order_ids=load_ticket_conditional_parent_order_ids(
+            conn,
+            ticket_id=str(attempt.get("ticket_id") or ""),
+        ),
         authority_boundary=ATTEMPT_AUTHORITY_BOUNDARY,
     )
     return {
@@ -186,6 +194,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
     now_ms: int,
     funding_start_time_ms: int | None = None,
     funding_end_time_ms: int | None = None,
+    conditional_parent_order_ids: list[str] | None = None,
     authority_boundary: str = AUTHORITY_BOUNDARY,
 ) -> dict[str, Any]:
     """Perform exchange reads without any PG connection or transaction."""
@@ -208,7 +217,11 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
             and funding_end_time_ms is not None
             and funding_end_time_ms >= funding_start_time_ms
         )
-        open_orders, recent_fills, positions, funding_result = await asyncio.wait_for(
+        conditional_fetch = getattr(gateway, "fetch_conditional_order_lineage", None)
+        should_fetch_conditional_lineage = bool(
+            callable(conditional_fetch) and conditional_parent_order_ids
+        )
+        open_orders, recent_fills, positions, funding_result, conditional_result = await asyncio.wait_for(
             asyncio.gather(
                 gateway.fetch_all_open_orders(scope.exchange_symbol),
                 gateway.fetch_my_trades(
@@ -223,6 +236,15 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
                     end_time_ms=int(funding_end_time_ms or 0),
                 )
                 if should_fetch_funding
+                else asyncio.sleep(0, result={"rows": [], "error": None}),
+                _fetch_optional_conditional_order_lineage(
+                    conditional_fetch=conditional_fetch,
+                    symbol=scope.exchange_symbol,
+                    parent_exchange_order_ids=list(
+                        conditional_parent_order_ids or []
+                    ),
+                )
+                if should_fetch_conditional_lineage
                 else asyncio.sleep(0, result={"rows": [], "error": None}),
             ),
             timeout=timeout_seconds,
@@ -248,6 +270,14 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
     position, position_blockers = _normalize_position(scope, positions or [])
     funding_income = list(funding_result.get("rows") or [])
     funding_error = funding_result.get("error")
+    conditional_order_lineage = _normalize_conditional_order_lineage(
+        list(conditional_result.get("rows") or [])
+    )
+    normalized_fills = [_normalize_fill(fill) for fill in recent_fills or []]
+    _bind_conditional_parent_ids(
+        normalized_fills,
+        conditional_order_lineage=conditional_order_lineage,
+    )
     snapshot = {
         "snapshot_id": _snapshot_id(snapshot_identity, now_ms),
         "source": "official_runtime_exchange_gateway",
@@ -262,7 +292,13 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         "position_side": scope.position_side,
         "netting_domain_key": scope.netting_domain_key,
         "open_orders": [_normalize_open_order(order) for order in open_orders or []],
-        "recent_fills": [_normalize_fill(fill) for fill in recent_fills or []],
+        "recent_fills": normalized_fills,
+        "conditional_order_lineage": conditional_order_lineage,
+        "conditional_order_lineage_available": (
+            should_fetch_conditional_lineage
+            and conditional_result.get("error") is None
+        ),
+        "conditional_order_lineage_error": conditional_result.get("error"),
         "funding_income": _normalize_funding_income(
             funding_income or [],
             ticket_id=scope.ticket_id,
@@ -301,6 +337,58 @@ async def _fetch_optional_funding_income(
     except Exception as exc:
         return {"rows": [], "error": type(exc).__name__}
     return {"rows": list(rows or []), "error": None}
+
+
+async def _fetch_optional_conditional_order_lineage(
+    *,
+    conditional_fetch: Any,
+    symbol: str,
+    parent_exchange_order_ids: list[str],
+) -> dict[str, Any]:
+    try:
+        rows = await conditional_fetch(symbol, parent_exchange_order_ids)
+    except Exception as exc:
+        return {"rows": [], "error": type(exc).__name__}
+    return {"rows": list(rows or []), "error": None}
+
+
+def load_ticket_conditional_parent_order_ids(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+) -> list[str]:
+    if not ticket_id:
+        return []
+    ids: list[str] = []
+    inspector = sa.inspect(conn)
+    if inspector.has_table("brc_ticket_bound_exit_protection_orders"):
+        table = _table(conn, "brc_ticket_bound_exit_protection_orders")
+        rows = conn.execute(
+            sa.select(table.c.exchange_order_id).where(
+                table.c.ticket_id == ticket_id,
+                table.c.role.in_(("SL", "RUNNER_SL")),
+            )
+        ).scalars()
+        ids.extend(str(value).strip() for value in rows if str(value or "").strip())
+    if ids or not inspector.has_table("brc_ticket_bound_protected_submit_attempts"):
+        return list(dict.fromkeys(ids))
+    attempts = _table(conn, "brc_ticket_bound_protected_submit_attempts")
+    raw_submit_result = conn.execute(
+        sa.select(attempts.c.submit_result)
+        .where(attempts.c.ticket_id == ticket_id)
+        .order_by(attempts.c.updated_at_ms.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    submit_result = _as_dict(raw_submit_result)
+    for order in submit_result.get("submitted_orders", []):
+        if not isinstance(order, dict):
+            continue
+        if str(order.get("order_role") or "").upper() not in {"SL", "RUNNER_SL"}:
+            continue
+        exchange_order_id = str(order.get("exchange_order_id") or "").strip()
+        if exchange_order_id:
+            ids.append(exchange_order_id)
+    return list(dict.fromkeys(ids))
 
 
 def _gateway_method_blockers(gateway: Any) -> list[str]:
@@ -407,6 +495,51 @@ def _normalize_fill(fill: Any) -> dict[str, Any]:
             raw.get("timestamp") or raw.get("timestamp_ms") or info.get("time")
         ),
     }
+
+
+def _normalize_conditional_order_lineage(rows: list[Any]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        item = _as_dict(row)
+        parent_id = str(item.get("parent_exchange_order_id") or "").strip()
+        actual_id = str(item.get("actual_exchange_order_id") or "").strip()
+        if not parent_id or not actual_id:
+            continue
+        normalized.append(
+            {
+                "parent_exchange_order_id": parent_id,
+                "actual_exchange_order_id": actual_id,
+                "client_order_id": str(item.get("client_order_id") or "").strip(),
+                "status": str(item.get("status") or "").lower(),
+            }
+        )
+    return normalized
+
+
+def _bind_conditional_parent_ids(
+    fills: list[dict[str, Any]],
+    *,
+    conditional_order_lineage: list[dict[str, Any]],
+) -> None:
+    parent_by_actual_id = {
+        str(item["actual_exchange_order_id"]): str(
+            item["parent_exchange_order_id"]
+        )
+        for item in conditional_order_lineage
+    }
+    client_by_actual_id = {
+        str(item["actual_exchange_order_id"]): str(item.get("client_order_id") or "")
+        for item in conditional_order_lineage
+    }
+    for fill in fills:
+        actual_id = str(fill.get("exchange_order_id") or "").strip()
+        parent_id = parent_by_actual_id.get(actual_id)
+        if not parent_id:
+            continue
+        fill["parent_exchange_order_id"] = parent_id
+        client_order_id = client_by_actual_id.get(actual_id)
+        if client_order_id:
+            fill["client_order_id"] = client_order_id
 
 
 def _normalize_funding_income(
@@ -625,6 +758,10 @@ def _row_by_id(
     table = sa.Table(table_name, sa.MetaData(), autoload_with=conn)
     row = conn.execute(sa.select(table).where(table.c[id_column] == id_value)).mappings().first()
     return dict(row) if row else {}
+
+
+def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:
+    return sa.Table(table_name, sa.MetaData(), autoload_with=conn)
 
 
 def _ticket_entry_fill_time_ms(

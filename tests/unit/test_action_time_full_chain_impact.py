@@ -1220,7 +1220,7 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
         "brc_action_time_tickets",
         "ticket_id",
         str(payloads["ticket"]["ticket_id"]),
-    ) == "submitted"
+    ) == "closed"
     assert _status(
         pg_control_connection,
         "brc_operation_layer_handoffs",

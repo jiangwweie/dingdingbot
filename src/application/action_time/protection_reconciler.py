@@ -149,14 +149,23 @@ def reconcile_ticket_bound_exit_protection_set(
             exchange_snapshot=exchange_snapshot,
             now_ms=now_ms,
         )
-    external_close, external_close_blockers = attribute_exact_ticket_bound_external_close(
-        conn,
-        lifecycle=lifecycle,
-        orders=orders,
-        exchange_scope=exchange_scope,
-        recent_fills=recent_fills,
-        position=position,
-    )
+    conditional_lineage_error = str(
+        exchange_snapshot.get("conditional_order_lineage_error") or ""
+    ).strip()
+    if position_flat and conditional_lineage_error:
+        external_close = {}
+        external_close_blockers = ["conditional_order_lineage_unavailable"]
+    else:
+        external_close, external_close_blockers = (
+            attribute_exact_ticket_bound_external_close(
+                conn,
+                lifecycle=lifecycle,
+                orders=orders,
+                exchange_scope=exchange_scope,
+                recent_fills=recent_fills,
+                position=position,
+            )
+        )
     if (
         position_flat
         and external_close
@@ -718,7 +727,14 @@ def _exchange_order_filled(
     expected = str(pg_order.get("exchange_order_id") or "")
     if not expected:
         return False
-    return any(str(fill.get("exchange_order_id") or "") == expected for fill in recent_fills)
+    return any(
+        expected
+        in {
+            str(fill.get("exchange_order_id") or ""),
+            str(fill.get("parent_exchange_order_id") or ""),
+        }
+        for fill in recent_fills
+    )
 
 
 def _position_flat(position: dict[str, Any]) -> bool:
@@ -770,12 +786,23 @@ def _insert_event(
     *,
     now_ms: int,
 ) -> None:
+    identity_tail = str(now_ms)
+    if event_type == "exit_protection_reconciled":
+        identity_tail = _stable_id(
+            "reconciliation_state",
+            str(payload.get("lifecycle_status") or ""),
+            json.dumps(
+                payload.get("blockers") or [],
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
     event = {
         "lifecycle_event_id": _stable_id(
             "ticket_lifecycle_event",
             str(lifecycle["lifecycle_run_id"]),
             event_type,
-            str(now_ms),
+            identity_tail,
         ),
         "lifecycle_run_id": str(lifecycle["lifecycle_run_id"]),
         "ticket_id": str(lifecycle["ticket_id"]),

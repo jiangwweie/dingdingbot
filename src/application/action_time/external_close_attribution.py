@@ -42,14 +42,25 @@ def attribute_exact_ticket_bound_external_close(
     tracked_exit_qty = Decimal("0")
     for fill in recent_fills:
         fill_order_id = str(fill.get("exchange_order_id") or "").strip()
-        if fill_order_id not in tracked_order_ids:
+        parent_order_id = str(
+            fill.get("parent_exchange_order_id") or ""
+        ).strip()
+        matched_tracked_id = next(
+            (
+                order_id
+                for order_id in (fill_order_id, parent_order_id)
+                if order_id in tracked_order_ids
+            ),
+            "",
+        )
+        if not matched_tracked_id:
             continue
         tracked = next(
             (
                 order
                 for order in orders
                 if str(order.get("exchange_order_id") or "").strip()
-                == fill_order_id
+                == matched_tracked_id
             ),
             {},
         )
@@ -63,9 +74,15 @@ def attribute_exact_ticket_bound_external_close(
     preliminary_candidates: list[dict[str, Any]] = []
     for fill in recent_fills:
         exchange_order_id = str(fill.get("exchange_order_id") or "").strip()
+        parent_exchange_order_id = str(
+            fill.get("parent_exchange_order_id") or ""
+        ).strip()
         if not exchange_order_id or exchange_order_id == entry_order_id:
             continue
-        if exchange_order_id in tracked_order_ids:
+        if (
+            exchange_order_id in tracked_order_ids
+            or parent_exchange_order_id in tracked_order_ids
+        ):
             continue
         if str(fill.get("side") or "").lower() != expected_side:
             continue

@@ -566,6 +566,28 @@ Keep production runtime quiet and bounded when markets are inactive.
 | **Strict audit clear** | `validate_no_runtime_file_authority.py` passes |
 | **Output governance clear** | `validate_output_artifact_scope.py --git-status --git-tracked` passes |
 
+### P1-E Real-Trade Fact Truth And Venue Lineage
+
+#### Goal
+
+Make the existing single-Ticket lifecycle preserve exact exchange truth before
+portfolio allocation expands the number of concurrent positions.
+
+#### Acceptance
+
+| Requirement | Acceptance proof |
+| --- | --- |
+| **Conditional-order lineage exact** | Binance `algoId -> actualOrderId` maps a child fill back to the ticket-bound SL/runner role |
+| **Fill projection idempotent** | an already-filled PG order missing its lifecycle event is backfilled once; contradictory fills hard-stop |
+| **Ticket terminal truth aligned** | lifecycle closure makes the Ticket `closed`; attempts and handoffs remain immutable execution facts |
+| **Outcome economics complete** | known fills require complete fees; empty funding is zero only after an available exchange read |
+| **Reconciliation change-only** | identical protected truth does not append repeated business events |
+| **Runtime I/O bounded** | no recurring JSON/MD writer or runtime file authority is added; performance audit remains clear |
+
+This work is the prerequisite truth layer for **P2-E**. It must not introduce
+portfolio sizing or multi-position policy while repairing historical/current
+Ticket facts.
+
 ### P2-E Advanced Capital Risk Allocation
 
 #### Goal

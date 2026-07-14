@@ -235,6 +235,12 @@ venue behavior.
 | **P0-K** | **Real Signal -> Ticket closure** | make production action-time pricing, sizing, stop-risk reservation, and Ticket creation one coherent typed chain | every eligible real-submit lane either creates one Ticket inside freshness bounds or stops at one producer-owned blocker before lane readiness |
 | **P0-L** | **Production-shaped certification** | prevent complete downstream dictionaries from hiding missing production handoffs | all six Event Specs pass raw-source-to-Ticket certification and projection consistency checks without exchange write |
 | **P0-M** | **Runtime causal integrity certification** | prove transaction, process-death, retry, concurrency, lifecycle, and projection invariants at production-shaped boundaries | 12 bounded PostgreSQL/process scenarios pass; findings are fixed or explicitly retained as live-only |
+| **P1-N** | **Real-trade fact truth and venue lineage** | conserve exact conditional parent/actual order identity, fill role, fees, funding availability, PnL, and terminal Ticket state | every closed real Ticket has one internally consistent lifecycle and Outcome projection; unchanged reconciliation creates no duplicate business event |
+
+**P1-N local Release certification is complete.** The implementation does not
+change strategy semantics, sizing, leverage, risk policy, runtime profile,
+FinalGate, Operation Layer, or exchange-write authority. Tokyo deployment and
+three-real-Ticket read-only acceptance remain the release cutover step.
 
 ## Active Runtime Loop
 
