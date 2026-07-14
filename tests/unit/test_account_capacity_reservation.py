@@ -66,13 +66,73 @@ def test_active_reservation_counts_against_its_risk_cluster() -> None:
     conn.execute(
         sa.text(
             """
-            INSERT INTO brc_budget_reservations VALUES (
+            ALTER TABLE brc_budget_reservations
+            ADD COLUMN exchange_instrument_id TEXT
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_budget_reservations (
+              budget_reservation_id, account_id, status, ticket_id, symbol, side,
+              risk_at_stop, reserved_margin, account_risk_policy_version,
+              risk_cluster_id, exchange_instrument_id
+            ) VALUES (
               'existing', 'account-1', 'active', 'ticket-1', 'SOLUSDT', 'long',
-              '15', '150', 'p1', 'crypto_usd_beta'
+              '15', '150', 'p1', 'crypto_usd_beta', 'binance_usdm:SOLUSDT'
             )
             """
         )
     )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_risk_cluster_memberships VALUES "
+            "('p1', 'binance_usdm:ETHUSDT', 'crypto_usd_beta')"
+        )
+    )
+    result = reserve_account_capacity_for_candidate(
+        conn,
+        candidate=AccountCapacityCandidate(
+            account_id="account-1", runtime_profile_id="profile-1",
+            exchange_instrument_id="binance_usdm:ETHUSDT", risk_cluster_id="crypto_usd_beta",
+            per_unit_stop_risk=Decimal("3"), entry_reference_price=Decimal("150"),
+            min_qty=Decimal("0.01"), qty_step=Decimal("0.01"), min_notional=Decimal("5"),
+            exchange_max_leverage=20,
+        ),
+        expected_source_snapshot_id="snapshot-1",
+        expected_projection_version=1,
+        now_ms=1_752_480_000_000,
+    )
+    assert result.allowed is True
+    assert result.allocated_risk == Decimal("9")
+    assert result.risk_cluster_id == "crypto_usd_beta"
+    assert result.account_risk_policy_version == "p1"
+
+
+def test_active_reservation_for_same_instrument_blocks_second_ticket_claim() -> None:
+    conn = _connection()
+    conn.execute(
+        sa.text(
+            "ALTER TABLE brc_budget_reservations "
+            "ADD COLUMN exchange_instrument_id TEXT"
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_budget_reservations (
+              budget_reservation_id, account_id, status, ticket_id, symbol, side,
+              risk_at_stop, reserved_margin, account_risk_policy_version,
+              risk_cluster_id, exchange_instrument_id
+            ) VALUES (
+              'existing-sol', 'account-1', 'active', 'ticket-sol', 'SOLUSDT', 'long',
+              '15', '150', 'p1', 'crypto_usd_beta', 'binance_usdm:SOLUSDT'
+            )
+            """
+        )
+    )
+
     result = reserve_account_capacity_for_candidate(
         conn,
         candidate=AccountCapacityCandidate(
@@ -86,10 +146,117 @@ def test_active_reservation_counts_against_its_risk_cluster() -> None:
         expected_projection_version=1,
         now_ms=1_752_480_000_000,
     )
+
+    assert result.first_blocker == "account_instrument_already_claimed"
+
+
+def test_consumed_reservation_owned_by_exposure_is_not_counted_twice_in_cluster() -> None:
+    conn = _connection()
+    conn.execute(
+        sa.text(
+            "CREATE TABLE brc_account_exposure_current ("
+            "account_id TEXT, exchange_instrument_id TEXT, held_risk NUMERIC, "
+            "position_slot_claimed BOOLEAN, owner_ticket_id TEXT)"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_account_exposure_current "
+            "(account_id, exchange_instrument_id, held_risk, position_slot_claimed, owner_ticket_id) "
+            "VALUES ('account-1', 'binance_usdm:ETHUSDT', '15', true, 'ticket-eth')"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_risk_cluster_memberships VALUES "
+            "('p1', 'binance_usdm:ETHUSDT', 'crypto_usd_beta')"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_budget_reservations VALUES ("
+            "'consumed-eth', 'account-1', 'consumed', 'ticket-eth', 'ETHUSDT', 'long', "
+            "'15', '150', 'p1', 'crypto_usd_beta')"
+        )
+    )
+
+    result = reserve_account_capacity_for_candidate(
+        conn,
+        candidate=AccountCapacityCandidate(
+            account_id="account-1", runtime_profile_id="profile-1",
+            exchange_instrument_id="binance_usdm:SOLUSDT",
+            risk_cluster_id="crypto_usd_beta",
+            per_unit_stop_risk=Decimal("3"), entry_reference_price=Decimal("150"),
+            min_qty=Decimal("0.01"), qty_step=Decimal("0.01"), min_notional=Decimal("5"),
+            exchange_max_leverage=20,
+        ),
+        expected_source_snapshot_id="snapshot-1",
+        expected_projection_version=1,
+        now_ms=1_752_480_000_000,
+    )
+
     assert result.allowed is True
     assert result.allocated_risk == Decimal("9")
-    assert result.risk_cluster_id == "crypto_usd_beta"
-    assert result.account_risk_policy_version == "p1"
+
+
+def test_flat_exposure_does_not_release_consumed_cluster_reservation_early() -> None:
+    conn = _connection()
+    conn.execute(
+        sa.text(
+            "CREATE TABLE brc_account_exposure_current ("
+            "account_id TEXT, exchange_instrument_id TEXT, held_risk NUMERIC, "
+            "position_slot_claimed BOOLEAN, owner_ticket_id TEXT, exposure_state TEXT)"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "ALTER TABLE brc_budget_reservations "
+            "ADD COLUMN exchange_instrument_id TEXT"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_account_exposure_current VALUES "
+            "('account-1', 'binance_usdm:ETHUSDT', '0', false, 'ticket-eth', 'flat')"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_risk_cluster_memberships VALUES "
+            "('p1', 'binance_usdm:ETHUSDT', 'crypto_usd_beta')"
+        )
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_budget_reservations (
+              budget_reservation_id, account_id, status, ticket_id, symbol, side,
+              risk_at_stop, reserved_margin, account_risk_policy_version,
+              risk_cluster_id, exchange_instrument_id
+            ) VALUES (
+              'consumed-eth', 'account-1', 'consumed', 'ticket-eth', 'ETHUSDT', 'long',
+              '15', '150', 'p1', 'crypto_usd_beta', 'binance_usdm:ETHUSDT'
+            )
+            """
+        )
+    )
+
+    result = reserve_account_capacity_for_candidate(
+        conn,
+        candidate=AccountCapacityCandidate(
+            account_id="account-1", runtime_profile_id="profile-1",
+            exchange_instrument_id="binance_usdm:SOLUSDT", risk_cluster_id="crypto_usd_beta",
+            per_unit_stop_risk=Decimal("3"), entry_reference_price=Decimal("150"),
+            min_qty=Decimal("0.01"), qty_step=Decimal("0.01"), min_notional=Decimal("5"),
+            exchange_max_leverage=20,
+        ),
+        expected_source_snapshot_id="snapshot-1",
+        expected_projection_version=1,
+        now_ms=1_752_480_000_000,
+    )
+
+    assert result.allowed is True
+    assert result.allocated_risk == Decimal("9")
 
 
 def test_account_capacity_can_only_downsize_existing_ticket_sizing() -> None:

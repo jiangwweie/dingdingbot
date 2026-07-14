@@ -72,31 +72,98 @@ def apply_account_capacity_to_sizing(base: ExecutionSizingDecision, capacity: Ac
     })
 
 def _instrument_claimed(conn: sa.Connection, account_id: str, instrument: str) -> bool:
-    if not sa.inspect(conn).has_table("brc_account_exposure_current"): return False
-    table = sa.Table("brc_account_exposure_current", sa.MetaData(), autoload_with=conn)
-    return conn.execute(sa.select(table.c.account_id).where(table.c.account_id == account_id).where(table.c.exchange_instrument_id == instrument).where(table.c.position_slot_claimed.is_(True)).limit(1)).first() is not None
+    if sa.inspect(conn).has_table("brc_account_exposure_current"):
+        exposures = sa.Table(
+            "brc_account_exposure_current", sa.MetaData(), autoload_with=conn
+        )
+        exposure_claim = conn.execute(
+            sa.select(exposures.c.account_id)
+            .where(exposures.c.account_id == account_id)
+            .where(exposures.c.exchange_instrument_id == instrument)
+            .where(exposures.c.position_slot_claimed.is_(True))
+            .limit(1)
+        ).first()
+        if exposure_claim is not None:
+            return True
+    if not sa.inspect(conn).has_table("brc_budget_reservations"):
+        return False
+    reservations = sa.Table(
+        "brc_budget_reservations", sa.MetaData(), autoload_with=conn
+    )
+    if "exchange_instrument_id" not in reservations.c:
+        return False
+    return conn.execute(
+        sa.select(reservations.c.budget_reservation_id)
+        .where(reservations.c.account_id == account_id)
+        .where(reservations.c.exchange_instrument_id == instrument)
+        .where(reservations.c.status.in_(("active", "consumed")))
+        .limit(1)
+    ).first() is not None
 
 def _cluster_held_risk(conn: sa.Connection, account_id: str, version: str, cluster: str, *, fallback: Decimal) -> Decimal:
     if not sa.inspect(conn).has_table("brc_account_exposure_current"): return fallback
     exposures = sa.Table("brc_account_exposure_current", sa.MetaData(), autoload_with=conn); memberships = sa.Table("brc_risk_cluster_memberships", sa.MetaData(), autoload_with=conn)
-    exposure_held = sum((_d(value) for value in conn.execute(sa.select(exposures.c.held_risk).join(memberships, memberships.c.exchange_instrument_id == exposures.c.exchange_instrument_id).where(exposures.c.account_id == account_id).where(memberships.c.risk_policy_version == version).where(memberships.c.risk_cluster_id == cluster)).scalars()), Decimal("0"))
+    exposure_query = (
+        sa.select(exposures)
+        .join(
+            memberships,
+            memberships.c.exchange_instrument_id == exposures.c.exchange_instrument_id,
+        )
+        .where(exposures.c.account_id == account_id)
+        .where(memberships.c.risk_policy_version == version)
+        .where(memberships.c.risk_cluster_id == cluster)
+    )
+    exposure_rows = [dict(row) for row in conn.execute(exposure_query).mappings()]
+    exposure_held = sum(
+        (_d(row.get("held_risk")) for row in exposure_rows), Decimal("0")
+    )
+    consumed_tickets_represented_by_exposure = {
+        str(row.get("owner_ticket_id") or "")
+        for row in exposure_rows
+        if (
+            str(row.get("owner_ticket_id") or "")
+            and _exposure_still_holds_capacity(row)
+        )
+    }
     if not sa.inspect(conn).has_table("brc_budget_reservations"):
         return exposure_held
     reservations = sa.Table("brc_budget_reservations", sa.MetaData(), autoload_with=conn)
     required_columns = {"account_risk_policy_version", "risk_cluster_id", "risk_at_stop", "status"}
     if not required_columns.issubset(reservations.c.keys()):
         return exposure_held
+    reservation_query = (
+        sa.select(reservations.c.risk_at_stop)
+        .where(reservations.c.account_id == account_id)
+        .where(reservations.c.account_risk_policy_version == version)
+        .where(reservations.c.risk_cluster_id == cluster)
+    )
+    if consumed_tickets_represented_by_exposure:
+        reservation_query = reservation_query.where(
+            sa.or_(
+                reservations.c.status == "active",
+                sa.and_(
+                    reservations.c.status == "consumed",
+                    ~reservations.c.ticket_id.in_(
+                        tuple(consumed_tickets_represented_by_exposure)
+                    ),
+                ),
+            )
+        )
+    else:
+        reservation_query = reservation_query.where(
+            reservations.c.status.in_(("active", "consumed"))
+        )
     reservation_held = sum(
         (
             _d(value)
-            for value in conn.execute(
-                sa.select(reservations.c.risk_at_stop)
-                .where(reservations.c.account_id == account_id)
-                .where(reservations.c.account_risk_policy_version == version)
-                .where(reservations.c.risk_cluster_id == cluster)
-                .where(reservations.c.status.in_(("active", "consumed")))
-            ).scalars()
+            for value in conn.execute(reservation_query).scalars()
         ),
         Decimal("0"),
     )
     return exposure_held + reservation_held
+
+
+def _exposure_still_holds_capacity(row: dict[str, object]) -> bool:
+    """A flat/closed projection cannot suppress its still-consumed reservation."""
+
+    return str(row.get("exposure_state") or "").strip() not in {"flat", "closed"}
