@@ -20,6 +20,11 @@ from src.application.action_time.lifecycle_safety_core import (
     lifecycle_decision_for_status,
     reduce_lifecycle_decision,
 )
+from src.domain.ticket_exit_protection import (
+    DEFAULT_REPLACEMENT_GRACE_MS,
+    order_mapping_for_view,
+    resolve_active_exit_protection_rows,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -75,15 +80,45 @@ def prepare_ticket_bound_runner_mutation_command(
             next_action="repair_ticket_bound_exit_protection_set",
         )
     orders = _orders_for_set(conn, set_id)
-    sl_order = _role_order(orders, "SL")
-    tp1_order = _role_order(orders, "TP1")
-    runner_order = _role_order(orders, "RUNNER_SL")
+    sl_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="SL",
+        orders=orders,
+        position_is_open=True,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    tp1_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="TP1",
+        orders=orders,
+        position_is_open=True,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    runner_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="RUNNER_SL",
+        orders=orders,
+        position_is_open=True,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    sl_order = order_mapping_for_view(
+        orders, sl_resolution.active_order or sl_resolution.lineage_leaf
+    )
+    tp1_order = order_mapping_for_view(orders, tp1_resolution.lineage_leaf)
+    runner_order = order_mapping_for_view(orders, runner_resolution.active_order)
     blockers = _command_blockers(
         protection_set=protection_set,
         sl_order=sl_order,
         tp1_order=tp1_order,
         runner_order=runner_order,
     )
+    for resolution in (sl_resolution, tp1_resolution, runner_resolution):
+        if resolution.fails_closed:
+            blockers.extend(resolution.blockers)
+    blockers = _dedupe(blockers)
     if blockers:
         return _result(
             "blocked",
@@ -448,13 +483,6 @@ def _orders_for_set(
             )
         ).mappings()
     ]
-
-
-def _role_order(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
-    for order in orders:
-        if str(order.get("role") or "").upper() == role.upper():
-            return dict(order)
-    return {}
 
 
 def _row_by_id(

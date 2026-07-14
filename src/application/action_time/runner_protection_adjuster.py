@@ -29,6 +29,11 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.action_time.lifecycle_safety_core import (  # noqa: E402
     classify_runner_protection_adjustment,
 )
+from src.domain.ticket_exit_protection import (  # noqa: E402
+    DEFAULT_REPLACEMENT_GRACE_MS,
+    order_mapping_for_view,
+    resolve_active_exit_protection_rows,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -83,9 +88,35 @@ def materialize_ticket_bound_runner_protection_adjustment(
         str(protection_set.get("ticket_id") or ""),
     )
     orders = _orders_for_set(conn, set_id)
-    sl_order = _role_order(orders, "SL")
-    tp1_order = _role_order(orders, "TP1")
-    existing_runner = _role_order(orders, "RUNNER_SL")
+    sl_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="SL",
+        orders=orders,
+        position_is_open=True,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    tp1_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="TP1",
+        orders=orders,
+        position_is_open=True,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    runner_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="RUNNER_SL",
+        orders=orders,
+        position_is_open=True,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    sl_order = order_mapping_for_view(
+        orders, sl_resolution.active_order or sl_resolution.lineage_leaf
+    )
+    tp1_order = order_mapping_for_view(orders, tp1_resolution.lineage_leaf)
+    existing_runner = order_mapping_for_view(orders, runner_resolution.active_order)
     runner_result = _runner_mutation_result_for_set(conn, set_id)
 
     blockers = _blockers(
@@ -96,6 +127,9 @@ def materialize_ticket_bound_runner_protection_adjustment(
         runner_exchange_id=runner_exchange_id
         or str(existing_runner.get("exchange_order_id") or ""),
     )
+    for resolution in (sl_resolution, tp1_resolution, runner_resolution):
+        if resolution.fails_closed:
+            blockers.extend(resolution.blockers)
     existing_runner_exchange_id = str(existing_runner.get("exchange_order_id") or "")
     if (
         existing_runner
@@ -477,13 +511,6 @@ def _orders_for_set(conn: sa.engine.Connection, set_id: str) -> list[dict[str, A
             sa.select(table).where(table.c.exit_protection_set_id == set_id)
         ).mappings()
     ]
-
-
-def _role_order(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
-    for order in orders:
-        if order.get("role") == role:
-            return dict(order)
-    return {}
 
 
 def _mark_lifecycle_status(

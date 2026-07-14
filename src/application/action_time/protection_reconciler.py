@@ -34,6 +34,11 @@ from src.application.action_time.lifecycle_safety_core import (
     lifecycle_decision_for_status,
     reduce_lifecycle_decision,
 )
+from src.domain.ticket_exit_protection import (
+    DEFAULT_REPLACEMENT_GRACE_MS,
+    order_mapping_for_view,
+    resolve_active_exit_protection_rows,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -96,11 +101,8 @@ def reconcile_ticket_bound_exit_protection_set(
             protection_set=protection_set,
             lifecycle=lifecycle,
             next_action="repair_ticket_bound_exchange_scope",
-        )
+    )
     exchange_scope = scope_resolution.scope
-    sl_order = _role_order(orders, "SL")
-    tp1_order = _role_order(orders, "TP1")
-    runner_order = _role_order(orders, "RUNNER_SL")
     open_orders = [
         dict(order)
         for order in exchange_snapshot.get("open_orders", [])
@@ -115,6 +117,46 @@ def reconcile_ticket_bound_exit_protection_set(
     position_snapshot_missing = not isinstance(raw_position, dict) or not raw_position
     position = dict(raw_position) if isinstance(raw_position, dict) else {}
     position_flat = False if position_snapshot_missing else _position_flat(position)
+    position_is_open = not position_flat
+    sl_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="SL",
+        orders=orders,
+        position_is_open=position_is_open,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    tp1_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="TP1",
+        orders=orders,
+        position_is_open=position_is_open,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    runner_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="RUNNER_SL",
+        orders=orders,
+        position_is_open=position_is_open,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    sl_order = order_mapping_for_view(
+        orders, sl_resolution.active_order or sl_resolution.lineage_leaf
+    )
+    tp1_order = order_mapping_for_view(
+        orders, tp1_resolution.active_order or tp1_resolution.lineage_leaf
+    )
+    runner_order = order_mapping_for_view(
+        orders, runner_resolution.active_order or runner_resolution.lineage_leaf
+    )
+    resolution_blockers = [
+        blocker
+        for resolution in (sl_resolution, tp1_resolution, runner_resolution)
+        if resolution.fails_closed
+        for blocker in resolution.blockers
+    ]
     ownership = classify_exchange_order_ownership(
         conn,
         current_scope=exchange_scope,
@@ -201,7 +243,7 @@ def reconcile_ticket_bound_exit_protection_set(
     )
     classification_blockers = (
         ["exchange_position_snapshot_missing"] if position_snapshot_missing else []
-    ) + list(classification.blockers)
+    ) + resolution_blockers + list(classification.blockers)
 
     blockers = _additional_blockers(
         orders=orders,
@@ -211,6 +253,7 @@ def reconcile_ticket_bound_exit_protection_set(
         tp1_filled=tp1_filled,
         active_sl_order=active_sl_order,
         old_sl_order=sl_order,
+        tp1_order=tp1_order,
         runner_order=runner_order,
         classification_blockers=classification_blockers,
         ownership_blockers=ownership_blockers,
@@ -389,13 +432,14 @@ def _additional_blockers(
     tp1_filled: bool,
     active_sl_order: dict[str, Any],
     old_sl_order: dict[str, Any],
+    tp1_order: dict[str, Any],
     runner_order: dict[str, Any],
     classification_blockers: list[str],
     ownership_blockers: list[str],
     exchange_scope: Any,
 ) -> list[str]:
     blockers = list(classification_blockers) + list(ownership_blockers)
-    for role, pg_order in (("SL", active_sl_order), ("TP1", _role_order(orders, "TP1"))):
+    for role, pg_order in (("SL", active_sl_order), ("TP1", tp1_order)):
         label = "runner_sl" if role == "SL" and pg_order == runner_order else role.lower()
         if role == "TP1" and _exchange_order_filled(pg_order, recent_fills):
             continue
@@ -756,13 +800,6 @@ def _orders_for_set(
             )
         ).mappings()
     ]
-
-
-def _role_order(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
-    for order in orders:
-        if str(order.get("role") or "").upper() == role.upper():
-            return dict(order)
-    return {}
 
 
 def _row_by_id(

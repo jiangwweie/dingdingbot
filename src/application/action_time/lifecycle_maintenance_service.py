@@ -36,6 +36,11 @@ from src.application.action_time.runner_mutation_command import (
 from src.application.action_time.runner_protection_adjuster import (
     materialize_ticket_bound_runner_protection_adjustment,
 )
+from src.domain.ticket_exit_protection import (
+    DEFAULT_REPLACEMENT_GRACE_MS,
+    order_mapping_for_view,
+    resolve_active_exit_protection_rows,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -181,7 +186,7 @@ async def run_ticket_bound_lifecycle_maintenance(
 
         runner: dict[str, Any] = {}
         runner_command_id = ""
-        if _runner_mutation_candidate(conn, set_id):
+        if _runner_mutation_candidate(conn, set_id, now_ms=now_ms + len(actions)):
             runner = prepare_ticket_bound_runner_mutation_command(
                 conn,
                 exit_protection_set_id=set_id,
@@ -362,7 +367,12 @@ def _scoped_exit_protection_set_ids(
     return [str(row["exit_protection_set_id"]) for row in conn.execute(query).mappings()]
 
 
-def _runner_mutation_candidate(conn: sa.engine.Connection, set_id: str) -> bool:
+def _runner_mutation_candidate(
+    conn: sa.engine.Connection,
+    set_id: str,
+    *,
+    now_ms: int,
+) -> bool:
     protection_set = _row_by_id(
         conn,
         "brc_ticket_bound_exit_protection_sets",
@@ -376,8 +386,26 @@ def _runner_mutation_candidate(conn: sa.engine.Connection, set_id: str) -> bool:
         str(protection_set.get("ticket_id") or ""),
     )
     orders = _orders_for_set(conn, set_id)
-    tp1 = _role_order(orders, "TP1")
-    runner = _role_order(orders, "RUNNER_SL")
+    tp1_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="TP1",
+        orders=orders,
+        position_is_open=True,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    runner_resolution = resolve_active_exit_protection_rows(
+        exit_protection_set_id=set_id,
+        role="RUNNER_SL",
+        orders=orders,
+        position_is_open=True,
+        now_ms=now_ms,
+        replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+    )
+    if tp1_resolution.fails_closed or runner_resolution.fails_closed:
+        return False
+    tp1 = order_mapping_for_view(orders, tp1_resolution.lineage_leaf)
+    runner = order_mapping_for_view(orders, runner_resolution.active_order)
     return (
         str(lifecycle.get("status") or "") == "runner_mutation_pending"
         or (
@@ -419,13 +447,6 @@ def _orders_for_set(conn: sa.engine.Connection, set_id: str) -> list[dict[str, A
             sa.select(table).where(table.c.exit_protection_set_id == set_id)
         ).mappings()
     ]
-
-
-def _role_order(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
-    for order in orders:
-        if str(order.get("role") or "").upper() == role:
-            return dict(order)
-    return {}
 
 
 def _protection_set_attempt_id(conn: sa.engine.Connection, set_id: str) -> str:

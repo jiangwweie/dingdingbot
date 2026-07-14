@@ -11,6 +11,12 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.domain.ticket_exit_protection import (
+    DEFAULT_REPLACEMENT_GRACE_MS,
+    order_mapping_for_view,
+    resolve_active_exit_protection_rows,
+)
+
 
 AUTHORITY_BOUNDARY = (
     "ticket_bound_live_outcome_ledger; PG ticket/attempt/lifecycle/protection "
@@ -129,9 +135,39 @@ def materialize_live_outcome_ledger(
         ticket_id,
     )
     protection_orders = _protection_orders(conn, ticket_id)
-    sl = _role_order(protection_orders, "SL")
-    tp1 = _role_order(protection_orders, "TP1")
-    runner_sl = _role_order(protection_orders, "RUNNER_SL")
+    set_id = str(protection_set.get("exit_protection_set_id") or "")
+    resolutions = {
+        role: resolve_active_exit_protection_rows(
+            exit_protection_set_id=set_id,
+            role=role,
+            orders=protection_orders,
+            position_is_open=False,
+            now_ms=now_ms,
+            replacement_grace_ms=DEFAULT_REPLACEMENT_GRACE_MS,
+        )
+        for role in ("SL", "TP1", "RUNNER_SL")
+    }
+    resolution_blockers = _dedupe(
+        [
+            blocker
+            for resolution in resolutions.values()
+            if resolution.fails_closed
+            for blocker in resolution.blockers
+        ]
+    )
+    if resolution_blockers:
+        return _result(
+            "blocked_exit_protection_identity",
+            now_ms=now_ms,
+            outcome={},
+            blockers=resolution_blockers,
+            next_action="repair_exit_protection_generation_lineage",
+        )
+    sl = order_mapping_for_view(protection_orders, resolutions["SL"].lineage_leaf)
+    tp1 = order_mapping_for_view(protection_orders, resolutions["TP1"].lineage_leaf)
+    runner_sl = order_mapping_for_view(
+        protection_orders, resolutions["RUNNER_SL"].lineage_leaf
+    )
     entry_fill = _lifecycle_fill_event(
         conn,
         lifecycle_run_id=str(lifecycle.get("lifecycle_run_id") or ""),
@@ -366,13 +402,6 @@ def _protection_orders(conn: sa.engine.Connection, ticket_id: str) -> list[dict[
             sa.select(table).where(table.c.ticket_id == ticket_id)
         ).mappings()
     ]
-
-
-def _role_order(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
-    for order in orders:
-        if str(order.get("role") or "").upper() == role:
-            return dict(order)
-    return {}
 
 
 def _existing_outcome(conn: sa.engine.Connection, ticket_id: str) -> dict[str, Any]:
