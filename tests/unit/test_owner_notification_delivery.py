@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 import sys
 
+import pytest
 import sqlalchemy as sa
 
 from src.application.owner_notification import (
@@ -225,6 +226,82 @@ def test_active_resolved_incident_starts_a_new_delivery_episode() -> None:
     assert selection.selected == (incident,)
     assert selection.reopened_dedupe_keys == frozenset({key})
     assert selection.reopened_incident_count == 1
+
+
+@pytest.mark.parametrize(
+    ("status_code", "response_body", "sent", "business_code"),
+    [
+        (200, '{"code": 0, "msg": "success"}', True, 0),
+        (200, '{"code": 19001, "msg": "invalid"}', False, 19001),
+        (200, '{"StatusCode": 0, "StatusMessage": "success"}', True, 0),
+        (200, '{"StatusCode": 1, "StatusMessage": "failed"}', False, 1),
+        (200, "not-json", False, None),
+        (200, "{}", False, None),
+        (500, '{"code": 0, "msg": "success"}', False, 0),
+    ],
+)
+def test_feishu_business_acknowledgement_requires_transport_and_business_success(
+    status_code: int,
+    response_body: str,
+    sent: bool,
+    business_code: int | None,
+) -> None:
+    module = _load_monitor()
+
+    acknowledgement = module.parse_feishu_robot_ack(
+        status_code=status_code,
+        response_body=response_body,
+    )
+
+    assert acknowledgement["sent"] is sent
+    assert acknowledgement["business_code"] == business_code
+    assert acknowledgement["status_code"] == status_code
+    assert len(str(acknowledgement["response_body_preview"])) <= 500
+
+
+def test_business_error_is_persisted_as_retryable_failed_delivery() -> None:
+    module = _load_monitor()
+    engine, conn, transaction = _connection()
+    try:
+        response = module.parse_feishu_robot_ack(
+            status_code=200,
+            response_body='{"code": 19001, "msg": "invalid"}',
+        )
+        summary = module._apply_pg_owner_notifications(
+            conn=conn,
+            automation_id="runtime-monitor",
+            control_state=_fresh_signal(10_000),
+            now_ms=10_000,
+            webhook_url="https://example.test/webhook",
+            webhook_secret=None,
+            notification_timeout_seconds=3,
+            notification_dry_run=False,
+            notifier=lambda *_args: response,
+        )
+
+        row = conn.execute(
+            sa.text(
+                """
+                SELECT notification_state, send_attempts, feishu_response
+                FROM brc_server_monitor_notifications
+                """
+            )
+        ).mappings().one()
+        persisted = row["feishu_response"]
+        if isinstance(persisted, str):
+            import json
+
+            persisted = json.loads(persisted)
+
+        assert summary["sent_count"] == 0
+        assert row["notification_state"] == "failed"
+        assert row["send_attempts"] == 1
+        assert persisted["business_code"] == 19001
+        assert persisted["business_message"] == "invalid"
+    finally:
+        transaction.rollback()
+        conn.close()
+        engine.dispose()
 
 
 def test_already_sent_candidates_do_not_starve_a_new_critical_card() -> None:

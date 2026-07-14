@@ -494,6 +494,19 @@ def _load_module():
     return module
 
 
+def test_feishu_acknowledgement_prefers_current_business_code_over_legacy_field() -> None:
+    module = _load_module()
+
+    acknowledgement = module.parse_feishu_robot_ack(
+        status_code=200,
+        response_body='{"code": 1, "msg": "rejected", "StatusCode": 0}',
+    )
+
+    assert acknowledgement["sent"] is False
+    assert acknowledgement["business_code"] == 1
+    assert acknowledgement["business_message"] == "rejected"
+
+
 def _load_file_module(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None

@@ -139,6 +139,42 @@ def _feishu_text_body(text: str, *, secret: str | None = None) -> dict[str, Any]
     return body
 
 
+def parse_feishu_robot_ack(
+    *,
+    status_code: int,
+    response_body: str,
+) -> dict[str, object]:
+    """Fail closed unless Feishu confirms both transport and business success."""
+    body_preview = str(response_body or "")[:500]
+    business_code: int | None = None
+    business_message: str | None = None
+    try:
+        parsed = json.loads(response_body)
+    except (TypeError, json.JSONDecodeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        if "code" in parsed:
+            code = parsed.get("code")
+            message = parsed.get("msg")
+        elif "StatusCode" in parsed:
+            code = parsed.get("StatusCode")
+            message = parsed.get("StatusMessage")
+        else:
+            code = None
+            message = None
+        if isinstance(code, int) and not isinstance(code, bool):
+            business_code = code
+        if message is not None:
+            business_message = str(message)[:500]
+    return {
+        "sent": 200 <= int(status_code) < 300 and business_code == 0,
+        "status_code": int(status_code),
+        "business_code": business_code,
+        "business_message": business_message,
+        "response_body_preview": body_preview,
+    }
+
+
 def send_feishu_text(
     webhook_url: str,
     webhook_secret: str | None,
@@ -156,11 +192,10 @@ def send_feishu_text(
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             response_body = response.read().decode("utf-8", errors="replace")
-            return {
-                "sent": 200 <= int(response.status) < 300,
-                "status_code": int(response.status),
-                "response_body_preview": response_body[:500],
-            }
+            return parse_feishu_robot_ack(
+                status_code=int(response.status),
+                response_body=response_body,
+            )
     except urllib.error.HTTPError as exc:
         response_body = exc.read().decode("utf-8", errors="replace")
         return {
@@ -197,11 +232,10 @@ def send_feishu_payload(
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             response_body = response.read().decode("utf-8", errors="replace")
-            return {
-                "sent": 200 <= int(response.status) < 300,
-                "status_code": int(response.status),
-                "response_body_preview": response_body[:500],
-            }
+            return parse_feishu_robot_ack(
+                status_code=int(response.status),
+                response_body=response_body,
+            )
     except urllib.error.HTTPError as exc:
         response_body = exc.read().decode("utf-8", errors="replace")
         return {
@@ -1246,6 +1280,8 @@ def _apply_pg_owner_notifications(
             "feishu_response": {
                 "sent": sent,
                 "status_code": response.get("status_code"),
+                "business_code": response.get("business_code"),
+                "business_message": response.get("business_message"),
                 "response_body_preview": response.get("response_body_preview"),
                 "skipped_reason": skipped_reason,
             },
@@ -1530,6 +1566,8 @@ def _apply_pg_notification(
             "feishu_response": {
                 "sent": sent,
                 "status_code": notification.get("status_code"),
+                "business_code": notification.get("business_code"),
+                "business_message": notification.get("business_message"),
                 "response_body_preview": notification.get("response_body_preview"),
                 "skipped_reason": notification.get("skipped_reason"),
             },
