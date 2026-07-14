@@ -2,55 +2,12 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from hashlib import sha256
-from typing import Literal, Sequence
+from decimal import Decimal
+from typing import Sequence
 
 import sqlalchemy as sa
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-
-class AccountRiskPolicy(BaseModel):
-    """Versioned account-level limits; strategy scope policy remains separate."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    risk_policy_version: str = Field(min_length=1)
-    planned_stop_risk_fraction: Decimal = Field(gt=Decimal("0"), le=Decimal("1"))
-    max_concurrent_positions: Literal[1, 2]
-    max_portfolio_open_risk_fraction: Decimal = Field(
-        gt=Decimal("0"), le=Decimal("1")
-    )
-    max_cluster_open_risk_fraction: Decimal = Field(gt=Decimal("0"), le=Decimal("1"))
-    max_portfolio_initial_margin_fraction: Decimal = Field(
-        gt=Decimal("0"), le=Decimal("1")
-    )
-    max_leverage: int = Field(ge=1, le=125)
-    max_new_action_time_lanes: Literal[1]
-    automatic_downsize_enabled: bool
-    unknown_exposure_policy: Literal["global_fail_closed"]
-    activation_state: Literal["shadow", "active"]
-
-    @model_validator(mode="after")
-    def _finite_fractions(self) -> "AccountRiskPolicy":
-        fractions = (
-            self.planned_stop_risk_fraction,
-            self.max_portfolio_open_risk_fraction,
-            self.max_cluster_open_risk_fraction,
-            self.max_portfolio_initial_margin_fraction,
-        )
-        if not all(value.is_finite() for value in fractions):
-            raise ValueError("account risk policy fractions must be finite")
-        return self
-
-
-class RiskClusterMembership(BaseModel):
-    """Static, versioned instrument-to-risk-cluster membership."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    exchange_instrument_id: str = Field(min_length=1)
-    risk_cluster_id: str = Field(min_length=1)
+from src.domain.account_risk import AccountRiskPolicy, RiskClusterMembership
 
 
 def append_account_risk_policy_event(
