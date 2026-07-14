@@ -14,6 +14,9 @@ LATEST_MIGRATION = (
     "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
 )
 CERTIFIED_CCXT_VERSION = "4.5.56"
+RUNTIME_VENV_PYTHON = (
+    "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
+)
 
 
 def _load_module():
@@ -272,6 +275,45 @@ def test_postdeploy_verifier_rejects_uncertified_ccxt_version():
 
     assert report["status"] == "blocked"
     assert "postdeploy_ccxt_version_mismatch" in report["checks"]["blockers"]
+
+
+def test_postdeploy_verifier_checks_ccxt_with_configured_runtime_venv():
+    module = _load_module()
+    commands = []
+    base_runner = _runner()
+
+    def runner(command):
+        commands.append(command)
+        return base_runner(command)
+
+    report = module.build_postdeploy_report(
+        host="tokyo",
+        deploy_root="~/brc-deploy",
+        api_base="http://127.0.0.1:18080",
+        expected_current_head=EXPECTED_HEAD,
+        expected_migration_count=70,
+        expected_latest_migration=LATEST_MIGRATION,
+        connect_timeout_seconds=8,
+        venv_python=RUNTIME_VENV_PYTHON,
+        runner=runner,
+    )
+
+    assert report["checks"]["postdeploy_acceptance_passed"] is True
+    ccxt_command = next(
+        command[-1] for command in commands if "import ccxt" in command[-1]
+    )
+    assert (
+        "cd \"$HOME\"/brc-deploy/app/current && "
+        f"{RUNTIME_VENV_PYTHON} -c 'import ccxt;"
+    ) in ccxt_command
+
+
+def test_postdeploy_verifier_cli_defaults_to_runtime_service_venv():
+    module = _load_module()
+
+    args = module._parse_args(["--expected-current-head", EXPECTED_HEAD])
+
+    assert args.venv_python == RUNTIME_VENV_PYTHON
 
 
 def test_postdeploy_verifier_subprocess_timeout_returns_failure(monkeypatch):

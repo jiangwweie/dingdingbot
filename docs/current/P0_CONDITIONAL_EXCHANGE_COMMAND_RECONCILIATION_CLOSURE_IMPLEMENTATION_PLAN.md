@@ -516,6 +516,8 @@ conditional-command, hold, or unknown-outcome scenario was skipped.
 - [ ] **Step 3: Record the planned postdeploy checks**:
   - exact release head;
   - `ccxt==4.5.56`;
+  - the deployment-selected absolute `venv_python` is passed to the verifier;
+  - the verifier's CCXT command never invokes bare `python`;
   - backend, watcher, monitor, and lifecycle timer health;
   - no new runtime files;
   - no synthetic signal, Ticket, command, or exchange write;

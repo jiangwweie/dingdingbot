@@ -466,6 +466,30 @@ performance risk clear.
 | Current docs/output/file-I/O | All validation commands passed; `suspicious_runtime_file_authority=0`, `frequent_report_write=0` |
 | Tokyo/Feishu/exchange access | None |
 
+### Release-Verifier Interpreter Closure — 2026-07-14
+
+The release review found one additional **P1 deployment reliability defect**:
+the postdeploy verifier used a bare `python -c 'import ccxt'` command. The
+Tokyo runtime services use
+`/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python`; the
+deployment planner owned that path but did not pass it to the verifier. A
+post-switch verifier failure could therefore report a failed deployment after
+`app/current` had already changed, without being an execution-chain defect.
+
+The repair makes the runtime interpreter an explicit verifier input and passes
+the same `venv_python` selected by the deployment plan into the phase-four
+postdeploy command. The verifier defaults to the current service interpreter
+only for direct read-only use. It never falls back to a bare `python` command.
+
+| Checkpoint | Result |
+| --- | --- |
+| RED | Old verifier rejected the new `venv_python` input; the phase-four plan omitted `--venv-python` |
+| GREEN | Verifier CCXT probe uses the configured absolute interpreter; plan test proves phase four passes the selected path |
+| Focused regression | `30 passed` in the local environment; `19 passed` in the certified `ccxt==4.5.56` environment for verifier and deploy-plan coverage |
+| Full unit suite | `3142 passed, 1 skipped, 3 warnings, 0 failed` in `597.18s` |
+| Tokyo readonly postdeploy verifier | `postdeploy_acceptance_passed`; current head `2001644581cccc968ba695d3ff129960db6a7e84`; `ccxt==4.5.56`; lifecycle service/timer healthy |
+| Server boundary | Read-only SSH verification only; no deploy, restart, PG mutation, Feishu send, order, or exchange write |
+
 ### Deployment Boundary
 
 Local acceptance does not authorize deployment. The current Tokyo Release
@@ -477,10 +501,12 @@ A later explicit deployment phase must:
 2. read-only check current Ticket, position, open-order, unknown-command, and
    monitor state;
 3. deploy through the current Tokyo deployment contract;
-4. verify service/timer health and current PG notification behavior without
+4. pass the selected absolute `venv_python` to the postdeploy verifier and
+   prove its CCXT probe does not use a bare interpreter;
+5. verify service/timer health and current PG notification behavior without
    sending a synthetic production card or creating a synthetic production
    order;
-5. preserve any unknown exchange outcome and its hold during rollback.
+6. preserve any unknown exchange outcome and its hold during rollback.
 
 ### Rollback
 

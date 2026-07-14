@@ -28,6 +28,9 @@ DEFAULT_EXPECTED_LATEST_MIGRATION = (
     "2026-07-13-120_reconcile_terminal_predispatch_commands.py"
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
+DEFAULT_VENV_PYTHON = (
+    "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
+)
 CERTIFIED_CCXT_VERSION = "4.5.56"
 
 
@@ -55,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_migration_count=args.expected_migration_count,
         expected_latest_migration=args.expected_latest_migration,
         connect_timeout_seconds=args.connect_timeout_seconds,
+        venv_python=args.venv_python,
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -72,12 +76,15 @@ def build_postdeploy_report(
     expected_migration_count: int,
     expected_latest_migration: str,
     connect_timeout_seconds: int,
+    venv_python: str = DEFAULT_VENV_PYTHON,
     runner: Runner | None = None,
 ) -> dict[str, Any]:
     command_runner = runner or _run
+    runtime_venv_python = str(venv_python or "").strip()
     root = _remote_path(deploy_root)
     current_path = f"{root}/app/current"
     quoted_current_path = _quote_remote_path(current_path)
+    quoted_venv_python = shlex.quote(runtime_venv_python)
 
     release_identity = _remote_release_identity(
         host,
@@ -153,7 +160,7 @@ def build_postdeploy_report(
             host,
             (
                 f"cd {quoted_current_path} && "
-                "python -c 'import ccxt; "
+                f"{quoted_venv_python} -c 'import ccxt; "
                 f"assert ccxt.__version__ == \"{CERTIFIED_CCXT_VERSION}\"; "
                 "print(ccxt.__version__)'"
             ),
@@ -185,6 +192,7 @@ def build_postdeploy_report(
             "expected_current_head": expected_current_head,
             "expected_migration_count": expected_migration_count,
             "expected_latest_migration": expected_latest_migration,
+            "venv_python": runtime_venv_python,
         },
         "facts": facts,
         "checks": checks,
@@ -678,6 +686,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--expected-latest-migration",
         default=DEFAULT_EXPECTED_LATEST_MIGRATION,
     )
+    parser.add_argument("--venv-python", default=DEFAULT_VENV_PYTHON)
     parser.add_argument("--connect-timeout-seconds", type=int, default=8)
     return parser.parse_args(argv)
 

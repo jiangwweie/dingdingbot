@@ -80,6 +80,48 @@ def test_full_phase_builder_propagates_release_name_into_activation_command(
     assert "--release-name brc-runtime-governance-full-plan" in phase["commands"][0]
 
 
+def test_full_phase_builder_passes_runtime_venv_to_postdeploy_verifier(
+    tmp_path,
+) -> None:
+    venv_python = "/home/ubuntu/brc-deploy/venvs/runtime/bin/python"
+    phases = _plan_phases(
+        host="tokyo",
+        repo_root=tmp_path,
+        repo_url="https://example.invalid/repo.git",
+        git_ref="codex/test",
+        target_commit="a" * 40,
+        release_name="brc-runtime-governance-full-plan",
+        deploy_root="/home/ubuntu/brc-deploy",
+        source_root="/home/ubuntu/brc-deploy/source",
+        source_repo_path="/home/ubuntu/brc-deploy/source/dingdingbot",
+        app_current="/home/ubuntu/brc-deploy/app/current",
+        remote_release_path="/home/ubuntu/brc-deploy/releases/new",
+        remote_tmp_release_path="/home/ubuntu/brc-deploy/releases/new.tmp",
+        release_manifest="/home/ubuntu/brc-deploy/releases/new/.brc-release-manifest.json",
+        service_name="brc-owner-console-backend.service",
+        env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
+        venv_python=venv_python,
+        api_base="http://127.0.0.1:18080",
+        previous_release_path="/home/ubuntu/brc-deploy/releases/old",
+        expected_deployed_head="b" * 40,
+        expected_remote_migration_count=116,
+        expected_remote_latest_migration="2026-07-12-116_example.py",
+        expected_latest_migration="2026-07-12-116_example.py",
+        target_migration_count=116,
+        remote_migration_revision="116",
+        target_migration_revision="116",
+        migration_gap_revision_count=0,
+        manifest_payload={"scope": "test"},
+    )
+
+    phase = next(
+        item for item in phases if item["phase"] == "4_switch_start_and_smoke"
+    )
+    postdeploy_command = phase["commands"][2]
+
+    assert f"--venv-python {venv_python}" in postdeploy_command
+
+
 def test_remote_preflight_requires_explicit_runtime_gateway_identity(tmp_path):
     phases = _plan_phases(
         host="tokyo",

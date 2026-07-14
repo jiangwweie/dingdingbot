@@ -602,7 +602,8 @@ def _plan_phases(
                     "scripts/verify_tokyo_runtime_governance_postdeploy.py --json "
                     f"--expected-current-head {q(target_commit)} "
                     f"--expected-migration-count {target_migration_count} "
-                    f"--expected-latest-migration {q(expected_latest_migration)}"
+                    f"--expected-latest-migration {q(expected_latest_migration)} "
+                    f"--venv-python {q(venv_python)}"
                 ),
             ],
             "stop_if": [
