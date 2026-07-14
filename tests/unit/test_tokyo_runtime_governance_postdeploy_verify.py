@@ -13,6 +13,7 @@ EXPECTED_HEAD = "0c350ca7d34db7d2db7c9ae2b99fa6c6e0ddcafe"
 LATEST_MIGRATION = (
     "2026-06-10-070_add_execution_intent_local_orders_registered_status.py"
 )
+CERTIFIED_CCXT_VERSION = "4.5.56"
 
 
 def _load_module():
@@ -37,7 +38,12 @@ def _json_response(payload: dict, status: int = 200):
     )
 
 
-def _runner(*, live_ready: bool = False, generic_post_status: int = 405):
+def _runner(
+    *,
+    live_ready: bool = False,
+    generic_post_status: int = 405,
+    ccxt_version: str = CERTIFIED_CCXT_VERSION,
+):
     module = _load_module()
     manifest = {
         "scope": "tokyo_runtime_governance_release_preparation",
@@ -72,6 +78,8 @@ def _runner(*, live_ready: bool = False, generic_post_status: int = 405):
             return module.CommandResult("success\n0\n", "", 0)
         if "cmp -s /etc/systemd/system/brc-ticket-lifecycle-maintenance.service" in remote:
             return module.CommandResult("match\n", "", 0)
+        if "import ccxt" in remote:
+            return module.CommandResult(ccxt_version + "\n", "", 0)
         if "/api/health" in remote:
             return module.CommandResult(
                 json.dumps(
@@ -128,6 +136,7 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
     assert report["facts"]["release_identity"]["source"] == "release_manifest"
     assert report["facts"]["release_identity_source"] == "release_manifest"
     assert report["facts"]["current_head"] == EXPECTED_HEAD
+    assert report["facts"]["ccxt_version"] == CERTIFIED_CCXT_VERSION
     assert len(report["facts"]["http_checks"]) == 17
     auth_checks = [
         item
@@ -245,6 +254,24 @@ def test_postdeploy_verifier_blocks_head_and_schema_mismatch():
     assert "postdeploy_release_head_mismatch" in blockers
     assert "postdeploy_migration_count_mismatch" in blockers
     assert "postdeploy_latest_migration_mismatch" in blockers
+
+
+def test_postdeploy_verifier_rejects_uncertified_ccxt_version():
+    module = _load_module()
+
+    report = module.build_postdeploy_report(
+        host="tokyo",
+        deploy_root="~/brc-deploy",
+        api_base="http://127.0.0.1:18080",
+        expected_current_head=EXPECTED_HEAD,
+        expected_migration_count=70,
+        expected_latest_migration=LATEST_MIGRATION,
+        connect_timeout_seconds=8,
+        runner=_runner(ccxt_version="4.5.55"),
+    )
+
+    assert report["status"] == "blocked"
+    assert "postdeploy_ccxt_version_mismatch" in report["checks"]["blockers"]
 
 
 def test_postdeploy_verifier_subprocess_timeout_returns_failure(monkeypatch):

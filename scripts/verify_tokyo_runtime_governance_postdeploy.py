@@ -28,6 +28,7 @@ DEFAULT_EXPECTED_LATEST_MIGRATION = (
     "2026-07-13-120_reconcile_terminal_predispatch_commands.py"
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
+CERTIFIED_CCXT_VERSION = "4.5.56"
 
 
 class PostDeployVerifyError(RuntimeError):
@@ -148,6 +149,17 @@ def build_postdeploy_report(
             connect_timeout_seconds=connect_timeout_seconds,
             runner=command_runner,
         ),
+        "ccxt_version": _ssh_text(
+            host,
+            (
+                f"cd {quoted_current_path} && "
+                "python -c 'import ccxt; "
+                f"assert ccxt.__version__ == \"{CERTIFIED_CCXT_VERSION}\"; "
+                "print(ccxt.__version__)'"
+            ),
+            connect_timeout_seconds=connect_timeout_seconds,
+            runner=command_runner,
+        ),
         "http_checks": _http_checks(
             host,
             api_base=api_base,
@@ -232,6 +244,8 @@ def evaluate_postdeploy_checks(
         blockers.append("postdeploy_lifecycle_service_last_run_failed")
     if str(facts.get("lifecycle_units_match_release") or "").strip() != "match":
         blockers.append("postdeploy_lifecycle_units_release_mismatch")
+    if str(facts.get("ccxt_version") or "").strip() != CERTIFIED_CCXT_VERSION:
+        blockers.append("postdeploy_ccxt_version_mismatch")
 
     http_checks = facts.get("http_checks")
     if not isinstance(http_checks, list):
@@ -679,6 +693,7 @@ def _print_human_report(report: dict[str, Any]) -> None:
     print(f"current_head={release_identity['head']}")
     print(f"migration_count={facts['migration_count']}")
     print(f"latest_migration={facts['latest_migration']}")
+    print(f"ccxt_version={facts['ccxt_version']}")
     print(
         "postdeploy_acceptance_passed="
         + str(checks["postdeploy_acceptance_passed"]).lower()
