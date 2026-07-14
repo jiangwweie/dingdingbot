@@ -29,6 +29,7 @@ def pg_control_connection():
         install_runtime_control_state_schema(conn, through_revision="104")
         seed_runtime_control_state(conn)
         install_runtime_control_state_revision(conn, revision="115")
+        install_runtime_control_state_revision(conn, revision="122")
     with engine.connect() as conn:
         yield conn
     engine.dispose()

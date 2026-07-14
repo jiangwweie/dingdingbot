@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN
-status: READY_FOR_EXECUTION_AFTER_DOCUMENT_REVIEW
+status: IMPLEMENTED_LOCAL_NO_DEPLOY_PENDING_RELEASE_CERTIFICATION
 authority: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md
 design: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
 base_commit: 2001644581cccc968ba695d3ff129960db6a7e84
@@ -50,6 +50,37 @@ Ticket-bound lifecycle。
 - **激活边界**：先 shadow、后 policy activation；migration 不把生产从 1 仓自动改为 2 仓。
 - **回滚边界**：`max_concurrent_positions=1` 只停止新 ENTRY，不强平、不撤保护单。
 
+## Local Implementation Status (2026-07-14)
+
+### Completed in This Worktree
+
+- **Account policy authority**：PG policy/current、static cluster membership、`shadow` / `active`
+  policy semantics and a no-activation-by-migration boundary are implemented.
+- **Capacity facts and arbitration**：full-account readonly snapshot, ownership classification,
+  exposure/budget current projections, risk-cluster reservation accounting, `FOR UPDATE` +
+  projection-version CAS, same-instrument rejection, and auto-downsize are implemented.
+- **Official Ticket chain**：an active policy causes the Action-Time script to fetch the complete
+  account snapshot outside the PG transaction; the atomic Ticket sequence consumes it.  The
+  legacy flat-account blockers are replaced only for this narrow active-policy path.
+- **Safety chain continuation**：FinalGate and Runtime Safety State revalidate the exact active
+  account-budget projection/version before they can permit submit readiness.
+- **Local evidence**：the PostgreSQL two-transaction lock test passed against local Docker PG;
+  targeted promotion/Ticket/FinalGate/Runtime Safety regressions passed; production runtime file
+  I/O audit reported `suspicious_runtime_file_authority=0` and `frequent_report_write=0`.
+
+### Explicitly Not Performed
+
+- **No deployment** was performed.
+- No production migration, policy activation, cluster seeding, account-policy mutation, or live
+  order was performed.
+- Existing production one-position behavior therefore remains unchanged.
+
+### Remaining Release Work
+
+- Complete the lifecycle-driven full-account reprojection/Owner-state acceptance in Task 9.
+- Run the full local release suite, then perform a separately authorized shadow activation and
+  rollback proof.  These are release gates, not implicit consequences of the local code commits.
+
 ---
 
 ## File Responsibility Map
@@ -76,6 +107,7 @@ Ticket-bound lifecycle。
 | `migrations/versions/2026-07-14-121_create_account_risk_policy.py` | Create | 建立账户风险 policy event/current 和 versioned cluster mapping |
 | `migrations/versions/2026-07-14-122_create_account_risk_current_projections.py` | Create | 建立 exposure/budget current 与 semantic-change event tables |
 | `migrations/versions/2026-07-14-123_repair_terminal_budget_reservations.py` | Create | 受约束修复 terminal pre-submit Ticket 的 consumed reservation |
+| `migrations/versions/2026-07-14-124_add_account_capacity_reservation_scope.py` | Create | 令 reservation 绑定 account policy、instrument、risk cluster 与 capacity projection version |
 | `tests/unit/test_account_risk.py` | Create | 纯 Decimal 风险、margin、cluster、auto-downsize 单测 |
 | `tests/unit/test_binance_usdm_account_risk_snapshot.py` | Create | 完整账户、普通单、Algo 单、timeout/shape 单测 |
 | `tests/unit/test_account_exchange_ownership.py` | Create | Ticket owner/purpose/unknown/conflict 分类单测 |

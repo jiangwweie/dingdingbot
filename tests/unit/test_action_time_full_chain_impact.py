@@ -134,6 +134,10 @@ DYNAMIC_RISK_POLICY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
 )
+ACCOUNT_RISK_CURRENT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-14-122_create_account_risk_current_projections.py"
+)
 LANE_IDENTITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
@@ -619,6 +623,10 @@ def pg_control_connection():
             (
                 ACTION_TIME_INVOCATION_MIGRATION_PATH,
                 "migration_119_action_time_full_chain",
+            ),
+            (
+                ACCOUNT_RISK_CURRENT_MIGRATION_PATH,
+                "migration_122_action_time_full_chain",
             ),
         ):
             extension = _load_module(path, module_name)
