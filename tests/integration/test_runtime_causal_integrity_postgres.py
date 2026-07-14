@@ -81,6 +81,35 @@ def test_rci_harness_uses_postgresql_revision_122(
     assert invocation_table == "brc_action_time_invocations"
 
 
+def test_rci_exit_policy_certification_keeps_production_capability_disabled(
+    postgres_certification_engine,
+):
+    with postgres_certification_engine.connect() as conn:
+        capability = conn.execute(
+            text(
+                "SELECT status, certification_ref "
+                "FROM brc_runtime_capabilities_current "
+                "WHERE capability_id = 'ticket_exit_policy_v1'"
+            )
+        ).mappings().one()
+        policy_count = conn.execute(
+            text("SELECT count(*) FROM brc_strategy_exit_policies")
+        ).scalar_one()
+        current_count = conn.execute(
+            text(
+                "SELECT count(*) FROM brc_strategy_exit_policies "
+                "WHERE status = 'current'"
+            )
+        ).scalar_one()
+
+    assert capability == {
+        "status": "disabled",
+        "certification_ref": "migration-122:future-only-fail-disabled",
+    }
+    assert policy_count == 0
+    assert current_count == 0
+
+
 def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:
     lane_id = _insert_action_time_lane_graph(conn)
     ticket = ticket_materializer.materialize_action_time_ticket(

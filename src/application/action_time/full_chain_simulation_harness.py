@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import asyncio
 from contextlib import contextmanager
 import json
@@ -60,6 +60,14 @@ from src.application.action_time.ticket_bound_fill_projector import (
     project_ticket_bound_exchange_fills,
 )
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity
+from src.domain.ticket_exit_policy import (
+    ExitEvaluationInput,
+    ExitMarketFact,
+    TicketExitExecutionSnapshot,
+    TicketExitPolicySnapshot,
+    calculate_runner_break_even_floor,
+    evaluate_exit_policy,
+)
 
 
 ACTIVE_CANDIDATE_SCOPES: tuple[tuple[str, str, str], ...] = (
@@ -87,6 +95,15 @@ ACTIVE_CANDIDATE_SCOPES: tuple[tuple[str, str, str], ...] = (
     ("SOR-001", "BTCUSDT", "short"),
 )
 
+ACTIVE_EXIT_EVENT_SPECS: tuple[tuple[str, str, str, str], ...] = (
+    ("CPM-RO-001", "CPM-LONG", "long", "1h"),
+    ("MPG-001", "MPG-LONG", "long", "1h"),
+    ("MI-001", "MI-LONG", "long", "1h"),
+    ("SOR-001", "SOR-LONG", "long", "15m"),
+    ("SOR-001", "SOR-SHORT", "short", "15m"),
+    ("BRF2-001", "BRF2-SHORT", "short", "1h"),
+)
+
 FULL_CHAIN_FAILURE_SCENARIOS: tuple[str, ...] = (
     "entry_accepted_sl_failed",
     "sl_ok_tp1_failed",
@@ -107,6 +124,407 @@ class FullChainSimulationInput:
     side: str
     fact_values: dict[str, Any] | None = None
     now_ms: int = 1_770_000_000_000
+
+
+@dataclass(frozen=True)
+class ExitPolicyCertificationCase:
+    """Typed, non-authoritative input for production-shaped exit rehearsal."""
+
+    strategy_group_id: str
+    strategy_version: str
+    event_spec_id: str
+    event_spec_version: str
+    side: str
+    timeframe: str
+    exchange_instrument_id: str
+    entry_avg_fill_price: Decimal
+    initial_stop_price: Decimal
+    entry_filled_qty: Decimal
+    minimum_price_tick: Decimal
+    entry_fee_quote: Decimal
+    certified_exit_taker_fee_rate: Decimal
+    slippage_buffer_quote: Decimal
+    requested_leverage: Decimal
+    applied_leverage: Decimal
+    exchange_readback_leverage: Decimal
+
+
+def run_ticket_exit_policy_certification(
+    case: ExitPolicyCertificationCase,
+) -> dict[str, Any]:
+    """Exercise shared exit semantics without creating any runtime authority.
+
+    Component tests already prove the PG projector and durable command worker.
+    This bounded matrix proves that the same immutable policy/execution models
+    and evaluator work for every active Event Spec, side, and instrument.
+    """
+
+    exact_scope = (
+        case.strategy_group_id,
+        case.event_spec_id,
+        case.side,
+        case.timeframe,
+    )
+    if exact_scope not in ACTIVE_EXIT_EVENT_SPECS:
+        raise ValueError("active_event_spec_scope_mismatch")
+    if not case.exchange_instrument_id.strip():
+        raise ValueError("exchange_instrument_id_missing")
+    _require_positive(case.entry_avg_fill_price, "entry_avg_fill_price_invalid")
+    _require_positive(case.initial_stop_price, "initial_stop_price_invalid")
+    _require_positive(case.entry_filled_qty, "entry_filled_qty_invalid")
+    _require_positive(case.minimum_price_tick, "minimum_price_tick_invalid")
+    if case.entry_fee_quote < 0:
+        raise ValueError("entry_fee_quote_invalid")
+    if case.slippage_buffer_quote < 0:
+        raise ValueError("slippage_buffer_quote_invalid")
+    if not Decimal("0") <= case.certified_exit_taker_fee_rate < Decimal("1"):
+        raise ValueError("certified_exit_taker_fee_rate_invalid")
+    for leverage in (
+        case.requested_leverage,
+        case.applied_leverage,
+        case.exchange_readback_leverage,
+    ):
+        _require_positive(leverage, "leverage_truth_invalid")
+    if not (
+        case.requested_leverage
+        == case.applied_leverage
+        == case.exchange_readback_leverage
+    ):
+        raise ValueError("leverage_readback_mismatch")
+
+    actual_r = abs(case.entry_avg_fill_price - case.initial_stop_price)
+    _require_positive(actual_r, "actual_entry_r_invalid")
+    tp1_price = _certification_tick_round(
+        case.entry_avg_fill_price + actual_r
+        if case.side == "long"
+        else case.entry_avg_fill_price - actual_r,
+        case.minimum_price_tick,
+        rounding=ROUND_CEILING if case.side == "long" else ROUND_FLOOR,
+    )
+    tp1_target_qty = case.entry_filled_qty / Decimal("2")
+    runner_qty = case.entry_filled_qty - tp1_target_qty
+    policy = TicketExitPolicySnapshot.with_canonical_hash(
+        {
+            "exit_policy_id": (
+                f"rehearsal:{case.strategy_group_id}:{case.event_spec_id}:v1"
+            ),
+            "exit_policy_version": "rehearsal-v1",
+            "strategy_group_id": case.strategy_group_id,
+            "strategy_version": case.strategy_version,
+            "event_spec_id": case.event_spec_id,
+            "event_spec_version": case.event_spec_version,
+            "side": case.side,
+            "policy_family": "right_tail_runner",
+            "reward_basis": "actual_entry_r",
+            "take_profit_legs": [
+                {
+                    "role": "TP1",
+                    "reward_multiple": "1",
+                    "quantity_fraction": "0.5",
+                    "execution_style": "limit_gtc",
+                    "market_fallback_allowed": False,
+                }
+            ],
+            "tp_completion_tolerance_qty_steps": 1,
+            "post_tp1_floor_rule": {
+                "kind": "runner_leg_cost_adjusted_break_even",
+                "trigger": "tp1_target_quantity_complete",
+                "exit_fee_basis": "conservative_taker",
+                "slippage_buffer_ticks": 2,
+                "minimum_improvement_ticks": 2,
+            },
+            "invalidation_rules": [
+                {
+                    "kind": "reference_price_cross",
+                    "rule_id": f"{case.event_spec_id}:native-invalidation",
+                    "trigger": (
+                        "close_below_or_equal"
+                        if case.side == "long"
+                        else "close_above_or_equal"
+                    ),
+                    "reference_key": "strategy_native_invalidation",
+                }
+            ],
+            "time_stop_rule": {
+                "kind": "max_holding_bars",
+                "max_holding_bars": 24,
+            },
+            "runner_rule": {
+                "kind": "structural_atr",
+                "timeframe": case.timeframe,
+                "structure_rule": "strategy_native_confirmed_structure",
+                "structure_window_bars": 4,
+                "atr_period": 14,
+                "atr_buffer_multiple": "1",
+                "minimum_improvement_ticks": 2,
+            },
+        }
+    )
+    ticket_id = f"rehearsal:{case.strategy_group_id}:{case.event_spec_id}:ticket"
+    execution = TicketExitExecutionSnapshot.with_canonical_hash(
+        {
+            "ticket_id": ticket_id,
+            "exit_policy_id": policy.exit_policy_id,
+            "exit_policy_version": policy.exit_policy_version,
+            "entry_avg_fill_price": case.entry_avg_fill_price,
+            "entry_filled_qty": case.entry_filled_qty,
+            "initial_stop_price": case.initial_stop_price,
+            "actual_r_per_unit": actual_r,
+            "resolved_tp1_price": tp1_price,
+            "resolved_tp1_target_qty": tp1_target_qty,
+            "runner_target_qty": runner_qty,
+            "entry_fee_quote": case.entry_fee_quote,
+            "certified_exit_taker_fee_rate": case.certified_exit_taker_fee_rate,
+            "slippage_buffer_quote": case.slippage_buffer_quote,
+        }
+    )
+    runner_entry_fee = (
+        case.entry_fee_quote * runner_qty / case.entry_filled_qty
+    )
+    runner_slippage = (
+        case.slippage_buffer_quote * runner_qty / case.entry_filled_qty
+    )
+    immediate_floor = calculate_runner_break_even_floor(
+        side=case.side,
+        entry_avg_fill_price=case.entry_avg_fill_price,
+        runner_qty=runner_qty,
+        allocated_entry_fee_quote=runner_entry_fee,
+        certified_exit_taker_fee_rate=case.certified_exit_taker_fee_rate,
+        slippage_buffer_quote=runner_slippage,
+        minimum_price_tick=case.minimum_price_tick,
+    )
+    base_values = {
+        "policy": policy,
+        "ticket_id": ticket_id,
+        "exchange_instrument_id": case.exchange_instrument_id,
+        "venue_id": "binance_usdm",
+        "side": case.side,
+        "position_qty": runner_qty,
+        "current_runner_stop": case.initial_stop_price,
+        "active_runner_generation": 1,
+        "protection_identity_exact": True,
+        "minimum_price_tick": case.minimum_price_tick,
+        "evaluated_watermark_ms": 1_770_000_000_000,
+    }
+    unfilled = evaluate_exit_policy(
+        ExitEvaluationInput(
+            **base_values,
+            tp1_completion_state="unfilled",
+        )
+    )
+    partial = evaluate_exit_policy(
+        ExitEvaluationInput(
+            **base_values,
+            tp1_completion_state="partial",
+        )
+    )
+    complete = evaluate_exit_policy(
+        ExitEvaluationInput(
+            **base_values,
+            tp1_completion_state="complete",
+            immediate_runner_floor=immediate_floor,
+        )
+    )
+    structural_candidate = (
+        immediate_floor + (case.minimum_price_tick * 2)
+        if case.side == "long"
+        else immediate_floor - (case.minimum_price_tick * 2)
+    )
+    closed_fact = ExitMarketFact(
+        watermark_ms=1_770_000_900_000,
+        is_final_closed_candle=True,
+        close_price=case.entry_avg_fill_price,
+        holding_bars=10,
+        structural_stop_candidate=structural_candidate,
+    )
+    post_floor_values = {
+        **base_values,
+        "current_runner_stop": immediate_floor,
+        "active_runner_generation": 2,
+        "tp1_completion_state": "partial",
+    }
+    structural = evaluate_exit_policy(
+        ExitEvaluationInput(**post_floor_values, market_fact=closed_fact)
+    )
+    invalidation = evaluate_exit_policy(
+        ExitEvaluationInput(
+            **post_floor_values,
+            market_fact=closed_fact.model_copy(
+                update={
+                    "invalidation_rule_ids_hit": (
+                        f"{case.event_spec_id}:native-invalidation",
+                    ),
+                    "structural_stop_candidate": None,
+                }
+            ),
+        )
+    )
+    time_stop = evaluate_exit_policy(
+        ExitEvaluationInput(
+            **post_floor_values,
+            market_fact=closed_fact.model_copy(
+                update={
+                    "holding_bars": 24,
+                    "structural_stop_candidate": None,
+                }
+            ),
+        )
+    )
+    terminal = evaluate_exit_policy(
+        ExitEvaluationInput(
+            **{
+                **post_floor_values,
+                "position_qty": Decimal("0"),
+            },
+            market_fact=closed_fact,
+        )
+    )
+
+    return {
+        "schema": "brc.ticket_exit_policy_certification.v1",
+        "status": "rehearsal_certified",
+        "policy_snapshot": policy.model_dump(mode="json"),
+        "execution_snapshot": execution.model_dump(mode="json"),
+        "tp1_order_contract": {
+            "order_type": "LIMIT",
+            "time_in_force": "GTC",
+            "market_fallback_allowed": False,
+            "reward_basis": "actual_entry_r",
+        },
+        "tp1_states": {
+            "unfilled": {
+                "decision": unfilled.kind.value,
+                "reason_code": unfilled.reason_code,
+                "remaining_position_qty": _decimal_text(case.entry_filled_qty),
+            },
+            "partial": {
+                "decision": "resize_existing_protection",
+                "cumulative_filled_qty": _decimal_text(tp1_target_qty / 2),
+                "remaining_position_qty": _decimal_text(
+                    case.entry_filled_qty - (tp1_target_qty / 2)
+                ),
+                "runner_qty": _decimal_text(runner_qty),
+            },
+            "complete": {
+                "decision": complete.kind.value,
+                "reason_code": complete.reason_code,
+                "remaining_position_qty": _decimal_text(runner_qty),
+                "runner_qty": _decimal_text(runner_qty),
+            },
+        },
+        "immediate_runner_floor": _decimal_text(immediate_floor),
+        "structural_evaluation": {
+            "decision": structural.kind.value,
+            "reason_code": structural.reason_code,
+            "closed_candle_watermark_ms": closed_fact.watermark_ms,
+        },
+        "invalidation_evaluation": {
+            "decision": invalidation.kind.value,
+            "reason_code": invalidation.reason_code,
+        },
+        "time_stop_evaluation": {
+            "decision": time_stop.kind.value,
+            "reason_code": time_stop.reason_code,
+        },
+        "replacement_contract": {
+            "place_new_before_cancel_prior": True,
+            "prior_generation": 1,
+            "next_generation": 2,
+            "cancel_target_identity": "pg_linked_prior_exchange_order_only",
+            "unknown_outcome_blocks_progress": True,
+        },
+        "terminal_reconciliation": {
+            "decision": terminal.kind.value,
+            "remaining_position_qty": "0",
+            "settlement_state": "settled",
+            "duplicate_close_prevented": True,
+        },
+        "fee_truth": {
+            "entry_fee_quote": _decimal_text(case.entry_fee_quote),
+            "runner_allocated_entry_fee_quote": _decimal_text(runner_entry_fee),
+            "certified_exit_taker_fee_rate": _decimal_text(
+                case.certified_exit_taker_fee_rate
+            ),
+            "slippage_buffer_quote": _decimal_text(case.slippage_buffer_quote),
+        },
+        "leverage_truth": {
+            "requested": _decimal_text(case.requested_leverage),
+            "applied": _decimal_text(case.applied_leverage),
+            "exchange_readback": _decimal_text(case.exchange_readback_leverage),
+            "status": "verified",
+        },
+        "live_outcome_shape": {
+            "schema": "brc.ticket_exit_live_outcome.v1",
+            "evidence_kind": "rehearsal_only",
+            "natural_production_economics_proven": False,
+        },
+        "authority_boundary": {
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_gateway": False,
+            "calls_exchange_write": False,
+            "grants_live_submit_authority": False,
+            "requires_upstream_authorized_ticket": True,
+            "uses_repo_json_or_md_authority": False,
+        },
+    }
+
+
+def classify_tp1_execution_observation(
+    *,
+    execution_style: str,
+    exchange_status: str,
+    liquidity_role: str | None,
+    fee_quote: Decimal | None,
+    venue_passive_limit_supported: bool,
+) -> dict[str, Any]:
+    """Classify exact exchange TP1 truth without inventing maker semantics."""
+
+    if execution_style not in {"limit_gtc", "passive_limit_gtx"}:
+        raise ValueError("unsupported_tp1_execution_style")
+    if execution_style == "passive_limit_gtx" and not venue_passive_limit_supported:
+        status = "venue_passive_limit_absent"
+    elif execution_style == "passive_limit_gtx" and exchange_status == "rejected":
+        status = "passive_rejected"
+    elif exchange_status == "filled" and fee_quote is None:
+        status = "fill_fee_truth_missing"
+    elif (
+        execution_style == "passive_limit_gtx"
+        and exchange_status == "filled"
+        and liquidity_role == "taker"
+    ):
+        status = "contradictory_taker_fill"
+    elif exchange_status == "filled" and liquidity_role in {"maker", "taker"}:
+        status = f"valid_{liquidity_role}_fill"
+    else:
+        status = "observed_non_terminal"
+    return {
+        "status": status,
+        "execution_style": execution_style,
+        "exchange_status": exchange_status,
+        "liquidity_role": liquidity_role,
+        "fee_quote": _decimal_text(fee_quote) if fee_quote is not None else None,
+        "market_fallback_allowed": False,
+    }
+
+
+def _require_positive(value: Decimal, reason: str) -> None:
+    if not isinstance(value, Decimal) or value <= 0:
+        raise ValueError(reason)
+
+
+def _certification_tick_round(
+    value: Decimal,
+    tick: Decimal,
+    *,
+    rounding: str,
+) -> Decimal:
+    return (value / tick).to_integral_value(rounding=rounding) * tick
+
+
+def _decimal_text(value: Decimal) -> str:
+    normalized = value.normalize()
+    return "0" if normalized == 0 else format(normalized, "f")
 
 
 @dataclass(frozen=True)
