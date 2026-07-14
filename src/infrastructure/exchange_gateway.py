@@ -23,6 +23,7 @@ from src.domain.ticket_bound_exchange_command import (
     ExchangeOrderLookupResult,
     ExchangeOrderLookupStatus,
     ExchangeOrderLookupView,
+    required_exchange_order_lookup_view,
 )
 from decimal import Decimal
 from src.domain.exceptions import FatalStartupError, ConnectionLostError, DataQualityWarning, InsufficientMarginError, InvalidOrderError, OrderNotFoundError, OrderAlreadyFilledError, RateLimitError
@@ -1955,7 +1956,10 @@ class ExchangeGateway:
                 "client_order_id and symbol are required for order lookup",
                 "F-011",
             )
-        lookup_view = self._required_lookup_view(request)
+        try:
+            lookup_view = required_exchange_order_lookup_view(request)
+        except ValueError as exc:
+            raise InvalidOrderError(str(exc), "F-011") from exc
         identity_kind = (
             "clientAlgoId"
             if lookup_view is ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
@@ -2048,29 +2052,6 @@ class ExchangeGateway:
             client_order_id=actual_client_id,
             gateway_symbol=gateway_symbol,
             exchange_status=exchange_status,
-        )
-
-    def _required_lookup_view(
-        self,
-        request: ExchangeOrderLookupRequest,
-    ) -> ExchangeOrderLookupView:
-        if request.command_kind != "place_order":
-            raise InvalidOrderError(
-                "client-id lookup only supports place_order commands",
-                "F-011",
-            )
-        if self.exchange_name.lower() != "binance":
-            return ExchangeOrderLookupView.REGULAR_ORDER
-
-        order_role = request.order_role.upper()
-        order_type = request.order_type.lower()
-        if order_role in {"SL", "RUNNER_SL"} and order_type == "stop_market":
-            return ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
-        if order_role in {"ENTRY", "TP1"} and order_type != "stop_market":
-            return ExchangeOrderLookupView.REGULAR_ORDER
-        raise InvalidOrderError(
-            "unsupported Binance command role/type lookup combination",
-            "F-011",
         )
 
     @classmethod

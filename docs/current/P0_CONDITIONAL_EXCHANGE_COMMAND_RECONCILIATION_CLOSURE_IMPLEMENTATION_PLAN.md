@@ -24,6 +24,15 @@ Tokyo CCXT version.
 **Tech Stack:** Python 3, Pydantic v2, SQLAlchemy, PostgreSQL, pytest, CCXT
 `4.5.56`, Binance USDT-M read-only order APIs.
 
+## Release-Review Remediation Extension — 2026-07-14
+
+The local candidate review added a shared required-view invariant. The pure
+`required_exchange_order_lookup_view(ExchangeOrderLookupRequest)` domain
+function is now the only selection authority consumed by both reconciliation
+and gateway code. The extension adds non-Binance regular-view acceptance and
+Binance wrong-view contradiction coverage without changing CCXT pinning,
+exchange-write authority, or the separate Tokyo deployment gate.
+
 ## Global Constraints
 
 - The current Tokyo Release continues running during local implementation.

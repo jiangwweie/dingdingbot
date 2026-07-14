@@ -67,6 +67,25 @@ class ExchangeOrderLookupRequest(ExchangeCommandModel):
     target_exchange_order_id: Optional[str] = Field(default=None, max_length=192)
 
 
+def required_exchange_order_lookup_view(
+    request: ExchangeOrderLookupRequest,
+) -> ExchangeOrderLookupView:
+    """Return the one readonly lookup view required by a durable command."""
+
+    if request.command_kind != "place_order":
+        raise ValueError("client-id lookup only supports place_order commands")
+    if request.exchange_id.lower() != "binance_usdm":
+        return ExchangeOrderLookupView.REGULAR_ORDER
+
+    order_role = request.order_role.upper()
+    order_type = request.order_type.lower()
+    if order_role in {"SL", "RUNNER_SL"} and order_type == "stop_market":
+        return ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
+    if order_role in {"ENTRY", "TP1"} and order_type != "stop_market":
+        return ExchangeOrderLookupView.REGULAR_ORDER
+    raise ValueError("unsupported Binance command role/type lookup combination")
+
+
 class ExchangeOrderLookupResult(ExchangeCommandModel):
     """Typed readonly exchange evidence from the command's required view."""
 

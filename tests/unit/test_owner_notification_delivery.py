@@ -346,6 +346,97 @@ def test_already_sent_candidates_do_not_starve_a_new_critical_card() -> None:
         engine.dispose()
 
 
+def test_sent_ledger_rows_beyond_one_thousand_never_resend() -> None:
+    module = _load_monitor()
+    engine, conn, transaction = _connection()
+    calls: list[dict] = []
+    state = _fresh_signals(10_000, 1_001)
+    try:
+        intents = project_owner_notification_intents(state, now_ms=10_000)
+        assert len(intents) == 1_001
+        for intent in intents:
+            _insert_ledger_row(
+                conn,
+                dedupe_key=module.owner_notification_dedupe_key(
+                    "runtime-monitor",
+                    intent,
+                ),
+                intent=intent,
+                notification_state="sent",
+                send_attempts=1,
+            )
+
+        summary = module._apply_pg_owner_notifications(
+            conn=conn,
+            automation_id="runtime-monitor",
+            control_state=state,
+            now_ms=10_000,
+            webhook_url="https://example.test/webhook",
+            webhook_secret=None,
+            notification_timeout_seconds=3,
+            notification_dry_run=False,
+            notifier=lambda _url, _secret, body, _timeout: (
+                calls.append(body) or {"sent": True, "status_code": 200}
+            ),
+        )
+
+        assert summary["sent_count"] == 0
+        assert summary["suppressed_count"] == 1_001
+        assert calls == []
+        assert conn.execute(
+            sa.text("SELECT COUNT(*) FROM brc_server_monitor_notifications")
+        ).scalar_one() == 1_001
+    finally:
+        transaction.rollback()
+        conn.close()
+        engine.dispose()
+
+
+def test_new_candidate_beyond_one_thousand_sent_rows_delivers_once() -> None:
+    module = _load_monitor()
+    engine, conn, transaction = _connection()
+    calls: list[dict] = []
+    state = _fresh_signals(10_000, 1_002)
+    try:
+        intents = project_owner_notification_intents(state, now_ms=10_000)
+        for intent in intents[:1_001]:
+            _insert_ledger_row(
+                conn,
+                dedupe_key=module.owner_notification_dedupe_key(
+                    "runtime-monitor",
+                    intent,
+                ),
+                intent=intent,
+                notification_state="sent",
+                send_attempts=1,
+            )
+
+        summary = module._apply_pg_owner_notifications(
+            conn=conn,
+            automation_id="runtime-monitor",
+            control_state=state,
+            now_ms=10_000,
+            webhook_url="https://example.test/webhook",
+            webhook_secret=None,
+            notification_timeout_seconds=3,
+            notification_dry_run=False,
+            notifier=lambda _url, _secret, body, _timeout: (
+                calls.append(body) or {"sent": True, "status_code": 200}
+            ),
+        )
+
+        assert summary["sent_count"] == 1
+        assert summary["suppressed_count"] == 1_001
+        assert len(calls) == 1
+        assert conn.execute(
+            sa.text("SELECT COUNT(*) FROM brc_server_monitor_notifications")
+        ).scalar_one() == 1_002
+    finally:
+        transaction.rollback()
+        conn.close()
+        engine.dispose()
+
+
 def test_owner_notification_delivery_sends_static_card_and_persists_typed_row() -> None:
     module = _load_monitor()
     engine, conn, transaction = _connection()

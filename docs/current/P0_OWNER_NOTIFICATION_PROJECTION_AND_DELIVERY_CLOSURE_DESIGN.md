@@ -32,6 +32,29 @@ coverage only. It does not change signal detection, StrategyGroup scope,
 capital, leverage, sizing, FinalGate, Operation Layer, exchange-write
 authority, lifecycle transition rules, or automatic exit policy.
 
+## Release-Review Remediation — 2026-07-14
+
+Local review found that the delivery ledger query combined exact stable keys and
+legacy correlation compatibility under one global `LIMIT 1000`. That could omit
+an already-sent exact row from a candidate set larger than 1,000, resend it,
+and then collide with the ledger unique key.
+
+The local correction is recorded in
+`P0_RELEASE_REVIEW_FINDINGS_REMEDIATION_DESIGN.md`:
+
+```text
+exact stable-key batches without a global result limit
+-> unresolved-only bounded legacy compatibility lookup
+-> existing eligibility, five-attempt cap, send, and persistence path
+```
+
+The correction introduces no migration, outbox, timer, notification policy,
+trading authority, or production file path. Its local acceptance includes the
+1,001-sent-row suppression regression, the beyond-1,000 new-card delivery
+regression, focused notification/monitor tests, full unit tests, and the
+current production file-I/O audit. Tokyo remains unchanged pending a separate
+release decision.
+
 ## Owner Decision Boundary
 
 The current Tokyo release remains the running production version while this

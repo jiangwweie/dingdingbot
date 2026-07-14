@@ -24,6 +24,16 @@ Close lifecycle notification misclassification, delivery-batch starvation,
 Feishu business-acknowledgement ambiguity, and lifecycle-worker health coverage
 without changing any trading authority or production cadence.
 
+## Release-Review Remediation Extension — 2026-07-14
+
+The local candidate review added one delivery-coverage regression to this plan:
+all exact sent ledger rows must remain visible beyond the former 1,000-row
+query boundary. The implementation replaces the global-limit combined query
+with exact-key batch resolution followed by unresolved-only bounded legacy
+compatibility lookup. The resulting local evidence is recorded in
+`P0_RELEASE_REVIEW_FINDINGS_REMEDIATION_DESIGN.md`; it adds no migration,
+outbox, timer, policy, or trading authority.
+
 ## Why
 
 The current release can report an old `trade_submitted` milestone for later

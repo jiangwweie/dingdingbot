@@ -25,6 +25,7 @@ from src.domain.ticket_bound_exchange_command import (
     ExchangeOrderLookupStatus,
     ExchangeOrderLookupView,
     ExchangeCommandState,
+    required_exchange_order_lookup_view,
 )
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
@@ -75,6 +76,32 @@ def test_not_found_lookup_result_preserves_required_view_evidence() -> None:
 
     assert result.exchange_order_id is None
     assert result.lookup_view.value == "conditional_algo_order"
+
+
+@pytest.mark.parametrize(
+    ("exchange_id", "order_role", "order_type", "expected_view"),
+    [
+        ("binance_usdm", "ENTRY", "market", "regular_order"),
+        ("binance_usdm", "SL", "stop_market", "conditional_algo_order"),
+        ("okx_swap", "SL", "stop_market", "regular_order"),
+    ],
+)
+def test_required_lookup_view_is_resolved_from_the_typed_venue_request(
+    exchange_id: str,
+    order_role: str,
+    order_type: str,
+    expected_view: str,
+) -> None:
+    request = ExchangeOrderLookupRequest(
+        exchange_id=exchange_id,
+        gateway_symbol="SOL/USDT:USDT",
+        command_kind="place_order",
+        order_role=order_role,
+        order_type=order_type,
+        client_order_id="brc-client-id",
+    )
+
+    assert required_exchange_order_lookup_view(request).value == expected_view
 
 
 @pytest.mark.parametrize(
@@ -214,6 +241,27 @@ async def test_conditional_regular_view_evidence_hard_stops_command(
     evidence = _exchange_result(pg_control_connection, order_role="SL")
     assert evidence["lookup_view"] == "regular_order"
     assert evidence["error_message"] == "required_lookup_view_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_non_binance_stop_lookup_accepts_regular_view(
+    pg_control_connection,
+):
+    command = {
+        **_unknown_place_command(pg_control_connection, order_role="SL"),
+        "exchange_id": "okx_swap",
+    }
+    gateway = _TypedLookupGateway(_found_result(command, "regular_order"))
+
+    decision = await lookup_unknown_exchange_command(
+        command=command,
+        gateway=gateway,
+        now_ms=NOW_MS + 5_000,
+    )
+
+    assert decision["status"] == "reconciled_submitted"
+    assert gateway.requests[0][0].exchange_id == "okx_swap"
+    assert decision["lookup_evidence"]["lookup_view"] == "regular_order"
 
 
 @pytest.mark.asyncio

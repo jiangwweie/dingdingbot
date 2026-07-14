@@ -23,6 +23,7 @@ from src.domain.ticket_bound_exchange_command import (
     ExchangeOrderLookupResult,
     ExchangeOrderLookupStatus,
     ExchangeOrderLookupView,
+    required_exchange_order_lookup_view,
 )
 
 
@@ -116,6 +117,7 @@ async def lookup_unknown_exchange_command(
                 now_ms=now_ms,
             )
         request = _lookup_request_from_command(command)
+        expected_view = required_exchange_order_lookup_view(request)
         result = await gateway.find_order_by_client_id(
             request,
             observed_at_ms=now_ms,
@@ -131,6 +133,7 @@ async def lookup_unknown_exchange_command(
     return _place_lookup_decision(
         command=command,
         result=result,
+        expected_view=expected_view,
         now_ms=now_ms,
     )
 
@@ -175,9 +178,9 @@ def _place_lookup_decision(
     *,
     command: dict[str, Any],
     result: ExchangeOrderLookupResult,
+    expected_view: ExchangeOrderLookupView,
     now_ms: int,
 ) -> dict[str, Any]:
-    expected_view = _required_lookup_view_for_command(command)
     evidence = _lookup_evidence(
         result,
         visibility_window_elapsed=False,
@@ -440,16 +443,6 @@ def _lookup_request_from_command(
             else None
         ),
     )
-
-
-def _required_lookup_view_for_command(
-    command: dict[str, Any],
-) -> ExchangeOrderLookupView:
-    order_role = str(command.get("order_role") or "").upper()
-    order_type = str(command.get("order_type") or "").lower()
-    if order_role in {"SL", "RUNNER_SL"} and order_type == "stop_market":
-        return ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
-    return ExchangeOrderLookupView.REGULAR_ORDER
 
 
 def _lookup_evidence(

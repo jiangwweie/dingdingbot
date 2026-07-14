@@ -25,6 +25,21 @@ persisted command role + order type
 -> source-specific domain-hold resolution only after proven truth
 ```
 
+## Release-Review Remediation — 2026-07-14
+
+Local review found a second inference of the required lookup view in the
+application layer. It classified every `SL/RUNNER_SL + stop_market` command as
+conditional even when the gateway's existing non-Binance adapter contract
+correctly returned a regular client-id view.
+
+The local correction is recorded in
+`P0_RELEASE_REVIEW_FINDINGS_REMEDIATION_DESIGN.md`: one pure domain resolver
+uses the typed canonical `exchange_id`, role, type, and command kind; both the
+application and gateway consume it. A Binance wrong-view result remains a hard
+stop, while a supported non-Binance regular-view result is no longer falsely
+contradictory. No venue admission, profile, exchange write, migration, or live
+policy change is introduced.
+
 For Binance USDT-M, `ENTRY` and `TP1` remain regular-order lookups.
 `SL` and `RUNNER_SL` with `order_type=stop_market` use the Algo Order endpoint
 through `clientAlgoId`. The design extends the existing gateway and durable

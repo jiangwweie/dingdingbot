@@ -1362,111 +1362,115 @@ def _apply_pg_owner_notifications(
     }
 
 
-def _pg_owner_notification_row(
-    conn: sa.engine.Connection,
-    *,
-    dedupe_key: str,
-    intent: OwnerNotificationIntent,
-) -> dict[str, Any]:
-    exact = _pg_notification_row(conn, dedupe_key)
-    if exact:
-        return exact
-    correlation = normalize_owner_correlation_id(intent.correlation_id)
-    legacy_correlations = {correlation}
-    for prefix in ("signal", "ticket"):
-        if correlation.startswith(f"{prefix}:"):
-            legacy_correlations.add(f"{prefix}:{correlation}")
-    row = conn.execute(
-        sa.text(
-            """
-            SELECT *
-            FROM brc_server_monitor_notifications
-            WHERE notification_kind = :notification_kind
-              AND correlation_id IN :correlation_ids
-            ORDER BY updated_at_ms DESC
-            LIMIT 1
-            """
-        ).bindparams(sa.bindparam("correlation_ids", expanding=True)),
-        {
-            "notification_kind": intent.notification_kind.value,
-            "correlation_ids": sorted(legacy_correlations),
-        },
-    ).mappings().first()
-    return dict(row) if row else {}
-
-
 def _pg_owner_notification_rows(
     conn: sa.engine.Connection,
     *,
     automation_id: str,
     intents: list[OwnerNotificationIntent],
 ) -> dict[str, dict[str, Any]]:
-    """Load bounded ledger state once for the current candidate batch."""
+    """Resolve exact ledger keys before bounded legacy compatibility rows."""
     if not intents:
         return {}
+
+    unique_intents: dict[str, OwnerNotificationIntent] = {}
+    for intent in intents:
+        unique_intents.setdefault(owner_notification_delivery_identity(intent), intent)
+    candidate_intents = list(unique_intents.values())
+
     dedupe_keys = [
-        owner_notification_dedupe_key(automation_id, intent) for intent in intents
+        owner_notification_dedupe_key(automation_id, intent)
+        for intent in candidate_intents
     ]
-    correlations: set[str] = set()
-    notification_kinds: set[str] = set()
-    for intent in intents:
-        normalized = normalize_owner_correlation_id(intent.correlation_id)
-        correlations.add(normalized)
-        notification_kinds.add(intent.notification_kind.value)
-        for prefix in ("signal", "ticket"):
-            if normalized.startswith(f"{prefix}:"):
-                correlations.add(f"{prefix}:{normalized}")
-    rows = [
-        dict(row)
-        for row in conn.execute(
-            sa.text(
-                """
-                SELECT *
-                FROM brc_server_monitor_notifications
-                WHERE dedupe_key IN :dedupe_keys
-                   OR (
-                        notification_kind IN :notification_kinds
-                    AND correlation_id IN :correlation_ids
-                   )
-                ORDER BY updated_at_ms DESC
-                LIMIT 1000
-                """
-            ).bindparams(
-                sa.bindparam("dedupe_keys", expanding=True),
-                sa.bindparam("notification_kinds", expanding=True),
-                sa.bindparam("correlation_ids", expanding=True),
-            ),
-            {
-                "dedupe_keys": dedupe_keys,
-                "notification_kinds": sorted(notification_kinds),
-                "correlation_ids": sorted(correlations),
-            },
-        ).mappings()
-    ]
-    by_dedupe_key = {str(row.get("dedupe_key") or ""): row for row in rows}
+    exact_rows: list[dict[str, Any]] = []
+    for dedupe_key_chunk in _chunks(dedupe_keys, size=500):
+        exact_rows.extend(
+            dict(row)
+            for row in conn.execute(
+                sa.text(
+                    """
+                    SELECT *
+                    FROM brc_server_monitor_notifications
+                    WHERE dedupe_key IN :dedupe_keys
+                    """
+                ).bindparams(sa.bindparam("dedupe_keys", expanding=True)),
+                {"dedupe_keys": dedupe_key_chunk},
+            ).mappings()
+        )
+
+    by_dedupe_key = {
+        str(row.get("dedupe_key") or ""): row for row in exact_rows
+    }
     resolved: dict[str, dict[str, Any]] = {}
-    for intent in intents:
+    unresolved: list[OwnerNotificationIntent] = []
+    for intent in candidate_intents:
         delivery_identity = owner_notification_delivery_identity(intent)
         exact = by_dedupe_key.get(
             owner_notification_dedupe_key(automation_id, intent)
         )
         if exact:
             resolved[delivery_identity] = exact
-            continue
+        else:
+            unresolved.append(intent)
+
+    if not unresolved:
+        return resolved
+
+    correlations: set[str] = set()
+    notification_kinds: set[str] = set()
+    for intent in unresolved:
         normalized = normalize_owner_correlation_id(intent.correlation_id)
-        for row in rows:
-            if (
-                str(row.get("notification_kind") or "")
-                != intent.notification_kind.value
-            ):
-                continue
-            if (
-                normalize_owner_correlation_id(str(row.get("correlation_id") or ""))
-                == normalized
-            ):
-                resolved[delivery_identity] = row
-                break
+        correlations.add(normalized)
+        notification_kinds.add(intent.notification_kind.value)
+        for prefix in ("signal", "ticket"):
+            if normalized.startswith(f"{prefix}:"):
+                correlations.add(f"{prefix}:{normalized}")
+
+    legacy_rows: list[dict[str, Any]] = []
+    for correlation_chunk in _chunks(sorted(correlations), size=500):
+        legacy_rows.extend(
+            dict(row)
+            for row in conn.execute(
+                sa.text(
+                    """
+                    SELECT *
+                    FROM brc_server_monitor_notifications
+                    WHERE notification_kind IN :notification_kinds
+                      AND correlation_id IN :correlation_ids
+                    ORDER BY updated_at_ms DESC, created_at_ms DESC, notification_id DESC
+                    """
+                ).bindparams(
+                    sa.bindparam("notification_kinds", expanding=True),
+                    sa.bindparam("correlation_ids", expanding=True),
+                ),
+                {
+                    "notification_kinds": sorted(notification_kinds),
+                    "correlation_ids": correlation_chunk,
+                },
+            ).mappings()
+        )
+
+    latest_legacy_rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in legacy_rows:
+        identity = (
+            str(row.get("notification_kind") or ""),
+            normalize_owner_correlation_id(str(row.get("correlation_id") or "")),
+        )
+        latest_legacy_rows.setdefault(identity, row)
+
+    for intent in unresolved:
+        resolved_row = latest_legacy_rows.get(
+            (
+                intent.notification_kind.value,
+                normalize_owner_correlation_id(intent.correlation_id),
+            )
+        )
+        if resolved_row:
+            resolved[owner_notification_delivery_identity(intent)] = resolved_row
     return resolved
+
+
+def _chunks(values: list[str], *, size: int) -> list[list[str]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]
 
 
 def _apply_pg_notification(
