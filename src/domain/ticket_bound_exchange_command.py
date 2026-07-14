@@ -41,6 +41,56 @@ class ExchangeCommandOutcomeClass(str, Enum):
     CONTRADICTORY_TRUTH = "contradictory_truth"
 
 
+class ExchangeOrderLookupView(str, Enum):
+    REGULAR_ORDER = "regular_order"
+    CONDITIONAL_ALGO_ORDER = "conditional_algo_order"
+    COMPLETE_OPEN_ORDERS = "complete_open_orders"
+
+
+class ExchangeOrderLookupStatus(str, Enum):
+    FOUND = "found"
+    NOT_FOUND = "not_found"
+    CANCEL_EFFECT_CONFIRMED = "cancel_effect_confirmed"
+
+
+class ExchangeOrderLookupRequest(ExchangeCommandModel):
+    """One durable command's required readonly exchange lookup."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    exchange_id: str = Field(min_length=1, max_length=128)
+    gateway_symbol: str = Field(min_length=1, max_length=128)
+    command_kind: str = Field(pattern="^(place_order|cancel_order)$")
+    order_role: str = Field(pattern="^(ENTRY|SL|TP1|RUNNER_SL)$")
+    order_type: str = Field(min_length=1, max_length=64)
+    client_order_id: str = Field(min_length=1, max_length=36)
+    target_exchange_order_id: Optional[str] = Field(default=None, max_length=192)
+
+
+class ExchangeOrderLookupResult(ExchangeCommandModel):
+    """Typed readonly exchange evidence from the command's required view."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: ExchangeOrderLookupStatus
+    lookup_view: ExchangeOrderLookupView
+    identity_kind: str = Field(min_length=1, max_length=64)
+    observed_at_ms: int = Field(ge=0)
+    exchange_order_id: Optional[str] = Field(default=None, max_length=192)
+    client_order_id: str = Field(min_length=1, max_length=36)
+    gateway_symbol: str = Field(min_length=1, max_length=128)
+    exchange_status: Optional[str] = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def _require_exchange_identity_when_found(self) -> "ExchangeOrderLookupResult":
+        if (
+            self.status is ExchangeOrderLookupStatus.FOUND
+            and not self.exchange_order_id
+        ):
+            raise ValueError("found lookup requires exchange_order_id")
+        return self
+
+
 class TicketBoundExchangeCommand(ExchangeCommandModel):
     exchange_command_id: str = Field(min_length=1, max_length=192)
     protected_submit_attempt_id: str = Field(min_length=1, max_length=192)

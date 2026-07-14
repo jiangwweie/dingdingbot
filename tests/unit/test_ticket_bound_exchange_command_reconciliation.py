@@ -15,6 +15,8 @@ from src.application.action_time.exchange_command_reconciliation import (
 )
 from src.domain.ticket_bound_exchange_command import (
     ExchangeCommandOutcomeClass,
+    ExchangeOrderLookupRequest,
+    ExchangeOrderLookupResult,
     ExchangeCommandState,
 )
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
@@ -25,6 +27,47 @@ from tests.unit.test_ticket_bound_protected_submit_attempt import (
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
+
+
+def test_conditional_lookup_request_conserves_role_type_and_identity() -> None:
+    request = ExchangeOrderLookupRequest(
+        exchange_id="binance_usdm",
+        gateway_symbol="SOL/USDT:USDT",
+        command_kind="place_order",
+        order_role="SL",
+        order_type="stop_market",
+        client_order_id="brc-client-sl",
+    )
+
+    assert request.order_role == "SL"
+    assert request.order_type == "stop_market"
+    assert request.client_order_id == "brc-client-sl"
+
+
+def test_lookup_result_requires_exchange_identity_for_found_status() -> None:
+    with pytest.raises(ValueError, match="found lookup requires exchange_order_id"):
+        ExchangeOrderLookupResult(
+            status="found",
+            lookup_view="conditional_algo_order",
+            identity_kind="clientAlgoId",
+            observed_at_ms=1,
+            client_order_id="brc-client-sl",
+            gateway_symbol="SOL/USDT:USDT",
+        )
+
+
+def test_not_found_lookup_result_preserves_required_view_evidence() -> None:
+    result = ExchangeOrderLookupResult(
+        status="not_found",
+        lookup_view="conditional_algo_order",
+        identity_kind="clientAlgoId",
+        observed_at_ms=2,
+        client_order_id="brc-client-sl",
+        gateway_symbol="SOL/USDT:USDT",
+    )
+
+    assert result.exchange_order_id is None
+    assert result.lookup_view.value == "conditional_algo_order"
 
 
 @pytest.mark.asyncio
