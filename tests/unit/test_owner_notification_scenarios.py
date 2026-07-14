@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
+from src.application.action_time.lifecycle_safety_core import (
+    LIFECYCLE_STATUS_SPECIFICATIONS,
+)
 from src.application.owner_notification import (
     OwnerNotificationKind,
     project_owner_notification_intents,
@@ -157,12 +162,142 @@ def test_ticket_emits_only_latest_material_lifecycle_stage() -> None:
         assert intents[0].correlation_id == "ticket:ticket-001"
 
 
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("entry_submit_sent", OwnerNotificationKind.TRADE_SUBMITTED),
+        ("entry_fill_pending", OwnerNotificationKind.TRADE_SUBMITTED),
+        ("position_protected", OwnerNotificationKind.POSITION_PROTECTED),
+        ("runner_protected", OwnerNotificationKind.TP1_RUNNER_ACTIVE),
+        ("lifecycle_closed", OwnerNotificationKind.TRADE_CLOSED),
+    ],
+)
+def test_material_lifecycle_statuses_emit_only_their_typed_milestone(
+    status: str,
+    expected: OwnerNotificationKind,
+) -> None:
+    intents = project_owner_notification_intents(
+        {
+            "action_time_tickets": [_ticket()],
+            "ticket_bound_order_lifecycle_runs": [_lifecycle(status)],
+        },
+        now_ms=NOW_MS,
+    )
+
+    assert [item.notification_kind for item in intents] == [expected]
+
+
+def test_every_automated_or_recoverable_lifecycle_status_is_intentionally_quiet() -> None:
+    material_statuses = {
+        "entry_submit_sent",
+        "entry_fill_pending",
+        "position_protected",
+        "runner_protected",
+        "lifecycle_closed",
+    }
+    quiet_statuses = {
+        status
+        for status, specification in LIFECYCLE_STATUS_SPECIFICATIONS.items()
+        if status not in material_statuses
+        and specification.control_state.value in {"automated", "recovery_required"}
+    }
+
+    assert quiet_statuses
+    for status in quiet_statuses:
+        intents = project_owner_notification_intents(
+            {
+                "action_time_tickets": [_ticket()],
+                "ticket_bound_order_lifecycle_runs": [_lifecycle(status)],
+            },
+            now_ms=NOW_MS,
+        )
+
+        assert intents == [], status
+
+
+def test_every_hard_stopped_lifecycle_status_is_temporarily_unavailable_without_owner_action() -> None:
+    hard_stopped_statuses = {
+        status
+        for status, specification in LIFECYCLE_STATUS_SPECIFICATIONS.items()
+        if specification.control_state.value == "hard_stopped"
+    }
+
+    assert hard_stopped_statuses
+    for status in hard_stopped_statuses:
+        intents = project_owner_notification_intents(
+            {
+                "action_time_tickets": [_ticket()],
+                "ticket_bound_order_lifecycle_runs": [_lifecycle(status)],
+            },
+            now_ms=NOW_MS,
+        )
+
+        assert [item.notification_kind for item in intents] == [
+            OwnerNotificationKind.SYSTEM_TEMPORARILY_UNAVAILABLE
+        ], status
+        assert intents[0].owner_action_required is False
+
+
+@pytest.mark.parametrize(
+    "status",
+    sorted(LIFECYCLE_STATUS_SPECIFICATIONS),
+)
+def test_retry_exhaustion_or_explicit_owner_action_requires_intervention(
+    status: str,
+) -> None:
+    intents = project_owner_notification_intents(
+        {
+            "action_time_tickets": [_ticket()],
+            "ticket_bound_order_lifecycle_runs": [
+                _lifecycle(status, blocker="runtime_retry_limit_exhausted")
+            ],
+        },
+        now_ms=NOW_MS,
+    )
+
+    assert [item.notification_kind for item in intents] == [
+        OwnerNotificationKind.INTERVENTION_REQUIRED
+    ]
+    assert intents[0].owner_action_required is True
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        "tp1_filled",
+        "runner_mutation_pending",
+        "runner_mutation_failed",
+        "protection_degraded",
+        "runner_reconciliation_mismatch",
+        "position_closed_protection_live",
+        "final_exit_unknown",
+        "settlement_blocked",
+        "review_blocked",
+    ],
+)
+def test_later_lifecycle_statuses_never_repeat_trade_submitted(status: str) -> None:
+    intents = project_owner_notification_intents(
+        {
+            "action_time_tickets": [_ticket()],
+            "ticket_bound_order_lifecycle_runs": [_lifecycle(status)],
+        },
+        now_ms=NOW_MS,
+    )
+
+    assert OwnerNotificationKind.TRADE_SUBMITTED not in {
+        item.notification_kind for item in intents
+    }
+
+
 def test_unprotected_and_unknown_exchange_outcome_are_critical() -> None:
     unprotected = project_owner_notification_intents(
         {
             "action_time_tickets": [_ticket()],
             "ticket_bound_order_lifecycle_runs": [
-                _lifecycle("protection_missing", blocker="protection_missing")
+                _lifecycle(
+                    "protection_missing",
+                    blocker="protection_retry_limit_exhausted",
+                )
             ],
         },
         now_ms=NOW_MS,

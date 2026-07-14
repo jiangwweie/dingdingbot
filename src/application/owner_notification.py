@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+from dataclasses import dataclass
 from enum import Enum
 from hashlib import sha256
 from typing import Any, Literal, Mapping
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.application.readmodels.owner_projection import (
+    ticket_bound_lifecycle_owner_feedback,
+)
 
 
 TEMPLATE_VERSION = "owner-notification-v1"
@@ -32,6 +37,18 @@ class OwnerNotificationSeverity(str, Enum):
     POSITIVE = "positive"
     WARNING = "warning"
     CRITICAL = "critical"
+
+
+class LifecycleNotificationProjectionOutcome(str, Enum):
+    MATERIAL_INTENT = "material_intent"
+    INTENTIONAL_QUIET = "intentional_quiet"
+    NO_LIFECYCLE = "no_lifecycle"
+
+
+@dataclass(frozen=True)
+class LifecycleNotificationProjection:
+    outcome: LifecycleNotificationProjectionOutcome
+    intent: OwnerNotificationIntent | None = None
 
 
 class OwnerNotificationIntent(BaseModel):
@@ -166,34 +183,6 @@ def project_owner_notification_intents(
             )
         )
 
-    unsafe_statuses = {
-        "entry_filled",
-        "entry_unknown",
-        "entry_orphaned",
-        "entry_partial_fill_unhandled",
-        "protection_missing",
-        "protection_submit_failed",
-        "protection_reconciliation_mismatch",
-    }
-    for ticket_id, lifecycle in lifecycle_by_ticket.items():
-        status = str(lifecycle.get("status") or "")
-        if status not in unsafe_statuses:
-            continue
-        correlation = f"incident:lifecycle:{ticket_id}"
-        active_incidents.add(correlation)
-        incident_ticket_ids.add(ticket_id)
-        intents.append(
-            _critical_intent(
-                correlation_id=correlation,
-                row={**ticket_by_id.get(ticket_id, {}), **lifecycle},
-                occurred_at_ms=_updated_at(lifecycle) or now_ms,
-                current_state="已经开仓，但保护状态无法确认",
-                reason="持仓、保护单或交易所事实尚未完成一致性确认",
-                owner_action="检查交易所持仓和保护单",
-                technical_refs=(f"lifecycle_status:{status}", ticket_id),
-            )
-        )
-
     handled_signal_ids: set[str] = set()
     for ticket in tickets:
         ticket_id = str(ticket.get("ticket_id") or "")
@@ -203,16 +192,28 @@ def project_owner_notification_intents(
                 handled_signal_ids.add(signal_id)
             continue
         lifecycle = lifecycle_by_ticket.get(ticket_id)
-        material = _ticket_material_intent(
+        lifecycle_projection = _ticket_lifecycle_notification_projection(
             ticket,
             lifecycle=lifecycle,
             outcome=outcome_by_ticket.get(ticket_id, {}),
             now_ms=now_ms,
         )
-        if material is not None:
-            intents.append(material)
-            if signal_id:
-                handled_signal_ids.add(signal_id)
+        if lifecycle is not None and signal_id:
+            handled_signal_ids.add(signal_id)
+        if lifecycle_projection.outcome is not LifecycleNotificationProjectionOutcome.MATERIAL_INTENT:
+            continue
+        material = lifecycle_projection.intent
+        if material is None:
+            continue
+        intents.append(material)
+        if material.notification_kind in {
+            OwnerNotificationKind.INTERVENTION_REQUIRED,
+            OwnerNotificationKind.SYSTEM_TEMPORARILY_UNAVAILABLE,
+        }:
+            active_incidents.add(material.correlation_id)
+            incident_ticket_ids.add(ticket_id)
+        if signal_id:
+            handled_signal_ids.add(signal_id)
 
     notifications = _rows(control_state.get("server_monitor_notifications"))
     sent_by_identity = {
@@ -290,18 +291,38 @@ def project_owner_notification_intents(
     )[:MAX_INTENTS_PER_RUN]
 
 
-def _ticket_material_intent(
+def _ticket_lifecycle_notification_projection(
     ticket: Mapping[str, Any],
     *,
     lifecycle: Mapping[str, Any] | None,
     outcome: Mapping[str, Any],
     now_ms: int,
-) -> OwnerNotificationIntent | None:
+) -> LifecycleNotificationProjection:
     ticket_id = str(ticket.get("ticket_id") or "")
     if not ticket_id:
-        return None
+        return LifecycleNotificationProjection(
+            LifecycleNotificationProjectionOutcome.INTENTIONAL_QUIET
+        )
+    if lifecycle is None:
+        return _ticket_fallback_notification_projection(ticket, now_ms=now_ms)
+
     row = {**ticket, **dict(lifecycle or {})}
-    status = str((lifecycle or {}).get("status") or "")
+    feedback = ticket_bound_lifecycle_owner_feedback(dict(lifecycle))
+    status = str(feedback["lifecycle_status"])
+    if bool(feedback["owner_action_required"]):
+        return LifecycleNotificationProjection(
+            LifecycleNotificationProjectionOutcome.MATERIAL_INTENT,
+            _critical_intent(
+                correlation_id=f"incident:lifecycle:{ticket_id}",
+                row=row,
+                occurred_at_ms=_updated_at(row) or now_ms,
+                current_state="交易状态需要人工介入",
+                reason=str(feedback["reason"]),
+                owner_action="检查交易所持仓、订单和保护状态",
+                technical_refs=(f"lifecycle_status:{status}", ticket_id),
+            ),
+        )
+
     values: dict[str, Any] | None = None
     if status == "lifecycle_closed":
         pnl = str(outcome.get("net_pnl") or "待结算")
@@ -335,9 +356,7 @@ def _ticket_material_intent(
             "reason": "交易所订单和内部记录已经核对",
             "next": "系统继续跟踪 TP1、Runner 和最终退出",
         }
-    elif status in {"entry_submit_sent", "entry_fill_pending"} or str(
-        ticket.get("status") or ""
-    ) == "submitted":
+    elif status in {"entry_submit_sent", "entry_fill_pending"}:
         values = {
             "kind": OwnerNotificationKind.TRADE_SUBMITTED,
             "severity": OwnerNotificationSeverity.INFO,
@@ -347,24 +366,107 @@ def _ticket_material_intent(
             "reason": "当前机会已经通过系统检查",
             "next": "系统将确认成交并建立保护",
         }
-    if values is None:
-        return None
+    if values is not None:
+        return LifecycleNotificationProjection(
+            LifecycleNotificationProjectionOutcome.MATERIAL_INTENT,
+            OwnerNotificationIntent(
+                notification_kind=values["kind"],
+                severity=values["severity"],
+                correlation_id=owner_correlation_id("ticket", ticket_id),
+                strategy_group_id=_group(row),
+                symbol=_symbol(row),
+                side=_side(row),
+                occurred_at_ms=(
+                    _updated_at(row) or int(ticket.get("created_at_ms") or now_ms)
+                ),
+                headline=values["headline"],
+                current_state=values["current"],
+                result_summary=values["result"],
+                plain_reason=values["reason"],
+                next_system_action=values["next"],
+                owner_action_required=False,
+                owner_action=None,
+                technical_refs=(f"ticket:{ticket_id}", f"lifecycle_status:{status}"),
+            ),
+        )
+    if str(feedback["status"]) == "temporarily_unavailable":
+        return LifecycleNotificationProjection(
+            LifecycleNotificationProjectionOutcome.MATERIAL_INTENT,
+            _temporarily_unavailable_lifecycle_intent(
+                ticket_id=ticket_id,
+                row=row,
+                occurred_at_ms=_updated_at(row) or now_ms,
+                reason=str(feedback["reason"]),
+                next_action=str(feedback["next_action"]),
+                status=status,
+            ),
+        )
+    return LifecycleNotificationProjection(
+        LifecycleNotificationProjectionOutcome.INTENTIONAL_QUIET
+    )
+
+
+def _ticket_fallback_notification_projection(
+    ticket: Mapping[str, Any],
+    *,
+    now_ms: int,
+) -> LifecycleNotificationProjection:
+    if str(ticket.get("status") or "") != "submitted":
+        return LifecycleNotificationProjection(
+            LifecycleNotificationProjectionOutcome.NO_LIFECYCLE
+        )
+    ticket_id = str(ticket.get("ticket_id") or "")
+    if not ticket_id:
+        return LifecycleNotificationProjection(
+            LifecycleNotificationProjectionOutcome.NO_LIFECYCLE
+        )
+    return LifecycleNotificationProjection(
+        LifecycleNotificationProjectionOutcome.MATERIAL_INTENT,
+        OwnerNotificationIntent(
+            notification_kind=OwnerNotificationKind.TRADE_SUBMITTED,
+            severity=OwnerNotificationSeverity.INFO,
+            correlation_id=owner_correlation_id("ticket", ticket_id),
+            strategy_group_id=_group(ticket),
+            symbol=_symbol(ticket),
+            side=_side(ticket),
+            occurred_at_ms=int(ticket.get("created_at_ms") or now_ms),
+            headline="真实订单已提交",
+            current_state="交易所正在处理订单",
+            result_summary="等待成交和保护确认",
+            plain_reason="当前机会已经通过系统检查",
+            next_system_action="系统将确认成交并建立保护",
+            owner_action_required=False,
+            owner_action=None,
+            technical_refs=(f"ticket:{ticket_id}", "lifecycle_status:none"),
+        ),
+    )
+
+
+def _temporarily_unavailable_lifecycle_intent(
+    *,
+    ticket_id: str,
+    row: Mapping[str, Any],
+    occurred_at_ms: int,
+    reason: str,
+    next_action: str,
+    status: str,
+) -> OwnerNotificationIntent:
     return OwnerNotificationIntent(
-        notification_kind=values["kind"],
-        severity=values["severity"],
-        correlation_id=owner_correlation_id("ticket", ticket_id),
+        notification_kind=OwnerNotificationKind.SYSTEM_TEMPORARILY_UNAVAILABLE,
+        severity=OwnerNotificationSeverity.WARNING,
+        correlation_id=f"incident:lifecycle:{ticket_id}",
         strategy_group_id=_group(row),
         symbol=_symbol(row),
         side=_side(row),
-        occurred_at_ms=_updated_at(row) or int(ticket.get("created_at_ms") or now_ms),
-        headline=values["headline"],
-        current_state=values["current"],
-        result_summary=values["result"],
-        plain_reason=values["reason"],
-        next_system_action=values["next"],
+        occurred_at_ms=occurred_at_ms,
+        headline="交易状态暂时无法确认",
+        current_state="系统已暂停相关的新开仓推进",
+        result_summary="系统正在等待状态恢复或核对完成",
+        plain_reason=reason,
+        next_system_action=next_action,
         owner_action_required=False,
         owner_action=None,
-        technical_refs=(f"ticket:{ticket_id}", f"lifecycle_status:{status}"),
+        technical_refs=(f"lifecycle_status:{status}", ticket_id),
     )
 
 
