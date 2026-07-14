@@ -6,8 +6,10 @@ import sqlalchemy as sa
 
 from src.application.action_time.account_capacity_reservation import (
     AccountCapacityCandidate,
+    apply_account_capacity_to_sizing,
     reserve_account_capacity_for_candidate,
 )
+from src.domain.execution_sizing import ExecutionSizingDecision
 
 
 def test_second_same_cluster_candidate_downsizes_under_locked_budget_row() -> None:
@@ -57,6 +59,15 @@ def test_different_cluster_uses_its_own_held_risk_not_portfolio_total() -> None:
     )
     assert result.allowed is True
     assert result.allocated_risk == Decimal("15")
+
+
+def test_account_capacity_can_only_downsize_existing_ticket_sizing() -> None:
+    base = ExecutionSizingDecision(symbol="SOLUSDT", side="long", entry_reference_price=Decimal("150"), protective_stop_price=Decimal("147"), intended_qty=Decimal("5"), effective_notional=Decimal("750"), selected_leverage=3, reserved_margin=Decimal("250"), planned_stop_risk_budget=Decimal("15"), planned_stop_risk=Decimal("15"), minimum_executable_quantity=Decimal(".01"), pricing_source_fact_snapshot_id="price", account_source_fact_snapshot_id="account", policy_version="p1", risk_reservation_basis="basis", valid_until_ms=2)
+    capacity = reserve_account_capacity_for_candidate(_connection(), candidate=AccountCapacityCandidate(account_id="account-1", runtime_profile_id="profile-1", exchange_instrument_id="binance_usdm:SOLUSDT", risk_cluster_id="crypto_usd_beta", per_unit_stop_risk=Decimal("3"), entry_reference_price=Decimal("150"), min_qty=Decimal(".01"), qty_step=Decimal(".01"), min_notional=Decimal("5"), exchange_max_leverage=20), expected_source_snapshot_id="snapshot-1", expected_projection_version=1, now_ms=1_752_480_000_000)
+    adapted = apply_account_capacity_to_sizing(base, capacity)
+    assert adapted.intended_qty == Decimal("3")
+    assert adapted.planned_stop_risk == Decimal("9")
+    assert adapted.effective_notional == Decimal("450")
 
 
 def _connection() -> sa.Connection:

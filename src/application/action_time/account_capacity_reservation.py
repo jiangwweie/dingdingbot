@@ -8,6 +8,7 @@ import sqlalchemy as sa
 
 from src.application.action_time.account_risk_policy import load_account_risk_policy_current
 from src.domain.account_risk import decide_account_capacity
+from src.domain.execution_sizing import ExecutionSizingDecision
 
 
 class AccountCapacityCandidate(BaseModel):
@@ -49,6 +50,22 @@ def _cluster(conn: sa.Connection, version: str, instrument: str) -> str | None:
     return conn.execute(sa.select(table.c.risk_cluster_id).where(table.c.risk_policy_version == version).where(table.c.exchange_instrument_id == instrument)).scalar_one_or_none()
 def _d(value: object) -> Decimal: return value if isinstance(value, Decimal) else Decimal(str(value))
 def _blocked(blocker: str) -> AccountCapacityReservationResult: return AccountCapacityReservationResult(allowed=False, first_blocker=blocker)
+
+def apply_account_capacity_to_sizing(base: ExecutionSizingDecision, capacity: AccountCapacityReservationResult) -> ExecutionSizingDecision:
+    """Narrow an existing sizing decision; account capacity can never widen it."""
+    if not capacity.allowed or capacity.selected_leverage is None:
+        raise ValueError("account capacity must be allowed before sizing adaptation")
+    if capacity.intended_qty > base.intended_qty or capacity.allocated_risk > base.planned_stop_risk:
+        raise ValueError("account capacity must not expand existing ticket sizing")
+    return base.model_copy(update={
+        "intended_qty": capacity.intended_qty,
+        "effective_notional": capacity.intended_qty * base.entry_reference_price,
+        "selected_leverage": capacity.selected_leverage,
+        "reserved_margin": capacity.reserved_margin,
+        "planned_stop_risk_budget": capacity.allocated_risk,
+        "planned_stop_risk": capacity.allocated_risk,
+        "risk_reservation_basis": "account_capacity_hard_cap_v0",
+    })
 
 def _instrument_claimed(conn: sa.Connection, account_id: str, instrument: str) -> bool:
     if not sa.inspect(conn).has_table("brc_account_exposure_current"): return False
