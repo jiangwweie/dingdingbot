@@ -19,7 +19,7 @@ def test_consumed_reservation_is_claim_ceiling_not_additive_to_open_exposure() -
             """
             INSERT INTO brc_account_exposure_current VALUES (
                 'exposure-1', 'account-1', 'ticket-1', true, 'open_protected',
-                '13', '0', '0', 'matched', NULL
+                '13', '13', '0', '0', 'matched', NULL
             )
             """
         )
@@ -44,8 +44,11 @@ def test_consumed_reservation_is_claim_ceiling_not_additive_to_open_exposure() -
 
     assert budget.open_directional_risk == Decimal("13")
     assert budget.reserved_risk == Decimal("9")
+    assert budget.working_entry_risk == Decimal("0")
+    assert budget.unknown_held_risk == Decimal("0")
     assert budget.portfolio_held_risk == Decimal("22")
     assert budget.claimed_position_slots == 2
+    assert budget.pending_ticket_claims == 1
     assert budget.new_entry_allowed is True
 
 
@@ -90,7 +93,7 @@ def _connection() -> sa.Connection:
             CREATE TABLE brc_account_exposure_current (
                 account_exposure_current_id TEXT PRIMARY KEY, account_id TEXT,
                 owner_ticket_id TEXT, position_slot_claimed BOOLEAN, exposure_state TEXT,
-                actual_directional_risk NUMERIC, planned_reserved_risk NUMERIC,
+                actual_directional_risk NUMERIC, held_risk NUMERIC, planned_reserved_risk NUMERIC,
                 unreflected_pending_margin NUMERIC, reconciliation_state TEXT,
                 first_blocker TEXT
             )
