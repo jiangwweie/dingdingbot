@@ -19,6 +19,10 @@ from src.application.action_time.netting_domain_hold import (
 from src.domain.ticket_bound_exchange_command import (
     ExchangeCommandOutcomeClass,
     ExchangeCommandState,
+    ExchangeOrderLookupRequest,
+    ExchangeOrderLookupResult,
+    ExchangeOrderLookupStatus,
+    ExchangeOrderLookupView,
 )
 
 
@@ -106,25 +110,16 @@ async def lookup_unknown_exchange_command(
 ) -> dict[str, Any]:
     try:
         if str(command.get("command_kind") or "") == "cancel_order":
-            orders = await gateway.fetch_all_open_orders(
-                str(command["gateway_symbol"])
+            return await _lookup_unknown_cancel_command(
+                command=command,
+                gateway=gateway,
+                now_ms=now_ms,
             )
-            target = str(command.get("target_exchange_order_id") or "")
-            still_open = any(
-                str(_mapping(order).get("id") or _mapping(order).get("exchange_order_id") or "")
-                == target
-                for order in orders or []
-            )
-            exchange_order = None if still_open else {
-                "exchange_order_id": target,
-                "client_order_id": str(command.get("client_order_id") or ""),
-                "symbol": str(command.get("gateway_symbol") or ""),
-            }
-        else:
-            exchange_order = await gateway.find_order_by_client_id(
-                str(command["client_order_id"]),
-                str(command["gateway_symbol"]),
-            )
+        request = _lookup_request_from_command(command)
+        result = await gateway.find_order_by_client_id(
+            request,
+            observed_at_ms=now_ms,
+        )
     except Exception as exc:
         return {
             "status": "lookup_failed",
@@ -133,23 +128,93 @@ async def lookup_unknown_exchange_command(
                 f"exchange_command_lookup_failed:{type(exc).__name__}"
             ],
         }
-    if exchange_order is None:
+    return _place_lookup_decision(
+        command=command,
+        result=result,
+        now_ms=now_ms,
+    )
+
+
+async def _lookup_unknown_cancel_command(
+    *,
+    command: dict[str, Any],
+    gateway: Any,
+    now_ms: int,
+) -> dict[str, Any]:
+    target = str(command.get("target_exchange_order_id") or "").strip()
+    if not target:
+        return {
+            "status": "hard_stopped",
+            "exchange_order_id": None,
+            "blockers": ["cancel_target_exchange_order_id_missing"],
+        }
+    orders = await gateway.fetch_all_open_orders(str(command["gateway_symbol"]))
+    if any(_order_contains_exchange_id(order, target) for order in orders or []):
+        return {
+            "status": "lookup_failed",
+            "exchange_order_id": target,
+            "blockers": ["cancel_effect_not_confirmed_target_still_open"],
+        }
+    return {
+        "status": "reconciled_submitted",
+        "exchange_order_id": target,
+        "blockers": [],
+        "lookup_evidence": {
+            "lookup_status": ExchangeOrderLookupStatus.CANCEL_EFFECT_CONFIRMED.value,
+            "lookup_view": ExchangeOrderLookupView.COMPLETE_OPEN_ORDERS.value,
+            "identity_kind": "target_exchange_order_id",
+            "client_order_id": str(command.get("client_order_id") or ""),
+            "gateway_symbol": str(command.get("gateway_symbol") or ""),
+            "observed_at_ms": now_ms,
+            "visibility_window_elapsed": True,
+        },
+    }
+
+
+def _place_lookup_decision(
+    *,
+    command: dict[str, Any],
+    result: ExchangeOrderLookupResult,
+    now_ms: int,
+) -> dict[str, Any]:
+    expected_view = _required_lookup_view_for_command(command)
+    evidence = _lookup_evidence(
+        result,
+        visibility_window_elapsed=False,
+    )
+    if result.lookup_view is not expected_view:
+        return {
+            "status": "hard_stopped",
+            "exchange_order_id": result.exchange_order_id,
+            "blockers": ["required_lookup_view_mismatch"],
+            "lookup_evidence": evidence,
+        }
+    if result.status is ExchangeOrderLookupStatus.NOT_FOUND:
         deadline = int(command.get("updated_at_ms") or now_ms) + VISIBILITY_WINDOW_MS
         if now_ms < deadline:
             return {
                 "status": "pending_visibility",
                 "exchange_order_id": None,
                 "blockers": ["exchange_command_visibility_window_active"],
+                "lookup_evidence": evidence,
             }
+        evidence["visibility_window_elapsed"] = True
         return {
             "status": "reconciled_absent",
             "exchange_order_id": None,
             "blockers": [],
+            "lookup_evidence": evidence,
         }
-    exchange = _mapping(exchange_order)
-    exchange_order_id = str(exchange.get("exchange_order_id") or "").strip()
-    actual_client_id = str(exchange.get("client_order_id") or "").strip()
-    actual_symbol = str(exchange.get("symbol") or "").strip()
+    if result.status is not ExchangeOrderLookupStatus.FOUND:
+        return {
+            "status": "lookup_failed",
+            "exchange_order_id": None,
+            "blockers": ["exchange_command_lookup_status_unsupported"],
+            "lookup_evidence": evidence,
+        }
+    exchange_order_id = str(result.exchange_order_id or "").strip()
+    actual_client_id = str(result.client_order_id or "").strip()
+    actual_symbol = str(result.gateway_symbol or "").strip()
     contradictory = (
         not exchange_order_id
         or (
@@ -166,11 +231,13 @@ async def lookup_unknown_exchange_command(
             "status": "hard_stopped",
             "exchange_order_id": exchange_order_id or None,
             "blockers": ["reconciled_exchange_identity_contradictory"],
+            "lookup_evidence": evidence,
         }
     return {
         "status": "reconciled_submitted",
         "exchange_order_id": exchange_order_id,
         "blockers": [],
+        "lookup_evidence": evidence,
     }
 
 
@@ -212,6 +279,7 @@ def apply_unknown_exchange_command_decision(
         exchange_result={
             "exchange_order_id": decision.get("exchange_order_id"),
             "error_message": blockers[0] if blockers else None,
+            **_mapping(decision.get("lookup_evidence")),
         },
         now_ms=now_ms,
     )
@@ -291,102 +359,35 @@ async def reconcile_unknown_exchange_commands(
     results: list[dict[str, Any]] = []
     for raw in rows:
         command = dict(raw)
-        try:
-            exchange_order = await gateway.find_order_by_client_id(
-                str(command["client_order_id"]),
-                str(command["gateway_symbol"]),
-            )
-        except Exception as exc:
-            counts["lookup_failed"] += 1
-            results.append(
-                _item(
-                    command,
-                    status="lookup_failed",
-                    blocker=f"exchange_command_lookup_failed:{type(exc).__name__}",
-                )
-            )
-            continue
-
-        if exchange_order is None:
-            visibility_deadline_ms = (
-                int(command.get("updated_at_ms") or now_ms)
-                + VISIBILITY_WINDOW_MS
-            )
-            if now_ms < visibility_deadline_ms:
-                counts["pending_visibility"] += 1
-                results.append(
-                    _item(
-                        command,
-                        status="pending_visibility",
-                        blocker="exchange_command_visibility_window_active",
-                    )
-                )
-                continue
-            record_exchange_command_outcome(
-                conn,
-                exchange_command_id=str(command["exchange_command_id"]),
-                target_state=ExchangeCommandState.RECONCILED_ABSENT,
-                outcome_class=ExchangeCommandOutcomeClass.RECONCILED_ABSENCE,
-                exchange_result={},
+        identity_blockers = _gateway_identity_blockers(command, gateway)
+        decision = (
+            {
+                "status": "hard_stopped",
+                "exchange_order_id": None,
+                "blockers": identity_blockers,
+            }
+            if identity_blockers
+            else await lookup_unknown_exchange_command(
+                command=command,
+                gateway=gateway,
                 now_ms=now_ms,
-            )
-            counts["reconciled_absent"] += 1
-            results.append(
-                _item(
-                    command,
-                    status="reconciled_absent",
-                    blocker="new_ticket_and_official_gates_required_for_any_retry",
-                )
-            )
-            continue
-
-        exchange = _mapping(exchange_order)
-        exchange_order_id = str(exchange.get("exchange_order_id") or "").strip()
-        actual_client_id = str(exchange.get("client_order_id") or "").strip()
-        actual_symbol = str(exchange.get("symbol") or "").strip()
-        contradictory = (
-            not exchange_order_id
-            or (
-                bool(actual_client_id)
-                and actual_client_id != str(command["client_order_id"])
-            )
-            or (
-                bool(actual_symbol)
-                and actual_symbol != str(command["gateway_symbol"])
             )
         )
-        if contradictory:
-            record_exchange_command_outcome(
-                conn,
-                exchange_command_id=str(command["exchange_command_id"]),
-                target_state=ExchangeCommandState.HARD_STOPPED,
-                outcome_class=ExchangeCommandOutcomeClass.CONTRADICTORY_TRUTH,
-                exchange_result={
-                    "exchange_order_id": exchange_order_id or None,
-                    "error_message": "reconciled_exchange_identity_contradictory",
-                },
-                now_ms=now_ms,
-            )
-            counts["hard_stopped"] += 1
-            results.append(
-                _item(
-                    command,
-                    status="hard_stopped",
-                    blocker="reconciled_exchange_identity_contradictory",
-                )
-            )
-            continue
-
-        record_exchange_command_outcome(
+        applied = apply_unknown_exchange_command_decision(
             conn,
-            exchange_command_id=str(command["exchange_command_id"]),
-            target_state=ExchangeCommandState.RECONCILED_SUBMITTED,
-            outcome_class=ExchangeCommandOutcomeClass.RECONCILED_EXCHANGE_TRUTH,
-            exchange_result={"exchange_order_id": exchange_order_id},
+            command=command,
+            decision=decision,
             now_ms=now_ms,
         )
-        counts["reconciled_submitted"] += 1
-        results.append(_item(command, status="reconciled_submitted", blocker=""))
+        status = str(applied["status"])
+        counts[status] += 1
+        results.append(
+            _item(
+                command,
+                status=status,
+                blocker=str(applied.get("first_blocker") or ""),
+            )
+        )
 
     blockers: list[str] = []
     if counts["hard_stopped"]:
@@ -421,6 +422,69 @@ def _mapping(value: Any) -> dict[str, Any]:
     if hasattr(value, "__dict__"):
         return dict(vars(value))
     return {}
+
+
+def _lookup_request_from_command(
+    command: dict[str, Any],
+) -> ExchangeOrderLookupRequest:
+    return ExchangeOrderLookupRequest(
+        exchange_id=str(command.get("exchange_id") or ""),
+        gateway_symbol=str(command.get("gateway_symbol") or ""),
+        command_kind=str(command.get("command_kind") or ""),
+        order_role=str(command.get("order_role") or ""),
+        order_type=str(command.get("order_type") or ""),
+        client_order_id=str(command.get("client_order_id") or ""),
+        target_exchange_order_id=(
+            str(command["target_exchange_order_id"])
+            if command.get("target_exchange_order_id")
+            else None
+        ),
+    )
+
+
+def _required_lookup_view_for_command(
+    command: dict[str, Any],
+) -> ExchangeOrderLookupView:
+    order_role = str(command.get("order_role") or "").upper()
+    order_type = str(command.get("order_type") or "").lower()
+    if order_role in {"SL", "RUNNER_SL"} and order_type == "stop_market":
+        return ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
+    return ExchangeOrderLookupView.REGULAR_ORDER
+
+
+def _lookup_evidence(
+    result: ExchangeOrderLookupResult,
+    *,
+    visibility_window_elapsed: bool,
+) -> dict[str, Any]:
+    return {
+        "lookup_status": result.status.value,
+        "lookup_view": result.lookup_view.value,
+        "identity_kind": result.identity_kind,
+        "client_order_id": result.client_order_id,
+        "gateway_symbol": result.gateway_symbol,
+        "observed_at_ms": result.observed_at_ms,
+        "visibility_window_elapsed": visibility_window_elapsed,
+        "exchange_status": result.exchange_status,
+    }
+
+
+def _order_contains_exchange_id(order: Any, target_exchange_order_id: str) -> bool:
+    raw = _mapping(order)
+    info = _mapping(raw.get("info"))
+    candidates = {
+        str(value).strip()
+        for value in (
+            raw.get("id"),
+            raw.get("exchange_order_id"),
+            raw.get("orderId"),
+            info.get("orderId"),
+            info.get("algoId"),
+            info.get("triggerOrderId"),
+        )
+        if value is not None and str(value).strip()
+    }
+    return target_exchange_order_id in candidates
 
 
 def _item(
