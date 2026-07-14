@@ -18,6 +18,9 @@ from src.application.readmodels import strategy_live_candidate_pool as candidate
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
 )
+from src.application.action_time.account_capacity_reservation import (
+    AccountCapacityReservationResult,
+)
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
 )
@@ -309,6 +312,43 @@ def test_invocation_sequence_uses_exact_post_opening_facts_and_ignores_other_sig
         "policy_current_id": invocation.lane_identity.policy_current_id,
         "time_authority": invocation.lane_identity.time_authority,
     }
+
+
+def test_invocation_sequence_rolls_back_before_lane_when_prefetched_capacity_blocks(
+    invocation_pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection, "SOR-001", "ETHUSDT", "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+    _bind_fresh_invocation_account_facts(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=NOW_MS + 1,
+    )
+
+    report = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 1,
+        completion_clock_ms=lambda: NOW_MS + 2,
+        prefetched_account_capacity=AccountCapacityReservationResult(
+            allowed=False,
+            first_blocker="account_budget_current_stale",
+        ),
+    )
+
+    assert report["status"] == "action_time_ticket_sequence_rolled_back"
+    assert report["blockers"] == ["account_budget_current_stale"]
+    assert _count(invocation_pg_control_connection, "brc_promotion_candidates") == 0
+    assert _count(invocation_pg_control_connection, "brc_budget_reservations") == 0
+    assert _count(invocation_pg_control_connection, "brc_action_time_lane_inputs") == 0
+    assert _count(invocation_pg_control_connection, "brc_action_time_tickets") == 0
 
 
 def test_repeated_invocation_after_ticket_exists_is_terminal_noop(

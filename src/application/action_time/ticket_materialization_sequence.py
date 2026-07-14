@@ -13,6 +13,9 @@ import sqlalchemy as sa
 from src.application.action_time.action_time_ticket import (
     materialize_action_time_ticket as _materialize_ticket,
 )
+from src.application.action_time.account_capacity_reservation import (
+    AccountCapacityReservationResult,
+)
 from src.application.action_time.action_time_invocation import (
     ActionTimeInvocationBlocked,
     bind_action_time_invocation_ticket,
@@ -72,6 +75,7 @@ def materialize_action_time_ticket_sequence(
     invocation_promotion_materializer: PromotionMaterializer = (
         _materialize_invocation_promotion
     ),
+    prefetched_account_capacity: AccountCapacityReservationResult | None = None,
 ) -> dict[str, Any]:
     """Commit a complete fact-to-Ticket unit or no partial action rows.
 
@@ -139,9 +143,12 @@ def materialize_action_time_ticket_sequence(
                     action_time_invocation_id=invocation.action_time_invocation_id,
                     stage_at_ms=started_at_ms,
                 )
+                promotion_kwargs: dict[str, Any] = {"evidence": evidence}
+                if prefetched_account_capacity is not None:
+                    promotion_kwargs["account_capacity"] = prefetched_account_capacity
                 promotion_payload = invocation_promotion_materializer(
                     conn,
-                    evidence=evidence,
+                    **promotion_kwargs,
                 )
             else:
                 projection_payload = projection_publisher(conn)
