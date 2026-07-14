@@ -76,6 +76,14 @@ ACTION_TIME_INVOCATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
 )
+TERMINAL_PREDISPATCH_RECONCILIATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-120_reconcile_terminal_predispatch_commands.py"
+)
+ACCOUNT_RISK_CURRENT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-14-122_create_account_risk_current_projections.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -158,6 +166,14 @@ def pg_control_connection():
         ACTION_TIME_INVOCATION_MIGRATION_PATH,
         "migration_119_pg_promotion_lane",
     )
+    terminal_predispatch_reconciliation_migration = _load_module(
+        TERMINAL_PREDISPATCH_RECONCILIATION_MIGRATION_PATH,
+        "migration_120_pg_promotion_lane",
+    )
+    account_risk_current_migration = _load_module(
+        ACCOUNT_RISK_CURRENT_MIGRATION_PATH,
+        "migration_122_pg_promotion_lane",
+    )
     seed = _load_module(SEED_PATH, "seed_pg_promotion_lane")
     engine = create_engine(
         "sqlite://",
@@ -233,6 +249,26 @@ def pg_control_connection():
             action_time_invocation_migration.upgrade()
         finally:
             action_time_invocation_migration.op = old_action_time_invocation_op
+        old_terminal_predispatch_reconciliation_op = (
+            terminal_predispatch_reconciliation_migration.op
+        )
+        terminal_predispatch_reconciliation_migration.op = Operations(
+            MigrationContext.configure(conn)
+        )
+        try:
+            terminal_predispatch_reconciliation_migration.upgrade()
+        finally:
+            terminal_predispatch_reconciliation_migration.op = (
+                old_terminal_predispatch_reconciliation_op
+            )
+        old_account_risk_current_op = account_risk_current_migration.op
+        account_risk_current_migration.op = Operations(
+            MigrationContext.configure(conn)
+        )
+        try:
+            account_risk_current_migration.upgrade()
+        finally:
+            account_risk_current_migration.op = old_account_risk_current_op
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(

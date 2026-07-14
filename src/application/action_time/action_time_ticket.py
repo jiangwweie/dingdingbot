@@ -36,6 +36,10 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
+from src.application.action_time.budget_reservation_transition import (  # noqa: E402
+    reclaim_terminal_presubmit_reservations,
+    transition_budget_reservation,
+)
 from src.application.action_time.pricing_sizing import (  # noqa: E402
     pricing_reference_from_action_time_fact_values,
     sizing_risk_decision_from_budget,
@@ -320,6 +324,11 @@ def _expire_stale_active_tickets(
                 "created_at_ms": now_ms,
             },
         )
+    reclaim_terminal_presubmit_reservations(
+        conn,
+        now_ms=now_ms,
+        evidence_ref_prefix="materialize_action_time_ticket",
+    )
     return len(expired_rows)
 
 
@@ -1132,20 +1141,31 @@ def _insert_ticket_bundle(
         ),
         {"lane_id": ticket["action_time_lane_input_id"]},
     )
-    conn.execute(
-        text(
-            """
-            UPDATE brc_budget_reservations
-            SET ticket_id = :ticket_id,
-                status = 'consumed'
-            WHERE budget_reservation_id = :budget_reservation_id
-            """
-        ),
-        {
-            "ticket_id": ticket["ticket_id"],
-            "budget_reservation_id": ticket["budget_reservation_id"],
-        },
+    reservations = sa.Table(
+        "brc_budget_reservations",
+        sa.MetaData(),
+        autoload_with=conn,
     )
+    bound = conn.execute(
+        reservations.update()
+        .where(
+            reservations.c.budget_reservation_id == ticket["budget_reservation_id"]
+        )
+        .where(reservations.c.status == "active")
+        .values(ticket_id=ticket["ticket_id"])
+    )
+    if int(bound.rowcount or 0) != 1:
+        raise TicketMaterializationBlocked(["budget_reservation_not_active_for_ticket"])
+    transition = transition_budget_reservation(
+        conn,
+        budget_reservation_id=str(ticket["budget_reservation_id"]),
+        to_status="consumed",
+        reason="action_time_ticket_bound",
+        evidence_ref=str(ticket["ticket_id"]),
+        now_ms=int(ticket["created_at_ms"]),
+    )
+    if transition.first_blocker:
+        raise TicketMaterializationBlocked([transition.first_blocker])
 
 
 def _matching_event_binding(
