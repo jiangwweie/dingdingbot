@@ -32,7 +32,10 @@ from src.domain.exit_policy_replay import (
 ACTIVE_POLICY_RECOMMENDATIONS: tuple[dict[str, Any], ...] = (
     {
         "strategy_group_id": "CPM-RO-001",
+        "strategy_version": "sgv:CPM-RO-001:v2",
         "event_spec_id": "CPM-LONG",
+        "event_spec_registry_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
+        "event_spec_version": "v2",
         "side": "long",
         "timeframe": "1h",
         "structure_window_bars": 3,
@@ -42,7 +45,10 @@ ACTIVE_POLICY_RECOMMENDATIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "strategy_group_id": "MPG-001",
+        "strategy_version": "sgv:MPG-001:v2",
         "event_spec_id": "MPG-LONG",
+        "event_spec_registry_id": "event_spec:MPG-001:MPG-LONG:v2",
+        "event_spec_version": "v2",
         "side": "long",
         "timeframe": "1h",
         "structure_window_bars": 3,
@@ -52,7 +58,10 @@ ACTIVE_POLICY_RECOMMENDATIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "strategy_group_id": "MI-001",
+        "strategy_version": "sgv:MI-001:v2",
         "event_spec_id": "MI-LONG",
+        "event_spec_registry_id": "event_spec:MI-001:MI-LONG:v2",
+        "event_spec_version": "v2",
         "side": "long",
         "timeframe": "1h",
         "structure_window_bars": 2,
@@ -62,7 +71,10 @@ ACTIVE_POLICY_RECOMMENDATIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "strategy_group_id": "SOR-001",
+        "strategy_version": "sgv:SOR-001:v2",
         "event_spec_id": "SOR-LONG",
+        "event_spec_registry_id": "event_spec:SOR-001:SOR-LONG:v2",
+        "event_spec_version": "v2",
         "side": "long",
         "timeframe": "15m",
         "structure_window_bars": 4,
@@ -72,7 +84,10 @@ ACTIVE_POLICY_RECOMMENDATIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "strategy_group_id": "SOR-001",
+        "strategy_version": "sgv:SOR-001:v2",
         "event_spec_id": "SOR-SHORT",
+        "event_spec_registry_id": "event_spec:SOR-001:SOR-SHORT:v2",
+        "event_spec_version": "v2",
         "side": "short",
         "timeframe": "15m",
         "structure_window_bars": 4,
@@ -82,7 +97,10 @@ ACTIVE_POLICY_RECOMMENDATIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "strategy_group_id": "BRF2-001",
+        "strategy_version": "sgv:BRF2-001:v2",
         "event_spec_id": "BRF2-SHORT",
+        "event_spec_registry_id": "event_spec:BRF2-001:BRF2-SHORT:v2",
+        "event_spec_version": "v2",
         "side": "short",
         "timeframe": "1h",
         "structure_window_bars": 3,
@@ -96,6 +114,7 @@ ACTIVE_POLICY_RECOMMENDATIONS: tuple[dict[str, Any], ...] = (
 def build_decision_payload() -> dict[str, Any]:
     decisions: list[dict[str, Any]] = []
     for recommendation in ACTIVE_POLICY_RECOMMENDATIONS:
+        policy_payload = _policy_payload(recommendation)
         candidates = _candidate_grid(recommendation)
         trades = _representative_paths(recommendation)
         comparisons = []
@@ -111,6 +130,10 @@ def build_decision_payload() -> dict[str, Any]:
         decisions.append(
             {
                 **recommendation,
+                "exit_policy_id": policy_payload["exit_policy_id"],
+                "exit_policy_version": policy_payload["exit_policy_version"],
+                "policy_hash": policy_payload["payload_hash"],
+                "policy_payload": policy_payload,
                 "recommended_candidate_id": candidates[0].candidate_id,
                 "comparison": comparisons,
                 "selection_basis": (
@@ -159,6 +182,69 @@ def build_decision_payload() -> dict[str, Any]:
         },
     }
     payload["decision_hash"] = _payload_hash(payload)
+    return payload
+
+
+def _policy_payload(recommendation: dict[str, Any]) -> dict[str, Any]:
+    side = str(recommendation["side"])
+    event_label = str(recommendation["event_spec_id"])
+    invalidation_reference = str(recommendation["invalidation"]).split(":", 1)[1]
+    payload: dict[str, Any] = {
+        "exit_policy_id": (
+            f"exit-policy:{recommendation['strategy_group_id']}:{event_label}:right-tail-v1"
+        ),
+        "exit_policy_version": "2026-07-15-v1",
+        "strategy_group_id": recommendation["strategy_group_id"],
+        "strategy_version": recommendation["strategy_version"],
+        "event_spec_id": recommendation["event_spec_registry_id"],
+        "event_spec_version": recommendation["event_spec_version"],
+        "side": side,
+        "policy_family": "right_tail_runner",
+        "reward_basis": "actual_entry_r",
+        "take_profit_legs": [
+            {
+                "role": "TP1",
+                "reward_multiple": "1",
+                "quantity_fraction": "0.5",
+                "execution_style": "limit_gtc",
+                "market_fallback_allowed": False,
+            }
+        ],
+        "tp_completion_tolerance_qty_steps": 1,
+        "post_tp1_floor_rule": {
+            "kind": "runner_leg_cost_adjusted_break_even",
+            "trigger": "tp1_target_quantity_complete",
+            "exit_fee_basis": "conservative_taker",
+            "slippage_buffer_ticks": 2,
+            "minimum_improvement_ticks": 2,
+        },
+        "invalidation_rules": [
+            {
+                "kind": "reference_price_cross",
+                "rule_id": f"{event_label}:native-invalidation-v1",
+                "trigger": (
+                    "close_below_or_equal" if side == "long" else "close_above_or_equal"
+                ),
+                "reference_key": invalidation_reference,
+            }
+        ],
+        "time_stop_rule": {
+            "kind": "max_holding_bars",
+            "max_holding_bars": recommendation["max_holding_bars"],
+        },
+        "runner_rule": {
+            "kind": "structural_atr",
+            "timeframe": recommendation["timeframe"],
+            "structure_rule": (
+                "confirmed_higher_low" if side == "long" else "confirmed_lower_high"
+            ),
+            "structure_window_bars": recommendation["structure_window_bars"],
+            "atr_period": 14,
+            "atr_buffer_multiple": recommendation["atr_buffer_multiple"],
+            "minimum_improvement_ticks": 2,
+        },
+    }
+    payload["payload_hash"] = _payload_hash(payload)
     return payload
 
 
