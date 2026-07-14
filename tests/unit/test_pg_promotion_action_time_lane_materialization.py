@@ -33,6 +33,9 @@ from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
 )
+from tests.support.runtime_control_state_schema import (
+    install_runtime_control_state_revision,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -233,6 +236,8 @@ def pg_control_connection():
             action_time_invocation_migration.upgrade()
         finally:
             action_time_invocation_migration.op = old_action_time_invocation_op
+        install_runtime_control_state_revision(conn, revision="121")
+        install_runtime_control_state_revision(conn, revision="122")
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(
