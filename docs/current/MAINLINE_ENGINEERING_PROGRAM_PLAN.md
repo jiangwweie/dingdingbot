@@ -2,7 +2,7 @@
 title: MAINLINE_ENGINEERING_PROGRAM_PLAN
 status: CURRENT_PROGRAM_PLAN
 authority: docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 ---
 
 # Mainline Engineering Program Plan
@@ -81,6 +81,7 @@ repo MD/JSON/output/report files.
 | **P1 Risk Reservation v0** | P1 | Require ticket-level stop-risk estimate and budget reservation before FinalGate-ready state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Consumer calculation is deployed; closure now requires RT-1 to prove the production price/quantity producer chain and a positive reservation before Ticket creation |
 | **P1-C Owner Explanation Read Model** | P1 | Make no-trade, signal, ticket, submit, runner, and closure states human-readable | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, `RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` | Owner can see whether the system is waiting, processing, blocked, protected, or closed without decoding internal terms |
 | **P1-D Performance And Retention Control** | P1 | Keep no-signal ticks, monitor runs, PG rows, logs, and reports bounded | `SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md`, `PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` | No recurring report growth; no restart storm; PG/file-authority validators remain clear |
+| **P1-F Dual-Position Hard-Cap Account Risk Model V0** | P1 next | Replace the symbol-filtered flat gate with full-account ownership, Exposure/Budget Current and atomic capacity reservation while keeping one new Lane | `DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md`, `DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md` | At most two different-instrument positions; 2.5% per Ticket, 6% portfolio, 4% cluster, 90% margin, 10x leverage; shadow and rollback certification pass |
 | **P2-E Advanced Capital Risk Allocation** | P2 | Allocate capital by portfolio exposure, StrategyGroup sleeve, symbol/side cap, cluster exposure, cooldown, and drawdown state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Multi-strategy / multi-symbol allocation can scale or pause exposure without changing per-ticket safety facts |
 | **P2-F Frontend Read Model Integration** | P2 | Build frontend against backend explanation/read models, not raw PG internals | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, frontend `OWNER_EXPLANATION_READ_MODEL_FRONTEND_CONTRACT.md` | UI shows runtime health, signal progress, account state, ticket status, and why-no-trade from backend read models |
 
@@ -97,8 +98,9 @@ deployed component baselines. They must not run as separate medium-scale WIP.
 | 4 | **P0-SIN Signal Identity Conservation And Owner Notification Truth** | Deployed and production-accepted; prevents anonymous readiness and watcher-local messages from masquerading as tradable opportunity truth |
 | P0 interrupt | **Natural Live Lifecycle Calibration** | A different-identity fresh signal or active safety incident preempts P1-OFC at the next committed transaction boundary |
 | 5 | **Owner Supervision Product Integration** | Deployed baseline; natural-event language calibration remains event-driven |
-| 6 | **P1 Capital Allocation V1** | Allocation requires reliable real ticket outcomes, not rehearsal-only closure |
-| 7 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one live-calibrated lifecycle through adapters |
+| 6 | **P1-F Dual-Position Hard-Cap Account Risk Model V0** | The single-Ticket lifecycle has real trade truth; the current blocker is the account-wide flat gate, not missing strategy capability |
+| 7 | **P2 Capital Allocation V1** | Strategy sleeves, dynamic allocation and drawdown controls require V0 dual-position truth plus more real outcomes |
+| 8 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one live-calibrated lifecycle through adapters |
 
 ## Current Next Execution Order
 
@@ -119,7 +121,8 @@ resumes the interrupted checklist item.
 | 4 | **RCI-3 Finding gate and repairs** | P0 complete | Four implementation defects have RED-GREEN fixes or bounded deployment remediation; no architecture gap was demonstrated; live-only unknowns stay R1B |
 | 5 | **RCI-4 Regression, audit, and deploy decision** | P0 complete | `3030 passed, 1 skipped`; file-I/O audits pass; production behavior changes are deployed and read-only accepted |
 | P0 interrupt | **R1B Natural-event acceptance** | P0 interrupt | The next distinct live signal persists its exact Ticket-chain and real venue outcome without synthetic production mutation |
-| 6 | **Deliberate execution-core stop** | P0 exit | After bounded certification, no further execution-core expansion starts without natural outcome evidence or a concrete safety incident |
+| 6 | **Dual-Position Hard-Cap Account Risk V0 design/implementation** | P1 next | Full-account exchange truth, ownership, current projections, reservation conservation and atomic capacity arbitration pass shadow certification before activation |
+| 7 | **Deliberate execution-core stop outside V0 scope** | P0/P1 boundary | No third position, strategy sleeve, dynamic correlation, fee reserve or multi-asset execution expansion enters this program |
 
 ## P0-RT Real Signal -> Ticket Closure
 
@@ -503,6 +506,44 @@ risk_at_stop = abs(entry_price - stop_price) * quantity
 | **Exposure conflict checked** | Same symbol, same side, and same strategy open-risk checks run before reservation |
 | **Versioned policy bound** | Ticket binds risk policy and budget/sleeve version used at creation |
 | **Production producer bound** | Entry reference and quantity come from typed, fresh, production-shaped action-time pricing/sizing producers rather than fixture-only dictionary keys |
+
+### P1-F Dual-Position Hard-Cap Account Risk Model V0
+
+#### Goal
+
+Replace the legacy symbol-filtered flat gate with one full-account capacity
+model while preserving the current Ticket lifecycle and one-new-Lane boundary:
+
+```text
+full-account exchange snapshot
+-> ownership and purpose classification
+-> Account Exposure Current
+-> Account Budget Current
+-> locked capacity reservation
+-> existing Action-Time Ticket chain
+```
+
+#### Associated Design Docs
+
+| Doc | Role |
+| --- | --- |
+| `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md` | Owner-approved architecture, formulas, state axes, failure and rollback rules |
+| `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md` | Task-by-task TDD, migration, shadow, activation and release sequence |
+| `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md` | Existing protected submit and lifecycle authority that V0 must reuse |
+| `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` | Later Advanced Allocation scope explicitly deferred from V0 |
+
+#### Acceptance
+
+| Requirement | Acceptance proof |
+| --- | --- |
+| **Two-position hard cap** | At most two different-instrument Ticket claims/positions; one new Action-Time Lane remains |
+| **Owner risk values** | Per Ticket 2.5%, portfolio 6%, static cluster 4%, initial margin 90%, leverage 10x |
+| **Complete account truth** | Account, all positions, regular orders and Algo/conditional orders are read without candidate-symbol filtering |
+| **No double count** | Reservation is a claim ceiling; actual exposure and pending work are conserved once across lifecycle stages |
+| **Atomic capacity** | Account budget row lock and projection-version check prevent concurrent over-reservation |
+| **Safe activation** | Shadow classifies the current real protected position correctly before two-position policy becomes active |
+| **Safe rollback** | Policy max returns to one without forced close or protection cancellation |
+| **No scope creep** | No third position, StrategyGroup sleeve, dynamic correlation, pre-entry fee reserve, or new execution chain |
 
 ### P1-C Owner Explanation Read Model
 
