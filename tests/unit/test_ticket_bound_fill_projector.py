@@ -1,3 +1,4 @@
+from decimal import Decimal
 import json
 
 from sqlalchemy import text
@@ -16,6 +17,7 @@ from tests.unit.test_ticket_bound_protected_submit_attempt import (
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
+from tests.unit.test_ticket_exit_policy_service import _versioned_exit_fixture
 
 
 def test_projector_backfills_missing_tp1_event_for_order_already_marked_filled(
@@ -98,3 +100,95 @@ def test_projector_backfills_missing_tp1_event_for_order_already_marked_filled(
         "cost": "0.0059432",
         "currency": "USDT",
     }
+
+
+def test_versioned_tp1_partial_and_complete_fill_watermarks_are_restart_safe(
+    pg_control_connection,
+):
+    ticket_id = _versioned_exit_fixture(pg_control_connection)
+    tp1 = pg_control_connection.execute(
+        text(
+            "SELECT * FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE ticket_id = :ticket_id AND role = 'TP1'"
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().one()
+    first_fill = {
+        "exchange_trade_id": "trade-tp1-1",
+        "exchange_order_id": tp1["exchange_order_id"],
+        "qty": "0.002",
+        "price": str(tp1["price"]),
+        "fee": {"cost": "0.001", "currency": "USDT"},
+        "timestamp_ms": NOW_MS + 7_000,
+    }
+    partial_snapshot = {
+        "recent_fills": [first_fill],
+        "position": {"qty": "0.008", "position_flat": False},
+    }
+
+    first = project_ticket_bound_exchange_fills(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot=partial_snapshot,
+        now_ms=NOW_MS + 7_000,
+    )
+    retry = project_ticket_bound_exchange_fills(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot=partial_snapshot,
+        now_ms=NOW_MS + 7_100,
+    )
+    partial = pg_control_connection.execute(
+        text(
+            "SELECT tp1_cumulative_filled_qty, tp1_completion_state, "
+            "remaining_position_qty FROM brc_ticket_exit_policy_current "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().one()
+
+    assert first["status"] == "fills_projected"
+    assert retry["status"] == "no_new_fills"
+    assert Decimal(str(partial["tp1_cumulative_filled_qty"])) == Decimal("0.002")
+    assert partial["tp1_completion_state"] == "partial"
+    assert Decimal(str(partial["remaining_position_qty"])) == Decimal("0.008")
+    assert pg_control_connection.execute(
+        text(
+            "SELECT status FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE ticket_id = :ticket_id AND role = 'TP1'"
+        ),
+        {"ticket_id": ticket_id},
+    ).scalar_one() == "partially_filled"
+
+    complete = project_ticket_bound_exchange_fills(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot={
+            "recent_fills": [
+                first_fill,
+                {
+                    "exchange_trade_id": "trade-tp1-2",
+                    "exchange_order_id": tp1["exchange_order_id"],
+                    "qty": "0.003",
+                    "price": str(tp1["price"]),
+                    "fee": {"cost": "0.0015", "currency": "USDT"},
+                    "timestamp_ms": NOW_MS + 8_000,
+                },
+            ],
+            "position": {"qty": "0.005", "position_flat": False},
+        },
+        now_ms=NOW_MS + 8_000,
+    )
+    current = pg_control_connection.execute(
+        text(
+            "SELECT tp1_cumulative_filled_qty, tp1_completion_state, "
+            "remaining_position_qty FROM brc_ticket_exit_policy_current "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().one()
+
+    assert complete["status"] == "fills_projected"
+    assert Decimal(str(current["tp1_cumulative_filled_qty"])) == Decimal("0.005")
+    assert current["tp1_completion_state"] == "complete"
+    assert Decimal(str(current["remaining_position_qty"])) == Decimal("0.005")

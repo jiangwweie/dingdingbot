@@ -81,7 +81,7 @@ def required_exchange_order_lookup_view(
     order_type = request.order_type.lower()
     if order_role in {"SL", "RUNNER_SL"} and order_type == "stop_market":
         return ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
-    if order_role in {"ENTRY", "TP1"} and order_type != "stop_market":
+    if order_role in {"ENTRY", "TP1", "RUNNER_SL"} and order_type != "stop_market":
         return ExchangeOrderLookupView.REGULAR_ORDER
     raise ValueError("unsupported Binance command role/type lookup combination")
 
@@ -147,7 +147,10 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     netting_domain_key: str = Field(min_length=1, max_length=640)
     command_kind: str = Field(pattern="^(place_order|cancel_order)$")
     command_source: str = Field(
-        pattern="^(protected_submit|protection_recovery|runner_mutation|orphan_cleanup)$"
+        pattern=(
+            "^(protected_submit|protection_recovery|runner_mutation|"
+            "orphan_cleanup|exit_policy_runner|exit_policy_close)$"
+        )
     )
     source_command_id: str = Field(min_length=1, max_length=192)
     target_exchange_order_id: Optional[str] = Field(default=None, max_length=192)

@@ -54,6 +54,8 @@ LIFECYCLE_MUTATION_COMMAND_SOURCES = (
     "protection_recovery",
     "runner_mutation",
     "orphan_cleanup",
+    "exit_policy_runner",
+    "exit_policy_close",
 )
 
 

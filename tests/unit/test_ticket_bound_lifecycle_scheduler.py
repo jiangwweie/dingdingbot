@@ -89,6 +89,9 @@ async def test_scheduler_selects_healthy_runner_without_exchange_write(
     assert payload["selected_scope_count"] == 1
     assert payload["exchange_read_called"] is True
     assert payload["exchange_write_called"] is False
+    assert payload["runs"][0]["exit_policy"]["status"] == (
+        "exit_policy_capability_disabled"
+    )
     assert "place_order" not in gateway.events
     assert "cancel_order" not in gateway.events
 

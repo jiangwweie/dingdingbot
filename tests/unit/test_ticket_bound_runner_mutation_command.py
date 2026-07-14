@@ -14,6 +14,7 @@ from tests.unit.test_ticket_bound_runner_protection_adjuster import (
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
+from tests.unit.test_ticket_exit_policy_service import _versioned_exit_fixture
 
 
 def test_runner_mutation_command_waits_for_tp1_fill(pg_control_connection):
@@ -88,6 +89,31 @@ def test_runner_mutation_command_is_idempotent(pg_control_connection):
     assert second["runner_mutation_command_id"] == first["runner_mutation_command_id"]
     assert second["idempotent_existing_runner_mutation_command"] is True
     assert _command_count(pg_control_connection) == 1
+
+
+def test_enabled_versioned_ticket_does_not_create_legacy_runner_command(
+    pg_control_connection,
+):
+    ticket_id = _versioned_exit_fixture(pg_control_connection)
+    set_id = str(
+        pg_control_connection.execute(
+            text(
+                "SELECT exit_protection_set_id FROM brc_ticket_exit_policy_current "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).scalar_one()
+    )
+    _mark_tp1_filled(pg_control_connection, set_id)
+
+    result = prepare_ticket_bound_runner_mutation_command(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        now_ms=NOW_MS + 7_000,
+    )
+
+    assert result["status"] == "delegated_to_ticket_exit_policy"
+    assert _command_count(pg_control_connection) == 0
 
 
 def test_runner_mutation_result_records_official_exchange_refs(pg_control_connection):

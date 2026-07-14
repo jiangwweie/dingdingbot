@@ -79,6 +79,17 @@ def prepare_ticket_bound_runner_mutation_command(
             blockers=["exit_protection_set_missing"],
             next_action="repair_ticket_bound_exit_protection_set",
         )
+    if _versioned_exit_policy_enabled(
+        conn,
+        ticket_id=str(protection_set.get("ticket_id") or ""),
+    ):
+        return _result(
+            "delegated_to_ticket_exit_policy",
+            now_ms=now_ms,
+            command={},
+            blockers=[],
+            next_action="run_ticket_exit_policy_maintenance",
+        )
     orders = _orders_for_set(conn, set_id)
     sl_resolution = resolve_active_exit_protection_rows(
         exit_protection_set_id=set_id,
@@ -240,6 +251,37 @@ def _command_blockers(
     if _decimal(protection_set.get("runner_qty")) <= 0:
         blockers.append("runner_qty_not_positive")
     return _dedupe(blockers)
+
+
+def _versioned_exit_policy_enabled(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+) -> bool:
+    inspector = sa.inspect(conn)
+    if not inspector.has_table("brc_runtime_capabilities_current") or not inspector.has_table(
+        "brc_action_time_tickets"
+    ):
+        return False
+    capabilities = _table(conn, "brc_runtime_capabilities_current")
+    capability = conn.execute(
+        sa.select(capabilities.c.status).where(
+            capabilities.c.capability_id == "ticket_exit_policy_v1"
+        )
+    ).first()
+    if not capability or str(capability[0]) != "enabled":
+        return False
+    ticket = _row_by_id(
+        conn,
+        "brc_action_time_tickets",
+        "ticket_id",
+        ticket_id,
+    )
+    return bool(
+        ticket
+        and str(ticket.get("exit_policy_id") or "")
+        not in {"", "legacy_unbound"}
+    )
 
 
 def _command_row(

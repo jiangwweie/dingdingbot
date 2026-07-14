@@ -26,6 +26,9 @@ from src.application.action_time.ticket_bound_fill_projector import (
 from src.application.action_time.ticket_bound_lifecycle_finalizer import (
     finalize_ticket_bound_lifecycle_if_ready,
 )
+from src.application.action_time.ticket_exit_policy_service import (
+    maintain_ticket_exit_policy_in_transaction,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -179,6 +182,12 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             now_ms=now_ms + index + 100,
         )
         blockers.extend(_result_blockers(maintenance))
+        exit_policy = maintain_ticket_exit_policy_in_transaction(
+            conn,
+            ticket_id=str(scope.get("ticket_id") or ""),
+            now_ms=now_ms + index + 105,
+        )
+        blockers.extend(_result_blockers(exit_policy))
         exchange_read_called = (
             exchange_read_called
             or maintenance.get("exchange_read_called") is True
@@ -199,6 +208,7 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
                 "first_tick": _summary(tick),
                 "fill_projection": _summary(fill_projection),
                 "maintenance": _summary(maintenance),
+                "exit_policy": _summary(exit_policy),
                 "finalization": _summary(finalization),
                 "actions": list(maintenance.get("actions") or []),
             }
@@ -304,6 +314,12 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             )
         )
         blockers.extend(_result_blockers(maintenance))
+        exit_policy = maintain_ticket_exit_policy_in_transaction(
+            conn,
+            ticket_id=str(scope.get("ticket_id") or ""),
+            now_ms=now_ms + index + 105,
+        )
+        blockers.extend(_result_blockers(exit_policy))
         exchange_read_called = (
             exchange_read_called
             or maintenance.get("exchange_read_called") is True
@@ -355,6 +371,7 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
                 "scheduled_tick": _summary(scheduled_tick),
                 "fill_projection": _summary(fill_projection),
                 "maintenance": _summary(maintenance),
+                "exit_policy": _summary(exit_policy),
                 "post_recovery_snapshot": _summary(post_recovery_snapshot_payload),
                 "recovery_check_tick": _summary(recovery_check_tick),
                 "finalization": _summary(finalization),

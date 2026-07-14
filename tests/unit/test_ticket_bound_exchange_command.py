@@ -78,6 +78,26 @@ def test_tp1_command_accepts_typed_passive_limit_gtx_only():
         )
 
 
+@pytest.mark.parametrize("source", ["exit_policy_runner", "exit_policy_close"])
+def test_exit_policy_sources_use_the_existing_typed_command_authority(source):
+    command = TicketBoundExchangeCommand.model_validate(
+        _tp1_command(
+            order_role="RUNNER_SL",
+            order_type="stop_market" if source == "exit_policy_runner" else "market",
+            execution_style=None,
+            time_in_force=None,
+            amount="0.125",
+            price=None,
+            stop_price="1990" if source == "exit_policy_runner" else None,
+            command_source=source,
+            source_command_id=f"{source}-1",
+        )
+    )
+
+    assert command.command_source == source
+    assert command.reduce_intent == "reduce_position"
+
+
 def _load_module(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None

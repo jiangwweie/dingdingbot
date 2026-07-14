@@ -52,6 +52,22 @@ def project_ticket_bound_exchange_fills(
     projected: list[dict[str, Any]] = []
     for row in rows:
         exchange_order_id = str(row.get("exchange_order_id") or "")
+        if str(row.get("role") or "") == "TP1" and _versioned_exit_projection_exists(
+            conn,
+            ticket_id=ticket_id,
+        ):
+            versioned = _project_versioned_tp1_fills(
+                conn,
+                ticket_id=ticket_id,
+                order=dict(row),
+                fills=fills,
+                exchange_snapshot=exchange_snapshot,
+                now_ms=now_ms,
+            )
+            if versioned.get("status") == "blocked":
+                return versioned
+            projected.extend(versioned.get("projected_fills") or [])
+            continue
         fill = _fill_for_order(fills, exchange_order_id=exchange_order_id)
         if not fill:
             continue
@@ -86,6 +102,7 @@ def project_ticket_bound_exchange_fills(
         projected.append(
             {
                 "role": str(row.get("role") or ""),
+                "exchange_trade_id": str(fill.get("exchange_trade_id") or "") or None,
                 "exchange_order_id": str(fill.get("exchange_order_id") or ""),
                 "parent_exchange_order_id": (
                     str(fill.get("parent_exchange_order_id") or "") or None
@@ -156,6 +173,261 @@ def project_ticket_bound_exchange_fills(
     if lifecycle_decision is not None:
         payload["lifecycle_decision"] = lifecycle_decision.to_dict()
     return payload
+
+
+def _versioned_exit_projection_exists(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+) -> bool:
+    if not sa.inspect(conn).has_table("brc_ticket_exit_policy_current"):
+        return False
+    table = _table(conn, "brc_ticket_exit_policy_current")
+    return conn.execute(
+        sa.select(table.c.ticket_id).where(table.c.ticket_id == ticket_id)
+    ).first() is not None
+
+
+def _project_versioned_tp1_fills(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    order: dict[str, Any],
+    fills: list[dict[str, Any]],
+    exchange_snapshot: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    exchange_order_id = str(order.get("exchange_order_id") or "")
+    matching = _fills_for_order(fills, exchange_order_id=exchange_order_id)
+    if not matching:
+        return {"status": "no_new_fills", "projected_fills": []}
+    lifecycle = _lifecycle_for_ticket(conn, ticket_id)
+    newly_projected: list[dict[str, Any]] = []
+    for fill in matching:
+        projected_fill = {
+            "role": "TP1",
+            "exchange_trade_id": str(fill.get("exchange_trade_id") or "") or None,
+            "exchange_order_id": str(fill.get("exchange_order_id") or ""),
+            "parent_exchange_order_id": (
+                str(fill.get("parent_exchange_order_id") or "") or None
+            ),
+            "fill_qty": str(fill.get("qty") or ""),
+            "fill_price": str(fill.get("price") or ""),
+            "fill_time_ms": fill.get("timestamp_ms"),
+            "fee": fill.get("fee"),
+            "liquidity_role": fill.get("liquidity_role"),
+            "realized_pnl": fill.get("realized_pnl"),
+            "reference_price": _exit_reference_price(order),
+            "funding_income": [],
+            "funding_income_available": (
+                exchange_snapshot.get("funding_income_available") is True
+            ),
+        }
+        existing = _recorded_tp1_trade(
+            conn,
+            lifecycle=lifecycle,
+            projected_fill=projected_fill,
+        )
+        if existing:
+            if _fill_truth_conflicts(existing, projected_fill):
+                return _hard_stop_fill_truth_contradiction(
+                    conn,
+                    ticket_id=ticket_id,
+                    role="TP1",
+                    exchange_order_id=exchange_order_id,
+                    existing_fill=existing,
+                    conflicting_fill=projected_fill,
+                    now_ms=now_ms,
+                )
+            continue
+        inserted = _insert_fill_event(
+            conn,
+            lifecycle=lifecycle,
+            event_type="tp1_filled",
+            fill=projected_fill,
+            now_ms=now_ms,
+        )
+        if inserted:
+            newly_projected.append(projected_fill)
+        if _tp1_gtx_taker_contradiction(
+            conn,
+            ticket_id=ticket_id,
+            fill=projected_fill,
+        ):
+            return _hard_stop_tp1_gtx_taker_contradiction(
+                conn,
+                ticket_id=ticket_id,
+                fill=projected_fill,
+                now_ms=now_ms,
+            )
+
+    cumulative = _recorded_tp1_cumulative_qty(
+        conn,
+        lifecycle=lifecycle,
+        exchange_order_id=exchange_order_id,
+    )
+    projections = _table(conn, "brc_ticket_exit_policy_current")
+    current = conn.execute(
+        sa.select(projections).where(projections.c.ticket_id == ticket_id)
+    ).mappings().one()
+    target = _normalized_decimal(current.get("resolved_tp1_target_qty"))
+    if target is None or target <= 0:
+        target = _normalized_decimal(order.get("qty"))
+    position = _mapping(exchange_snapshot.get("position"))
+    remaining = _normalized_decimal(position.get("qty"))
+    if target is None or target <= 0 or remaining is None or remaining < 0:
+        blocker = "tp1_fill_projection_required_fact_missing"
+        conn.execute(
+            projections.update()
+            .where(projections.c.ticket_id == ticket_id)
+            .values(first_blocker=blocker, updated_at_ms=now_ms)
+        )
+        return {
+            "status": "blocked",
+            "projected_roles": [],
+            "projected_count": 0,
+            "projected_fills": [],
+            "first_blocker": blocker,
+            "blockers": [blocker],
+        }
+    tolerance = _tp1_completion_tolerance(
+        conn,
+        ticket_id=ticket_id,
+        current=dict(current),
+    )
+    if cumulative > target + tolerance:
+        completion = "contradictory"
+        blocker = "tp1_cumulative_fill_exceeds_frozen_target"
+    elif target - cumulative <= tolerance:
+        completion = "complete"
+        blocker = None
+    elif cumulative > 0:
+        completion = "partial"
+        blocker = None
+    else:
+        completion = "unfilled"
+        blocker = None
+    conn.execute(
+        projections.update()
+        .where(projections.c.ticket_id == ticket_id)
+        .values(
+            tp1_cumulative_filled_qty=cumulative,
+            tp1_completion_state=completion,
+            remaining_position_qty=remaining,
+            state=(
+                "tp1_complete"
+                if completion == "complete"
+                else "tp1_partial" if completion == "partial" else "blocked"
+            ),
+            first_blocker=blocker,
+            updated_at_ms=now_ms,
+        )
+    )
+    orders = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    conn.execute(
+        orders.update()
+        .where(
+            orders.c.exit_protection_order_id
+            == order["exit_protection_order_id"]
+        )
+        .values(
+            status=(
+                "filled"
+                if completion == "complete"
+                else "partially_filled" if completion == "partial" else order["status"]
+            ),
+            updated_at_ms=now_ms,
+        )
+    )
+    if blocker:
+        return {
+            "status": "blocked",
+            "projected_roles": ["TP1"] if newly_projected else [],
+            "projected_count": len(newly_projected),
+            "projected_fills": newly_projected,
+            "first_blocker": blocker,
+            "blockers": [blocker],
+        }
+    return {
+        "status": "fills_projected" if newly_projected else "no_new_fills",
+        "projected_fills": newly_projected,
+    }
+
+
+def _tp1_completion_tolerance(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    current: dict[str, Any],
+) -> Decimal:
+    tickets = _table(conn, "brc_action_time_tickets")
+    ticket = conn.execute(
+        sa.select(tickets).where(tickets.c.ticket_id == ticket_id)
+    ).mappings().one()
+    policy = _mapping(ticket.get("exit_policy_snapshot"))
+    steps = int(policy.get("tp_completion_tolerance_qty_steps") or 0)
+    instruments = _table(conn, "brc_exchange_instruments")
+    instrument = conn.execute(
+        sa.select(instruments).where(
+            instruments.c.exchange_instrument_id
+            == ticket["exchange_instrument_id"]
+        )
+    ).mappings().one()
+    quantity_step = _normalized_decimal(instrument.get("quantity_step"))
+    if quantity_step is None or quantity_step <= 0:
+        return Decimal("0")
+    return Decimal(steps) * quantity_step
+
+
+def _recorded_tp1_trade(
+    conn: sa.engine.Connection,
+    *,
+    lifecycle: dict[str, Any],
+    projected_fill: dict[str, Any],
+) -> dict[str, Any]:
+    if not lifecycle:
+        return {}
+    identity = _fill_event_identity(projected_fill)
+    events = _table(conn, "brc_ticket_bound_lifecycle_events")
+    rows = conn.execute(
+        sa.select(events.c.event_payload).where(
+            events.c.lifecycle_run_id == lifecycle["lifecycle_run_id"],
+            events.c.event_type == "tp1_filled",
+        )
+    ).scalars()
+    for payload in rows:
+        fill = _mapping(_mapping(payload).get("fill"))
+        if _fill_event_identity(fill) == identity:
+            return fill
+    return {}
+
+
+def _recorded_tp1_cumulative_qty(
+    conn: sa.engine.Connection,
+    *,
+    lifecycle: dict[str, Any],
+    exchange_order_id: str,
+) -> Decimal:
+    if not lifecycle:
+        return Decimal("0")
+    events = _table(conn, "brc_ticket_bound_lifecycle_events")
+    total = Decimal("0")
+    for payload in conn.execute(
+        sa.select(events.c.event_payload).where(
+            events.c.lifecycle_run_id == lifecycle["lifecycle_run_id"],
+            events.c.event_type == "tp1_filled",
+        )
+    ).scalars():
+        fill = _mapping(_mapping(payload).get("fill"))
+        if exchange_order_id not in {
+            str(fill.get("exchange_order_id") or ""),
+            str(fill.get("parent_exchange_order_id") or ""),
+        }:
+            continue
+        qty = _normalized_decimal(fill.get("fill_qty", fill.get("qty")))
+        if qty is not None and qty > 0:
+            total += qty
+    return total
 
 
 def _tp1_gtx_taker_contradiction(
@@ -324,6 +596,22 @@ def _fill_for_order(
     return {}
 
 
+def _fills_for_order(
+    fills: list[dict[str, Any]],
+    *,
+    exchange_order_id: str,
+) -> list[dict[str, Any]]:
+    return [
+        dict(fill)
+        for fill in fills
+        if exchange_order_id
+        in {
+            str(fill.get("exchange_order_id") or ""),
+            str(fill.get("parent_exchange_order_id") or ""),
+        }
+    ]
+
+
 def _fill_truth_conflicts(
     existing_fill: dict[str, Any],
     observed_fill: dict[str, Any],
@@ -335,7 +623,9 @@ def _fill_truth_conflicts(
         existing = _normalized_decimal(
             existing_fill.get(existing_key, existing_fill.get(observed_key))
         )
-        observed = _normalized_decimal(observed_fill.get(observed_key))
+        observed = _normalized_decimal(
+            observed_fill.get(observed_key, observed_fill.get(existing_key))
+        )
         if existing is not None and observed is not None and existing != observed:
             return True
     return False
@@ -545,15 +835,15 @@ def _insert_fill_event(
     event_type: str,
     fill: dict[str, Any],
     now_ms: int,
-) -> None:
+) -> bool:
     if not lifecycle:
-        return
+        return False
     events = _table(conn, "brc_ticket_bound_lifecycle_events")
     event_id = _stable_id(
         "ticket_lifecycle_event",
         str(lifecycle["lifecycle_run_id"]),
         event_type,
-        str(fill.get("exchange_order_id") or ""),
+        _fill_event_identity(fill),
     )
     existing = conn.execute(
         sa.select(events.c.lifecycle_event_id).where(
@@ -574,6 +864,25 @@ def _insert_fill_event(
                 created_at_ms=now_ms,
             )
         )
+        return True
+    return False
+
+
+def _fill_event_identity(fill: dict[str, Any]) -> str:
+    trade_id = str(fill.get("exchange_trade_id") or "").strip()
+    if trade_id:
+        return f"trade:{trade_id}"
+    return "fill:" + sha256(
+        "|".join(
+            (
+                str(fill.get("exchange_order_id") or ""),
+                str(fill.get("parent_exchange_order_id") or ""),
+                str(fill.get("fill_time_ms", fill.get("timestamp_ms")) or ""),
+                str(fill.get("fill_qty", fill.get("qty")) or ""),
+                str(fill.get("fill_price", fill.get("price")) or ""),
+            )
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _table(conn: sa.engine.Connection, table_name: str) -> sa.Table:

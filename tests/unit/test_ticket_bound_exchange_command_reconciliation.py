@@ -83,6 +83,7 @@ def test_not_found_lookup_result_preserves_required_view_evidence() -> None:
     [
         ("binance_usdm", "ENTRY", "market", "regular_order"),
         ("binance_usdm", "SL", "stop_market", "conditional_algo_order"),
+        ("binance_usdm", "RUNNER_SL", "market", "regular_order"),
         ("okx_swap", "SL", "stop_market", "regular_order"),
     ],
 )

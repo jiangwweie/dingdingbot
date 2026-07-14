@@ -532,6 +532,14 @@ def _normalize_fill(fill: Any) -> dict[str, Any]:
             else None
         )
     return {
+        "exchange_trade_id": _first(
+            raw,
+            info,
+            "id",
+            "tradeId",
+            "trade_id",
+            "exchange_trade_id",
+        ),
         "exchange_order_id": _first(raw, info, "order", "orderId", "exchange_order_id"),
         "symbol": str(raw.get("symbol") or info.get("symbol") or ""),
         "side": side,
