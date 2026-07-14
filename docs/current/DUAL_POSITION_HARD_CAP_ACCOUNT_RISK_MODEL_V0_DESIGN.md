@@ -1,9 +1,9 @@
 ---
 title: DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN
-status: OWNER_APPROVED_DESIGN
+status: OWNER_APPROVED_DESIGN_IMPLEMENTED_LOCAL_NO_DEPLOY
 authority: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
 owner_decision_date: 2026-07-14
-implementation_state: DESIGN_ONLY_NOT_DEPLOYED
+implementation_state: LOCAL_IMPLEMENTED_NOT_DEPLOYED
 ---
 
 # Dual-Position Hard-Cap Account Risk Model V0

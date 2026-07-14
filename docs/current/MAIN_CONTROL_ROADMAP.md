@@ -73,7 +73,7 @@ validated market wait while Owner-facing product integration continues.
 | Area | Current fact |
 | --- | --- |
 | **Live Candidate Baseline** | Tokyo runs release `2001644581cccc968ba695d3ff129960db6a7e84`; real exchange trades have occurred and the current ETHUSDT Ticket is protected and reconciled |
-| **Active delivery branch** | `codex/dual-position-account-risk-v0` is isolated at `.worktrees/dual-position-account-risk-v0` from release head `2001644581cccc968ba695d3ff129960db6a7e84`; current work is design/plan only |
+| **Active delivery branch** | `codex/dual-position-account-risk-v0` is isolated at `.worktrees/dual-position-account-risk-v0` from release head `2001644581cccc968ba695d3ff129960db6a7e84`; local implementation is complete and remains not deployed/not activated |
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` and its release manifest are the exact deployed-head authority |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
 | **PG migration** | Tokyo is at migration `120` (`2026-07-13-120_reconcile_terminal_predispatch_commands.py`) |
@@ -111,7 +111,7 @@ then resumes this order.
 | 5 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
 | 6 | **Runtime causal integrity certification** | P0 complete | Twelve bounded real-PostgreSQL/process scenarios pass; six demonstrated implementation defects are repaired without authority expansion; migration 120 conserves historical pre-dispatch failure truth and notification correlation preserves production identity |
 | 7 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
-| 8 | **Dual-Position Hard-Cap Account Risk Model V0** | P1 design approved | Full-account exchange truth, ownership, Exposure/Budget Current, reservation conservation and atomic capacity arbitration pass shadow certification before 2.5%/two-position activation |
+| 8 | **Dual-Position Hard-Cap Account Risk Model V0** | P1 local implementation complete; no deploy | Full-account exchange truth, ownership, Exposure/Budget Current, reservation conservation and atomic capacity arbitration require separately authorized shadow certification before 2.5%/two-position activation |
 
 ## Why This Was Not Detected Before Production Signals
 

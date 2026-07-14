@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN
-status: IMPLEMENTED_LOCAL_NO_DEPLOY_PENDING_RELEASE_CERTIFICATION
+status: IMPLEMENTED_LOCAL_NO_DEPLOY_PENDING_SHADOW_CERTIFICATION
 authority: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md
 design: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
 base_commit: 2001644581cccc968ba695d3ff129960db6a7e84
@@ -64,8 +64,14 @@ Ticket-bound lifecycle。
   legacy flat-account blockers are replaced only for this narrow active-policy path.
 - **Safety chain continuation**：FinalGate and Runtime Safety State revalidate the exact active
   account-budget projection/version before they can permit submit readiness.
+- **Lifecycle capacity conservation**：the lifecycle worker now prefetches one full-account
+  snapshot per active-policy account outside its PG transaction and passes the typed snapshot
+  into reconciliation ticks.  A semantic Tick change reprojects Exposure/Budget Current; an
+  identical Tick does not write a duplicate semantic event.  The Tokyo readonly ops summary
+  exposes only Owner-readable account-capacity language.
 - **Local evidence**：the PostgreSQL two-transaction lock test passed against local Docker PG;
-  targeted promotion/Ticket/FinalGate/Runtime Safety regressions passed; production runtime file
+  a seeded-baseline temporary PostgreSQL upgrade reached migration `124 (head)`; targeted
+  promotion/Ticket/FinalGate/Runtime Safety/lifecycle regressions passed; production runtime file
   I/O audit reported `suspicious_runtime_file_authority=0` and `frequent_report_write=0`.
 
 ### Explicitly Not Performed
@@ -77,9 +83,11 @@ Ticket-bound lifecycle。
 
 ### Remaining Release Work
 
-- Complete the lifecycle-driven full-account reprojection/Owner-state acceptance in Task 9.
-- Run the full local release suite, then perform a separately authorized shadow activation and
-  rollback proof.  These are release gates, not implicit consequences of the local code commits.
+- Complete the full local release-suite run and record any pre-existing external harness blocker
+  separately from account-risk regressions.
+- Perform a separately authorized **production** shadow activation, readonly current-state check,
+  and disposable rollback proof.  These are release gates, not implicit consequences of the local
+  code commits, and are intentionally excluded from this no-deploy task.
 
 ---
 
