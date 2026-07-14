@@ -212,9 +212,9 @@ def test_postdeploy_http_check_retries_only_transport_failure_inside_one_ssh_cal
 def test_postdeploy_verifier_defaults_track_current_stage_migration_head():
     module = _load_module()
 
-    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 121
+    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 122
     assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-07-14-121_add_exit_execution_safety.py"
+        "2026-07-14-122_add_ticket_exit_policy_core.py"
     )
 
 
