@@ -1098,6 +1098,9 @@ def ticket_lifecycle_phase_two_enable_command(
     """Build fail-closed phase-two activation with automatic PG rollback."""
 
     q = shlex.quote
+    runtime_identity_env_path = str(
+        Path(env_path).with_name("runtime-order-capable.env")
+    )
     watcher_timer = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)
     monitor_timer = q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)
     lifecycle_timer = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)
@@ -1110,7 +1113,9 @@ def ticket_lifecycle_phase_two_enable_command(
     )
     return (
         "set -eu; SUCCESS=0; "
-        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        f"cd {q(remote_release_path)}; "
+        f"test -f {q(runtime_identity_env_path)}; "
+        f"set -a; . {q(env_path)}; . {q(runtime_identity_env_path)}; set +a; "
         "rollback_phase_two() { "
         f"if [ \"$SUCCESS\" != 1 ]; then {disable} >/dev/null 2>&1 || true; fi; "
         f"sudo -n systemctl start {watcher_timer} >/dev/null 2>&1 || true; "
