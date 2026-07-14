@@ -52,6 +52,28 @@ def test_consumed_reservation_is_claim_ceiling_not_additive_to_open_exposure() -
     assert budget.new_entry_allowed is True
 
 
+def test_semantically_identical_refresh_preserves_capacity_projection_version() -> None:
+    conn = _connection()
+
+    first = project_account_budget_current(
+        conn,
+        snapshot=_snapshot(),
+        runtime_profile_id="profile-1",
+        policy=_policy(),
+        now_ms=NOW_MS,
+    )
+    second = project_account_budget_current(
+        conn,
+        snapshot=_snapshot().model_copy(update={"source_snapshot_id": "snapshot-2"}),
+        runtime_profile_id="profile-1",
+        policy=_policy(),
+        now_ms=NOW_MS + 1,
+    )
+
+    assert first.projection_version == 1
+    assert second.projection_version == 1
+
+
 def _policy() -> AccountRiskPolicy:
     return AccountRiskPolicy(
         risk_policy_version="policy-1",

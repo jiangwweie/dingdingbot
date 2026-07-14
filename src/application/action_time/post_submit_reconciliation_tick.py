@@ -24,6 +24,12 @@ from src.application.action_time.netting_domain_hold import (
     resolve_netting_domain_hold_source,
     upsert_netting_domain_hold,
 )
+from src.application.action_time.account_risk_reprojection import (
+    reproject_account_risk_current,
+)
+from src.infrastructure.binance_usdm_account_risk_snapshot import (
+    FullAccountRiskSnapshot,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -96,6 +102,7 @@ def materialize_ticket_bound_first_reconciliation_tick(
     *,
     protected_submit_attempt_id: str,
     exchange_snapshot: dict[str, Any] | None = None,
+    account_risk_snapshot: FullAccountRiskSnapshot | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     return materialize_ticket_bound_reconciliation_tick(
@@ -103,6 +110,7 @@ def materialize_ticket_bound_first_reconciliation_tick(
         protected_submit_attempt_id=protected_submit_attempt_id,
         tick_kind=FIRST_TICK_KIND,
         exchange_snapshot=exchange_snapshot,
+        account_risk_snapshot=account_risk_snapshot,
         now_ms=now_ms,
     )
 
@@ -113,6 +121,7 @@ def materialize_ticket_bound_reconciliation_tick(
     protected_submit_attempt_id: str,
     tick_kind: str,
     exchange_snapshot: dict[str, Any] | None = None,
+    account_risk_snapshot: FullAccountRiskSnapshot | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
@@ -343,12 +352,23 @@ def materialize_ticket_bound_reconciliation_tick(
         "updated_at_ms": now_ms,
     }
     _upsert_row(conn, "brc_ticket_bound_reconciliation_ticks", "reconciliation_tick_id", tick)
+    account_risk_reprojection: dict[str, Any] = {}
+    if account_risk_snapshot is not None and _tick_semantics_changed(
+        existing, tick
+    ):
+        account_risk_reprojection = reproject_account_risk_current(
+            conn,
+            snapshot=account_risk_snapshot,
+            runtime_profile_id=exchange_scope.runtime_profile_id,
+            now_ms=now_ms,
+        ).model_dump()
     return _result(
         status,
         now_ms=now_ms,
         tick=tick,
         blockers=blockers,
         next_action=next_action,
+        extra={"account_risk_reprojection": account_risk_reprojection},
     )
 
 
@@ -594,6 +614,23 @@ def _snapshot_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
         "fetched_at_ms": snapshot.get("fetched_at_ms"),
     }
+
+
+def _tick_semantics_changed(existing: dict[str, Any], tick: dict[str, Any]) -> bool:
+    """Only lifecycle semantic transitions may trigger a capacity reprojection."""
+
+    if not existing:
+        return True
+    keys = (
+        "status",
+        "entry_state",
+        "sl_state",
+        "tp1_state",
+        "position_state",
+        "first_blocker",
+        "blockers",
+    )
+    return any(existing.get(key) != tick.get(key) for key in keys)
 
 
 def _existing_tick(

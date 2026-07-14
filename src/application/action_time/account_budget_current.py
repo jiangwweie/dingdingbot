@@ -117,6 +117,23 @@ def project_account_budget_current(
     limit = snapshot.total_wallet_balance * policy.max_portfolio_open_risk_fraction
     margin_limit = snapshot.total_wallet_balance * policy.max_portfolio_initial_margin_fraction
     existing = _existing(conn, snapshot.account_id, runtime_profile_id, policy.risk_policy_version)
+    semantic_values = {
+        "risk_policy_version": policy.risk_policy_version,
+        "total_wallet_balance": snapshot.total_wallet_balance,
+        "available_balance": snapshot.available_balance,
+        "exchange_total_initial_margin": snapshot.exchange_total_initial_margin,
+        "reserved_risk": reserved_risk,
+        "working_entry_risk": working_risk,
+        "open_directional_risk": open_risk,
+        "unknown_held_risk": unknown_risk,
+        "portfolio_held_risk": held,
+        "unreflected_pending_margin": pending_margin,
+        "claimed_position_slots": slots + pending,
+        "pending_ticket_claims": pending,
+        "max_concurrent_positions": policy.max_concurrent_positions,
+        "new_entry_allowed": not blockers,
+        "first_blocker": blockers[0] if blockers else None,
+    }
     result = AccountBudgetCurrent(
         account_id=snapshot.account_id, runtime_profile_id=runtime_profile_id,
         risk_policy_version=policy.risk_policy_version, open_directional_risk=open_risk,
@@ -125,7 +142,7 @@ def project_account_budget_current(
         portfolio_held_risk=held, claimed_position_slots=slots + pending,
         pending_ticket_claims=pending, new_entry_allowed=not blockers,
         first_blocker=blockers[0] if blockers else None,
-        projection_version=(int(existing.get("projection_version") or 0) + 1 if existing else 1),
+        projection_version=_projection_version(existing, semantic_values),
     )
     _persist(conn, result, snapshot, policy, margin_limit, limit, now_ms, existing)
     return result
@@ -174,3 +191,16 @@ def _decimal(value: object) -> Decimal:
 
 def _stable_id(prefix: str, *parts: str) -> str:
     return f"{prefix}:{sha256('|'.join(parts).encode()).hexdigest()[:32]}"
+
+
+def _projection_version(
+    existing: dict[str, object] | None,
+    semantic_values: dict[str, object],
+) -> int:
+    """Advance the CAS version only when capacity semantics actually change."""
+
+    if existing is None:
+        return 1
+    if all(existing.get(key) == value for key, value in semantic_values.items()):
+        return int(existing.get("projection_version") or 0)
+    return int(existing.get("projection_version") or 0) + 1
