@@ -47,10 +47,12 @@ MIGRATIONS = {
     / "migrations/versions/2026-07-12-117_extend_owner_notifications.py",
     "118": REPO_ROOT
     / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py",
+    "121": REPO_ROOT
+    / "migrations/versions/2026-07-14-121_add_exit_execution_safety.py",
 }
 REVISION_ORDER = (
     "086", "103", "104", "105", "106", "107", "108", "109", "110", "111",
-    "112", "113", "114", "115", "116", "117", "118",
+    "112", "113", "114", "115", "116", "117", "118", "121",
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 

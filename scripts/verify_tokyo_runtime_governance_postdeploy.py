@@ -23,9 +23,9 @@ from typing import Any, Callable
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 120
+DEFAULT_EXPECTED_MIGRATION_COUNT = 121
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-13-120_reconcile_terminal_predispatch_commands.py"
+    "2026-07-14-121_add_exit_execution_safety.py"
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
 DEFAULT_VENV_PYTHON = (

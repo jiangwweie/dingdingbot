@@ -20,9 +20,9 @@ from typing import Any
 
 
 DEFAULT_DEPLOYED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
-DEFAULT_EXPECTED_MIN_MIGRATIONS = 120
+DEFAULT_EXPECTED_MIN_MIGRATIONS = 121
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-13-120_reconcile_terminal_predispatch_commands.py"
+    "2026-07-14-121_add_exit_execution_safety.py"
 )
 class ReleaseReadinessError(RuntimeError):
     """Raised when release readiness inspection cannot proceed."""
