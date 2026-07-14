@@ -18,6 +18,12 @@ import ccxt.async_support as ccxt_async
 from pydantic import BaseModel
 
 from src.domain.models import KlineData, AccountSnapshot, PositionInfo, OrderPlacementResult, OrderCancelResult, OrderStatus, OrderType, Order, OrderRole
+from src.domain.ticket_bound_exchange_command import (
+    ExchangeOrderLookupRequest,
+    ExchangeOrderLookupResult,
+    ExchangeOrderLookupStatus,
+    ExchangeOrderLookupView,
+)
 from decimal import Decimal
 from src.domain.exceptions import FatalStartupError, ConnectionLostError, DataQualityWarning, InsufficientMarginError, InvalidOrderError, OrderNotFoundError, OrderAlreadyFilledError, RateLimitError
 from src.infrastructure.logger import logger
@@ -1931,64 +1937,179 @@ class ExchangeGateway:
 
     async def find_order_by_client_id(
         self,
-        client_order_id: str,
-        symbol: str,
-    ) -> Optional[Dict[str, Any]]:
-        """Read one order by the deterministic venue client identity.
+        request: ExchangeOrderLookupRequest,
+        *,
+        observed_at_ms: int,
+    ) -> ExchangeOrderLookupResult:
+        """Read one durable command through its required venue identity view.
 
-        A not-found response is returned as ``None`` so the command
-        reconciliation layer can apply its visibility window. Network or
-        unclassified lookup failures remain exceptions and never mean absent.
+        The returned status only means the selected view completed.  Transport,
+        malformed-payload, and unsupported-command failures remain exceptions,
+        so callers cannot confuse an incomplete view with authoritative absence.
         """
 
         import ccxt
 
-        if not client_order_id or not symbol:
+        if not request.client_order_id or not request.gateway_symbol:
             raise InvalidOrderError(
                 "client_order_id and symbol are required for order lookup",
                 "F-011",
             )
-        params = (
-            {"origClientOrderId": client_order_id}
-            if self.exchange_name.lower() == "binance"
-            else {"clientOrderId": client_order_id}
+        lookup_view = self._required_lookup_view(request)
+        identity_kind = (
+            "clientAlgoId"
+            if lookup_view is ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
+            else (
+                "origClientOrderId"
+                if self.exchange_name.lower() == "binance"
+                else "clientOrderId"
+            )
         )
         try:
-            raw = await self.rest_exchange.fetch_order(None, symbol, params=params)
+            if lookup_view is ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER:
+                raw = await self.rest_exchange.fapiPrivateGetAlgoOrder(
+                    {"clientAlgoId": request.client_order_id}
+                )
+            else:
+                params = (
+                    {"origClientOrderId": request.client_order_id}
+                    if self.exchange_name.lower() == "binance"
+                    else {"clientOrderId": request.client_order_id}
+                )
+                raw = await self.rest_exchange.fetch_order(
+                    None,
+                    request.gateway_symbol,
+                    params=params,
+                )
         except ccxt.OrderNotFound:
-            return None
+            return ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.NOT_FOUND,
+                lookup_view=lookup_view,
+                identity_kind=identity_kind,
+                observed_at_ms=observed_at_ms,
+                client_order_id=request.client_order_id,
+                gateway_symbol=request.gateway_symbol,
+            )
         except ccxt.DDoSProtection as exc:
             raise RateLimitError(f"API 频率限制：{exc}", "C-010") from exc
         except ccxt.NetworkError as exc:
             raise ConnectionLostError(f"网络错误：{exc}", "C-001") from exc
         if not isinstance(raw, dict):
             raise ConnectionLostError(
-                "按 client_order_id 查询订单返回非结构化响应",
+                "Order lookup returned non-structured response",
                 "C-002",
             )
         info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
-        actual_client_id = next(
-            (
-                str(value)
-                for value in (
-                    raw.get("clientOrderId"),
-                    raw.get("clientOrderid"),
-                    info.get("origClientOrderId"),
-                    info.get("clientOrderId"),
-                    info.get("clientOrderid"),
+        if lookup_view is ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER:
+            exchange_order_id = self._required_lookup_value(
+                raw,
+                "algoId",
+            )
+            actual_client_id = self._required_lookup_value(
+                raw,
+                "clientAlgoId",
+            )
+            exchange_status = self._optional_lookup_value(raw, "algoStatus")
+        else:
+            exchange_order_id = self._optional_lookup_value(
+                raw,
+                "id",
+                "orderId",
+            )
+            if exchange_order_id is None:
+                exchange_order_id = self._required_lookup_value(info, "orderId")
+            actual_client_id = self._optional_lookup_value(
+                raw,
+                "clientOrderId",
+                "clientOrderid",
+            )
+            if actual_client_id is None:
+                actual_client_id = self._required_lookup_value(
+                    info,
+                    "origClientOrderId",
+                    "clientOrderId",
+                    "clientOrderid",
                 )
-                if value is not None and str(value)
-            ),
-            "",
+            exchange_status = self._optional_lookup_value(raw, "status")
+        raw_symbol = self._optional_lookup_value(raw, "symbol")
+        if raw_symbol is None:
+            raw_symbol = self._required_lookup_value(info, "symbol")
+        gateway_symbol = (
+            request.gateway_symbol
+            if self._lookup_symbols_match(raw_symbol, request.gateway_symbol)
+            else raw_symbol
         )
-        return {
-            "exchange_order_id": str(raw.get("id") or info.get("orderId") or ""),
-            "client_order_id": actual_client_id,
-            "symbol": str(raw.get("symbol") or symbol),
-            "status": raw.get("status"),
-            "filled_qty": raw.get("filled"),
-            "average_exec_price": raw.get("average"),
-        }
+        return ExchangeOrderLookupResult(
+            status=ExchangeOrderLookupStatus.FOUND,
+            lookup_view=lookup_view,
+            identity_kind=identity_kind,
+            observed_at_ms=observed_at_ms,
+            exchange_order_id=exchange_order_id,
+            client_order_id=actual_client_id,
+            gateway_symbol=gateway_symbol,
+            exchange_status=exchange_status,
+        )
+
+    def _required_lookup_view(
+        self,
+        request: ExchangeOrderLookupRequest,
+    ) -> ExchangeOrderLookupView:
+        if request.command_kind != "place_order":
+            raise InvalidOrderError(
+                "client-id lookup only supports place_order commands",
+                "F-011",
+            )
+        if self.exchange_name.lower() != "binance":
+            return ExchangeOrderLookupView.REGULAR_ORDER
+
+        order_role = request.order_role.upper()
+        order_type = request.order_type.lower()
+        if order_role in {"SL", "RUNNER_SL"} and order_type == "stop_market":
+            return ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
+        if order_role in {"ENTRY", "TP1"} and order_type != "stop_market":
+            return ExchangeOrderLookupView.REGULAR_ORDER
+        raise InvalidOrderError(
+            "unsupported Binance command role/type lookup combination",
+            "F-011",
+        )
+
+    @classmethod
+    def _lookup_symbols_match(cls, raw_symbol: str, gateway_symbol: str) -> bool:
+        raw_key = cls._normalize_symbol_key(raw_symbol)
+        gateway_key = cls._normalize_symbol_key(gateway_symbol)
+        if raw_key == gateway_key:
+            return True
+        # Binance native USD-M payloads omit the CCXT settle suffix, e.g.
+        # ``ETHUSDT`` instead of ``ETH/USDT:USDT``.
+        gateway_market_key = cls._normalize_symbol_key(
+            gateway_symbol.split(":", maxsplit=1)[0]
+        )
+        return raw_key == gateway_market_key
+
+    @staticmethod
+    def _optional_lookup_value(
+        raw: Dict[str, Any],
+        *keys: str,
+    ) -> Optional[str]:
+        for key in keys:
+            value = raw.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return None
+
+    @classmethod
+    def _required_lookup_value(
+        cls,
+        raw: Dict[str, Any],
+        *keys: str,
+    ) -> str:
+        value = cls._optional_lookup_value(raw, *keys)
+        if value is None:
+            raise ConnectionLostError(
+                "Order lookup response is missing required identity",
+                "C-002",
+            )
+        return value
 
     async def _fetch_conditional_open_order_by_id(
         self,
