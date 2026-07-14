@@ -280,7 +280,8 @@ def test_phase_two_deploy_is_pg_gated_and_rolls_back_capability_on_failure():
     assert "CAPABILITY_OUTPUT" in command
     assert "rollback_phase_two" in command
     assert "run_ticket_bound_lifecycle_maintenance_once.py" in command
-    assert "no_maintainable_lifecycle" in command
+    assert "scheduler_complete" in command
+    assert "selected_scope_count" in command
     assert "exchange_write_called" in command
     assert command.index("verify_ticket_lifecycle_phase_two_readiness.py") < command.index(
         "set_ticket_lifecycle_mutation_capability.py --enable"

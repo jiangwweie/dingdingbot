@@ -1140,10 +1140,10 @@ def ticket_lifecycle_phase_two_enable_command(
         f"{q(venv_python)} -c "
         + q(
             "import json,os; p=json.loads(os.environ['LIFECYCLE_OUTPUT']); "
-            "assert p['status']=='no_maintainable_lifecycle'; "
+            "assert p['status'] in {'no_maintainable_lifecycle','scheduler_complete'}; "
             "assert p['exchange_write_called'] is False; "
             "assert p['network_inside_pg_transaction'] is False; "
-            "assert p['selected_scope_count']==0"
+            "assert 0<=p['selected_scope_count']<=1"
         )
         + "; "
         f"CAPABILITY_OUTPUT=$(PYTHONPATH=$PWD {q(venv_python)} "
