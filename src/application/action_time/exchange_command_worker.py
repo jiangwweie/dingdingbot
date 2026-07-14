@@ -206,6 +206,7 @@ async def run_one_ticket_bound_exchange_command(
         command,
         exchange_result,
     )
+    placement_facts = _placement_result_facts(exchange_result)
     with engine.begin() as conn:
         recorded = record_claimed_exchange_command_outcome(
             conn,
@@ -225,6 +226,7 @@ async def run_one_ticket_bound_exchange_command(
                 "exchange_order_id": exchange_order_id,
                 "error_code": None if accepted else "exchange_rejected",
                 "error_message": error,
+                **placement_facts,
             },
             now_ms=now_ms,
         )
@@ -401,6 +403,23 @@ def _accepted_result(
         or ""
     )
     return success is True and bool(exchange_order_id), exchange_order_id, error
+
+
+def _placement_result_facts(result: Any) -> dict[str, Any]:
+    facts: dict[str, Any] = {}
+    for key in (
+        "selected_leverage",
+        "exchange_configured_initial_leverage",
+        "leverage_verified_at_ms",
+    ):
+        value = (
+            result.get(key)
+            if isinstance(result, dict)
+            else getattr(result, key, None)
+        )
+        if value is not None:
+            facts[key] = value
+    return facts
 
 
 def _result(

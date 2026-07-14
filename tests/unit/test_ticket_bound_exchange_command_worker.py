@@ -50,6 +50,11 @@ class _WorkerGateway:
         return SimpleNamespace(
             is_success=True,
             exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+            selected_leverage=kwargs.get("desired_leverage"),
+            exchange_configured_initial_leverage=kwargs.get("desired_leverage"),
+            leverage_verified_at_ms=(
+                NOW_MS + 4999 if kwargs.get("desired_leverage") else None
+            ),
         )
 
     async def cancel_order(self, **kwargs):
@@ -105,7 +110,7 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
     with engine.connect() as conn:
         row = conn.execute(
             text(
-                "SELECT order_role, command_state, claim_token "
+                "SELECT order_role, command_state, claim_token, exchange_result "
                 "FROM brc_ticket_bound_exchange_commands "
                 "WHERE exchange_command_id = :command_id"
             ),
@@ -114,6 +119,14 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
     assert row["order_role"] == "ENTRY"
     assert row["command_state"] == "confirmed_submitted"
     assert row["claim_token"]
+    exchange_result = row["exchange_result"]
+    if isinstance(exchange_result, str):
+        import json
+
+        exchange_result = json.loads(exchange_result)
+    assert exchange_result["selected_leverage"] == 2
+    assert exchange_result["exchange_configured_initial_leverage"] == 2
+    assert exchange_result["leverage_verified_at_ms"] == NOW_MS + 4999
 
 
 @pytest.mark.asyncio

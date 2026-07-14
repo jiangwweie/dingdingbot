@@ -21,11 +21,27 @@ class MockRestExchange:
         self.mocked_fetch_order_response = None
         self.mocked_fetch_open_orders_response = []
         self.set_leverage_calls = []
+        self.configured_leverage = 2
+
+    async def fetch_positions(self):
+        return [
+            {
+                "symbol": SYMBOL,
+                "side": "long",
+                "contracts": "0",
+                "leverage": self.configured_leverage,
+                "info": {
+                    "positionSide": "BOTH",
+                    "leverage": self.configured_leverage,
+                },
+            }
+        ]
 
     async def set_leverage(self, leverage, symbol, params=None):
         self.set_leverage_calls.append(
             {"leverage": leverage, "symbol": symbol, "params": params or {}}
         )
+        self.configured_leverage = leverage
         return {"leverage": leverage, "symbol": symbol}
 
     async def create_order(self, symbol, type, side, amount, price=None, params=None):

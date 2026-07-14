@@ -168,6 +168,7 @@ def materialize_live_outcome_ledger(
     runner_sl = order_mapping_for_view(
         protection_orders, resolutions["RUNNER_SL"].lineage_leaf
     )
+    entry_command = _exchange_command_for_role(conn, ticket_id, "ENTRY")
     entry_fill = _lifecycle_fill_event(
         conn,
         lifecycle_run_id=str(lifecycle.get("lifecycle_run_id") or ""),
@@ -180,7 +181,30 @@ def materialize_live_outcome_ledger(
         event_type="tp1_filled",
         payload_key="fill",
     )
-    tp1_command = _tp1_exchange_command(conn, ticket_id)
+    tp1_command = _exchange_command_for_role(conn, ticket_id, "TP1")
+    entry_exchange_result = _json_dict(entry_command.get("exchange_result"))
+    exchange_configured_initial_leverage = _positive_decimal(
+        entry_exchange_result.get("exchange_configured_initial_leverage")
+    )
+    account_exposure = _latest_reconciliation_account_exposure(conn, ticket_id)
+    effective_leverage_status = str(account_exposure.get("status") or "missing")
+    effective_leverage_blockers = _json_list(account_exposure.get("blockers"))
+    if account_exposure and str(account_exposure.get("account_id") or "") != str(
+        entry_command.get("account_id") or ""
+    ):
+        effective_leverage_blockers.append("account_exposure_account_mismatch")
+    if account_exposure and str(account_exposure.get("exchange_id") or "") != str(
+        entry_command.get("exchange_id") or ""
+    ):
+        effective_leverage_blockers.append("account_exposure_exchange_mismatch")
+    effective_leverage_blockers = _dedupe(effective_leverage_blockers)
+    if effective_leverage_blockers:
+        effective_leverage_status = "invalid"
+    effective_account_exposure_leverage = None
+    if effective_leverage_status == "ready" and not effective_leverage_blockers:
+        effective_account_exposure_leverage = _positive_or_zero_decimal(
+            account_exposure.get("effective_account_exposure_leverage")
+        )
     final_fill = _lifecycle_fill_event(
         conn,
         lifecycle_run_id=str(lifecycle.get("lifecycle_run_id") or ""),
@@ -316,6 +340,12 @@ def materialize_live_outcome_ledger(
         "risk_at_stop": risk_at_stop,
         "initial_notional": initial_notional,
         "leverage": _positive_decimal(ticket.get("leverage")),
+        "exchange_configured_initial_leverage": (
+            exchange_configured_initial_leverage
+        ),
+        "effective_account_exposure_leverage": (
+            effective_account_exposure_leverage
+        ),
         "sl_exchange_order_id": str(sl.get("exchange_order_id") or "") or None,
         "tp1_exchange_order_id": str(tp1.get("exchange_order_id") or "") or None,
         "tp1_fill_time_ms": tp1_fill.get("fill_time_ms"),
@@ -356,7 +386,17 @@ def materialize_live_outcome_ledger(
             "funding_complete": funding is not None,
             "exit_slippage_complete": exit_slippage is not None,
             "leverage_source": "ticket_selected_leverage",
-            "exchange_effective_leverage_known": False,
+            "exchange_effective_leverage_known": (
+                effective_account_exposure_leverage is not None
+            ),
+            "configured_leverage_verified_at_ms": (
+                entry_exchange_result.get("leverage_verified_at_ms")
+            ),
+            "effective_leverage_status": effective_leverage_status,
+            "effective_leverage_blockers": effective_leverage_blockers,
+            "effective_leverage_observed_at_ms": account_exposure.get(
+                "observed_at_ms"
+            ),
             "tp1_order_type": str(tp1_command.get("order_type") or "") or None,
             "tp1_execution_style": (
                 str(tp1_command.get("execution_style") or "") or None
@@ -432,9 +472,10 @@ def _protection_orders(conn: sa.engine.Connection, ticket_id: str) -> list[dict[
     ]
 
 
-def _tp1_exchange_command(
+def _exchange_command_for_role(
     conn: sa.engine.Connection,
     ticket_id: str,
+    role: str,
 ) -> dict[str, Any]:
     if not ticket_id or not sa.inspect(conn).has_table(
         "brc_ticket_bound_exchange_commands"
@@ -444,11 +485,34 @@ def _tp1_exchange_command(
     row = conn.execute(
         sa.select(table).where(
             table.c.ticket_id == ticket_id,
-            table.c.order_role == "TP1",
+            table.c.order_role == role,
             table.c.command_kind == "place_order",
         )
     ).mappings().first()
     return dict(row) if row else {}
+
+
+def _latest_reconciliation_account_exposure(
+    conn: sa.engine.Connection,
+    ticket_id: str,
+) -> dict[str, Any]:
+    if not ticket_id or not sa.inspect(conn).has_table(
+        "brc_ticket_bound_reconciliation_ticks"
+    ):
+        return {}
+    table = _table(conn, "brc_ticket_bound_reconciliation_ticks")
+    summaries = conn.execute(
+        sa.select(table.c.exchange_snapshot_summary)
+        .where(table.c.ticket_id == ticket_id)
+        .order_by(table.c.updated_at_ms.desc())
+    ).scalars()
+    for summary in summaries:
+        exposure = _json_dict(
+            _json_dict(summary).get("account_exposure")
+        )
+        if exposure:
+            return exposure
+    return {}
 
 
 def _existing_outcome(conn: sa.engine.Connection, ticket_id: str) -> dict[str, Any]:

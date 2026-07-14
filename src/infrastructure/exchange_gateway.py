@@ -1068,6 +1068,91 @@ class ExchangeGateway:
             )
         return rows
 
+    async def fetch_account_exposure_snapshot(self) -> Dict[str, Any]:
+        """Return signed cross-margin exposure facts without mutating account state."""
+
+        balance, positions = await asyncio.gather(
+            self.rest_exchange.fetch_balance(),
+            self.rest_exchange.fetch_positions(),
+        )
+        if not isinstance(balance, dict) or not isinstance(positions, list):
+            raise RuntimeError("account_exposure_snapshot_shape_invalid")
+        info = balance.get("info") if isinstance(balance.get("info"), dict) else {}
+        margin_raw = info.get("totalMarginBalance")
+        if margin_raw in {None, ""}:
+            totals = balance.get("total") if isinstance(balance.get("total"), dict) else {}
+            margin_raw = totals.get("USDT")
+        margin_balance = self._optional_nonnegative_decimal(margin_raw)
+        gross_notional = Decimal("0")
+        for raw in positions:
+            if not isinstance(raw, dict):
+                raise RuntimeError("account_exposure_position_row_invalid")
+            position_info = (
+                raw.get("info") if isinstance(raw.get("info"), dict) else {}
+            )
+            direct_notional = raw.get("notional")
+            if direct_notional in {None, ""}:
+                direct_notional = position_info.get("notional")
+            notional = self._optional_nonnegative_decimal_abs(direct_notional)
+            if notional is None:
+                contracts = self._optional_nonnegative_decimal_abs(
+                    raw.get("contracts")
+                )
+                mark_price = self._optional_nonnegative_decimal_abs(
+                    raw.get("markPrice")
+                    or raw.get("mark_price")
+                    or position_info.get("markPrice")
+                )
+                contract_size = self._optional_nonnegative_decimal_abs(
+                    raw.get("contractSize")
+                    or raw.get("contract_size")
+                    or position_info.get("contractSize")
+                    or "1"
+                )
+                if contracts is None or mark_price is None or contract_size is None:
+                    if contracts in {None, Decimal("0")}:
+                        continue
+                    raise RuntimeError("account_exposure_position_notional_missing")
+                notional = contracts * mark_price * contract_size
+            gross_notional += notional
+        blockers: list[str] = []
+        effective = None
+        if margin_balance is None or margin_balance <= 0:
+            blockers.append("account_margin_balance_missing_or_zero")
+        else:
+            effective = gross_notional / margin_balance
+        return {
+            "status": "ready" if not blockers else "partial",
+            "account_id": str(
+                getattr(self, "runtime_account_id", "") or ""
+            ),
+            "exchange_id": str(
+                getattr(self, "runtime_exchange_id", "") or ""
+            ),
+            "account_margin_balance": (
+                str(margin_balance) if margin_balance is not None else None
+            ),
+            "gross_open_position_notional": str(gross_notional),
+            "effective_account_exposure_leverage": (
+                str(effective) if effective is not None else None
+            ),
+            "observed_at_ms": int(time.time() * 1000),
+            "blockers": blockers,
+        }
+
+    @staticmethod
+    def _optional_nonnegative_decimal(value: Any) -> Optional[Decimal]:
+        if value in {None, ""}:
+            return None
+        parsed = Decimal(str(value))
+        return parsed if parsed >= 0 else None
+
+    @staticmethod
+    def _optional_nonnegative_decimal_abs(value: Any) -> Optional[Decimal]:
+        if value in {None, ""}:
+            return None
+        return abs(Decimal(str(value)))
+
     # ============================================================
     # Phase 5: Order Management APIs
     # ============================================================
@@ -1254,10 +1339,15 @@ class ExchangeGateway:
                 raise InvalidOrderError("目标杠杆必须是 1-125 的整数", "F-011")
 
         try:
+            configured_leverage = None
+            leverage_verified_at_ms = None
             if desired_leverage is not None:
-                await self.rest_exchange.set_leverage(
-                    int(desired_leverage),
-                    symbol,
+                configured_leverage, leverage_verified_at_ms = (
+                    await self._set_and_verify_entry_leverage(
+                        symbol=symbol,
+                        selected_leverage=int(desired_leverage),
+                        position_side=position_side,
+                    )
                 )
             # 映射订单类型到 CCXT 格式
             ccxt_type = self._map_order_type_to_ccxt(order_type)
@@ -1303,6 +1393,13 @@ class ExchangeGateway:
                 reduce_only=reduce_only,
                 exchange_reduce_only_param_sent=payload.exchange_reduce_only_param_sent,
                 exchange_reduce_only_omit_reason=payload.exchange_reduce_only_omit_reason,
+                selected_leverage=(
+                    int(desired_leverage)
+                    if desired_leverage is not None
+                    else None
+                ),
+                exchange_configured_initial_leverage=configured_leverage,
+                leverage_verified_at_ms=leverage_verified_at_ms,
                 client_order_id=client_order_id,
                 status=order_status,
             )
@@ -1333,6 +1430,75 @@ class ExchangeGateway:
                 f"{e}",
                 "C-002",
             )
+
+    async def _set_and_verify_entry_leverage(
+        self,
+        *,
+        symbol: str,
+        selected_leverage: int,
+        position_side: Optional[str],
+    ) -> tuple[int, int]:
+        before_rows = await self.fetch_position_rows(symbol)
+        exact_before = self._exact_leverage_position_rows(
+            before_rows,
+            position_side=position_side,
+        )
+        if any(Decimal(str(row.get("size") or "0")) != 0 for row in exact_before):
+            raise InvalidOrderError(
+                "entry_leverage_open_position_bucket_not_flat",
+                "F-011",
+            )
+        await self.rest_exchange.set_leverage(selected_leverage, symbol)
+        after_rows = await self.fetch_position_rows(symbol)
+        exact_after = self._exact_leverage_position_rows(
+            after_rows,
+            position_side=position_side,
+        )
+        configured_values: set[int] = set()
+        for row in exact_after:
+            info = row.get("info") if isinstance(row.get("info"), dict) else {}
+            raw = row.get("leverage")
+            if raw is None:
+                raw = info.get("leverage")
+            if raw in {None, ""}:
+                continue
+            try:
+                configured_values.add(int(Decimal(str(raw))))
+            except (ArithmeticError, ValueError) as exc:
+                raise InvalidOrderError(
+                    "exchange_configured_leverage_readback_invalid",
+                    "F-011",
+                ) from exc
+        if not configured_values:
+            raise InvalidOrderError(
+                "exchange_configured_leverage_readback_missing",
+                "F-011",
+            )
+        if configured_values != {selected_leverage}:
+            raise InvalidOrderError(
+                "exchange_configured_leverage_readback_mismatch",
+                "F-011",
+            )
+        return selected_leverage, int(time.time() * 1000)
+
+    @staticmethod
+    def _exact_leverage_position_rows(
+        rows: List[Dict[str, Any]],
+        *,
+        position_side: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        expected_side = str(position_side or "").upper()
+        if expected_side:
+            return [
+                row
+                for row in rows
+                if str(row.get("position_side") or "").upper() == expected_side
+            ]
+        return [
+            row
+            for row in rows
+            if str(row.get("position_side") or "").upper() in {"", "BOTH"}
+        ]
 
     async def _cancel_conditional_open_order_if_visible(
         self,

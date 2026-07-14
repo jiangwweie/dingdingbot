@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import json
 
 from sqlalchemy import text
 
@@ -16,11 +17,17 @@ from src.application.action_time.live_outcome_ledger import (
 from src.application.action_time.ticket_bound_fill_projector import (
     project_ticket_bound_exchange_fills,
 )
+from src.application.action_time.post_submit_reconciliation_tick import (
+    materialize_ticket_bound_first_reconciliation_tick,
+)
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
     _prepare_real_submit,
     _submitted_orders,
+)
+from tests.unit.test_ticket_bound_post_submit_reconciliation_tick import (
+    _attempt_snapshot,
 )
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
@@ -325,6 +332,67 @@ def test_tp1_gtx_taker_fill_hard_stops_as_contradictory_truth(
     assert projected["first_blocker"] == "tp1_gtx_taker_contradiction"
     assert lifecycle["status"] == "blocked"
     assert lifecycle["first_blocker"] == "tp1_gtx_taker_contradiction"
+
+
+def test_live_outcome_keeps_selected_configured_and_effective_leverage_separate(
+    pg_control_connection,
+):
+    ids, prepared, _ = _submitted_attempt_with_protection(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET exchange_result = :exchange_result "
+            "WHERE order_role = 'ENTRY'"
+        ),
+        {
+            "exchange_result": json.dumps(
+                {
+                    "selected_leverage": 2,
+                    "exchange_configured_initial_leverage": 2,
+                    "leverage_verified_at_ms": NOW_MS + 5_500,
+                }
+            )
+        },
+    )
+    snapshot = _attempt_snapshot(prepared)
+    snapshot["account_exposure"] = {
+        "status": "ready",
+        "account_id": "owner-subaccount-runtime-v0",
+        "exchange_id": "binance_usdm",
+        "account_margin_balance": "100",
+        "gross_open_position_notional": "250",
+        "effective_account_exposure_leverage": "2.5",
+        "observed_at_ms": NOW_MS + 6_400,
+        "blockers": [],
+    }
+    tick = materialize_ticket_bound_first_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 6_500,
+    )
+    assert tick["status"] == "matched"
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_order_lifecycle_runs "
+            "SET status = 'reconciliation_matched', first_blocker = NULL, "
+            "blockers = '[]', updated_at_ms = :now_ms "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ids["ticket_id"], "now_ms": NOW_MS + 8_000},
+    )
+
+    payload = materialize_live_outcome_ledger(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        now_ms=NOW_MS + 9_000,
+    )
+
+    outcome = payload["outcome"]
+    assert outcome["leverage"] == Decimal("2")
+    assert outcome["exchange_configured_initial_leverage"] == Decimal("2")
+    assert outcome["effective_account_exposure_leverage"] == Decimal("2.5")
+    assert outcome["source_refs"]["effective_leverage_status"] == "ready"
 
 
 def test_funding_attribution_rejects_conflicting_duplicate_and_excludes_unrelated_rows():

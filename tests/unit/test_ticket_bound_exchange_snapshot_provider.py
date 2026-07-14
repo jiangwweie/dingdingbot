@@ -136,6 +136,77 @@ async def test_snapshot_reads_and_normalizes_signed_funding_without_exchange_wri
     assert payload["snapshot"]["exchange_write_called"] is False
 
 
+async def test_snapshot_includes_optional_signed_account_exposure_truth():
+    class _ExposureGateway(_Gateway):
+        async def fetch_account_exposure_snapshot(self):
+            self.events.append("account_exposure")
+            return {
+                "status": "ready",
+                "account_id": "owner-subaccount-runtime-v0",
+                "exchange_id": "binance_usdm",
+                "account_margin_balance": "100",
+                "gross_open_position_notional": "250",
+                "effective_account_exposure_leverage": "2.5",
+                "observed_at_ms": 1999,
+                "blockers": [],
+            }
+
+    gateway = _ExposureGateway()
+    payload = await fetch_resolved_ticket_bound_exchange_snapshot(
+        scope=_scope(),
+        snapshot_identity="protection-1",
+        gateway=gateway,
+        timeout_seconds=1,
+        recent_fill_limit=50,
+        now_ms=2000,
+    )
+
+    assert payload["status"] == "snapshot_ready"
+    assert payload["snapshot"]["account_exposure"] == {
+        "status": "ready",
+        "account_id": "owner-subaccount-runtime-v0",
+        "exchange_id": "binance_usdm",
+        "account_margin_balance": "100",
+        "gross_open_position_notional": "250",
+        "effective_account_exposure_leverage": "2.5",
+        "observed_at_ms": 1999,
+        "blockers": [],
+    }
+    assert payload["snapshot"]["exchange_write_called"] is False
+
+
+async def test_snapshot_nulls_mismatched_or_stale_effective_leverage_truth():
+    class _MismatchedExposureGateway(_Gateway):
+        async def fetch_account_exposure_snapshot(self):
+            return {
+                "status": "ready",
+                "account_id": "other-account",
+                "exchange_id": "binance_usdm",
+                "account_margin_balance": "100",
+                "gross_open_position_notional": "250",
+                "effective_account_exposure_leverage": "2.5",
+                "observed_at_ms": 1,
+                "blockers": [],
+            }
+
+    payload = await fetch_resolved_ticket_bound_exchange_snapshot(
+        scope=_scope(),
+        snapshot_identity="protection-1",
+        gateway=_MismatchedExposureGateway(),
+        timeout_seconds=1,
+        recent_fill_limit=50,
+        now_ms=40_000,
+    )
+
+    exposure = payload["snapshot"]["account_exposure"]
+    assert exposure["status"] == "invalid"
+    assert exposure["effective_account_exposure_leverage"] is None
+    assert exposure["blockers"] == [
+        "account_exposure_account_mismatch",
+        "account_exposure_snapshot_stale",
+    ]
+
+
 async def test_snapshot_binds_binance_conditional_parent_to_actual_fill():
     gateway = _Gateway()
 

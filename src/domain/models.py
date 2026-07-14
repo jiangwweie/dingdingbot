@@ -1127,6 +1127,9 @@ class OrderPlacementResult(FinancialModel):
     reduce_only: bool = False
     exchange_reduce_only_param_sent: Optional[bool] = None
     exchange_reduce_only_omit_reason: Optional[str] = None
+    selected_leverage: Optional[int] = None
+    exchange_configured_initial_leverage: Optional[int] = None
+    leverage_verified_at_ms: Optional[int] = None
     client_order_id: Optional[str] = None
     status: OrderStatus = OrderStatus.PENDING
     created_at: int = Field(default_factory=lambda: int(time.time() * 1000))

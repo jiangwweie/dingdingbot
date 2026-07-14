@@ -592,6 +592,11 @@ def _snapshot_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
         "position_state": _position_state(
             snapshot.get("position") if isinstance(snapshot.get("position"), dict) else {}
         ),
+        "account_exposure": (
+            dict(snapshot.get("account_exposure"))
+            if isinstance(snapshot.get("account_exposure"), dict)
+            else {}
+        ),
         "fetched_at_ms": snapshot.get("fetched_at_ms"),
     }
 

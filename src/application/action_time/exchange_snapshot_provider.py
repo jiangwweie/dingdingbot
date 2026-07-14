@@ -23,6 +23,7 @@ AUTHORITY_BOUNDARY = (
     "FinalGate, Operation Layer, profile, sizing, withdrawal, transfer, or file "
     "authority"
 )
+ACCOUNT_EXPOSURE_MAX_AGE_MS = 30_000
 
 ATTEMPT_AUTHORITY_BOUNDARY = (
     "ticket_bound_attempt_exchange_snapshot_provider; read-only gateway "
@@ -221,7 +222,18 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         should_fetch_conditional_lineage = bool(
             callable(conditional_fetch) and conditional_parent_order_ids
         )
-        open_orders, recent_fills, positions, funding_result, conditional_result = await asyncio.wait_for(
+        account_exposure_fetch = getattr(
+            gateway, "fetch_account_exposure_snapshot", None
+        )
+        should_fetch_account_exposure = callable(account_exposure_fetch)
+        (
+            open_orders,
+            recent_fills,
+            positions,
+            funding_result,
+            conditional_result,
+            account_exposure_result,
+        ) = await asyncio.wait_for(
             asyncio.gather(
                 gateway.fetch_all_open_orders(scope.exchange_symbol),
                 gateway.fetch_my_trades(
@@ -246,6 +258,9 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
                 )
                 if should_fetch_conditional_lineage
                 else asyncio.sleep(0, result={"rows": [], "error": None}),
+                account_exposure_fetch()
+                if should_fetch_account_exposure
+                else asyncio.sleep(0, result={}),
             ),
             timeout=timeout_seconds,
         )
@@ -308,6 +323,15 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         ),
         "funding_income_available": should_fetch_funding and funding_error is None,
         "funding_income_error": funding_error,
+        "account_exposure": _normalize_account_exposure(
+            scope=scope,
+            payload=(
+                dict(account_exposure_result)
+                if isinstance(account_exposure_result, dict)
+                else {}
+            ),
+            now_ms=now_ms,
+        ),
         "position": position,
         "fetched_at_ms": now_ms,
         "authority_boundary": authority_boundary,
@@ -319,6 +343,31 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         "snapshot": snapshot,
         "exchange_read_called": True,
     }
+
+
+def _normalize_account_exposure(
+    *,
+    scope: TicketBoundExchangeScope,
+    payload: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    if not payload:
+        return {}
+    normalized = dict(payload)
+    blockers = [str(item) for item in payload.get("blockers", []) if item]
+    if str(payload.get("account_id") or "") != scope.account_id:
+        blockers.append("account_exposure_account_mismatch")
+    if str(payload.get("exchange_id") or "") != scope.exchange_id:
+        blockers.append("account_exposure_exchange_mismatch")
+    observed_at_ms = int(payload.get("observed_at_ms") or 0)
+    age_ms = now_ms - observed_at_ms
+    if observed_at_ms <= 0 or age_ms < 0 or age_ms > ACCOUNT_EXPOSURE_MAX_AGE_MS:
+        blockers.append("account_exposure_snapshot_stale")
+    if blockers:
+        normalized["status"] = "invalid"
+        normalized["effective_account_exposure_leverage"] = None
+    normalized["blockers"] = _dedupe(blockers)
+    return normalized
 
 
 async def _fetch_optional_funding_income(
@@ -554,6 +603,10 @@ def _optional_bool(value: Any) -> bool | None:
     if normalized in {"false", "0", "no"}:
         return False
     return None
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(value for value in values if value))
 
 
 def _normalize_conditional_order_lineage(rows: list[Any]) -> list[dict[str, Any]]:
