@@ -18,6 +18,11 @@ from src.application.action_time.account_capacity_reservation import (
     AccountCapacityCandidate,
     reserve_account_capacity_for_candidate,
 )
+from src.application.action_time.account_budget_current import (
+    project_account_budget_current,
+)
+from src.domain.account_risk import AccountRiskPolicy
+from src.infrastructure.binance_usdm_account_risk_snapshot import FullAccountRiskSnapshot
 
 
 _DSN = os.getenv("BRC_LOCAL_TEST_POSTGRES_DSN", "")
@@ -91,6 +96,79 @@ def test_only_one_concurrent_candidate_claims_account_budget_projection() -> Non
         engine.dispose()
 
 
+def test_lifecycle_flat_release_updates_account_budget_once() -> None:
+    engine = sa.create_engine(
+        _DSN,
+        connect_args={"options": f"-c search_path={_SCHEMA}"},
+    )
+    _create_budget_projection_tables(engine)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """INSERT INTO brc_account_exposure_current VALUES
+                    ('exposure-1', 'account-1', 'ticket-1', true, 'open_protected',
+                     15, 15, 15, 0, 'matched', NULL)"""
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """INSERT INTO brc_budget_reservations VALUES
+                    ('reservation-1', 'account-1', 'ticket-1', 'consumed', 15, 150)"""
+                )
+            )
+            first = project_account_budget_current(
+                conn,
+                snapshot=_budget_snapshot("snapshot-open"),
+                runtime_profile_id="profile-1",
+                policy=_policy(),
+                now_ms=1_752_480_000_000,
+            )
+            assert first.portfolio_held_risk == Decimal("15")
+            assert first.claimed_position_slots == 1
+
+            conn.execute(
+                sa.text(
+                    """UPDATE brc_account_exposure_current
+                    SET exposure_state = 'flat', position_slot_claimed = false,
+                        held_risk = 0, actual_directional_risk = 0"""
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "UPDATE brc_budget_reservations SET status = 'released'"
+                )
+            )
+            released = project_account_budget_current(
+                conn,
+                snapshot=_budget_snapshot("snapshot-flat"),
+                runtime_profile_id="profile-1",
+                policy=_policy(),
+                now_ms=1_752_480_000_100,
+            )
+            repeated = project_account_budget_current(
+                conn,
+                snapshot=_budget_snapshot("snapshot-flat-repeat"),
+                runtime_profile_id="profile-1",
+                policy=_policy(),
+                now_ms=1_752_480_000_200,
+            )
+
+        assert released.portfolio_held_risk == Decimal("0")
+        assert released.claimed_position_slots == 0
+        assert released.projection_version == first.projection_version + 1
+        assert repeated.projection_version == released.projection_version
+    finally:
+        with engine.begin() as conn:
+            for table in (
+                "brc_account_exposure_current",
+                "brc_budget_reservations",
+                "brc_account_budget_current",
+            ):
+                conn.execute(sa.text(f"DROP TABLE IF EXISTS {table}"))
+        engine.dispose()
+
+
 def _create_tables(engine: sa.Engine) -> None:
     statements = (
         """CREATE TABLE brc_account_budget_current (
@@ -158,6 +236,73 @@ def _seed(engine: sa.Engine) -> None:
                 ('policy-1', 'binance_usdm:SOLUSDT', 'crypto_usd_beta')"""
             )
         )
+
+
+def _create_budget_projection_tables(engine: sa.Engine) -> None:
+    statements = (
+        """CREATE TABLE brc_account_exposure_current (
+            account_exposure_current_id TEXT PRIMARY KEY, account_id TEXT,
+            owner_ticket_id TEXT, position_slot_claimed BOOLEAN, exposure_state TEXT,
+            actual_directional_risk NUMERIC, held_risk NUMERIC,
+            planned_reserved_risk NUMERIC, unreflected_pending_margin NUMERIC,
+            reconciliation_state TEXT, first_blocker TEXT
+        )""",
+        """CREATE TABLE brc_budget_reservations (
+            budget_reservation_id TEXT PRIMARY KEY, account_id TEXT, ticket_id TEXT,
+            status TEXT, risk_at_stop NUMERIC, reserved_margin NUMERIC
+        )""",
+        """CREATE TABLE brc_account_budget_current (
+            account_budget_current_id TEXT PRIMARY KEY, account_id TEXT,
+            runtime_profile_id TEXT, risk_policy_version TEXT,
+            total_wallet_balance NUMERIC, available_balance NUMERIC,
+            exchange_total_initial_margin NUMERIC, reserved_risk NUMERIC,
+            working_entry_risk NUMERIC, open_directional_risk NUMERIC,
+            unknown_held_risk NUMERIC, portfolio_held_risk NUMERIC,
+            unreflected_pending_margin NUMERIC, portfolio_margin_used NUMERIC,
+            ticket_risk_limit NUMERIC, portfolio_risk_limit NUMERIC,
+            portfolio_risk_remaining NUMERIC, portfolio_margin_limit NUMERIC,
+            portfolio_margin_remaining NUMERIC, claimed_position_slots INTEGER,
+            pending_ticket_claims INTEGER, max_concurrent_positions INTEGER,
+            reconciliation_state TEXT, new_entry_allowed BOOLEAN, first_blocker TEXT,
+            source_snapshot_id TEXT, source_watermark TEXT, valid_until_ms BIGINT,
+            projection_version BIGINT, updated_at_ms BIGINT
+        )""",
+    )
+    with engine.begin() as conn:
+        for statement in statements:
+            conn.execute(sa.text(statement))
+
+
+def _budget_snapshot(snapshot_id: str) -> FullAccountRiskSnapshot:
+    return FullAccountRiskSnapshot(
+        snapshot_ready=True,
+        account_id="account-1",
+        exchange_id="binance_usdm",
+        total_wallet_balance=Decimal("600"),
+        available_balance=Decimal("500"),
+        exchange_total_initial_margin=Decimal("100"),
+        can_trade=True,
+        position_mode="one_way",
+        source_snapshot_id=snapshot_id,
+        observed_at_ms=1_752_480_000_000,
+        valid_until_ms=1_752_480_060_000,
+    )
+
+
+def _policy() -> AccountRiskPolicy:
+    return AccountRiskPolicy(
+        risk_policy_version="policy-1",
+        planned_stop_risk_fraction=Decimal("0.025"),
+        max_concurrent_positions=2,
+        max_portfolio_open_risk_fraction=Decimal("0.06"),
+        max_cluster_open_risk_fraction=Decimal("0.04"),
+        max_portfolio_initial_margin_fraction=Decimal("0.90"),
+        max_leverage=10,
+        max_new_action_time_lanes=1,
+        automatic_downsize_enabled=True,
+        unknown_exposure_policy="global_fail_closed",
+        activation_state="active",
+    )
 
 
 def _candidate() -> AccountCapacityCandidate:
