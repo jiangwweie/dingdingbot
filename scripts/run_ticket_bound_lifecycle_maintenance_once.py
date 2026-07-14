@@ -48,6 +48,15 @@ from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     is_sync_postgres_dsn,
     normalize_sync_postgres_dsn,
 )
+from src.infrastructure.binance_usdm_account_risk_snapshot import (  # noqa: E402
+    BinanceUsdmAccountRiskSnapshotProvider,
+    FullAccountRiskSnapshot,
+)
+from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
+    DEFAULT_BASE_URL,
+    _env_value,
+    _request_json,
+)
 
 
 LIFECYCLE_MUTATION_COMMAND_SOURCES = (
@@ -55,6 +64,7 @@ LIFECYCLE_MUTATION_COMMAND_SOURCES = (
     "runner_mutation",
     "orphan_cleanup",
 )
+DEFAULT_ACCOUNT_RISK_ENV_FILE = Path("/home/ubuntu/brc-deploy/env/live-readonly.env")
 
 
 async def _amain(argv: list[str] | None = None) -> int:
@@ -196,6 +206,22 @@ async def _amain(argv: list[str] | None = None) -> int:
                 stage="exchange_snapshot",
             )
 
+        with engine.connect() as conn:
+            account_risk_scopes = _active_account_risk_scopes(
+                conn,
+                prepared_scopes=prepared_scopes,
+            )
+            conn.rollback()
+        provided_account_risk_snapshots = await _prefetch_account_risk_snapshots(
+            account_risk_scopes,
+            env_file=Path(args.account_risk_env_file).expanduser(),
+            base_url=args.account_risk_base_url,
+            timeout_seconds=min(
+                args.account_risk_timeout_seconds,
+                _remaining_seconds(deadline_at, "account_risk_snapshot"),
+            ),
+        )
+
         _remaining_seconds(deadline_at, "pg_lifecycle_projection")
         with engine.begin() as conn:
             maintenance_payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
@@ -207,6 +233,7 @@ async def _amain(argv: list[str] | None = None) -> int:
                 max_actions_per_scope=args.max_actions_per_scope,
                 snapshot_timeout_seconds=args.snapshot_timeout_seconds,
                 provided_exchange_snapshots=provided_snapshots,
+                provided_account_risk_snapshots=provided_account_risk_snapshots,
             )
         payload = {
             **maintenance_payload,
@@ -372,6 +399,115 @@ def _prepare_snapshot_scopes(
     return prepared
 
 
+def _active_account_risk_scopes(
+    conn: sa.Connection,
+    *,
+    prepared_scopes: list[dict[str, Any]],
+) -> dict[str, tuple[str, str, str]]:
+    """Return Ticket-to-account scopes only for active capacity policy.
+
+    The result is intentionally keyed by Ticket rather than symbol.  A single
+    full-account snapshot may be reused for multiple selected Tickets of the
+    same account, while the scheduler remains unable to infer account truth
+    from per-Ticket exchange snapshots.
+    """
+
+    if not prepared_scopes or not sa.inspect(conn).has_table(
+        "brc_account_risk_policy_current"
+    ):
+        return {}
+    policies = sa.Table(
+        "brc_account_risk_policy_current", sa.MetaData(), autoload_with=conn
+    )
+    active_pairs = {
+        (str(row["account_id"]), str(row["runtime_profile_id"]))
+        for row in conn.execute(
+            sa.select(policies.c.account_id, policies.c.runtime_profile_id).where(
+                policies.c.activation_state == "active"
+            )
+        ).mappings()
+    }
+    result: dict[str, tuple[str, str, str]] = {}
+    for prepared in prepared_scopes:
+        scope = prepared.get("scope")
+        if scope is None:
+            continue
+        account_id = str(getattr(scope, "account_id", "") or "")
+        runtime_profile_id = str(getattr(scope, "runtime_profile_id", "") or "")
+        exchange_id = str(getattr(scope, "exchange_id", "") or "")
+        ticket_id = str(getattr(scope, "ticket_id", "") or "")
+        if (
+            ticket_id
+            and exchange_id == "binance_usdm"
+            and (account_id, runtime_profile_id) in active_pairs
+        ):
+            result[ticket_id] = (account_id, runtime_profile_id, exchange_id)
+    return result
+
+
+async def _prefetch_account_risk_snapshots(
+    ticket_scopes: dict[str, tuple[str, str, str]],
+    *,
+    env_file: Path,
+    base_url: str,
+    timeout_seconds: float,
+) -> dict[str, FullAccountRiskSnapshot]:
+    """Fetch one full-account snapshot per selected account outside PG work."""
+
+    by_account: dict[tuple[str, str], FullAccountRiskSnapshot] = {}
+    for account_id, _runtime_profile_id, exchange_id in sorted(set(ticket_scopes.values())):
+        key = (account_id, exchange_id)
+        by_account[key] = await _fetch_account_risk_snapshot(
+            account_id=account_id,
+            exchange_id=exchange_id,
+            env_file=env_file,
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+        )
+    return {
+        ticket_id: by_account[(account_id, exchange_id)]
+        for ticket_id, (account_id, _runtime_profile_id, exchange_id) in ticket_scopes.items()
+    }
+
+
+async def _fetch_account_risk_snapshot(
+    *,
+    account_id: str,
+    exchange_id: str,
+    env_file: Path,
+    base_url: str,
+    timeout_seconds: float,
+) -> FullAccountRiskSnapshot:
+    """Use the official signed GET collector only; no gateway mutation surface."""
+
+    api_key = _env_value(
+        ("EXCHANGE_API_KEY", "BINANCE_API_KEY", "binance_exchange_key"),
+        env_file=env_file,
+    )
+    api_secret = _env_value(
+        ("EXCHANGE_API_SECRET", "BINANCE_SECRET_KEY", "binance_exchange_secret"),
+        env_file=env_file,
+    )
+
+    async def signed_get(path: str) -> Any:
+        return await asyncio.to_thread(
+            _request_json,
+            base_url=base_url,
+            path=path,
+            api_key=api_key,
+            api_secret=api_secret,
+            signed=True,
+            timeout_seconds=timeout_seconds,
+        )
+
+    provider = BinanceUsdmAccountRiskSnapshotProvider(
+        account_id=account_id,
+        exchange_id=exchange_id,
+        signed_get=signed_get,
+    )
+    return await provider.fetch(timeout_seconds=timeout_seconds)
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
@@ -381,6 +517,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--max-lifecycle-scopes", type=int, default=1)
     parser.add_argument("--max-actions-per-scope", type=int, default=16)
     parser.add_argument("--snapshot-timeout-seconds", type=float, default=8.0)
+    parser.add_argument(
+        "--account-risk-env-file",
+        default=str(DEFAULT_ACCOUNT_RISK_ENV_FILE),
+    )
+    parser.add_argument("--account-risk-base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument("--account-risk-timeout-seconds", type=float, default=12.0)
     parser.add_argument("--command-lease-ms", type=int, default=15_000)
     parser.add_argument("--global-deadline-seconds", type=float, default=28.0)
     args = parser.parse_args(argv)

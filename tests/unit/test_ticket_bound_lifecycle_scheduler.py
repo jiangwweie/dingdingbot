@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,8 @@ from src.application.action_time.lifecycle_maintenance_scheduler import (
     run_ticket_bound_lifecycle_maintenance_scheduler,
     select_ticket_bound_lifecycle_maintenance_scopes,
 )
+from src.application.action_time import lifecycle_maintenance_scheduler as scheduler
+from src.infrastructure.binance_usdm_account_risk_snapshot import FullAccountRiskSnapshot
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_runner_protection_adjuster import (
     _mark_tp1_filled,
@@ -274,6 +277,81 @@ async def test_snapshot_complete_empty_position_rows_prove_flat(
     assert payload["status"] == "snapshot_ready"
     assert payload["snapshot"]["position"]["truth_state"] == "flat"
     assert payload["snapshot"]["position"]["position_flat"] is True
+
+
+@pytest.mark.asyncio
+async def test_scheduler_passes_prefetched_account_snapshot_to_first_tick(monkeypatch):
+    captured: list[FullAccountRiskSnapshot | None] = []
+    scope = {
+        "ticket_id": "ticket-1",
+        "protected_submit_attempt_id": "attempt-1",
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+    }
+    monkeypatch.setattr(
+        scheduler,
+        "select_ticket_bound_first_reconciliation_tick_scopes",
+        lambda *_args, **_kwargs: [scope],
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "select_ticket_bound_lifecycle_maintenance_scopes",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "materialize_ticket_bound_first_reconciliation_tick",
+        lambda *_args, account_risk_snapshot=None, **_kwargs: captured.append(
+            account_risk_snapshot
+        )
+        or {"status": "matched", "blockers": []},
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "project_ticket_bound_exchange_fills",
+        lambda *_args, **_kwargs: {"status": "projected", "blockers": []},
+    )
+
+    async def fake_maintenance(*_args, **_kwargs):
+        return {"status": "complete", "blockers": [], "actions": []}
+
+    monkeypatch.setattr(scheduler, "run_ticket_bound_lifecycle_maintenance", fake_maintenance)
+    monkeypatch.setattr(
+        scheduler,
+        "finalize_ticket_bound_lifecycle_if_ready",
+        lambda *_args, **_kwargs: {"status": "not_ready", "blockers": []},
+    )
+    snapshot = _account_risk_snapshot()
+
+    payload = await scheduler.run_ticket_bound_lifecycle_maintenance_scheduler(
+        object(),
+        fetch_exchange_snapshot=False,
+        provided_exchange_snapshots={
+            "attempt-1": {"status": "snapshot_ready", "snapshot": {}}
+        },
+        provided_account_risk_snapshots={"ticket-1": snapshot},
+        now_ms=NOW_MS,
+    )
+
+    assert payload["status"] == "scheduler_complete"
+    assert captured == [snapshot]
+
+
+def _account_risk_snapshot() -> FullAccountRiskSnapshot:
+    return FullAccountRiskSnapshot(
+        snapshot_ready=True,
+        account_id="owner-subaccount-runtime-v0",
+        exchange_id="binance_usdm",
+        total_wallet_balance=Decimal("600"),
+        available_balance=Decimal("500"),
+        exchange_total_initial_margin=Decimal("100"),
+        can_trade=True,
+        position_mode="one_way",
+        source_snapshot_id="account-risk-snapshot-1",
+        observed_at_ms=NOW_MS,
+        valid_until_ms=NOW_MS + 60_000,
+    )
 
 
 class _SchedulerGateway:
