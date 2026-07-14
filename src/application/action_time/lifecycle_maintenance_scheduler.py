@@ -38,6 +38,7 @@ AUTHORITY_BOUNDARY = (
 
 MAINTAINABLE_LIFECYCLE_STATUSES = {
     "position_protected",
+    "runner_protected",
     "tp1_filled",
     "runner_mutation_pending",
     "protection_missing",
@@ -54,6 +55,7 @@ MAINTAINABLE_LIFECYCLE_STATUSES = {
 }
 SNAPSHOT_STATUSES = {
     "position_protected",
+    "runner_protected",
     "protection_degraded",
     "tp1_filled",
     "runner_mutation_pending",

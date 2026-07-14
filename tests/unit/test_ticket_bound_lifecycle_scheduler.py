@@ -6,22 +6,91 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import text
 
+from scripts import materialize_ticket_bound_exit_protection_set as exit_protection
+from scripts import materialize_ticket_bound_runner_protection_adjustment as runner_adjuster
 from src.application.action_time.exchange_snapshot_provider import (
     fetch_ticket_bound_exchange_snapshot,
 )
 from src.application.action_time.lifecycle_maintenance_scheduler import (
+    MAINTAINABLE_LIFECYCLE_STATUSES,
+    SNAPSHOT_STATUSES,
     lifecycle_maintenance_scopes_require_exchange_gateway,
     run_ticket_bound_lifecycle_maintenance_scheduler,
     select_ticket_bound_lifecycle_maintenance_scopes,
 )
+from src.application.action_time.post_submit_reconciliation_tick import (
+    materialize_ticket_bound_first_reconciliation_tick,
+)
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
+from tests.unit.test_ticket_bound_exit_protection_materializer import (
+    _submitted_attempt,
+)
+from tests.unit.test_ticket_bound_post_submit_reconciliation_tick import (
+    _attempt_snapshot,
+)
 from tests.unit.test_ticket_bound_runner_protection_adjuster import (
     _mark_tp1_filled,
     _materialized_exit_protection_set,
+    _record_official_runner_mutation_result,
 )
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
+
+
+def test_runner_protected_is_maintainable_and_snapshot_eligible():
+    assert "runner_protected" in MAINTAINABLE_LIFECYCLE_STATUSES
+    assert "runner_protected" in SNAPSHOT_STATUSES
+
+
+@pytest.mark.asyncio
+async def test_scheduler_selects_healthy_runner_without_exchange_write(
+    pg_control_connection,
+):
+    _, prepared = _submitted_attempt(pg_control_connection)
+    protection = exit_protection.materialize_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6000,
+    )
+    set_id = protection["exit_protection_set_id"]
+    first_tick = materialize_ticket_bound_first_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        exchange_snapshot=_attempt_snapshot(prepared),
+        now_ms=NOW_MS + 6500,
+    )
+    assert first_tick["status"] == "matched"
+    _mark_tp1_filled(pg_control_connection, set_id)
+    _record_official_runner_mutation_result(
+        pg_control_connection,
+        set_id,
+        runner_exchange_id="exchange-runner-sl-1",
+        now_ms=NOW_MS + 7000,
+    )
+    runner = runner_adjuster.materialize_ticket_bound_runner_protection_adjustment(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        runner_sl_exchange_order_id="exchange-runner-sl-1",
+        runner_sl_local_order_id="runner-sl-1",
+        now_ms=NOW_MS + 7500,
+    )
+    assert runner["status"] == "runner_protected"
+    gateway = _HealthyRunnerGateway()
+
+    payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
+        pg_control_connection,
+        gateway=gateway,
+        allow_exchange_mutation=True,
+        fetch_exchange_snapshot=True,
+        now_ms=NOW_MS + 10_000,
+    )
+
+    assert payload["selected_scope_count"] == 1
+    assert payload["exchange_read_called"] is True
+    assert payload["exchange_write_called"] is False
+    assert "place_order" not in gateway.events
+    assert "cancel_order" not in gateway.events
 
 
 @pytest.mark.asyncio
@@ -361,3 +430,21 @@ class _SchedulerGateway:
             exchange_order_id=kwargs["exchange_order_id"],
             status="CANCELED",
         )
+
+
+class _HealthyRunnerGateway(_SchedulerGateway):
+    @staticmethod
+    def _open_orders(symbol: str):
+        return [
+            {
+                "id": "exchange-runner-sl-1",
+                "clientOrderId": "runner-sl-1",
+                "symbol": symbol,
+                "side": "sell",
+                "reduceOnly": True,
+                "amount": "0.25",
+                "price": "",
+                "stopPrice": "2000",
+                "status": "open",
+            }
+        ]
