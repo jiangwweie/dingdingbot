@@ -17,7 +17,8 @@ user-invocable: true
 - `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`
 - `docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md`
 - `docs/current/MAIN_CONTROL_ROADMAP.md`
-- Relevant files under `docs/current/strategy-group-handoffs/`
+- `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md`
+- `docs/current/strategy-group-handoffs/main-control-handoff-index.md`
 
 Current required context is `AGENTS.md` plus `docs/current/*`.
 Historical archive material is recovery/provenance only and must not be used as current project truth.
@@ -53,6 +54,31 @@ Prefer current tracked code, `docs/current/*`, and accepted Owner decisions over
   the requirement or project goal has changed; and which old path is replaced,
   removed, or retired. Glue is acceptable only with a bounded replacement or
   removal condition and without becoming a second source of truth.
+- Treat runtime JSON/Markdown file reads and recurring JSON/Markdown report
+  writes as architecture debt, not as a stable integration layer. The preferred
+  architecture action is delete; if current runtime state is needed, migrate it
+  to PG/current services; if only provenance remains, move it to archive-only
+  tooling. Do not design new production flows that depend on repo/output/report
+  files.
+- Treat dynamic-path evidence JSON writers, YAML config import/export file
+  interfaces, JSONL trace/observe sidecars, and tests that create legacy report
+  JSON fixtures as file-authority debt even when they are not literal
+  `latest-*.json` paths. Delete them, migrate useful current semantics to
+  PG/current services, or move pure history to archive-only provenance.
+- Treat current artifact/proof/evidence scripts with JSON/Markdown file
+  inputs/outputs, report directories, or artifact file CLI parameters as
+  architecture debt even when they are outside production cadence. Delete them
+  by family, migrate useful semantics to PG/current projections, or move pure
+  history to archive-only provenance.
+- Treat file-backed repositories, local comparison readers, artifact-file
+  validators, and JSON fixture CLIs in current `src/` or runtime `scripts/` as
+  architecture debt. They must be deleted from the current path or rewritten to
+  PG/current services; "non-production fallback" is not an acceptable current
+  abstraction.
+- Every runtime, deploy, monitor, readmodel, watcher, action-time, or Owner
+  explanation architecture decision must include cadence and performance
+  impact: no-signal tick file growth target, PG row growth, CPU-heavy trigger,
+  timeout boundary, disk/retention behavior, and archive-only cleanup rule.
 - Do not accept explanation-only, audit-only, or artifact-only completion for
   live-enablement work. The architecture outcome must remove a blocker,
   reclassify it with per-symbol / per-fact evidence, prove

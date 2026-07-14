@@ -10,17 +10,20 @@ last_verified: 2026-07-01
 ## Purpose
 
 This contract limits active live-enablement work so the project stops rewarding
-parallel artifact production and starts rewarding blocker removal.
+parallel artifact production and starts rewarding blocker removal. It is now
+scoped by `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`: WIP limits active
+StrategyGroups, while each active StrategyGroup may carry a bounded candidate
+symbol set for read-only pre-trade readiness.
 
 The current management unit is:
 
 ```text
-StrategyGroup + symbol lane + first blocker + next action
+StrategyGroup + candidate symbol + readiness state + first blocker + next action
 ```
 
 ## Active WIP Limit
 
-The mainline may carry at most five StrategyGroup lanes:
+The mainline may carry at most five active StrategyGroups:
 
 | Slot | StrategyGroup | Current role |
 | --- | --- | --- |
@@ -32,6 +35,12 @@ The mainline may carry at most five StrategyGroup lanes:
 
 No new mainline StrategyGroup may be added unless one current lane exits
 mainline or the Owner explicitly changes the selected lane set.
+
+Within those five StrategyGroups, V0 may carry multiple candidate symbols per
+StrategyGroup for read-only observation, fact computation, and fresh-signal
+promotion. This does not authorize live-submit scope expansion. V0 defaults to
+two to four candidate symbols per active StrategyGroup and at most one
+action-time real-submit candidate at a time.
 
 ## Support-Only StrategyGroups
 
@@ -65,7 +74,7 @@ The seven-day review must answer:
 | --- | --- |
 | Which blockers were removed? | List lanes and old/new blocker states |
 | Which artifacts changed no decision? | List artifacts and remove them from mainline reporting |
-| Which lanes exit mainline? | List StrategyGroup + symbol lanes and reason |
+| Which lanes exit mainline? | List StrategyGroups or candidate symbols and reason |
 | Which symbols should advance to parity or trial-scope proposal? | List only lanes with evidence |
 | Can the project honestly say the market gave no opportunity? | `yes` only when `market_wait_validated` rows pass the checklist |
 
@@ -91,6 +100,8 @@ Replacement is a planning decision. It does not authorize real orders.
 A WIP lane is complete only when it reaches one of:
 
 - `market_wait_validated`;
+- `pretrade_ready` with per-symbol readiness and no non-market blocker;
+- `promotion_candidate` for a fresh satisfied read-only or trial-scoped symbol;
 - `live_submit_ready` after current fresh signal and action-time gates;
 - `review_recorded` after a real official action;
 - `exit_mainline` under this contract;

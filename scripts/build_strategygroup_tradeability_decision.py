@@ -12,9 +12,12 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
+
+import sqlalchemy as sa
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -29,25 +32,33 @@ from src.domain.runtime_readiness_state import (  # noqa: E402
     live_submit_ready_for_strategy_artifact,
     runtime_safety_state_from_artifact,
 )
+from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
+    PgBackedRuntimeControlStateRepository,
+    is_current_action_time_lane,
+    is_current_fact_snapshot,
+    is_current_live_signal,
+    is_current_pretrade_readiness,
+    is_current_watcher_coverage,
+)
+from src.application.readmodels.runtime_safety_truth import (  # noqa: E402
+    RuntimeSafetyTruth,
+    current_runtime_safety_truth_by_lane,
+    current_runtime_safety_truths,
+    verified_submit_truth_by_strategy,
+)
+from src.application.readmodels.strategy_live_candidate_pool import (  # noqa: E402
+    build_strategy_live_candidate_pool_from_control_state,
+)
+from src.application.action_time.capability_certification import (  # noqa: E402
+    current_action_time_capability_truth_by_lane,
+    current_runtime_head,
+)
 from scripts.strategygroup_non_executing_projection import (  # noqa: E402
     recursive_true_key_paths,
 )
-
-DEFAULT_REGISTRY_JSON = (
-    REPO_ROOT
-    / "docs/current/strategy-group-handoffs/strategygroup-registry-baseline.json"
-)
-DEFAULT_TIER_POLICY_JSON = (
-    REPO_ROOT
-    / "docs/current/strategy-group-handoffs/main-control-runtime-tier-policy.json"
-)
-DEFAULT_OUTPUT_JSON = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-tradeability-decision.json"
-)
-DEFAULT_OUTPUT_MD = (
-    REPO_ROOT
-    / "output/runtime-monitor/latest-strategygroup-tradeability-decision.md"
+from scripts.pg_dsn import (  # noqa: E402
+    is_sync_postgres_dsn,
+    normalize_sync_postgres_dsn,
 )
 
 SCHEMA = "brc.strategygroup_tradeability_decision.v1"
@@ -62,6 +73,119 @@ DECISION_ORDER = {
     "not_tradable_execution_gate": 5,
     "not_tradable_market_wait": 6,
     "not_tradable_strategy_quality": 7,
+}
+
+CONTRACT_BLOCKER_CLASSES = {
+    "artifact_missing",
+    "schema_invalid",
+    "detector_not_attached",
+    "watcher_tick_missing",
+    "scope_not_attached",
+    "computed_not_satisfied",
+    "replay_live_rule_mismatch",
+    "event_execution_capability_not_certified",
+    "action_time_boundary_not_reproduced",
+    "policy_scope_missing",
+    "runtime_profile_scope_missing",
+    "market_wait_validated",
+    "active_position_resolution",
+    "hard_safety_stop",
+    "review_only_warning",
+}
+
+BLOCKER_DECISION_BY_CLASS = {
+    "artifact_missing": "not_tradable_facts",
+    "schema_invalid": "not_tradable_facts",
+    "detector_not_attached": "not_tradable_facts",
+    "watcher_tick_missing": "not_tradable_facts",
+    "scope_not_attached": "not_tradable_asset_admission",
+    "computed_not_satisfied": "not_tradable_market_wait",
+    "replay_live_rule_mismatch": "not_tradable_facts",
+    "event_execution_capability_not_certified": "not_tradable_execution_gate",
+    "action_time_boundary_not_reproduced": "not_tradable_execution_gate",
+    "policy_scope_missing": "not_tradable_policy",
+    "runtime_profile_scope_missing": "not_tradable_execution_gate",
+    "market_wait_validated": "not_tradable_market_wait",
+    "active_position_resolution": "not_tradable_execution_gate",
+    "hard_safety_stop": "not_tradable_safety_stop",
+    "review_only_warning": "not_tradable_strategy_quality",
+}
+
+BLOCKER_OWNER_BY_CLASS = {
+    "artifact_missing": "engineering",
+    "schema_invalid": "engineering",
+    "detector_not_attached": "engineering",
+    "watcher_tick_missing": "runtime",
+    "scope_not_attached": "engineering",
+    "computed_not_satisfied": "market",
+    "replay_live_rule_mismatch": "engineering",
+    "event_execution_capability_not_certified": "engineering",
+    "action_time_boundary_not_reproduced": "runtime",
+    "policy_scope_missing": "owner",
+    "runtime_profile_scope_missing": "runtime",
+    "market_wait_validated": "market",
+    "active_position_resolution": "runtime",
+    "hard_safety_stop": "safety",
+    "review_only_warning": "strategy_review",
+}
+
+BLOCKER_PRIORITY = {
+    "hard_safety_stop": 0,
+    "artifact_missing": 10,
+    "schema_invalid": 20,
+    "detector_not_attached": 30,
+    "watcher_tick_missing": 40,
+    "scope_not_attached": 50,
+    "policy_scope_missing": 55,
+    "runtime_profile_scope_missing": 58,
+    "replay_live_rule_mismatch": 60,
+    "event_execution_capability_not_certified": 65,
+    "action_time_boundary_not_reproduced": 70,
+    "active_position_resolution": 75,
+    "computed_not_satisfied": 80,
+    "market_wait_validated": 90,
+    "review_only_warning": 100,
+}
+
+REPLAY_LIVE_PARITY_SCHEMA = "brc.replay_live_parity_audit.v1"
+ACTION_TIME_BOUNDARY_SCHEMA = "brc.strategy_fresh_signal_action_time_boundary.v1"
+MI_TRIAL_ADMISSION_SCHEMA = "brc.mi_trial_admission_decision.v1"
+REPLAY_LIVE_PARITY_STRATEGY_IDS = {"CPM-RO-001", "MPG-001", "SOR-001"}
+ACTION_TIME_BOUNDARY_STRATEGY_IDS = {"CPM-RO-001", "MPG-001", "SOR-001"}
+
+LEGACY_BLOCKER_CLASS_MAP = {
+    "brf2_candidate_authorization_evidence_not_created": "action_time_boundary_not_reproduced",
+    "brf2_shadow_candidate_evidence_ready_authorization_evidence_not_created": "action_time_boundary_not_reproduced",
+    "brf2_watcher_fact_input_missing": "watcher_tick_missing",
+    "cpm_candidate_authorization_evidence_not_created": "action_time_boundary_not_reproduced",
+    "cpm_disable_fact_active": "computed_not_satisfied",
+    "cpm_dry_run_submit_rehearsal_gap": "action_time_boundary_not_reproduced",
+    "cpm_registry_identity_gap": "scope_not_attached",
+    "cpm_required_facts_mapping_gap": "artifact_missing",
+    "cpm_runtime_signal_capture_gap": "detector_not_attached",
+    "cpm_watcher_scope_gap": "watcher_tick_missing",
+    "experiment_worthiness_or_loss_envelope_unclosed": "review_only_warning",
+    "forbidden_effect_detected": "hard_safety_stop",
+    "fresh_brf2_short_signal_absent": "market_wait_validated",
+    "fresh_cpm_long_signal_absent": "market_wait_validated",
+    "fresh_cpm_short_signal_absent": "market_wait_validated",
+    "fresh_executable_signal_absent": "market_wait_validated",
+    "fresh_mpg_long_signal_absent": "market_wait_validated",
+    "fresh_session_range_signal_absent": "market_wait_validated",
+    "fresh_signal_absent": "market_wait_validated",
+    "fresh_sor_long_signal_absent": "market_wait_validated",
+    "fresh_sor_session_range_signal_absent": "market_wait_validated",
+    "fresh_strategy_signal_absent": "market_wait_validated",
+    "mpg_high_beta_public_facts_gap": "scope_not_attached",
+    "mpg_public_facts_gap": "scope_not_attached",
+    "official_runtime_chain_ready": "market_wait_validated",
+    "owner_trial_scope_or_capital_policy_missing": "policy_scope_missing",
+    "portfolio_tradeability_decision_state_missing": "schema_invalid",
+    "private_action_time_facts_required": "action_time_boundary_not_reproduced",
+    "required_facts_mapping_gap": "artifact_missing",
+    "required_facts_or_classifier_mapping_unclosed": "artifact_missing",
+    "short_squeeze_risk_state_disable_active": "computed_not_satisfied",
+    "strategy_group_not_admitted_as_final_trial_asset": "scope_not_attached",
 }
 
 FORBIDDEN_TRUE_KEYS = {
@@ -90,190 +214,50 @@ FORBIDDEN_TRUE_KEYS = {
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--capital-trial-envelope-projection-json",
+        "--database-url",
+        default=os.getenv("PG_DATABASE_URL", ""),
         help=(
-            "Explicit capital-trial envelope projection input. Runtime callers "
-            "should pass this path; omitting it prevents stale capital-trial "
-            "projection output from changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument("--registry-json", default=str(DEFAULT_REGISTRY_JSON))
-    parser.add_argument("--tier-policy-json", default=str(DEFAULT_TIER_POLICY_JSON))
-    parser.add_argument(
-        "--signal-coverage-json",
-        help=(
-            "Explicit signal-coverage input. Runtime callers should pass this "
-            "path; omitting it prevents stale signal-coverage output from "
-            "changing Tradeability judgment."
+            "PostgreSQL DSN for the DB-backed production current source. "
+            "When omitted, PG_DATABASE_URL is used."
         ),
     )
     parser.add_argument(
-        "--runtime-safety-state-json",
-        help=(
-            "Explicit Runtime Safety State input. Runtime "
-            "callers should pass this path; omitting it prevents stale "
-            "Runtime Safety evidence from granting Tradeability judgment."
-        ),
+        "--require-database-url",
+        action="store_true",
+        help="Require a DB-backed production current source. This is the only production mode.",
     )
     parser.add_argument(
-        "--trial-asset-admission-proposal-json",
-        help=(
-            "Explicit Strategy Asset State admission proposal input. Runtime "
-            "callers should pass this path; omitting it prevents stale "
-            "trial-asset admission output from changing Tradeability judgment."
-        ),
+        "--allow-non-postgres-for-test",
+        action="store_true",
+        help="Allow SQLite/non-PG DSNs only in tests.",
     )
-    parser.add_argument(
-        "--brf2-owner-trial-policy-scope-json",
-        help=(
-            "Explicit BRF2 Owner trial policy scope input. Runtime callers "
-            "should pass this path; omitting it prevents stale Owner policy "
-            "scope output from changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument(
-        "--cpm-identity-routing-decision-json",
-        help="Explicit CPM identity routing decision input.",
-    )
-    parser.add_argument(
-        "--cpm-owner-trial-policy-scope-json",
-        help="Explicit CPM Owner trial policy scope input.",
-    )
-    parser.add_argument(
-        "--cpm-required-facts-mapping-json",
-        help="Explicit CPM RequiredFacts mapping input.",
-    )
-    parser.add_argument(
-        "--cpm-runtime-signal-capture-json",
-        help="Explicit CPM runtime signal capture input.",
-    )
-    parser.add_argument(
-        "--cpm-shadow-candidate-evidence-json",
-        help="Explicit CPM shadow candidate evidence input.",
-    )
-    parser.add_argument(
-        "--cpm-dry-run-submit-rehearsal-json",
-        help="Explicit CPM dry-run submit rehearsal input.",
-    )
-    parser.add_argument(
-        "--three-strategy-live-trial-portfolio-json",
-        help=(
-            "Explicit Strategy Asset / Trial Envelope portfolio input. Runtime "
-            "callers should pass this path; omitting it prevents stale "
-            "portfolio output from changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument(
-        "--brf2-runtime-signal-capture-json",
-        help=(
-            "Explicit BRF2 runtime signal capture input. Runtime callers should "
-            "pass this path; omitting it keeps signal-capture evidence absent "
-            "instead of reading a stale latest-* artifact."
-        ),
-    )
-    parser.add_argument(
-        "--brf2-shadow-candidate-evidence-json",
-        help=(
-            "Explicit BRF2 shadow candidate evidence provenance input. Runtime "
-            "callers should pass this path; omitting it keeps shadow evidence "
-            "provenance absent instead of reading a stale default artifact."
-        ),
-    )
-    parser.add_argument(
-        "--trial-grade-signal-gate-audit-json",
-        help=(
-            "Explicit trial-grade signal-gate audit input. Runtime callers "
-            "should pass this path; omitting it prevents stale trial-grade "
-            "audit output from changing Tradeability judgment."
-        ),
-    )
-    parser.add_argument("--output-json", default=str(DEFAULT_OUTPUT_JSON))
-    parser.add_argument("--output-owner-progress", default=str(DEFAULT_OUTPUT_MD))
     args = parser.parse_args(argv)
-
-    decision_artifact = build_tradeability_decision(
-        capital_trial_envelope_projection=(
-            _read_json(Path(args.capital_trial_envelope_projection_json))
-            if args.capital_trial_envelope_projection_json
-            else {}
-        ),
-        registry=_read_json(Path(args.registry_json)),
-        tier_policy=_read_json(Path(args.tier_policy_json)),
-        signal_coverage=(
-            _read_json(Path(args.signal_coverage_json))
-            if args.signal_coverage_json
-            else {}
-        ),
-        runtime_safety_state=(
-            _read_json(Path(args.runtime_safety_state_json))
-            if args.runtime_safety_state_json
-            else {}
-        ),
-        trial_asset_admission_proposal=_read_optional_json(
-            Path(args.trial_asset_admission_proposal_json)
+    database_url = normalize_sync_postgres_dsn(args.database_url)
+    if not database_url:
+        print(
+            "ERROR: PG_DATABASE_URL is required for DB-backed Tradeability Decision",
+            file=sys.stderr,
         )
-        if args.trial_asset_admission_proposal_json
-        else {},
-        brf2_owner_trial_policy_scope=(
-            _read_optional_json(Path(args.brf2_owner_trial_policy_scope_json))
-            if args.brf2_owner_trial_policy_scope_json
-            else {}
-        ),
-        cpm_identity_routing_decision=(
-            _read_optional_json(Path(args.cpm_identity_routing_decision_json))
-            if args.cpm_identity_routing_decision_json
-            else {}
-        ),
-        cpm_owner_trial_policy_scope=(
-            _read_optional_json(Path(args.cpm_owner_trial_policy_scope_json))
-            if args.cpm_owner_trial_policy_scope_json
-            else {}
-        ),
-        cpm_required_facts_mapping=(
-            _read_optional_json(Path(args.cpm_required_facts_mapping_json))
-            if args.cpm_required_facts_mapping_json
-            else {}
-        ),
-        cpm_runtime_signal_capture=(
-            _read_optional_json(Path(args.cpm_runtime_signal_capture_json))
-            if args.cpm_runtime_signal_capture_json
-            else {}
-        ),
-        cpm_shadow_candidate_evidence=(
-            _read_optional_json(Path(args.cpm_shadow_candidate_evidence_json))
-            if args.cpm_shadow_candidate_evidence_json
-            else {}
-        ),
-        cpm_dry_run_submit_rehearsal=(
-            _read_optional_json(Path(args.cpm_dry_run_submit_rehearsal_json))
-            if args.cpm_dry_run_submit_rehearsal_json
-            else {}
-        ),
-        three_strategy_live_trial_portfolio=(
-            _read_optional_json(Path(args.three_strategy_live_trial_portfolio_json))
-            if args.three_strategy_live_trial_portfolio_json
-            else {}
-        ),
-        brf2_runtime_signal_capture=(
-            _read_optional_json(Path(args.brf2_runtime_signal_capture_json))
-            if args.brf2_runtime_signal_capture_json
-            else {}
-        ),
-        brf2_shadow_candidate_evidence=(
-            _read_optional_json(Path(args.brf2_shadow_candidate_evidence_json))
-            if args.brf2_shadow_candidate_evidence_json
-            else {}
-        ),
-        trial_grade_signal_gate_audit=(
-            _read_optional_json(Path(args.trial_grade_signal_gate_audit_json))
-            if args.trial_grade_signal_gate_audit_json
-            else {}
-        ),
-    )
-    output_json = Path(args.output_json)
-    output_md = Path(args.output_owner_progress)
-    _write_json(output_json, decision_artifact)
-    _write_text(output_md, _markdown(decision_artifact, output_json))
+        return 2
+
+    if (
+        not is_sync_postgres_dsn(database_url)
+        and not args.allow_non_postgres_for_test
+    ):
+        print(
+            "ERROR: DB-backed Tradeability Decision requires PostgreSQL DSN",
+            file=sys.stderr,
+        )
+        return 2
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.connect() as conn:
+            repository = PgBackedRuntimeControlStateRepository(conn)
+            decision_artifact = build_tradeability_decision_from_control_state(
+                repository.read_control_state(),
+            )
+    finally:
+        engine.dispose()
     print(
         json.dumps(
             {
@@ -282,7 +266,6 @@ def main(argv: list[str] | None = None) -> int:
                 "top_decision": decision_artifact["summary"]["top_decision"],
                 "top_strategy_group_id": decision_artifact["summary"]["top_strategy_group_id"],
                 "tradable_now_count": decision_artifact["summary"]["tradable_now_count"],
-                "output_json": str(output_json),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -310,6 +293,9 @@ def build_tradeability_decision(
     brf2_runtime_signal_capture: dict[str, Any] | None = None,
     brf2_shadow_candidate_evidence: dict[str, Any] | None = None,
     trial_grade_signal_gate_audit: dict[str, Any] | None = None,
+    replay_live_parity_audit: dict[str, Any] | None = None,
+    mi_trial_admission_decision: dict[str, Any] | None = None,
+    strategy_fresh_signal_action_time_boundary: dict[str, Any] | None = None,
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     forbidden_effects = _forbidden_effects(
@@ -329,6 +315,9 @@ def build_tradeability_decision(
         brf2_runtime_signal_capture or {},
         brf2_shadow_candidate_evidence or {},
         trial_grade_signal_gate_audit or {},
+        replay_live_parity_audit or {},
+        mi_trial_admission_decision or {},
+        strategy_fresh_signal_action_time_boundary or {},
     )
     registry_rows = _registry_rows_by_id(registry)
     tier_rows = _tier_rows_by_id(tier_policy)
@@ -354,6 +343,8 @@ def build_tradeability_decision(
     all_ids.update(admission_proposals)
     all_ids.update(owner_policy_scopes)
     all_ids.update(portfolio_seats)
+    if _mi_trial_admission_present(mi_trial_admission_decision or {}):
+        all_ids.add("MI-001")
     if "MPG-001" in registry_rows:
         all_ids.add("MPG-001")
 
@@ -409,6 +400,11 @@ def build_tradeability_decision(
             ),
             trial_grade_row=trial_grade_rows.get(strategy_group_id, {}),
             runtime_safety_state=runtime_safety_state,
+            replay_live_parity_audit=replay_live_parity_audit or {},
+            mi_trial_admission_decision=mi_trial_admission_decision or {},
+            strategy_fresh_signal_action_time_boundary=(
+                strategy_fresh_signal_action_time_boundary or {}
+            ),
             forbidden_effects=forbidden_effects,
         )
         for strategy_group_id in sorted(all_ids, key=_strategy_sort_key)
@@ -457,6 +453,12 @@ def build_tradeability_decision(
                 in {"armed_observation", "tiny_live_ready", "live_submit_ready"}
                 for row in rows
             ),
+            "market_wait_validated_has_full_checklist": all(
+                row["first_blocker_class"] != "market_wait_validated"
+                or _as_dict(row.get("market_wait_validation")).get("valid")
+                is True
+                for row in rows
+            ),
             "july_bullish_rebound_paths_consumed": july_trade_paths["checks"][
                 "machine_consumed_path_count"
             ]
@@ -475,6 +477,1705 @@ def build_tradeability_decision(
             "places_order": False,
         },
     }
+
+
+def build_tradeability_decision_from_control_state(
+    control_state: dict[str, Any],
+    *,
+    generated_at_utc: str | None = None,
+) -> dict[str, Any]:
+    """Build Tradeability directly from PG Candidate Pool and current lineage.
+
+    The production path deliberately does not translate PG rows into legacy
+    JSON-artifact shapes. Candidate Pool owns per-symbol readiness; this
+    function aggregates one current decision per StrategyGroup and permits
+    ``tradable_now`` only from a verified current Runtime Safety State lineage.
+    """
+
+    if control_state.get("source_mode") != "db_backed":
+        raise ValueError("Tradeability Decision production path requires DB-backed state")
+    if control_state.get("projection_target") != "production_current":
+        raise ValueError("Tradeability Decision requires production_current state")
+    generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
+    candidate_pool = build_strategy_live_candidate_pool_from_control_state(
+        control_state,
+        generated_at_utc=generated,
+    )
+    rows = _pg_current_tradeability_rows(
+        control_state=control_state,
+        candidate_pool=candidate_pool,
+    )
+    summary = _summary(rows)
+    july_trade_paths = _july_bullish_rebound_trade_path_closure(rows)
+    expected_ids = {
+        "CPM-RO-001",
+        "MPG-001",
+        "MI-001",
+        "SOR-001",
+        "BRF2-001",
+    }
+    checks = {
+        "one_current_decision_per_strategy_group": len(rows)
+        == len({row["strategy_group_id"] for row in rows}),
+        "five_active_strategy_groups_present": {
+            str(row.get("strategy_group_id") or "") for row in rows
+        }
+        == expected_ids,
+        "pg_candidate_pool_is_strategy_truth_source": all(
+            row.get("state_source") == "pg_current_candidate_pool" for row in rows
+        ),
+        "legacy_artifact_guards_not_used": all(
+            row.get("first_blocker_detail")
+            not in {
+                "market_wait_validated checklist is incomplete",
+                "replay_live_parity_audit generated_at_utc is missing or invalid",
+                "mi_trial_admission_decision generated_at_utc is missing or invalid",
+            }
+            for row in rows
+        ),
+        "tradable_now_requires_verified_current_lineage": all(
+            row.get("decision") != "tradable_now"
+            or (
+                _as_dict(row.get("runtime_safety_reference")).get(
+                    "live_submit_ready_for_strategy"
+                )
+                is True
+                and _as_dict(row.get("runtime_safety_reference")).get(
+                    "lineage_verified"
+                )
+                is True
+            )
+            for row in rows
+        ),
+        "first_blocker_classes_follow_contract": all(
+            row.get("decision") == "tradable_now"
+            or row.get("first_blocker_class") in CONTRACT_BLOCKER_CLASSES
+            for row in rows
+        ),
+        "market_wait_only_after_full_validation": all(
+            row.get("first_blocker_class") != "market_wait_validated"
+            or _as_dict(row.get("market_wait_validation")).get("valid") is True
+            for row in rows
+        ),
+        "decision_rows_do_not_emit_legacy_authority_mirrors": all(
+            "actionable_now" not in row and "real_order_authority" not in row
+            for row in rows
+        ),
+        "july_bullish_rebound_paths_consumed": july_trade_paths["checks"][
+            "machine_consumed_path_count"
+        ]
+        >= 5,
+    }
+    status = (
+        "tradeability_decision_ready"
+        if rows and all(checks.values())
+        else "blocked_internal_consistency"
+    )
+    return {
+        "schema": SCHEMA,
+        "scope": "strategygroup_tradeability_decision_read_model",
+        "status": status,
+        "generated_at_utc": generated,
+        "summary": summary,
+        "decision_rows": rows,
+        "july_bullish_rebound_trade_path_closure": july_trade_paths,
+        "owner_summary": {
+            "state": "交易资格已判定",
+            "top_strategy_group_id": summary["top_strategy_group_id"],
+            "top_decision": summary["top_decision"],
+            "top_first_blocker": summary["top_first_blocker_class"],
+            "owner_policy_blocker_present": summary["owner_first_blocker_count"] > 0,
+            "owner_intervention_required": summary["owner_first_blocker_count"] > 0,
+        },
+        "checks": checks,
+        "interaction": _interaction(),
+        "safety_invariants": {
+            "decision_generator_changes_runtime_safety_state": False,
+            "decision_generator_creates_execution_attempt": False,
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "control_state_watermark": {
+            "schema": str(control_state.get("schema") or ""),
+            "table_counts": _as_dict(control_state.get("table_counts")),
+            "candidate_pool_schema": str(candidate_pool.get("schema") or ""),
+        },
+        "source_validation": {
+            "valid": status == "tradeability_decision_ready",
+            "source_mode": "db_backed",
+            "projection_target": "production_current",
+            "legacy_file_authority": False,
+            "legacy_artifact_adapter_used": False,
+        },
+    }
+
+
+def _pg_current_tradeability_rows(
+    *,
+    control_state: dict[str, Any],
+    candidate_pool: dict[str, Any],
+) -> list[dict[str, Any]]:
+    candidate_rows = {
+        str(row.get("strategy_group_id") or ""): row
+        for row in _dict_rows(candidate_pool.get("candidate_rows"))
+        if str(row.get("strategy_group_id") or "")
+    }
+    symbol_rows_by_strategy: dict[str, list[dict[str, Any]]] = {}
+    for row in _dict_rows(candidate_pool.get("symbol_readiness_rows")):
+        strategy_group_id = str(row.get("strategy_group_id") or "")
+        if strategy_group_id:
+            symbol_rows_by_strategy.setdefault(strategy_group_id, []).append(row)
+
+    current_truths = current_runtime_safety_truths(control_state)
+    latest_truth_by_strategy: dict[str, RuntimeSafetyTruth] = {}
+    for truth in current_truths:
+        if truth.strategy_group_id and truth.strategy_group_id not in latest_truth_by_strategy:
+            latest_truth_by_strategy[truth.strategy_group_id] = truth
+    verified_truth_by_strategy = verified_submit_truth_by_strategy(control_state)
+    truth_by_lane = current_runtime_safety_truth_by_lane(control_state)
+    now_ms = _control_state_now_ms(control_state)
+    current_lanes = [
+        row
+        for row in _dict_rows(control_state.get("action_time_lane_inputs"))
+        if is_current_action_time_lane(row, now_ms)
+    ]
+    current_lane_by_strategy = {
+        str(row.get("strategy_group_id") or ""): row for row in current_lanes
+    }
+
+    rows: list[dict[str, Any]] = []
+    for strategy_group_id in (
+        "CPM-RO-001",
+        "MPG-001",
+        "MI-001",
+        "SOR-001",
+        "BRF2-001",
+    ):
+        candidate = candidate_rows.get(strategy_group_id, {})
+        group_symbol_rows = symbol_rows_by_strategy.get(strategy_group_id, [])
+        selected = _pg_selected_symbol_row(candidate, group_symbol_rows)
+        verified_truth = verified_truth_by_strategy.get(strategy_group_id)
+        latest_truth = verified_truth or latest_truth_by_strategy.get(strategy_group_id)
+        current_lane = current_lane_by_strategy.get(strategy_group_id, {})
+        lane_truth = truth_by_lane.get(
+            str(current_lane.get("action_time_lane_input_id") or "")
+        )
+
+        blocker = _normalize_pg_tradeability_blocker(
+            str(candidate.get("first_blocker") or selected.get("first_blocker") or "")
+        )
+        if verified_truth:
+            classifier = _classifier(
+                "tradable_now",
+                "official_runtime_chain_ready",
+                "PG current Runtime Safety State and L5-L7 lineage are verified",
+                "runtime",
+                "continue_official_live_submit_chain",
+                "live_submit_ready",
+            )
+        else:
+            blocker = _pg_action_time_runtime_blocker(
+                blocker=blocker,
+                current_lane=current_lane,
+                lane_truth=lane_truth,
+            )
+            market_wait_validation = _pg_market_wait_validation(
+                control_state=control_state,
+                strategy_group_id=strategy_group_id,
+                candidate=candidate,
+                selected=selected,
+                blocker=blocker,
+            )
+            if blocker == "market_wait_validated" and not market_wait_validation["valid"]:
+                blocker = _pg_market_wait_validation_first_failure(
+                    market_wait_validation
+                )
+            classifier = _classifier(
+                BLOCKER_DECISION_BY_CLASS.get(blocker, "not_tradable_facts"),
+                blocker,
+                _pg_decision_detail(
+                    blocker=blocker,
+                    candidate=candidate,
+                    selected=selected,
+                    lane_truth=lane_truth,
+                ),
+                BLOCKER_OWNER_BY_CLASS.get(blocker, "engineering"),
+                _next_action_for_contract(blocker),
+                _after_next_state_for_contract(blocker),
+            )
+        classifier["legacy_blocker_raw"] = ""
+
+        required_facts_status = _pg_required_facts_status(selected, blocker)
+        market_wait_validation = _pg_market_wait_validation(
+            control_state=control_state,
+            strategy_group_id=strategy_group_id,
+            candidate=candidate,
+            selected=selected,
+            blocker=str(classifier.get("first_blocker_class") or ""),
+        )
+        stage = (
+            "live_submit_ready"
+            if classifier["decision"] == "tradable_now"
+            else str(candidate.get("stage") or "armed_observation")
+        )
+        policy_scope = _pg_current_policy_scope(
+            control_state=control_state,
+            strategy_group_id=strategy_group_id,
+            group_symbol_rows=group_symbol_rows,
+        )
+        row = {
+            "strategy_group_id": strategy_group_id,
+            "stage": stage,
+            "decision": classifier["decision"],
+            "can_trade_now": classifier["decision"] == "tradable_now",
+            "canonical_lane": _pg_canonical_lane(
+                strategy_group_id=strategy_group_id,
+                candidate=candidate,
+                selected=selected,
+                current_lane=current_lane,
+                truth=latest_truth,
+            ),
+            "first_blocker_class": classifier["first_blocker_class"],
+            "first_blocker_detail": classifier["first_blocker_detail"],
+            "legacy_blocker_raw": "",
+            "blocker_owner": classifier["blocker_owner"],
+            "next_action": classifier["next_action"],
+            "after_next_state": classifier["after_next_state"],
+            "secondary_blockers": _pg_secondary_blockers(
+                group_symbol_rows,
+                selected_blocker=str(classifier.get("first_blocker_class") or ""),
+            ),
+            "resolved_blockers": [],
+            "policy_scope": policy_scope,
+            "required_facts_status": required_facts_status,
+            "market_wait_validation": market_wait_validation,
+            "trade_paths": _trade_paths_for_strategy(
+                strategy_group_id=strategy_group_id,
+                row_classifier=classifier,
+                required_facts_status=required_facts_status,
+            ),
+            "observe_only_exit": {},
+            "runtime_scope_status": _pg_runtime_scope_status(
+                control_state=control_state,
+                strategy_group_id=strategy_group_id,
+                candidate=candidate,
+                group_symbol_rows=group_symbol_rows,
+            ),
+            "signal_grade_status": {
+                "controlled_live_standby_ready": classifier[
+                    "first_blocker_class"
+                ]
+                in {"computed_not_satisfied", "market_wait_validated"},
+                "stage_5_waiting_live_opportunity_ready": classifier[
+                    "first_blocker_class"
+                ]
+                in {"computed_not_satisfied", "market_wait_validated"},
+            },
+            "evidence_snapshot": {
+                "selected_symbol": str(
+                    selected.get("symbol")
+                    or selected.get("symbol_or_basket")
+                    or candidate.get("selected_symbol")
+                    or ""
+                ),
+                "selected_side": str(selected.get("side") or candidate.get("side") or ""),
+                "candidate_pool_evidence": str(
+                    selected.get("evidence_ref") or candidate.get("evidence") or ""
+                ),
+                "signal_state": str(selected.get("signal_state") or "absent"),
+            },
+            "runtime_safety_reference": _pg_current_runtime_safety_reference(
+                strategy_group_id=strategy_group_id,
+                truth=latest_truth,
+                verified_truth=verified_truth,
+            ),
+            "state_source": "pg_current_candidate_pool",
+            "authority_boundary": (
+                "tradeability_decision_is_read_model; verified_current_runtime_safety_lineage_only; execution_attempt_required_for_lifecycle_entry"
+                if classifier["decision"] == "tradable_now"
+                else "tradeability_decision_is_read_model; pg_current_candidate_pool_and_runtime_safety_truth; no_finalgate_no_operation_layer_no_exchange_write"
+            ),
+        }
+        rows.append(row)
+    return rows
+
+
+def _pg_selected_symbol_row(
+    candidate: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    symbol = str(candidate.get("selected_symbol") or "")
+    side = str(candidate.get("side") or "")
+    return next(
+        (
+            row
+            for row in rows
+            if str(row.get("symbol") or row.get("symbol_or_basket") or "") == symbol
+            and str(row.get("side") or "") == side
+        ),
+        rows[0] if rows else {},
+    )
+
+
+def _normalize_pg_tradeability_blocker(blocker: str) -> str:
+    if blocker == "action_time_preflight_ready":
+        return "action_time_boundary_not_reproduced"
+    if blocker.startswith("fresh_") and blocker.endswith("_absent"):
+        return "market_wait_validated"
+    if blocker in CONTRACT_BLOCKER_CLASSES:
+        return blocker
+    return "schema_invalid" if blocker else "artifact_missing"
+
+
+def _pg_action_time_runtime_blocker(
+    *,
+    blocker: str,
+    current_lane: dict[str, Any],
+    lane_truth: RuntimeSafetyTruth | None,
+) -> str:
+    if lane_truth and lane_truth.snapshot.get("active_position_conflict") is True:
+        return "active_position_resolution"
+    if lane_truth and _string_list(lane_truth.snapshot.get("blockers")):
+        return "hard_safety_stop"
+    if current_lane and blocker in {
+        "market_wait_validated",
+        "computed_not_satisfied",
+        "action_time_boundary_not_reproduced",
+    }:
+        return "action_time_boundary_not_reproduced"
+    return blocker
+
+
+def _pg_required_facts_status(selected: dict[str, Any], blocker: str) -> str:
+    public_facts = _as_dict(selected.get("public_facts_state"))
+    state = str(public_facts.get("state") or "")
+    if state in {"satisfied", "computed_not_satisfied"}:
+        return "ready"
+    if blocker in {
+        "action_time_boundary_not_reproduced",
+        "active_position_resolution",
+        "hard_safety_stop",
+    }:
+        return "action_time_only"
+    return "missing"
+
+
+def _pg_market_wait_validation(
+    *,
+    control_state: dict[str, Any],
+    strategy_group_id: str,
+    candidate: dict[str, Any],
+    selected: dict[str, Any],
+    blocker: str,
+) -> dict[str, Any]:
+    if blocker != "market_wait_validated":
+        return {"valid": False, "not_applicable": True, "checks": {}}
+    owner_authorization = _as_dict(selected.get("owner_authorization"))
+    public_facts = _as_dict(selected.get("public_facts_state"))
+    server_coverage = _as_dict(selected.get("server_runtime_coverage"))
+    checks = {
+        "asset_admission": str(candidate.get("stage") or "")
+        in {"armed_observation", "tiny_live_ready", "live_submit_ready"},
+        "scope": str(selected.get("scope_state") or "")
+        in {"live_submit_allowed", "conditional_action_time_rehearsal_allowed"},
+        "policy": owner_authorization.get("pretrade_candidate_allowed") is True
+        and owner_authorization.get("action_time_rehearsal_allowed") is True
+        and owner_authorization.get("live_submit_allowed")
+        in {"scoped", "conditional_hard_gated"},
+        "symbol": bool(selected.get("symbol") or selected.get("symbol_or_basket")),
+        "detector": str(selected.get("detector_state") or "")
+        in {"ready", "running"},
+        "watcher_input": str(selected.get("watcher_state") or "") == "fresh"
+        and server_coverage.get("state") == "active_watcher_scope",
+        "facts": public_facts.get("state") == "satisfied",
+        "failed_facts_clear": not _string_list(
+            public_facts.get("computed_not_satisfied")
+        ),
+        "classification": blocker in CONTRACT_BLOCKER_CLASSES,
+        "action_time_path": _pg_action_time_capability_certified(
+            control_state,
+            strategy_group_id=strategy_group_id,
+        ),
+        "fresh_signal": str(selected.get("signal_state") or "absent") != "fresh",
+    }
+    return {"valid": all(checks.values()), "not_applicable": False, "checks": checks}
+
+
+def _pg_market_wait_validation_first_failure(validation: dict[str, Any]) -> str:
+    checks = _as_dict(validation.get("checks"))
+    for key, blocker in (
+        ("asset_admission", "scope_not_attached"),
+        ("scope", "runtime_profile_scope_missing"),
+        ("policy", "policy_scope_missing"),
+        ("symbol", "scope_not_attached"),
+        ("detector", "detector_not_attached"),
+        ("watcher_input", "watcher_tick_missing"),
+        ("facts", "artifact_missing"),
+        ("failed_facts_clear", "computed_not_satisfied"),
+        ("action_time_path", "action_time_boundary_not_reproduced"),
+    ):
+        if checks.get(key) is not True:
+            return blocker
+    return "schema_invalid"
+
+
+def _pg_action_time_capability_certified(
+    control_state: dict[str, Any],
+    *,
+    strategy_group_id: str,
+) -> bool:
+    truths = current_action_time_capability_truth_by_lane(
+        control_state,
+        current_runtime_head=current_runtime_head(control_state),
+    )
+    group_truths = [
+        truth
+        for lane_key, truth in truths.items()
+        if lane_key[0] == strategy_group_id
+    ]
+    return bool(group_truths) and all(truth.certified for truth in group_truths)
+
+
+def _pg_current_policy_scope(
+    *,
+    control_state: dict[str, Any],
+    strategy_group_id: str,
+    group_symbol_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    candidates = [
+        row
+        for row in _active_candidate_scope_rows(control_state)
+        if str(row.get("strategy_group_id") or "") == strategy_group_id
+    ]
+    policy_by_id = _policy_rows_by_id(control_state)
+    policies = [
+        policy_by_id.get(str(row.get("policy_current_id") or ""), {})
+        for row in candidates
+    ]
+    policies = [row for row in policies if row]
+    first = policies[0] if policies else {}
+    return {
+        "source": "pg_owner_policy_current",
+        "capital_scope": str(first.get("account_id") or ""),
+        "profile": sorted(
+            {
+                str(row.get("runtime_profile_id") or "")
+                for row in policies
+                if str(row.get("runtime_profile_id") or "")
+            }
+        ),
+        "symbol_scope": sorted(
+            {
+                str(row.get("symbol") or row.get("symbol_or_basket") or "")
+                for row in group_symbol_rows
+                if str(row.get("symbol") or row.get("symbol_or_basket") or "")
+            }
+        ),
+        "side_scope": sorted(
+            {str(row.get("side") or "") for row in candidates if str(row.get("side") or "")}
+        ),
+        "leverage_scenario": str(first.get("leverage") or ""),
+        "max_notional": {"value": str(first.get("max_notional") or "")},
+        "attempt_cap": _int(first.get("attempt_cap")) or 0,
+        "loss_unit": {"value": str(first.get("loss_unit") or "")},
+        "missing_policy_fields": [] if policies else ["owner_policy_current"],
+    }
+
+
+def _pg_runtime_scope_status(
+    *,
+    control_state: dict[str, Any],
+    strategy_group_id: str,
+    candidate: dict[str, Any],
+    group_symbol_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    groups = _active_strategy_group_rows(control_state)
+    versions = _current_strategy_version_rows(control_state)
+    candidates = [
+        row
+        for row in _active_candidate_scope_rows(control_state)
+        if str(row.get("strategy_group_id") or "") == strategy_group_id
+    ]
+    return {
+        "registry_admitted": strategy_group_id in groups,
+        "strategy_version_current": strategy_group_id in versions,
+        "registry_default_tier": str(
+            _as_dict(groups.get(strategy_group_id)).get("default_tier") or "unknown"
+        ),
+        "owner_policy_recorded": all(row.get("policy_current_id") for row in candidates),
+        "candidate_scope_count": len(candidates),
+        "current_watcher_coverage_count": sum(
+            _as_dict(row.get("server_runtime_coverage")).get("state")
+            == "active_watcher_scope"
+            for row in group_symbol_rows
+        ),
+        "candidate_symbol_count": len(group_symbol_rows),
+        "event_execution_capability_certified": _pg_action_time_capability_certified(
+            control_state,
+            strategy_group_id=strategy_group_id,
+        ),
+        "selected_symbol": str(candidate.get("selected_symbol") or ""),
+        "live_trial_portfolio_stage": str(candidate.get("stage") or ""),
+    }
+
+
+def _pg_current_runtime_safety_reference(
+    *,
+    strategy_group_id: str,
+    truth: RuntimeSafetyTruth | None,
+    verified_truth: RuntimeSafetyTruth | None,
+) -> dict[str, Any]:
+    selected = verified_truth or truth
+    if selected is None:
+        return {
+            "state_source": "pg_runtime_safety_state_current",
+            "strategy_group_id": strategy_group_id,
+            "snapshot_id": "",
+            "live_submit_ready_for_strategy": False,
+            "live_submit_ready": False,
+            "lineage_verified": False,
+            "live_submit_ready_false_reason": "no_current_runtime_safety_snapshot",
+            "execution_attempt_required_for_lifecycle_entry": True,
+        }
+    return {
+        "state_source": "pg_runtime_safety_state_current",
+        "strategy_group_id": strategy_group_id,
+        "snapshot_id": selected.snapshot_id,
+        "action_time_lane_input_id": selected.lane_id,
+        "live_submit_ready_for_strategy": selected.submit_authorized,
+        "live_submit_ready": selected.submit_authorized,
+        "lineage_verified": selected.lineage_verified,
+        "payload_authorized": selected.payload_authorized,
+        "valid_until_ms": selected.snapshot.get("valid_until_ms"),
+        "live_submit_ready_false_reason": ""
+        if selected.submit_authorized
+        else ",".join(selected.failure_reasons),
+        "execution_attempt_required_for_lifecycle_entry": True,
+    }
+
+
+def _pg_canonical_lane(
+    *,
+    strategy_group_id: str,
+    candidate: dict[str, Any],
+    selected: dict[str, Any],
+    current_lane: dict[str, Any],
+    truth: RuntimeSafetyTruth | None,
+) -> dict[str, Any]:
+    trusted_refs = _as_dict(
+        truth.snapshot.get("trusted_fact_refs") if truth is not None else {}
+    )
+    return {
+        "strategy_group_id": strategy_group_id,
+        "symbol": str(
+            selected.get("symbol")
+            or selected.get("symbol_or_basket")
+            or candidate.get("selected_symbol")
+            or ""
+        ),
+        "side": str(selected.get("side") or candidate.get("side") or ""),
+        "signal_event_id": str(
+            trusted_refs.get("signal_event_id")
+            or current_lane.get("signal_event_id")
+            or ""
+        ),
+        "action_time_lane_input_id": str(
+            current_lane.get("action_time_lane_input_id")
+            or (truth.lane_id if truth is not None else "")
+        ),
+        "ticket_id": str(trusted_refs.get("ticket_id") or ""),
+        "runtime_safety_snapshot_id": truth.snapshot_id if truth is not None else "",
+    }
+
+
+def _pg_secondary_blockers(
+    rows: list[dict[str, Any]],
+    *,
+    selected_blocker: str,
+) -> list[str]:
+    blockers = [
+        _normalize_pg_tradeability_blocker(str(row.get("first_blocker") or ""))
+        for row in rows
+    ]
+    return [
+        blocker
+        for blocker in dict.fromkeys(blockers)
+        if blocker and blocker != selected_blocker
+    ]
+
+
+def _pg_decision_detail(
+    *,
+    blocker: str,
+    candidate: dict[str, Any],
+    selected: dict[str, Any],
+    lane_truth: RuntimeSafetyTruth | None,
+) -> str:
+    if blocker == "market_wait_validated":
+        return "PG current admission, scope, watcher, facts, and action-time capability are closed; no fresh eligible signal exists"
+    if blocker == "computed_not_satisfied":
+        failed = _string_list(
+            _as_dict(selected.get("public_facts_state")).get(
+                "computed_not_satisfied"
+            )
+        )
+        return "PG current detector ran; strategy facts are not satisfied" + (
+            f": {','.join(failed)}" if failed else ""
+        )
+    if blocker == "active_position_resolution":
+        return "Current Runtime Safety State reports an active position or open-order conflict"
+    if blocker == "hard_safety_stop" and lane_truth is not None:
+        return "Current Runtime Safety State is blocked: " + ",".join(
+            _string_list(lane_truth.snapshot.get("blockers"))
+        )
+    return str(
+        selected.get("evidence_ref")
+        or candidate.get("evidence")
+        or f"PG current first blocker is {blocker}"
+    )
+
+
+def _tradeability_inputs_from_control_state(
+    control_state: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    candidate_rows = _active_candidate_scope_rows(control_state)
+    if not candidate_rows:
+        raise ValueError("PG control state has no active candidate scope rows")
+    strategy_groups = _active_strategy_group_rows(control_state)
+    strategy_versions = _current_strategy_version_rows(control_state)
+    policy_by_id = _policy_rows_by_id(control_state)
+    runtime_by_candidate = _active_runtime_scope_by_candidate(control_state)
+    event_binding_by_candidate = _active_event_binding_by_candidate(control_state)
+    event_by_id = _current_event_rows_by_id(control_state)
+    readiness_by_lane = _current_pretrade_readiness_by_lane(control_state)
+    fact_by_lane = _current_fact_snapshot_by_lane(control_state)
+    signal_by_lane = _fresh_signal_by_lane(control_state)
+    coverage_by_lane = _current_watcher_coverage_by_lane(control_state)
+
+    for row in candidate_rows:
+        candidate_scope_id = str(row.get("candidate_scope_id") or "")
+        if candidate_scope_id not in runtime_by_candidate:
+            raise ValueError(f"{candidate_scope_id} has no active PG runtime scope")
+        if candidate_scope_id not in event_binding_by_candidate:
+            raise ValueError(f"{candidate_scope_id} has no active PG event binding")
+
+    return {
+        "registry": _pg_registry_projection(
+            strategy_groups=strategy_groups,
+            strategy_versions=strategy_versions,
+            control_state=control_state,
+        ),
+        "tier_policy": _pg_tier_policy_projection(
+            candidate_rows=candidate_rows,
+            policy_by_id=policy_by_id,
+            runtime_by_candidate=runtime_by_candidate,
+        ),
+        "capital_trial_envelope_projection": _pg_capital_projection(
+            candidate_rows=candidate_rows,
+            policy_by_id=policy_by_id,
+            runtime_by_candidate=runtime_by_candidate,
+            fact_by_lane=fact_by_lane,
+            readiness_by_lane=readiness_by_lane,
+        ),
+        "signal_coverage": _pg_signal_coverage_projection(signal_by_lane=signal_by_lane),
+        "runtime_safety_state": _pg_runtime_safety_projection(control_state),
+        "three_strategy_live_trial_portfolio": _pg_portfolio_projection(
+            candidate_rows=candidate_rows,
+            policy_by_id=policy_by_id,
+            runtime_by_candidate=runtime_by_candidate,
+            readiness_by_lane=readiness_by_lane,
+            fact_by_lane=fact_by_lane,
+        ),
+        "cpm_identity_routing_decision": _pg_cpm_identity_projection(candidate_rows),
+        "cpm_owner_trial_policy_scope": _pg_owner_policy_scope_projection(
+            strategy_group_id="CPM-RO-001",
+            candidate_rows=candidate_rows,
+            policy_by_id=policy_by_id,
+        ),
+        "cpm_required_facts_mapping": _pg_cpm_required_facts_projection(
+            control_state
+        ),
+        "cpm_runtime_signal_capture": _pg_runtime_signal_capture_projection(
+            strategy_group_id="CPM-RO-001",
+            candidate_rows=candidate_rows,
+            readiness_by_lane=readiness_by_lane,
+            fact_by_lane=fact_by_lane,
+            signal_by_lane=signal_by_lane,
+            coverage_by_lane=coverage_by_lane,
+        ),
+        "cpm_dry_run_submit_rehearsal": _pg_cpm_rehearsal_projection(
+            candidate_rows=candidate_rows,
+            runtime_by_candidate=runtime_by_candidate,
+        ),
+        "brf2_owner_trial_policy_scope": _pg_owner_policy_scope_projection(
+            strategy_group_id="BRF2-001",
+            candidate_rows=candidate_rows,
+            policy_by_id=policy_by_id,
+        ),
+        "brf2_runtime_signal_capture": _pg_runtime_signal_capture_projection(
+            strategy_group_id="BRF2-001",
+            candidate_rows=candidate_rows,
+            readiness_by_lane=readiness_by_lane,
+            fact_by_lane=fact_by_lane,
+            signal_by_lane=signal_by_lane,
+            coverage_by_lane=coverage_by_lane,
+        ),
+        "mi_trial_admission_decision": _pg_mi_trial_admission_projection(
+            candidate_rows
+        ),
+        "replay_live_parity_audit": _pg_replay_live_parity_projection(
+            candidate_rows=candidate_rows,
+            readiness_by_lane=readiness_by_lane,
+            fact_by_lane=fact_by_lane,
+            signal_by_lane=signal_by_lane,
+            coverage_by_lane=coverage_by_lane,
+        ),
+        "strategy_fresh_signal_action_time_boundary": (
+            _pg_action_time_boundary_projection(
+                candidate_rows=candidate_rows,
+                event_binding_by_candidate=event_binding_by_candidate,
+                event_by_id=event_by_id,
+                signal_by_lane=signal_by_lane,
+                fact_by_lane=fact_by_lane,
+            )
+        ),
+    }
+
+
+def _active_candidate_scope_rows(control_state: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(
+        [
+            row
+            for row in _dict_rows(control_state.get("candidate_scope"))
+            if row.get("status") == "active"
+        ],
+        key=lambda row: (
+            _strategy_sort_key(str(row.get("strategy_group_id") or "")),
+            _int(row.get("priority_rank")) or 999,
+            str(row.get("symbol") or ""),
+            str(row.get("side") or ""),
+        ),
+    )
+
+
+def _active_strategy_group_rows(
+    control_state: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    return {
+        str(row.get("strategy_group_id") or ""): row
+        for row in _dict_rows(control_state.get("strategy_groups"))
+        if row.get("status") == "active"
+    }
+
+
+def _current_strategy_version_rows(
+    control_state: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    return {
+        str(row.get("strategy_group_id") or ""): row
+        for row in _dict_rows(control_state.get("strategy_group_versions"))
+        if row.get("status") == "current"
+    }
+
+
+def _policy_rows_by_id(control_state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(row.get("policy_current_id") or ""): row
+        for row in _dict_rows(control_state.get("owner_policy_current"))
+    }
+
+
+def _active_runtime_scope_by_candidate(
+    control_state: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    bindings: dict[str, dict[str, Any]] = {}
+    for row in _dict_rows(control_state.get("runtime_scope_bindings")):
+        if row.get("status") != "active":
+            continue
+        candidate_scope_id = str(row.get("candidate_scope_id") or "")
+        if candidate_scope_id in bindings:
+            raise ValueError(f"multiple active runtime scopes for {candidate_scope_id}")
+        bindings[candidate_scope_id] = row
+    return bindings
+
+
+def _active_event_binding_by_candidate(
+    control_state: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    bindings: dict[str, dict[str, Any]] = {}
+    for row in _dict_rows(control_state.get("candidate_scope_event_bindings")):
+        if row.get("status") != "active":
+            continue
+        candidate_scope_id = str(row.get("candidate_scope_id") or "")
+        if candidate_scope_id in bindings:
+            raise ValueError(f"multiple active event bindings for {candidate_scope_id}")
+        bindings[candidate_scope_id] = row
+    return bindings
+
+
+def _current_event_rows_by_id(
+    control_state: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    return {
+        str(row.get("event_spec_id") or ""): row
+        for row in _dict_rows(control_state.get("strategy_side_event_specs"))
+        if row.get("status") == "current"
+    }
+
+
+def _current_pretrade_readiness_by_lane(
+    control_state: dict[str, Any],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
+    return {
+        _lane_key(row): row
+        for row in _dict_rows(control_state.get("pretrade_readiness_rows"))
+        if is_current_pretrade_readiness(row, now_ms)
+    }
+
+
+def _current_fact_snapshot_by_lane(
+    control_state: dict[str, Any],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
+    snapshots: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in _dict_rows(control_state.get("runtime_fact_snapshots")):
+        if not is_current_fact_snapshot(row, now_ms):
+            continue
+        key = _lane_key(row)
+        if not all(key):
+            continue
+        current = snapshots.get(key)
+        if current is None or _int(row.get("observed_at_ms")) >= _int(
+            current.get("observed_at_ms")
+        ):
+            snapshots[key] = row
+    return snapshots
+
+
+def _fresh_signal_by_lane(
+    control_state: dict[str, Any],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
+    signals: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in _dict_rows(control_state.get("live_signal_events")):
+        if not is_current_live_signal(row, now_ms):
+            continue
+        key = _lane_key(row)
+        current = signals.get(key)
+        if current is None or _int(row.get("observed_at_ms")) >= _int(
+            current.get("observed_at_ms")
+        ):
+            signals[key] = row
+    return signals
+
+
+def _control_state_now_ms(control_state: dict[str, Any]) -> int:
+    try:
+        value = int(control_state.get("read_now_ms") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value > 0:
+        return value
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
+def _current_watcher_coverage_by_lane(
+    control_state: dict[str, Any],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    now_ms = _control_state_now_ms(control_state)
+    coverage: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in _dict_rows(control_state.get("watcher_runtime_coverage")):
+        if not is_current_watcher_coverage(row, now_ms):
+            continue
+        key = _lane_key(row)
+        current = coverage.get(key)
+        if current is None or _int(row.get("last_tick_at_ms")) >= _int(
+            current.get("last_tick_at_ms")
+        ):
+            coverage[key] = row
+    return coverage
+
+
+def _lane_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("strategy_group_id") or ""),
+        str(row.get("symbol") or ""),
+        str(row.get("side") or ""),
+    )
+
+
+def _pg_registry_projection(
+    *,
+    strategy_groups: dict[str, dict[str, Any]],
+    strategy_versions: dict[str, dict[str, Any]],
+    control_state: dict[str, Any],
+) -> dict[str, Any]:
+    facts_by_version: dict[str, list[str]] = {}
+    for row in _dict_rows(control_state.get("required_fact_contracts")):
+        version_id = str(row.get("strategy_group_version_id") or "")
+        fact_key = str(row.get("fact_key") or "")
+        if version_id and fact_key:
+            facts_by_version.setdefault(version_id, []).append(fact_key)
+    rows = []
+    for strategy_group_id, group in sorted(
+        strategy_groups.items(),
+        key=lambda item: _strategy_sort_key(item[0]),
+    ):
+        version = strategy_versions.get(strategy_group_id, {})
+        version_id = str(
+            version.get("strategy_group_version_id")
+            or group.get("current_version_id")
+            or ""
+        )
+        rows.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "default_tier": str(group.get("default_tier") or "L4"),
+                "trial_eligible": True,
+                "supported_sides": _string_list(version.get("supported_sides")),
+                "required_facts_summary": {
+                    "source": "pg_required_fact_contracts",
+                    "fact_keys": sorted(set(facts_by_version.get(version_id, []))),
+                },
+                "source_mode": "db_backed",
+            }
+        )
+    return {
+        "status": "registry_ready",
+        "source_mode": "db_backed",
+        "rows": rows,
+    }
+
+
+def _pg_tier_policy_projection(
+    *,
+    candidate_rows: list[dict[str, Any]],
+    policy_by_id: dict[str, dict[str, Any]],
+    runtime_by_candidate: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    current: dict[str, dict[str, Any]] = {}
+    for strategy_group_id, rows in _candidate_rows_by_strategy(candidate_rows).items():
+        policies = [
+            policy_by_id.get(str(row.get("policy_current_id") or ""), {})
+            for row in rows
+        ]
+        runtime_scopes = [
+            runtime_by_candidate.get(str(row.get("candidate_scope_id") or ""), {})
+            for row in rows
+        ]
+        current[strategy_group_id] = {
+            "tier": _first_non_empty(policy.get("tier") for policy in policies)
+            or "L4",
+            "mode": "armed_observation",
+            "pretrade_candidate_allowed": any(
+                policy.get("pretrade_candidate_allowed") is True
+                for policy in policies
+            ),
+            "action_time_rehearsal_allowed": any(
+                policy.get("action_time_rehearsal_allowed") is True
+                for policy in policies
+            ),
+            "live_submit_scope_present": any(
+                scope.get("live_submit_allowed") is True for scope in runtime_scopes
+            ),
+            "source_mode": "db_backed",
+        }
+    return {
+        "source_mode": "db_backed",
+        "current_strategy_groups": current,
+    }
+
+
+def _pg_capital_projection(
+    *,
+    candidate_rows: list[dict[str, Any]],
+    policy_by_id: dict[str, dict[str, Any]],
+    runtime_by_candidate: dict[str, dict[str, Any]],
+    fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for strategy_group_id, group_rows in _candidate_rows_by_strategy(
+        candidate_rows
+    ).items():
+        selected = group_rows[0]
+        policies = [
+            policy_by_id.get(str(row.get("policy_current_id") or ""), {})
+            for row in group_rows
+        ]
+        runtime_scopes = [
+            runtime_by_candidate.get(str(row.get("candidate_scope_id") or ""), {})
+            for row in group_rows
+        ]
+        rows.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "candidate_family": "pg_runtime_control_state",
+                "candidate_status": "active_runtime_scope",
+                "research_intake_position": "admitted_runtime_candidate",
+                "identity_status": "registry_identity_resolved",
+                "execution_tier": _first_non_empty(
+                    policy.get("tier") for policy in policies
+                )
+                or "L4",
+                "pool_stage": "armed_observation",
+                "promotion_scope": "live_submit_hard_gated",
+                "tiny_live_ready": False,
+                "owner_policy_required": False,
+                "risk_boundary_ready": all(
+                    scope.get("symbol_side_scope_closed") is True
+                    and scope.get("notional_leverage_scope_closed") is True
+                    for scope in runtime_scopes
+                    if scope
+                ),
+                "risk_boundary_missing": [],
+                "risk_envelope": _pg_risk_envelope(policies),
+                "symbol_scope": sorted(
+                    {str(row.get("symbol") or "") for row in group_rows}
+                ),
+                "side_scope": sorted({str(row.get("side") or "") for row in group_rows}),
+                "trial_recommendation": "pg_control_state_armed_observation",
+                "trial_blockers": _pg_group_trial_blockers(
+                    group_rows=group_rows,
+                    fact_by_lane=fact_by_lane,
+                    readiness_by_lane=readiness_by_lane,
+                ),
+                "required_facts_draft": [],
+            }
+        )
+    return {
+        "status": "pg_runtime_control_state_projection_ready",
+        "source_mode": "db_backed",
+        "capital_trial_eligibility_rows": rows,
+        "selected_non_mpg_trial_candidate": rows[0] if rows else {},
+    }
+
+
+def _pg_signal_coverage_projection(
+    *,
+    signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "status": "pg_signal_coverage_ready",
+        "source_mode": "db_backed",
+        "checks": {
+            "runtime_ready_signal_count": len(signal_by_lane),
+            "broader_would_enter_signal_count": 0,
+        },
+        "broader_observation": {"would_enter_signals": []},
+    }
+
+
+def _pg_runtime_safety_projection(control_state: dict[str, Any]) -> dict[str, Any]:
+    truths = current_runtime_safety_truths(control_state)
+    if not truths:
+        return {
+            "schema": "brc.strategygroup_runtime_safety_state.v1",
+            "status": "runtime_safety_state_ready",
+            "source_mode": "db_backed",
+            "checks": {
+                "live_submit_ready": False,
+                "fresh_signal_state": "unknown",
+            },
+            "decision": {
+                "live_submit_ready": False,
+                "live_submit_ready_false_reason": "no_runtime_safety_snapshot",
+            },
+            "runtime_safety_state": {
+                "state_family": "Runtime Safety State",
+                "status": "not_ready",
+                "primary_judgment_source": False,
+                "live_submit_ready": False,
+                "ready_for_finalgate_checkpoint": False,
+                "fresh_signal_state": "unknown",
+                "live_submit_ready_false_reason": "no_runtime_safety_snapshot",
+            },
+        }
+    truth = truths[0]
+    latest = truth.snapshot
+    live_ready = truth.submit_authorized
+    strategy_group_id = str(latest.get("strategy_group_id") or "")
+    return {
+        "schema": "brc.strategygroup_runtime_safety_state.v1",
+        "status": "live_submit_ready" if live_ready else "runtime_safety_state_ready",
+        "source_mode": "db_backed",
+        "strategy_group_id": strategy_group_id,
+        "symbol": str(latest.get("symbol") or ""),
+        "side": str(latest.get("side") or ""),
+        "checks": {
+            "live_submit_ready": live_ready,
+            "fresh_signal_state": "fresh" if latest.get("facts_fresh") is True else "unknown",
+        },
+        "decision": {
+            "live_submit_ready": live_ready,
+            "live_submit_ready_false_reason": ""
+            if live_ready
+            else ",".join(truth.failure_reasons)
+            or _runtime_safety_false_reason(latest),
+        },
+        "runtime_safety_state": {
+            "state_family": "Runtime Safety State",
+            "status": str(latest.get("safety_state") or "not_ready"),
+            "primary_judgment_source": False,
+            "live_submit_ready": live_ready,
+            "ready_for_finalgate_checkpoint": latest.get("finalgate_ready") is True,
+            "fresh_signal_state": "fresh"
+            if latest.get("facts_fresh") is True
+            else "unknown",
+            "live_submit_ready_false_reason": ""
+            if live_ready
+            else ",".join(truth.failure_reasons)
+            or _runtime_safety_false_reason(latest),
+            "candidate_authorization_state": {
+                "state_role": "candidate_authorization",
+                "strategy_group_id": strategy_group_id,
+                "status": "authorization_evidence_created"
+                if live_ready
+                else "candidate_authorization_not_reached",
+                "primary_judgment_source": False,
+                "shadow_candidate_evidence_ready": live_ready,
+                "authorization_evidence_created": live_ready,
+                "ready_for_finalgate_checkpoint": latest.get("finalgate_ready") is True,
+                "first_blocker_class": "",
+                "next_runtime_step": "",
+            },
+        },
+        "strategy_group_ids": [strategy_group_id] if strategy_group_id else [],
+        "safety_invariants": {
+            "calls_finalgate": False,
+            "calls_operation_layer": False,
+            "calls_exchange_write": False,
+            "places_order": False,
+        },
+    }
+
+
+def _pg_portfolio_projection(
+    *,
+    candidate_rows: list[dict[str, Any]],
+    policy_by_id: dict[str, dict[str, Any]],
+    runtime_by_candidate: dict[str, dict[str, Any]],
+    readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    seats: list[dict[str, Any]] = []
+    for strategy_group_id, rows in _candidate_rows_by_strategy(candidate_rows).items():
+        selected = rows[0]
+        policies = [
+            policy_by_id.get(str(row.get("policy_current_id") or ""), {})
+            for row in rows
+        ]
+        runtime_scopes = [
+            runtime_by_candidate.get(str(row.get("candidate_scope_id") or ""), {})
+            for row in rows
+        ]
+        seats.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "stage": "armed_observation",
+                "owner_policy_recorded": bool(policies),
+                "owner_policy_scope_missing": not bool(policies),
+                "required_facts_mapping_ready": True,
+                "watcher_scope_ready": bool(runtime_scopes),
+                "runtime_readiness": {
+                    "armed_observation_ready": bool(runtime_scopes),
+                    "required_facts_mapping_ready": True,
+                    "watcher_scope_ready": bool(runtime_scopes),
+                },
+                "policy_scope": _pg_policy_scope(
+                    strategy_group_id=strategy_group_id,
+                    candidate_rows=rows,
+                    policies=policies,
+                ),
+                "first_tradeability_blocker": _pg_group_first_blocker(
+                    rows=rows,
+                    fact_by_lane=fact_by_lane,
+                    readiness_by_lane=readiness_by_lane,
+                ),
+                "primary_symbol": str(selected.get("symbol") or ""),
+                "primary_side": str(selected.get("side") or ""),
+            }
+        )
+    return {
+        "status": "pg_strategy_live_trial_portfolio_ready",
+        "source_mode": "db_backed",
+        "strategy_group_seats": seats,
+        "portfolio_trial_envelope": {
+            "source": "pg_owner_policy_current",
+            "capital_scope": "owner_subaccount_runtime_scope",
+        },
+    }
+
+
+def _pg_cpm_identity_projection(
+    candidate_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    present = any(
+        row.get("strategy_group_id") == "CPM-RO-001" for row in candidate_rows
+    )
+    return {
+        "status": "cpm_identity_routing_decision_ready" if present else "missing",
+        "identity_decision": "standalone_trial_asset" if present else "",
+        "cpm_long_vs_mpg_long_distinct": present,
+        "source_mode": "db_backed",
+    }
+
+
+def _pg_owner_policy_scope_projection(
+    *,
+    strategy_group_id: str,
+    candidate_rows: list[dict[str, Any]],
+    policy_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    policies = [
+        policy_by_id.get(str(row.get("policy_current_id") or ""), {})
+        for row in candidate_rows
+        if row.get("strategy_group_id") == strategy_group_id
+    ]
+    policies = [policy for policy in policies if policy]
+    if not policies:
+        return {}
+    return {
+        "status": "owner_trial_policy_scope_ready",
+        "owner_policy_recorded": True,
+        "cpm_policy_scope_recorded": strategy_group_id == "CPM-RO-001",
+        "policy": _pg_policy_scope(
+            strategy_group_id=strategy_group_id,
+            candidate_rows=[
+                row
+                for row in candidate_rows
+                if row.get("strategy_group_id") == strategy_group_id
+            ],
+            policies=policies,
+        ),
+        "source_mode": "db_backed",
+    }
+
+
+def _pg_cpm_required_facts_projection(
+    control_state: dict[str, Any],
+) -> dict[str, Any]:
+    has_cpm_facts = any(
+        str(row.get("strategy_group_version_id") or "").startswith("CPM-RO-001")
+        for row in _dict_rows(control_state.get("required_fact_contracts"))
+    ) or any(
+        row.get("strategy_group_id") == "CPM-RO-001"
+        for row in _dict_rows(control_state.get("strategy_event_required_facts"))
+    )
+    return {
+        "status": "cpm_required_facts_mapping_ready" if has_cpm_facts else "missing",
+        "required_facts_mapping_ready": has_cpm_facts,
+        "source_mode": "db_backed",
+    }
+
+
+def _pg_runtime_signal_capture_projection(
+    *,
+    strategy_group_id: str,
+    candidate_rows: list[dict[str, Any]],
+    readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    coverage_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    group_rows = [
+        row for row in candidate_rows if row.get("strategy_group_id") == strategy_group_id
+    ]
+    if not group_rows:
+        return {}
+    best = _pg_best_candidate_row(
+        group_rows,
+        readiness_by_lane=readiness_by_lane,
+        fact_by_lane=fact_by_lane,
+        signal_by_lane=signal_by_lane,
+        coverage_by_lane=coverage_by_lane,
+    )
+    key = _lane_key(best)
+    signal = signal_by_lane.get(key, {})
+    facts = fact_by_lane.get(key, {})
+    readiness = readiness_by_lane.get(key, {})
+    coverage = coverage_by_lane.get(key, {})
+    first_blocker = _pg_lane_first_blocker(
+        candidate=best,
+        readiness=readiness,
+        facts=facts,
+        signal=signal,
+        coverage=coverage,
+    )
+    signal_state = (
+        "fresh_signal_present"
+        if signal
+        else "blocked_by_disable_fact"
+        if first_blocker == "computed_not_satisfied"
+        and strategy_group_id == "BRF2-001"
+        else "fresh_signal_absent"
+    )
+    return {
+        "status": (
+            "cpm_runtime_signal_capture_ready"
+            if strategy_group_id == "CPM-RO-001"
+            else "brf2_runtime_signal_capture_ready"
+        ),
+        "source_mode": "db_backed",
+        "checks": {
+            "watcher_scope_ready": bool(coverage) or bool(readiness) or bool(facts),
+        },
+        "signal_detector_preview": {
+            "strategy_group_id": strategy_group_id,
+            "symbol": str(best.get("symbol") or ""),
+            "side": str(best.get("side") or ""),
+            "current_signal_state": signal_state,
+            "first_blocker_class": first_blocker
+            if signal_state != "fresh_signal_absent"
+            else (
+                "fresh_cpm_long_signal_absent"
+                if strategy_group_id == "CPM-RO-001"
+                else "fresh_brf2_short_signal_absent"
+            ),
+            "first_blocker_owner": BLOCKER_OWNER_BY_CLASS.get(
+                first_blocker,
+                "market",
+            ),
+            "signal_capture_checkpoint": _next_action_for_contract(first_blocker),
+        },
+    }
+
+
+def _pg_cpm_rehearsal_projection(
+    *,
+    candidate_rows: list[dict[str, Any]],
+    runtime_by_candidate: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    ready = any(
+        row.get("strategy_group_id") == "CPM-RO-001"
+        and runtime_by_candidate.get(str(row.get("candidate_scope_id") or ""), {}).get(
+            "live_submit_allowed"
+        )
+        is True
+        for row in candidate_rows
+    )
+    return {
+        "status": "cpm_dry_run_submit_rehearsal_shape_ready" if ready else "missing",
+        "dry_run_submit_rehearsal": "shape_ready" if ready else "missing",
+        "checks": {"submit_rehearsal_shape_ready": ready},
+        "source_mode": "db_backed",
+    }
+
+
+def _pg_mi_trial_admission_projection(
+    candidate_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    present = any(row.get("strategy_group_id") == "MI-001" for row in candidate_rows)
+    return {
+        "schema": MI_TRIAL_ADMISSION_SCHEMA,
+        "status": "mi_trial_admission_decision_ready" if present else "missing",
+        "trial_admission_decision": "runtime_scope_admitted" if present else "",
+        "promotion_scope": "armed_observation" if present else "",
+        "readonly_observation_scope_attached": False,
+        "source_mode": "db_backed",
+    }
+
+
+def _pg_replay_live_parity_projection(
+    *,
+    candidate_rows: list[dict[str, Any]],
+    readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    coverage_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    rows = []
+    for candidate in candidate_rows:
+        key = _lane_key(candidate)
+        readiness = readiness_by_lane.get(key, {})
+        facts = fact_by_lane.get(key, {})
+        signal = signal_by_lane.get(key, {})
+        coverage = coverage_by_lane.get(key, {})
+        blocker = _pg_lane_first_blocker(
+            candidate=candidate,
+            readiness=readiness,
+            facts=facts,
+            signal=signal,
+            coverage=coverage,
+        )
+        rows.append(
+            {
+                "strategy_group_id": key[0],
+                "symbol": key[1],
+                "side": key[2],
+                "blocker_class": blocker,
+                "detector_attached": blocker
+                not in {"detector_not_attached", "watcher_tick_missing"},
+                "watcher_tick_present": bool(coverage)
+                or facts.get("freshness_state") == "fresh"
+                or readiness.get("watcher_state") == "fresh",
+                "computed": facts.get("computed") is True
+                or readiness.get("public_facts_state")
+                in {"satisfied", "computed_not_satisfied"},
+                "fresh_signal_present": bool(signal),
+                "failed_facts": _pg_failed_facts(readiness=readiness, facts=facts),
+                "next_action": _next_action_for_contract(blocker),
+                "after_next_state": _after_next_state_for_contract(blocker),
+                "live_submit_scope_priority": _int(candidate.get("priority_rank")),
+                "lane_scope": "pg_runtime_control_state",
+            }
+        )
+    return {
+        "schema": REPLAY_LIVE_PARITY_SCHEMA,
+        "status": "replay_live_parity_audit_ready",
+        "source_mode": "db_backed",
+        "per_symbol_mismatch_table": rows,
+    }
+
+
+def _pg_action_time_boundary_projection(
+    *,
+    candidate_rows: list[dict[str, Any]],
+    event_binding_by_candidate: dict[str, dict[str, Any]],
+    event_by_id: dict[str, dict[str, Any]],
+    signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    rows = []
+    for candidate in candidate_rows:
+        strategy_group_id = str(candidate.get("strategy_group_id") or "")
+        if strategy_group_id not in ACTION_TIME_BOUNDARY_STRATEGY_IDS:
+            continue
+        key = _lane_key(candidate)
+        signal = signal_by_lane.get(key, {})
+        facts = fact_by_lane.get(key, {})
+        binding = event_binding_by_candidate.get(
+            str(candidate.get("candidate_scope_id") or ""),
+            {},
+        )
+        event = event_by_id.get(str(binding.get("event_spec_id") or ""), {})
+        blocker = (
+            "market_wait_validated"
+            if signal and facts.get("satisfied") is True
+            else "action_time_boundary_not_reproduced"
+            if signal
+            else "market_wait_validated"
+            if facts.get("computed") is True and facts.get("satisfied") is True
+            else "watcher_tick_missing"
+        )
+        rows.append(
+            {
+                "strategy_group_id": strategy_group_id,
+                "symbol": key[1],
+                "side": key[2],
+                "event_spec_id": str(event.get("event_spec_id") or ""),
+                "blocker_class": blocker,
+                "first_blocker_detail": "PG action-time boundary projection",
+                "action_time_path_ready": blocker == "market_wait_validated",
+                "dry_run_submit_rehearsal_ready": blocker == "market_wait_validated",
+                "mismatch_count": 0 if blocker == "market_wait_validated" else 1,
+                "live_submit_scope_priority": _int(candidate.get("priority_rank")),
+                "lane_scope": "pg_runtime_control_state",
+                "after_next_state": _after_next_state_for_contract(blocker),
+            }
+        )
+    return {
+        "schema": ACTION_TIME_BOUNDARY_SCHEMA,
+        "status": "strategy_fresh_signal_action_time_boundary_ready",
+        "source_mode": "db_backed",
+        "strategy_rows": rows,
+    }
+
+
+def _candidate_rows_by_strategy(
+    candidate_rows: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in candidate_rows:
+        grouped.setdefault(str(row.get("strategy_group_id") or ""), []).append(row)
+    return {
+        strategy_group_id: sorted(
+            rows,
+            key=lambda row: (
+                _int(row.get("priority_rank")) or 999,
+                str(row.get("symbol") or ""),
+                str(row.get("side") or ""),
+            ),
+        )
+        for strategy_group_id, rows in grouped.items()
+        if strategy_group_id
+    }
+
+
+def _pg_best_candidate_row(
+    rows: list[dict[str, Any]],
+    *,
+    readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    coverage_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    return sorted(
+        rows,
+        key=lambda row: (
+            _pg_blocker_rank(
+                _pg_lane_first_blocker(
+                    candidate=row,
+                    readiness=readiness_by_lane.get(_lane_key(row), {}),
+                    facts=fact_by_lane.get(_lane_key(row), {}),
+                    signal=signal_by_lane.get(_lane_key(row), {}),
+                    coverage=coverage_by_lane.get(_lane_key(row), {}),
+                )
+            ),
+            _int(row.get("priority_rank")) or 999,
+            str(row.get("symbol") or ""),
+            str(row.get("side") or ""),
+        ),
+    )[0]
+
+
+def _pg_lane_first_blocker(
+    *,
+    candidate: dict[str, Any],
+    readiness: dict[str, Any],
+    facts: dict[str, Any],
+    signal: dict[str, Any],
+    coverage: dict[str, Any],
+) -> str:
+    explicit = str(readiness.get("first_blocker_class") or "")
+    if explicit:
+        return _contract_blocker_class(explicit, "not_tradable_facts")
+    if signal:
+        return (
+            "market_wait_validated"
+            if facts.get("satisfied") is True
+            else "action_time_boundary_not_reproduced"
+        )
+    if facts.get("computed") is True:
+        return (
+            "market_wait_validated"
+            if facts.get("satisfied") is True
+            else "computed_not_satisfied"
+        )
+    if coverage.get("coverage_state") == "covered":
+        return "computed_not_satisfied"
+    if not candidate.get("candidate_scope_id"):
+        return "scope_not_attached"
+    return "watcher_tick_missing"
+
+
+def _pg_group_first_blocker(
+    *,
+    rows: list[dict[str, Any]],
+    fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> str:
+    blockers = [
+        _pg_lane_first_blocker(
+            candidate=row,
+            readiness=readiness_by_lane.get(_lane_key(row), {}),
+            facts=fact_by_lane.get(_lane_key(row), {}),
+            signal={},
+            coverage={},
+        )
+        for row in rows
+    ]
+    return sorted(blockers, key=_pg_blocker_rank)[0] if blockers else "artifact_missing"
+
+
+def _pg_group_trial_blockers(
+    *,
+    group_rows: list[dict[str, Any]],
+    fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+) -> list[str]:
+    blocker = _pg_group_first_blocker(
+        rows=group_rows,
+        fact_by_lane=fact_by_lane,
+        readiness_by_lane=readiness_by_lane,
+    )
+    return [blocker]
+
+
+def _pg_blocker_rank(blocker: str) -> int:
+    return BLOCKER_PRIORITY.get(blocker, 999)
+
+
+def _pg_failed_facts(
+    *,
+    readiness: dict[str, Any],
+    facts: dict[str, Any],
+) -> list[str]:
+    return _string_list(
+        readiness.get("computed_not_satisfied") or facts.get("failed_facts")
+    )
+
+
+def _pg_risk_envelope(policies: list[dict[str, Any]]) -> dict[str, Any]:
+    policy = next((item for item in policies if item), {})
+    return {
+        "attempt_cap_per_review_cycle": _int(policy.get("attempt_cap")) or 1,
+        "daily_loss_cap_units": 1,
+        "max_notional": str(policy.get("max_notional") or ""),
+        "leverage": str(policy.get("leverage") or ""),
+    }
+
+
+def _pg_policy_scope(
+    *,
+    strategy_group_id: str,
+    candidate_rows: list[dict[str, Any]],
+    policies: list[dict[str, Any]],
+) -> dict[str, Any]:
+    policy = next((item for item in policies if item), {})
+    return {
+        "strategy_group_id": strategy_group_id,
+        "capital_scope": {"source": "pg_owner_policy_current"},
+        "profile": str(policy.get("runtime_profile_id") or ""),
+        "symbol_scope": sorted(
+            {str(row.get("symbol") or "") for row in candidate_rows}
+        ),
+        "side_scope": sorted({str(row.get("side") or "") for row in candidate_rows}),
+        "leverage_scenario": str(policy.get("leverage") or ""),
+        "max_notional": {"value": str(policy.get("max_notional") or "")},
+        "attempt_cap": _int(policy.get("attempt_cap")) or 1,
+        "loss_unit": {"value": str(policy.get("loss_unit") or "")},
+        "daily_loss_cap_units": 1,
+        "max_consecutive_losses": 1,
+        "valid_until": policy.get("valid_until_ms"),
+        "trial_identity": f"{strategy_group_id}_PG_RUNTIME_SCOPE",
+        "missing_policy_fields": [],
+        "owner_policy_recorded": bool(policies),
+    }
+
+
+def _latest_runtime_safety_row(control_state: dict[str, Any]) -> dict[str, Any]:
+    truths = current_runtime_safety_truths(control_state)
+    return truths[0].snapshot if truths else {}
+
+
+def _runtime_safety_false_reason(row: dict[str, Any]) -> str:
+    blockers = _string_list(row.get("blockers"))
+    if blockers:
+        return ",".join(blockers)
+    if row.get("active_position_conflict") is True:
+        return "active_position_resolution"
+    if row.get("facts_fresh") is not True:
+        return "facts_not_fresh"
+    if row.get("finalgate_ready") is not True:
+        return "action_time_finalgate"
+    if row.get("operation_layer_ready") is not True:
+        return "operation_layer_not_ready"
+    if row.get("protection_ready") is not True:
+        return "protection_not_ready"
+    return "submit_not_allowed"
+
+
+def _first_non_empty(values: Any) -> str:
+    for value in values:
+        if value not in (None, ""):
+            return str(value)
+    return ""
 
 
 def _decision_row(
@@ -497,6 +2198,9 @@ def _decision_row(
     cpm_dry_run_submit_rehearsal: dict[str, Any],
     trial_grade_row: dict[str, Any],
     runtime_safety_state: dict[str, Any],
+    replay_live_parity_audit: dict[str, Any],
+    mi_trial_admission_decision: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
     forbidden_effects: list[str],
 ) -> dict[str, Any]:
     blockers = [str(item) for item in candidate.get("trial_blockers") or []]
@@ -512,6 +2216,7 @@ def _decision_row(
         owner_policy_scope=owner_policy_scope,
         portfolio_seat=portfolio_seat,
         runtime_safety_state=runtime_safety_state,
+        mi_trial_admission_decision=mi_trial_admission_decision,
     )
     brf2_shadow_candidate_evidence_provenance = (
         _brf2_shadow_candidate_evidence_provenance(
@@ -543,6 +2248,11 @@ def _decision_row(
         cpm_runtime_signal_capture=cpm_runtime_signal_capture,
         cpm_shadow_candidate_evidence=cpm_shadow_candidate_evidence,
         cpm_dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
+        replay_live_parity_audit=replay_live_parity_audit,
+        mi_trial_admission_decision=mi_trial_admission_decision,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
         blockers=blockers,
         runtime_safety_state=runtime_safety_state,
         forbidden_effects=forbidden_effects,
@@ -605,6 +2315,60 @@ def _decision_row(
         and cpm_required_facts_mapping.get("required_facts_mapping_ready") is True
     ):
         required_facts_status = "ready"
+    market_wait_validation = _market_wait_validation(
+        strategy_group_id=strategy_group_id,
+        stage=stage,
+        classifier=classifier,
+        registry_present=registry_present,
+        tier_present=tier_present,
+        tier_row=tier_row,
+        portfolio_seat=portfolio_seat,
+        owner_policy_recorded=owner_policy_recorded,
+        required_facts_status=required_facts_status,
+        cpm_admission_policy_closed=cpm_admission_policy_closed,
+        cpm_required_facts_mapping=cpm_required_facts_mapping,
+        cpm_runtime_signal_capture=cpm_runtime_signal_capture,
+        cpm_dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
+        brf2_runtime_signal_capture=brf2_runtime_signal_capture,
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
+        runtime_safety_state=runtime_safety_state,
+    )
+    if (
+        classifier["first_blocker_class"] == "market_wait_validated"
+        and not market_wait_validation["valid"]
+    ):
+        classifier = _classifier(
+            "not_tradable_facts",
+            "artifact_missing",
+            "market_wait_validated checklist is incomplete",
+            "engineering",
+            "complete_market_wait_validation_checklist",
+            "market_wait_validated",
+        )
+        market_wait_validation = _market_wait_validation(
+            strategy_group_id=strategy_group_id,
+            stage=stage,
+            classifier=classifier,
+            registry_present=registry_present,
+            tier_present=tier_present,
+            tier_row=tier_row,
+            portfolio_seat=portfolio_seat,
+            owner_policy_recorded=owner_policy_recorded,
+            required_facts_status=required_facts_status,
+            cpm_admission_policy_closed=cpm_admission_policy_closed,
+            cpm_required_facts_mapping=cpm_required_facts_mapping,
+            cpm_runtime_signal_capture=cpm_runtime_signal_capture,
+            cpm_dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
+            brf2_runtime_signal_capture=brf2_runtime_signal_capture,
+            replay_live_parity_audit=replay_live_parity_audit,
+            strategy_fresh_signal_action_time_boundary=(
+                strategy_fresh_signal_action_time_boundary
+            ),
+            runtime_safety_state=runtime_safety_state,
+        )
     trade_paths = _trade_paths_for_strategy(
         strategy_group_id=strategy_group_id,
         row_classifier=classifier,
@@ -622,8 +2386,10 @@ def _decision_row(
         "stage": stage,
         "decision": classifier["decision"],
         "can_trade_now": classifier["decision"] == "tradable_now",
+        "canonical_lane": _as_dict(classifier.get("canonical_lane")),
         "first_blocker_class": classifier["first_blocker_class"],
         "first_blocker_detail": classifier["first_blocker_detail"],
+        "legacy_blocker_raw": classifier["legacy_blocker_raw"],
         "blocker_owner": classifier["blocker_owner"],
         "next_action": classifier["next_action"],
         "after_next_state": classifier["after_next_state"],
@@ -637,6 +2403,7 @@ def _decision_row(
         "resolved_blockers": resolved_blockers,
         "policy_scope": policy_scope,
         "required_facts_status": required_facts_status,
+        "market_wait_validation": market_wait_validation,
         "trade_paths": trade_paths,
         "observe_only_exit": observe_only_exit,
         "runtime_scope_status": {
@@ -682,6 +2449,16 @@ def _decision_row(
                 ).get("current_signal_state")
                 or ""
             ),
+            "mi_trial_admission_decision": str(
+                mi_trial_admission_decision.get("trial_admission_decision") or ""
+            )
+            if strategy_group_id == "MI-001"
+            else "",
+            "mi_promotion_scope": str(
+                mi_trial_admission_decision.get("promotion_scope") or ""
+            )
+            if strategy_group_id == "MI-001"
+            else "",
         },
         "signal_grade_status": signal_grade_status,
         "evidence_snapshot": _evidence_snapshot(
@@ -725,6 +2502,9 @@ def _first_blocker(
     cpm_runtime_signal_capture: dict[str, Any],
     cpm_shadow_candidate_evidence: dict[str, Any],
     cpm_dry_run_submit_rehearsal: dict[str, Any],
+    replay_live_parity_audit: dict[str, Any],
+    mi_trial_admission_decision: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
     blockers: list[str],
     runtime_safety_state: dict[str, Any],
     forbidden_effects: list[str],
@@ -764,10 +2544,38 @@ def _first_blocker(
             runtime_signal_capture=cpm_runtime_signal_capture,
             shadow_candidate_evidence=cpm_shadow_candidate_evidence,
             dry_run_submit_rehearsal=cpm_dry_run_submit_rehearsal,
+            replay_live_parity_audit=replay_live_parity_audit,
             blockers=blockers,
         )
         if cpm:
             return cpm
+    if strategy_group_id == "MI-001":
+        mi_guard = _mi_trial_admission_guard(mi_trial_admission_decision)
+        if mi_guard:
+            return mi_guard
+    if strategy_group_id == "MI-001" and _mi_trial_admission_candidate(
+        mi_trial_admission_decision
+    ):
+        if _mi_readonly_observation_scope_attached(mi_trial_admission_decision):
+            return _classifier(
+                "not_tradable_policy",
+                "policy_scope_missing",
+                (
+                    "MI trial admission candidate has readonly observation "
+                    "scope; Owner trial policy is not recorded"
+                ),
+                "owner",
+                "record_scoped_owner_policy",
+                "policy_scope_recorded",
+            )
+        return _classifier(
+            "not_tradable_asset_admission",
+            "scope_not_attached",
+            "MI trial admission candidate is recorded; runtime observation scope is not attached",
+            "engineering",
+            "attach_mi_trial_candidate_to_runtime_observation_scope",
+            "armed_observation",
+        )
     if stage == "observe_only_would_enter":
         exit_rule = _observe_only_exit_for_strategy(
             strategy_group_id=strategy_group_id,
@@ -830,6 +2638,15 @@ def _first_blocker(
                 if brf2_candidate_blocker:
                     return brf2_candidate_blocker
             return brf2_capture_blocker
+    external_blocker = _external_first_blocker(
+        strategy_group_id=strategy_group_id,
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
+    )
+    if external_blocker:
+        return external_blocker
     if strategy_group_id == "MPG-001" and _mpg_waits_for_market(
         tier_row=tier_row,
         runtime_safety_state=runtime_safety_state,
@@ -839,7 +2656,7 @@ def _first_blocker(
             "fresh_executable_signal_absent",
             "MPG is the admitted live lane, but no fresh executable signal exists",
             "market",
-            "continue_armed_observation_until_fresh_signal",
+            "continue_watcher_observation_until_fresh_signal",
             "live_submit_ready",
         )
 
@@ -906,7 +2723,7 @@ def _first_blocker(
             "fresh_executable_signal_absent",
             "admission and facts are closed; only fresh signal is missing",
             "market",
-            "continue_armed_observation_until_fresh_signal",
+            "continue_watcher_observation_until_fresh_signal",
             "live_submit_ready",
         )
     return _classifier(
@@ -947,7 +2764,7 @@ def _brf2_runtime_signal_capture_blocker(artifact: dict[str, Any]) -> dict[str, 
             "brf2_candidate_authorization_evidence_not_created",
             "BRF2 fresh signal is present in the non-executing detector; shadow evidence exists before official candidate authorization and action-time evidence",
             "runtime",
-            "build_brf2_shadow_candidate_evidence_for_action_time_chain",
+            "materialize_pg_brf2_candidate_authorization_for_action_time_chain",
             "shadow_candidate_evidence_ready",
         )
     if signal_state in {"fresh_signal_absent", "blocked_by_disable_fact"}:
@@ -979,6 +2796,7 @@ def _cpm_first_blocker(
     runtime_signal_capture: dict[str, Any],
     shadow_candidate_evidence: dict[str, Any],
     dry_run_submit_rehearsal: dict[str, Any],
+    replay_live_parity_audit: dict[str, Any],
     blockers: list[str],
 ) -> dict[str, str]:
     text = " ".join(
@@ -1127,6 +2945,14 @@ def _cpm_first_blocker(
             "live_submit_ready",
         )
 
+    external_blocker = _external_first_blocker(
+        strategy_group_id="CPM-RO-001",
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary={},
+    )
+    if external_blocker:
+        return external_blocker
+
     return _classifier(
         "not_tradable_market_wait",
         "fresh_cpm_long_signal_absent",
@@ -1221,6 +3047,128 @@ def _brf2_shadow_candidate_evidence_provenance(
     return _BRF2ShadowCandidateEvidenceProvenance.from_artifact(artifact).as_dict()
 
 
+def _market_wait_validation(
+    *,
+    strategy_group_id: str,
+    stage: str,
+    classifier: dict[str, str],
+    registry_present: bool,
+    tier_present: bool,
+    tier_row: dict[str, Any],
+    portfolio_seat: dict[str, Any],
+    owner_policy_recorded: bool,
+    required_facts_status: str,
+    cpm_admission_policy_closed: bool,
+    cpm_required_facts_mapping: dict[str, Any],
+    cpm_runtime_signal_capture: dict[str, Any],
+    cpm_dry_run_submit_rehearsal: dict[str, Any],
+    brf2_runtime_signal_capture: dict[str, Any],
+    replay_live_parity_audit: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
+    runtime_safety_state: dict[str, Any],
+) -> dict[str, Any]:
+    if classifier["first_blocker_class"] != "market_wait_validated":
+        return {"valid": False, "not_applicable": True, "checks": {}}
+
+    runtime_readiness = _as_dict(portfolio_seat.get("runtime_readiness"))
+    cpm_mapping_ready = (
+        cpm_required_facts_mapping.get("status") == "cpm_required_facts_mapping_ready"
+        and cpm_required_facts_mapping.get("required_facts_mapping_ready") is True
+    )
+    cpm_capture_ready = (
+        cpm_runtime_signal_capture.get("status") == "cpm_runtime_signal_capture_ready"
+        and _as_dict(cpm_runtime_signal_capture.get("checks")).get(
+            "watcher_scope_ready"
+        )
+        is True
+    )
+    cpm_rehearsal_ready = (
+        cpm_dry_run_submit_rehearsal.get("status")
+        in {
+            "cpm_dry_run_submit_rehearsal_passed",
+            "cpm_dry_run_submit_rehearsal_shape_ready",
+        }
+        and (
+            cpm_dry_run_submit_rehearsal.get("dry_run_submit_rehearsal")
+            in {"passed", "fresh_signal_passed", "shape_ready"}
+            or _as_dict(cpm_dry_run_submit_rehearsal.get("checks")).get(
+                "submit_rehearsal_shape_ready"
+            )
+            is True
+        )
+    )
+    brf2_capture_ready = (
+        brf2_runtime_signal_capture.get("status")
+        == "brf2_runtime_signal_capture_ready"
+    )
+    external_lane_checks = _market_wait_external_lane_checks(
+        strategy_group_id=strategy_group_id,
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
+    )
+    generic_runtime_ready = (
+        bool(portfolio_seat)
+        or runtime_readiness.get("armed_observation_ready") is True
+        or runtime_readiness.get("watcher_scope_ready") is True
+    )
+
+    checks = {
+        "asset_admission": stage
+        in {"armed_observation", "tiny_live_ready", "live_submit_ready"},
+        "scope": bool(registry_present or tier_present or portfolio_seat),
+        "policy": bool(
+            owner_policy_recorded
+            or cpm_admission_policy_closed
+            or portfolio_seat
+        ),
+        "symbol": bool(
+            strategy_group_id in {"CPM-RO-001", "BRF2-001"}
+            or external_lane_checks["symbol"]
+        ),
+        "detector": bool(
+            cpm_capture_ready
+            if strategy_group_id == "CPM-RO-001"
+            else brf2_capture_ready
+            if strategy_group_id == "BRF2-001"
+            else external_lane_checks["detector"]
+        ),
+        "watcher_input": bool(
+            cpm_capture_ready
+            if strategy_group_id == "CPM-RO-001"
+            else brf2_capture_ready
+            if strategy_group_id == "BRF2-001"
+            else external_lane_checks["watcher_input"]
+        ),
+        "facts": bool(
+            required_facts_status in {"ready", "action_time_only"}
+            or cpm_mapping_ready
+            or external_lane_checks["facts"]
+        ),
+        "failed_facts_clear": bool(
+            strategy_group_id in {"CPM-RO-001", "BRF2-001"}
+            or external_lane_checks["failed_facts_clear"]
+        ),
+        "classification": classifier["first_blocker_class"]
+        in CONTRACT_BLOCKER_CLASSES,
+        "action_time_path": bool(
+            cpm_rehearsal_ready
+            if strategy_group_id == "CPM-RO-001"
+            else brf2_capture_ready
+            if strategy_group_id == "BRF2-001"
+            else external_lane_checks["action_time_path"]
+        ),
+        "fresh_signal": classifier["legacy_blocker_raw"]
+        in LEGACY_BLOCKER_CLASS_MAP,
+    }
+    return {
+        "valid": all(checks.values()),
+        "not_applicable": False,
+        "checks": checks,
+    }
+
+
 def _classifier(
     decision: str,
     first_blocker_class: str,
@@ -1229,6 +3177,12 @@ def _classifier(
     next_action: str,
     after_next_state: str,
 ) -> dict[str, str]:
+    legacy_blocker_raw = first_blocker_class
+    if decision != "tradable_now":
+        contract_class = _contract_blocker_class(first_blocker_class, decision)
+        decision = BLOCKER_DECISION_BY_CLASS.get(contract_class, decision)
+        blocker_owner = BLOCKER_OWNER_BY_CLASS.get(contract_class, blocker_owner)
+        first_blocker_class = contract_class
     return {
         "decision": decision,
         "first_blocker_class": first_blocker_class,
@@ -1236,7 +3190,599 @@ def _classifier(
         "blocker_owner": blocker_owner,
         "next_action": next_action,
         "after_next_state": after_next_state,
+        "legacy_blocker_raw": legacy_blocker_raw,
     }
+
+
+def _external_first_blocker(
+    *,
+    strategy_group_id: str,
+    replay_live_parity_audit: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
+) -> dict[str, str]:
+    replay_guard = _external_artifact_guard(
+        artifact=replay_live_parity_audit,
+        artifact_name="replay_live_parity_audit",
+        expected_schema=REPLAY_LIVE_PARITY_SCHEMA,
+        expected_status="replay_live_parity_audit_ready",
+        required_strategy_ids=REPLAY_LIVE_PARITY_STRATEGY_IDS,
+        row_keys=("per_symbol_mismatch_table",),
+        strategy_group_id=strategy_group_id,
+    )
+    if replay_guard:
+        return replay_guard
+    action_time_guard = _external_artifact_guard(
+        artifact=strategy_fresh_signal_action_time_boundary,
+        artifact_name="strategy_fresh_signal_action_time_boundary",
+        expected_schema=ACTION_TIME_BOUNDARY_SCHEMA,
+        expected_status="strategy_fresh_signal_action_time_boundary_ready",
+        required_strategy_ids=ACTION_TIME_BOUNDARY_STRATEGY_IDS,
+        row_keys=(
+            "strategy_rows",
+            "per_strategy_boundary_table",
+            "boundary_rows",
+            "strategy_group_rows",
+            "decision_rows",
+        ),
+        strategy_group_id=strategy_group_id,
+    )
+    if action_time_guard:
+        return action_time_guard
+    rows = _external_blocker_rows(
+        strategy_group_id=strategy_group_id,
+        replay_live_parity_audit=replay_live_parity_audit,
+        strategy_fresh_signal_action_time_boundary=(
+            strategy_fresh_signal_action_time_boundary
+        ),
+    )
+    if not rows:
+        return {}
+    row = sorted(
+        rows,
+        key=_canonical_lane_sort_key,
+    )[0]
+    blocker_class = str(row.get("blocker_class") or "")
+    failed_facts = _string_list(row.get("failed_facts"))
+    symbol = str(row.get("symbol") or "strategy_scope")
+    detail = str(row.get("detail") or "")
+    if not detail:
+        detail = (
+            (
+                f"{strategy_group_id}/{symbol} external blocker classified as "
+                f"{blocker_class}"
+            )
+            if not failed_facts
+            else (
+                f"{strategy_group_id}/{symbol} computed facts not satisfied: "
+                f"{','.join(failed_facts)}"
+            )
+        )
+    next_action = str(row.get("next_action") or _next_action_for_contract(blocker_class))
+    classifier = _classifier(
+        BLOCKER_DECISION_BY_CLASS.get(blocker_class, "not_tradable_facts"),
+        blocker_class,
+        detail,
+        BLOCKER_OWNER_BY_CLASS.get(blocker_class, "engineering"),
+        next_action,
+        str(row.get("after_next_state") or _after_next_state_for_contract(blocker_class)),
+    )
+    classifier["canonical_lane"] = {
+        "strategy_group_id": strategy_group_id,
+        "symbol": symbol,
+        "first_blocker": blocker_class,
+        "next_action": next_action,
+        "mismatch_count": _int(row.get("mismatch_count")),
+        "live_submit_scope_priority": _int(row.get("live_submit_scope_priority")),
+        "lane_scope": str(row.get("lane_scope") or "unknown"),
+        "selection_rule": (
+            "first_blocker_priority->live_submit_scope_priority->"
+            "mismatch_count->symbol"
+        ),
+    }
+    return classifier
+
+
+def _external_blocker_rows(
+    *,
+    strategy_group_id: str,
+    replay_live_parity_audit: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in _dict_rows(replay_live_parity_audit.get("per_symbol_mismatch_table")):
+        if str(row.get("strategy_group_id") or "") != strategy_group_id:
+            continue
+        if not _external_row_shape_valid(row):
+            rows.append(
+                {
+                    "symbol": str(row.get("symbol") or ""),
+                    "blocker_class": "schema_invalid",
+                    "detail": "replay_live_parity_audit row shape is invalid",
+                    "next_action": "repair_artifact_schema_and_add_regression",
+                    "after_next_state": "artifact_schema_valid",
+                }
+            )
+            continue
+        blocker_class = _contract_blocker_class(
+            str(row.get("blocker_class") or row.get("first_blocker_class") or ""),
+            "not_tradable_facts",
+        )
+        rows.append(
+            {
+                "symbol": str(row.get("symbol") or ""),
+                "blocker_class": blocker_class,
+                "failed_facts": _string_list(row.get("failed_facts")),
+                "mismatch_count": _int(row.get("mismatch_count")),
+                "live_submit_scope_priority": _int(
+                    row.get("live_submit_scope_priority")
+                ),
+                "lane_scope": str(row.get("lane_scope") or "unknown"),
+                "next_action": str(
+                    row.get("next_action") or _next_action_for_contract(blocker_class)
+                ),
+                "after_next_state": _after_next_state_for_contract(blocker_class),
+            }
+        )
+    for row in _action_time_boundary_rows(strategy_fresh_signal_action_time_boundary):
+        if str(row.get("strategy_group_id") or "") != strategy_group_id:
+            continue
+        if not _external_row_shape_valid(row):
+            rows.append(
+                {
+                    "symbol": str(row.get("symbol") or ""),
+                    "blocker_class": "schema_invalid",
+                    "detail": (
+                        "strategy_fresh_signal_action_time_boundary row shape "
+                        "is invalid"
+                    ),
+                    "next_action": "repair_artifact_schema_and_add_regression",
+                    "after_next_state": "artifact_schema_valid",
+                }
+            )
+            continue
+        blocker_class = _contract_blocker_class(
+            str(
+                row.get("blocker_class")
+                or row.get("first_blocker_class")
+                or row.get("first_blocker")
+                or ""
+            ),
+            "not_tradable_execution_gate",
+        )
+        if not blocker_class:
+            continue
+        rows.append(
+            {
+                "symbol": str(row.get("symbol") or ""),
+                "blocker_class": blocker_class,
+                "mismatch_count": _int(row.get("mismatch_count")),
+                "live_submit_scope_priority": _int(
+                    row.get("live_submit_scope_priority")
+                ),
+                "lane_scope": str(row.get("lane_scope") or "action_time_boundary"),
+                "detail": str(
+                    row.get("first_blocker_detail")
+                    or row.get("detail")
+                    or row.get("first_blocker")
+                    or "action-time boundary did not reproduce"
+                ),
+                "next_action": _next_action_for_contract(blocker_class),
+                "after_next_state": str(
+                    row.get("after_next_state")
+                    or _after_next_state_for_contract(blocker_class)
+                ),
+            }
+        )
+    return rows
+
+
+def _canonical_lane_sort_key(row: dict[str, Any]) -> tuple[int, int, int, str]:
+    return (
+        BLOCKER_PRIORITY.get(str(row.get("blocker_class") or ""), 999),
+        -_int(row.get("live_submit_scope_priority")),
+        -_int(row.get("mismatch_count")),
+        str(row.get("symbol") or ""),
+    )
+
+
+def _market_wait_external_lane_checks(
+    *,
+    strategy_group_id: str,
+    replay_live_parity_audit: dict[str, Any],
+    strategy_fresh_signal_action_time_boundary: dict[str, Any],
+) -> dict[str, bool]:
+    parity_ready_symbols = {
+        str(row.get("symbol") or "")
+        for row in _dict_rows(replay_live_parity_audit.get("per_symbol_mismatch_table"))
+        if str(row.get("strategy_group_id") or "") == strategy_group_id
+        and str(row.get("symbol") or "")
+        and _contract_blocker_class(
+            str(row.get("blocker_class") or row.get("first_blocker_class") or ""),
+            "not_tradable_market_wait",
+        )
+        == "market_wait_validated"
+        and row.get("detector_attached") is True
+        and row.get("watcher_tick_present") is True
+        and row.get("computed") is True
+        and not _string_list(row.get("failed_facts"))
+    }
+    action_time_ready_symbols = {
+        str(row.get("symbol") or "")
+        for row in _action_time_boundary_rows(strategy_fresh_signal_action_time_boundary)
+        if str(row.get("strategy_group_id") or "") == strategy_group_id
+        and str(row.get("symbol") or "")
+        and _contract_blocker_class(
+            str(
+                row.get("blocker_class")
+                or row.get("first_blocker_class")
+                or row.get("first_blocker")
+                or ""
+            ),
+            "not_tradable_market_wait",
+        )
+        == "market_wait_validated"
+        and (
+            row.get("action_time_path_ready") is True
+            or row.get("dry_run_submit_rehearsal_ready") is True
+        )
+    }
+    matched_symbols = parity_ready_symbols & action_time_ready_symbols
+    return {
+        "symbol": bool(matched_symbols),
+        "detector": bool(matched_symbols),
+        "watcher_input": bool(matched_symbols),
+        "facts": bool(matched_symbols),
+        "failed_facts_clear": bool(matched_symbols),
+        "action_time_path": bool(matched_symbols),
+    }
+
+
+def _action_time_boundary_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for key in (
+        "strategy_rows",
+        "per_strategy_boundary_table",
+        "boundary_rows",
+        "strategy_group_rows",
+        "decision_rows",
+    ):
+        rows.extend(_dict_rows(artifact.get(key)))
+    return rows
+
+
+def _external_artifact_guard(
+    *,
+    artifact: dict[str, Any],
+    artifact_name: str,
+    expected_schema: str,
+    expected_status: str,
+    required_strategy_ids: set[str],
+    row_keys: tuple[str, ...],
+    strategy_group_id: str,
+) -> dict[str, str]:
+    if not artifact:
+        return {}
+    if strategy_group_id not in required_strategy_ids:
+        return {}
+    if _artifact_marked_fixture_or_partial(artifact):
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="schema_invalid",
+            detail=f"{artifact_name} is marked fixture or partial",
+        )
+    if _status(artifact) != expected_status:
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="schema_invalid",
+            detail=f"{artifact_name} status is not {expected_status}",
+        )
+    if artifact.get("schema") != expected_schema:
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="schema_invalid",
+            detail=f"{artifact_name} schema is not {expected_schema}",
+        )
+    if not _parseable_timestamp(str(artifact.get("generated_at_utc") or "")):
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="schema_invalid",
+            detail=f"{artifact_name} generated_at_utc is missing or invalid",
+        )
+    summary = _as_dict(artifact.get("summary"))
+    rows = _external_artifact_rows(artifact, row_keys)
+    strategy_ids = {
+        str(row.get("strategy_group_id") or "")
+        for row in rows
+        if str(row.get("strategy_group_id") or "")
+    }
+    summary_strategy_count = _int(summary.get("strategy_count"))
+    if summary_strategy_count < len(required_strategy_ids):
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="artifact_missing",
+            detail=f"{artifact_name} summary does not cover required WIP lanes",
+        )
+    if not required_strategy_ids <= strategy_ids:
+        return _invalid_external_artifact_classifier(
+            artifact_name=artifact_name,
+            blocker_class="artifact_missing",
+            detail=f"{artifact_name} rows do not cover required WIP lanes",
+        )
+    if artifact_name == "replay_live_parity_audit":
+        if _int(summary.get("replay_signal_count")) <= 0:
+            return _invalid_external_artifact_classifier(
+                artifact_name=artifact_name,
+                blocker_class="artifact_missing",
+                detail=f"{artifact_name} replay_signal_count is empty",
+            )
+        if not _dict_rows(artifact.get("per_symbol_mismatch_table")):
+            return _invalid_external_artifact_classifier(
+                artifact_name=artifact_name,
+                blocker_class="artifact_missing",
+                detail=f"{artifact_name} per_symbol_mismatch_table is empty",
+            )
+    return {}
+
+
+def _external_artifact_rows(
+    artifact: dict[str, Any],
+    row_keys: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for key in row_keys:
+        rows.extend(_dict_rows(artifact.get(key)))
+    return rows
+
+
+def _external_row_shape_valid(row: dict[str, Any]) -> bool:
+    if not str(row.get("strategy_group_id") or ""):
+        return False
+    blocker_class = str(
+        row.get("blocker_class")
+        or row.get("first_blocker_class")
+        or row.get("first_blocker")
+        or ""
+    )
+    if not blocker_class:
+        return False
+    return _contract_blocker_class(blocker_class) in CONTRACT_BLOCKER_CLASSES
+
+
+def _artifact_marked_fixture_or_partial(artifact: dict[str, Any]) -> bool:
+    status = _status(artifact).lower()
+    scope = str(artifact.get("scope") or "").lower()
+    marker_values = json.dumps(
+        [
+            artifact.get("fixture"),
+            artifact.get("partial"),
+            artifact.get("source"),
+            _as_dict(artifact.get("summary")).get("source"),
+            _as_dict(artifact.get("summary")).get("artifact_kind"),
+        ],
+        ensure_ascii=False,
+    ).lower()
+    return any(
+        token in status or token in scope or token in marker_values
+        for token in ("fixture", "partial")
+    )
+
+
+def _parseable_timestamp(value: str) -> bool:
+    if not value:
+        return False
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+def _invalid_external_artifact_classifier(
+    *,
+    artifact_name: str,
+    blocker_class: str,
+    detail: str,
+) -> dict[str, str]:
+    return _classifier(
+        BLOCKER_DECISION_BY_CLASS.get(blocker_class, "not_tradable_facts"),
+        blocker_class,
+        detail,
+        BLOCKER_OWNER_BY_CLASS.get(blocker_class, "engineering"),
+        _next_action_for_contract(blocker_class),
+        _after_next_state_for_contract(blocker_class),
+    )
+
+
+def _mi_trial_admission_candidate(artifact: dict[str, Any]) -> bool:
+    if _mi_trial_admission_guard(artifact):
+        return False
+    return (
+        _status(artifact) == "mi_trial_admission_decision_ready"
+        and artifact.get("trial_admission_decision")
+        == "trial_asset_admission_candidate"
+        and artifact.get("promotion_scope") == "trial_admission"
+    )
+
+
+def _mi_readonly_observation_scope_attached(artifact: dict[str, Any]) -> bool:
+    watcher_scope = _as_dict(artifact.get("watcher_scope"))
+    symbol_scope = _as_dict(artifact.get("symbol_scope"))
+    watcher_symbols = watcher_scope.get("symbol_scope")
+    readonly_candidates = symbol_scope.get("readonly_watcher_candidates")
+    return bool(
+        (isinstance(watcher_symbols, list) and watcher_symbols)
+        or (isinstance(readonly_candidates, list) and readonly_candidates)
+    )
+
+
+def _mi_trial_admission_present(artifact: dict[str, Any]) -> bool:
+    return bool(artifact) and (
+        _status(artifact) == "mi_trial_admission_decision_ready"
+        or artifact.get("trial_admission_decision") is not None
+        or artifact.get("promotion_scope") is not None
+        or artifact.get("strategy_group_id") == "MI-001"
+    )
+
+
+def _mi_trial_admission_guard(artifact: dict[str, Any]) -> dict[str, str]:
+    if not _mi_trial_admission_present(artifact):
+        return {}
+    if _artifact_marked_fixture_or_partial(artifact):
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail="mi_trial_admission_decision is marked fixture or partial",
+        )
+    if _status(artifact) != "mi_trial_admission_decision_ready":
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail=(
+                "mi_trial_admission_decision status is not "
+                "mi_trial_admission_decision_ready"
+            ),
+        )
+    if artifact.get("schema") != MI_TRIAL_ADMISSION_SCHEMA:
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail=(
+                "mi_trial_admission_decision schema is not "
+                f"{MI_TRIAL_ADMISSION_SCHEMA}"
+            ),
+        )
+    if not _parseable_timestamp(str(artifact.get("generated_at_utc") or "")):
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail="mi_trial_admission_decision generated_at_utc is missing or invalid",
+        )
+    if artifact.get("strategy_group_id") != "MI-001":
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail="mi_trial_admission_decision strategy_group_id is not MI-001",
+        )
+    tradeability = _as_dict(artifact.get("tradeability"))
+    if (
+        artifact.get("trial_admission_decision")
+        not in {"trial_asset_admission_candidate", "park"}
+        or artifact.get("promotion_scope") != "trial_admission"
+        or not str(tradeability.get("first_blocker") or "")
+    ):
+        return _invalid_external_artifact_classifier(
+            artifact_name="mi_trial_admission_decision",
+            blocker_class="schema_invalid",
+            detail="mi_trial_admission_decision row shape is invalid",
+        )
+    return {}
+
+
+def _contract_blocker_class(blocker: str, decision: str = "") -> str:
+    lowered = blocker.lower()
+    if blocker in CONTRACT_BLOCKER_CLASSES:
+        return blocker
+    if lowered in LEGACY_BLOCKER_CLASS_MAP:
+        return LEGACY_BLOCKER_CLASS_MAP[lowered]
+    if lowered in {"", "none"}:
+        return "market_wait_validated" if decision == "not_tradable_market_wait" else "artifact_missing"
+    if any(token in lowered for token in ("forbidden", "safety", "hard_stop")):
+        return "hard_safety_stop"
+    if any(token in lowered for token in ("owner", "capital", "trial_identity", "policy")):
+        return "policy_scope_missing"
+    if any(
+        token in lowered
+        for token in (
+            "registry",
+            "identity",
+            "tier",
+            "non_executing_trial_readiness",
+            "not_admitted",
+            "scope",
+        )
+    ):
+        return "scope_not_attached"
+    if any(token in lowered for token in ("schema", "decision_state_missing")):
+        return "schema_invalid"
+    if any(token in lowered for token in ("detector", "runtime_signal_capture_gap")):
+        return "detector_not_attached"
+    if any(token in lowered for token in ("watcher", "tick", "fact_input")):
+        return "watcher_tick_missing"
+    if any(token in lowered for token in ("role_only", "stop", "overfit", "role", "filler", "quality", "loss_envelope", "worthiness")):
+        return "review_only_warning"
+    if any(token in lowered for token in ("rule_mismatch", "replay_live")):
+        return "replay_live_rule_mismatch"
+    if any(
+        token in lowered
+        for token in (
+            "finalgate",
+            "operation_layer",
+            "candidate_authorization",
+            "shadow_candidate",
+            "dry_run_submit_rehearsal",
+            "action_time",
+            "exchange",
+            "account",
+            "protection",
+        )
+    ):
+        return "action_time_boundary_not_reproduced"
+    if lowered.startswith("fresh_") or "fresh_signal" in lowered:
+        return "schema_invalid"
+    if any(
+        token in lowered
+        for token in (
+            "required_facts",
+            "fact",
+            "stale",
+            "classifier",
+            "rewrite",
+            "squeeze",
+            "disable",
+            "forward",
+            "range_context",
+        )
+    ):
+        return "computed_not_satisfied" if decision == "not_tradable_market_wait" else "artifact_missing"
+    return "review_only_warning"
+
+
+def _next_action_for_contract(blocker_class: str) -> str:
+    return {
+        "artifact_missing": "generate_or_wire_current_artifact",
+        "schema_invalid": "repair_artifact_schema_and_add_regression",
+        "detector_not_attached": "attach_live_detector_to_selected_lane",
+        "watcher_tick_missing": "refresh_or_repair_watcher_fact_source",
+        "scope_not_attached": "produce_scoped_live_observation_or_scope_proposal",
+        "computed_not_satisfied": "continue_observation_with_failed_fact_matrix",
+        "replay_live_rule_mismatch": "normalize_replay_live_rules_or_record_revision",
+        "action_time_boundary_not_reproduced": "repair_non_executing_action_time_rehearsal_path",
+        "policy_scope_missing": "record_scoped_owner_policy",
+        "runtime_profile_scope_missing": "bind_runtime_profile_scope",
+        "market_wait_validated": "continue_watcher_observation_until_fresh_signal",
+        "active_position_resolution": "resolve_active_position_or_open_order",
+        "hard_safety_stop": "remove_hard_safety_violation",
+        "review_only_warning": "record_strategy_review_decision",
+    }.get(blocker_class, "repair_tradeability_blocker_classification")
+
+
+def _after_next_state_for_contract(blocker_class: str) -> str:
+    return {
+        "artifact_missing": "artifact_ready",
+        "schema_invalid": "artifact_schema_valid",
+        "detector_not_attached": "detector_attached",
+        "watcher_tick_missing": "watcher_tick_present",
+        "scope_not_attached": "armed_observation",
+        "computed_not_satisfied": "live_submit_ready",
+        "replay_live_rule_mismatch": "replay_live_rule_aligned",
+        "action_time_boundary_not_reproduced": "action_time_rehearsal_ready",
+        "policy_scope_missing": "admitted_trial_asset",
+        "runtime_profile_scope_missing": "runtime_profile_scope_bound",
+        "market_wait_validated": "live_submit_ready",
+        "active_position_resolution": "runtime_safety_clear",
+        "hard_safety_stop": "safety_clear_for_tradeability_review",
+        "review_only_warning": "strategy_asset_state_updated",
+    }.get(blocker_class, "tradeability_decision_ready")
 
 
 def _stage(
@@ -1250,6 +3796,7 @@ def _stage(
     owner_policy_scope: dict[str, Any],
     portfolio_seat: dict[str, Any],
     runtime_safety_state: dict[str, Any],
+    mi_trial_admission_decision: dict[str, Any] | None = None,
 ) -> str:
     if _row_live_submit_ready(
         strategy_group_id=strategy_group_id,
@@ -1270,6 +3817,10 @@ def _stage(
     portfolio_stage = str(portfolio_seat.get("stage") or "")
     if portfolio_stage == "armed_observation":
         return "armed_observation"
+    if strategy_group_id == "MI-001" and _mi_trial_admission_candidate(
+        mi_trial_admission_decision or {}
+    ):
+        return "trial_asset_admission_candidate"
     if admission_proposal:
         if owner_policy_recorded:
             return str(admission_proposal.get("proposed_stage") or "admitted_trial_asset")
@@ -2361,28 +4912,7 @@ def _evidence_snapshot(
 
 
 def _class_for_blocker(blocker: str) -> str:
-    lowered = blocker.lower()
-    if any(
-        token in lowered
-        for token in (
-            "registry",
-            "identity",
-            "tier",
-            "non_executing_trial_readiness",
-        )
-    ):
-        return "asset_admission"
-    if any(token in lowered for token in ("owner", "capital", "trial_identity")):
-        return "policy"
-    if any(token in lowered for token in ("fact", "stale", "classifier", "rewrite", "squeeze", "forward", "range")):
-        return "facts"
-    if "fresh_signal" in lowered:
-        return "market"
-    if any(token in lowered for token in ("finalgate", "operation_layer", "exchange", "account", "protection")):
-        return "execution_gate"
-    if any(token in lowered for token in ("stop", "overfit", "role", "filler", "quality")):
-        return "strategy_quality"
-    return "review"
+    return _contract_blocker_class(blocker)
 
 
 def _consistency_checks(
@@ -2403,6 +4933,11 @@ def _consistency_checks(
                 strategy_group_id=str(row.get("strategy_group_id") or ""),
                 runtime_safety_state=runtime_safety_state,
             )
+            for row in rows
+        ),
+        "first_blocker_classes_follow_contract": all(
+            row["decision"] == "tradable_now"
+            or row["first_blocker_class"] in CONTRACT_BLOCKER_CLASSES
             for row in rows
         ),
     }
@@ -2519,49 +5054,6 @@ def _selected_strategy_group_id(
     )
 
 
-def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
-    summary = artifact["summary"]
-    lines = [
-        "## StrategyGroup Tradeability Decision",
-        "",
-        f"- Status: `{artifact['status']}`",
-        f"- Generated: `{artifact['generated_at_utc']}`",
-        f"- Output JSON: `{output_json}`",
-        f"- Decision rows: `{summary['row_count']}`",
-        f"- Tradable now: `{summary['tradable_now_count']}`",
-        f"- Top blocker: `{summary['top_strategy_group_id']}` / `{summary['top_decision']}` / `{summary['top_first_blocker_class']}`",
-        f"- Next action: `{summary['top_next_action']}`",
-        "",
-        "## Decision Rows",
-        "",
-        "| StrategyGroup | Stage | Decision | First Blocker | Owner | Next Action | After |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
-    ]
-    for row in artifact["decision_rows"]:
-        lines.append(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |".format(
-                row["strategy_group_id"],
-                row["stage"],
-                row["decision"],
-                row["first_blocker_class"],
-                row["blocker_owner"],
-                row["next_action"],
-                row["after_next_state"],
-            )
-        )
-    lines.extend(
-        [
-            "",
-            "## Boundary",
-            "",
-            "- Tradeability Decision is a read model only.",
-            "- It does not call FinalGate, Operation Layer, or exchange write.",
-            "- Runtime Safety State remains the live-submit safety source; Execution Attempt remains the lifecycle entry object.",
-        ]
-    )
-    return "\n".join(lines) + "\n"
-
-
 def _forbidden_effects(*source_artifacts: dict[str, Any]) -> list[str]:
     return recursive_true_key_paths(*source_artifacts, true_keys=FORBIDDEN_TRUE_KEYS)
 
@@ -2619,29 +5111,6 @@ def _int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _read_optional_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    return _read_json(path)
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 def _yes_no(value: bool) -> str:

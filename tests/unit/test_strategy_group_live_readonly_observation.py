@@ -266,10 +266,65 @@ def test_binance_public_kline_source_returns_only_closed_public_bars():
     assert all(candle.is_closed is True for candle in candles)
 
 
+def test_binance_public_kline_source_supports_sor_15m_closed_bars():
+    now_ms = 1_800_000_000_000
+    interval_ms = 15 * 60 * 1000
+    requested_urls: list[str] = []
+
+    def transport(url: str, timeout: float) -> list:
+        requested_urls.append(url)
+        assert timeout == 10.0
+        return [
+            [
+                now_ms - 2 * interval_ms,
+                "100",
+                "102",
+                "99",
+                "101",
+                "1234",
+                now_ms - interval_ms - 1,
+            ],
+            [
+                now_ms - interval_ms,
+                "101",
+                "103",
+                "100",
+                "102",
+                "1234",
+                now_ms - 1,
+            ],
+            [
+                now_ms,
+                "102",
+                "104",
+                "101",
+                "103",
+                "1234",
+                now_ms + interval_ms - 1,
+            ],
+        ]
+
+    source = BinancePublicKlineMarketSource(now_ms=lambda: now_ms, transport=transport)
+
+    candles = source.latest_closed_candles(
+        symbol="ETH/USDT:USDT",
+        timeframe="15m",
+        limit=2,
+    )
+
+    assert "symbol=ETHUSDT" in requested_urls[0]
+    assert "interval=15m" in requested_urls[0]
+    assert [candle.close_time_ms for candle in candles] == [
+        now_ms - interval_ms - 1,
+        now_ms - 1,
+    ]
+
+
 def test_live_market_source_records_observe_only_history_with_live_source_metadata():
+    now_ms = 1_800_000_000_000
+
     def transport(url: str, _timeout: float) -> list:
         interval_ms = 4 * 60 * 60 * 1000 if "interval=4h" in url else 60 * 60 * 1000
-        now_ms = 1_800_000_000_000
         rows = []
         for index in range(140):
             open_time = now_ms - (140 - index) * interval_ms
@@ -287,11 +342,13 @@ def test_live_market_source_records_observe_only_history_with_live_source_metada
             )
         return rows
 
-    source = BinancePublicKlineMarketSource(now_ms=lambda: 1_800_000_000_000, transport=transport)
+    source = BinancePublicKlineMarketSource(now_ms=lambda: now_ms, transport=transport)
     payload = run_strategy_group_live_readonly_observation_once(
         market_source=source,
         sink=InMemoryStrategyGroupObservationSink(),
     )
+    latest_1h_open_time_ms = now_ms - 60 * 60 * 1000
+    latest_1h_close_time_ms = now_ms - 1
 
     assert len(payload.current_signals) == 8
     assert payload.input_source_summary["source_type"] == "live_market_read_only"
@@ -299,6 +356,12 @@ def test_live_market_source_records_observe_only_history_with_live_source_metada
     assert payload.input_source_summary["fallback_used"] is False
     assert all(record.source_type == "live_market_read_only" for record in payload.signal_history)
     assert all(record.market_source == "binance_usdm_public_klines_read_only" for record in payload.signal_history)
+    assert all(record.market_bar_timestamp_ms == latest_1h_close_time_ms for record in payload.signal_history)
+    assert all(record.market_bar_timestamp_ms != latest_1h_open_time_ms for record in payload.signal_history)
+    assert all(
+        record.signal_input_snapshot["trigger_candle_close_time_ms"] == latest_1h_close_time_ms
+        for record in payload.signal_history
+    )
     assert all(record.not_order is True for record in payload.signal_history)
     assert all(record.not_execution_intent is True for record in payload.signal_history)
 

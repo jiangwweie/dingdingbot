@@ -15,6 +15,8 @@ user-invocable: true
 - `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`
 - `docs/current/TRADEABILITY_DECISION_CONTRACT.md`
 - `docs/current/MAIN_CONTROL_ROADMAP.md`
+- `docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`
+- `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md`
 
 ## Role
 
@@ -25,14 +27,21 @@ Allowed chain positions:
 | Chain position | Only question it answers |
 | --- | --- |
 | `replay_live_parity` | Did replay-observed signal reproduce in live/current detector under the same symbol, timeframe, venue, and fact rules? |
-| `tradeability_first_blocker` | What is the current first blocker for this StrategyGroup + symbol lane? |
-| `symbol_scope_decision` | Should a symbol move from observed to read-only matched to trial-scope proposal? |
-| `action_time_boundary` | If a fresh live signal appears, can it reach candidate/auth, FinalGate, and Operation Layer without manual operation? |
-| `daily_live_enablement_status` | Which WIP lane moved closer to live submit today, and what is the next single action? |
+| `pretrade_candidate_readiness` | What is the current readiness and first blocker for this StrategyGroup + candidate symbol? |
+| `tradeability_first_blocker` | What is the current first blocker for this StrategyGroup or candidate symbol? |
+| `symbol_scope_decision` | Should a symbol move from observed/read-only to scoped promotion or explicit deferral? |
+| `fresh_signal_promotion` | Can a fresh satisfied candidate become a promotion candidate or action-time lane input? |
+| `action_time_boundary` | If a fresh live signal appears, can one narrowed lane reach candidate/auth, FinalGate, and Operation Layer without manual operation? |
+| `daily_live_enablement_status` | Which active StrategyGroup/candidate symbol moved closer to promotion or live submit today, and what is the next single action? |
 
 Do not answer broad strategy, architecture, governance, or documentation
 questions inside this skill. Route those only after the chain-position output
 proves they are the first blocker.
+
+After PG cutover, chain position must be derived from PG current state and
+audit lineage. Generated JSON/MD, output artifacts, Single Lane Packet, local
+cache, and old watcher reports are exports or diagnostics only. They must not
+override PG signal, promotion, lane, ticket, policy, fact, or blocker state.
 
 ## Required Output
 
@@ -50,6 +59,19 @@ stop_condition:
 owner_action_required:
 authority_boundary:
 ```
+
+When a fresh signal or no-trade question is involved, include the nearest
+lineage object that exists:
+
+```text
+signal_event_id:
+promotion_candidate_id:
+action_time_lane_input_id:
+ticket_id:
+```
+
+Use `none` when the object does not exist, and make the missing object part of
+the first-blocker explanation.
 
 No long narrative, no broad roadmap, no new artifact proposal unless the
 artifact removes/reclassifies the first blocker and is consumed by the standard
@@ -69,6 +91,10 @@ Do not output:
 - FinalGate bypass;
 - Operation Layer bypass;
 - exchange-write authority from replay, synthetic, read-only, or audit evidence.
+- chain-position conclusions from JSON exports when PG current state exists;
+- FinalGate readiness without `ticket_id`;
+- Operation Layer readiness without `ticket_id + finalgate_pass_id`;
+- unsupported side mirroring or generated_at-based freshness.
 
 ## WIP Discipline
 
@@ -90,7 +116,7 @@ active lane and admits a replacement under the WIP contract.
 A chain-position task is accepted only when it:
 
 - names one chain position;
-- names one StrategyGroup + symbol lane;
+- names one StrategyGroup + symbol candidate when symbol-specific;
 - names one first blocker;
 - provides one evidence reference;
 - provides one next engineering or policy action;

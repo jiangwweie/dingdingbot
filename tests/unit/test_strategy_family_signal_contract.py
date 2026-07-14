@@ -17,6 +17,11 @@ from src.domain.strategy_family_signal import (
     StrategyFamilySignalInput,
     StrategyFamilySignalOutput,
 )
+from src.domain.execution_eligibility import (
+    RequiredExecutionMode,
+    SignalGrade,
+    resolve_execution_eligibility,
+)
 
 
 def _market_snapshot() -> MarketSnapshot:
@@ -79,6 +84,7 @@ def _signal_input() -> StrategyFamilySignalInput:
         binding_id="bind-001",
         symbol="BTC/USDT:USDT",
         timestamp_ms=1770000000200,
+        trigger_candle_close_time_ms=1770000000200,
         primary_timeframe="4h",
         context_timeframes=["1d", "1h"],
         market_snapshot=_market_snapshot(),
@@ -160,6 +166,7 @@ def test_can_construct_would_enter_signal_output():
         playbook_id="TF-001",
         symbol="BTC/USDT:USDT",
         timestamp_ms=1770000000400,
+        trigger_candle_close_time_ms=1770000000400,
         timeframe="4h",
         signal_type=SignalType.WOULD_ENTER,
         side=SignalSide.LONG,
@@ -187,9 +194,103 @@ def test_can_construct_would_enter_signal_output():
     assert output.side == SignalSide.LONG
     assert output.reason_codes == ["trend_follow_through", "atr_context_available"]
     assert output.input_refs.evaluation_ref == "eval-001"
+    assert output.time_authority == "trigger_candle_close_time_ms"
+    assert output.trigger_candle_close_time_ms == 1770000000400
+    assert output.model_dump(mode="json")["trigger_candle_close_time_ms"] == 1770000000400
     assert output.review_plan.review_required is True
     assert output.not_order is True
     assert output.not_execution_intent is True
+
+
+def test_signal_output_accepts_typed_fact_observations():
+    output = StrategyFamilySignalOutput(
+        signal_id="sig-facts-001",
+        evaluation_id="eval-001",
+        strategy_family_id="CPM-RO-001",
+        strategy_family_version_id="CPM-RO-001-v0",
+        symbol="ETH/USDT:USDT",
+        timestamp_ms=1770000000400,
+        trigger_candle_close_time_ms=1770000000400,
+        timeframe="1h",
+        signal_type=SignalType.WOULD_ENTER,
+        side=SignalSide.LONG,
+        fact_observations=[
+            {
+                "fact_key": "htf_trend_intact",
+                "observed_value": True,
+                "observed_at_ms": 1770000000400,
+                "valid_until_ms": 1770003600400,
+                "source_ref": "evaluator:cpm-ro-001-historical-v0:htf_trend",
+            }
+        ],
+        input_refs=_input_refs(),
+    )
+
+    assert output.fact_observations[0].fact_key == "htf_trend_intact"
+    assert output.fact_observations[0].observed_value is True
+
+
+def test_observe_only_signal_is_never_execution_eligible():
+    envelope = resolve_execution_eligibility(
+        declared_signal_grade=SignalGrade.OBSERVE_ONLY_SIGNAL,
+        declared_required_execution_mode=RequiredExecutionMode.OBSERVE_ONLY,
+        execution_eligibility_enabled=False,
+        evaluator_signal_grade=SignalGrade.OBSERVE_ONLY_SIGNAL,
+        evaluator_required_execution_mode=RequiredExecutionMode.OBSERVE_ONLY,
+        authority_source_ref="event-spec:SOR-LONG-v1",
+    )
+
+    assert envelope.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
+    assert envelope.required_execution_mode == RequiredExecutionMode.OBSERVE_ONLY
+    assert envelope.execution_eligible is False
+
+
+def test_evaluator_cannot_upgrade_event_spec_authority():
+    with pytest.raises(ValueError, match="exceeds declared event-spec authority"):
+        resolve_execution_eligibility(
+            declared_signal_grade=SignalGrade.OBSERVE_ONLY_SIGNAL,
+            declared_required_execution_mode=RequiredExecutionMode.OBSERVE_ONLY,
+            execution_eligibility_enabled=False,
+            evaluator_signal_grade=SignalGrade.TRIAL_GRADE_SIGNAL,
+            evaluator_required_execution_mode=RequiredExecutionMode.TRIAL_LIVE,
+            authority_source_ref="event-spec:SOR-LONG-v1",
+        )
+
+
+def test_signal_output_defaults_to_typed_observe_only_authority():
+    output = StrategyFamilySignalOutput(
+        signal_id="sig-observe-only-001",
+        evaluation_id="eval-001",
+        strategy_family_id="tf",
+        strategy_family_version_id="tf-v1",
+        symbol="BTC/USDT:USDT",
+        timestamp_ms=1770000000400,
+        trigger_candle_close_time_ms=1770000000400,
+        timeframe="4h",
+        signal_type=SignalType.WOULD_ENTER,
+        side=SignalSide.LONG,
+        input_refs=_input_refs(),
+    )
+
+    assert output.signal_grade == SignalGrade.OBSERVE_ONLY_SIGNAL
+    assert output.required_execution_mode == RequiredExecutionMode.OBSERVE_ONLY
+
+
+def test_would_enter_signal_output_requires_trigger_candle_close_time():
+    with pytest.raises(ValueError, match="trigger_candle_close_time_ms"):
+        StrategyFamilySignalOutput(
+            signal_id="sig-enter-missing-time",
+            evaluation_id="eval-001",
+            strategy_family_id="tf",
+            strategy_family_version_id="tf-v1",
+            symbol="BTC/USDT:USDT",
+            timestamp_ms=1770000000450,
+            timeframe="4h",
+            signal_type=SignalType.WOULD_ENTER,
+            side=SignalSide.LONG,
+            reason_codes=["missing_time_authority"],
+            input_refs=_input_refs(),
+        )
 
 
 @pytest.mark.parametrize(
@@ -217,6 +318,7 @@ def test_signal_output_rejects_forbidden_execution_order_fields(field_name: str)
             strategy_family_version_id="tf-v1",
             symbol="BTC/USDT:USDT",
             timestamp_ms=1770000000500,
+            trigger_candle_close_time_ms=1770000000500,
             timeframe="4h",
             signal_type=SignalType.WOULD_ENTER,
             side=SignalSide.LONG,
@@ -234,6 +336,7 @@ def test_high_confidence_does_not_authorize_execution():
         strategy_family_version_id="tf-v1",
         symbol="BTC/USDT:USDT",
         timestamp_ms=1770000000600,
+        trigger_candle_close_time_ms=1770000000600,
         timeframe="4h",
         signal_type=SignalType.WOULD_ENTER,
         side=SignalSide.SHORT,
@@ -290,6 +393,7 @@ def test_signal_output_serialization_round_trip_preserves_non_execution_flags():
         playbook_id="VB-001",
         symbol="ETH/USDT:USDT",
         timestamp_ms=1770000000900,
+        trigger_candle_close_time_ms=1770000000900,
         timeframe="1h",
         signal_type=SignalType.WOULD_REDUCE,
         side=SignalSide.LONG,

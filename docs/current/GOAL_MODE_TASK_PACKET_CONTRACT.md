@@ -17,10 +17,11 @@ current code, runtime gates, FinalGate, Operation Layer, live RequiredFacts, or
 Owner policy.
 
 Goal-mode work now uses the Live Enablement blocker model in
-`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`. A task must move a selected
-StrategyGroup + symbol lane forward, or prove the exact blocker that prevents
-forward movement. Explanation-only, artifact-only, and no-trade narrative tasks
-are not complete.
+`docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` and the Pre-Trade Runtime
+model in `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`. A task must move a
+selected StrategyGroup candidate symbol forward, improve promotion/action-time
+narrowing, or prove the exact blocker that prevents forward movement.
+Explanation-only, artifact-only, and no-trade narrative tasks are not complete.
 
 Goal-mode work must also obey
 `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` and, when it affects daily status,
@@ -77,6 +78,48 @@ A Goal Packet must include:
 | `Fresh signal interrupt` | What to do if a real fresh signal appears |
 | `Safety boundary` | Conditions that stop the task |
 | `Report format` | Required Evidence Packet contents |
+
+## Pre-Trade Task Packet Gate
+
+After the Pre-Trade Candidate Pool exists, every live-enablement engineering
+task must start from either one PG-backed Candidate Pool readiness row or one
+PG-backed Daily Live Enablement Table summary row. Generated JSON/MD exports
+are diagnostic material only and must not be used as task authority.
+
+The task entry must name one StrategyGroup, one candidate symbol when the work is
+symbol-specific, and one first blocker. Broad prompts such as `continue MPG`,
+`advance live readiness`, or `fix runtime` are invalid unless they are rewritten
+into the required candidate entry shape below.
+
+Every task must include these fields before implementation starts:
+
+| Field | Required value |
+| --- | --- |
+| `active_candidate` | One `StrategyGroup + symbol` readiness row from the Candidate Pool, or one Daily Table strategy summary row when the task is strategy-level |
+| `chain_position` | The row's chain position |
+| `first_blocker` | The row's blocker class from `BLOCKER_CLASSIFICATION_CONTRACT.md` |
+| `expected_state_change` | One readiness, blocker, promotion, action-time, or stop-condition field expected to change after the task |
+| `allowed_files` | Files or directories allowed for the bounded task |
+| `forbidden_files` | Files, authority paths, credentials, profiles, sizing defaults, and core execution paths that must not be touched |
+| `stop_condition` | The row's stop condition or a stricter task-specific stop |
+| `authority_boundary` | The row's authority boundary, preserving no FinalGate bypass, no Operation Layer bypass, no live profile expansion, no sizing expansion, and no exchange write |
+
+Completion must change at least one of these fields:
+
+| State field | Meaning |
+| --- | --- |
+| `first_blocker` | The blocker is removed or reclassified |
+| `candidate_readiness_state` | Detector, watcher, facts, scope, signal, risk, or promotion state changes |
+| `lane_stage` | A promoted candidate moves to action-time or exits WIP |
+| `replay_live_status` | Replay/live parity becomes matched, reclassified, or no longer first blocker |
+| `live_detector_status` | Detector attachment, watcher input, or computed state changes |
+| `facts_state` | Required facts become present, computed, failed, or cleared with per-fact evidence |
+| `action_time_boundary_status` | Candidate/auth or non-executing action-time rehearsal boundary changes |
+| `next_action` | The next action no longer repeats the same blocker-removal instruction |
+| `stop_condition` | The lane exits, parks, waits for Owner, or reaches a stricter stop condition |
+
+A task that only regenerates artifacts, adds commentary, or repeats the same
+`next_action` without changing one of these fields is incomplete.
 
 ## Evidence Packet Required Shape
 

@@ -3,14 +3,12 @@
 
 The evidence combines the ACTIVE runtime observation status artifact with a
 strategy-group read-only preview. It is designed for operator handoff while the
-runtime loop is waiting for a real signal: no PG writes, no shadow candidates,
-no ExecutionIntent, no orders, and no runtime mutation.
+runtime loop is waiting for a real signal: no PG writes, no non-ticket trade
+records, no ExecutionIntent, no orders, and no runtime mutation.
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,12 +17,6 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
-from scripts.preview_strategy_group_readonly_observation import (  # noqa: E402
-    SourceName,
-    build_preview_artifact,
-)
-
 
 def build_watch_evidence(
     *,
@@ -50,6 +42,31 @@ def build_watch_evidence(
         for row in runtime_ready
         if row.get("status") == "ready_for_final_gate_preflight"
     ]
+    pg_live_signal_events = (
+        active_status_artifact.get("pg_live_signal_events")
+        if isinstance(active_status_artifact.get("pg_live_signal_events"), dict)
+        else {}
+    )
+    signal_event_ids = [
+        str(item)
+        for item in pg_live_signal_events.get("signal_event_ids") or []
+        if str(item or "").strip()
+    ]
+    runtime_identity_gap_signals = (
+        [
+            {
+                "runtime_instance_id": row.get("runtime_instance_id"),
+                "strategy_family_id": row.get("strategy_family_id"),
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "signal_type": row.get("signal_type"),
+                "reason_codes": list(row.get("reason_codes") or []),
+            }
+            for row in runtime_ready
+        ]
+        if runtime_ready and not signal_event_ids
+        else []
+    )
     strategy_would_enter = [
         _strategy_summary(row)
         for row in strategy_preview_artifact.get("would_enter_signals") or []
@@ -67,12 +84,15 @@ def build_watch_evidence(
     status = "blocked_forbidden_effect"
     next_step = "resolve_signal_watch_forbidden_effects"
     if not forbidden_effects:
-        if runtime_ready_for_preflight:
-            status = "runtime_prepare_records_ready_for_preview"
-            next_step = "run_final_gate_arm_preview_and_disabled_smoke_only"
+        if runtime_identity_gap_signals:
+            status = "runtime_signal_identity_gap"
+            next_step = "repair_pg_live_signal_identity_handoff"
+        elif runtime_ready_for_preflight:
+            status = "runtime_signal_ready_for_action_time_ticket"
+            next_step = "materialize_pg_action_time_ticket"
         elif runtime_ready:
             status = "runtime_signal_ready"
-            next_step = "review_runtime_ready_signal_prepare_path"
+            next_step = "materialize_pg_action_time_ticket"
         elif strategy_would_enter:
             status = "strategy_group_signal_review_available"
             next_step = "review_would_enter_strategy_group_without_execution"
@@ -106,26 +126,20 @@ def build_watch_evidence(
                 "selected_runtime_instance_ids"
             )
             or [],
-            "prepared_authorization_id": active_status_artifact.get(
-                "prepared_authorization_id"
-            ),
         },
         "runtime_signals": runtime_summaries,
         "runtime_ready_signals": runtime_ready,
-        "runtime_prepare_context": {
+        "runtime_identity_gap_signals": runtime_identity_gap_signals,
+        "runtime_action_time_context": {
             "ready_for_prepare_count": len(runtime_ready_for_prepare),
             "ready_for_final_gate_preflight_count": len(runtime_ready_for_preflight),
-            "prepared_authorization_id": active_status_artifact.get(
-                "prepared_authorization_id"
-            ),
-            "shadow_candidate_id": active_status_artifact.get("shadow_candidate_id"),
+            "signal_event_ids": signal_event_ids,
             "allowed_non_executing_followups": [
-                "create_shadow_signal_evaluation",
-                "create_shadow_order_candidate",
-                "create_prepare_authorization_record",
-                "run_final_gate_preview",
-                "run_arm_preview",
-                "run_disabled_first_real_submit_smoke",
+                "materialize_pg_promotion_action_time_lane",
+                "materialize_action_time_ticket",
+                "run_ticket_bound_finalgate_preflight",
+                "prepare_ticket_bound_operation_layer_handoff",
+                "run_disabled_ticket_bound_protected_submit_smoke",
             ],
             "forbidden_followups": [
                 "create_executable_execution_intent",
@@ -179,26 +193,6 @@ def build_watch_evidence(
     }
 
 
-def build_watch_evidence_from_paths(
-    *,
-    status_artifact_json: str | Path,
-    strategy_source: SourceName,
-) -> dict[str, Any]:
-    status_artifact = _load_json_object(Path(status_artifact_json).expanduser())
-    strategy_preview = build_preview_artifact(source_name=strategy_source)
-    return build_watch_evidence(
-        active_status_artifact=status_artifact,
-        strategy_preview_artifact=strategy_preview,
-    )
-
-
-def _load_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"JSON object required: {path}")
-    return payload
-
-
 def _runtime_summary(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "runtime_instance_id": row.get("runtime_instance_id"),
@@ -236,16 +230,18 @@ def _strategy_summary(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _allowed_review_checkpoints(status: str) -> list[str]:
+    if status == "runtime_signal_identity_gap":
+        return []
     if status == "runtime_signal_ready":
         return [
             "review_runtime_ready_signal",
-            "create_shadow_prepare_records_if_authorized",
+            "materialize_pg_action_time_ticket",
         ]
-    if status == "runtime_prepare_records_ready_for_preview":
+    if status == "runtime_signal_ready_for_action_time_ticket":
         return [
-            "run_final_gate_preview",
-            "run_arm_preview",
-            "run_disabled_first_real_submit_smoke",
+            "materialize_pg_action_time_ticket",
+            "run_ticket_bound_finalgate_preflight",
+            "prepare_ticket_bound_operation_layer_handoff",
         ]
     if status == "strategy_group_signal_review_available":
         return ["review_strategy_group_would_enter_signal_without_execution"]
@@ -281,31 +277,3 @@ def _forbidden_effects(*sources: tuple[str, dict[str, Any]]) -> list[str]:
         for item in safety.get("forbidden_effects") or []:
             effects.append(f"{source_name}.{item}")
     return sorted(set(effects))
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--status-artifact-json", required=True)
-    parser.add_argument(
-        "--strategy-source",
-        choices=["sample", "local_sqlite_read_only", "live_market"],
-        default="local_sqlite_read_only",
-    )
-    parser.add_argument("--output-json")
-    args = parser.parse_args(argv)
-
-    artifact = build_watch_evidence_from_paths(
-        status_artifact_json=args.status_artifact_json,
-        strategy_source=args.strategy_source,
-    )
-    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
-    if args.output_json:
-        output_path = Path(args.output_json).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(payload + "\n", encoding="utf-8")
-    print(payload)
-    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -204,6 +204,7 @@ def _strategy_output(
         strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         timeframe="1h",
         signal_type=signal_type,
         side=side,
@@ -252,6 +253,14 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
         strategy_family_id="VCB-001",
         strategy_family_version_id="VCB-001-v0",
     )
+    mi = catalog.get_binding(
+        strategy_family_id="MI-001",
+        strategy_family_version_id="MI-001-v0",
+    )
+    brf2 = catalog.get_binding(
+        strategy_family_id="BRF2-001",
+        strategy_family_version_id="BRF2-001-v0",
+    )
     rmr = catalog.get_binding(
         strategy_family_id="RMR-001",
         strategy_family_version_id="RMR-001-v0",
@@ -299,6 +308,19 @@ def test_initial_catalog_separates_semantic_reference_and_execution_approval():
     assert vcb.supported_sides == ["long", "short"]
     assert vcb.payoff_profile == StrategyPayoffProfile.RIGHT_TAIL
     assert vcb.exit_policy.runner_required is True
+
+    assert mi.allows_shadow_order_candidate is True
+    assert mi.supported_sides == ["long"]
+    assert mi.metadata["pilot_strategygroup_route"] is True
+    assert mi.metadata["reference_role"] == "relative_strength_impulse_long"
+
+    assert brf2.allows_shadow_order_candidate is True
+    assert brf2.supported_sides == ["short"]
+    assert brf2.metadata["pilot_strategygroup_route"] is True
+    assert brf2.metadata["short_side_conservative_profile_required"] is True
+    assert brf2.metadata["reference_role"] == (
+        "conditional_short_reversal_followthrough"
+    )
 
     assert rmr.candidate_mode == StrategyCandidateMode.REGIME_CLASSIFIER_ONLY
     assert rmr.allows_shadow_order_candidate is False
@@ -465,7 +487,7 @@ async def test_cpm_strategy_output_can_flow_to_semantic_shadow_candidate():
     assert candidate.protection_preview.stop_price_reference == Decimal("2425")
 
 
-async def test_cpm_short_strategy_output_is_rejected_by_long_only_semantics():
+async def test_cpm_short_strategy_output_is_rejected_by_current_side_scope():
     fake_shadow = _FakeShadowService(
         _evaluation(
             family_id="CPM-RO-001",
@@ -475,7 +497,7 @@ async def test_cpm_short_strategy_output_is_rejected_by_long_only_semantics():
     )
     service = StrategySemanticsShadowBindingService(shadow_service=fake_shadow)
 
-    with pytest.raises(StrategySemanticsBindingError, match="not supported"):
+    with pytest.raises(StrategySemanticsBindingError, match="side short is not supported"):
         await service.create_semantic_order_candidate_from_strategy_output(
             _strategy_output(side=SignalSide.SHORT),
             context=_context(

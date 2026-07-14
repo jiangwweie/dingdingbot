@@ -20,7 +20,6 @@
 | `backend-dev/SKILL.md` | - | 后端开发专家 - Python + FastAPI + asyncio |
 | `code-reviewer/SKILL.md` | - | 代码审查员 - 架构一致性、安全隐患识别 |
 | `diagnostic-analyst/SKILL.md` | - | 诊断分析师 |
-| `frontend-dev/SKILL.md` | - | 前端开发专家 - React + TypeScript + TailwindCSS |
 | `product-manager/SKILL.md` | - | 产品经理 - 需求过滤、优先级排序、用户故事 |
 | `project-manager/SKILL.md` | - | 项目经理 - 任务调度、Agent调度、进度追踪 |
 | `qa-tester/SKILL.md` | - | 质量保障专家 - pytest + pytest-asyncio |

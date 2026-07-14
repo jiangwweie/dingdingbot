@@ -13,14 +13,15 @@ This contract defines how main control names blockers while moving a selected
 StrategyGroup from admission toward the official live-submit path.
 
 The project does not need more broad explanations for why no trade happened.
-The current operating target is Live Enablement:
+The current operating target is Pre-Trade Runtime V0:
 
 ```text
-select StrategyGroup + symbol lane
--> classify the earliest blocker precisely
+active StrategyGroup candidate symbol set
+-> classify per-symbol readiness blockers precisely
 -> remove engineering / scope / policy / runtime blockers
--> reach market_wait_validated only when non-market blockers are closed
--> on fresh signal refresh action-time facts
+-> promote fresh satisfied candidates without authority leakage
+-> narrow at most one candidate into action-time lane input
+-> refresh action-time facts
 -> candidate / authorization evidence
 -> FinalGate
 -> Operation Layer
@@ -34,15 +35,16 @@ They are not independent completion paths.
 
 ## Core Rule
 
-Every blocker must name the earliest missing state that prevents the selected
-StrategyGroup + symbol lane from advancing toward live-submit readiness.
+Every blocker must name the earliest missing state that prevents an active
+StrategyGroup candidate symbol from advancing toward pre-trade readiness,
+promotion, or the narrowed action-time lane.
 
 Do not use broad labels such as `waiting_for_market`,
 `fresh_signal_absent`, `missing_fact`, or `live_detector_artifact_missing`
 unless the stricter class below is actually true.
 
-`market_wait_validated` is allowed only after all non-market blockers in the
-lane have been closed or explicitly scoped out by Owner policy.
+`market_wait_validated` is allowed only after all non-market blockers for that
+candidate symbol have been closed or explicitly scoped out by Owner policy.
 
 ## Blocker Classes
 
@@ -55,10 +57,12 @@ lane have been closed or explicitly scoped out by Owner policy.
 | `scope_not_attached` | Strategy/symbol/side/timeframe exists only in research or read-only review and is not attached to selected runtime observation scope | engineering / owner | Produce scoped live-observation or live-scope proposal with policy boundary |
 | `computed_not_satisfied` | Detector and facts ran successfully, but one or more strategy facts are false, stale, or below threshold | market | Continue observation; report failing fact matrix |
 | `replay_live_rule_mismatch` | Replay event cannot be reproduced because replay rules and current live detector/fact rules differ | engineering / strategy_review | Normalize rules or record a strategy revision decision |
+| `event_execution_capability_not_certified` | The current Event Spec or evaluator is explicitly observe-only and cannot yet emit the declared trial/production execution grade and mode | engineering / strategy_review | Certify the event-specific execution contract or keep the event explicitly observe-only |
 | `action_time_boundary_not_reproduced` | A live-like detector event cannot reach candidate/auth or action-time rehearsal without exchange write | engineering / runtime | Repair non-executing action-time rehearsal path |
 | `policy_scope_missing` | Owner capital/profile/symbol/side/leverage/loss-unit/attempt-cap/tier policy is missing for the lane | owner | Ask for the specific scoped policy decision |
 | `runtime_profile_scope_missing` | Runtime profile, selected StrategyGroup binding, symbol lane, side, leverage, notional, or exposure scope is absent or inconsistent | runtime / engineering | Bind or repair runtime profile scope without expanding authority silently |
 | `market_wait_validated` | All non-market blockers are closed and the only missing condition is a current fresh eligible signal | market | Keep watching; preempt lower work on fresh signal |
+| `action_time_preflight_ready` | A fresh satisfied lane has active server runtime coverage, action-time path readiness, public facts, private action-time facts, account/balance facts, and active-position/open-order clearance for non-executing preflight input generation | engineering | Prepare non-executing FinalGate preflight input; this does not grant FinalGate, Operation Layer, or exchange-write authority |
 | `active_position_resolution` | Active position, open order, or protection state conflicts with new submit | runtime / safety | Reconcile or close via official recovery path |
 | `hard_safety_stop` | Execution would violate FinalGate, Operation Layer, stale fact, missing protection, duplicate-submit, wrong-account, withdrawal, transfer, credential, profile, sizing, or destructive boundary | safety | Stop and surface safety state |
 | `review_only_warning` | Evidence quality concern that may affect promote/revise/park/kill decisions but does not block non-executing engineering closure | strategy_review | Record strategy review impact without blocking live path engineering |

@@ -190,6 +190,7 @@ class RuntimeStrategySignalSchedulerPlanningService:
         expires_at_ms: int | None = None,
         metadata: dict | None = None,
         evaluation_result: RuntimeStrategySignalEvaluationResult | None = None,
+        allow_live_runtime_handoff_prepare: bool = False,
     ) -> RuntimeStrategySignalSchedulerPlanningResult:
         readiness = RuntimeStrategySignalSchedulerAssemblyService(
             semantics_catalog=self._semantics_catalog,
@@ -199,6 +200,9 @@ class RuntimeStrategySignalSchedulerPlanningService:
             signal_input,
             output,
             candidate_id=candidate_id,
+            allow_live_runtime_handoff_prepare=(
+                allow_live_runtime_handoff_prepare
+            ),
         )
         if readiness.status in {
             RuntimeStrategySignalSchedulerReadinessStatus.OBSERVE_ONLY,
@@ -261,6 +265,11 @@ class RuntimeStrategySignalSchedulerPlanningService:
             metadata={
                 "scheduler_planning_handoff": True,
                 "scheduler_candidate_id": candidate_id,
+                **(
+                    {"live_runtime_handoff_prepare_allowed": True}
+                    if allow_live_runtime_handoff_prepare
+                    else {}
+                ),
                 **(metadata or {}),
             },
         )

@@ -23,7 +23,6 @@ TOPIC_KEYWORDS = {
     'kline': ['kline', 'k 线', 'ohlcv', 'candle'],
     'database': ['database', '数据库', 'sqlite', 'wal', 'db'],
     'api': ['api', 'rest', 'fastapi', 'endpoint', '路由'],
-    'frontend': ['frontend', '前端', 'react', 'typescript', 'vue'],
     'testing': ['test', '测试', 'e2e', 'pytest'],
     'architecture': ['architecture', '架构', 'adr', 'design', '设计'],
     'strategy': ['strategy', '策略', 'pinbar', 'engulfing'],

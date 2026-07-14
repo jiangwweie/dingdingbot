@@ -66,7 +66,6 @@ class BootstrapConfig:
     min_liquidation_stop_buffer: Decimal | None = None
     playbook_id: str = "PB-BRC-LIVE-RUNTIME-V1"
     account_facts_source: str = "binance_readonly"
-    account_facts_json: str | None = None
     owner_operator_id: str = "owner"
     runtime_carrier_id: str = "strategygroup-runtime-bootstrap"
     reason: str = "Owner standing-authorized StrategyGroup runtime bootstrap"
@@ -176,6 +175,7 @@ class RuntimeLiveBootstrapApiFlow:
             allowed_statuses={200, 404},
         )
         if result.get("http_status") == 200:
+            self._sync_existing_strategy_family_version_scope(result)
             self.state.remember(
                 "strategy_family_version_id",
                 self._config.strategy_family_version_id,
@@ -316,7 +316,7 @@ class RuntimeLiveBootstrapApiFlow:
             "trial_constraint_snapshot_id",
             admission_body.get("trial_constraint_snapshot_id"),
         )
-        admission_result = admission_body.get("admission_result")
+        admission_result = _admission_result(admission_body)
         if admission_result not in {"admit", "admit_with_constraints"}:
             self.state.add_blockers([f"admission_result_{admission_result or 'missing'}"])
         acceptance = self._step(
@@ -420,8 +420,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "trusted_account_fact_source_confirmed",
             ]
         )
-        if self._config.side.lower() == "short":
-            runtime_confirmations["short_side_conservative_profile_confirmed"] = True
+        runtime_confirmations["short_side_conservative_profile_confirmed"] = True
         confirmation = self._step(
             "create_runtime_promotion_confirmation",
             "POST",
@@ -499,9 +498,6 @@ class RuntimeLiveBootstrapApiFlow:
         )
 
     def _account_facts_snapshot(self) -> dict[str, Any]:
-        if self._config.account_facts_json:
-            with open(self._config.account_facts_json, "r", encoding="utf-8") as handle:
-                return json.load(handle)
         if self._config.account_facts_source == "static":
             return _static_account_facts(self._config)
         if self._config.account_facts_source == "binance_readonly":
@@ -531,6 +527,7 @@ class RuntimeLiveBootstrapApiFlow:
                 "status": body_value.get("status") if isinstance(body_value, dict) else None,
                 "step_result": _step_result(name, body_value),
                 "ids": _id_summary(body_value),
+                "error_detail": _error_detail(body_value),
                 "blockers": body_value.get("blockers", []) if isinstance(body_value, dict) else [],
                 "warnings": body_value.get("warnings", []) if isinstance(body_value, dict) else [],
             }
@@ -541,6 +538,49 @@ class RuntimeLiveBootstrapApiFlow:
             self.state.add_blockers(body_value.get("blockers"))
             self.state.add_warnings(body_value.get("warnings"))
         return result
+
+    def _sync_existing_strategy_family_version_scope(self, result: dict[str, Any]) -> None:
+        body = _body(result)
+        if not body:
+            return
+        expected_symbols = _supported_symbols(self._config)
+        expected_timeframes = [self._config.timeframe]
+        symbols_missing = [
+            symbol
+            for symbol in expected_symbols
+            if symbol not in set(str(item) for item in body.get("supported_symbols") or [])
+        ]
+        timeframes_missing = [
+            timeframe
+            for timeframe in expected_timeframes
+            if timeframe
+            not in set(str(item) for item in body.get("supported_timeframes") or [])
+        ]
+        if not symbols_missing and not timeframes_missing:
+            return
+        synced = self._step(
+            "sync_existing_strategy_family_version_scope",
+            "POST",
+            (
+                "/api/brc/strategy-family-versions/"
+                f"{self._config.strategy_family_version_id}/scope-sync"
+            ),
+            body={
+                "supported_symbols": expected_symbols,
+                "supported_timeframes": expected_timeframes,
+                "actor": self._config.owner_operator_id,
+                "reason": (
+                    "Owner authorized current StrategyGroup candidate universe "
+                    "for pre-trade runtime scope."
+                ),
+            },
+        )
+        if synced.get("http_status") == 200:
+            self.state.add_warnings(
+                [
+                    "strategy_family_version_scope_synced_for_candidate_universe"
+                ]
+            )
 
     def _report(self) -> dict[str, Any]:
         return {
@@ -720,14 +760,32 @@ def _body(result: dict[str, Any]) -> dict[str, Any]:
     return body if isinstance(body, dict) else {}
 
 
+def _error_detail(body: dict[str, Any]) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    value = body.get("message") or body.get("detail") or body.get("error")
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True)
+    return str(value)
+
+
 def _step_result(name: str, body: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(body, dict):
         return {}
     if name == "evaluate_admission_request":
-        return {"admission_result": body.get("admission_result")}
+        return {"admission_result": _admission_result(body)}
     if name == "preflight_create_gated_trial":
         return {"preflight_result": body.get("preflight_result")}
     return {}
+
+
+def _admission_result(body: dict[str, Any]) -> str | None:
+    value = body.get("admission_result") or body.get("decision")
+    if value is None:
+        return None
+    return str(value)
 
 
 def _id_summary(value: Any) -> dict[str, Any]:
@@ -807,7 +865,6 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
         choices=["binance_readonly", "static"],
         default="binance_readonly",
     )
-    parser.add_argument("--account-facts-json")
     parser.add_argument("--owner-operator-id", default="owner")
     parser.add_argument(
         "--runtime-carrier-id",
@@ -837,7 +894,6 @@ def _parse_args(argv: list[str]) -> BootstrapConfig:
         min_liquidation_stop_buffer=args.min_liquidation_stop_buffer,
         playbook_id=args.playbook_id,
         account_facts_source=args.account_facts_source,
-        account_facts_json=args.account_facts_json,
         owner_operator_id=args.owner_operator_id,
         runtime_carrier_id=args.runtime_carrier_id,
         reason=args.reason,

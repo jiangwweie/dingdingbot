@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 
@@ -175,25 +174,3 @@ def test_no_signal_diagnostic_unknown_watch_status_reviews_evidence_status():
         "review_no_signal_diagnostic_evidence"
     ]
     assert artifact["review_plan"]["next_step"] != "review_watch_packet_status"
-
-
-def test_no_signal_diagnostic_cli_reads_and_writes_json(tmp_path, capsys):
-    module = _load_module()
-    watch_path = tmp_path / "watch.json"
-    output_path = tmp_path / "diagnostic.json"
-    watch_path.write_text(json.dumps(_watch_evidence()), encoding="utf-8")
-
-    exit_code = module.main(
-        [
-            "--watch-evidence-json",
-            str(watch_path),
-            "--output-json",
-            str(output_path),
-        ]
-    )
-
-    assert exit_code == 0
-    stdout_payload = json.loads(capsys.readouterr().out)
-    file_payload = json.loads(output_path.read_text())
-    assert stdout_payload == file_payload
-    assert file_payload["scope"] == "runtime_no_signal_diagnostic_evidence"

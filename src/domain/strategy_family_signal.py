@@ -13,6 +13,10 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.comparative_strength import ComparativeStrengthSnapshot
+
+from src.domain.execution_eligibility import RequiredExecutionMode, SignalGrade
+
 
 CONTRACT_VERSION = "brc-strategy-family-signal-v1"
 
@@ -109,6 +113,16 @@ class SignalReviewPlan(StrategyFamilySignalModel):
     owner_review_status: str = Field(default="pending", max_length=64)
 
 
+class StrategyFactObservation(StrategyFamilySignalModel):
+    """One strategy fact actually observed by a versioned evaluator."""
+
+    fact_key: str = Field(min_length=1, max_length=128)
+    observed_value: bool | Decimal | int | str
+    observed_at_ms: int = Field(ge=0)
+    valid_until_ms: int = Field(gt=0)
+    source_ref: str = Field(min_length=1, max_length=256)
+
+
 class MarketSnapshot(StrategyFamilySignalModel):
     """Read-only market facts used for signal evaluation and later review."""
 
@@ -175,9 +189,12 @@ class StrategyFamilySignalInput(StrategyFamilySignalModel):
     binding_id: Optional[str] = Field(default=None, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
     timestamp_ms: int = Field(ge=0)
+    time_authority: Literal["trigger_candle_close_time_ms"] = "trigger_candle_close_time_ms"
+    trigger_candle_close_time_ms: Optional[int] = Field(default=None, ge=0)
     primary_timeframe: str = Field(min_length=1, max_length=32)
     context_timeframes: list[str] = Field(default_factory=list)
     market_snapshot: MarketSnapshot
+    comparative_strength_snapshot: Optional[ComparativeStrengthSnapshot] = None
     account_facts_snapshot: AccountFactsSnapshot
     position_open_order_summary: dict[str, Any] = Field(default_factory=dict)
     reconciliation_status: dict[str, Any] = Field(default_factory=dict)
@@ -212,6 +229,8 @@ class StrategyFamilySignalOutput(StrategyFamilySignalModel):
     playbook_id: Optional[str] = Field(default=None, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
     timestamp_ms: int = Field(ge=0)
+    time_authority: Literal["trigger_candle_close_time_ms"] = "trigger_candle_close_time_ms"
+    trigger_candle_close_time_ms: Optional[int] = Field(default=None, ge=0)
     timeframe: str = Field(min_length=1, max_length=32)
     signal_type: SignalType
     side: SignalSide = SignalSide.NONE
@@ -222,11 +241,13 @@ class StrategyFamilySignalOutput(StrategyFamilySignalModel):
     )
     reason_codes: list[str] = Field(default_factory=list)
     human_summary: str = Field(default="", max_length=4096)
-    required_execution_mode: str = Field(default="observe_only", max_length=128)
+    signal_grade: SignalGrade = SignalGrade.OBSERVE_ONLY_SIGNAL
+    required_execution_mode: RequiredExecutionMode = RequiredExecutionMode.OBSERVE_ONLY
     expected_risk_shape: ExpectedRiskShape | str = ExpectedRiskShape.UNKNOWN
     invalidation_conditions: list[dict[str, Any]] = Field(default_factory=list)
     signal_snapshot: dict[str, Any] = Field(default_factory=dict)
     evidence_payload: dict[str, Any] = Field(default_factory=dict)
+    fact_observations: list[StrategyFactObservation] = Field(default_factory=list)
     input_refs: SignalInputRefs = Field(default_factory=SignalInputRefs)
     data_quality: SignalDataQuality = Field(default_factory=SignalDataQuality)
     review_plan: SignalReviewPlan = Field(default_factory=SignalReviewPlan)
@@ -236,6 +257,11 @@ class StrategyFamilySignalOutput(StrategyFamilySignalModel):
     @model_validator(mode="after")
     def _enforce_signal_invariants(self) -> "StrategyFamilySignalOutput":
         reject_forbidden_execution_fields(self.model_dump(mode="python"), root="signal_output")
+        if (
+            self.signal_type == SignalType.WOULD_ENTER
+            and self.trigger_candle_close_time_ms is None
+        ):
+            raise ValueError("would_enter signal requires trigger_candle_close_time_ms")
         if self.signal_type == SignalType.NO_ACTION and self.side != SignalSide.NONE:
             raise ValueError("no_action signal must use side=none")
         return self

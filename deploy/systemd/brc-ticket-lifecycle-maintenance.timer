@@ -1,0 +1,12 @@
+[Unit]
+Description=Run BRC ticket-bound lifecycle maintenance on bounded cadence
+
+[Timer]
+OnActiveSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Persistent=false
+Unit=brc-ticket-lifecycle-maintenance.service
+
+[Install]
+WantedBy=timers.target

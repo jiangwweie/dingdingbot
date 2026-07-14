@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from src.application.decision_trace import TraceService
+from src.application.decision_trace import TraceEvent, TraceService
 from src.application.global_kill_switch import (
     GLOBAL_KILL_SWITCH_CONFLICTING_REASON,
     GLOBAL_KILL_SWITCH_CORRUPT_REASON,
@@ -39,11 +39,22 @@ from src.domain.models import (
     SignalResult,
 )
 from src.infrastructure.pg_global_kill_switch_repository import PgGlobalKillSwitchRepository
-from src.infrastructure.jsonl_trace_sink import JsonlTraceSink
 from src.infrastructure.pg_models import PGGlobalKillSwitchStateORM
 from src.infrastructure.repository_ports import CampaignStateSnapshot, GlobalKillSwitchStateSnapshot
 from src.interfaces import api as api_module
 from src.interfaces.api_console_runtime import router as runtime_router
+
+
+class _CaptureTraceSink:
+    def __init__(self) -> None:
+        self.events = []
+
+    def emit(self, event: TraceEvent) -> None:
+        self.events.append(event.model_dump(mode="json"))
+
+    @property
+    def text(self) -> str:
+        return "\n".join(json.dumps(event, sort_keys=True) for event in self.events)
 
 
 class _CountingCapitalProtection:
@@ -630,9 +641,9 @@ async def test_missing_gks_row_blocks_new_entries_fail_closed(gks_repo):
 
 
 @pytest.mark.asyncio
-async def test_missing_gks_row_blocks_execute_signal_and_emits_trace(gks_repo, tmp_path):
-    trace_path = tmp_path / "runtime" / "risk_decision.jsonl"
-    trace_service = TraceService(sinks=[JsonlTraceSink(trace_path)])
+async def test_missing_gks_row_blocks_execute_signal_and_emits_trace(gks_repo):
+    trace_sink = _CaptureTraceSink()
+    trace_service = TraceService(sinks=[trace_sink])
     gks = GlobalKillSwitchService(repository=gks_repo, trace_service=trace_service)
     await gks.initialize()
     guard = StartupTradingGuardService(trace_service=trace_service)
@@ -648,7 +659,7 @@ async def test_missing_gks_row_blocks_execute_signal_and_emits_trace(gks_repo, t
     assert intent.blocked_reason == KILL_SWITCH_BLOCK_REASON
     assert cp.calls == 0
     assert lifecycle.created == 0
-    payload = trace_path.read_text(encoding="utf-8")
+    payload = trace_sink.text
     assert "risk.global_kill_switch_check" in payload
     assert GLOBAL_KILL_SWITCH_MISSING_REASON in payload
     assert KILL_SWITCH_BLOCK_REASON in payload
@@ -941,10 +952,10 @@ async def test_conflicting_gks_state_activates_fail_closed(caplog):
 
 
 @pytest.mark.asyncio
-async def test_startup_guard_blocks_until_manual_arm_and_emits_trace(tmp_path):
-    trace_path = tmp_path / "runtime" / "risk_decision.jsonl"
+async def test_startup_guard_blocks_until_manual_arm_and_emits_trace():
+    trace_sink = _CaptureTraceSink()
     guard = StartupTradingGuardService(
-        trace_service=TraceService(sinks=[JsonlTraceSink(trace_path)])
+        trace_service=TraceService(sinks=[trace_sink])
     )
     orchestrator, cp, lifecycle = await _orchestrator_with_startup_guard(guard=guard)
 
@@ -954,7 +965,7 @@ async def test_startup_guard_blocks_until_manual_arm_and_emits_trace(tmp_path):
     assert intent.blocked_reason == STARTUP_TRADING_GUARD_BLOCK_REASON
     assert cp.calls == 0
     assert lifecycle.created == 0
-    payload = trace_path.read_text(encoding="utf-8")
+    payload = trace_sink.text
     assert "risk.startup_trading_guard_check" in payload
     assert STARTUP_TRADING_GUARD_BLOCK_REASON in payload
 
@@ -971,10 +982,10 @@ def test_new_startup_guard_instance_after_restart_defaults_blocked():
 
 
 @pytest.mark.asyncio
-async def test_manual_arm_allows_signal_to_reach_capital_protection(tmp_path):
-    trace_path = tmp_path / "runtime" / "risk_decision.jsonl"
+async def test_manual_arm_allows_signal_to_reach_capital_protection():
+    trace_sink = _CaptureTraceSink()
     guard = StartupTradingGuardService(
-        trace_service=TraceService(sinks=[JsonlTraceSink(trace_path)])
+        trace_service=TraceService(sinks=[trace_sink])
     )
     guard.manual_arm(updated_by="owner", reason="testnet smoke approved")
     orchestrator, cp, lifecycle = await _orchestrator_with_startup_guard(guard=guard)
@@ -985,21 +996,21 @@ async def test_manual_arm_allows_signal_to_reach_capital_protection(tmp_path):
     assert lifecycle.created == 0
     assert intent.status == ExecutionIntentStatus.BLOCKED
     assert intent.blocked_reason == "CP_DENY"
-    payload = trace_path.read_text(encoding="utf-8")
+    payload = trace_sink.text
     assert "risk.startup_trading_guard_check" in payload
     assert '"decision": "allow"' in payload
 
 
-def test_manual_arm_emits_control_trace_without_secrets(tmp_path):
-    trace_path = tmp_path / "runtime" / "risk_decision.jsonl"
+def test_manual_arm_emits_control_trace_without_secrets():
+    trace_sink = _CaptureTraceSink()
     guard = StartupTradingGuardService(
-        trace_service=TraceService(sinks=[JsonlTraceSink(trace_path)]),
+        trace_service=TraceService(sinks=[trace_sink]),
         config_hash="cfg-safe",
     )
 
     guard.manual_arm(updated_by="owner", reason="testnet smoke approved")
 
-    payload = json.loads(trace_path.read_text(encoding="utf-8").splitlines()[0])
+    payload = trace_sink.events[0]
     assert payload["event_type"] == "control.startup_trading_guard_arm"
     assert payload["lifecycle_id"] == "control:startup_trading_guard"
     assert payload["config_hash"] == "cfg-safe"

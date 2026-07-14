@@ -28,6 +28,7 @@ class BinancePublicKlineMarketSource:
 
     _BASE_URL = "https://fapi.binance.com/fapi/v1/klines"
     _TIMEFRAME_MS = {
+        "15m": 15 * 60 * 1000,
         "1h": 60 * 60 * 1000,
         "4h": 4 * 60 * 60 * 1000,
     }

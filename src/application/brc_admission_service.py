@@ -52,6 +52,18 @@ def _id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+def _merge_preserving_order(existing: list[str], incoming: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in [*existing, *incoming]:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        merged.append(text)
+    return merged
+
+
 class AdmissionRuleViolation(ValueError):
     """Raised when admission facts violate a Phase 1 boundary."""
 
@@ -79,6 +91,17 @@ class BrcAdmissionRepositoryPort(Protocol):
         self,
         strategy_family_version_id: str,
     ) -> Optional[StrategyFamilyVersion]:
+        ...
+
+    async def sync_strategy_family_version_scope(
+        self,
+        strategy_family_version_id: str,
+        *,
+        supported_symbols: list[str],
+        supported_timeframes: list[str],
+        actor: str,
+        reason: str,
+    ) -> StrategyFamilyVersion:
         ...
 
     async def create_rule_config(self, config: AdmissionRuleConfig) -> AdmissionRuleConfig:
@@ -3615,6 +3638,50 @@ class BrcAdmissionService:
             actor=created_by,
             message="Strategy family version created.",
             metadata={"strategy_family_id": strategy_family_id},
+        )
+        return saved
+
+    async def sync_strategy_family_version_scope(
+        self,
+        strategy_family_version_id: str,
+        *,
+        supported_symbols: list[str],
+        supported_timeframes: list[str],
+        actor: str = "owner",
+        reason: str = "",
+    ) -> StrategyFamilyVersion:
+        version = await self._repo.get_strategy_family_version(strategy_family_version_id)
+        if version is None:
+            raise AdmissionRuleViolation(
+                f"strategy family version not found: {strategy_family_version_id}"
+            )
+        merged_symbols = _merge_preserving_order(
+            version.supported_symbols,
+            supported_symbols,
+        )
+        merged_timeframes = _merge_preserving_order(
+            version.supported_timeframes,
+            supported_timeframes,
+        )
+        saved = await self._repo.sync_strategy_family_version_scope(
+            strategy_family_version_id,
+            supported_symbols=merged_symbols,
+            supported_timeframes=merged_timeframes,
+            actor=actor,
+            reason=reason,
+        )
+        await self._audit(
+            event_type=AdmissionAuditEventType.FAMILY_VERSION_SCOPE_SYNCED,
+            ref_type="strategy_family_version",
+            ref_id=saved.strategy_family_version_id,
+            actor=actor,
+            message="Strategy family version scope synchronized.",
+            metadata={
+                "strategy_family_id": saved.strategy_family_id,
+                "reason": reason,
+                "supported_symbols": saved.supported_symbols,
+                "supported_timeframes": saved.supported_timeframes,
+            },
         )
         return saved
 

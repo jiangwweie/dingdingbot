@@ -1,0 +1,21 @@
+[Unit]
+Description=BRC server-side readonly runtime monitor
+Wants=network-online.target
+After=network-online.target brc-owner-console-backend.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/brc-deploy/app/current
+EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
+EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-monitor.env
+ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/run_tokyo_runtime_server_monitor.py \
+  --require-database-url \
+  --systemd-unit brc-owner-console-backend.service \
+  --systemd-unit brc-runtime-signal-watcher.timer \
+  --systemd-unit brc-runtime-signal-watcher.service
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict

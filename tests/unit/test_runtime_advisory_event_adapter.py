@@ -141,10 +141,10 @@ def test_completion_audit_waiting_for_market_builds_digest_without_push():
     assert event.context_artifact.runtime["market_dependent_remaining"] == 5
 
 
-def test_watcher_prepared_signal_builds_push_only_strategy_event_without_order_params():
+def test_watcher_action_time_ticket_signal_builds_push_only_strategy_event_without_order_params():
     event = build_watcher_artifact_advisory_event(
         {
-            "status": "prepared_shadow_evidence_ready_for_owner_review",
+            "status": "runtime_signal_ready_for_action_time_ticket",
             "artifact_id": "watcher-ready-1",
             "notification": {"required": True, "reason": "owner_attention_required"},
             "operator_command_plan": {"next_step": "legacy_should_not_surface"},

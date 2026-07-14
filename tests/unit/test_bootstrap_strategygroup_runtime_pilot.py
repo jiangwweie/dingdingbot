@@ -1,12 +1,64 @@
 from __future__ import annotations
 
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+import pytest
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine, text
+
+from scripts import bootstrap_strategygroup_runtime_pilot as bootstrap
 from scripts.bootstrap_strategygroup_runtime_pilot import (
+    PG_SOURCE_REF,
     RuntimePilotBootstrapConfig,
-    _active_inventory_counts,
-    _runtime_rows_from_payload,
+    _bootstrap_config,
     _runtime_symbol,
     build_artifact,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+
+
+def _load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _seed_runtime_control_state_db(tmp_path: Path) -> str:
+    migration = _load_module(MIGRATION_PATH, "migration_086_bootstrap_runtime")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_bootstrap_runtime")
+    database_url = f"sqlite:///{tmp_path / 'runtime-control-state.db'}"
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+    engine.dispose()
+    return database_url
+
+
+def _mutate_runtime_control_state_db(database_url: str, statement: str) -> None:
+    engine = create_engine(database_url)
+    with engine.begin() as conn:
+        conn.execute(text(statement))
+    engine.dispose()
 
 
 class _FakeClient:
@@ -190,70 +242,6 @@ def test_runtime_symbol_normalizes_binance_usdt_to_runtime_symbol():
     assert _runtime_symbol("COIN/USDT:USDT") == "COIN/USDT:USDT"
 
 
-def test_runtime_rows_from_payload_accepts_current_runtime_signal_summary_shape():
-    rows = _runtime_rows_from_payload(
-        {
-            "active_runtime_count": 2,
-            "runtime_signal_summaries": [
-                {
-                    "runtime_instance_id": "runtime-mpg-1",
-                    "strategy_family_id": "MPG-001",
-                    "symbol": "COIN/USDT:USDT",
-                    "side": "long",
-                }
-            ],
-        }
-    )
-
-    assert rows == [
-        {
-            "runtime_instance_id": "runtime-mpg-1",
-            "strategy_family_id": "MPG-001",
-            "symbol": "COIN/USDT:USDT",
-            "side": "long",
-        }
-    ]
-
-
-def test_runtime_rows_from_payload_ignores_legacy_status_packet_wrapper():
-    rows = _runtime_rows_from_payload(
-        {
-            "status_packet": {
-                "runtime_signal_summaries": [
-                    {
-                        "runtime_instance_id": "legacy-runtime-must-not-win",
-                        "strategy_family_id": "MPG-001",
-                    }
-                ],
-            }
-        }
-    )
-
-    assert rows == []
-
-
-def test_active_inventory_counts_ignores_legacy_status_packet_wrapper():
-    counts = _active_inventory_counts(
-        {
-            "status_packet": {
-                "active_runtime_count": 9,
-                "monitored_runtime_count": 7,
-            },
-            "data": {
-                "watcher": {
-                    "active_runtime_count": 2,
-                    "monitored_runtime_count": 1,
-                }
-            },
-        }
-    )
-
-    assert counts == {
-        "active_runtime_count": 2,
-        "monitored_runtime_count": 1,
-    }
-
-
 def test_plan_skips_existing_group_and_observe_only_by_default():
     artifact = build_artifact(
         config=RuntimePilotBootstrapConfig(
@@ -290,6 +278,115 @@ def test_plan_skips_existing_group_and_observe_only_by_default():
     assert artifact["safety_invariants"]["plan_only"] is True
     assert artifact["safety_invariants"]["creates_runtime_records"] is False
     assert artifact["safety_invariants"]["creates_order"] is False
+
+
+def test_candidate_pool_side_overrides_legacy_handoff_side():
+    candidate_pool = {
+        "status": "strategy_live_candidate_pool_ready",
+        "candidate_universe": {"SOR-001": ["ETHUSDT"]},
+        "symbol_readiness_rows": [
+            {
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+            }
+        ],
+        "candidate_rows": [
+            {
+                "strategy_group_id": "SOR-001",
+                "side": "long",
+                "daily_rank": 1,
+            }
+        ],
+    }
+
+    artifact = build_artifact(
+        config=RuntimePilotBootstrapConfig(
+            execute=False,
+            strategy_group_ids=("SOR-001",),
+            max_symbols_per_group=1,
+            max_total_new_runtimes=1,
+            candidate_universe_source="candidate-pool.json",
+        ),
+        intake_artifact=_intake(),
+        live_facts_readiness={
+            "readiness": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "observe_ready": True,
+                    "readiness_status": "candidate_universe_runtime_scope_ready",
+                    "exchange_rules": {"ready_symbols": ["ETHUSDT"]},
+                }
+            ]
+        },
+        active_runtimes=[],
+        candidate_pool=candidate_pool,
+    )
+
+    assert artifact["status"] == "planned_runtime_bootstrap"
+    assert len(artifact["targets"]) == 1
+    assert artifact["targets"][0]["strategy_group_id"] == "SOR-001"
+    assert artifact["targets"][0]["exchange_symbol"] == "ETHUSDT"
+    assert artifact["targets"][0]["side"] == "long"
+
+
+def test_candidate_pool_lane_universe_bootstraps_missing_side_even_when_group_active():
+    candidate_pool = {
+        "status": "strategy_live_candidate_pool_ready",
+        "candidate_universe": {"MPG-001": ["OPUSDT"]},
+        "candidate_lane_universe": {"MPG-001": ["OPUSDT:long", "OPUSDT:short"]},
+        "candidate_rows": [
+            {"strategy_group_id": "MPG-001", "daily_rank": 1, "side": "long"},
+        ],
+        "symbol_readiness_rows": [
+            {"strategy_group_id": "MPG-001", "symbol": "OPUSDT", "side": "long"},
+            {"strategy_group_id": "MPG-001", "symbol": "OPUSDT", "side": "short"},
+        ],
+    }
+
+    artifact = build_artifact(
+        config=RuntimePilotBootstrapConfig(
+            execute=False,
+            strategy_group_ids=("MPG-001",),
+            max_symbols_per_group=4,
+            max_total_new_runtimes=4,
+            candidate_universe_source="candidate-pool.json",
+        ),
+        intake_artifact=_intake(),
+        live_facts_readiness={
+            "readiness": [
+                {
+                    "strategy_group_id": "MPG-001",
+                    "observe_ready": True,
+                    "readiness_status": "candidate_universe_runtime_scope_ready",
+                    "exchange_rules": {"ready_symbols": ["OPUSDT"]},
+                }
+            ]
+        },
+        active_runtimes=[
+            {
+                "runtime_instance_id": "runtime-mpg-op-long",
+                "strategy_family_id": "MPG-001",
+                "strategy_family_version_id": "MPG-001-v0",
+                "symbol": "OP/USDT:USDT",
+                "side": "long",
+                "status": "active",
+            }
+        ],
+        candidate_pool=candidate_pool,
+    )
+
+    assert [
+        (item["strategy_group_id"], item["exchange_symbol"], item["side"])
+        for item in artifact["targets"]
+    ] == [("MPG-001", "OPUSDT", "short")]
+    skipped = {
+        (item["strategy_group_id"], item["exchange_symbol"], item["side"]): item
+        for item in artifact["skipped"]
+    }
+    assert skipped[("MPG-001", "OPUSDT", "long")]["reason"] == (
+        "runtime_already_active_for_group_symbol_side"
+    )
 
 
 def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization():
@@ -333,6 +430,107 @@ def test_plan_can_renew_exhausted_runtime_attempts_under_standing_authorization(
         "runtime_attempts_exhausted_renewal_ready_for_runtime_bootstrap"
     )
     assert target["renewal_of_runtime_instance_id"] == "runtime-teq-exhausted"
+    assert artifact["safety_invariants"]["creates_candidate"] is False
+    assert artifact["safety_invariants"]["creates_execution_intent"] is False
+    assert artifact["safety_invariants"]["creates_order"] is False
+
+
+def test_bootstrap_config_uses_lane_specific_policy_risk_defaults():
+    config = _bootstrap_config(
+        config=RuntimePilotBootstrapConfig(),
+        group={
+            "strategy_group_id": "MPG-001",
+            "name": "MPG",
+            "supported_symbols": ["OPUSDT"],
+            "risk_defaults": {
+                "max_notional_per_action_usdt": "8",
+                "max_leverage": "1",
+            },
+            "risk_defaults_by_lane": {
+                "OPUSDT:long": {
+                    "max_notional_per_action_usdt": "13",
+                    "max_leverage": "3",
+                }
+            },
+        },
+        symbol="OPUSDT",
+        side="long",
+    )
+
+    assert str(config.max_notional) == "13"
+    assert config.max_leverage == 3
+
+
+def test_plan_can_use_candidate_pool_universe_instead_of_legacy_picker_scope():
+    candidate_pool = {
+        "status": "strategy_live_candidate_pool_ready",
+        "candidate_universe": {
+            "CPM-RO-001": ["ETHUSDT", "SOLUSDT"],
+            "MPG-001": ["OPUSDT"],
+            "SOR-001": ["ETHUSDT"],
+            "BRF2-001": [
+                "BTCUSDT",
+                "brf2_research_supported_symbols_only",
+            ],
+        },
+        "candidate_rows": [
+            {"strategy_group_id": "MPG-001", "daily_rank": 1, "side": "long"},
+            {"strategy_group_id": "CPM-RO-001", "daily_rank": 2, "side": "long"},
+            {"strategy_group_id": "SOR-001", "daily_rank": 3, "side": "long"},
+            {"strategy_group_id": "BRF2-001", "daily_rank": 4, "side": "short"},
+        ],
+        "symbol_readiness_rows": [
+            {"strategy_group_id": "CPM-RO-001", "symbol": "ETHUSDT", "side": "long"},
+            {"strategy_group_id": "CPM-RO-001", "symbol": "SOLUSDT", "side": "long"},
+            {"strategy_group_id": "MPG-001", "symbol": "OPUSDT", "side": "long"},
+            {"strategy_group_id": "SOR-001", "symbol": "ETHUSDT", "side": "long"},
+            {"strategy_group_id": "BRF2-001", "symbol": "BTCUSDT", "side": "short"},
+        ],
+    }
+
+    artifact = build_artifact(
+        config=RuntimePilotBootstrapConfig(
+            execute=False,
+            include_observe_only=True,
+            max_symbols_per_group=4,
+            max_total_new_runtimes=10,
+            candidate_universe_source="candidate-pool.json",
+        ),
+        intake_artifact=_intake(),
+        live_facts_readiness={
+            "readiness": [
+                {
+                    "strategy_group_id": strategy_group_id,
+                    "observe_ready": True,
+                    "readiness_status": "candidate_universe_runtime_scope_ready",
+                    "exchange_rules": {"ready_symbols": symbols},
+                }
+                for strategy_group_id, symbols in {
+                    "CPM-RO-001": ["ETHUSDT", "SOLUSDT"],
+                    "MPG-001": ["OPUSDT"],
+                    "SOR-001": ["ETHUSDT"],
+                    "BRF2-001": ["BTCUSDT"],
+                }.items()
+            ]
+        },
+        active_runtimes=[],
+        candidate_pool=candidate_pool,
+    )
+
+    target_keys = [
+        (item["strategy_group_id"], item["exchange_symbol"], item["side"])
+        for item in artifact["targets"]
+    ]
+    assert target_keys == [
+        ("MPG-001", "OPUSDT", "long"),
+        ("CPM-RO-001", "ETHUSDT", "long"),
+        ("CPM-RO-001", "SOLUSDT", "long"),
+        ("SOR-001", "ETHUSDT", "long"),
+        ("BRF2-001", "BTCUSDT", "short"),
+    ]
+    assert not any("RESEARCH" in item["exchange_symbol"] for item in artifact["targets"])
+    assert artifact["runtime_scope"]["candidate_universe_source"] == "candidate-pool.json"
+    assert artifact["runtime_scope"]["candidate_universe_symbol_count"] == 5
     assert artifact["safety_invariants"]["creates_candidate"] is False
     assert artifact["safety_invariants"]["creates_execution_intent"] is False
     assert artifact["safety_invariants"]["creates_order"] is False
@@ -391,3 +589,171 @@ def test_execute_blocks_when_active_inventory_is_unavailable():
     assert artifact["status"] == "blocked_active_runtime_inventory_unavailable"
     assert artifact["executions"] == []
     assert "active_runtime_inventory_unavailable:URLError" in artifact["blockers"]
+
+
+def test_cli_requires_pg_runtime_control_state(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+
+    result = bootstrap.main([])
+
+    assert result == 2
+    assert "PG_DATABASE_URL is required for PG-only runtime bootstrap" in (
+        capsys.readouterr().err
+    )
+
+
+def test_cli_execute_requires_database_url(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+
+    result = bootstrap.main(
+        [
+            "--execute",
+        ]
+    )
+
+    assert result == 2
+    assert "PG_DATABASE_URL is required for PG-only runtime bootstrap" in (
+        capsys.readouterr().err
+    )
+
+
+def test_cli_rejects_removed_local_diagnostic_flag(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    removed_flag = "--allow-" + "local-file-diagnostic"
+
+    with pytest.raises(SystemExit) as exc:
+        bootstrap.main(
+            [
+                "--database-url",
+                database_url,
+                "--allow-non-postgres-for-test",
+                removed_flag,
+                "--execute",
+            ]
+        )
+
+    assert exc.value.code == 2
+    assert f"unrecognized arguments: {removed_flag}" in capsys.readouterr().err
+
+
+def test_cli_execute_rejects_non_postgres_test_dsn_override(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--execute",
+        ]
+    )
+
+    assert result == 2
+    assert "must not be combined with --execute" in capsys.readouterr().err
+
+
+def test_cli_rejects_removed_candidate_universe_file_flag(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    removed_flag = "--candidate-" + "universe-json"
+
+    with pytest.raises(SystemExit) as exc:
+        bootstrap.main(
+            [
+                "--database-url",
+                database_url,
+                "--allow-non-postgres-for-test",
+                removed_flag,
+                str(tmp_path / "must-not-be-read.json"),
+            ]
+        )
+
+    assert exc.value.code == 2
+    assert f"unrecognized arguments: {removed_flag}" in capsys.readouterr().err
+
+
+def test_cli_pg_bootstrap_requires_active_runtime_scope_binding(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    _mutate_runtime_control_state_db(
+        database_url,
+        """
+        DELETE FROM brc_runtime_scope_bindings
+        WHERE candidate_scope_id = 'candidate_scope:MPG-001:OPUSDT:long:MPG-LONG'
+        """,
+    )
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+        ]
+    )
+
+    assert result == 2
+    assert "has no active runtime scope binding" in capsys.readouterr().err
+
+
+def test_cli_pg_bootstrap_requires_policy_notional_leverage_scope(tmp_path, capsys):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    _mutate_runtime_control_state_db(
+        database_url,
+        """
+        UPDATE brc_owner_policy_current
+        SET max_notional = NULL
+        WHERE policy_current_id =
+          'policy_current:candidate_scope:MPG-001:OPUSDT:long:MPG-LONG'
+        """,
+    )
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+        ]
+    )
+
+    assert result == 2
+    assert "missing max_notional or leverage scope" in capsys.readouterr().err
+
+
+def test_cli_pg_backed_bootstrap_reads_seeded_runtime_control_state(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    database_url = _seed_runtime_control_state_db(tmp_path)
+    monkeypatch.setattr(bootstrap, "UrlLibApiClient", lambda api_base: object())
+    monkeypatch.setattr(bootstrap, "_list_active_runtimes", lambda client: ([], []))
+
+    result = bootstrap.main(
+        [
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
+            "--max-symbols-per-group",
+            "4",
+            "--max-total-new-runtimes",
+            "30",
+            "--include-observe-only",
+        ]
+    )
+
+    assert result == 0
+    artifact = json.loads(capsys.readouterr().out)
+    assert artifact["status"] == "planned_runtime_bootstrap"
+    assert artifact["runtime_scope"]["candidate_universe_source"] == PG_SOURCE_REF
+    assert artifact["runtime_scope"]["candidate_universe_symbol_count"] == 18
+    assert artifact["runtime_scope"]["candidate_universe_lane_count"] == 22
+    target_scope = {
+        (row["strategy_group_id"], row["exchange_symbol"], row["side"])
+        for row in artifact["targets"]
+    }
+    assert ("CPM-RO-001", "ETHUSDT", "short") not in target_scope
+    assert ("MPG-001", "OPUSDT", "short") not in target_scope
+    assert ("BRF2-001", "BTCUSDT", "long") not in target_scope
+    assert ("SOR-001", "ETHUSDT", "long") in target_scope
+    assert ("SOR-001", "ETHUSDT", "short") in target_scope
+    assert artifact["safety_invariants"]["creates_candidate"] is False
+    assert artifact["safety_invariants"]["creates_execution_intent"] is False
+    assert artifact["safety_invariants"]["creates_order"] is False

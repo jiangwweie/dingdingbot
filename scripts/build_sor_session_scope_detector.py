@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""Build SOR SOL/AVAX scope and session breakout detector facts."""
+"""Build SOR authorized-symbol scope and session breakout detector facts."""
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+import sqlalchemy as sa
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -22,32 +27,51 @@ from strategygroup_non_executing_projection import (  # noqa: E402
     non_executing_interaction,
     non_executing_safety_invariants,
 )
-
-
-DEFAULT_PUBLIC_FACTS_JSON = (
-    REPO_ROOT / "output/runtime-monitor/latest-binance-usdm-public-facts.json"
+from runtime_pg_fact_snapshots import read_pretrade_public_facts_artifact  # noqa: E402
+from src.domain.sor_session_range_evaluator import SOR001SessionRangeEvaluator  # noqa: E402
+from src.domain.strategy_family_signal import (  # noqa: E402
+    AccountFactsSnapshot,
+    MarketSnapshot,
+    SignalSide,
+    SignalType,
+    StrategyFamilySignalInput,
 )
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "output/runtime-monitor"
+
+
 BASE_URL = "https://fapi.binance.com"
-SYMBOLS = ("SOLUSDT", "AVAXUSDT")
 PRIMARY_LIVE_SCOPE = ("BTCUSDT", "ETHUSDT")
+READONLY_EXPANSION_SCOPE = ("SOLUSDT", "AVAXUSDT")
+SYMBOLS = ("ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--public-facts-json", default=str(DEFAULT_PUBLIC_FACTS_JSON))
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--database-url", default=os.getenv("PG_DATABASE_URL", ""))
+    parser.add_argument("--require-database-url", action="store_true")
+    parser.add_argument("--allow-non-postgres-for-test", action="store_true")
+    parser.add_argument(
+        "--ssh-host",
+        default="",
+        help="Optional SSH host for read-only Binance USD-M kline fetch.",
+    )
     args = parser.parse_args(argv)
 
-    artifacts = build_sor_session_scope_detector(
-        public_facts=_read_optional_json(Path(args.public_facts_json))
-    )
-    output_dir = Path(args.output_dir)
-    for artifact in artifacts.values():
-        json_path = output_dir / artifact["output_file_names"]["json"]
-        md_path = output_dir / artifact["output_file_names"]["md"]
-        _write_json(json_path, artifact)
-        _write_text(md_path, _markdown(artifact, json_path))
+    if not args.database_url:
+        print("ERROR: PG_DATABASE_URL is required for DB-backed SOR detector", file=sys.stderr)
+        return 2
+    if not args.database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://")
+    ) and not args.allow_non_postgres_for_test:
+        print("ERROR: DB-backed SOR detector requires PostgreSQL DSN", file=sys.stderr)
+        return 2
+    engine = sa.create_engine(args.database_url)
+    try:
+        with engine.connect() as conn:
+            public_facts = read_pretrade_public_facts_artifact(conn, symbols=list(SYMBOLS))
+    finally:
+        engine.dispose()
+
+    artifacts = build_sor_session_scope_detector(public_facts=public_facts, ssh_host=args.ssh_host)
     print(
         json.dumps(
             {
@@ -67,6 +91,7 @@ def build_sor_session_scope_detector(
     *,
     public_facts: dict[str, Any],
     candle_payloads: dict[str, list[list[Any]]] | None = None,
+    ssh_host: str = "",
     generated_at_utc: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     now = _parse_utc(generated_at_utc) if generated_at_utc else datetime.now(timezone.utc)
@@ -75,9 +100,12 @@ def build_sor_session_scope_detector(
         for row in public_facts.get("symbols") or []
         if isinstance(row, dict)
     }
-    candle_payloads = candle_payloads or {
-        symbol: _fetch_klines(symbol) for symbol in SYMBOLS
-    }
+    if candle_payloads is None:
+        candle_payloads = (
+            _fetch_klines_via_ssh(ssh_host, SYMBOLS)
+            if ssh_host
+            else {symbol: _fetch_klines(symbol) for symbol in SYMBOLS}
+        )
     detector_rows = [
         _detector_row(
             symbol=symbol,
@@ -93,7 +121,11 @@ def build_sor_session_scope_detector(
 
 
 def _scope_artifact(rows: list[dict[str, Any]], generated_at_utc: str) -> dict[str, Any]:
-    ready_symbols = [row["symbol"] for row in rows if row["public_facts_ready"]]
+    ready_symbols = [
+        row["symbol"]
+        for row in rows
+        if row["symbol"] in READONLY_EXPANSION_SCOPE and row["public_facts_ready"]
+    ]
     return {
         "schema": "brc.sor_expanded_scope.v1",
         "scope": "sor_sol_avax_readonly_scope_non_authority",
@@ -116,18 +148,25 @@ def _scope_artifact(rows: list[dict[str, Any]], generated_at_utc: str) -> dict[s
 
 
 def _detector_artifact(rows: list[dict[str, Any]], generated_at_utc: str) -> dict[str, Any]:
-    fresh_count = sum(row["fresh_session_range_signal"] is True for row in rows)
+    fresh_count = sum(
+        event_row.get("fresh_signal") is True
+        for row in rows
+        for event_row in row.get("side_event_rows", [])
+    )
     return {
         "schema": "brc.sor_session_detector_facts.v1",
         "scope": "sor_session_breakout_detector_facts_non_authority",
         "status": "sor_session_detector_facts_ready",
         "generated_at_utc": generated_at_utc,
         "strategy_group_id": "SOR-001",
-        "path_id": "SOR-SESSION-BREAKOUT",
+        "path_id": "SOR-SIDE-SPECIFIC-SESSION-RANGE",
         "detector_source_mode": "binance_usdm_public_closed_candles",
+        "generic_sor_signal_allowed": False,
         "symbol_detector_rows": rows,
         "summary": {
             "fresh_session_signal_count": fresh_count,
+            "fresh_side_event_count": fresh_count,
+            "supported_event_ids": ["SOR-LONG", "SOR-SHORT"],
             "first_blocker": (
                 "private_action_time_facts_required"
                 if fresh_count
@@ -159,14 +198,17 @@ def _detector_row(
     session = _current_session_candles(closed, generated_at)
     opening = session[:4]
     latest = session[-1] if session else {}
-    opening_high = max([_float(row.get("high")) for row in opening if _float(row.get("high")) is not None], default=None)
-    opening_low = min([_float(row.get("low")) for row in opening if _float(row.get("low")) is not None], default=None)
+    evaluation = _evaluate_session(symbol=symbol, session=session, generated_at=generated_at)
+    evidence = evaluation.evidence_payload
+    opening_high = _float(evidence.get("opening_range_high"))
+    opening_low = _float(evidence.get("opening_range_low"))
     close = _float(latest.get("close"))
-    prior = session[-2] if len(session) >= 2 else {}
-    prior_close = _float(prior.get("close"))
-    breakout = close is not None and opening_high is not None and close > opening_high
-    follow_through = breakout and (prior_close is None or close >= prior_close)
-    invalidation_ok = close is not None and opening_low is not None and close > opening_low
+    long_breakout = evidence.get("breakout_confirmed") is True
+    long_follow_through = long_breakout
+    long_invalidation_ok = close is not None and opening_low is not None and close > opening_low
+    short_breakdown = evidence.get("breakdown_confirmed") is True
+    short_follow_through = short_breakdown
+    short_invalidation_ok = close is not None and opening_high is not None and close < opening_high
     public_ready = (
         public_row.get("public_facts_ready") is True
         and public_row.get("spread_ok") is True
@@ -174,42 +216,134 @@ def _detector_row(
         and public_row.get("qty_step_ok") is True
         and public_row.get("funding_not_extreme") is True
     )
-    fresh = bool(public_ready and breakout and follow_through and invalidation_ok)
-    missing = []
+    long_fresh = bool(
+        public_ready
+        and evaluation.signal_type == SignalType.WOULD_ENTER
+        and evaluation.side == SignalSide.LONG
+        and long_invalidation_ok
+    )
+    short_fresh = bool(
+        public_ready
+        and evaluation.signal_type == SignalType.WOULD_ENTER
+        and evaluation.side == SignalSide.SHORT
+        and short_invalidation_ok
+    )
+    long_missing = []
+    short_missing = []
     if not public_ready:
-        missing.append("public_facts_ready")
+        long_missing.append("public_facts_ready")
+        short_missing.append("public_facts_ready")
     if opening_high is None or opening_low is None:
-        missing.append("opening_range_available")
-    if not breakout:
-        missing.append("breakout_level_crossed")
-    if not follow_through:
-        missing.append("follow_through_confirmed")
-    if not invalidation_ok:
-        missing.append("invalidation_level_held")
+        long_missing.append("opening_range_available")
+        short_missing.append("opening_range_available")
+    if not long_breakout:
+        long_missing.append("breakout_level_crossed")
+    if not long_follow_through:
+        long_missing.append("follow_through_confirmed")
+    if not long_invalidation_ok:
+        long_missing.append("invalidation_level_held")
+    if not short_breakdown:
+        short_missing.append("breakdown_level_crossed")
+    if not short_follow_through:
+        short_missing.append("bearish_follow_through_confirmed")
+    if not short_invalidation_ok:
+        short_missing.append("reclaim_invalidation_clear")
+    side_event_rows = [
+        {
+            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v2",
+            "event_id": "SOR-LONG",
+            "side": "long",
+            "event_direction": "closed_15m_breakout_above_opening_range_high",
+            "trigger_level": opening_high,
+            "protection_ref_type": "opening_range_low_reference",
+            "protection_level": opening_low,
+            "follow_through": long_follow_through,
+            "invalidation_held": long_invalidation_ok,
+            "fresh_signal": long_fresh,
+            "missing_required_trigger_facts": long_missing,
+            "trigger_candle_close_time_utc": latest.get("close_time_utc"),
+        },
+        {
+            "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v2",
+            "event_id": "SOR-SHORT",
+            "side": "short",
+            "event_direction": "closed_15m_breakdown_below_opening_range_low",
+            "trigger_level": opening_low,
+            "protection_ref_type": "opening_range_high_reference",
+            "protection_level": opening_high,
+            "follow_through": short_follow_through,
+            "invalidation_held": short_invalidation_ok,
+            "fresh_signal": short_fresh,
+            "missing_required_trigger_facts": short_missing,
+            "trigger_candle_close_time_utc": latest.get("close_time_utc"),
+        },
+    ]
     return {
         "symbol": symbol,
         "timeframe": "15m_closed",
         "public_facts_ready": public_ready,
+        "generic_sor_signal_allowed": False,
+        "side_event_rows": side_event_rows,
         "opening_range": {
             "high": opening_high,
             "low": opening_low,
             "source": "utc_session_first_four_15m_closed_candles",
         },
         "breakout_level": opening_high,
-        "follow_through": follow_through,
+        "breakdown_level": opening_low,
+        "follow_through": long_follow_through,
         "invalidation": {
             "level": opening_low,
-            "held": invalidation_ok,
+            "held": long_invalidation_ok,
         },
         "latest_close": close,
         "latest_candle_close_time_utc": latest.get("close_time_utc"),
-        "fresh_session_range_signal": fresh,
-        "missing_required_trigger_facts": missing,
+        "fresh_session_range_signal": long_fresh,
+        "fresh_session_range_short_signal": short_fresh,
+        "missing_required_trigger_facts": long_missing,
         "primary_trial_scope_decision": "readonly_watcher_only_not_primary_live_scope",
         "primary_trial_scope_rejection_reason": (
             "requires_session_detector_forward_observation_and_private_action_time_facts"
         ),
     }
+
+
+def _evaluate_session(
+    *,
+    symbol: str,
+    session: list[dict[str, Any]],
+    generated_at: datetime,
+):
+    timestamp_ms = int(generated_at.timestamp() * 1000)
+    trigger_ms = int(session[-1].get("close_time_ms") or timestamp_ms) if session else timestamp_ms
+    exchange_symbol = f"{symbol.removesuffix('USDT')}/USDT:USDT"
+    signal_input = StrategyFamilySignalInput(
+        evaluation_id=f"sor-readonly-{symbol}-{trigger_ms}",
+        strategy_family_id="SOR-001",
+        strategy_family_version_id="SOR-001-v0",
+        symbol=exchange_symbol,
+        timestamp_ms=timestamp_ms,
+        trigger_candle_close_time_ms=trigger_ms,
+        primary_timeframe="15m",
+        market_snapshot=MarketSnapshot(
+            symbol=exchange_symbol,
+            timestamp_ms=timestamp_ms,
+            source="binance_usdm_public_closed_candles",
+            freshness="fresh",
+            last_price=(Decimal(str(session[-1]["close"])) if session else None),
+            timeframe="15m",
+            candle_context={"windows": {"15m": session}, "closed_bar": True},
+        ),
+        account_facts_snapshot=AccountFactsSnapshot(
+            source="sor_readonly_detector_no_private_facts",
+            truth_level="not_loaded",
+            timestamp_ms=timestamp_ms,
+            freshness="not_applicable",
+        ),
+        source="sor_readonly_detector",
+        freshness="fresh",
+    )
+    return SOR001SessionRangeEvaluator().evaluate(signal_input)
 
 
 def _fetch_klines(symbol: str) -> list[list[Any]]:
@@ -226,6 +360,49 @@ def _fetch_klines(symbol: str) -> list[list[Any]]:
         return []
 
 
+def _fetch_klines_via_ssh(host: str, symbols: tuple[str, ...]) -> dict[str, list[list[Any]]]:
+    remote_code = f"""
+import json
+import urllib.parse
+import urllib.request
+
+BASE_URL = {BASE_URL!r}
+SYMBOLS = {list(symbols)!r}
+
+def fetch(symbol):
+    query = urllib.parse.urlencode({{"symbol": symbol, "interval": "15m", "limit": 120}})
+    req = urllib.request.Request(
+        BASE_URL + "/fapi/v1/klines?" + query,
+        headers={{"User-Agent": "brc-readonly-monitor/1.0"}},
+    )
+    with urllib.request.urlopen(req, timeout=15) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        return payload if isinstance(payload, list) else []
+
+print(json.dumps({{symbol: fetch(symbol) for symbol in SYMBOLS}}, ensure_ascii=False))
+"""
+    result = subprocess.run(
+        ["ssh", host, "python3", "-"],
+        check=False,
+        capture_output=True,
+        input=remote_code,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        return {symbol: [] for symbol in symbols}
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {symbol: [] for symbol in symbols}
+    if not isinstance(payload, dict):
+        return {symbol: [] for symbol in symbols}
+    return {
+        symbol: payload.get(symbol) if isinstance(payload.get(symbol), list) else []
+        for symbol in symbols
+    }
+
+
 def _closed_candles(rows: list[list[Any]], now: datetime) -> list[dict[str, Any]]:
     now_ms = int(now.timestamp() * 1000)
     closed = []
@@ -238,9 +415,11 @@ def _closed_candles(rows: list[list[Any]], now: datetime) -> list[dict[str, Any]
         closed.append(
             {
                 "open_time_ms": _int(row[0]),
+                "open": row[1],
                 "high": row[2],
                 "low": row[3],
                 "close": row[4],
+                "volume": row[5],
                 "close_time_ms": close_time_ms,
                 "close_time_utc": datetime.fromtimestamp(
                     close_time_ms / 1000, tz=timezone.utc
@@ -278,38 +457,6 @@ def _safety_invariants() -> dict[str, bool]:
         "live_profile_changed": False,
         "order_sizing_changed": False,
     }
-
-
-def _markdown(artifact: dict[str, Any], output_json: Path) -> str:
-    return "\n".join(
-        [
-            f"## {artifact['schema']}",
-            "",
-            f"- Status: `{artifact['status']}`",
-            f"- StrategyGroup: `{artifact['strategy_group_id']}`",
-            f"- Output JSON: `{output_json}`",
-        ]
-    ) + "\n"
-
-
-def _read_optional_json(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload if isinstance(payload, dict) else {}
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 def _parse_utc(value: str) -> datetime:

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Plan a git-based Tokyo runtime-governance deployment.
 
-This is the preferred deployment plan for follow-up runtime-governance stages.
-It avoids uploading a local archive: Tokyo fetches a pushed branch head from the
+This is the Tokyo deployment plan for follow-up runtime-governance stages. It
+avoids uploading a local archive: Tokyo fetches a pushed branch head from the
 repository, exports that exact commit into a clean release directory, writes a
-release manifest, then follows the same backup/migration/restart/smoke gates as
-the archive fallback.
+release manifest, then runs migration/restart/smoke gates without report-file
+or deploy-backup side effects.
 
 Default behavior is dry-run planning only. This script does not SSH, fetch on
 Tokyo, write remote files, run migrations, restart services, create orders, call
@@ -28,25 +28,60 @@ REPO_ROOT_FOR_IMPORT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT_FOR_IMPORT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT_FOR_IMPORT))
 
-from scripts.plan_tokyo_runtime_governance_deploy import (
-    CONFIRMATION_PHRASE,
-    DEFAULT_API_BASE,
-    DEFAULT_DEPLOY_ROOT,
-    DEFAULT_ENV_PATH,
-    DEFAULT_HOST,
-    DEFAULT_PG_CONTAINER_NAME,
-    DEFAULT_SERVICE_NAME,
-    DEFAULT_VENV_PYTHON,
-    runtime_signal_watcher_dispatcher_dropin_install_command,
-)
 from src.domain.standing_authorization import (
     OWNER_STANDING_AUTHORIZATION_REFERENCE,
 )
 
 
+DEFAULT_HOST = "tokyo"
+DEFAULT_DEPLOY_ROOT = "/home/ubuntu/brc-deploy"
+DEFAULT_SERVICE_NAME = "brc-owner-console-backend.service"
+DEFAULT_ENV_PATH = "/home/ubuntu/brc-deploy/env/live-readonly.env"
+DEFAULT_VENV_PYTHON = (
+    "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
+)
+DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_GIT_REF = "program/live-safe-v1"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-06-23-085_rename_live_lifecycle_owner_action_flag.py"
+    "2026-07-13-120_reconcile_terminal_predispatch_commands.py"
+)
+CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
+DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.service"
+DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME = "brc-runtime-signal-watcher.timer"
+DEFAULT_RUNTIME_MONITOR_SERVICE_NAME = "brc-runtime-monitor.service"
+DEFAULT_RUNTIME_MONITOR_TIMER_NAME = "brc-runtime-monitor.timer"
+DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME = (
+    "brc-ticket-lifecycle-maintenance.service"
+)
+DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME = (
+    "brc-ticket-lifecycle-maintenance.timer"
+)
+RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service"
+)
+RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.timer"
+)
+RUNTIME_MONITOR_SERVICE_REPO_PATH = "deploy/systemd/brc-runtime-monitor.service"
+RUNTIME_MONITOR_TIMER_REPO_PATH = "deploy/systemd/brc-runtime-monitor.timer"
+TICKET_LIFECYCLE_MAINTENANCE_SERVICE_REPO_PATH = (
+    "deploy/systemd/brc-ticket-lifecycle-maintenance.service"
+)
+TICKET_LIFECYCLE_MAINTENANCE_TIMER_REPO_PATH = (
+    "deploy/systemd/brc-ticket-lifecycle-maintenance.timer"
+)
+RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf"
+)
+RUNTIME_SIGNAL_WATCHER_PRODUCT_STATE_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf"
+)
+RUNTIME_SIGNAL_WATCHER_ACTION_TIME_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher.service.d/85-action-time-refresh-if-needed.conf"
+)
+BACKEND_RUNTIME_IDENTITY_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-owner-console-backend.service.d/"
+    "30-runtime-order-capable-identity.conf"
 )
 
 
@@ -66,6 +101,12 @@ class RemoteBranchProbeResult:
     status: str
     blocker: str | None
     attempts: list[dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class CanonicalRepoUrl:
+    value: str
+    normalized_from: str | None = None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -118,6 +159,8 @@ def build_git_deploy_plan(
 ) -> dict[str, Any]:
     """Build a non-executing git deployment command plan."""
 
+    canonical_repo_url = _canonical_git_fetch_repo_url(repo_url)
+    repo_url = canonical_repo_url.value
     head = _git(repo_root, "rev-parse", "HEAD").stdout
     short_head = _git(repo_root, "rev-parse", "--short=8", "HEAD").stdout
     branch = _git(repo_root, "branch", "--show-current").stdout
@@ -134,6 +177,8 @@ def build_git_deploy_plan(
     blockers: list[str] = []
     warnings: list[str] = []
 
+    if canonical_repo_url.normalized_from:
+        warnings.append("git_repo_url_normalized_to_https_for_remote_fetch")
     if tracked_dirty:
         warnings.append(
             "tracked_worktree_dirty_remote_git_export_ignores_local_changes"
@@ -150,6 +195,8 @@ def build_git_deploy_plan(
         blockers.append("target_migration_count_less_than_remote_baseline")
     if not repo_url.strip():
         blockers.append("git_repo_url_required")
+    elif not _repo_url_uses_https(repo_url):
+        blockers.append("git_repo_url_must_use_https")
     if git_ref.startswith("refs/"):
         blockers.append("git_deploy_v1_requires_branch_name_not_full_ref")
     if not git_ref.strip():
@@ -164,7 +211,12 @@ def build_git_deploy_plan(
         blocker=None,
         attempts=[],
     )
-    if repo_url.strip() and git_ref.strip() and not git_ref.startswith("refs/"):
+    if (
+        repo_url.strip()
+        and _repo_url_uses_https(repo_url)
+        and git_ref.strip()
+        and not git_ref.startswith("refs/")
+    ):
         remote_ref_probe = _remote_branch_probe(repo_url=repo_url, branch=git_ref)
         remote_ref_head = remote_ref_probe.head
         if remote_ref_probe.blocker:
@@ -180,9 +232,6 @@ def build_git_deploy_plan(
     source_root = f"{deploy_root}/source"
     source_repo_path = f"{source_root}/dingdingbot"
     releases_dir = f"{deploy_root}/releases"
-    reports_dir = f"{deploy_root}/reports/{final_release_name}"
-    watcher_reports_dir = f"{deploy_root}/reports/runtime-signal-watcher"
-    backups_dir = f"{deploy_root}/backups"
     app_current = f"{deploy_root}/app/current"
     remote_release_path = f"{releases_dir}/{final_release_name}"
     remote_tmp_release_path = f"{remote_release_path}.tmp"
@@ -190,7 +239,6 @@ def build_git_deploy_plan(
         releases_dir=releases_dir,
         previous_release=previous_release,
     )
-    backup_path = f"{backups_dir}/{final_release_name}.pgdump"
     release_manifest = f"{remote_release_path}/.brc-release-manifest.json"
     manifest_payload = _release_manifest_payload(
         branch=branch,
@@ -206,16 +254,14 @@ def build_git_deploy_plan(
         repo_url=repo_url,
         git_ref=git_ref,
         target_commit=target,
+        release_name=final_release_name,
+        deploy_root=deploy_root,
         source_root=source_root,
         source_repo_path=source_repo_path,
-        reports_dir=reports_dir,
-        watcher_reports_dir=watcher_reports_dir,
-        backups_dir=backups_dir,
         app_current=app_current,
         remote_release_path=remote_release_path,
         remote_tmp_release_path=remote_tmp_release_path,
         release_manifest=release_manifest,
-        backup_path=backup_path,
         service_name=service_name,
         env_path=env_path,
         venv_python=venv_python,
@@ -275,7 +321,6 @@ def build_git_deploy_plan(
             "remote_release_path": remote_release_path,
             "remote_tmp_release_path": remote_tmp_release_path,
             "remote_release_manifest_path": release_manifest,
-            "backup_path": backup_path,
             "target_migration_count": target_migration_count,
             "latest_migration": local_latest_migration,
         },
@@ -319,16 +364,14 @@ def _plan_phases(
     repo_url: str,
     git_ref: str,
     target_commit: str,
+    release_name: str,
+    deploy_root: str,
     source_root: str,
     source_repo_path: str,
-    reports_dir: str,
-    watcher_reports_dir: str,
-    backups_dir: str,
     app_current: str,
     remote_release_path: str,
     remote_tmp_release_path: str,
     release_manifest: str,
-    backup_path: str,
     service_name: str,
     env_path: str,
     venv_python: str,
@@ -347,44 +390,17 @@ def _plan_phases(
     q = shlex.quote
     local_python = "/opt/homebrew/bin/python3"
     manifest_json = json.dumps(manifest_payload, indent=2, sort_keys=True)
-    deploy_channel_status_json = json.dumps(
-        {
-            "scope": "tokyo_runtime_governance_deploy_channel_status",
-            "status": "postdeploy_accepted",
-            "deployed_head": target_commit,
-            "release_path": remote_release_path,
-            "checks": {
-                "blockers": [],
-                "tokyo_probe_blockers": [],
-                "tokyo_connectivity_blockers": [],
-                "tokyo_connectivity_probe_ready": True,
-                "postdeploy_acceptance_passed": True,
-            },
-            "safety_invariants": {
-                "deploy_channel_status_only": True,
-                "places_order": False,
-                "calls_order_lifecycle": False,
-                "exchange_write_called": False,
-                "withdrawal_or_transfer_created": False,
-                "mutates_secrets": False,
-                "mutates_live_profile": False,
-                "mutates_order_sizing": False,
-            },
-        },
-        indent=2,
-        sort_keys=True,
-    )
     health_url = api_base.rstrip("/") + "/api/health"
     health_wait_command = (
         f"set -eu; HEALTH_URL={q(health_url)}; "
         "HEALTH_READY=0; "
-        "for attempt in $(seq 1 30); do "
-        'if curl -fsS "$HEALTH_URL" 2>/dev/null; then '
+        "for attempt in $(seq 1 15); do "
+        'if curl --connect-timeout 1 --max-time 1 -fsS "$HEALTH_URL" 2>/dev/null; then '
         "HEALTH_READY=1; break; "
         "fi; "
         "sleep 1; "
         "done; "
-        'test "$HEALTH_READY" = 1 || curl -fsS "$HEALTH_URL"'
+        'test "$HEALTH_READY" = 1 || curl --connect-timeout 1 --max-time 2 -fsS "$HEALTH_URL"'
     )
     base_revision = remote_migration_revision or "UNKNOWN_REMOTE_REVISION"
     head_revision = target_migration_revision or "UNKNOWN_TARGET_REVISION"
@@ -397,8 +413,18 @@ def _plan_phases(
         'test -n "$REMOTE_HEAD"; '
         f'test "$REMOTE_HEAD" = {q(target_commit)}'
     )
+    runtime_order_capable_env_path = (
+        f"{deploy_root.rstrip('/')}/env/runtime-order-capable.env"
+    )
+    runtime_gateway_identity_preflight_command = (
+        "set -eu; "
+        f"test -f {q(runtime_order_capable_env_path)}; "
+        f"set -a; . {q(runtime_order_capable_env_path)}; set +a; "
+        'test -n "${BRC_RUNTIME_EXCHANGE_ACCOUNT_ID:-}"; '
+        'test "${BRC_RUNTIME_EXCHANGE_ID:-}" = binance_usdm'
+    )
     remote_export_command = (
-        f"set -eu; mkdir -p {q(source_root)} {q(reports_dir)} {q(backups_dir)}; "
+        f"set -eu; mkdir -p {q(source_root)}; "
         f"if [ ! -d {q(source_repo_path)}/.git ]; then "
         f"git clone --no-checkout {q(repo_url)} {q(source_repo_path)}; "
         "fi; "
@@ -416,42 +442,58 @@ def _plan_phases(
         f"mv {q(remote_tmp_release_path)} {q(remote_release_path)}; "
         f"test $(readlink -f {q(app_current)}) = {q(previous_release_path)}"
     )
-    quiesce_backup_and_migrate_command = (
-        f"set -eu; sudo -n systemctl stop {q(service_name)}; "
-        f"umask 077; set -a; . {q(env_path)}; set +a; "
-        'DB_URL="${PG_DATABASE_URL:-${DATABASE_URL:-}}"; '
-        'test -n "$DB_URL" || '
-        "{ echo PG_DATABASE_URL_or_DATABASE_URL_required >&2; exit 2; }; "
-        "if command -v pg_dump >/dev/null 2>&1; then "
-        f"pg_dump \"$DB_URL\" -Fc -f {q(backup_path)}; "
-        "else "
-        f"DB_USER=$({q(venv_python)} -c "
-        "'import os; from urllib.parse import urlparse; "
-        "print(urlparse(os.environ[\"PG_DATABASE_URL\"]).username or \"\")'); "
-        f"DB_NAME=$({q(venv_python)} -c "
-        "'import os; from urllib.parse import urlparse; "
-        "print((urlparse(os.environ[\"PG_DATABASE_URL\"]).path or \"/\").lstrip(\"/\"))'); "
-        'test -n "$DB_USER"; test -n "$DB_NAME"; '
-        f"sudo -n docker exec {q(DEFAULT_PG_CONTAINER_NAME)} "
-        'pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc '
-        f"> {q(backup_path)}; "
-        "fi; "
-        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
-        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
-        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
-        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head"
+    pre_switch_lifecycle_safety_command = (
+        ticket_lifecycle_pre_switch_readiness_command(
+            remote_release_path=remote_release_path,
+            env_path=env_path,
+            venv_python=venv_python,
+        )
+    )
+    quiesce_and_migrate_command = ticket_lifecycle_quiesce_and_migrate_command(
+        remote_release_path=remote_release_path,
+        env_path=env_path,
+        venv_python=venv_python,
+        service_name=service_name,
+        certification_ref=f"deploy-quiesce:{target_commit}",
+    )
+    backend_identity_install_command = (
+        backend_runtime_identity_dropin_install_command(
+            remote_release_path=remote_release_path,
+            deploy_root=deploy_root,
+            service_name=service_name,
+        )
+    )
+    backend_identity_process_check = (
+        f"MAIN_PID=$(systemctl show --property MainPID --value {q(service_name)}); "
+        'test "${MAIN_PID:-0}" -gt 0; '
+        'tr "\\000" "\\n" < "/proc/$MAIN_PID/environ" | '
+        "cut -d= -f1 | grep -Fx BRC_RUNTIME_EXCHANGE_ACCOUNT_ID >/dev/null; "
+        'tr "\\000" "\\n" < "/proc/$MAIN_PID/environ" | '
+        "cut -d= -f1 | grep -Fx BRC_RUNTIME_EXCHANGE_ID >/dev/null"
     )
     switch_start_and_smoke_command = (
         f"set -eu; ln -sfn {q(remote_release_path)} {q(app_current)}; "
+        f"{backend_identity_install_command}; "
         f"sudo -n systemctl start {q(service_name)}; "
         f"sudo -n systemctl is-active {q(service_name)}; "
+        f"{backend_identity_process_check}; "
         f"{health_wait_command}; "
-        f"{runtime_signal_watcher_dispatcher_dropin_install_command(remote_release_path=remote_release_path)}; "
-        f"mkdir -p {q(watcher_reports_dir)}; "
-        f"cat > {q(watcher_reports_dir + '/tokyo-deploy-channel-status.json')} <<'JSON'\n"
-        f"{deploy_channel_status_json}\nJSON\n"
+        f"{runtime_signal_watcher_dispatcher_dropin_install_command(remote_release_path=remote_release_path, deploy_root=deploy_root)}; "
         f"test -f {q(release_manifest)}; "
         f"test $(readlink -f {q(app_current)}) = {q(remote_release_path)}"
+    )
+    phase_two_enable_command = ticket_lifecycle_phase_two_enable_command(
+        remote_release_path=remote_release_path,
+        env_path=env_path,
+        venv_python=venv_python,
+        certification_ref=f"tokyo-release:{target_commit}",
+    )
+    action_time_capability_command = action_time_capability_certification_command(
+        remote_release_path=remote_release_path,
+        env_path=env_path,
+        venv_python=venv_python,
+        runtime_head=target_commit,
+        release_name=release_name,
     )
 
     return [
@@ -472,16 +514,12 @@ def _plan_phases(
                 f"--expected-revision-count {expected_gap_count}",
                 f"cd {q(str(repo_root))} && {local_python} "
                 "scripts/verify_strategy_observation_shadow_planning_rehearsal.py --json",
-                f"cd {q(str(repo_root))} && {local_python} "
-                "scripts/verify_runtime_submit_rehearsal_pre_live_evidence.py --json "
-                "--skip-current-head-deployed-check",
             ],
             "stop_if": [
                 "local release readiness is not true",
                 "target commit is not the pushed remote branch head",
                 "migration gap audit does not pass",
                 "shadow-planning rehearsal does not pass",
-                "runtime submit pre-live evidence contains forbidden execution flags",
             ],
         },
         {
@@ -494,12 +532,14 @@ def _plan_phases(
                 f"--expected-migration-count {expected_remote_migration_count} "
                 f"--expected-latest-migration {q(expected_remote_latest_migration)}",
                 _ssh(host, remote_ref_probe_command),
+                _ssh(host, runtime_gateway_identity_preflight_command),
             ],
             "stop_if": [
                 "remote current head differs from expected baseline",
                 "remote migration state differs from expected baseline",
                 "Tokyo cannot reach the GitHub branch head",
                 "Tokyo branch head differs from the target commit",
+                "runtime gateway account or exchange identity is missing",
                 "health live_ready is true",
             ],
         },
@@ -519,16 +559,25 @@ def _plan_phases(
             ],
         },
         {
-            "phase": "3_quiesce_backup_and_migrate",
+            "phase": "2b_pre_switch_lifecycle_safety",
+            "remote_mutation": False,
+            "commands": [_ssh(host, pre_switch_lifecycle_safety_command)],
+            "stop_if": [
+                "an active real lifecycle, unknown command, or domain hold exists",
+                "an unprotected real attempt exists",
+            ],
+        },
+        {
+            "phase": "3_quiesce_and_migrate",
             "remote_mutation": True,
             "remote_mutation_authorization": (
                 OWNER_STANDING_AUTHORIZATION_REFERENCE
             ),
             "requires_confirmation_phrase": CONFIRMATION_PHRASE,
-            "commands": [_ssh(host, quiesce_backup_and_migrate_command)],
+            "commands": [_ssh(host, quiesce_and_migrate_command)],
             "stop_if": [
                 "service cannot be stopped with non-interactive sudo",
-                "database backup is not created",
+                "lifecycle capability cannot be quiesced before code switch",
                 "alembic upgrade fails",
             ],
         },
@@ -563,6 +612,37 @@ def _plan_phases(
                 "post-deploy readonly probe fails",
             ],
         },
+        {
+            "phase": "5_certify_and_enable_durable_lifecycle_mutation",
+            "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
+            "requires_confirmation_phrase": CONFIRMATION_PHRASE,
+            "commands": [_ssh(host, phase_two_enable_command)],
+            "stop_if": [
+                "phase-one PG capability is not disabled",
+                "fresh account-mode truth is not exactly one safe account",
+                "an active real lifecycle, unknown command, or domain hold exists",
+                "no-active lifecycle run calls the exchange or creates state",
+                "capability enablement cannot be committed to PG current truth",
+            ],
+        },
+        {
+            "phase": "6_certify_action_time_capability_truth",
+            "remote_mutation": True,
+            "remote_mutation_authorization": (
+                OWNER_STANDING_AUTHORIZATION_REFERENCE
+            ),
+            "requires_confirmation_phrase": CONFIRMATION_PHRASE,
+            "commands": [_ssh(host, action_time_capability_command)],
+            "stop_if": [
+                "22-scope production-shaped disabled-smoke matrix fails",
+                "release-bound capability identity is incomplete",
+                "capability certification cannot be committed to PG current truth",
+                "current projections disagree on first blocker",
+            ],
+        },
     ]
 
 
@@ -589,6 +669,27 @@ def _release_manifest_payload(
             "archive_uploaded": False,
         },
     }
+
+
+def _canonical_git_fetch_repo_url(repo_url: str) -> CanonicalRepoUrl:
+    stripped = repo_url.strip()
+    if stripped.startswith("git@github.com:"):
+        path = stripped.removeprefix("git@github.com:")
+        return CanonicalRepoUrl(
+            value=f"https://github.com/{path}",
+            normalized_from=stripped,
+        )
+    if stripped.startswith("ssh://git@github.com/"):
+        path = stripped.removeprefix("ssh://git@github.com/")
+        return CanonicalRepoUrl(
+            value=f"https://github.com/{path}",
+            normalized_from=stripped,
+        )
+    return CanonicalRepoUrl(value=stripped)
+
+
+def _repo_url_uses_https(repo_url: str) -> bool:
+    return repo_url.strip().startswith("https://")
 
 
 def _remote_branch_probe(*, repo_url: str, branch: str) -> RemoteBranchProbeResult:
@@ -680,6 +781,394 @@ def _text_tail(text: str, *, max_chars: int = 500) -> str:
     if len(stripped) <= max_chars:
         return stripped
     return stripped[-max_chars:]
+
+
+def runtime_signal_watcher_dispatcher_dropin_install_command(
+    *,
+    remote_release_path: str,
+    deploy_root: str = DEFAULT_DEPLOY_ROOT,
+) -> str:
+    q = shlex.quote
+    service_dir = "/etc/systemd/system"
+    service_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}"
+    timer_path = f"{service_dir}/{DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME}"
+    runtime_monitor_service_path = (
+        f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_SERVICE_NAME}"
+    )
+    runtime_monitor_timer_path = f"{service_dir}/{DEFAULT_RUNTIME_MONITOR_TIMER_NAME}"
+    ticket_lifecycle_maintenance_service_path = (
+        f"{service_dir}/{DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME}"
+    )
+    ticket_lifecycle_maintenance_timer_path = (
+        f"{service_dir}/{DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME}"
+    )
+    stale_runtime_db_retention_service_path = (
+        f"{service_dir}/brc-runtime-db-retention.service"
+    )
+    stale_runtime_db_retention_timer_path = (
+        f"{service_dir}/brc-runtime-db-retention.timer"
+    )
+    service_dropin_dir = (
+        f"/etc/systemd/system/{DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME}.d"
+    )
+    service_dropin_path = f"{service_dropin_dir}/90-resume-dispatcher-after-refresh.conf"
+    dry_run_audit_dropin_path = f"{service_dropin_dir}/60-dry-run-audit-chain.conf"
+    goal_status_dropin_path = f"{service_dropin_dir}/70-goal-status.conf"
+    product_state_dropin_path = f"{service_dropin_dir}/80-product-state-refresh.conf"
+    action_time_dropin_path = f"{service_dropin_dir}/85-action-time-refresh-if-needed.conf"
+    stale_scope_dropin_path = (
+        f"{service_dropin_dir}/30-strategygroup-runtime-pilot-scope.conf"
+    )
+    stale_operation_layer_flags_dropin_path = (
+        f"{service_dropin_dir}/30-operation-layer-followup-flags.conf"
+    )
+    stale_product_state_refresh_dropin_path = (
+        f"{service_dropin_dir}/50-product-state-refresh.conf"
+    )
+    stale_resume_dispatcher_dropin_path = (
+        f"{service_dropin_dir}/40-resume-dispatcher.conf"
+    )
+    release_service_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_SERVICE_REPO_PATH}"
+    )
+    release_timer_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_TIMER_REPO_PATH}"
+    )
+    release_runtime_monitor_service_path = (
+        f"{remote_release_path.rstrip('/')}/{RUNTIME_MONITOR_SERVICE_REPO_PATH}"
+    )
+    release_runtime_monitor_timer_path = (
+        f"{remote_release_path.rstrip('/')}/{RUNTIME_MONITOR_TIMER_REPO_PATH}"
+    )
+    release_ticket_lifecycle_maintenance_service_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{TICKET_LIFECYCLE_MAINTENANCE_SERVICE_REPO_PATH}"
+    )
+    release_ticket_lifecycle_maintenance_timer_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{TICKET_LIFECYCLE_MAINTENANCE_TIMER_REPO_PATH}"
+    )
+    release_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_DISPATCHER_DROPIN_REPO_PATH}"
+    )
+    release_product_state_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_PRODUCT_STATE_DROPIN_REPO_PATH}"
+    )
+    release_action_time_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{RUNTIME_SIGNAL_WATCHER_ACTION_TIME_DROPIN_REPO_PATH}"
+    )
+    return (
+        f"set -eu; "
+        f"test -f {q(release_service_path)}; "
+        f"test -f {q(release_timer_path)}; "
+        f"test -f {q(release_runtime_monitor_service_path)}; "
+        f"test -f {q(release_runtime_monitor_timer_path)}; "
+        f"test -f {q(release_ticket_lifecycle_maintenance_service_path)}; "
+        f"test -f {q(release_ticket_lifecycle_maintenance_timer_path)}; "
+        f"test -f {q(release_dropin_path)}; "
+        f"test -f {q(release_product_state_dropin_path)}; "
+        f"test -f {q(release_action_time_dropin_path)}; "
+        f"sudo -n cp {q(release_service_path)} {q(service_path)}; "
+        f"sudo -n cp {q(release_timer_path)} {q(timer_path)}; "
+        f"sudo -n cp {q(release_runtime_monitor_service_path)} {q(runtime_monitor_service_path)}; "
+        f"sudo -n cp {q(release_runtime_monitor_timer_path)} {q(runtime_monitor_timer_path)}; "
+        f"sudo -n cp {q(release_ticket_lifecycle_maintenance_service_path)} {q(ticket_lifecycle_maintenance_service_path)}; "
+        f"sudo -n cp {q(release_ticket_lifecycle_maintenance_timer_path)} {q(ticket_lifecycle_maintenance_timer_path)}; "
+        f"sudo -n chmod 0644 {q(service_path)} {q(timer_path)} {q(runtime_monitor_service_path)} {q(runtime_monitor_timer_path)} {q(ticket_lifecycle_maintenance_service_path)} {q(ticket_lifecycle_maintenance_timer_path)}; "
+        f"sudo -n mkdir -p {q(service_dropin_dir)}; "
+        f"sudo -n cp {q(release_dropin_path)} {q(service_dropin_path)}; "
+        f"sudo -n cp {q(release_product_state_dropin_path)} {q(product_state_dropin_path)}; "
+        f"sudo -n cp {q(release_action_time_dropin_path)} {q(action_time_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(service_dropin_path)} {q(product_state_dropin_path)} {q(action_time_dropin_path)}; "
+        f"sudo -n rm -f {q(dry_run_audit_dropin_path)}; "
+        f"sudo -n rm -f {q(goal_status_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_scope_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_operation_layer_flags_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_product_state_refresh_dropin_path)}; "
+        f"sudo -n rm -f {q(stale_resume_dispatcher_dropin_path)}; "
+        "sudo -n systemctl disable --now brc-runtime-db-retention.timer 2>/dev/null || true; "
+        f"sudo -n rm -f {q(stale_runtime_db_retention_service_path)}; "
+        f"sudo -n rm -f {q(stale_runtime_db_retention_timer_path)}; "
+        "sudo -n systemctl daemon-reload; "
+        f"sudo -n systemctl enable {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl enable --now {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl enable --now {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
+        f"sudo -n systemctl restart {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl restart {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
+        f"sudo -n systemctl start {q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)}; "
+        f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)}; "
+        f"sudo -n systemctl is-enabled {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl is-enabled {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)}; "
+        f"sudo -n systemctl is-active {q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)}"
+    )
+
+
+def backend_runtime_identity_dropin_install_command(
+    *,
+    remote_release_path: str,
+    deploy_root: str = DEFAULT_DEPLOY_ROOT,
+    service_name: str = DEFAULT_SERVICE_NAME,
+) -> str:
+    """Install the server-owned runtime identity source into the backend unit."""
+
+    q = shlex.quote
+    release_dropin_path = (
+        f"{remote_release_path.rstrip('/')}/"
+        f"{BACKEND_RUNTIME_IDENTITY_DROPIN_REPO_PATH}"
+    )
+    target_dropin_dir = f"/etc/systemd/system/{service_name}.d"
+    target_dropin_path = (
+        f"{target_dropin_dir}/30-runtime-order-capable-identity.conf"
+    )
+    runtime_identity_env_path = (
+        f"{deploy_root.rstrip('/')}/env/runtime-order-capable.env"
+    )
+    return (
+        "set -eu; "
+        f"test -f {q(release_dropin_path)}; "
+        f"test -f {q(runtime_identity_env_path)}; "
+        f"sudo -n mkdir -p {q(target_dropin_dir)}; "
+        f"sudo -n cp {q(release_dropin_path)} {q(target_dropin_path)}; "
+        f"sudo -n chmod 0644 {q(target_dropin_path)}; "
+        "sudo -n systemctl daemon-reload; "
+        f"systemctl cat {q(service_name)} | "
+        f"grep -F {q('EnvironmentFile=-' + runtime_identity_env_path)} >/dev/null"
+    )
+
+
+def ticket_lifecycle_pre_switch_readiness_command(
+    *,
+    remote_release_path: str,
+    env_path: str,
+    venv_python: str,
+) -> str:
+    """Build a read-only gate that accepts the prior certified capability state."""
+
+    q = shlex.quote
+    return (
+        "set -eu; "
+        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
+        "--require-database-url --deploy-quiescence --json"
+    )
+
+
+def action_time_capability_certification_command(
+    *,
+    remote_release_path: str,
+    env_path: str,
+    venv_python: str,
+    runtime_head: str,
+    release_name: str,
+) -> str:
+    """Build the bounded postdeploy matrix -> PG certification sequence."""
+
+    q = shlex.quote
+    test_node = (
+        "tests/unit/test_action_time_full_chain_impact.py::"
+        "test_six_event_specs_across_all_active_scopes_reach_disabled_smoke_"
+        "from_production_shape"
+    )
+    certification_ref = f"tokyo-release:{runtime_head}:22-scope-disabled-smoke"
+    watcher_timer = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)
+    return (
+        "set -eu; SUCCESS=0; "
+        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        "restore_watcher_timer() { "
+        f"sudo -n systemctl start {watcher_timer} >/dev/null 2>&1 || true; "
+        "}; trap restore_watcher_timer EXIT; "
+        f"PYTHONPATH=$PWD timeout 300 {q(venv_python)} -m pytest -q {q(test_node)}; "
+        f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
+        "scripts/record_runtime_release_activation.py "
+        f"--runtime-head {q(runtime_head)} "
+        f"--release-name {q(release_name)} "
+        f"--verification-ref {q('postdeploy-accepted:' + runtime_head)}; "
+        f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
+        "scripts/certify_action_time_capability.py "
+        f"--runtime-head {q(runtime_head)} "
+        f"--certification-ref {q(certification_ref)} "
+        "--expected-lane-count 22; "
+        f"PYTHONPATH=$PWD timeout 60 {q(venv_python)} "
+        "scripts/publish_runtime_control_current_projections.py --json; "
+        f"sudo -n systemctl start {watcher_timer}; "
+        f"systemctl is-active {watcher_timer}; "
+        "SUCCESS=1; trap - EXIT"
+    )
+
+
+def ticket_lifecycle_quiesce_and_migrate_command(
+    *,
+    remote_release_path: str,
+    env_path: str,
+    venv_python: str,
+    service_name: str,
+    certification_ref: str,
+) -> str:
+    """Quiesce capability before switching code and restore it on failure."""
+
+    q = shlex.quote
+    watcher_timer = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)
+    monitor_timer = q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)
+    lifecycle_timer = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)
+    watcher_service = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME)
+    monitor_service = q(DEFAULT_RUNTIME_MONITOR_SERVICE_NAME)
+    lifecycle_service = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME)
+    backend_service = q(service_name)
+    capability_status = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --status "
+        "--require-database-url --json"
+    )
+    capability_disable = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --disable "
+        f"--require-database-url --certification-ref {q(certification_ref)} --json"
+    )
+    quiesced_readiness = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
+        "--require-database-url --deploy-quiescence --json"
+    )
+    capability_restore = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --enable "
+        "--require-database-url --certification-ref "
+        f"{q('rollback:' + certification_ref)} --json"
+    )
+    return (
+        "set -eu; SUCCESS=0; "
+        f"cd {q(remote_release_path)}; set -a; . {q(env_path)}; set +a; "
+        f"CAPABILITY_BEFORE=$({capability_status}); export CAPABILITY_BEFORE; "
+        f"CAPABILITY_WAS_ENABLED=$({q(venv_python)} -c "
+        + q(
+            "import json,os; "
+            "print(1 if json.loads(os.environ['CAPABILITY_BEFORE'])['enabled'] else 0)"
+        )
+        + "); "
+        "rollback_quiesce() { "
+        'if [ "$SUCCESS" != 1 ] && [ "$CAPABILITY_WAS_ENABLED" = 1 ]; then '
+        f"{capability_restore} >/dev/null 2>&1 || true; fi; "
+        f"sudo -n systemctl start {backend_service} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {watcher_timer} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {monitor_timer} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {lifecycle_timer} >/dev/null 2>&1 || true; "
+        "}; trap rollback_quiesce EXIT; "
+        f"timeout 30 sudo -n systemctl stop {watcher_timer}; "
+        f"timeout 30 sudo -n systemctl stop {monitor_timer}; "
+        f"timeout 30 sudo -n systemctl stop {lifecycle_timer}; "
+        f"timeout 60 sudo -n systemctl stop {watcher_service}; "
+        f"timeout 60 sudo -n systemctl stop {monitor_service}; "
+        f"timeout 60 sudo -n systemctl stop {lifecycle_service}; "
+        f"timeout 60 sudo -n systemctl stop {backend_service}; "
+        f"{quiesced_readiness}; "
+        f"{capability_disable}; "
+        f"test ! -f requirements.txt || {q(venv_python)} -m pip install "
+        "--disable-pip-version-check -r requirements.txt; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
+        f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/seed_runtime_control_state_foundation.py --apply --json; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/validate_runtime_control_state_repository.py --json; "
+        f"QUIESCED_CAPABILITY=$({capability_status}); export QUIESCED_CAPABILITY; "
+        f"{q(venv_python)} -c "
+        + q(
+            "import json,os; p=json.loads(os.environ['QUIESCED_CAPABILITY']); "
+            "assert p['enabled'] is False; assert p['exchange_write_called'] is False"
+        )
+        + "; SUCCESS=1; trap - EXIT"
+    )
+
+
+def ticket_lifecycle_phase_two_enable_command(
+    *,
+    remote_release_path: str,
+    env_path: str,
+    venv_python: str,
+    certification_ref: str,
+) -> str:
+    """Build fail-closed phase-two activation with automatic PG rollback."""
+
+    q = shlex.quote
+    runtime_identity_env_path = str(
+        Path(env_path).with_name("runtime-order-capable.env")
+    )
+    watcher_timer = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)
+    monitor_timer = q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)
+    lifecycle_timer = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)
+    lifecycle_service = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME)
+    disable = (
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --disable "
+        "--require-database-url --certification-ref "
+        f"{q('rollback:' + certification_ref)} --json"
+    )
+    return (
+        "set -eu; SUCCESS=0; "
+        f"cd {q(remote_release_path)}; "
+        f"test -f {q(runtime_identity_env_path)}; "
+        f"set -a; . {q(env_path)}; . {q(runtime_identity_env_path)}; set +a; "
+        "rollback_phase_two() { "
+        f"if [ \"$SUCCESS\" != 1 ]; then {disable} >/dev/null 2>&1 || true; fi; "
+        f"sudo -n systemctl start {watcher_timer} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {monitor_timer} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl start {lifecycle_timer} >/dev/null 2>&1 || true; "
+        "}; trap rollback_phase_two EXIT; "
+        f"sudo -n systemctl stop {watcher_timer}; "
+        f"sudo -n systemctl stop {monitor_timer}; "
+        f"sudo -n systemctl stop {lifecycle_timer}; "
+        f"sudo -n systemctl stop {lifecycle_service}; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/build_runtime_account_safe_facts.py "
+        f"--require-database-url --env-file {q(env_path)}; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
+        "--require-database-url --json; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/audit_production_runtime_file_io.py --json; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --enable "
+        f"--require-database-url --certification-ref {q(certification_ref)} --json; "
+        f"LIFECYCLE_OUTPUT=$(PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/run_ticket_bound_lifecycle_maintenance_once.py "
+        "--require-database-url --max-lifecycle-scopes 1 "
+        "--max-actions-per-scope 16 --snapshot-timeout-seconds 8); "
+        "export LIFECYCLE_OUTPUT; "
+        f"{q(venv_python)} -c "
+        + q(
+            "import json,os; p=json.loads(os.environ['LIFECYCLE_OUTPUT']); "
+            "assert p['status'] in {'no_maintainable_lifecycle','scheduler_complete'}; "
+            "assert p['exchange_write_called'] is False; "
+            "assert p['network_inside_pg_transaction'] is False; "
+            "assert 0<=p['selected_scope_count']<=1"
+        )
+        + "; "
+        f"CAPABILITY_OUTPUT=$(PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/set_ticket_lifecycle_mutation_capability.py --status "
+        "--require-database-url --json); export CAPABILITY_OUTPUT; "
+        f"{q(venv_python)} -c "
+        + q(
+            "import json,os; p=json.loads(os.environ['CAPABILITY_OUTPUT']); "
+            "assert p['status']=='ready'; "
+            "assert p['enabled'] is True; assert p['exchange_write_called'] is False"
+        )
+        + "; "
+        f"sudo -n systemctl start {lifecycle_service}; "
+        f"test $(systemctl show {lifecycle_service} --property=Result --value) = success; "
+        "SUCCESS=1; trap - EXIT; "
+        f"sudo -n systemctl start {monitor_timer}; "
+        f"sudo -n systemctl start {lifecycle_timer}; "
+        f"systemctl is-active {monitor_timer}; "
+        f"systemctl is-active {lifecycle_timer}"
+    )
 
 
 def _ssh(host: str, remote_command: str) -> str:

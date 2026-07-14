@@ -390,11 +390,30 @@ def test_clean_temp_db_migration_upgrade_downgrade_upgrade(tmp_path, monkeypatch
     config.set_main_option("script_location", str(Path("migrations").resolve()))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
 
+    command.upgrade(config, "106")
+
+    from scripts import seed_runtime_control_state_foundation as seed
+    from sqlalchemy import create_engine
+
+    bootstrap_engine = create_engine(f"sqlite:///{db_path}")
+    with bootstrap_engine.begin() as connection:
+        seed.seed_runtime_control_state_foundation(
+            connection,
+            migration_baseline_revision="106",
+        )
+    bootstrap_engine.dispose()
+
     command.upgrade(config, "head")
     command.downgrade(config, "007")
+    command.upgrade(config, "106")
+    bootstrap_engine = create_engine(f"sqlite:///{db_path}")
+    with bootstrap_engine.begin() as connection:
+        seed.seed_runtime_control_state_foundation(
+            connection,
+            migration_baseline_revision="106",
+        )
+    bootstrap_engine.dispose()
     command.upgrade(config, "head")
-
-    from sqlalchemy import create_engine
 
     engine = create_engine(f"sqlite:///{db_path}")
     try:

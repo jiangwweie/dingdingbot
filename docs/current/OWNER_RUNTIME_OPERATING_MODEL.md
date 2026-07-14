@@ -2,7 +2,7 @@
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
 authority: docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
-last_verified: 2026-07-01
+last_verified: 2026-07-10
 ---
 
 # Owner Runtime Operating Model
@@ -49,6 +49,66 @@ The Owner decides:
 - whether to adjust risk or pause automation when an abnormal state appears;
 - whether to keep, revise, promote, park, or kill a StrategyGroup after review;
 - when the project moves from development-stage pilot to production operations.
+
+Owner decisions become runtime authority only through validated PG policy
+events and policy versions. Chat statements, MD edits, JSON patches, and agent
+memory are not current runtime authorization.
+
+## Owner Policy Operations
+
+The Owner operating surface should support these first-class policy operations:
+
+| Operation | Owner meaning | Runtime effect |
+| --- | --- | --- |
+| `enable_strategy` | 启用策略 | Allows observation and candidacy under policy |
+| `pause_strategy` | 暂停策略 | Blocks new promotion and ticket creation |
+| `resume_strategy` | 恢复策略 | Allows runtime under current policy again |
+| `retire_strategy` | 下线策略 | Closes future runtime for the StrategyGroup |
+| `narrow_scope` | 缩小范围 | Removes symbol, side, or event scope |
+| `expand_scope` | 扩大范围 | Adds symbol, side, or event scope after validation |
+| `enable_ticket_eligibility` | 允许生成交易前正式票据 | Allows Action-Time Ticket stage |
+| `disable_ticket_eligibility` | 禁止生成交易前正式票据 | Keeps strategy at observation/candidate stage |
+| `enable_real_submit` | 允许真实提交 | Allows real-submit narrow lane when all gates pass |
+| `disable_real_submit` | 关闭真实提交 | Blocks FinalGate-to-submit progression |
+| `set_budget` | 设置预算 | Sets notional, leverage, margin, or exposure scope |
+| `set_runtime_profile` | 设置运行配置 | Binds account, environment, and execution policy |
+| `set_notification_policy` | 设置通知策略 | Sets Feishu / Owner notification behavior |
+
+Every operation must create a new policy version and append an audit event.
+Affected promotion candidates, action-time lanes, budget reservations, and
+Action-Time Tickets must revalidate or invalidate when policy changes.
+
+Scope expansion, ticket eligibility, and real-submit enablement require
+validation of event specs, RequiredFacts, runtime coverage, ticket lineage,
+FinalGate handoff, Operation Layer handoff, protection, reconciliation, and
+negative tests as applicable.
+
+## Experiment Objective
+
+The product is a small-capital, bounded-downside, right-tail-open live-profit
+experiment system. The Owner bounds the left tail through allocated experiment
+capital and scoped policy. The system preserves the right tail through eligible
+StrategyGroup selection, timely in-boundary execution, protection, partial
+profit taking and runner behavior when the strategy specifies them, disciplined
+exit, and outcome review.
+
+This objective does not mean that every trade must be high leverage, that every
+winner must remain open indefinitely, or that the system may expand capital,
+scope, leverage, notional, or runtime profile on its own. It means the product
+must not optimize for smooth returns, high win rate, low volatility, or avoiding
+all losses at the cost of suppressing valid asymmetric opportunities.
+
+The objective affects product and engineering choices, but it does not replace
+the authority chain:
+
+```text
+Owner capital and scope policy
+-> strategy experiment eligibility
+-> risk-at-stop and protection envelope
+-> current Tradeability Decision and Runtime Safety State
+-> FinalGate and Operation Layer
+-> lifecycle execution, reconciliation, settlement, and review
+```
 
 The Owner-provided subaccount allocation is already the upstream risk-control
 decision. Within that allocation and the selected official runtime profile, the
@@ -250,6 +310,23 @@ Main Owner screens should avoid internal gate names. Use terse language:
 
 If everything is healthy, the Owner product surface should say `运行中`, `等待机会`, or `无需操作`.
 Do not show a next-step prompt for healthy automation.
+
+Owner-facing no-trade explanations must answer:
+
+```text
+市场有没有给机会
+系统有没有抓到
+推到了哪一步
+第一阻断是什么
+是市场原因、工程原因、授权原因、安全原因还是对账/保护原因
+下一步由系统处理还是需要 Owner 介入
+```
+
+Primary Owner messages must use product language. Internal terms such as
+`FinalGate`, `Operation Layer`, `RequiredFacts`, `candidate`, `authorization
+evidence`, `preflight`, `proof chain`, `refId`, raw artifact path, blocker code,
+and `runtime grant` belong in developer/audit details, not the main Owner
+surface.
 
 ## Document Authority
 

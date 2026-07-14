@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -63,6 +64,14 @@ def _runner(*, live_ready: bool = False, generic_post_status: int = 405):
             return module.CommandResult("70\n", "", 0)
         if "tail -1" in remote:
             return module.CommandResult(LATEST_MIGRATION + "\n", "", 0)
+        if remote == "set -eu; systemctl is-enabled brc-ticket-lifecycle-maintenance.timer":
+            return module.CommandResult("enabled\n", "", 0)
+        if remote == "set -eu; systemctl is-active brc-ticket-lifecycle-maintenance.timer":
+            return module.CommandResult("active\n", "", 0)
+        if "systemctl show brc-ticket-lifecycle-maintenance.service" in remote:
+            return module.CommandResult("success\n0\n", "", 0)
+        if "cmp -s /etc/systemd/system/brc-ticket-lifecycle-maintenance.service" in remote:
+            return module.CommandResult("match\n", "", 0)
         if "/api/health" in remote:
             return module.CommandResult(
                 json.dumps(
@@ -157,12 +166,43 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
     assert all(value is False for value in report["safety_invariants"].values())
 
 
+def test_postdeploy_http_check_retries_only_transport_failure_inside_one_ssh_call():
+    module = _load_module()
+    commands = []
+
+    def runner(command):
+        commands.append(command)
+        return module.CommandResult(
+            '{"error_code":"401"}\nHTTP_STATUS:401\n',
+            "",
+            0,
+        )
+
+    result = module._remote_http(
+        "tokyo",
+        method="GET",
+        url="http://127.0.0.1:18080/api/example",
+        expected_status=401,
+        expect_json=True,
+        name="bounded_retry",
+        connect_timeout_seconds=8,
+        runner=runner,
+    )
+
+    remote_command = commands[0][-1]
+    assert "for attempt in 1 2 3" in remote_command
+    assert "sleep 1" in remote_command
+    assert "curl -sS -m 8" in remote_command
+    assert result["http_status"] == 401
+    assert result["body_json"] == {"error_code": "401"}
+
+
 def test_postdeploy_verifier_defaults_track_current_stage_migration_head():
     module = _load_module()
 
-    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 84
+    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 120
     assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-06-11-084_create_runtime_post_submit_budget_settlements.py"
+        "2026-07-13-120_reconcile_terminal_predispatch_commands.py"
     )
 
 
@@ -205,3 +245,17 @@ def test_postdeploy_verifier_blocks_head_and_schema_mismatch():
     assert "postdeploy_release_head_mismatch" in blockers
     assert "postdeploy_migration_count_mismatch" in blockers
     assert "postdeploy_latest_migration_mismatch" in blockers
+
+
+def test_postdeploy_verifier_subprocess_timeout_returns_failure(monkeypatch):
+    module = _load_module()
+
+    def timeout_run(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=("ssh", "tokyo"), timeout=20)
+
+    monkeypatch.setattr(module.subprocess, "run", timeout_run)
+
+    result = module._run(("ssh", "tokyo", "hostname"))
+
+    assert result.returncode == 124
+    assert "command timed out after 20s" in result.stderr

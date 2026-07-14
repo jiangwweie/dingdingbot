@@ -2,7 +2,7 @@
 title: AI_AGENT_CONSTRAINTS
 status: CURRENT
 authority: docs/current/AI_AGENT_CONSTRAINTS.md
-last_verified: 2026-07-01
+last_verified: 2026-07-10
 ---
 
 # AI Agent Constraints
@@ -24,13 +24,72 @@ Owner enables a StrategyGroup
 ```
 
 The Owner should not need to read raw evidence artifacts to operate the system.
-Evidence artifacts are audit outputs under the Owner-facing control board.
+Evidence artifacts are audit outputs behind runtime supervision summaries.
 
-The global business objective is profitability through a small-capital
-right-tail StrategyGroup experimentation system. During the current stage,
-profit is not the engineering acceptance test. Engineering work is valuable
-only when it improves opportunity discovery, runtime capture, execution
-quality, risk-capital governance, or the review loop.
+## Durable Owner Vision And Engineering Posture
+
+The system target is a single-Owner, multi-StrategyGroup, multi-instrument,
+multi-side trading product. Its long-term instrument universe is not limited to
+cryptocurrency and may include venue-supported equity-linked contracts,
+precious-metals contracts, and other contract asset classes. Current production
+scope does not automatically expand when the vision expands. Live venue,
+instrument, side, capital, and profile authority still require explicit Owner
+policy and current runtime safety.
+
+Agents must keep core models asset-class neutral. Do not assume every
+instrument is a crypto perpetual, trades 24x7, uses funding, lacks expiry, or
+shares crypto quantity and settlement rules. Use the existing canonical symbol
+and exchange-instrument authority and extend it through versioned contract,
+session, precision, settlement, and fact semantics when an asset class requires
+them. String replacement and symbol naming conventions are not instrument
+identity.
+
+The Owner supplies goals and durable engineering principles. Agents own normal
+architecture and engineering decisions once those are clear. Do not stop for
+chat confirmation on schema shape, bounded refactoring, tests, short
+maintenance-window migrations, removal of wrong internal compatibility paths,
+or other reversible in-scope implementation choices.
+
+Agents must not respond to a local defect with a local patch when the defect
+reveals a missing system invariant. Audit the same class across active
+StrategyGroups, instruments, sides, and lifecycle stages; design one core
+abstraction; replace or delete the obsolete path; and add negative tests that
+prove the class is closed. Known future dimensions such as additional asset
+classes and capital allocation require stable extension seams now, but do not
+justify speculative multi-tenant, distributed, or institutional platform
+machinery.
+
+Single-Owner development should be aggressive: prefer short downtime,
+breaking internal migrations, and clean replacement over online dual write,
+long-lived compatibility, or enterprise rollout systems. This posture never
+weakens real-funds safety, exchange-outcome certainty, idempotency, protection,
+scope, credential, withdrawal, transfer, FinalGate, or Operation Layer
+boundaries.
+
+The global business objective is a single-Owner, small-capital,
+bounded-downside, right-tail-open StrategyGroup experimentation system. The
+target distribution is many explicitly budgeted experiments whose left tail is
+bounded by capital scope, risk-at-stop, protection, attempt limits, and pause
+rules while eligible opportunities retain the strategy-defined ability to
+capture materially larger winners inside explicit Owner policy and lifecycle
+semantics. This is not a stable-yield, low-volatility, high-win-rate, or
+institutional portfolio objective.
+
+Agents must not optimize the system primarily for win rate, smooth equity,
+minimum variance, avoidance of every loss, or the appearance of safety when
+that would suppress eligible right-tail opportunity. Agents must evaluate
+strategy selection, capital allocation, entry timeliness, protection, partial
+profit taking, runner behavior, exit, and review by whether they preserve
+bounded downside and asymmetric upside across the full lifecycle.
+
+Right-tail openness is not automatic leverage, notional, symbol, side,
+instrument, venue, profile, or capital expansion. It never grants signal,
+ticket, order, FinalGate, Operation Layer, or exchange-write authority. Do not
+hard-code a return target, drawdown target, win-rate target, or leverage target
+from this objective. During the current stage, profit is not the engineering
+acceptance test. Engineering work is valuable only when it improves opportunity
+discovery, runtime capture, execution quality, risk-capital governance, or the
+review loop without weakening official safety boundaries.
 
 The project is aggressive inside explicit constraints. The Owner-provided
 subaccount allocation is already the risk-control result and may be treated as
@@ -59,19 +118,27 @@ comes only from the selected profile and action-time exchange facts.
 
 Strategy tradeability uses `docs/current/TRADEABILITY_DECISION_CONTRACT.md`.
 Blocker naming uses `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md`.
+Pre-trade runtime uses `docs/current/PRE_TRADE_RUNTIME_CONTRACT.md`.
+Tokyo deployment uses `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
 Daily management uses
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`, and active
 lane limits use `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
 Agents must not stop at "research absorbed", "artifact ready", or
 "waiting_for_market" when a strategy still cannot trade. Every active selected,
-admitted, or newly absorbed candidate must expose:
+admitted, or newly absorbed candidate symbol must expose:
 
-- whether it can trade now;
+- whether it can be observed, promoted, or trade now;
 - if not, the first blocker;
 - whether the blocker is engineering, Owner policy, market, runtime,
   strategy-review, or safety;
 - the exact next action;
 - the state expected after that action.
+
+The active pre-trade posture is multi-StrategyGroup and multi-symbol. Agents
+must not interpret the Daily Table rank 1 row as the only market opportunity the
+system may respond to. A fresh satisfied candidate symbol may preempt lower
+work by becoming a promotion candidate, but it must still narrow to one
+action-time lane and pass all official gates before any real submit.
 
 Do not classify a candidate as `not_tradable_market_wait` or
 `market_wait_validated` unless asset admission, scoped Owner policy, runtime
@@ -80,6 +147,12 @@ blocker classification, and non-live action-time path readiness are already
 closed. A strategy such as a research-side short candidate may be
 `tiny_live_intake_candidate` and still have an earlier admission or scope
 blocker.
+
+Runtime recovery and monitor classes that may appear in current generated
+surfaces include `waiting_for_market`, `missing_fact`, `deployment_issue`,
+`active_position_resolution`, `hard_safety_stop`, and `review_only_warning`.
+Planning must map them to the relevant blocker contract or recovery surface
+before treating them as Owner-facing state.
 
 ## Global Authority Model
 
@@ -96,8 +169,9 @@ Owner policy includes StrategyGroup enable/pause/resume, promote/downshift,
 park/kill, scoped risk acceptance, capital/profile/scope changes, and
 production-stage transition.
 
-System process includes observation, RequiredFacts mapping, fresh signal
-detection, candidate/auth evidence, action-time FinalGate, official Operation
+System process includes wide read-only observation, per-symbol RequiredFacts
+mapping, fresh signal detection, non-executing promotion, action-time lane
+narrowing, candidate/auth evidence, action-time FinalGate, official Operation
 Layer, protection, reconciliation, settlement, and review capture.
 
 Owner scoped risk acceptance may advance `trial_eligible` or tier eligibility.
@@ -228,11 +302,123 @@ Generated views summarize.
 Archives preserve provenance.
 ```
 
-StrategyGroup semantics belong in reviewed handoff packs and the registry
-contract. Dynamic actionability belongs to runtime state. Owner risk acceptance
-belongs to explicit Owner policy or current scoped decisions. Generated monitor,
-replay, and ledger outputs are checkpoint evidence; they must not be hand-edited
-into authority.
+StrategyGroup semantics belong in PG strategy registry/version/event/fact rows
+and the registry contract. Dynamic actionability belongs to runtime state. Owner
+risk acceptance belongs to explicit Owner policy or current scoped decisions.
+Generated monitor, replay, and ledger outputs are checkpoint evidence; they must
+not be hand-edited into authority.
+
+## PG Cutover Source Discipline
+
+After PG cutover, agents and skills must treat PG current state plus append-only
+audit lineage as the explanation authority for L2-L7 runtime state.
+
+Required source order for runtime explanation:
+
+```text
+PG current state
+-> PG audit / lineage events
+-> DB-backed read-model exports
+-> generated JSON/MD exports for display only
+-> archive / replay / old artifacts only as historical evidence
+```
+
+Agents must not treat these as production authority after cutover:
+
+```text
+latest-*.json
+repo MD policy files
+output artifacts
+Single Lane Packet
+local monitor cache
+Codex heartbeat state
+old StrategyGroup handoff JSON
+old DEFAULT_SIDE_SCOPE / code fallback
+```
+
+When PG lineage exists, no-trade, chain-position, forensics, review, and monitor
+analysis must explain:
+
+```text
+stage_reached
+first_blocker
+plain_language_reason
+next_system_action
+owner_action_required
+signal / promotion / lane / ticket / order lineage refs
+```
+
+For PG implementation tasks, prompts must explicitly forbid:
+
+```text
+MVP or transitional runtime fallback
+long-term PG + JSON dual authority
+FinalGate loose parameter input
+Operation Layer loose submit input
+unsupported side mirroring
+generated_at as event_time_ms
+replay event as fresh live signal
+JSON export as runtime scope source
+```
+
+Reviewer agents must check negative constraints, not only happy paths.
+
+## Runtime File I/O And Performance Discipline
+
+Runtime file I/O must follow
+`docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md`.
+
+The target is deletion or PG replacement, not better documentation of file
+paths:
+
+```text
+runtime readers -> migrate to PG or delete
+recurring JSON/MD writers -> delete from cadence or replace with PG rows
+historical material -> archive-only, never runtime input
+Owner explanation -> PG Owner Explanation Read Model only
+```
+
+Agents must not add new production reads from repo/output/report JSON or
+Markdown. Agents must not add new recurring writes of JSON/Markdown reports in
+watcher tick, server monitor, product refresh, dispatcher, FinalGate,
+Operation Layer, or Owner console readmodel paths.
+
+This ban also covers dynamic-path file authority that does not expose a
+literal repo/output path in code: env-selected evidence JSON files, YAML
+config import/export interfaces, JSONL trace or observe sidecars, and tests
+that create legacy report JSON files to feed current code. Current semantics
+must be PG/current services or in-memory typed fixtures; historical material is
+archive-only.
+
+Agents must not add or preserve current artifact/proof/evidence scripts whose
+main interface is JSON/Markdown files, report directories, or artifact file CLI
+parameters. Current semantics must move to PG/current projections or
+API/readmodels; pure history must be archive-only; everything else is deleted.
+
+Agents must not keep file-backed repositories, local comparison repositories,
+or "non-production fallback" readers in current `src/` or current runtime
+scripts. If a file-backed reader has historical value, it belongs outside the
+current runtime path as archive provenance only; otherwise it is deleted.
+
+Every architecture plan, implementation task, and review that touches runtime,
+deploy, monitor, readmodel, or action-time code must state:
+
+| Performance dimension | Required answer |
+| --- | --- |
+| Cadence | per tick, per signal, per deploy, manual, or archive-only |
+| File writes | number of JSON/MD files created by one no-signal tick; target is `0` |
+| PG writes | bounded row count or explicit reason |
+| CPU | whether heavy builders run only on PG trigger |
+| Disk | whether append-only or per-run files are created |
+| Timeout | whether subprocess/API work is bounded |
+| Retention | archive-only owner and cleanup rule, if any |
+
+Do not accept `validator passed` as sufficient evidence if the validator does
+not cover invoked scripts, cadence, file growth, and Owner-facing file reads.
+For runtime/deploy/monitor/readmodel/watcher/action-time/Owner explanation
+changes, review evidence must include `scripts/audit_production_runtime_file_io.py`
+or a stricter successor. Production cadence is not acceptable unless the audit
+reports `performance_risk.status=clear` and zero `frequent_report_write`.
 
 Strategy-research artifacts from `/Users/jiangwei/Documents/final-strategy-research`
 must not become unconditional runtime monitor dependencies. Main control should
@@ -259,13 +445,13 @@ Agents must obey these constraints:
 | Strategy Asset State evidence requirement | Signal Observation grade artifacts are useful only if they move a lane forward, prove a precise blocker, or change `go_live`, `do_not_go_live`, `keep_observing`, `revise`, `park`, `kill`, `promote`, or `block_for_safety` |
 | Replay/proxy boundary | Replay, synthetic fixtures, proxy facts, and opportunity ledger rows must never become live signal, live RequiredFacts, FinalGate input, Operation Layer evidence, or submit authority |
 | Deploy threshold | Do not deploy for isolated wording, single report fields, or one-off local artifacts; deploy only after a stage-worthy closed local checkpoint or explicit Owner request |
-| Entry-point control | Prefer extending the local monitor sequence, replay lab, opportunity review work loop, or opportunity ledger producer over adding permanent standalone scripts |
+| Entry-point control | For production monitoring, extend the server-side runtime monitor contract path; for development diagnostics, prefer extending the local monitor sequence, replay lab, opportunity review work loop, or opportunity ledger producer over adding unrelated standalone scripts |
 
 New Signal Observation grade scripts or artifacts must satisfy at least one of:
 
 - remove or precisely reclassify a Live Enablement blocker;
 - produce or consume Strategy Asset State pre-live evidence rows that change a lane decision;
-- feed the local monitor sequence;
+- feed the server-side runtime monitor for production notification, or the local monitor sequence for development diagnostics;
 - replace and reduce older entry points;
 - create a bounded one-time migration or validation artifact with no long-term
   mainline role.
@@ -280,7 +466,7 @@ action-time FinalGate, and official Operation Layer all passing.
 
 The Owner is a supervisor, not an execution operator.
 
-Owner-facing product surfaces must answer:
+Runtime supervision summaries must answer:
 
 - which StrategyGroups are enabled;
 - which are running, waiting, processing, paused, or unavailable;
@@ -288,9 +474,8 @@ Owner-facing product surfaces must answer:
 - whether the Owner needs to intervene;
 - what one-line reason explains an unavailable or intervention state.
 
-Owner-facing product surfaces must not make the Owner drive internal execution steps.
-Do not turn these internal names into primary Owner labels, navigation, table columns,
-primary summaries, or action commands:
+Runtime supervision summaries must not make the Owner drive internal execution
+steps. Do not turn these internal names into Owner action requirements:
 
 ```text
 FinalGate
@@ -306,7 +491,7 @@ blocker code
 runtime grant
 ```
 
-Allowed main Owner language is deliberately small:
+Allowed Owner status language is deliberately small:
 
 ```text
 未启用
@@ -324,8 +509,8 @@ Allowed main Owner language is deliberately small:
 保护正常
 ```
 
-Internal gate names and evidence details may appear only in audit, detail, or
-developer surfaces after the Owner asks to expand them.
+Internal gate names and evidence details may appear only in audit or developer
+diagnostics.
 
 ## Standing Authorization
 
@@ -354,12 +539,17 @@ current official profile, agents should preserve and use it rather than reduce
 it for caution. Changes to those defaults still require explicit Owner
 direction because they are authority changes, not routine safety fixes.
 
-Do not deploy to Tokyo for every small local change. Routine status review
-should use local cache or local goal-progress artifacts first, then at most one
-L1 read-only Tokyo snapshot when cache is missing, stale, or schema-stale.
+Do not deploy to Tokyo for every small local change. Production recurring
+monitoring is owned by the Tokyo server-side readonly runtime monitor timer.
 Bounded Tokyo deploy apply should be reserved for a stage-worthy fix,
 deployable milestone, fresh-signal unblock, safety regression repair, or
 explicit Owner request.
+
+Deployment tasks must follow `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
+Local SSH is the control plane; Tokyo code acquisition must use an approved git
+fetch/export path or an explicitly scoped archive upload fallback. Deploy
+success is not live-submit readiness and must not become FinalGate, Operation
+Layer, exchange write, order creation, live profile mutation, or sizing mutation.
 
 ## StrategyGroup Runtime Bootstrap
 
@@ -396,19 +586,18 @@ paper/simulator Operation Layer, post-submit lifecycle rehearsal, rough
 cost/PnL estimation, or monitor/review shape work when those artifacts remain
 non-executing and non-authoritative.
 
-Monitor cache freshness is not a live-trading safety blocker. Cache missing,
-stale cache age, stale cache schema, or runtime-head mismatch must be classified
-as `monitor_refresh_needed`. These states may emit `NOTIFY` to trigger a local
-or one-shot L1 refresh, but they must not populate `checks.blockers`, must not
-be reported as `hard_safety_stop`, and must not flip P0 from
-`waiting_for_market` to blocked when the runtime chain itself remains ready.
+Production monitor source health is classified by the Tokyo server-side
+readonly monitor. Runtime status, watcher status, public facts,
+account-safe facts, systemd state, deploy health, and readiness-chain failures
+must be surfaced as server-side monitor decisions without creating live-submit
+authority.
 
 When a detector artifact exists, watcher input is present, and facts were
 computed but false, classify the lane as `computed_not_satisfied`. Do not report
 it as missing detector or missing artifact.
 
-Gate classes are internal safety classifications. The main Owner surface should map
-them to one terse product sentence, for example:
+Gate classes are internal safety classifications. Runtime supervision output
+should map them to one terse status sentence, for example:
 
 | Internal condition | Owner-facing sentence |
 | --- | --- |

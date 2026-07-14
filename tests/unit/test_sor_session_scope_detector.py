@@ -38,13 +38,26 @@ def _public_symbol(symbol: str) -> dict:
 
 
 def _public_facts() -> dict:
-    return {"symbols": [_public_symbol("SOLUSDT"), _public_symbol("AVAXUSDT")]}
+    return {
+        "symbols": [
+            _public_symbol("ETHUSDT"),
+            _public_symbol("SOLUSDT"),
+            _public_symbol("BTCUSDT"),
+            _public_symbol("AVAXUSDT"),
+        ]
+    }
 
 
-def _row(open_time_ms: int, close: str, high: str, low: str) -> list:
+def _row(
+    open_time_ms: int,
+    close: str,
+    high: str,
+    low: str,
+    open_: str = "100",
+) -> list:
     return [
         open_time_ms,
-        "100",
+        open_,
         high,
         low,
         close,
@@ -76,13 +89,34 @@ def _candles(*, breakout: bool) -> list[list]:
     return rows
 
 
-def test_sor_session_detector_builds_sol_avax_readonly_scope():
+def _breakdown_candles() -> list[list]:
+    start = int(datetime(2026, 6, 30, tzinfo=timezone.utc).timestamp() * 1000)
+    fifteen = 15 * 60 * 1000
+    rows = [
+        _row(start + idx * fifteen, close="100", high="101", low="99")
+        for idx in range(4)
+    ]
+    rows.append(
+        _row(
+            start + 4 * fifteen,
+            close="97",
+            high="99",
+            low="96.5",
+            open_="99",
+        )
+    )
+    return rows
+
+
+def test_sor_session_detector_builds_authorized_symbol_scope():
     module = _load_module()
 
     artifacts = module.build_sor_session_scope_detector(
         public_facts=_public_facts(),
         candle_payloads={
+            "ETHUSDT": _candles(breakout=False),
             "SOLUSDT": _candles(breakout=True),
+            "BTCUSDT": _candles(breakout=False),
             "AVAXUSDT": _candles(breakout=False),
         },
         generated_at_utc="2026-06-30T02:00:00+00:00",
@@ -92,6 +126,13 @@ def test_sor_session_detector_builds_sol_avax_readonly_scope():
     detector = artifacts["detector"]
     assert scope["expanded_readonly_watcher_symbols"] == ["SOLUSDT", "AVAXUSDT"]
     assert scope["primary_live_submit_symbol_scope"] == ["BTCUSDT", "ETHUSDT"]
+    assert scope["reviewed_symbols"] == ["ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT"]
+    assert {row["symbol"] for row in detector["symbol_detector_rows"]} == {
+        "ETHUSDT",
+        "SOLUSDT",
+        "BTCUSDT",
+        "AVAXUSDT",
+    }
     sol = next(row for row in detector["symbol_detector_rows"] if row["symbol"] == "SOLUSDT")
     avax = next(row for row in detector["symbol_detector_rows"] if row["symbol"] == "AVAXUSDT")
     assert sol["opening_range"]["high"] == 101.0
@@ -99,9 +140,22 @@ def test_sor_session_detector_builds_sol_avax_readonly_scope():
     assert sol["follow_through"] is True
     assert sol["invalidation"]["held"] is True
     assert sol["fresh_session_range_signal"] is True
+    assert sol["generic_sor_signal_allowed"] is False
+    long_event = next(row for row in sol["side_event_rows"] if row["event_id"] == "SOR-LONG")
+    short_event = next(row for row in sol["side_event_rows"] if row["event_id"] == "SOR-SHORT")
+    assert long_event["side"] == "long"
+    assert long_event["event_spec_id"] == "event_spec:SOR-001:SOR-LONG:v2"
+    assert long_event["fresh_signal"] is True
+    assert long_event["protection_ref_type"] == "opening_range_low_reference"
+    assert short_event["side"] == "short"
+    assert short_event["event_spec_id"] == "event_spec:SOR-001:SOR-SHORT:v2"
+    assert short_event["fresh_signal"] is False
+    assert short_event["protection_ref_type"] == "opening_range_high_reference"
     assert avax["fresh_session_range_signal"] is False
     assert "breakout_level_crossed" in avax["missing_required_trigger_facts"]
     assert detector["summary"]["fresh_session_signal_count"] == 1
+    assert detector["summary"]["supported_event_ids"] == ["SOR-LONG", "SOR-SHORT"]
+    assert detector["generic_sor_signal_allowed"] is False
     for artifact in artifacts.values():
         checks = artifact["checks"]
         assert checks["primary_live_submit_scope_changed"] is False
@@ -119,7 +173,12 @@ def test_sor_session_detector_fails_closed_without_candles():
 
     artifacts = module.build_sor_session_scope_detector(
         public_facts=_public_facts(),
-        candle_payloads={"SOLUSDT": [], "AVAXUSDT": []},
+        candle_payloads={
+            "ETHUSDT": [],
+            "SOLUSDT": [],
+            "BTCUSDT": [],
+            "AVAXUSDT": [],
+        },
         generated_at_utc="2026-06-30T02:00:00+00:00",
     )
 
@@ -128,3 +187,59 @@ def test_sor_session_detector_fails_closed_without_candles():
     for row in detector["symbol_detector_rows"]:
         assert row["fresh_session_range_signal"] is False
         assert "opening_range_available" in row["missing_required_trigger_facts"]
+
+
+def test_sor_session_detector_can_fetch_candles_via_readonly_ssh(monkeypatch):
+    module = _load_module()
+
+    def fake_fetch(host: str, symbols: tuple[str, ...]) -> dict[str, list[list]]:
+        assert host == "tokyo"
+        assert symbols == ("ETHUSDT", "SOLUSDT", "BTCUSDT", "AVAXUSDT")
+        return {
+            "ETHUSDT": _candles(breakout=False),
+            "SOLUSDT": _candles(breakout=True),
+            "BTCUSDT": _candles(breakout=False),
+            "AVAXUSDT": _candles(breakout=False),
+        }
+
+    monkeypatch.setattr(module, "_fetch_klines_via_ssh", fake_fetch)
+
+    artifacts = module.build_sor_session_scope_detector(
+        public_facts=_public_facts(),
+        ssh_host="tokyo",
+        generated_at_utc="2026-06-30T02:00:00+00:00",
+    )
+
+    detector = artifacts["detector"]
+    sol = next(row for row in detector["symbol_detector_rows"] if row["symbol"] == "SOLUSDT")
+    assert sol["latest_candle_close_time_utc"]
+    assert sol["fresh_session_range_signal"] is True
+
+
+def test_sor_session_detector_splits_short_breakdown_event_from_long_breakout():
+    module = _load_module()
+
+    artifacts = module.build_sor_session_scope_detector(
+        public_facts=_public_facts(),
+        candle_payloads={
+            "ETHUSDT": _breakdown_candles(),
+            "SOLUSDT": _candles(breakout=False),
+            "BTCUSDT": _candles(breakout=False),
+            "AVAXUSDT": _candles(breakout=False),
+        },
+        generated_at_utc="2026-06-30T02:00:00+00:00",
+    )
+
+    detector = artifacts["detector"]
+    eth = next(row for row in detector["symbol_detector_rows"] if row["symbol"] == "ETHUSDT")
+    long_event = next(row for row in eth["side_event_rows"] if row["event_id"] == "SOR-LONG")
+    short_event = next(row for row in eth["side_event_rows"] if row["event_id"] == "SOR-SHORT")
+    assert eth["fresh_session_range_signal"] is False
+    assert eth["fresh_session_range_short_signal"] is True
+    assert long_event["fresh_signal"] is False
+    assert "breakout_level_crossed" in long_event["missing_required_trigger_facts"]
+    assert short_event["side"] == "short"
+    assert short_event["fresh_signal"] is True
+    assert short_event["event_direction"] == "closed_15m_breakdown_below_opening_range_low"
+    assert short_event["protection_ref_type"] == "opening_range_high_reference"
+    assert detector["summary"]["fresh_session_signal_count"] == 1

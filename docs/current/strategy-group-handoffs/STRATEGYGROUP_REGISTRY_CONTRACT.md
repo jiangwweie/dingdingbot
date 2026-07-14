@@ -2,7 +2,7 @@
 title: STRATEGYGROUP_REGISTRY_CONTRACT
 status: CURRENT_PILOT_CONTRACT
 authority: docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
-last_verified: 2026-06-23
+last_verified: 2026-07-13
 ---
 
 # StrategyGroup Registry Contract
@@ -32,15 +32,16 @@ or order-sizing authority.
 | Artifact | Role |
 | --- | --- |
 | Research Strategy Cabinet | Research-side shelf of strategy semantics and evidence |
-| StrategyGroup handoff pack | Reviewed main-control intake artifact for one StrategyGroup |
-| StrategyGroup Registry | Owner-readable asset registry contract for strategy governance |
+| PG StrategyGroup registry/version rows | Current main-control intake data for StrategyGroup semantics |
+| StrategyGroup Registry Contract | Owner-readable asset registry contract for strategy governance |
 | Runtime tier policy | Defines what each tier may do |
 | Strategy Asset State evidence | Records current keep, revise, promote, park, kill, go-live, do-not-go-live, or safety-block evidence |
 | Tradeability Decision | Records whether the strategy can trade now and the first blocker when it cannot |
 | Review Ledger | Records real action outcomes and post-trial learning |
 
-The registry should summarize handoff and research evidence. It must not copy
-large replay corpora or raw packet details into the main-control layer.
+The registry should summarize PG current strategy rows and selected research
+evidence. It must not copy large replay corpora or raw packet details into the
+main-control layer.
 
 ## Governance Authority
 
@@ -94,7 +95,7 @@ Each StrategyGroup registry row should define these fields:
 | `downshift_rule` | Conditions that move a StrategyGroup to a lower tier or disable candidate preparation |
 | `park_rule` | Conditions that keep it inactive without deleting the idea |
 | `kill_condition` | Conditions that remove it from active strategy allocation |
-| `evidence_refs` | Links to handoff packs, replay summaries, Strategy Asset State evidence rows, or Review Ledger rows |
+| `evidence_refs` | Links to PG import/audit lineage, archive-only replay summaries, Strategy Asset State evidence rows, or Review Ledger rows |
 | `authority_boundary` | Explicit statement that the row does not authorize real orders |
 
 ## Trial Eligibility And Runtime Authority
@@ -189,6 +190,87 @@ missed a fixed target or used a higher leverage scenario in research.
 `L4` is not direct order authority. It only means the StrategyGroup is allowed
 to attempt the official real-order path when Tradeability Decision and Runtime
 Safety State both allow the action-time path.
+
+`L1` observe-only terminology is a research-asset tier. It must not describe a
+currently admitted production StrategyGroup merely because its watcher is
+non-executing. The current five Event-Spec scopes below are binary: they are
+admitted into the bounded official path, or a future variant remains outside
+production in research/parked state.
+
+## Current Active Runtime Event Registry
+
+The current active pre-trade runtime uses these Owner-confirmed StrategyGroup
+semantics. This section is the durable registry contract for the PG initial
+seed and must not be replaced by old handoff JSON, old code constants, or
+generated output artifacts.
+
+| StrategyGroup | Candidate symbols | Supported side | Event spec | Event time authority | Protection reference |
+| --- | --- | --- | --- | --- | --- |
+| `CPM-RO-001` | `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, `SUIUSDT` | long only | `CPM-LONG` | closed 1h reclaim trigger candle close | `pullback_low_reference` |
+| `MPG-001` | `OPUSDT`, `SOLUSDT`, `AVAXUSDT`, `SUIUSDT` | long only | `MPG-LONG` | closed 1h momentum-persistence trigger candle close | `momentum_floor_reference` |
+| `MI-001` | `AVAXUSDT`, `ETHUSDT`, `SOLUSDT` | long only / long-first | `MI-LONG` | closed 1h candle anchoring 12h impulse | impulse invalidation / fast reversal threshold |
+| `SOR-001` | `ETHUSDT`, `SOLUSDT`, `AVAXUSDT`, `BTCUSDT` | long and short through explicit side events | `SOR-LONG`, `SOR-SHORT` | closed 15m session breakout/breakdown candle close | opening-range invalidation |
+| `BRF2-001` | `BTCUSDT`, `AVAXUSDT`, `ETHUSDT` | short only | `BRF2-SHORT` | closed 1h rally-failure trigger candle close | `rally_high_reference` |
+
+Unsupported opposite sides are not dormant permissions. They are rejected
+runtime scope. A future unsupported side requires a new StrategyGroup or a
+versioned strategy variant with its own event spec, RequiredFacts, scope,
+policy, protection, and negative tests.
+
+### Production Lane Identity And Admission
+
+The registry represents **22 active candidate lanes** across the five rows
+above and **6 versioned Event Specs**. Each current lane is
+`trial_grade_capable`, and each current Event Spec declares
+`trial_grade_signal + trial_live` with execution eligibility enabled.
+
+Before production evaluation, PG resolves one immutable lane identity:
+
+```text
+candidate scope + Event-Spec binding + Event Spec + runtime scope +
+runtime instance + current policy/profile
+```
+
+The identity's canonical direction, Event Spec, and timeframe are authoritative
+over evaluator output. Only the explicit `SOR-LONG` and `SOR-SHORT` bindings
+permit their respective directions. **CPM-RO-001 is long-only**; no CPM short
+scope is retained as a dormant, observe-only, or retryable production lane.
+Source: `PRE_TRADE_RUNTIME_CONTRACT.md`, migration **118**, and current PG
+registry seed.
+
+### Event Meanings
+
+| Event spec | Plain-language event |
+| --- | --- |
+| `CPM-LONG` | 4h uptrend remains intact, 1h pullback is normal, and 1h reclaim confirms continuation |
+| `MPG-LONG` | 4h context is upward, 1h momentum persists, and a closed 1h candle confirms continuation or breakout |
+| `MI-LONG` | A strong 12h close-to-close impulse appears in an allowed high-beta asset and passes exhaustion/reversal checks |
+| `SOR-LONG` | Session opening range is formed, price breaks above the range high, follow-through confirms, and invalidation holds |
+| `SOR-SHORT` | Session opening range is formed, price breaks below the range low, bearish follow-through confirms, and reclaim does not occur |
+| `BRF2-SHORT` | A weak or non-strong-uptrend market rallies, rally failure/rejection confirms, and squeeze risk remains acceptable |
+
+### Current Event RequiredFacts Boundary
+
+The current PG seed must not include transitional `v0` exceptions inside
+RequiredFacts. If a RequiredFact is not part of a strategy event, that absence
+must be represented by a new versioned event spec or RequiredFacts version, not
+by free-text exceptions.
+
+Current special case:
+
+| Event spec | RequiredFact decision |
+| --- | --- |
+| `MI-LONG` | `relative_strength_confirmed=true` is required for the current event spec |
+
+### Version Boundary
+
+StrategyGroup versions, event specs, RequiredFacts, policy, execution policy,
+and protection policy are versioned.
+
+Signals, promotion candidates, Action-Time Tickets, orders, protection,
+reconciliation, and reviews must bind the versions that were current when they
+were created. New versions affect future events. They must not rewrite the
+meaning of historical signals, tickets, orders, or reviews.
 
 ## Current Pilot Registry Sketch
 

@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from typing import Any, Literal, Optional
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -32,6 +33,10 @@ from src.domain.signal_evaluation import (
     OrderCandidateStatus,
     SignalEvaluation,
     SignalEvaluationStatus,
+)
+from src.infrastructure.sync_pg_dsn import (
+    is_sync_postgres_dsn,
+    normalize_sync_postgres_dsn,
 )
 from src.domain.runtime_execution_intent_adapter import (
     RuntimeExecutionIntentCreationPreview,
@@ -135,6 +140,7 @@ from src.domain.runtime_execution_exchange_submit_recovery_resolution import (
 )
 from src.domain.runtime_execution_exchange_gateway_readiness import (
     GATEWAY_BINDING_ENABLED_ENV,
+    RUNTIME_EXCHANGE_LIFECYCLE_GATEWAY_METHODS,
     RuntimeExecutionExchangeGatewayReadiness,
 )
 from src.domain.runtime_execution_attempt_reservation import (
@@ -192,6 +198,164 @@ router = APIRouter(
     tags=["Trading Console"],
     dependencies=[Depends(require_operator_session)],
 )
+
+
+class RuntimeActionTimeFinalGatePreflight(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    controlled_submit_plan_status: str
+    final_gate_verdict: str
+    ticket_preflight_status: str
+    ticket_id: str | None = None
+    finalgate_pass_id: str | None = None
+    action_time_lane_input_id: str | None = None
+    strategy_group_id: str | None = None
+    symbol: str | None = None
+    side: str | None = None
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    next_action: str
+    authority_boundary: str
+    submit_executed: bool = False
+    order_created: bool = False
+    exchange_called: bool = False
+    owner_bounded_execution_called: bool = False
+    order_lifecycle_called: bool = False
+    operation_layer_called: bool = False
+    exchange_write_called: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
+
+
+class RuntimeOperationLayerHandoff(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    operation_layer_verdict: str
+    ticket_id: str | None = None
+    finalgate_pass_id: str | None = None
+    operation_layer_handoff_id: str | None = None
+    operation_submit_command_id: str | None = None
+    action_time_lane_input_id: str | None = None
+    strategy_group_id: str | None = None
+    symbol: str | None = None
+    side: str | None = None
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    command_plan: dict[str, Any] = Field(default_factory=dict)
+    next_action: str
+    authority_boundary: str
+    submit_executed: bool = False
+    operation_layer_submit_called: bool = False
+    order_created: bool = False
+    exchange_called: bool = False
+    exchange_write_called: bool = False
+    owner_bounded_execution_called: bool = False
+    order_lifecycle_called: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
+
+
+class RuntimeTicketBoundProtectedSubmit(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    protected_submit_attempt_id: str | None = None
+    ticket_id: str | None = None
+    finalgate_pass_id: str | None = None
+    operation_layer_handoff_id: str | None = None
+    operation_submit_command_id: str | None = None
+    runtime_safety_snapshot_id: str | None = None
+    action_time_lane_input_id: str | None = None
+    strategy_group_id: str | None = None
+    symbol: str | None = None
+    side: str | None = None
+    submit_mode: str | None = None
+    submit_allowed: bool = False
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    submit_request: dict[str, Any] = Field(default_factory=dict)
+    submit_result: dict[str, Any] = Field(default_factory=dict)
+    identity_evidence: dict[str, Any] = Field(default_factory=dict)
+    next_action: str
+    authority_boundary: str
+    official_operation_layer_submit_called: bool = False
+    exchange_write_called: bool = False
+    order_created: bool = False
+    order_lifecycle_called: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
+
+
+class RuntimeTicketBoundPostSubmitClosure(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    post_submit_closure_id: str | None = None
+    protected_submit_attempt_id: str | None = None
+    ticket_id: str | None = None
+    operation_submit_command_id: str | None = None
+    strategy_group_id: str | None = None
+    symbol: str | None = None
+    side: str | None = None
+    protection_state: str | None = None
+    reconciliation_state: str | None = None
+    settlement_state: str | None = None
+    review_state: str | None = None
+    first_blocker: str | None = None
+    blockers: list[str] = Field(default_factory=list)
+    submitted_order_refs: list[dict[str, Any]] = Field(default_factory=list)
+    next_action: str
+    authority_boundary: str
+    finalgate_called: bool = False
+    operation_layer_called: bool = False
+    exchange_write_called: bool = False
+    order_created: bool = False
+    order_lifecycle_called: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
+    runtime_budget_mutated: bool = False
+
+
+class RuntimeTicketBoundLifecycleMaintenanceRequest(BaseModel):
+    ticket_id: str | None = None
+    protected_submit_attempt_id: str | None = None
+    exit_protection_set_id: str | None = None
+    exchange_snapshot: dict[str, Any] = Field(default_factory=dict)
+    allow_exchange_mutation: bool = False
+    max_actions: int = Field(default=16, ge=1, le=64)
+
+
+class RuntimeTicketBoundLifecycleMaintenance(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
+    status: str
+    scope: dict[str, Any] = Field(default_factory=dict)
+    action_count: int = 0
+    actions: list[dict[str, Any]] = Field(default_factory=list)
+    first_blocker: str | None = None
+    blockers: list[str] = Field(default_factory=list)
+    next_action: str
+    allow_exchange_mutation: bool = False
+    exchange_write_called: bool = False
+    finalgate_called: bool = False
+    operation_layer_called: bool = False
+    order_created: bool = False
+    withdrawal_or_transfer_created: bool = False
+    live_profile_changed: bool = False
+    order_sizing_changed: bool = False
+    runtime_budget_mutated: bool = False
+    authority_boundary: str
 
 
 class _TradingConsoleLiveReadOnlyGateway:
@@ -310,6 +474,7 @@ class StrategyRuntimeInspectionView(BaseModel):
 class RuntimeStrategySignalShadowPlanningRequest(BaseModel):
     signal_input: StrategyFamilySignalInput
     allow_shadow_candidate_creation: bool = False
+    allow_live_runtime_handoff_prepare: bool = False
     candidate_id: str | None = None
     context_id: str | None = None
     expires_at_ms: int | None = Field(default=None, ge=0)
@@ -320,6 +485,7 @@ class RuntimeStrategySignalIntentDraftSourceRequest(BaseModel):
     signal_input: StrategyFamilySignalInput
     allow_shadow_candidate_creation: Literal[True] = True
     allow_intent_draft_creation: Literal[True] = True
+    allow_live_runtime_handoff_prepare: bool = False
     owner_reviewed: Literal[True] = True
     owner_confirmed_for_intent: Literal[True] = True
     candidate_id: str | None = None
@@ -445,7 +611,7 @@ class ScheduledReadonlyObservationRunRequest(BaseModel):
 class RuntimeNextAttemptObservationCycleRequest(BaseModel):
     source: Literal["live_market", "sample"] = "live_market"
     include_exchange: bool = True
-    allow_prepare_records: bool = False
+    allow_action_time_ticket_materialization: bool = False
     symbol: str | None = None
     side: str | None = None
     family: str | None = None
@@ -987,6 +1153,9 @@ async def runtime_strategy_signal_shadow_plan_for_signal_input(
             runtime=runtime,
             candidate_id=request.candidate_id,
             allow_shadow_candidate_creation=request.allow_shadow_candidate_creation,
+            allow_live_runtime_handoff_prepare=(
+                request.allow_live_runtime_handoff_prepare
+            ),
             context_id=request.context_id,
             expires_at_ms=request.expires_at_ms,
             metadata={
@@ -1033,6 +1202,9 @@ async def runtime_strategy_signal_intent_draft_source_for_signal_input(
             runtime=runtime,
             allow_shadow_candidate_creation=request.allow_shadow_candidate_creation,
             allow_intent_draft_creation=request.allow_intent_draft_creation,
+            allow_live_runtime_handoff_prepare=(
+                request.allow_live_runtime_handoff_prepare
+            ),
             owner_reviewed=request.owner_reviewed,
             owner_confirmed_for_intent=request.owner_confirmed_for_intent,
             candidate_id=request.candidate_id,
@@ -1212,13 +1384,13 @@ async def runtime_next_attempt_observation_cycle(
     runtime_instance_id: str,
     request: RuntimeNextAttemptObservationCycleRequest,
 ) -> dict[str, Any]:
-    if request.allow_prepare_records:
+    if request.allow_action_time_ticket_materialization:
         raise HTTPException(
             status_code=400,
             detail=(
-                "next-attempt observation API is non-executing; use the "
-                "official runtime_next_attempt_prepare_api_flow after "
-                "ready_for_prepare"
+                "next-attempt observation API is non-executing; materialize "
+                "PG promotion candidates and Action-Time Ticket after "
+                "ready_for_action_time_ticket_materialization"
             ),
         )
     try:
@@ -2053,6 +2225,1253 @@ async def runtime_execution_controlled_submit_preflight_for_authorization(
         if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+
+
+@router.get(
+    "/runtime-action-time-finalgate-preflights/tickets/{ticket_id}",
+    response_model=RuntimeActionTimeFinalGatePreflight,
+)
+async def runtime_action_time_finalgate_preflight_for_ticket(
+    ticket_id: str,
+) -> RuntimeActionTimeFinalGatePreflight:
+    ticket_id = str(ticket_id or "").strip()
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id_required")
+    try:
+        report = _run_ticket_bound_action_time_finalgate_preflight(ticket_id)
+        return RuntimeActionTimeFinalGatePreflight(
+            **_ticket_bound_finalgate_api_body(report)
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post(
+    "/runtime-operation-layer-handoffs/tickets/{ticket_id}/finalgate-passes/{finalgate_pass_id}",
+    response_model=RuntimeOperationLayerHandoff,
+)
+async def runtime_operation_layer_handoff_for_ticket(
+    ticket_id: str,
+    finalgate_pass_id: str,
+) -> RuntimeOperationLayerHandoff:
+    ticket_id = str(ticket_id or "").strip()
+    finalgate_pass_id = str(finalgate_pass_id or "").strip()
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id_required")
+    if not finalgate_pass_id:
+        raise HTTPException(status_code=400, detail="finalgate_pass_id_required")
+    try:
+        report = _run_ticket_bound_operation_layer_handoff(
+            ticket_id=ticket_id,
+            finalgate_pass_id=finalgate_pass_id,
+        )
+        return RuntimeOperationLayerHandoff(
+            **_ticket_bound_operation_layer_handoff_api_body(report)
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post(
+    "/runtime-protected-submits/tickets/{ticket_id}/operation-submit-commands/"
+    "{operation_submit_command_id}",
+    response_model=RuntimeTicketBoundProtectedSubmit,
+)
+async def runtime_ticket_bound_protected_submit_for_ticket(
+    ticket_id: str,
+    operation_submit_command_id: str,
+    submit_mode: str = Query(default="disabled_smoke"),
+) -> RuntimeTicketBoundProtectedSubmit:
+    ticket_id = str(ticket_id or "").strip()
+    operation_submit_command_id = str(operation_submit_command_id or "").strip()
+    submit_mode = str(submit_mode or "").strip()
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id_required")
+    if not operation_submit_command_id:
+        raise HTTPException(status_code=400, detail="operation_submit_command_id_required")
+    try:
+        report = await _run_ticket_bound_protected_submit(
+            ticket_id=ticket_id,
+            operation_submit_command_id=operation_submit_command_id,
+            submit_mode=submit_mode,
+        )
+        return RuntimeTicketBoundProtectedSubmit(
+            **_ticket_bound_protected_submit_api_body(report)
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post(
+    "/runtime-post-submit-closures/protected-submit-attempts/"
+    "{protected_submit_attempt_id}",
+    response_model=RuntimeTicketBoundPostSubmitClosure,
+)
+async def runtime_ticket_bound_post_submit_closure_for_attempt(
+    protected_submit_attempt_id: str,
+) -> RuntimeTicketBoundPostSubmitClosure:
+    protected_submit_attempt_id = str(protected_submit_attempt_id or "").strip()
+    if not protected_submit_attempt_id:
+        raise HTTPException(status_code=400, detail="protected_submit_attempt_id_required")
+    try:
+        report = _run_ticket_bound_post_submit_closure(
+            protected_submit_attempt_id=protected_submit_attempt_id,
+        )
+        return RuntimeTicketBoundPostSubmitClosure(
+            **_ticket_bound_post_submit_closure_api_body(report)
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post(
+    "/runtime-ticket-bound-lifecycle-maintenance",
+    response_model=RuntimeTicketBoundLifecycleMaintenance,
+)
+async def runtime_ticket_bound_lifecycle_maintenance(
+    request: RuntimeTicketBoundLifecycleMaintenanceRequest,
+) -> RuntimeTicketBoundLifecycleMaintenance:
+    try:
+        report = await _run_ticket_bound_lifecycle_maintenance(request)
+        return RuntimeTicketBoundLifecycleMaintenance(**report)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except sa.exc.SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _run_ticket_bound_action_time_finalgate_preflight(ticket_id: str) -> dict[str, Any]:
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound FinalGate")
+    if not is_sync_postgres_dsn(database_url):
+        raise RuntimeError("ticket-bound FinalGate requires PostgreSQL DSN")
+
+    from src.application.action_time.finalgate_preflight import (
+        materialize_action_time_finalgate_preflight,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            return materialize_action_time_finalgate_preflight(
+                conn,
+                ticket_id=ticket_id,
+            )
+    finally:
+        engine.dispose()
+
+
+def _run_ticket_bound_operation_layer_handoff(
+    *,
+    ticket_id: str,
+    finalgate_pass_id: str,
+) -> dict[str, Any]:
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound Operation Layer handoff")
+    if not is_sync_postgres_dsn(database_url):
+        raise RuntimeError("ticket-bound Operation Layer handoff requires PostgreSQL DSN")
+
+    from src.application.action_time.operation_layer_handoff import (
+        materialize_action_time_operation_layer_handoff,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            return materialize_action_time_operation_layer_handoff(
+                conn,
+                ticket_id=ticket_id,
+                finalgate_pass_id=finalgate_pass_id,
+            )
+    finally:
+        engine.dispose()
+
+
+async def _run_ticket_bound_protected_submit(
+    *,
+    ticket_id: str,
+    operation_submit_command_id: str,
+    submit_mode: str,
+) -> dict[str, Any]:
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound protected submit")
+    if not is_sync_postgres_dsn(database_url):
+        raise RuntimeError("ticket-bound protected submit requires PostgreSQL DSN")
+
+    from src.application.action_time.protected_submit_attempt import (
+        SUBMIT_MODE_REAL_GATEWAY_ACTION,
+        prepare_ticket_bound_protected_submit_attempt,
+        record_ticket_bound_protected_submit_result,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            report = prepare_ticket_bound_protected_submit_attempt(
+                conn,
+                ticket_id=ticket_id,
+                operation_submit_command_id=operation_submit_command_id,
+                submit_mode=submit_mode,
+            )
+        if report.get("status") != "submit_prepared":
+            return report
+        if submit_mode != SUBMIT_MODE_REAL_GATEWAY_ACTION:
+            return report
+
+        submit_result = await _execute_ticket_bound_real_gateway_submit(
+            report,
+            engine=engine,
+        )
+        with engine.begin() as conn:
+            return record_ticket_bound_protected_submit_result(
+                conn,
+                protected_submit_attempt_id=str(
+                    report.get("protected_submit_attempt_id") or ""
+                ),
+                submit_result=submit_result,
+            )
+    finally:
+        engine.dispose()
+
+
+def _run_ticket_bound_post_submit_closure(
+    *,
+    protected_submit_attempt_id: str,
+) -> dict[str, Any]:
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound post-submit closure")
+    if not is_sync_postgres_dsn(database_url):
+        raise RuntimeError("ticket-bound post-submit closure requires PostgreSQL DSN")
+
+    from src.application.action_time.post_submit_closure import (
+        materialize_ticket_bound_post_submit_closure,
+    )
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            return materialize_ticket_bound_post_submit_closure(
+                conn,
+                protected_submit_attempt_id=protected_submit_attempt_id,
+            )
+    finally:
+        engine.dispose()
+
+
+async def _run_ticket_bound_lifecycle_maintenance(
+    request: RuntimeTicketBoundLifecycleMaintenanceRequest,
+) -> dict[str, Any]:
+    database_url = normalize_sync_postgres_dsn(os.getenv("PG_DATABASE_URL") or "")
+    if not database_url:
+        raise RuntimeError("PG_DATABASE_URL is required for ticket-bound lifecycle maintenance")
+    if not is_sync_postgres_dsn(database_url):
+        raise RuntimeError("ticket-bound lifecycle maintenance requires PostgreSQL DSN")
+
+    from src.application.action_time.lifecycle_maintenance_service import (
+        run_ticket_bound_lifecycle_maintenance,
+    )
+    from src.interfaces import api as api_module
+
+    gateway = None
+    if request.allow_exchange_mutation:
+        gateway_binding = await _runtime_exchange_submit_gateway_binding(api_module)
+        gateway = gateway_binding.get("gateway")
+
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            return await run_ticket_bound_lifecycle_maintenance(
+                conn,
+                ticket_id=request.ticket_id or "",
+                protected_submit_attempt_id=request.protected_submit_attempt_id or "",
+                exit_protection_set_id=request.exit_protection_set_id or "",
+                exchange_snapshot=request.exchange_snapshot or None,
+                gateway=gateway,
+                allow_exchange_mutation=request.allow_exchange_mutation,
+                max_actions=request.max_actions,
+            )
+    finally:
+        engine.dispose()
+
+
+async def _execute_ticket_bound_real_gateway_submit(
+    report: dict[str, Any],
+    *,
+    engine: Any,
+) -> dict[str, Any]:
+    from src.application.order_lifecycle_service import OrderLifecycleService
+    from src.interfaces import api as api_module
+
+    gateway_binding = await _runtime_exchange_submit_gateway_binding(api_module)
+    gateway = gateway_binding.get("gateway")
+    if gateway is None:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="runtime_exchange_gateway_unavailable",
+            blockers=list(gateway_binding.get("blockers") or []),
+        )
+    order_repository = _cached_pg_repo(
+        api_module,
+        "_trading_console_pg_order_repo",
+        _build_pg_order_repo,
+    )
+    if order_repository is None:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="order_lifecycle_repository_unavailable",
+            blockers=["order_lifecycle_repository_unavailable"],
+        )
+    order_lifecycle_service = OrderLifecycleService(repository=order_repository)
+    from src.application.action_time.exchange_command import (
+        list_exchange_commands_for_attempt,
+    )
+
+    with engine.connect() as conn:
+        commands = list_exchange_commands_for_attempt(
+            conn,
+            protected_submit_attempt_id=str(
+                report.get("protected_submit_attempt_id") or ""
+            ),
+        )
+    if not commands:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="exchange_commands_missing",
+            blockers=["exchange_commands_missing"],
+        )
+
+    submitted_orders: list[dict[str, Any]] = []
+    for command in commands:
+        result = await _execute_one_ticket_bound_exchange_command(
+            engine=engine,
+            exchange_command_id=str(command["exchange_command_id"]),
+            gateway=gateway,
+            order_lifecycle_service=order_lifecycle_service,
+            now_ms=int(time.time() * 1000),
+        )
+        submitted = result.get("submitted_order")
+        if isinstance(submitted, dict) and submitted:
+            submitted_orders.append(submitted)
+        if result.get("status") != "exchange_command_confirmed_submitted":
+            status = str(result.get("status") or "exchange_command_failed")
+            aggregate_status = (
+                "exchange_submit_outcome_unknown"
+                if status == "exchange_command_outcome_unknown"
+                else (
+                    "entry_submit_failed"
+                    if command.get("order_role") == "ENTRY"
+                    else "protection_submit_failed"
+                )
+            )
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status=aggregate_status,
+                blockers=list(result.get("blockers") or []),
+                order_created=bool(result.get("order_created")),
+                order_lifecycle_called=bool(
+                    result.get("order_lifecycle_called")
+                ),
+                exchange_write_called=bool(result.get("exchange_write_called")),
+                submitted_orders=submitted_orders,
+            )
+
+    return {
+        "schema": "brc.ticket_bound_protected_submit_result.v1",
+        "status": "exchange_submit_orders_submitted",
+        "ticket_id": report.get("ticket_id"),
+        "operation_submit_command_id": report.get(
+            "operation_submit_command_id"
+        ),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "exchange_call_count": len(commands),
+        "submitted_orders": submitted_orders,
+        "exchange_write_called": True,
+        "order_created": True,
+        "order_lifecycle_called": True,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+async def _execute_one_ticket_bound_exchange_command(
+    *,
+    engine: Any,
+    exchange_command_id: str,
+    gateway: Any,
+    order_lifecycle_service: Any,
+    now_ms: int,
+) -> dict[str, Any]:
+    """Dispatch one persisted command without holding a command transaction."""
+
+    from src.application.action_time.exchange_command import (
+        mark_exchange_command_dispatching,
+        record_exchange_command_outcome,
+        resize_prepared_protection_command_to_entry_fill,
+    )
+    from src.application.action_time.lifecycle_mutation_capability import (
+        lifecycle_mutation_capability_decision,
+    )
+    from src.domain.exceptions import (
+        ConnectionLostError,
+        InsufficientMarginError,
+        InvalidOrderError,
+    )
+    from src.domain.models import Direction, Order, OrderRole, OrderStatus
+    from src.domain.ticket_bound_exchange_command import (
+        ExchangeCommandOutcomeClass,
+        ExchangeCommandState,
+    )
+
+    with engine.connect() as conn:
+        table = sa.Table(
+            "brc_ticket_bound_exchange_commands",
+            sa.MetaData(),
+            autoload_with=conn,
+        )
+        command_row = conn.execute(
+            sa.select(table).where(
+                table.c.exchange_command_id == exchange_command_id
+            )
+        ).mappings().first()
+    if command_row is None:
+        return {
+            "status": "exchange_command_missing",
+            "blockers": ["exchange_command_missing"],
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+        }
+    command = dict(command_row)
+    with engine.begin() as conn:
+        capability = lifecycle_mutation_capability_decision(conn)
+        if capability["blockers"]:
+            return {
+                "status": "lifecycle_mutation_capability_not_ready",
+                "blockers": list(capability["blockers"]),
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            }
+        try:
+            command = resize_prepared_protection_command_to_entry_fill(
+                conn,
+                exchange_command_id=exchange_command_id,
+                now_ms=now_ms,
+            )
+        except ValueError as exc:
+            return {
+                "status": "protection_quantity_binding_blocked",
+                "blockers": [str(exc)],
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            }
+    gateway_account_id = str(
+        getattr(gateway, "runtime_account_id", "") or ""
+    ).strip()
+    gateway_exchange_id = str(
+        getattr(gateway, "runtime_exchange_id", "") or ""
+    ).strip()
+    identity_blockers: list[str] = []
+    if gateway_account_id != str(command.get("account_id") or ""):
+        identity_blockers.append("exchange_command_gateway_account_mismatch")
+    if gateway_exchange_id != str(command.get("exchange_id") or ""):
+        identity_blockers.append("exchange_command_gateway_exchange_mismatch")
+    if identity_blockers:
+        return {
+            "status": "exchange_command_identity_blocked",
+            "blockers": identity_blockers,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+        }
+    try:
+        direction = Direction.LONG if command["side"] == "long" else Direction.SHORT
+        amount = Decimal(str(command["amount"]))
+        order = Order(
+            id=str(command["local_order_id"]),
+            signal_id=str(command["ticket_id"]),
+            symbol=str(command["gateway_symbol"]),
+            direction=direction,
+            order_type=_ticket_bound_order_type(command["order_type"]),
+            order_role=OrderRole(str(command["order_role"])),
+            price=_optional_decimal(command.get("price")),
+            trigger_price=_optional_decimal(command.get("stop_price")),
+            requested_qty=amount,
+            status=OrderStatus.CREATED,
+            created_at=now_ms,
+            updated_at=now_ms,
+            reduce_only=command.get("reduce_only") is True,
+            parent_order_id=command.get("parent_order_id"),
+            signal_evaluation_id=str(command["ticket_id"]),
+        )
+        await order_lifecycle_service.register_created_order(
+            order,
+            metadata={
+                "scope": "ticket_bound_exchange_command",
+                "exchange_command_id": exchange_command_id,
+                "ticket_id": command["ticket_id"],
+                "operation_submit_command_id": command[
+                    "operation_submit_command_id"
+                ],
+                "exchange_order_submitted": False,
+                "exchange_called": False,
+            },
+        )
+    except Exception as exc:
+        return {
+            "status": "local_order_registration_failed",
+            "blockers": [
+                "local_order_registration_failed:"
+                f"{command.get('local_order_id')}:{type(exc).__name__}"
+            ],
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": True,
+        }
+
+    with engine.begin() as conn:
+        command = mark_exchange_command_dispatching(
+            conn,
+            exchange_command_id=exchange_command_id,
+            now_ms=now_ms,
+        )
+
+    try:
+        placement = await gateway.place_order(
+            symbol=str(command["gateway_symbol"]),
+            order_type=str(command["order_type"]),
+            side=str(command["gateway_side"]),
+            amount=Decimal(str(command["amount"])),
+            price=_optional_decimal(command.get("price")),
+            trigger_price=_optional_decimal(command.get("stop_price")),
+            reduce_only=command.get("reduce_only") is True,
+            position_side=command.get("position_side"),
+            client_order_id=str(command["client_order_id"]),
+        )
+    except (InvalidOrderError, InsufficientMarginError) as exc:
+        with engine.begin() as conn:
+            record_exchange_command_outcome(
+                conn,
+                exchange_command_id=exchange_command_id,
+                target_state=ExchangeCommandState.CONFIRMED_REJECTED,
+                outcome_class=ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION,
+                exchange_result={
+                    "error_code": getattr(exc, "error_code", None),
+                    "error_message": str(exc),
+                },
+                now_ms=now_ms,
+            )
+        return _exchange_command_execution_result(
+            "exchange_command_confirmed_rejected",
+            command,
+            blockers=[str(exc)],
+        )
+    except (ConnectionLostError, TimeoutError, ConnectionError) as exc:
+        return _record_unknown_exchange_command(
+            engine,
+            command,
+            exchange_command_id=exchange_command_id,
+            error=exc,
+            now_ms=now_ms,
+        )
+    except Exception as exc:
+        return _record_unknown_exchange_command(
+            engine,
+            command,
+            exchange_command_id=exchange_command_id,
+            error=exc,
+            now_ms=now_ms,
+        )
+
+    exchange_order_id = str(
+        getattr(placement, "exchange_order_id", None) or ""
+    ).strip()
+    if not getattr(placement, "is_success", False):
+        with engine.begin() as conn:
+            record_exchange_command_outcome(
+                conn,
+                exchange_command_id=exchange_command_id,
+                target_state=ExchangeCommandState.CONFIRMED_REJECTED,
+                outcome_class=ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION,
+                exchange_result={
+                    "error_code": getattr(placement, "error_code", None),
+                    "error_message": getattr(placement, "error_message", None),
+                },
+                now_ms=now_ms,
+            )
+        return _exchange_command_execution_result(
+            "exchange_command_confirmed_rejected",
+            command,
+            blockers=[
+                str(
+                    getattr(placement, "error_message", None)
+                    or getattr(placement, "error_code", None)
+                    or "exchange_command_rejected"
+                )
+            ],
+        )
+    if not exchange_order_id:
+        return _record_unknown_exchange_command(
+            engine,
+            command,
+            exchange_command_id=exchange_command_id,
+            error=RuntimeError("exchange_order_id_missing"),
+            now_ms=now_ms,
+            incomplete_response=True,
+        )
+
+    with engine.begin() as conn:
+        record_exchange_command_outcome(
+            conn,
+            exchange_command_id=exchange_command_id,
+            target_state=ExchangeCommandState.CONFIRMED_SUBMITTED,
+            outcome_class=ExchangeCommandOutcomeClass.EXCHANGE_ACCEPTED,
+            exchange_result={
+                "exchange_order_id": exchange_order_id,
+                "filled_qty": str(getattr(placement, "filled_qty", "") or ""),
+                "average_exec_price": str(
+                    getattr(placement, "average_exec_price", "") or ""
+                ),
+                "fee": getattr(placement, "fee", None),
+                "fill_time_ms": getattr(placement, "fill_time_ms", None),
+            },
+            now_ms=now_ms,
+        )
+    try:
+        await order_lifecycle_service.submit_order(
+            str(command["local_order_id"]),
+            exchange_order_id=exchange_order_id,
+        )
+        filled_qty = getattr(placement, "filled_qty", None)
+        parsed_filled_qty = _decimal_or_zero(filled_qty)
+        parsed_average_exec_price = _decimal_or_zero(
+            getattr(placement, "average_exec_price", None)
+        )
+        if parsed_filled_qty > Decimal("0") and parsed_average_exec_price > Decimal("0"):
+            await order_lifecycle_service.update_order_filled(
+                str(command["local_order_id"]),
+                filled_qty=parsed_filled_qty,
+                average_exec_price=parsed_average_exec_price,
+            )
+        else:
+            # A venue may report a terminal-looking market-order status before
+            # returning complete execution quantity/price fields.  Preserve
+            # exchange acceptance locally and let the read-only reconciliation
+            # snapshot establish fill truth; never fabricate a zero-price fill.
+            await order_lifecycle_service.confirm_order(
+                str(command["local_order_id"]),
+                exchange_order_id=exchange_order_id,
+            )
+    except Exception as exc:
+        return _exchange_command_execution_result(
+            "order_lifecycle_update_failed",
+            command,
+            blockers=[
+                "order_lifecycle_update_failed:"
+                f"{command.get('local_order_id')}:{type(exc).__name__}"
+            ],
+            exchange_order_id=exchange_order_id,
+        )
+
+    return _exchange_command_execution_result(
+        "exchange_command_confirmed_submitted",
+        command,
+        exchange_order_id=exchange_order_id,
+        placement=placement,
+    )
+
+
+def _record_unknown_exchange_command(
+    engine: Any,
+    command: dict[str, Any],
+    *,
+    exchange_command_id: str,
+    error: Exception,
+    now_ms: int,
+    incomplete_response: bool = False,
+) -> dict[str, Any]:
+    from src.application.action_time.exchange_command import (
+        record_exchange_command_outcome,
+    )
+    from src.domain.ticket_bound_exchange_command import (
+        ExchangeCommandOutcomeClass,
+        ExchangeCommandState,
+    )
+
+    outcome = (
+        ExchangeCommandOutcomeClass.INCOMPLETE_RESPONSE
+        if incomplete_response
+        else ExchangeCommandOutcomeClass.NETWORK_AMBIGUOUS
+    )
+    with engine.begin() as conn:
+        record_exchange_command_outcome(
+            conn,
+            exchange_command_id=exchange_command_id,
+            target_state=ExchangeCommandState.OUTCOME_UNKNOWN,
+            outcome_class=outcome,
+            exchange_result={
+                "error_code": getattr(error, "error_code", None),
+                "error_message": str(error),
+            },
+            now_ms=now_ms,
+        )
+    return _exchange_command_execution_result(
+        "exchange_command_outcome_unknown",
+        command,
+        blockers=["exchange_command_outcome_unknown"],
+    )
+
+
+def _exchange_command_execution_result(
+    status: str,
+    command: dict[str, Any],
+    *,
+    blockers: list[str] | None = None,
+    exchange_order_id: str = "",
+    placement: Any = None,
+) -> dict[str, Any]:
+    submitted_order = {}
+    if exchange_order_id:
+        submitted_order = {
+            "local_order_id": command.get("local_order_id"),
+            "exchange_order_id": exchange_order_id,
+            "order_role": command.get("order_role"),
+            "reduce_only": command.get("reduce_only") is True,
+            "amount": str(command.get("amount") or ""),
+            "price": str(command.get("price") or ""),
+            "trigger_price": str(command.get("stop_price") or ""),
+            "status": str(getattr(placement, "status", "")).split(".")[-1],
+            "filled_qty": str(getattr(placement, "filled_qty", "") or ""),
+            "average_exec_price": str(
+                getattr(placement, "average_exec_price", "") or ""
+            ),
+            "fee": getattr(placement, "fee", None),
+            "fill_time_ms": getattr(placement, "fill_time_ms", None),
+        }
+    return {
+        "status": status,
+        "exchange_command_id": command.get("exchange_command_id"),
+        "order_role": command.get("order_role"),
+        "blockers": blockers or [],
+        "submitted_order": submitted_order,
+        "exchange_write_called": status
+        not in {"local_order_registration_failed", "exchange_command_missing"},
+        "order_created": True,
+        "order_lifecycle_called": True,
+    }
+
+
+async def _submit_ticket_bound_orders(
+    report: dict[str, Any],
+    *,
+    gateway: Any,
+    order_lifecycle_service: Any,
+) -> dict[str, Any]:
+    from src.domain.models import Direction, Order, OrderRole, OrderStatus
+
+    submit_request = dict(report.get("submit_request") or {})
+    identity_blockers = _ticket_bound_submit_request_identity_blockers(
+        report,
+        submit_request,
+    )
+    if identity_blockers:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="submit_request_identity_mismatch",
+            blockers=identity_blockers,
+        )
+    orders = [
+        dict(item)
+        for item in submit_request.get("orders", [])
+        if isinstance(item, dict)
+    ]
+    if not orders:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="submit_request_orders_missing",
+            blockers=["submit_request_orders_missing"],
+        )
+    now_ms = int(time.time() * 1000)
+    registered_orders: list[Any] = []
+    submitted_orders: list[dict[str, Any]] = []
+    exchange_call_count = 0
+    try:
+        direction = Direction(str(submit_request.get("direction") or ""))
+    except Exception as exc:
+        return _ticket_bound_submit_blocked_result(
+            report,
+            status="submit_request_direction_invalid",
+            blockers=[f"submit_request_direction_invalid:{type(exc).__name__}"],
+        )
+    for order_request in orders:
+        local_order_id = str(order_request.get("local_order_id") or "")
+        try:
+            order_type = _ticket_bound_order_type(
+                order_request.get("gateway_order_type")
+            )
+            order_role = OrderRole(str(order_request.get("order_role") or ""))
+            amount = Decimal(str(order_request.get("amount") or "0"))
+            order = Order(
+                id=local_order_id,
+                signal_id=str(report.get("ticket_id") or ""),
+                symbol=str(
+                    order_request.get("symbol")
+                    or submit_request.get("exchange_symbol")
+                    or ""
+                ),
+                direction=direction,
+                order_type=order_type,
+                order_role=order_role,
+                price=_optional_decimal(order_request.get("price")),
+                trigger_price=_optional_decimal(order_request.get("trigger_price")),
+                requested_qty=amount,
+                status=OrderStatus.CREATED,
+                created_at=now_ms,
+                updated_at=now_ms,
+                reduce_only=order_request.get("reduce_only") is True,
+                parent_order_id=order_request.get("parent_order_id"),
+                signal_evaluation_id=str(report.get("ticket_id") or ""),
+            )
+        except Exception as exc:
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status="submit_request_order_invalid",
+                blockers=[
+                    "submit_request_order_invalid:"
+                    f"{local_order_id or 'missing'}:{type(exc).__name__}"
+                ],
+                order_created=bool(registered_orders),
+                order_lifecycle_called=bool(registered_orders),
+                submitted_orders=submitted_orders,
+            )
+        try:
+            registered = await order_lifecycle_service.register_created_order(
+                order,
+                metadata={
+                    "scope": "ticket_bound_protected_submit",
+                    "ticket_id": report.get("ticket_id"),
+                    "operation_submit_command_id": (
+                        report.get("operation_submit_command_id")
+                    ),
+                    "runtime_safety_snapshot_id": (
+                        report.get("runtime_safety_snapshot_id")
+                    ),
+                    "exchange_order_submitted": False,
+                    "exchange_called": False,
+                },
+            )
+        except Exception as exc:
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status="local_order_registration_failed",
+                blockers=[
+                    "local_order_registration_failed:"
+                    f"{local_order_id}:{type(exc).__name__}"
+                ],
+                order_created=bool(registered_orders),
+                order_lifecycle_called=bool(registered_orders),
+                submitted_orders=submitted_orders,
+            )
+        registered_orders.append(registered)
+
+        exchange_call_count += 1
+        try:
+            placement_result = await gateway.place_order(
+                symbol=order.symbol,
+                order_type=str(order_request.get("gateway_order_type") or ""),
+                side=str(order_request.get("gateway_side") or ""),
+                amount=amount,
+                price=_optional_decimal(order_request.get("price")),
+                trigger_price=_optional_decimal(order_request.get("trigger_price")),
+                reduce_only=order_request.get("reduce_only") is True,
+                client_order_id=str(
+                    order_request.get("client_order_id") or local_order_id
+                ),
+            )
+        except Exception as exc:
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status="exchange_submit_failed",
+                blockers=[
+                    "exchange_submit_failed:"
+                    f"{local_order_id}:{type(exc).__name__}"
+                ],
+                order_created=True,
+                order_lifecycle_called=True,
+                exchange_write_called=True,
+                submitted_orders=submitted_orders,
+            )
+        if not getattr(placement_result, "is_success", False):
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status=(
+                    "protection_submit_failed"
+                    if order_role != OrderRole.ENTRY
+                    else "entry_submit_failed"
+                ),
+                blockers=[
+                    getattr(placement_result, "error_message", None)
+                    or getattr(placement_result, "error_code", None)
+                    or f"exchange_submit_failed:{local_order_id}"
+                ],
+                order_created=True,
+                order_lifecycle_called=True,
+                exchange_write_called=True,
+                submitted_orders=submitted_orders,
+            )
+        exchange_order_id = getattr(placement_result, "exchange_order_id", None)
+        try:
+            await order_lifecycle_service.submit_order(
+                local_order_id,
+                exchange_order_id=exchange_order_id,
+            )
+            filled_qty = getattr(placement_result, "filled_qty", None)
+            average_exec_price = getattr(placement_result, "average_exec_price", None)
+            parsed_filled_qty = _decimal_or_zero(filled_qty)
+            if (
+                str(getattr(placement_result, "status", "")).split(".")[-1].lower()
+                == "filled"
+                or parsed_filled_qty > Decimal("0")
+            ):
+                await order_lifecycle_service.update_order_filled(
+                    local_order_id,
+                    filled_qty=parsed_filled_qty if parsed_filled_qty > 0 else amount,
+                    average_exec_price=Decimal(
+                        str(
+                            average_exec_price
+                            or order_request.get("price")
+                            or order_request.get("trigger_price")
+                            or submit_request.get("reference_price")
+                            or "0"
+                        )
+                    ),
+                )
+            else:
+                await order_lifecycle_service.confirm_order(
+                    local_order_id,
+                    exchange_order_id=exchange_order_id,
+                )
+        except Exception as exc:
+            return _ticket_bound_submit_blocked_result(
+                report,
+                status="order_lifecycle_update_failed",
+                blockers=[
+                    "order_lifecycle_update_failed:"
+                    f"{local_order_id}:{type(exc).__name__}"
+                ],
+                order_created=True,
+                order_lifecycle_called=True,
+                exchange_write_called=True,
+                submitted_orders=submitted_orders,
+            )
+        submitted_orders.append(
+            {
+                "local_order_id": local_order_id,
+                "exchange_order_id": exchange_order_id,
+                "order_role": str(order_role.value),
+                "reduce_only": order_request.get("reduce_only") is True,
+                "amount": str(order_request.get("amount") or ""),
+                "price": str(order_request.get("price") or ""),
+                "trigger_price": str(order_request.get("trigger_price") or ""),
+                "status": str(getattr(placement_result, "status", "")).split(".")[-1],
+                "filled_qty": str(getattr(placement_result, "filled_qty", "") or ""),
+                "average_exec_price": str(
+                    getattr(placement_result, "average_exec_price", "") or ""
+                ),
+            }
+        )
+
+    return {
+        "schema": "brc.ticket_bound_protected_submit_result.v1",
+        "status": "exchange_submit_orders_submitted",
+        "ticket_id": report.get("ticket_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "exchange_call_count": exchange_call_count,
+        "submitted_orders": submitted_orders,
+        "exchange_write_called": True,
+        "order_created": True,
+        "order_lifecycle_called": True,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _ticket_bound_submit_request_identity_blockers(
+    report: dict[str, Any],
+    submit_request: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    for key in (
+        "ticket_id",
+        "operation_submit_command_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+    ):
+        expected = str(report.get(key) or "").strip()
+        actual = str(submit_request.get(key) or "").strip()
+        if not expected:
+            blockers.append(f"submit_report_identity_missing:{key}")
+        elif not actual:
+            blockers.append(f"submit_request_identity_missing:{key}")
+        elif actual != expected:
+            blockers.append(
+                f"submit_request_identity_mismatch:{key}:"
+                f"expected={expected}:actual={actual}"
+            )
+    return blockers
+
+
+def _ticket_bound_submit_blocked_result(
+    report: dict[str, Any],
+    *,
+    status: str,
+    blockers: list[str],
+    order_created: bool = False,
+    order_lifecycle_called: bool = False,
+    exchange_write_called: bool = False,
+    submitted_orders: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema": "brc.ticket_bound_protected_submit_result.v1",
+        "status": status,
+        "ticket_id": report.get("ticket_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "blockers": blockers,
+        "submitted_orders": submitted_orders or [],
+        "exchange_write_called": exchange_write_called,
+        "order_created": order_created,
+        "order_lifecycle_called": order_lifecycle_called,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+    }
+
+
+def _ticket_bound_order_type(value: Any) -> Any:
+    from src.domain.models import OrderType
+
+    normalized = str(value or "").strip().lower()
+    if normalized == "market":
+        return OrderType.MARKET
+    if normalized == "limit":
+        return OrderType.LIMIT
+    if normalized == "stop_market":
+        return OrderType.STOP_MARKET
+    if normalized == "stop_limit":
+        return OrderType.STOP_LIMIT
+    raise ValueError(f"unsupported_ticket_bound_order_type:{normalized or 'missing'}")
+
+
+def _optional_decimal(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    return Decimal(str(value))
+
+
+def _decimal_or_zero(value: Any) -> Decimal:
+    if value is None or value == "":
+        return Decimal("0")
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+
+
+def _ticket_bound_finalgate_api_body(report: dict[str, Any]) -> dict[str, Any]:
+    preflight_status = str(report.get("status") or "")
+    passed = preflight_status in {"finalgate_ready", "finalgate_already_ready"}
+    blockers = [
+        str(item)
+        for item in (report.get("blockers") or [])
+        if str(item).strip()
+    ]
+    return {
+        "schema": "brc.runtime_action_time_finalgate_preflight_api.v1",
+        "status": (
+            "ready_for_controlled_submit_adapter" if passed else "blocked"
+        ),
+        "controlled_submit_plan_status": (
+            "ready_for_controlled_submit_adapter" if passed else "blocked"
+        ),
+        "final_gate_verdict": "pass" if passed else "block",
+        "ticket_preflight_status": preflight_status,
+        "ticket_id": report.get("ticket_id"),
+        "finalgate_pass_id": report.get("finalgate_pass_id"),
+        "action_time_lane_input_id": report.get("action_time_lane_input_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "blockers": blockers,
+        "warnings": [],
+        "next_action": str(report.get("next_action") or ""),
+        "authority_boundary": str(report.get("authority_boundary") or ""),
+        "submit_executed": False,
+        "order_created": False,
+        "exchange_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+        "operation_layer_called": False,
+        "exchange_write_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+        "source_report": report,
+    }
+
+
+def _ticket_bound_operation_layer_handoff_api_body(report: dict[str, Any]) -> dict[str, Any]:
+    handoff_status = str(report.get("status") or "")
+    ready = handoff_status in {
+        "operation_layer_handoff_ready",
+        "operation_layer_handoff_already_exists",
+    }
+    blockers = [
+        str(item)
+        for item in (report.get("blockers") or [])
+        if str(item).strip()
+    ]
+    return {
+        "schema": "brc.runtime_operation_layer_handoff_api.v1",
+        "status": "operation_layer_handoff_ready" if ready else "blocked",
+        "operation_layer_verdict": "ready" if ready else "block",
+        "ticket_id": report.get("ticket_id"),
+        "finalgate_pass_id": report.get("finalgate_pass_id"),
+        "operation_layer_handoff_id": report.get("operation_layer_handoff_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "action_time_lane_input_id": report.get("action_time_lane_input_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "blockers": blockers,
+        "warnings": [],
+        "command_plan": dict(report.get("command_plan") or {}),
+        "next_action": str(report.get("next_action") or ""),
+        "authority_boundary": str(report.get("authority_boundary") or ""),
+        "submit_executed": False,
+        "operation_layer_submit_called": False,
+        "order_created": False,
+        "exchange_called": False,
+        "exchange_write_called": False,
+        "owner_bounded_execution_called": False,
+        "order_lifecycle_called": False,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+        "source_report": report,
+    }
+
+
+def _ticket_bound_protected_submit_api_body(report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": "brc.runtime_ticket_bound_protected_submit_api.v1",
+        "status": str(report.get("status") or "blocked"),
+        "protected_submit_attempt_id": report.get("protected_submit_attempt_id"),
+        "ticket_id": report.get("ticket_id"),
+        "finalgate_pass_id": report.get("finalgate_pass_id"),
+        "operation_layer_handoff_id": report.get("operation_layer_handoff_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "runtime_safety_snapshot_id": report.get("runtime_safety_snapshot_id"),
+        "action_time_lane_input_id": report.get("action_time_lane_input_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "submit_mode": report.get("submit_mode"),
+        "submit_allowed": report.get("submit_allowed") is True,
+        "blockers": [
+            str(item)
+            for item in (report.get("blockers") or [])
+            if str(item).strip()
+        ],
+        "warnings": [
+            str(item)
+            for item in (report.get("warnings") or [])
+            if str(item).strip()
+        ],
+        "submit_request": dict(report.get("submit_request") or {}),
+        "submit_result": dict(report.get("submit_result") or {}),
+        "identity_evidence": dict(report.get("identity_evidence") or {}),
+        "next_action": str(report.get("next_action") or ""),
+        "authority_boundary": str(report.get("authority_boundary") or ""),
+        "official_operation_layer_submit_called": (
+            report.get("official_operation_layer_submit_called") is True
+        ),
+        "exchange_write_called": report.get("exchange_write_called") is True,
+        "order_created": report.get("order_created") is True,
+        "order_lifecycle_called": report.get("order_lifecycle_called") is True,
+        "withdrawal_or_transfer_created": (
+            report.get("withdrawal_or_transfer_created") is True
+        ),
+        "live_profile_changed": report.get("live_profile_changed") is True,
+        "order_sizing_changed": report.get("order_sizing_changed") is True,
+        "source_report": report,
+    }
+
+
+def _ticket_bound_post_submit_closure_api_body(report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": "brc.runtime_ticket_bound_post_submit_closure_api.v1",
+        "status": str(report.get("status") or "blocked"),
+        "post_submit_closure_id": report.get("post_submit_closure_id"),
+        "protected_submit_attempt_id": report.get("protected_submit_attempt_id"),
+        "ticket_id": report.get("ticket_id"),
+        "operation_submit_command_id": report.get("operation_submit_command_id"),
+        "strategy_group_id": report.get("strategy_group_id"),
+        "symbol": report.get("symbol"),
+        "side": report.get("side"),
+        "protection_state": report.get("protection_state"),
+        "reconciliation_state": report.get("reconciliation_state"),
+        "settlement_state": report.get("settlement_state"),
+        "review_state": report.get("review_state"),
+        "first_blocker": report.get("first_blocker"),
+        "blockers": [
+            str(item)
+            for item in (report.get("blockers") or [])
+            if str(item).strip()
+        ],
+        "submitted_order_refs": [
+            dict(item)
+            for item in (report.get("submitted_order_refs") or [])
+            if isinstance(item, dict)
+        ],
+        "next_action": str(report.get("next_action") or ""),
+        "authority_boundary": str(report.get("authority_boundary") or ""),
+        "finalgate_called": report.get("finalgate_called") is True,
+        "operation_layer_called": report.get("operation_layer_called") is True,
+        "exchange_write_called": report.get("exchange_write_called") is True,
+        "order_created": report.get("order_created") is True,
+        "order_lifecycle_called": report.get("order_lifecycle_called") is True,
+        "withdrawal_or_transfer_created": (
+            report.get("withdrawal_or_transfer_created") is True
+        ),
+        "live_profile_changed": report.get("live_profile_changed") is True,
+        "order_sizing_changed": report.get("order_sizing_changed") is True,
+        "runtime_budget_mutated": report.get("runtime_budget_mutated") is True,
+        "source_report": report,
+    }
 
 
 @router.get(
@@ -4152,13 +5571,7 @@ def _runtime_post_close_followup_plan(
         ),
         "owner_close_approval_env": followup_evidence.owner_close_approval_env,
         "owner_close_approval_value": followup_evidence.owner_close_approval_value,
-        "refresh_followup_command_args": with_env_file(
-            [
-                "scripts/build_runtime_post_close_followup_artifact.py",
-                "--runtime-instance-id",
-                runtime_instance_id,
-            ]
-        ),
+        "refresh_followup_command_args": [],
         "owner_close_dry_run_command_args": (
             close_args if followup_evidence.owner_close_approval_value else []
         ),
@@ -4181,13 +5594,7 @@ def _runtime_post_close_followup_plan(
             if standing_recovery_ready
             else []
         ),
-        "closed_review_facts_refresh_command_args": with_env_file(
-            [
-                "scripts/build_runtime_closed_trade_review_facts_artifact.py",
-                "--runtime-instance-id",
-                runtime_instance_id,
-            ]
-        ),
+        "closed_review_facts_refresh_command_args": [],
         "closed_review_command_args": (
             [] if post_close_complete else list(followup_evidence.closed_review_command_args)
         ),
@@ -4232,15 +5639,17 @@ async def _runtime_next_attempt_observation_cycle_payload(
     runtime_instance_id: str,
     request: RuntimeNextAttemptObservationCycleRequest,
 ) -> dict[str, Any]:
-    from scripts import build_runtime_strategy_signal_input_artifact as signal_builder
+    from src.application.readmodels import runtime_strategy_signal_input as signal_builder
+    from src.application.runtime_lane_identity_service import (
+        RuntimeLaneIdentityResolutionError,
+    )
     from src.application.runtime_strategy_signal_evaluation_service import (
+        RuntimeLaneEventEvaluationStatus,
         RuntimeStrategySignalEvaluationService,
-        RuntimeStrategySignalEvaluationStatus,
     )
 
     runtime = await (await _strategy_runtime_service()).get_runtime(runtime_instance_id)
-    if request.symbol and request.symbol != runtime.symbol:
-        raise ValueError("signal symbol override must match runtime symbol")
+    _assert_runtime_observation_request_matches_runtime(runtime=runtime, request=request)
     owner_scope = _runtime_next_attempt_owner_scope(runtime, request)
     owner_flow_response = await _service(
         include_exchange=request.include_exchange,
@@ -4273,14 +5682,14 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "next_attempt_gate": next_attempt_gate,
             "just_in_time_lifecycle_audit": jit_audit,
             "signal_artifact": None,
-            "prepare_artifact": None,
+            "action_time_ticket": None,
             "blockers": list(next_attempt_gate.get("blockers") or ["next_attempt_gate_blocked"]),
             "warnings": list(next_attempt_gate.get("warnings") or []),
             "observation_cycle_plan": {
                 "next_step": next_attempt_gate.get("required_next_step")
                 or "resolve_next_attempt_gate_blocker",
                 "not_executed": True,
-                "creates_shadow_candidate": False,
+                "creates_action_time_ticket": False,
                 "creates_execution_intent": False,
                 "places_order": False,
                 "calls_order_lifecycle": False,
@@ -4288,15 +5697,71 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "safety_invariants": _runtime_next_attempt_observation_safety(),
         }
 
-    source = signal_builder._market_source(
+    try:
+        lane_resolution = await _resolve_runtime_lane_resolution(runtime=runtime)
+    except RuntimeLaneIdentityResolutionError as exc:
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "blocked",
+            "blocked_stage": "runtime_lane_identity",
+            "runtime_instance_id": runtime_instance_id,
+            "owner_action_scope": owner_scope,
+            "include_exchange": request.include_exchange,
+            "next_attempt_gate": next_attempt_gate,
+            "just_in_time_lifecycle_audit": jit_audit,
+            "signal_artifact": None,
+            "action_time_ticket": None,
+            "blockers": [exc.blocker],
+            "warnings": [],
+            "observation_cycle_plan": {
+                "next_step": "repair_runtime_lane_identity",
+                "not_executed": True,
+                "creates_action_time_ticket": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _runtime_next_attempt_observation_safety(),
+        }
+    lane_identity = lane_resolution.identity
+    runtime_identity_mismatches = _runtime_object_lane_identity_mismatches(
+        runtime=runtime,
+        lane_resolution=lane_resolution,
+    )
+    if runtime_identity_mismatches:
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "blocked",
+            "blocked_stage": "runtime_lane_identity",
+            "runtime_instance_id": runtime_instance_id,
+            "owner_action_scope": owner_scope,
+            "include_exchange": request.include_exchange,
+            "next_attempt_gate": next_attempt_gate,
+            "just_in_time_lifecycle_audit": jit_audit,
+            "signal_artifact": None,
+            "action_time_ticket": None,
+            "blockers": runtime_identity_mismatches,
+            "warnings": [],
+            "observation_cycle_plan": {
+                "next_step": "repair_runtime_lane_identity",
+                "not_executed": True,
+                "creates_action_time_ticket": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _runtime_next_attempt_observation_safety(),
+        }
+
+    source = signal_builder.market_source(
         SimpleNamespace(
             source=request.source,
             timeout_seconds=request.timeout_seconds,
         )
     )
-    one_hour = source.latest_closed_candles(
+    primary_candles = source.latest_closed_candles(
         symbol=runtime.symbol,
-        timeframe="1h",
+        timeframe=lane_identity.timeframe,
         limit=request.one_hour_limit,
     )
     four_hour = source.latest_closed_candles(
@@ -4305,30 +5770,52 @@ async def _runtime_next_attempt_observation_cycle_payload(
         limit=request.four_hour_limit,
     )
     now_ms = int(time.time() * 1000)
-    signal_input = signal_builder._build_signal_input(
+    comparative_strength_snapshot = (
+        await signal_builder.load_runtime_comparative_strength_snapshot(
+            runtime=runtime,
+            trigger_candle_close_time_ms=int(primary_candles[-1].close_time_ms),
+            now_ms=now_ms,
+        )
+    )
+    signal_input = signal_builder.build_signal_input(
         runtime=runtime,
-        one_hour=one_hour,
+        one_hour=primary_candles,
         four_hour=four_hour,
         source_id=getattr(source, "source_id", "unknown_read_only_market_source"),
         source_type=getattr(source, "source_type", "read_only_market_source"),
         evaluation_id=request.evaluation_id,
         playbook_id=request.playbook_id,
         now_ms=now_ms,
+        comparative_strength_snapshot=comparative_strength_snapshot,
+        primary_timeframe=lane_identity.timeframe,
     )
-    evaluation = RuntimeStrategySignalEvaluationService().evaluate(signal_input)
+    evaluation = RuntimeStrategySignalEvaluationService().evaluate_for_runtime_lane(
+        signal_input,
+        lane_identity=lane_identity,
+        freshness_window_ms=lane_resolution.freshness_window_ms,
+    )
     signal_artifact = {
         "scope": "runtime_next_attempt_observation_cycle_signal_artifact",
         "status": (
-            "ready_for_shadow_candidate_prepare"
-            if evaluation.status
-            == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
-            else evaluation.status.value
+            "ready_for_action_time_ticket_materialization"
+            if evaluation.status == RuntimeLaneEventEvaluationStatus.EVENT_SATISFIED
+            else (
+                "waiting_for_opportunity"
+                if evaluation.status
+                == RuntimeLaneEventEvaluationStatus.COMPUTED_NOT_SATISFIED
+                else "temporarily_unavailable"
+            )
         ),
-        "runtime_instance_id": runtime.runtime_instance_id,
-        "strategy_family_id": runtime.strategy_family_id,
-        "strategy_family_version_id": runtime.strategy_family_version_id,
-        "symbol": runtime.symbol,
-        "side": runtime.side,
+        "runtime_instance_id": lane_identity.runtime_instance_id,
+        "strategy_family_id": lane_identity.strategy_group_id,
+        "strategy_family_version_id": lane_resolution.evaluator_version_id,
+        "symbol": lane_identity.symbol,
+        "side": lane_identity.side,
+        "lane_identity": lane_identity.model_dump(mode="json"),
+        "lane_identity_key": lane_identity.identity_key,
+        "can_materialize_live_signal_event": (
+            evaluation.can_materialize_live_signal_event
+        ),
         "source": getattr(source, "source_id", "unknown_read_only_market_source"),
         "source_type": getattr(source, "source_type", "read_only_market_source"),
         "signal_input": signal_input.model_dump(mode="json"),
@@ -4345,14 +5832,11 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "withdrawal_or_transfer_created": False,
         },
     }
-    ready = (
-        evaluation.status
-        == RuntimeStrategySignalEvaluationStatus.READY_FOR_SEMANTIC_BINDING
-    )
-    if not ready:
+    ready = evaluation.can_materialize_live_signal_event
+    if evaluation.status == RuntimeLaneEventEvaluationStatus.BLOCKED:
         return {
             "scope": "runtime_next_attempt_observation_cycle_api",
-            "status": "waiting_for_signal",
+            "status": "temporarily_unavailable",
             "blocked_stage": "strategy_signal",
             "runtime_instance_id": runtime_instance_id,
             "owner_action_scope": owner_scope,
@@ -4360,13 +5844,37 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "next_attempt_gate": next_attempt_gate,
             "just_in_time_lifecycle_audit": jit_audit,
             "signal_artifact": signal_artifact,
-            "prepare_artifact": None,
-            "blockers": ["strategy_signal_not_ready_for_shadow_candidate_prepare"],
+            "action_time_ticket": None,
+            "blockers": list(evaluation.blockers),
             "warnings": list(evaluation.warnings),
             "observation_cycle_plan": {
-                "next_step": "observe_only_or_wait_for_next_closed_bar",
+                "next_step": "repair_runtime_signal_input_or_event_scope",
                 "not_executed": True,
-                "creates_shadow_candidate": False,
+                "creates_action_time_ticket": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _runtime_next_attempt_observation_safety(),
+        }
+    if not ready:
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "waiting_for_opportunity",
+            "blocked_stage": None,
+            "runtime_instance_id": runtime_instance_id,
+            "owner_action_scope": owner_scope,
+            "include_exchange": request.include_exchange,
+            "next_attempt_gate": next_attempt_gate,
+            "just_in_time_lifecycle_audit": jit_audit,
+            "signal_artifact": signal_artifact,
+            "action_time_ticket": None,
+            "blockers": [],
+            "warnings": list(evaluation.warnings),
+            "observation_cycle_plan": {
+                "next_step": "wait_for_next_event_spec_closed_bar",
+                "not_executed": True,
+                "creates_action_time_ticket": False,
                 "creates_execution_intent": False,
                 "places_order": False,
                 "calls_order_lifecycle": False,
@@ -4376,32 +5884,27 @@ async def _runtime_next_attempt_observation_cycle_payload(
 
     return {
         "scope": "runtime_next_attempt_observation_cycle_api",
-        "status": "ready_for_prepare",
+        "status": "ready_for_action_time_ticket_materialization",
         "runtime_instance_id": runtime_instance_id,
         "owner_action_scope": owner_scope,
         "include_exchange": request.include_exchange,
         "next_attempt_gate": next_attempt_gate,
         "just_in_time_lifecycle_audit": jit_audit,
         "signal_artifact": signal_artifact,
-        "prepare_artifact": None,
+        "action_time_ticket": None,
         "blockers": [],
         "warnings": list(evaluation.warnings),
         "observation_cycle_plan": {
-            "next_step": "run_official_runtime_next_attempt_prepare_api_flow",
-            "api_prepare_endpoint": (
-                f"/api/trading-console/strategy-runtimes/{runtime_instance_id}"
-                "/strategy-signal-shadow-plans"
-            ),
-            "cli_prepare_command_args": [
-                "scripts/runtime_next_attempt_prepare_api_flow.py",
-                "--runtime-instance-id",
-                runtime_instance_id,
-                "--signal-input-json",
-                "<write signal_artifact.signal_input to a local json file first>",
+            "next_step": "materialize_pg_promotion_action_time_lane",
+            "api_action_time_ticket_endpoint": None,
+            "pg_materialization_steps": [
+                "materialize_pg_promotion_action_time_lane",
+                "materialize_action_time_ticket",
             ],
+            "cli_action_time_ticket_command_args": [],
             "signal_input_embedded": True,
             "not_executed": True,
-            "creates_shadow_candidate": False,
+            "creates_action_time_ticket": False,
             "creates_execution_intent": False,
             "places_order": False,
             "calls_order_lifecycle": False,
@@ -4415,6 +5918,67 @@ async def _runtime_next_attempt_observation_cycle_payload(
     }
 
 
+async def _resolve_runtime_lane_resolution(*, runtime: Any) -> Any:
+    """Resolve the active PG lane on the API boundary without file fallback."""
+
+    from src.application.runtime_lane_identity_service import RuntimeLaneIdentityService
+    from src.infrastructure.database import get_pg_engine
+
+    async with get_pg_engine().connect() as conn:
+        return await conn.run_sync(
+            lambda sync_conn: RuntimeLaneIdentityService().resolve(
+                sync_conn,
+                runtime_instance_id=str(runtime.runtime_instance_id),
+            )
+        )
+
+
+def _assert_runtime_observation_request_matches_runtime(
+    *,
+    runtime: StrategyRuntimeInstance,
+    request: RuntimeNextAttemptObservationCycleRequest,
+) -> None:
+    expected_symbol = _normalized_runtime_symbol(runtime.symbol)
+    if request.symbol and _normalized_runtime_symbol(request.symbol) != expected_symbol:
+        raise ValueError("signal symbol override must match runtime symbol")
+    if request.side and request.side.lower() != str(runtime.side).lower():
+        raise ValueError("signal side override must match runtime side")
+    if request.family and request.family != runtime.strategy_family_id:
+        raise ValueError("signal family override must match runtime strategy group")
+    if (
+        request.strategy_family_id
+        and request.strategy_family_id != runtime.strategy_family_id
+    ):
+        raise ValueError("strategy family override must match runtime strategy group")
+    expected_carrier = runtime.carrier_id or runtime.strategy_family_version_id
+    if request.carrier_id and request.carrier_id != expected_carrier:
+        raise ValueError("carrier override must match runtime evaluator version")
+
+
+def _runtime_object_lane_identity_mismatches(
+    *,
+    runtime: StrategyRuntimeInstance,
+    lane_resolution: Any,
+) -> list[str]:
+    identity = lane_resolution.identity
+    mismatches: list[str] = []
+    if runtime.runtime_instance_id != identity.runtime_instance_id:
+        mismatches.append("runtime_lane_identity_mismatch:runtime_instance_id")
+    if runtime.strategy_family_id != identity.strategy_group_id:
+        mismatches.append("runtime_lane_identity_mismatch:strategy_group_id")
+    if _normalized_runtime_symbol(runtime.symbol) != identity.symbol:
+        mismatches.append("runtime_lane_identity_mismatch:symbol")
+    if str(runtime.side).lower() != identity.side:
+        mismatches.append("runtime_lane_identity_mismatch:side")
+    if runtime.strategy_family_version_id != lane_resolution.evaluator_version_id:
+        mismatches.append("runtime_lane_identity_mismatch:evaluator_version_id")
+    return sorted(dict.fromkeys(mismatches))
+
+
+def _normalized_runtime_symbol(value: str) -> str:
+    return str(value or "").upper().split(":", 1)[0].replace("/", "")
+
+
 def _runtime_next_attempt_owner_scope(
     runtime: StrategyRuntimeInstance,
     request: RuntimeNextAttemptObservationCycleRequest,
@@ -4423,14 +5987,11 @@ def _runtime_next_attempt_owner_scope(
     return {
         key: value
         for key, value in {
-            "symbol": request.symbol or runtime.symbol,
-            "side": request.side or runtime.side,
-            "family": request.family,
-            "strategy_family_id": request.strategy_family_id
-            or runtime.strategy_family_id,
-            "carrier_id": request.carrier_id
-            or runtime.carrier_id
-            or runtime.strategy_family_version_id,
+            "symbol": runtime.symbol,
+            "side": runtime.side,
+            "family": runtime.strategy_family_id,
+            "strategy_family_id": runtime.strategy_family_id,
+            "carrier_id": runtime.carrier_id or runtime.strategy_family_version_id,
             "quantity": request.quantity,
             "target_notional_usdt": request.target_notional_usdt,
             "max_notional": request.max_notional
@@ -4448,7 +6009,7 @@ def _runtime_next_attempt_owner_scope(
 def _runtime_next_attempt_observation_safety() -> dict[str, bool]:
     return {
         "api_non_executing": True,
-        "allow_prepare_records": False,
+        "allow_action_time_ticket_materialization": False,
         "local_registration_armed": False,
         "exchange_submit_armed": False,
         "execute_real_submit": False,
@@ -5228,21 +6789,42 @@ def _runtime_exchange_submit_gateway_env_blockers() -> list[str]:
         actual = os.environ.get(key, "").strip().lower()
         if actual != expected_value:
             blockers.append(f"{key.lower()}_not_{expected_value}")
+    account_id = os.environ.get("BRC_RUNTIME_EXCHANGE_ACCOUNT_ID", "").strip()
+    exchange_id = os.environ.get("BRC_RUNTIME_EXCHANGE_ID", "").strip()
+    if not account_id:
+        blockers.append("brc_runtime_exchange_account_id_missing")
+    if not exchange_id:
+        blockers.append("brc_runtime_exchange_id_missing")
+    elif exchange_id != "binance_usdm":
+        blockers.append(f"brc_runtime_exchange_id_unsupported:{exchange_id}")
     return blockers
 
 
 def _runtime_exchange_submit_gateway_status(gateway: Any) -> dict[str, Any]:
-    required = ["place_order", "fetch_ticker_price", "get_market_info"]
+    required = RUNTIME_EXCHANGE_LIFECYCLE_GATEWAY_METHODS
     missing = [
         f"runtime_gateway_missing_{name}"
         for name in required
         if not callable(getattr(gateway, name, None))
     ]
+    account_id = os.environ.get("BRC_RUNTIME_EXCHANGE_ACCOUNT_ID", "").strip()
+    exchange_id = os.environ.get("BRC_RUNTIME_EXCHANGE_ID", "").strip()
+    if not account_id:
+        missing.append("brc_runtime_exchange_account_id_missing")
+    if not exchange_id:
+        missing.append("brc_runtime_exchange_id_missing")
+    elif exchange_id != "binance_usdm":
+        missing.append(f"brc_runtime_exchange_id_unsupported:{exchange_id}")
+    if not missing:
+        setattr(gateway, "runtime_account_id", account_id)
+        setattr(gateway, "runtime_exchange_id", exchange_id)
     return {
         "status": "ready" if not missing else "blocked_methods_missing",
         "gateway": gateway if not missing else None,
         "blockers": missing,
         "gateway_type": type(gateway).__name__,
+        "account_id": account_id,
+        "exchange_id": exchange_id,
     }
 
 

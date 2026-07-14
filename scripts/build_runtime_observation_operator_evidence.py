@@ -7,14 +7,13 @@ The evidence joins:
 2. Runtime + strategy signal watch evidence.
 3. No-signal diagnostic evidence when applicable.
 
-It does not write PG rows, resolve runtimes, create shadow candidates, create
-ExecutionIntents, place orders, call OrderLifecycle, or mutate runtime state.
+It does not write PG rows, resolve runtimes, create non-ticket trade records,
+create ExecutionIntents, place orders, call OrderLifecycle, or mutate runtime
+state.
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,11 +27,7 @@ from scripts.build_runtime_no_signal_diagnostic_evidence import (  # noqa: E402
     build_no_signal_diagnostic_evidence,
 )
 from scripts.build_runtime_strategy_signal_watch_evidence import (  # noqa: E402
-    SourceName,
     build_watch_evidence,
-)
-from scripts.preview_strategy_group_readonly_observation import (  # noqa: E402
-    build_preview_artifact,
 )
 
 
@@ -56,12 +51,15 @@ def build_operator_evidence(
     status = "blocked_forbidden_effect"
     next_step = "resolve_operator_evidence_forbidden_effects"
     if not forbidden_effects:
-        if watch_status in {
+        if watch_status == "runtime_signal_identity_gap":
+            status = "runtime_signal_identity_gap"
+            next_step = "repair_pg_live_signal_identity_handoff"
+        elif watch_status in {
             "runtime_signal_ready",
-            "runtime_prepare_records_ready_for_preview",
+            "runtime_signal_ready_for_action_time_ticket",
         }:
             status = "runtime_signal_attention"
-            next_step = "review_runtime_ready_signal_prepare_or_preview_path"
+            next_step = "materialize_pg_action_time_ticket"
         elif watch_status == "strategy_group_signal_review_available":
             status = "strategy_group_signal_review_available"
             next_step = "review_strategy_group_would_enter_without_execution"
@@ -86,7 +84,9 @@ def build_operator_evidence(
         "no_action_diagnostics": (
             diagnostic_evidence.get("no_action_diagnostics") or {}
         ),
-        "runtime_prepare_context": watch_evidence.get("runtime_prepare_context") or {},
+        "runtime_action_time_context": (
+            watch_evidence.get("runtime_action_time_context") or {}
+        ),
         "operator_review_plan": {
             "not_execution_authority": True,
             "next_step": next_step,
@@ -134,30 +134,19 @@ def build_operator_evidence(
     }
 
 
-def build_operator_evidence_from_path(
-    *,
-    status_artifact_json: str | Path,
-    strategy_source: SourceName,
-) -> dict[str, Any]:
-    active_status = _load_json_object(Path(status_artifact_json).expanduser())
-    preview = build_preview_artifact(source_name=strategy_source)
-    return build_operator_evidence(
-        active_status_artifact=active_status,
-        strategy_preview_artifact=preview,
-    )
-
-
 def _allowed_review_checkpoints(
     *,
     status: str,
     watch_evidence: dict[str, Any],
     diagnostic_evidence: dict[str, Any],
 ) -> list[str]:
+    if status == "runtime_signal_identity_gap":
+        return []
     if status == "runtime_signal_attention":
         watch_plan = watch_evidence.get("watch_evidence_plan")
         return list(
             (watch_plan or {}).get("allowed_review_checkpoints")
-            or ["review_runtime_ready_signal_prepare_or_preview_path"]
+            or ["materialize_pg_action_time_ticket"]
         )
     if status == "strategy_group_signal_review_available":
         return ["review_strategy_group_would_enter_without_execution"]
@@ -201,38 +190,3 @@ def _forbidden_effects(*sources: tuple[str, dict[str, Any]]) -> list[str]:
             if safety.get(key) is True:
                 effects.append(f"{source_name}.{key}")
     return sorted(set(str(item) for item in effects if item))
-
-
-def _load_json_object(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"JSON object required: {path}")
-    return payload
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--status-artifact-json", required=True)
-    parser.add_argument(
-        "--strategy-source",
-        choices=["sample", "local_sqlite_read_only", "live_market"],
-        default="local_sqlite_read_only",
-    )
-    parser.add_argument("--output-json")
-    args = parser.parse_args(argv)
-
-    artifact = build_operator_evidence_from_path(
-        status_artifact_json=args.status_artifact_json,
-        strategy_source=args.strategy_source,
-    )
-    payload = json.dumps(artifact, ensure_ascii=False, indent=2, sort_keys=True)
-    if args.output_json:
-        output_path = Path(args.output_json).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(payload + "\n", encoding="utf-8")
-    print(payload)
-    return 0 if artifact["status"] != "blocked_forbidden_effect" else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

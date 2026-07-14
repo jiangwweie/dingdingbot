@@ -1006,6 +1006,61 @@ class ExchangeGateway:
             logger.error(f"获取持仓失败：{e}")
             raise
 
+    async def fetch_position_rows(self, symbol: str) -> List[Dict[str, Any]]:
+        """Return a complete, side-preserving CCXT position view.
+
+        Lifecycle reconciliation needs zero-sized rows and Binance
+        ``positionSide``.  The legacy ``fetch_positions`` method intentionally
+        returns active ``PositionInfo`` objects and therefore cannot prove a
+        hedge bucket flat.  This read-only method keeps the complete venue
+        shape, validates quantities, and never infers a missing side.
+        """
+
+        try:
+            raw_positions = await self.rest_exchange.fetch_positions()
+        except Exception as exc:
+            logger.error(
+                "获取完整持仓视图失败：symbol=%s, error=%s",
+                symbol,
+                exc,
+            )
+            raise
+        if not isinstance(raw_positions, list):
+            raise RuntimeError("exchange_position_rows_root_not_list")
+        rows: List[Dict[str, Any]] = []
+        for raw in raw_positions:
+            if not isinstance(raw, dict):
+                raise RuntimeError("exchange_position_row_not_object")
+            row_symbol = str(raw.get("symbol") or "").strip()
+            if not row_symbol:
+                raise RuntimeError("exchange_position_symbol_missing")
+            if row_symbol != symbol:
+                continue
+            contracts = raw.get("contracts")
+            if contracts is None:
+                raise RuntimeError("exchange_position_contracts_missing")
+            try:
+                size = Decimal(str(contracts))
+            except (ArithmeticError, ValueError) as exc:
+                raise RuntimeError("exchange_position_contracts_invalid") from exc
+            info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+            position_side = str(
+                raw.get("positionSide")
+                or raw.get("position_side")
+                or info.get("positionSide")
+                or ""
+            ).upper()
+            rows.append(
+                {
+                    **raw,
+                    "symbol": row_symbol,
+                    "size": str(size),
+                    "position_side": position_side,
+                    "info": dict(info),
+                }
+            )
+        return rows
+
     # ============================================================
     # Phase 5: Order Management APIs
     # ============================================================
@@ -1027,6 +1082,92 @@ class ExchangeGateway:
             logger.error(f"获取未完成订单失败：symbol={symbol}, error={e}")
             raise
 
+    async def fetch_all_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
+        """Fetch the complete venue open-order view for one symbol.
+
+        Binance USDT-M exposes regular orders and conditional/algo orders via
+        separate CCXT views.  Both reads are required: a failure in either view
+        is propagated so callers cannot mistake an incomplete snapshot for an
+        authoritative absence.  Other exchanges retain the unified default
+        view until their gateway capability contract says otherwise.
+        """
+
+        normal_orders = await self.fetch_open_orders(symbol)
+        order_views = [normal_orders]
+        if str(getattr(self, "exchange_name", "")).lower() == "binance":
+            conditional_orders = await self.fetch_open_orders(
+                symbol,
+                params={"stop": True},
+            )
+            order_views.append(conditional_orders)
+        return self._merge_open_order_views(order_views)
+
+    async def fetch_my_trades(
+        self,
+        symbol: str,
+        limit: int = 50,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch account trade fills for a symbol.
+
+        Ticket-bound lifecycle close projection uses this as a read-only source
+        for final exit / TP1 / SL fills. It must not submit, cancel, amend,
+        withdraw, or transfer anything.
+        """
+        try:
+            return await self.rest_exchange.fetch_my_trades(
+                symbol,
+                limit=limit,
+                params=params or {},
+            )
+        except Exception as e:
+            logger.error(f"获取成交记录失败：symbol={symbol}, error={e}")
+            raise
+
+    async def fetch_funding_income(
+        self,
+        symbol: str,
+        *,
+        start_time_ms: int,
+        end_time_ms: int,
+    ) -> List[Dict[str, Any]]:
+        """Fetch signed Binance USD-M funding income for one exact market window.
+
+        This is a read-only post-trade accounting source.  It does not submit,
+        cancel, amend, withdraw, transfer, or mutate account configuration.
+        """
+
+        exchange_name = str(getattr(self, "exchange_name", "")).lower()
+        raw_fetch = getattr(self.rest_exchange, "fapiPrivateGetIncome", None)
+        if "binance" not in exchange_name or not callable(raw_fetch):
+            raise NotImplementedError("funding_income_read_not_supported")
+        if int(start_time_ms) < 0 or int(end_time_ms) < int(start_time_ms):
+            raise ValueError("funding_income_time_window_invalid")
+        market = self.rest_exchange.market(symbol)
+        market_id = str(market.get("id") or "").strip()
+        if not market_id:
+            raise ValueError("funding_income_exchange_market_id_missing")
+        params = {
+            "symbol": market_id,
+            "incomeType": "FUNDING_FEE",
+            "startTime": int(start_time_ms),
+            "endTime": int(end_time_ms),
+            "limit": 1000,
+        }
+        try:
+            rows = await raw_fetch(params)
+        except Exception as e:
+            logger.error(
+                "获取资金费收入失败：symbol=%s, start=%s, end=%s, error=%s",
+                symbol,
+                start_time_ms,
+                end_time_ms,
+                e,
+            )
+            raise
+        return list(rows or [])
+
     async def place_order(
         self,
         symbol: str,
@@ -1037,6 +1178,7 @@ class ExchangeGateway:
         trigger_price: Optional[Decimal] = None,  # 条件单触发价
         reduce_only: bool = False,  # 仅减仓（平仓单必须设置）
         position_side: Optional[str] = None,  # Binance futures hedge mode: LONG/SHORT
+        desired_leverage: Optional[int] = None,  # ENTRY-only Action-Time leverage
         client_order_id: Optional[str] = None,  # 客户端订单 ID
     ) -> OrderPlacementResult:
         """
@@ -1074,7 +1216,24 @@ class ExchangeGateway:
         if order_type == "stop_market" and trigger_price is None:
             raise InvalidOrderError("STOP_MARKET 订单必须指定触发价", "F-011")
 
+        if desired_leverage is not None:
+            if reduce_only:
+                raise InvalidOrderError(
+                    "保护/退出订单不得改变杠杆", "F-011"
+                )
+            if self.exchange_name.lower() != "binance":
+                raise InvalidOrderError(
+                    "动态杠杆当前仅支持 Binance USD-M", "F-011"
+                )
+            if isinstance(desired_leverage, bool) or not 1 <= int(desired_leverage) <= 125:
+                raise InvalidOrderError("目标杠杆必须是 1-125 的整数", "F-011")
+
         try:
+            if desired_leverage is not None:
+                await self.rest_exchange.set_leverage(
+                    int(desired_leverage),
+                    symbol,
+                )
             # 映射订单类型到 CCXT 格式
             ccxt_type = self._map_order_type_to_ccxt(order_type)
 
@@ -1142,28 +1301,10 @@ class ExchangeGateway:
 
         except Exception as e:
             logger.error(f"下单失败：{e}")
-            return OrderPlacementResult(
-                order_id=system_order_id,
-                symbol=symbol,
-                order_type=OrderType(order_type.upper()),
-                direction=self._map_side_to_direction(side, reduce_only),
-                side=side,
-                amount=amount,
-                price=price,
-                trigger_price=trigger_price,
-                reduce_only=reduce_only,
-                exchange_reduce_only_param_sent=(
-                    reduce_only and not self._should_omit_reduce_only_param(position_side)
-                ),
-                exchange_reduce_only_omit_reason=(
-                    "binance_hedge_mode_position_side"
-                    if reduce_only and self._should_omit_reduce_only_param(position_side)
-                    else None
-                ),
-                client_order_id=client_order_id,
-                error_code="F-011",
-                error_message=f"下单失败：{str(e)}",
-                status=OrderStatus.REJECTED,
+            raise ConnectionLostError(
+                "下单请求结果不确定，必须按 client_order_id 查询交易所事实："
+                f"{e}",
+                "C-002",
             )
 
     async def _cancel_conditional_open_order_if_visible(
@@ -1173,7 +1314,7 @@ class ExchangeGateway:
     ) -> Optional[Dict[str, Any]]:
         """Cancel Binance futures conditional orders visible only in stop-order views."""
         try:
-            raw_orders = await self.rest_exchange.fetch_open_orders(symbol, params={"stop": True})
+            raw_orders = await self.fetch_all_open_orders(symbol)
         except Exception as exc:
             logger.warning(
                 "Conditional open-order lookup failed during cancel fallback: "
@@ -1183,7 +1324,7 @@ class ExchangeGateway:
                 exc,
                 exc_info=True,
             )
-            return None
+            raise
 
         for raw_order in raw_orders or []:
             if not self._raw_order_matches(
@@ -1358,42 +1499,32 @@ class ExchangeGateway:
                     exc,
                 )
 
-        params_candidates = [{}]
-        if order_type == OrderType.STOP_MARKET or str(expected_type).upper() == "STOP_MARKET":
-            params_candidates.extend(
-                [
-                    {"stop": True},
-                    {"type": "STOP_MARKET"},
-                ]
-            )
-
         retry_delays = list(self._order_confirmation_retry_delays) if fetch_order_missed else []
         attempts = 1 + len(retry_delays)
         for attempt_idx in range(attempts):
-            for params in params_candidates:
-                try:
-                    raw_orders = await self.rest_exchange.fetch_open_orders(symbol, params=params)
-                except Exception as exc:
-                    logger.warning(
-                        "Order confirmation fetch_open_orders miss: symbol=%s params=%s error=%s",
-                        symbol,
-                        params,
-                        exc,
-                    )
-                    continue
+            try:
+                raw_orders = await self.fetch_all_open_orders(symbol)
+            except Exception as exc:
+                logger.warning(
+                    "Order confirmation complete open-order read failed: "
+                    "symbol=%s error=%s",
+                    symbol,
+                    exc,
+                )
+                raw_orders = []
 
-                for raw_order in raw_orders:
-                    if self._raw_order_matches(
-                        raw_order,
-                        exchange_order_id=exchange_order_id,
-                        client_order_id=client_order_id,
-                        expected_symbol=symbol,
-                        expected_side=side,
-                        expected_reduce_only=reduce_only,
-                        expected_type=expected_type,
-                        expected_stop_price=stop_price,
-                    ):
-                        return True
+            for raw_order in raw_orders:
+                if self._raw_order_matches(
+                    raw_order,
+                    exchange_order_id=exchange_order_id,
+                    client_order_id=client_order_id,
+                    expected_symbol=symbol,
+                    expected_side=side,
+                    expected_reduce_only=reduce_only,
+                    expected_type=expected_type,
+                    expected_stop_price=stop_price,
+                ):
+                    return True
             if attempt_idx < len(retry_delays):
                 await asyncio.sleep(retry_delays[attempt_idx])
 
@@ -1449,19 +1580,152 @@ class ExchangeGateway:
 
     @staticmethod
     def _candidate_order_ids(raw_order: Dict[str, Any]) -> set[str]:
-        info = raw_order.get("info") or {}
-        candidate_ids = {
+        return ExchangeGateway._open_order_exchange_ids(
+            raw_order
+        ) | ExchangeGateway._open_order_client_ids(raw_order)
+
+    @staticmethod
+    def _open_order_exchange_ids(raw_order: Dict[str, Any]) -> set[str]:
+        info = raw_order.get("info") if isinstance(raw_order.get("info"), dict) else {}
+        values = {
             raw_order.get("id"),
+            raw_order.get("orderId"),
+            raw_order.get("exchange_order_id"),
+            info.get("orderId"),
+            info.get("algoId"),
+            info.get("triggerOrderId"),
+        }
+        return {str(value) for value in values if value is not None and str(value)}
+
+    @staticmethod
+    def _open_order_client_ids(raw_order: Dict[str, Any]) -> set[str]:
+        info = raw_order.get("info") if isinstance(raw_order.get("info"), dict) else {}
+        values = {
             raw_order.get("clientOrderId"),
             raw_order.get("clientOrderid"),
-            info.get("orderId"),
+            raw_order.get("client_order_id"),
             info.get("origClientOrderId"),
             info.get("clientOrderId"),
             info.get("clientOrderid"),
-            info.get("algoId"),
             info.get("clientAlgoId"),
         }
-        return {str(item) for item in candidate_ids if item is not None}
+        return {str(value) for value in values if value is not None and str(value)}
+
+    @classmethod
+    def _merge_open_order_views(
+        cls,
+        order_views: List[List[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        merged_orders: List[Dict[str, Any]] = []
+        exchange_id_indexes: Dict[str, int] = {}
+        client_id_indexes: Dict[str, int] = {}
+
+        for orders in order_views:
+            for raw_order in orders or []:
+                if not isinstance(raw_order, dict):
+                    raise ConnectionLostError(
+                        "Open-order view returned a non-structured order",
+                        "C-002",
+                    )
+                exchange_ids = cls._open_order_exchange_ids(raw_order)
+                client_ids = cls._open_order_client_ids(raw_order)
+                matching_indexes = {
+                    index
+                    for identity, index in exchange_id_indexes.items()
+                    if identity in exchange_ids
+                } | {
+                    index
+                    for identity, index in client_id_indexes.items()
+                    if identity in client_ids
+                }
+                if len(matching_indexes) > 1:
+                    raise ConnectionLostError(
+                        "Open-order views returned contradictory order identities",
+                        "C-002",
+                    )
+
+                if matching_indexes:
+                    index = next(iter(matching_indexes))
+                    existing = merged_orders[index]
+                    combined_exchange_ids = (
+                        cls._open_order_exchange_ids(existing) | exchange_ids
+                    )
+                    combined_client_ids = (
+                        cls._open_order_client_ids(existing) | client_ids
+                    )
+                    merged_orders[index] = cls._merge_open_order_payload(
+                        existing,
+                        raw_order,
+                    )
+                else:
+                    index = len(merged_orders)
+                    merged_orders.append(dict(raw_order))
+                    combined_exchange_ids = exchange_ids
+                    combined_client_ids = client_ids
+
+                cls._bind_open_order_identities(
+                    exchange_id_indexes,
+                    combined_exchange_ids,
+                    index,
+                )
+                cls._bind_open_order_identities(
+                    client_id_indexes,
+                    combined_client_ids,
+                    index,
+                )
+
+        return merged_orders
+
+    @staticmethod
+    def _bind_open_order_identities(
+        identity_indexes: Dict[str, int],
+        identities: set[str],
+        index: int,
+    ) -> None:
+        for identity in identities:
+            existing_index = identity_indexes.get(identity)
+            if existing_index is not None and existing_index != index:
+                raise ConnectionLostError(
+                    "Open-order views returned contradictory order identities",
+                    "C-002",
+                )
+            identity_indexes[identity] = index
+
+    @staticmethod
+    def _merge_open_order_payload(
+        existing: Dict[str, Any],
+        incoming: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        merged = dict(existing)
+        identity_keys = {
+            "clientOrderId",
+            "clientOrderid",
+            "client_order_id",
+            "symbol",
+        }
+        for key, value in incoming.items():
+            if key == "info":
+                existing_info = (
+                    dict(merged.get("info"))
+                    if isinstance(merged.get("info"), dict)
+                    else {}
+                )
+                incoming_info = value if isinstance(value, dict) else {}
+                existing_info.update(
+                    {
+                        info_key: info_value
+                        for info_key, info_value in incoming_info.items()
+                        if info_value is not None and info_value != ""
+                    }
+                )
+                merged["info"] = existing_info
+                continue
+            if value is None or value == "":
+                continue
+            if key in identity_keys and merged.get(key) not in {None, ""}:
+                continue
+            merged[key] = value
+        return merged
 
     @staticmethod
     def _raw_order_matches(
@@ -1597,36 +1861,149 @@ class ExchangeGateway:
             logger.error(f"查询订单失败：{e}")
             raise
 
+    async def fetch_conditional_order_lineage(
+        self,
+        symbol: str,
+        parent_exchange_order_ids: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Read Binance conditional parent-to-actual order identity.
+
+        Binance USDT-M exposes the submitted conditional order as ``algoId``
+        and the triggered exchange order as ``actualOrderId``.  User trades
+        contain only the latter, so both ids are required to conserve the
+        ticket-bound SL/runner role after a trigger.  This method is read-only.
+        """
+
+        parent_ids = list(
+            dict.fromkeys(
+                str(value).strip()
+                for value in parent_exchange_order_ids
+                if str(value or "").strip()
+            )
+        )
+        if not parent_ids:
+            return []
+        if self.exchange_name.lower() != "binance":
+            return []
+        rows: List[Dict[str, Any]] = []
+        for parent_id in parent_ids:
+            raw = await self.rest_exchange.fapiPrivateGetAlgoOrder(
+                {"algoId": parent_id}
+            )
+            if not isinstance(raw, dict):
+                raise ConnectionLostError(
+                    "条件订单血缘查询返回非结构化响应",
+                    "C-002",
+                )
+            observed_parent_id = str(raw.get("algoId") or "").strip()
+            if observed_parent_id != parent_id:
+                raise ConnectionLostError(
+                    "条件订单血缘返回了不一致的父订单标识",
+                    "C-002",
+                )
+            rows.append(
+                {
+                    "parent_exchange_order_id": observed_parent_id,
+                    "actual_exchange_order_id": str(
+                        raw.get("actualOrderId") or ""
+                    ).strip(),
+                    "client_order_id": str(
+                        raw.get("clientAlgoId") or ""
+                    ).strip(),
+                    "status": str(raw.get("algoStatus") or "").lower(),
+                    "symbol": str(raw.get("symbol") or ""),
+                    "side": str(raw.get("side") or "").lower(),
+                    "position_side": str(
+                        raw.get("positionSide") or ""
+                    ).upper(),
+                    "order_type": str(raw.get("orderType") or "").upper(),
+                    "qty": str(raw.get("quantity") or ""),
+                    "actual_qty": str(raw.get("actualQty") or ""),
+                    "trigger_price": str(raw.get("triggerPrice") or ""),
+                    "trigger_time_ms": raw.get("triggerTime"),
+                    "reduce_only": str(raw.get("reduceOnly")).lower()
+                    in {"true", "1", "yes"},
+                    "close_position": str(raw.get("closePosition")).lower()
+                    in {"true", "1", "yes"},
+                }
+            )
+        return rows
+
+    async def find_order_by_client_id(
+        self,
+        client_order_id: str,
+        symbol: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Read one order by the deterministic venue client identity.
+
+        A not-found response is returned as ``None`` so the command
+        reconciliation layer can apply its visibility window. Network or
+        unclassified lookup failures remain exceptions and never mean absent.
+        """
+
+        import ccxt
+
+        if not client_order_id or not symbol:
+            raise InvalidOrderError(
+                "client_order_id and symbol are required for order lookup",
+                "F-011",
+            )
+        params = (
+            {"origClientOrderId": client_order_id}
+            if self.exchange_name.lower() == "binance"
+            else {"clientOrderId": client_order_id}
+        )
+        try:
+            raw = await self.rest_exchange.fetch_order(None, symbol, params=params)
+        except ccxt.OrderNotFound:
+            return None
+        except ccxt.DDoSProtection as exc:
+            raise RateLimitError(f"API 频率限制：{exc}", "C-010") from exc
+        except ccxt.NetworkError as exc:
+            raise ConnectionLostError(f"网络错误：{exc}", "C-001") from exc
+        if not isinstance(raw, dict):
+            raise ConnectionLostError(
+                "按 client_order_id 查询订单返回非结构化响应",
+                "C-002",
+            )
+        info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+        actual_client_id = next(
+            (
+                str(value)
+                for value in (
+                    raw.get("clientOrderId"),
+                    raw.get("clientOrderid"),
+                    info.get("origClientOrderId"),
+                    info.get("clientOrderId"),
+                    info.get("clientOrderid"),
+                )
+                if value is not None and str(value)
+            ),
+            "",
+        )
+        return {
+            "exchange_order_id": str(raw.get("id") or info.get("orderId") or ""),
+            "client_order_id": actual_client_id,
+            "symbol": str(raw.get("symbol") or symbol),
+            "status": raw.get("status"),
+            "filled_qty": raw.get("filled"),
+            "average_exec_price": raw.get("average"),
+        }
+
     async def _fetch_conditional_open_order_by_id(
         self,
         exchange_order_id: str,
         symbol: str,
     ) -> Optional[Dict[str, Any]]:
-        params_candidates = ({}, {"stop": True}, {"type": "STOP_MARKET"})
-        for params in params_candidates:
-            try:
-                raw_orders = await self.rest_exchange.fetch_open_orders(
-                    symbol,
-                    params=params,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "conditional fetch_order fallback fetch_open_orders miss: "
-                    "symbol=%s params=%s exchange_order_id=%s error=%s",
-                    symbol,
-                    params,
-                    exchange_order_id,
-                    exc,
-                )
-                continue
-            for raw_order in raw_orders:
-                if self._raw_order_matches(
-                    raw_order,
-                    exchange_order_id=exchange_order_id,
-                    client_order_id=None,
-                    expected_symbol=symbol,
-                ):
-                    return raw_order
+        raw_orders = await self.fetch_all_open_orders(symbol)
+        for raw_order in raw_orders:
+            if self._raw_order_matches(
+                raw_order,
+                exchange_order_id=exchange_order_id,
+                client_order_id=None,
+                expected_symbol=symbol,
+            ):
+                return raw_order
         return None
 
     def _order_placement_result_from_raw_order(

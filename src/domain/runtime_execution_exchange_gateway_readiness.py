@@ -17,6 +17,16 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 GATEWAY_BINDING_ENABLED_ENV = "RUNTIME_EXCHANGE_SUBMIT_GATEWAY_BINDING_ENABLED"
 DEFAULT_RUNTIME_EXCHANGE_GATEWAY_READINESS_MAX_AGE_MS = 15 * 60 * 1000
+RUNTIME_EXCHANGE_LIFECYCLE_GATEWAY_METHODS = [
+    "place_order",
+    "cancel_order",
+    "fetch_open_orders",
+    "fetch_order",
+    "fetch_positions",
+    "fetch_my_trades",
+    "fetch_ticker_price",
+    "get_market_info",
+]
 
 
 class RuntimeExecutionExchangeGatewayReadinessModel(BaseModel):
@@ -171,7 +181,7 @@ def build_runtime_execution_exchange_gateway_readiness(
         owner_operator_id=str(owner_operator_id or "").strip() or "unknown",
         owner_confirmation_reference=_optional_str(owner_confirmation_reference),
         reason=str(reason or "").strip() or "missing_reason",
-        required_gateway_methods=["place_order", "fetch_ticker_price", "get_market_info"],
+        required_gateway_methods=list(RUNTIME_EXCHANGE_LIFECYCLE_GATEWAY_METHODS),
         blockers=_dedupe(blockers),
         warnings=_dedupe(warnings),
         created_at_ms=now_ms,

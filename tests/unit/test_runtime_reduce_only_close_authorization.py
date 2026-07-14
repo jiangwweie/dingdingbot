@@ -3,8 +3,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-
-from scripts import build_runtime_reduce_only_close_owner_evidence as script
 from src.domain.runtime_position_exit_plan import (
     RuntimePositionExitPlan,
     RuntimePositionExitPlanStatus,
@@ -109,16 +107,3 @@ def test_reduce_only_close_owner_rejects_legacy_packet_only_input():
 
     with pytest.raises(ValueError):
         RuntimeReduceOnlyCloseOwnerEvidence.model_validate(legacy_payload)
-
-
-def test_reduce_only_close_owner_script_safety_is_projection_only():
-    safety = script._reduce_only_close_owner_safety_invariants(
-        exchange_read_only=True,
-    )
-
-    assert safety["reduce_only_close_owner_projection_only"] is True
-    assert "packet_only" not in safety
-    assert safety["exchange_read_only"] is True
-    assert safety["exchange_write_called"] is False
-    assert safety["order_created"] is False
-    assert safety["position_closed"] is False

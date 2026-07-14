@@ -103,7 +103,14 @@ class OrderStateMachine:
     # value: 可以转换到的目标状态集合
     TRANSITIONS = {
         "CREATED": {"SUBMITTED", "CANCELED"},
-        "SUBMITTED": {"OPEN", "REJECTED", "CANCELED", "EXPIRED"},
+        "SUBMITTED": {
+            "OPEN",
+            "PARTIALLY_FILLED",
+            "FILLED",
+            "REJECTED",
+            "CANCELED",
+            "EXPIRED",
+        },
         "PENDING": {"OPEN", "REJECTED", "CANCELED", "SUBMITTED"},
         "OPEN": {"PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED", "EXPIRED"},
         "PARTIALLY_FILLED": {"FILLED", "CANCELED"},

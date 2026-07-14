@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+
+import sqlalchemy as sa
+
 import scripts.build_strategy_group_live_facts_readiness_artifact as readiness_script
-from scripts.build_strategy_group_live_facts_readiness_artifact import (
+import src.application.readmodels.strategy_group_live_facts_readiness as readiness_readmodel
+from src.application.readmodels.strategy_group_live_facts_readiness import (
     build_readiness_artifact,
+    build_readiness_artifact_from_pg,
 )
 
 
@@ -64,7 +71,7 @@ def test_live_facts_readiness_allows_observation_when_candidate_facts_missing():
         "observe_ready_candidate_prerequisites_missing"
     )
     assert artifact["owner_state"]["blocked_at"] == "candidate_prepare_facts"
-    assert artifact["owner_state"]["downgrade_mode"] == (
+    assert artifact["owner_state"]["authority_mode"] == (
         "observe_only_until_candidate_prerequisites_ready"
     )
     assert "automatic_recovery_action" not in artifact["owner_state"]
@@ -127,7 +134,7 @@ def test_live_facts_readiness_blocks_observation_when_exchange_rules_missing():
     assert artifact["counts"]["observe_ready"] == 0
     assert artifact["operator_path"]["can_continue_observation"] is False
     assert artifact["owner_state"]["blocked_at"] == "live_fact_readiness"
-    assert artifact["owner_state"]["downgrade_mode"] == "not_observing"
+    assert artifact["owner_state"]["authority_mode"] == "not_observing"
     assert "automatic_recovery_action" not in artifact["owner_state"]
     assert artifact["owner_state"]["non_authority_checkpoint"] == (
         "refresh_strategy_group_live_facts_readonly"
@@ -186,3 +193,137 @@ def test_live_facts_readiness_allows_partial_supported_symbol_availability():
 
 def test_live_facts_readiness_does_not_expose_legacy_packet_builder():
     assert not hasattr(readiness_script, "build_packet")
+    assert not hasattr(readiness_script, "build_readiness_artifact")
+    assert not hasattr(readiness_script, "build_readiness_artifact_from_pg")
+
+
+def test_live_facts_readiness_cli_rejects_live_facts_json(tmp_path):
+    try:
+        readiness_readmodel._parse_args(
+            [
+                "--live-facts-json",
+                str(tmp_path / "live-facts.json"),
+                "--output-json",
+                str(tmp_path / "out.json"),
+            ]
+        )
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("retired live-facts JSON input must be rejected")
+
+
+def test_live_facts_readiness_script_is_thin_cli_wrapper(monkeypatch) -> None:
+    monkeypatch.setattr(readiness_readmodel, "main", lambda argv=None: 7)
+
+    assert readiness_script.main(["--ignored-by-fake-main"]) == 7
+
+
+def test_live_facts_readiness_builds_from_pg_fact_snapshots(tmp_path):
+    db_path = tmp_path / "runtime.db"
+    with sqlite3.connect(db_path) as conn:
+        _create_runtime_fact_snapshots(conn)
+    engine = sa.create_engine(f"sqlite:///{db_path}")
+    try:
+        with engine.connect() as conn:
+            artifact = build_readiness_artifact_from_pg(
+                conn=conn,
+                intake_artifact=_intake(),
+                generated_at_ms=1,
+            )
+    finally:
+        engine.dispose()
+
+    assert artifact["status"] == "strategy_group_live_facts_ready_for_armed_observation"
+    assert artifact["live_facts_source"]["mode"] == "pg_runtime_fact_snapshots"
+    assert artifact["live_facts"]["source_mode"] == "db_backed"
+    assert artifact["counts"]["observe_ready"] == 2
+    assert artifact["counts"]["armed_candidate_prepare_ready"] == 1
+    assert artifact["candidate_prepare_blockers"] == []
+
+
+def _create_runtime_fact_snapshots(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE brc_runtime_fact_snapshots (
+          fact_snapshot_id TEXT PRIMARY KEY,
+          strategy_group_id TEXT,
+          symbol TEXT,
+          side TEXT,
+          runtime_profile_id TEXT,
+          fact_surface TEXT,
+          source_kind TEXT,
+          source_ref TEXT,
+          computed BOOLEAN,
+          satisfied BOOLEAN,
+          freshness_state TEXT,
+          failed_facts TEXT,
+          fact_values TEXT,
+          blocker_class TEXT,
+          observed_at_ms INTEGER,
+          valid_until_ms INTEGER,
+          created_at_ms INTEGER
+        )
+        """
+    )
+    for symbol in ("BTCUSDT", "ETHUSDT", "XAUUSDT"):
+        conn.execute(
+            """
+            INSERT INTO brc_runtime_fact_snapshots (
+              fact_snapshot_id, strategy_group_id, symbol, side, runtime_profile_id,
+              fact_surface, source_kind, source_ref, computed, satisfied,
+              freshness_state, failed_facts, fact_values, blocker_class,
+              observed_at_ms, valid_until_ms, created_at_ms
+            ) VALUES (
+              ?, 'MPG-001', ?, 'long', 'runtime:MPG-001', 'pretrade_public',
+              'live_market', 'unit', 1, 1, 'fresh', '[]', ?, NULL,
+              1780000000000, 1780000300000, 1780000000000
+            )
+            """,
+            (
+                f"fact:MPG-001:{symbol}:long:pretrade_public:1780000000000",
+                symbol,
+                json.dumps(
+                    {
+                        "symbol": symbol,
+                        "public_facts_ready": True,
+                        "public_symbol_row": {
+                            "symbol": symbol,
+                            "public_facts_ready": True,
+                        },
+                    }
+                ),
+            ),
+        )
+    checks = {
+        "source_signed_get_only": True,
+        "source_exchange_write_called": False,
+        "source_order_created": False,
+        "account_trade_permission": True,
+        "active_position_clear": True,
+        "open_orders_clear": True,
+        "budget_available": True,
+        "protection_template_ready": True,
+        "next_attempt_gate_ready": True,
+        "account_safe": True,
+        "account_safe_facts_ready": True,
+        "private_action_time_facts_ready": True,
+        "active_position_or_open_order_clear": True,
+        "action_time_available_balance": True,
+    }
+    for surface in ("account_safe", "account_mode"):
+        conn.execute(
+            """
+            INSERT INTO brc_runtime_fact_snapshots (
+              fact_snapshot_id, strategy_group_id, symbol, side, runtime_profile_id,
+              fact_surface, source_kind, source_ref, computed, satisfied,
+              freshness_state, failed_facts, fact_values, blocker_class,
+              observed_at_ms, valid_until_ms, created_at_ms
+            ) VALUES (
+              ?, NULL, NULL, NULL, NULL, ?, 'live_account_readonly', 'unit',
+              1, 1, 'fresh', '[]', ?, NULL, 1780000000000, 1780000060000,
+              1780000000000
+            )
+            """,
+            (f"fact:global:{surface}:1780000000000", surface, json.dumps(checks)),
+        )

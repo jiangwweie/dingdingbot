@@ -7,10 +7,9 @@ Responsibility:
 - Database connection management
 - SQL operation encapsulation
 - Cache management (with TTL)
-- File I/O operations
 
 Architecture:
-    ConfigService → ConfigRepository → ConfigParser
+    ConfigService → ConfigRepository
     
 Usage:
     from src.application.config import ConfigRepository
@@ -30,8 +29,6 @@ from typing import List, Dict, Any, Optional
 
 import aiosqlite
 import cachetools
-import yaml
-
 from src.domain.exceptions import FatalStartupError
 from src.domain.models import (
     RiskConfig,
@@ -40,7 +37,6 @@ from src.domain.models import (
     FilterConfig,
 )
 from src.infrastructure.logger import logger, mask_secret
-from src.application.config.config_parser import ConfigParser
 from src.application.config.models import (
     CoreConfig,
     UserConfig,
@@ -65,10 +61,9 @@ class ConfigRepository:
     - Database connection management
     - SQL operation encapsulation
     - Cache management (with TTL)
-    - File I/O
     
     Architecture:
-        ConfigService → ConfigRepository → ConfigParser
+        ConfigService → ConfigRepository
     """
     
     # ============================================================
@@ -94,7 +89,6 @@ class ConfigRepository:
         self._import_preview_cache: cachetools.TTLCache = cachetools.TTLCache(maxsize=100, ttl=300)
         
         # YAML parser
-        self._parser = ConfigParser()
         self._config_entry_repo: Optional[Any] = None
         
         # Config directory (for YAML backward compatibility)
@@ -1465,121 +1459,6 @@ class ConfigRepository:
         await self._db.commit()
         
         return saved_count
-    
-    # ============================================================
-    # YAML Import/Export Operations
-    # ============================================================
-    
-    async def import_from_yaml(self, yaml_path: str, changed_by: str = "system") -> Dict[str, Any]:
-        """
-        Import configuration from YAML file.
-        
-        Args:
-            yaml_path: Path to YAML file
-            changed_by: User identifier
-        
-        Returns:
-            Imported configuration dictionary
-        """
-        self.assert_initialized()
-        
-        if not os.path.exists(yaml_path):
-            raise FileNotFoundError(f"YAML file not found: {yaml_path}")
-        
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f)
-        
-        if not isinstance(data, dict):
-            raise ValueError("YAML config import requires a mapping at the document root")
-
-        profile_name = str(data.get("profile_name") or "default")
-        config_entry_repo = await self._ensure_config_entry_repository()
-        imported_sections: list[str] = []
-        imported_count = 0
-
-        config_entries = data.get("config_entries")
-        if config_entries is not None:
-            if not isinstance(config_entries, dict):
-                raise ValueError("config_entries must be a flat mapping")
-            imported_count += await config_entry_repo.import_from_dict(config_entries)
-            imported_sections.append("config_entries")
-
-        backtest_config = data.get("backtest")
-        if backtest_config is not None:
-            if not isinstance(backtest_config, dict):
-                raise ValueError("backtest must be a mapping")
-            imported_count += await config_entry_repo.save_backtest_configs(
-                backtest_config,
-                profile_name=profile_name,
-                version="v1.0.0",
-            )
-            imported_sections.append(f"backtest:{profile_name}")
-
-        if not imported_sections:
-            raise ValueError(
-                "YAML import supports only explicit KV sections: "
-                "config_entries and backtest. Runtime table imports must use ConfigManager."
-            )
-
-        logger.info(
-            "Configuration imported from %s: %s (%s entries)",
-            yaml_path,
-            ", ".join(imported_sections),
-            imported_count,
-        )
-        
-        # Log the import operation to config history
-        await self._log_config_change(
-            entity_type="config_bundle",
-            entity_id="import_export",
-            action="IMPORT",
-            old_values=None,
-            new_values={
-                "source_path": yaml_path,
-                "imported_sections": imported_sections,
-                "imported_count": imported_count,
-            },
-            changed_by=changed_by,
-            change_summary=f"Configuration imported from {yaml_path}: {', '.join(imported_sections)}",
-        )
-        await self._db.commit()
-        
-        return data
-    
-    async def export_to_yaml(self, yaml_path: str, config: Optional[Dict[str, Any]] = None, changed_by: str = "system") -> None:
-        """
-        Export current configuration to YAML file.
-
-        Args:
-            yaml_path: Path to output YAML file
-            config: Configuration to export. If None, exports current config
-            changed_by: User identifier
-        """
-        self.assert_initialized()
-
-        # Get current config if not provided
-        if config is None:
-            config = await self.get_user_config_dict()
-
-        # Use ConfigParser to serialize - handles Decimal precision and Pydantic models
-        yaml_str = self._parser.dump_to_yaml(config)
-
-        # Write to file
-        with open(yaml_path, 'w', encoding='utf-8') as f:
-            f.write(yaml_str)
-
-        logger.info(f"Configuration exported to {yaml_path}")
-
-        # Log the export operation
-        await self._log_config_change(
-            entity_type="config_bundle",
-            entity_id="import_export",
-            action="EXPORT",
-            old_values=None,
-            new_values={"destination_path": yaml_path},
-            changed_by=changed_by,
-            change_summary=f"Configuration exported to {yaml_path}",
-        )
     
     # ============================================================
     # Cache Management

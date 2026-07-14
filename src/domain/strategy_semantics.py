@@ -379,7 +379,7 @@ def initial_strategy_semantics_catalog() -> StrategySemanticsCatalog:
                 canonical_family_id="PMR-001",
                 implementation_id="pmr-metal-breakdown-pilot-v0",
                 source_ref="src/domain/reference_price_action_evaluators.py",
-                supported_sides=["short"],
+                supported_sides=["long", "short"],
                 trigger="metal_role_breakdown_short",
                 stop_reference="recent_breakdown_reclaim_or_atr_reference",
                 reference_role="precious_metal_short_overlay",
@@ -390,11 +390,38 @@ def initial_strategy_semantics_catalog() -> StrategySemanticsCatalog:
                 canonical_family_id="SOR-001",
                 implementation_id="sor-opening-range-breakdown-pilot-v0",
                 source_ref="src/domain/reference_price_action_evaluators.py",
-                supported_sides=["short"],
+                supported_sides=["long", "short"],
                 trigger="session_opening_range_breakdown",
                 stop_reference="opening_range_reclaim_or_atr_reference",
                 reference_role="session_opening_range_short",
                 optional_fact_key="session_window_state",
+                primary_ohlcv_fact_key="ohlcv_15m",
+                require_4h_context=False,
+            ),
+            _pilot_strategygroup_binding(
+                strategy_family_id="MI-001",
+                strategy_family_version_id="MI-001-v0",
+                canonical_family_id="MI-001",
+                implementation_id="mi-market-impulse-pilot-v0",
+                source_ref="src/application/strategy_group_live_readonly_observation.py",
+                supported_sides=["long"],
+                trigger="relative_strength_momentum_impulse",
+                stop_reference="impulse_failure_or_atr_reference",
+                reference_role="relative_strength_impulse_long",
+                optional_fact_key="relative_strength",
+            ),
+            _pilot_strategygroup_binding(
+                strategy_family_id="BRF2-001",
+                strategy_family_version_id="BRF2-001-v0",
+                canonical_family_id="BRF2-001",
+                implementation_id="brf2-bearish-reversal-followthrough-pilot-v0",
+                source_ref="src/domain/brf_price_action_evaluator.py",
+                supported_sides=["short"],
+                trigger="squeeze_disable_cleared_bearish_followthrough",
+                stop_reference="squeeze_reclaim_or_atr_reference",
+                reference_role="conditional_short_reversal_followthrough",
+                optional_fact_key="short_squeeze_risk",
+                short_side_conservative_profile_required=True,
             ),
             _brf_binding(),
             _btpc_binding(),
@@ -535,6 +562,9 @@ def _pilot_strategygroup_binding(
     stop_reference: str,
     reference_role: str,
     optional_fact_key: str | None = None,
+    short_side_conservative_profile_required: bool = False,
+    primary_ohlcv_fact_key: str = "ohlcv_1h",
+    require_4h_context: bool = True,
 ) -> StrategyImplementationBinding:
     optional_facts = [
         _fact(
@@ -556,7 +586,10 @@ def _pilot_strategygroup_binding(
         candidate_mode=StrategyCandidateMode.SHADOW_ORDER_CANDIDATE_ALLOWED,
         source_ref=source_ref,
         supported_sides=supported_sides,
-        required_facts=_price_action_required_facts(),
+        required_facts=_price_action_required_facts(
+            primary_ohlcv_fact_key=primary_ohlcv_fact_key,
+            require_4h_context=require_4h_context,
+        ),
         optional_facts=optional_facts,
         entry_policy=EntryPolicy(
             kind=EntryPolicyKind.MARKET_NEXT_EXECUTABLE_OPPORTUNITY,
@@ -592,6 +625,9 @@ def _pilot_strategygroup_binding(
             "not_proven_alpha": True,
             "reference_role": reference_role,
             "pilot_strategygroup_route": True,
+            "short_side_conservative_profile_required": (
+                short_side_conservative_profile_required
+            ),
             "runtime_confirmation_note": (
                 "Owner confirms bounded runtime/profile; entries may be attempted "
                 "automatically only within runtime boundaries and after FinalGate."
@@ -966,15 +1002,24 @@ def _fco_binding() -> StrategyImplementationBinding:
     )
 
 
-def _price_action_required_facts() -> list[StrategyFactRequirement]:
-    return [
-        _fact("ohlcv_1h", description="Closed 1h OHLCV window."),
-        _fact("ohlcv_4h", description="Closed 4h OHLCV context window."),
+def _price_action_required_facts(
+    *,
+    primary_ohlcv_fact_key: str = "ohlcv_1h",
+    require_4h_context: bool = True,
+) -> list[StrategyFactRequirement]:
+    facts = [
+        _fact(
+            primary_ohlcv_fact_key,
+            description=f"Closed {primary_ohlcv_fact_key.removeprefix('ohlcv_')} OHLCV window.",
+        ),
         _fact("price_action_structure", description="Pullback/reclaim or rally-failure evidence."),
         _fact("account_facts", description="Read-only account facts snapshot."),
         _fact("runtime_boundary", description="Runtime attempts/budget/leverage boundary snapshot."),
         _fact("position_projection", description="Trusted local active-position projection."),
     ]
+    if require_4h_context:
+        facts.insert(1, _fact("ohlcv_4h", description="Closed 4h OHLCV context window."))
+    return facts
 
 
 def _fact(

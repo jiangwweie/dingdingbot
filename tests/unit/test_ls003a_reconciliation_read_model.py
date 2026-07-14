@@ -38,6 +38,51 @@ class _FakeRestExchange:
         return [{"id": "ex-1", "symbol": symbol, "status": "open", "amount": "1"}]
 
 
+class _MultiViewOpenOrderExchange:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def fetch_open_orders(self, symbol: str, params=None):
+        params = params or {}
+        self.calls.append((symbol, params))
+        if params == {}:
+            return [
+                {
+                    "id": "order-normal",
+                    "clientOrderId": "client-normal",
+                    "symbol": symbol,
+                    "status": "open",
+                },
+                {
+                    "id": "order-stop",
+                    "clientOrderId": "client-stop",
+                    "symbol": symbol,
+                    "status": "open",
+                },
+            ]
+        if params == {"stop": True}:
+            return [
+                {
+                    "id": "order-stop",
+                    "clientOrderId": "client-stop",
+                    "symbol": symbol,
+                    "status": "open",
+                    "stopPrice": "90",
+                }
+            ]
+        if params == {"type": "STOP_MARKET"}:
+            return [
+                {
+                    "id": "algo-stop",
+                    "clientOrderId": "client-stop",
+                    "symbol": symbol,
+                    "status": "open",
+                    "triggerPrice": "90",
+                }
+            ]
+        raise AssertionError(f"unexpected params: {params}")
+
+
 class _FakeGateway:
     def __init__(
         self,
@@ -236,6 +281,23 @@ async def test_fetch_open_orders_wrapper_calls_rest_exchange():
 
     assert gateway.rest_exchange.symbols == [SYMBOL]
     assert orders[0]["id"] == "ex-1"
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_open_orders_merges_conditional_views_and_deduplicates():
+    gateway = object.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    gateway.rest_exchange = _MultiViewOpenOrderExchange()
+
+    orders = await gateway.fetch_all_open_orders(SYMBOL)
+
+    assert gateway.rest_exchange.calls == [
+        (SYMBOL, {}),
+        (SYMBOL, {"stop": True}),
+    ]
+    assert len(orders) == 2
+    stop = next(order for order in orders if order["clientOrderId"] == "client-stop")
+    assert stop.get("stopPrice") == "90" or stop.get("triggerPrice") == "90"
 
 
 @pytest.mark.asyncio

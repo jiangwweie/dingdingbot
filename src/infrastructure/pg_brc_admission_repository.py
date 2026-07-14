@@ -121,6 +121,31 @@ class PgBrcAdmissionRepository:
             row = await session.get(PGBrcStrategyFamilyVersionORM, strategy_family_version_id)
             return self._to_strategy_family_version(row) if row is not None else None
 
+    async def sync_strategy_family_version_scope(
+        self,
+        strategy_family_version_id: str,
+        *,
+        supported_symbols: list[str],
+        supported_timeframes: list[str],
+        actor: str,
+        reason: str,
+    ) -> StrategyFamilyVersion:
+        del actor, reason
+        async with self._session_maker() as session:
+            async with session.begin():
+                row = await session.get(
+                    PGBrcStrategyFamilyVersionORM,
+                    strategy_family_version_id,
+                )
+                if row is None:
+                    raise ValueError(
+                        f"strategy family version not found: {strategy_family_version_id}"
+                    )
+                row.supported_symbols_json = list(supported_symbols)
+                row.supported_timeframes_json = list(supported_timeframes)
+                await session.flush()
+                return self._to_strategy_family_version(row)
+
     async def create_rule_config(self, config: AdmissionRuleConfig) -> AdmissionRuleConfig:
         async with self._session_maker() as session:
             async with session.begin():

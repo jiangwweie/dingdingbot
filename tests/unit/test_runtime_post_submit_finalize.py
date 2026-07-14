@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 from decimal import Decimal
-import json
-import subprocess
-import sys
 
 import pytest
 
-from scripts.runtime_post_submit_finalize_dry_run import build_payload_from_fixture
 from src.application.runtime_post_submit_finalize_service import (
     RuntimePostSubmitFinalizeService,
 )
@@ -389,44 +385,22 @@ async def test_post_submit_finalize_service_blocks_expected_runtime_mismatch():
     assert packet.pre_submit_rehearsal_retry_allowed is False
 
 
-def test_post_submit_finalize_dry_run_fixture_outputs_json(tmp_path):
-    payload = {
-        "authorization_id": "auth-1",
-        "runtime": _runtime(boundary={"budget_reserved": Decimal("0")}).model_dump(
-            mode="json"
-        ),
-        "exchange_submit_execution_result": _submitted_result().model_dump(
-            mode="json"
-        ),
-        "submit_outcome_review": _ready_review_no_fill_cancelled().model_dump(
-            mode="json"
-        ),
-        "post_submit_budget_settlement": _settlement().model_dump(mode="json"),
-        "active_positions_count": 0,
-        "closed_review_required": False,
-        "now_ms": NOW_MS,
-    }
-    fixture = tmp_path / "fixture.json"
-    fixture.write_text(json.dumps(payload))
-
-    post_submit_finalize_payload = build_payload_from_fixture(payload)
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "scripts/runtime_post_submit_finalize_dry_run.py",
-            "--fixture",
-            str(fixture),
-        ],
-        cwd=".",
-        check=True,
-        capture_output=True,
-        text=True,
+def test_post_submit_finalize_payload_requires_fresh_authorization_after_no_fill():
+    packet = build_runtime_post_submit_finalize_payload(
+        authorization_id="auth-1",
+        runtime=_runtime(boundary={"budget_reserved": Decimal("0")}),
+        exchange_submit_execution_result=_submitted_result(),
+        submit_outcome_review=_ready_review_no_fill_cancelled(),
+        post_submit_budget_settlement=_settlement(),
+        active_positions_count=0,
+        closed_review_required=False,
+        now_ms=NOW_MS,
     )
-    stdout = json.loads(completed.stdout)
 
-    assert post_submit_finalize_payload["status"] == "finalized_ready_for_next_attempt"
-    assert stdout["status"] == "finalized_ready_for_next_attempt"
-    assert stdout["next_attempt_gate"]["requires_fresh_authorization"] is True
+    assert packet.status == (
+        RuntimePostSubmitFinalizeStatus.FINALIZED_READY_FOR_NEXT_ATTEMPT
+    )
+    assert packet.next_attempt_gate.requires_fresh_authorization is True
 
 
 def _ready_review_no_fill_cancelled():

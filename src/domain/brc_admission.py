@@ -69,6 +69,7 @@ class StrategyFamilyStatus(str, Enum):
 class AdmissionAuditEventType(str, Enum):
     FAMILY_CREATED = "family_created"
     FAMILY_VERSION_CREATED = "family_version_created"
+    FAMILY_VERSION_SCOPE_SYNCED = "family_version_scope_synced"
     ADMISSION_EVIDENCE_CREATED = "admission_evidence_created"
     OWNER_REGIME_INPUT_CREATED = "owner_regime_input_created"
     ADMISSION_REQUEST_CREATED = "admission_request_created"

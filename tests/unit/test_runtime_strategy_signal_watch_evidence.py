@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 
 
@@ -30,6 +29,7 @@ def _status_artifact(
     signal_type="no_action",
     prepared_authorization_id=None,
     shadow_candidate_id=None,
+    signal_event_ids=None,
 ):
     return {
         "status": status,
@@ -43,6 +43,15 @@ def _status_artifact(
         "selected_runtime_instance_ids": ["runtime-1"],
         "prepared_authorization_id": prepared_authorization_id,
         "shadow_candidate_id": shadow_candidate_id,
+        "pg_live_signal_events": {
+            "status": (
+                "pg_live_signal_events_written"
+                if signal_event_ids
+                else "pg_live_signal_events_blocked"
+            ),
+            "written_count": len(signal_event_ids or []),
+            "signal_event_ids": list(signal_event_ids or []),
+        },
         "runtime_signal_summaries": [
             {
                 "runtime_instance_id": "runtime-1",
@@ -157,7 +166,7 @@ def test_watch_evidence_summarizes_waiting_no_signal():
     assert artifact["safety_invariants"]["execution_intent_created"] is False
 
 
-def test_watch_evidence_surfaces_runtime_ready_prepare_context():
+def test_watch_evidence_classifies_anonymous_runtime_ready_as_identity_gap():
     module = _load_module()
 
     artifact = module.build_watch_evidence(
@@ -168,19 +177,44 @@ def test_watch_evidence_surfaces_runtime_ready_prepare_context():
         strategy_preview_artifact=_strategy_preview(),
     )
 
-    assert artifact["status"] == "runtime_signal_ready"
+    assert artifact["status"] == "runtime_signal_identity_gap"
     assert artifact["checks"]["runtime_ready_signal_count"] == 1
-    assert artifact["runtime_prepare_context"]["ready_for_prepare_count"] == 1
-    assert (
-        artifact["watch_evidence_plan"]["next_step"]
-        == "review_runtime_ready_signal_prepare_path"
-    )
-    assert artifact["watch_evidence_plan"]["allowed_review_checkpoints"] == [
-        "review_runtime_ready_signal",
-        "create_shadow_prepare_records_if_authorized",
+    assert artifact["runtime_action_time_context"]["ready_for_prepare_count"] == 1
+    assert artifact["runtime_action_time_context"]["signal_event_ids"] == []
+    assert artifact["runtime_identity_gap_signals"] == [
+        {
+            "runtime_instance_id": "runtime-1",
+            "strategy_family_id": "CPM-001",
+            "symbol": "BNB/USDT:USDT",
+            "side": "long",
+            "signal_type": "would_enter",
+            "reason_codes": ["cpm_no_action_no_reclaim"],
+        }
     ]
-    assert "place_exchange_order" in artifact["runtime_prepare_context"]["forbidden_followups"]
+    assert artifact["watch_evidence_plan"]["next_step"] == (
+        "repair_pg_live_signal_identity_handoff"
+    )
+    assert artifact["watch_evidence_plan"]["allowed_review_checkpoints"] == []
     assert artifact["watch_evidence_plan"]["places_order"] is False
+
+
+def test_watch_evidence_surfaces_named_pg_runtime_ready_context():
+    module = _load_module()
+
+    artifact = module.build_watch_evidence(
+        active_status_artifact=_status_artifact(
+            status="ready_for_prepare",
+            signal_type="would_enter",
+            signal_event_ids=["signal:unit-cpm-bnb"],
+        ),
+        strategy_preview_artifact=_strategy_preview(),
+    )
+
+    assert artifact["status"] == "runtime_signal_ready"
+    assert artifact["runtime_action_time_context"]["signal_event_ids"] == [
+        "signal:unit-cpm-bnb"
+    ]
+    assert artifact["runtime_identity_gap_signals"] == []
 
 
 def test_watch_evidence_surfaces_prepared_records_preview_only_context():
@@ -192,22 +226,23 @@ def test_watch_evidence_surfaces_prepared_records_preview_only_context():
             signal_type="would_enter",
             prepared_authorization_id="prep-auth-1",
             shadow_candidate_id="shadow-candidate-1",
+            signal_event_ids=["signal:prepared-cpm-bnb"],
         ),
         strategy_preview_artifact=_strategy_preview(),
     )
 
-    assert artifact["status"] == "runtime_prepare_records_ready_for_preview"
+    assert artifact["status"] == "runtime_signal_ready_for_action_time_ticket"
     assert (
-        artifact["runtime_prepare_context"]["ready_for_final_gate_preflight_count"] == 1
+        artifact["runtime_action_time_context"]["ready_for_final_gate_preflight_count"] == 1
     )
-    assert artifact["runtime_prepare_context"]["prepared_authorization_id"] == "prep-auth-1"
-    assert artifact["runtime_prepare_context"]["shadow_candidate_id"] == "shadow-candidate-1"
+    assert "prepared_authorization_id" not in artifact["runtime_action_time_context"]
+    assert "shadow_candidate_id" not in artifact["runtime_action_time_context"]
     assert artifact["watch_evidence_plan"]["allowed_review_checkpoints"] == [
-        "run_final_gate_preview",
-        "run_arm_preview",
-        "run_disabled_first_real_submit_smoke",
+        "materialize_pg_action_time_ticket",
+        "run_ticket_bound_finalgate_preflight",
+        "prepare_ticket_bound_operation_layer_handoff",
     ]
-    assert "execute_first_real_submit" in artifact["runtime_prepare_context"]["forbidden_followups"]
+    assert "execute_first_real_submit" in artifact["runtime_action_time_context"]["forbidden_followups"]
     assert artifact["watch_evidence_plan"]["creates_execution_intent"] is False
 
 
@@ -243,28 +278,3 @@ def test_watch_evidence_blocks_forbidden_effects():
     assert artifact["watch_evidence_plan"]["next_step"] == (
         "resolve_signal_watch_forbidden_effects"
     )
-
-
-def test_watch_evidence_cli_reads_status_file(tmp_path, capsys):
-    module = _load_module()
-    status_path = tmp_path / "status.json"
-    output_path = tmp_path / "watch.json"
-    status_path.write_text(json.dumps(_status_artifact()), encoding="utf-8")
-
-    code = module.main(
-        [
-            "--status-artifact-json",
-            str(status_path),
-            "--strategy-source",
-            "sample",
-            "--output-json",
-            str(output_path),
-        ]
-    )
-
-    assert code == 0
-    stdout_payload = json.loads(capsys.readouterr().out)
-    file_payload = json.loads(output_path.read_text())
-    assert stdout_payload == file_payload
-    assert file_payload["scope"] == "runtime_strategy_signal_watch_evidence"
-    assert file_payload["safety_invariants"]["pg_observation_written"] is False

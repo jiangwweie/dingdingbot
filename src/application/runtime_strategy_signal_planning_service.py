@@ -254,7 +254,7 @@ class RuntimeStrategySignalPlanningService:
                     *fact_check.missing_facts,
                     *fact_check.stale_facts,
                 ],
-                warnings=list(evaluation.warnings) + fact_check.warnings,
+                warnings=list(evaluation.warnings) + fact_check.downgrade_notes,
                 metadata={
                     **overlay_metadata,
                     "blocked_before_shadow_candidate": True,
@@ -809,9 +809,11 @@ def _stop_price_reference(
         if atr is not None and atr > Decimal("0"):
             return entry_price + atr, "brf_atr_reference"
     if output.strategy_family_id == "SOR-001" and output.side == SignalSide.SHORT:
-        structure_stop = _decimal_or_none(
-            _nested(evidence, "session_structure", "range_high_reference")
-        )
+        structure_stop = _decimal_or_none(evidence.get("opening_range_high"))
+        if structure_stop is None:
+            structure_stop = _decimal_or_none(
+                _nested(evidence, "session_structure", "range_high_reference")
+            )
         if structure_stop is not None:
             return structure_stop, "sor_opening_range_high_reclaim"
         if atr is not None and atr > Decimal("0"):

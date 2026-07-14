@@ -49,6 +49,7 @@ def _signal_input(
         strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         primary_timeframe="1h",
         context_timeframes=["4h"],
         market_snapshot=MarketSnapshot(
@@ -98,6 +99,7 @@ def _output(
         strategy_family_version_id=version_id,
         symbol="ETH/USDT:USDT",
         timestamp_ms=NOW_MS,
+        trigger_candle_close_time_ms=NOW_MS,
         timeframe="1h",
         signal_type=signal_type,
         side=SignalSide.LONG if signal_type == SignalType.WOULD_ENTER else SignalSide.NONE,
@@ -331,6 +333,39 @@ async def test_scheduler_planning_does_not_call_shadow_planner_for_live_runtime_
     assert planner.calls == []
     assert result.metadata["planner_call_suppressed_reason"] == (
         "operation_layer_handoff_pending"
+    )
+
+
+async def test_scheduler_planning_allows_live_runtime_non_executing_handoff_prepare():
+    planner = _FakeShadowPlanner()
+    result = await RuntimeStrategySignalSchedulerPlanningService(
+        planner=planner,
+        fact_sources=_ready_sources(),
+    ).plan_if_ready(
+        _signal_input(),
+        _output(),
+        runtime=_runtime(execution_enabled=True, shadow_mode=False),
+        candidate_id="CPM-RO-001",
+        allow_shadow_candidate_creation=True,
+        allow_live_runtime_handoff_prepare=True,
+    )
+
+    assert (
+        result.status
+        == RuntimeStrategySignalSchedulerPlanningStatus.SHADOW_CANDIDATE_CREATED
+    )
+    assert (
+        result.readiness.status
+        == RuntimeStrategySignalSchedulerReadinessStatus.READY_FOR_NON_EXECUTING_PLANNER
+    )
+    assert "runtime_live_execution_enabled_operation_layer_handoff_prepare" in (
+        result.warnings
+    )
+    assert result.order_candidate_created is True
+    assert planner.calls
+    assert (
+        planner.calls[0]["metadata"]["live_runtime_handoff_prepare_allowed"]
+        is True
     )
 
 

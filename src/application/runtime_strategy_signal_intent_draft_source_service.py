@@ -30,6 +30,7 @@ class RuntimeStrategySignalIntentDraftSchedulerPort(Protocol):
         context_id: str | None = None,
         expires_at_ms: int | None = None,
         metadata: dict | None = None,
+        allow_live_runtime_handoff_prepare: bool = False,
     ) -> RuntimeStrategySignalSchedulerPlanningResult:
         ...
 
@@ -140,6 +141,7 @@ class RuntimeStrategySignalIntentDraftSourceService:
         expires_at_ms: int | None = None,
         active_positions_count: int | None = None,
         metadata: dict | None = None,
+        allow_live_runtime_handoff_prepare: bool = False,
     ) -> RuntimeStrategySignalIntentDraftSourceArtifact:
         preflight_blockers: list[str] = []
         if not allow_shadow_candidate_creation:
@@ -178,10 +180,16 @@ class RuntimeStrategySignalIntentDraftSourceService:
             allow_shadow_candidate_creation=True,
             context_id=context_id,
             expires_at_ms=expires_at_ms,
+            allow_live_runtime_handoff_prepare=(
+                allow_live_runtime_handoff_prepare
+            ),
             metadata={
                 "rtf014_persisted_intent_draft_source": True,
                 "requires_persisted_signal_evaluation": True,
                 "requires_persisted_order_candidate": True,
+                "live_runtime_handoff_prepare_allowed": (
+                    allow_live_runtime_handoff_prepare
+                ),
                 **(metadata or {}),
             },
         )

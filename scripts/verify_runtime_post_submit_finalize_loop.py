@@ -511,14 +511,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Verify local runtime post-submit finalize loop.",
     )
-    parser.add_argument("--output-json")
-    args = parser.parse_args()
+    parser.parse_args()
     report = asyncio.run(build_post_submit_finalize_loop_report())
     payload = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
-    if args.output_json:
-        output_path = Path(args.output_json).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(payload + "\n", encoding="utf-8")
     print(payload)
     return 0 if report["status"].endswith("_passed") else 2
 

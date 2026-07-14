@@ -2,15 +2,39 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from src.infrastructure.exchange_gateway import ExchangeGateway
+from src.domain.exceptions import ConnectionLostError
 
 
 class _RestExchange:
     def __init__(self, market):
         self.markets = {"BTC/USDT:USDT": market}
+        self.fetch_my_trades_calls = []
+        self.income_calls = []
 
     def market(self, symbol):
         return self.markets[symbol]
+
+    async def fetch_my_trades(self, symbol, *, limit=50, params=None):
+        self.fetch_my_trades_calls.append(
+            {"symbol": symbol, "limit": limit, "params": params or {}}
+        )
+        return [{"id": "trade-1", "symbol": symbol}]
+
+    async def fapiPrivateGetIncome(self, params):
+        self.income_calls.append(dict(params))
+        return [
+            {
+                "tranId": "income-1",
+                "symbol": params["symbol"],
+                "incomeType": "FUNDING_FEE",
+                "income": "-0.12",
+                "asset": "USDT",
+                "time": params["startTime"] + 1,
+            }
+        ]
 
 
 def _gateway_with_market(market):
@@ -61,3 +85,103 @@ def test_get_min_notional_returns_none_when_markets_not_loaded():
     gateway.rest_exchange = type("Rest", (), {"markets": None})()
 
     assert gateway.get_min_notional("BTC/USDT:USDT") is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_my_trades_wrapper_calls_rest_exchange():
+    rest = _RestExchange({"limits": {"cost": {"min": "100"}}})
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.rest_exchange = rest
+
+    trades = await gateway.fetch_my_trades("BTC/USDT:USDT", limit=20)
+
+    assert trades == [{"id": "trade-1", "symbol": "BTC/USDT:USDT"}]
+    assert rest.fetch_my_trades_calls == [
+        {"symbol": "BTC/USDT:USDT", "limit": 20, "params": {}}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_funding_income_uses_exact_binance_market_and_time_window():
+    rest = _RestExchange(
+        {"id": "BTCUSDT", "limits": {"cost": {"min": "100"}}}
+    )
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    gateway.rest_exchange = rest
+
+    rows = await gateway.fetch_funding_income(
+        "BTC/USDT:USDT",
+        start_time_ms=1000,
+        end_time_ms=2000,
+    )
+
+    assert rows[0]["income"] == "-0.12"
+    assert rest.income_calls == [
+        {
+            "symbol": "BTCUSDT",
+            "incomeType": "FUNDING_FEE",
+            "startTime": 1000,
+            "endTime": 2000,
+            "limit": 1000,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unclassified_create_order_exception_is_ambiguous_not_rejected():
+    class _AmbiguousRest:
+        async def create_order(self, **_kwargs):
+            raise RuntimeError("connection closed after request write")
+
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    gateway.rest_exchange = _AmbiguousRest()
+
+    with pytest.raises(ConnectionLostError) as exc:
+        await gateway.place_order(
+            symbol="BTC/USDT:USDT",
+            order_type="market",
+            side="buy",
+            amount=Decimal("0.001"),
+            client_order_id="brc-test-ambiguous",
+        )
+
+    assert exc.value.error_code == "C-002"
+
+
+@pytest.mark.asyncio
+async def test_find_order_by_client_id_uses_binance_read_identity():
+    class _LookupRest:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def fetch_order(self, order_id, symbol, *, params):
+            self.calls.append((order_id, symbol, params))
+            return {
+                "id": "exchange-1",
+                "symbol": symbol,
+                "clientOrderId": "brc-client-1",
+                "status": "open",
+                "info": {},
+            }
+
+    rest = _LookupRest()
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    gateway.rest_exchange = rest
+
+    order = await gateway.find_order_by_client_id(
+        "brc-client-1",
+        "ETH/USDT:USDT",
+    )
+
+    assert rest.calls == [
+        (
+            None,
+            "ETH/USDT:USDT",
+            {"origClientOrderId": "brc-client-1"},
+        )
+    ]
+    assert order["exchange_order_id"] == "exchange-1"
+    assert order["client_order_id"] == "brc-client-1"

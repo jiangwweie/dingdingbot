@@ -37,11 +37,6 @@
         "path": "./.claude/team/backend-dev/SKILL.md"
       },
       {
-        "name": "team-frontend-dev",
-        "description": "前端开发专家 - 负责 React + TypeScript + TailwindCSS 前端实现",
-        "path": "./.claude/team/frontend-dev/SKILL.md"
-      },
-      {
         "name": "team-qa-tester",
         "description": "质量保障专家 - 负责测试策略设计、单元测试、集成测试",
         "path": "./.claude/team/qa-tester/SKILL.md"
@@ -59,13 +54,6 @@
     ]
   },
   "subagents": {
-    "frontend-dev": {
-      "name": "前端开发专家",
-      "description": "React + TypeScript + TailwindCSS 前端实现",
-      "model": "sonnet",
-      "tools": ["all"],
-      "skill": "team-frontend-dev"
-    },
     "backend-dev": {
       "name": "后端开发专家",
       "description": "Python + FastAPI + asyncio 后端实现",

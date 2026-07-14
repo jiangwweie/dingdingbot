@@ -1,7 +1,7 @@
 # AGENTS.md - BRC Agent Operating Guide
 
-Last updated: 2026-07-01
-Current phase: StrategyGroup live-enablement pilot
+Last updated: 2026-07-10
+Current phase: Pre-Trade Runtime V0
 
 ## Current Document Authority
 
@@ -20,11 +20,26 @@ docs/current/PROJECT_INFORMATION_ARCHITECTURE.md
 docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
 docs/current/AI_AGENT_CONSTRAINTS.md
 docs/current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md
+docs/current/STRATEGY_ENGINEERING_INTAKE_CONTRACT.md
 docs/current/TRADEABILITY_DECISION_CONTRACT.md
 docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md
+docs/current/PRE_TRADE_RUNTIME_CONTRACT.md
+docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md
+docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md
+docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md
+docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md
+docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md
+docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
 docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md
 docs/current/WIP_AND_STOP_RULE_CONTRACT.md
 docs/current/MAIN_CONTROL_ROADMAP.md
+docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md
+docs/current/P1_OPPORTUNITY_FEEDBACK_CALIBRATION_DESIGN.md
+docs/current/P1_OPPORTUNITY_FEEDBACK_CALIBRATION_IMPLEMENTATION_PLAN.md
+docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md
+docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_IMPLEMENTATION_PLAN.md
+docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md
+docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md
 docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
 docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
 docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md
@@ -61,15 +76,50 @@ authority order. `docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CO
 defines the StrategyGroup asset layer.
 `docs/current/BLOCKER_CLASSIFICATION_CONTRACT.md` defines blocker classes and
 Live Enablement completion rules.
+`docs/current/PRE_TRADE_RUNTIME_CONTRACT.md` defines the current
+multi-StrategyGroup, multi-symbol pre-trade runtime: wide observation, bounded
+candidate readiness, fresh-signal promotion, single action-time lane narrowing,
+and single-intent protected submit.
+`docs/current/SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md` defines the production
+monitor ownership boundary: Tokyo server-side readonly timer and Feishu
+notification are the target production path; local heartbeat and local monitor
+sequence are development diagnostic paths only, not production fallback and not
+the source of production Owner notification decisions.
+`docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` defines the Tokyo runtime
+deployment boundary: local SSH is the control plane, Tokyo code acquisition uses
+approved git fetch/export or explicitly scoped archive upload paths, and deploy
+success never grants live-submit or exchange-write authority.
+`docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md`,
+`docs/current/RUNTIME_CONTROL_STATE_DB_ARCHITECTURE.md`,
+and `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md` define the target
+DB-backed current projection boundary: runtime/trading decisions must not
+depend on repo MD/JSON, each current projection has one owner projector, and
+generated JSON/MD is not a runtime source. The target is not to document file
+I/O forever; it is to delete production file readers and recurring JSON/MD
+writers, migrate required current state into PG/current services, and keep
+valuable old material only as archive/provenance outside runtime cadence.
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md` defines the
 single daily management table.
 `docs/current/WIP_AND_STOP_RULE_CONTRACT.md` defines active lane limits and stop
 rules. `docs/current/GOAL_MODE_TASK_PACKET_CONTRACT.md` defines how architecture
 direction becomes bounded execution work.
+`docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` and
+`docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_IMPLEMENTATION_PLAN.md`
+define the current P0-LC integration: production lifecycle wiring, continuous
+reconciliation, one durable exchange-command authority, and terminal closure.
+Older P0-C/P0-D/P0-F documents remain component contracts only where they do
+not conflict with this current integration design.
 
 Do not turn generated output, historical archive material, stale roadmap text,
 or chat summaries into current authority when current code, machine config,
 runtime state, or explicit Owner decisions disagree.
+
+`output/**` is generated runtime output. It must not enter routine commits.
+Current runtime state belongs in PG/current services; generated JSON/MD output
+is local, volatile, or archive-only evidence. Use
+`python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked`
+before accepting output changes; any tracked output path is a cleanup target,
+not a commit whitelist candidate.
 
 ## Product Objective
 
@@ -85,6 +135,62 @@ surface says intervention is needed.
 
 The system is not an institutional quant platform, a raw packet browser, or a
 manual evidence-interpretation workflow.
+
+### Durable Owner System Vision
+
+The target product is a single-Owner, small-capital, bounded-downside,
+right-tail-open, multi-StrategyGroup, multi-instrument, multi-side live-profit
+experiment system. It is not a generic quant platform, stable-yield product,
+low-volatility compounding system, or institutional asset-management platform.
+Its objective is to keep each experiment's downside explicit and bounded while
+preserving the ability to capture rare, materially larger winners.
+
+This objective is a durable decision constraint, not live-submit authority and
+not a fixed return, leverage, notional, drawdown, or win-rate target. It must
+not bypass Owner policy, action-time facts, FinalGate, Operation Layer,
+protection, reconciliation, or settlement. It also must not be reinterpreted as
+a reason to suppress eligible tail opportunities merely to make returns look
+smoother or safer.
+
+The instrument universe is not limited to cryptocurrency. Core contracts must
+remain usable for venue-supported crypto contracts, equity-linked contracts,
+precious-metals contracts, and future contract asset classes. Current
+deployment scope may remain narrower, but new core models must not assume that
+every instrument is a crypto perpetual, trades continuously, uses funding, or
+shares the same quantity, settlement, session, expiry, or protection semantics.
+
+Use canonical `exchange_instrument_id`, `asset_class`, venue identity, contract
+rules, and versioned strategy/event semantics at core boundaries. A future
+capital-allocation policy must be able to compare eligible
+`StrategyGroup + instrument + side` candidates without granting signal,
+ticket, order, or exchange-write authority. The current single action-time lane
+is a bounded execution policy, not a permanent single-strategy architecture.
+
+### Durable Owner Engineering Principles
+
+The Owner defines the product goal, capital/risk policy, live scope, and
+irreversible production boundaries. Codex owns architecture, sequencing,
+schema design, migrations, implementation, tests, and bounded deployment
+inside those decisions. Do not return ordinary technical decisions to the
+Owner after the goal and constraints are clear.
+
+Do not optimize for a narrow MVP by adding StrategyGroup-, symbol-, side-, or
+asset-class-specific patches to the main chain. When one defect reveals a
+missing invariant or abstraction, audit the whole problem class, design the
+shared core boundary, remove or replace the obsolete path, and prove the
+negative cases across the active matrix. Extension readiness means correct
+versioned abstractions and stable interfaces for known future dimensions; it
+does not mean prebuilding speculative institutional infrastructure.
+
+This is a single-Owner system, so development and deployment may be aggressive:
+short maintenance windows, breaking internal migrations, direct deletion of
+wrong compatibility paths, and focused replacement refactors are preferred to
+dual writes, rolling-schema compatibility, long-lived adapters, multi-tenant
+permissions, or enterprise rollout machinery. Aggressive engineering never
+relaxes real-funds invariants: stale facts, duplicate submit, unknown exchange
+outcome, wrong scope/account/instrument, missing protection, FinalGate or
+Operation Layer bypass, credential mutation, withdrawal, and transfer remain
+fail-closed.
 
 The project is a bounded-aggressive real-profit experiment. The Owner-provided
 subaccount allocation is already the upstream risk-control decision and may be
@@ -114,11 +220,11 @@ generic `waiting_for_market`.
 Current planning must use this Live Enablement loop:
 
 ```text
-select StrategyGroup + symbol lane
--> classify the earliest blocker with the Blocker Classification Contract
--> attach detector / watcher / facts / scope / policy / runtime profile
--> reach market_wait_validated only after non-market blockers are closed
--> on fresh signal refresh action-time facts
+maintain active StrategyGroup candidate symbol sets
+-> compute per-symbol readiness and first blocker
+-> promote fresh satisfied candidates without exchange-write authority
+-> narrow at most one promoted candidate into an action-time lane input
+-> refresh action-time facts
 -> candidate / authorization evidence
 -> FinalGate
 -> Operation Layer
@@ -128,18 +234,20 @@ select StrategyGroup + symbol lane
 Current WIP is limited by `docs/current/WIP_AND_STOP_RULE_CONTRACT.md`.
 Daily status must collapse into
 `docs/current/MAIN_CONTROL_DAILY_LIVE_ENABLEMENT_TABLE_CONTRACT.md`.
-The daily management unit is:
+Before action-time, the pre-trade management unit is:
 
 ```text
-StrategyGroup + symbol + first blocker + evidence + next action + stop condition
+StrategyGroup + symbol + readiness state + first blocker + evidence + next action + stop condition
 ```
 
-The main bottleneck is no longer a general explanation of no-trade periods. The
-main bottleneck is removing or precisely proving the earliest Live Enablement
-blocker for the selected StrategyGroup + symbol lane. Reports, markdown,
-read-only watcher expansion, replay outputs, and daily status reports are mainline
-only when they move a lane forward or replace a broad blocker with a precise
-per-symbol / per-fact blocker and next action.
+The main bottleneck is no longer a general explanation of no-trade periods or a
+single fixed daily lane. The main bottleneck is keeping the active
+StrategyGroups in a multi-symbol pre-trade candidate pool, proving per-symbol
+readiness, and allowing a fresh satisfied symbol to become the single
+action-time lane. Reports, markdown, JSON exports, replay outputs, and daily
+status files are not mainline authority. If their semantics are current, move
+them to PG/current projections or API/readmodels; if they are historical, keep
+them archive-only; otherwise delete them.
 
 `StrategyGroup Decision Ledger` is the minimal pre-live strategy-learning
 ledger. For compatibility, its active contract lives at
@@ -312,7 +420,7 @@ StrategyGroup selection
 -> notification and review
 ```
 
-## Owner Interface
+## Owner Supervision Boundary
 
 The normal Owner-facing states are product states:
 
@@ -331,22 +439,8 @@ Evidence packets are audit artifacts. Do not ask the Owner to read raw watcher
 packets, manually judge signal freshness, manually assemble RequiredFacts, or
 hand-approve every in-boundary candidate after a bounded runtime is selected.
 
-Main Owner UI must use terse Owner language:
-
-```text
-运行中
-等待机会
-处理中
-暂不可用
-需要介入
-无需操作
-资金正常
-订单正常
-保护正常
-```
-
-The main Owner UI must not expose these as primary labels, menus, cards, or
-actions:
+Runtime status summaries and notifications must not turn these internal names
+into Owner decision requirements:
 
 ```text
 FinalGate
@@ -362,10 +456,10 @@ blocker code
 runtime grant
 ```
 
-Those names may appear only in audit/detail/developer surfaces. If the system is
-healthy, the UI should say the StrategyGroup is running or waiting and that no
-Owner action is required. Only abnormal states should create Owner actions such
-as pause, adjust risk, or review recovery.
+Those names may appear only in audit or developer diagnostics. If the system is
+healthy, status output should say the StrategyGroup is running or waiting and
+that no Owner action is required. Only abnormal states should create Owner
+actions such as pause, adjust risk, or review recovery.
 
 ## Strategy Research Boundary
 
@@ -375,9 +469,11 @@ Strategy research artifacts belong in:
 /Users/jiangwei/Documents/final-strategy-research
 ```
 
-Main control accepts only StrategyGroup handoff packs, runtime admission facts,
-RequiredFacts definitions, risk defaults, hard stops, sample packets, and review
-outcomes.
+Main control accepts StrategyGroup semantics through PG strategy registry,
+versioned event specs, candidate scope, RequiredFacts rows, Owner policy, runtime
+scope bindings, and review outcomes. Historical StrategyGroup handoff/replay
+files are provenance only and must not be treated as current intake or runtime
+authority.
 
 ## Codex / Claude Workflow
 
@@ -430,13 +526,53 @@ Claude can touch a core file only when the task card explicitly allows it.
 
 ## Engineering Constraints
 
+- Core abstractions must support known dimensions independently:
+  `StrategyGroup`, strategy/event version, canonical instrument, asset class,
+  venue, side, runtime profile, Owner policy, allocation policy, ticket,
+  exchange command, lifecycle, and review. Do not encode one of these as a
+  hidden constant or infer it from another.
+- New runtime work must distinguish semantic capability, current execution
+  eligibility, Owner authorization, capital allocation, and action-time safety.
+  No lower layer may upgrade authority granted by an earlier layer.
+- Future capital allocation belongs between eligible promotion candidates and
+  action-time lane narrowing. Strategy evaluators must not assign portfolio
+  capital, and allocation decisions must not create signal or submit authority.
+- Prefer decisive replacement over transitional compatibility in this
+  single-Owner system. Any temporary adapter must name the exact old path it
+  replaces and the removal condition in the same task.
 - `domain/` must remain pure business logic and must not import I/O frameworks.
 - Financial calculations must use `decimal.Decimal`, not `float`.
 - Sensitive values must be masked in logs.
 - Core parameters should use named Pydantic models instead of unstructured
   dictionaries.
-- Execution, recovery, reconciliation, and circuit-breaker state should prefer
-  the PG mainline unless explicitly documented as transitional.
+- Execution, recovery, reconciliation, and circuit-breaker state must use the
+  PG mainline. Transitional PG + file dual authority, local JSON fallback, and
+  current file-backed repositories are not allowed.
+- Runtime, deploy, monitor, readmodel, watcher, action-time, and Owner
+  explanation changes must include cadence and performance impact. Production
+  no-signal ticks should create zero JSON/MD report files; heavy builders must
+  run only on explicit PG triggers; subprocess/API work must be timeout-bounded;
+  archive output must be manual, owner-scoped, and retention-bounded.
+- Runtime, deploy, monitor, readmodel, watcher, action-time, and Owner
+  explanation reviews must include machine evidence from
+  `scripts/audit_production_runtime_file_io.py` or a stricter successor.
+  `performance_risk.status` must be `clear` for production cadence unless the
+  task is explicitly an archive-only/manual ops cleanup.
+- Do not add new production reads from repo/output/report JSON or Markdown.
+  Delete or migrate existing readers to PG/current services. Do not add new
+  recurring JSON/MD writers; delete them from cadence or replace them with PG
+  rows/current projections.
+- Do not add dynamic-path evidence JSON writers, YAML config import/export
+  file interfaces, JSONL trace/observe sidecars, or tests that create legacy
+  report JSON files for current code. Useful current semantics must use
+  PG/current services or in-memory typed test fixtures; history is archive-only.
+- Do not add or preserve current artifact/proof/evidence scripts whose main
+  interface is JSON/Markdown files, report directories, or artifact CLI
+  parameters such as file input/output paths. Existing occurrences are cleanup
+  targets under `docs/current/PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md`.
+- Do not add project-local agent tools that write benchmark, transcript,
+  result, report, or generated analysis files into the trading repo. Use
+  external/system skills instead of vendoring write-heavy toolkits here.
 
 ## Git Discipline
 

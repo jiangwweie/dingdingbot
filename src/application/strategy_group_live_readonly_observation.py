@@ -283,6 +283,7 @@ class MI001MomentumImpulseReadOnlyEvaluator:
                 playbook_id=signal_input.playbook_id,
                 symbol=signal_input.symbol,
                 timestamp_ms=signal_input.timestamp_ms,
+                trigger_candle_close_time_ms=signal_input.trigger_candle_close_time_ms,
                 timeframe=signal_input.primary_timeframe,
                 signal_type=SignalType.WOULD_ENTER,
                 side=SignalSide.LONG,
@@ -319,6 +320,7 @@ class MI001MomentumImpulseReadOnlyEvaluator:
             playbook_id=signal_input.playbook_id,
             symbol=signal_input.symbol,
             timestamp_ms=signal_input.timestamp_ms,
+            trigger_candle_close_time_ms=signal_input.trigger_candle_close_time_ms,
             timeframe=signal_input.primary_timeframe,
             signal_type=SignalType.NO_ACTION,
             side=SignalSide.NONE,
@@ -397,8 +399,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "impulse_return_pct",
             ],
             source_refs=[
-                "src/application/strategy_group_live_readonly_observation.py",
-                "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md",
+                "pg_strategy_group_live_readonly_observation_readmodel",
+                "pg_strategy_review_mi001_bnb_sol_evidence",
             ],
             candidate_blockers=["scheduled live read-only observation not started", "PG observation sink schema gap"],
             evaluator=mi_evaluator,
@@ -421,8 +423,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "impulse_return_pct",
             ],
             source_refs=[
-                "src/application/strategy_group_live_readonly_observation.py",
-                "reports/directional-opportunity-broad-smoke-20260529/mi001_bnb_sol_evidence_reviewability.md",
+                "pg_strategy_group_live_readonly_observation_readmodel",
+                "pg_strategy_review_mi001_bnb_sol_evidence",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -450,8 +452,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "short_loss_confirmed",
             ],
             source_refs=[
-                "src/domain/cpm_historical_evaluator.py",
-                "docs/ops/crypto-pullback-module-v1-oos-failure-classification.md",
+                "domain_cpm_historical_evaluator",
+                "pg_strategy_review_cpm_oos_classification",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -478,8 +480,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "short_squeeze_risk",
             ],
             source_refs=[
-                "src/domain/brf_price_action_evaluator.py",
-                "docs/ops/td-governance-and-refactor-plan-2026-06.md",
+                "domain_brf_price_action_evaluator",
+                "pg_strategy_review_brf_governance",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -506,8 +508,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "candidate_semantics",
             ],
             source_refs=[
-                "src/domain/reference_price_action_evaluators.py",
-                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+                "domain_reference_price_action_evaluators",
+                "pg_strategy_runtime_semantics",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -533,8 +535,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "candidate_semantics",
             ],
             source_refs=[
-                "src/domain/reference_price_action_evaluators.py",
-                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+                "domain_reference_price_action_evaluators",
+                "pg_strategy_runtime_semantics",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -561,8 +563,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "candidate_semantics",
             ],
             source_refs=[
-                "src/domain/reference_price_action_evaluators.py",
-                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+                "domain_reference_price_action_evaluators",
+                "pg_strategy_runtime_semantics",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -588,8 +590,8 @@ def _observation_specs() -> list[_ObservationSpec]:
                 "candidate_semantics",
             ],
             source_refs=[
-                "src/domain/reference_price_action_evaluators.py",
-                "docs/canon/STRATEGY_RUNTIME_GUIDE.md",
+                "domain_reference_price_action_evaluators",
+                "pg_strategy_runtime_semantics",
             ],
             candidate_blockers=[
                 "scheduled live read-only observation not started",
@@ -632,7 +634,14 @@ def _evaluate_observation_candidate(
             reason=f"Observation unavailable: {type(exc).__name__}",
         )
 
-    timestamp_ms = one_hour[-1].open_time_ms
+    trigger_candle_close_time_ms = one_hour[-1].close_time_ms
+    if trigger_candle_close_time_ms is None or trigger_candle_close_time_ms <= one_hour[-1].open_time_ms:
+        blockers.append("trigger_candle_close_time_missing")
+        return _blocked_observation_candidate(
+            spec,
+            blockers=blockers,
+            reason="Observation unavailable: latest 1h closed candle has no close_time_ms",
+        )
     signal_input = _sample_signal_input(
         family_id=spec.strategy_group_id,
         version_id=spec.strategy_family_version_id,
@@ -643,7 +652,7 @@ def _evaluate_observation_candidate(
             symbol=spec.symbol,
             candles=_raw_candles_from_recent(one_hour),
             four_hour_candles=_raw_candles_from_recent(four_hour) if four_hour else None,
-            timestamp_ms=timestamp_ms,
+            timestamp_ms=trigger_candle_close_time_ms,
             source=getattr(market_source, "source_id", "read_only_market_bar_source"),
             freshness="latest_available_closed_bar",
         ),
@@ -976,6 +985,7 @@ def _invalid_output(
         playbook_id=signal_input.playbook_id,
         symbol=signal_input.symbol,
         timestamp_ms=signal_input.timestamp_ms,
+        trigger_candle_close_time_ms=signal_input.trigger_candle_close_time_ms,
         timeframe=signal_input.primary_timeframe,
         signal_type=SignalType.INVALID,
         side=SignalSide.NONE,
@@ -1007,6 +1017,7 @@ def _parse_candle(raw: dict[str, Any]) -> RecentCandle:
         low=Decimal(str(raw["low"])),
         close=Decimal(str(raw["close"])),
         volume=Decimal(str(raw.get("volume", "0"))),
+        close_time_ms=int(raw["close_time_ms"]) if raw.get("close_time_ms") is not None else None,
     )
 
 
@@ -1034,6 +1045,7 @@ def _sample_signal_input(
     freshness: str = "sample_preview",
 ) -> StrategyFamilySignalInput:
     timestamp_ms = market_snapshot.timestamp_ms
+    trigger_candle_close_time_ms = _trigger_candle_close_time_from_snapshot(market_snapshot)
     return StrategyFamilySignalInput(
         evaluation_id=f"{OBSERVATION_V1_SOURCE}:{family_id}:{symbol}:{timestamp_ms}",
         strategy_family_id=family_id,
@@ -1041,6 +1053,7 @@ def _sample_signal_input(
         playbook_id=playbook_id,
         symbol=symbol,
         timestamp_ms=timestamp_ms,
+        trigger_candle_close_time_ms=trigger_candle_close_time_ms,
         primary_timeframe="1h",
         context_timeframes=["4h", "24h", "72h", "7d"],
         market_snapshot=market_snapshot,
@@ -1068,6 +1081,20 @@ def _sample_signal_input(
         freshness=freshness,
         input_quality=SignalDataQuality(status=SignalDataQualityStatus.OK),
     )
+
+
+def _trigger_candle_close_time_from_snapshot(market_snapshot: MarketSnapshot) -> int | None:
+    windows = dict(market_snapshot.candle_context.get("windows") or {})
+    for key in ("1h", market_snapshot.timeframe):
+        if not key:
+            continue
+        candles = list(windows.get(key) or [])
+        if not candles:
+            continue
+        value = candles[-1].get("close_time_ms")
+        if value is not None:
+            return int(value)
+    return None
 
 
 def _market_snapshot(
@@ -1099,6 +1126,7 @@ def _raw_candles_from_recent(candles: list[RecentCandle]) -> list[dict[str, Any]
     return [
         {
             "open_time_ms": candle.open_time_ms,
+            "close_time_ms": candle.close_time_ms,
             "open": str(candle.open),
             "high": str(candle.high),
             "low": str(candle.low),
@@ -1264,6 +1292,7 @@ def _raw_candle(index: int, close: Decimal) -> dict[str, Any]:
     timestamp_ms = 1770000000000 + index * 60 * 60 * 1000
     return {
         "open_time_ms": timestamp_ms,
+        "close_time_ms": timestamp_ms + 60 * 60 * 1000 - 1,
         "open": str(close - Decimal("0.1")),
         "high": str(close + Decimal("0.4")),
         "low": str(close - Decimal("0.5")),
@@ -1282,6 +1311,7 @@ def _raw_ohlcv_candle(
     timestamp_ms = 1770000000000 + index * 60 * 60 * 1000
     return {
         "open_time_ms": timestamp_ms,
+        "close_time_ms": timestamp_ms + 60 * 60 * 1000 - 1,
         "open": open_,
         "high": high,
         "low": low,

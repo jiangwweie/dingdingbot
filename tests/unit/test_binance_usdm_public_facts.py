@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SCRIPT_PATH = (
@@ -59,3 +60,60 @@ def test_mark_price_fresh_requires_recent_exchange_timestamp():
     assert row["mark_price_fresh"] is False
     assert row["public_facts_ready"] is False
     assert row["mark_price_age_seconds"] == 600
+
+
+def test_partial_public_facts_do_not_fail_global_watcher_tick():
+    module = _load_module()
+
+    assert (
+        module._artifact_status(ready_count=5, symbol_count=6, errors=[])
+        == "binance_usdm_public_facts_partial"
+    )
+    assert module._exit_code_for_status("binance_usdm_public_facts_partial") == 0
+
+
+def test_endpoint_errors_still_fail_public_facts_fetch():
+    module = _load_module()
+
+    assert (
+        module._artifact_status(
+            ready_count=5,
+            symbol_count=6,
+            errors=["/fapi/v1/exchangeInfo:URLError:timeout"],
+        )
+        == "binance_usdm_public_facts_unavailable"
+    )
+    assert module._exit_code_for_status("binance_usdm_public_facts_unavailable") == 2
+
+
+def test_comparative_candle_fetch_reads_each_unique_symbol_once():
+    module = _load_module()
+
+    class FakeSource:
+        def __init__(self):
+            self.calls = []
+
+        def latest_closed_candles(self, *, symbol, timeframe, limit):
+            self.calls.append((symbol, timeframe, limit))
+            return [
+                SimpleNamespace(
+                    open_time_ms=index * 3_600_000,
+                    close_time_ms=(index + 1) * 3_600_000,
+                    close="100",
+                )
+                for index in range(limit)
+            ]
+
+    source = FakeSource()
+
+    result = module._fetch_comparative_candles(
+        source,
+        ("SOLUSDT", "OPUSDT", "SOLUSDT", "ETHUSDT"),
+    )
+
+    assert list(result) == ["ETHUSDT", "OPUSDT", "SOLUSDT"]
+    assert source.calls == [
+        ("ETHUSDT", "1h", 13),
+        ("OPUSDT", "1h", 13),
+        ("SOLUSDT", "1h", 13),
+    ]

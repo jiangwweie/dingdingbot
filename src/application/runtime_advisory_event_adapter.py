@@ -38,9 +38,8 @@ WATCHER_NOISE_STATUSES = {
 
 WATCHER_SIGNAL_STATUSES = {
     "runtime_signal_ready",
-    "runtime_signal_ready_for_non_executing_prepare",
-    "runtime_prepare_records_ready_for_preview",
-    "prepared_shadow_evidence_ready_for_owner_review",
+    "runtime_signal_ready_for_action_time_ticket",
+    "ready_for_action_time_ticket_materialization",
     "operator_evidence_needs_review",
     "ready_for_final_gate_preflight",
 }
@@ -199,7 +198,7 @@ def build_completion_audit_advisory_event(
     return build_llm_advisory_event(
         event_type=LlmConsumableEventType.DAILY_AUDIT_DIGEST,
         source_type="completion_audit",
-        source_id=_source_id(report, default="first_bounded_live_order_completion_audit"),
+        source_id=_source_id(report, default="runtime_completion_audit"),
         now_ms=timestamp,
         context_artifact=context_artifact,
         allowed_llm_actions=_allowed_actions_for_digest(blockers=gaps),

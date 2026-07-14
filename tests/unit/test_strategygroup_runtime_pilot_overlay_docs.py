@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 
 
@@ -67,24 +65,23 @@ def test_current_owner_interface_stays_simple():
         assert phrase in text
 
 
-def test_current_strategygroup_handoff_records_research_sync_boundary():
+def test_current_strategygroup_file_source_retirement_boundary():
     text = _read(
         REPO_ROOT
         / "docs"
         / "current"
         / "strategy-group-handoffs"
-        / "main-control-research-sync.md"
+        / "main-control-handoff-index.md"
     )
 
     for phrase in [
-        "d62ce55727614fcfdb2d12f8fee1d3c226950048",
-        "Raw research artifacts",
-        "not integrated",
-        "not a direct runtime expansion",
+        "no longer a StrategyGroup runtime",
+        "PG current state",
+        "removed from `docs/current` as current inputs",
+        "Old handoff/replay/policy files must not be used",
         "docs/current/strategy-group-handoffs/",
-        "FinalGate bypass",
-        "Operation Layer bypass",
-        "automatic admission of every broader research symbol",
+        "Historical",
+        "material must not be wired back into current runtime decisions",
     ]:
         assert phrase in text
 
@@ -101,60 +98,3 @@ def test_current_gate_classes_are_documented():
         "review_only_warning",
     ]:
         assert recovery_class in text
-
-
-def test_runtime_pilot_goal_audit_does_not_freeze_moving_branch_head():
-    text = _read(
-        REPO_ROOT
-        / "docs"
-        / "current"
-        / "STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md"
-    )
-
-    assert "Latest pushed branch head" not in text
-    assert "moving git ref" in text
-    assert "Latest deployed runtime head" in text
-
-
-def test_runtime_pilot_goal_audit_deployed_head_matches_monitor_baseline():
-    text = _read(
-        REPO_ROOT
-        / "docs"
-        / "current"
-        / "STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md"
-    )
-    baseline = json.loads(
-        (
-            REPO_ROOT
-            / "docs"
-            / "current"
-            / "RUNTIME_MONITOR_BASELINE.json"
-        ).read_text(encoding="utf-8")
-    )
-    match = re.search(r"\| Latest deployed runtime head \| `([0-9a-f]{40})` \|", text)
-
-    assert match is not None
-    if baseline["expected_runtime_head"] not in {"LOCAL_GIT_HEAD", "__LOCAL_GIT_HEAD__"}:
-        assert match.group(1) == baseline["expected_runtime_head"]
-
-
-def test_runtime_pilot_goal_audit_keeps_completion_boundary_explicit():
-    text = _read(
-        REPO_ROOT
-        / "docs"
-        / "current"
-        / "STRATEGYGROUP_RUNTIME_PILOT_GOAL_AUDIT.md"
-    )
-
-    for phrase in [
-        "The goal is not complete yet",
-        "real fresh selected StrategyGroup",
-        "first bounded real order",
-        "Healthy waiting for market is not a blocker",
-        "mock signal treated as real signal",
-        "disabled smoke treated as real execution proof",
-    ]:
-        assert phrase in text
-
-    assert "| real exchange submit |" in text
-    assert "Market-dependent" in text

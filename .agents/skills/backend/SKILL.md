@@ -59,4 +59,12 @@ Codex-owned by default:
 - Preserve per-symbol / per-fact blocker evidence for detector and watcher
   work. If facts are computed but false, classify the lane as
   `computed_not_satisfied`, not as missing detector.
+- Do not implement current backend/runtime behavior through JSON/Markdown file
+  readers, file-backed repositories, artifact-file validators, or fixture-file
+  CLIs. Current runtime state belongs in PG/current services; history is
+  archive-only.
+- Do not add dynamic-path evidence JSON writers, YAML config import/export
+  file interfaces, JSONL trace/observe sidecars, or tests that create legacy
+  report JSON fixtures for current backend code. Use PG/current services or
+  in-memory typed fixtures.
 - Ask before long test suites.

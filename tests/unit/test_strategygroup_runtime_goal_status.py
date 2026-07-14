@@ -5,201 +5,521 @@ import sys
 from pathlib import Path
 
 import pytest
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
 
 from scripts import build_strategygroup_runtime_goal_status as goal_status
-from scripts.build_strategygroup_runtime_goal_status import build_goal_status_artifact
+from scripts import materialize_ticket_bound_protected_submit_attempt as submit
+from src.infrastructure.runtime_control_state_repository import (
+    PgBackedRuntimeControlStateRepository,
+)
+from tests.unit.test_action_time_ticket_materialization import NOW_MS
+from tests.unit.test_ticket_bound_protected_submit_attempt import (
+    _create_ready_protected_submit,
+)
+from tests.unit.lifecycle_test_schema import apply_enabled_lifecycle_command_schema
 
 
-HEAD = "3e08c037a4990a268d1ee2b61861601d57423223"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+RISK_RESERVATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
+)
+EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
+)
+DYNAMIC_RISK_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
+SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+PG_TEST_NOW_MS = 1770001000000
 
 
-def _write(path: Path, payload: dict) -> None:
-    path.write_text(json.dumps(payload), encoding="utf-8")
+def _load_module(path: Path, name: str):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def _write_base_artifacts(report_dir: Path) -> None:
-    report_dir.mkdir(parents=True)
-    _write(
-        report_dir / "watcher-tick.json",
-        {
-            "status": "watching_no_signal",
-            "blockers": [
-                "runtime-mpg-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
-            ],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
+@pytest.fixture()
+def pg_control_connection():
+    migration = _load_module(MIGRATION_PATH, "migration_086_goal_status")
+    risk_reservation_migration = _load_module(
+        RISK_RESERVATION_MIGRATION_PATH,
+        "migration_103_goal_status",
+    )
+    execution_eligibility_migration = _load_module(
+        EXECUTION_ELIGIBILITY_MIGRATION_PATH,
+        "migration_104_goal_status",
+    )
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_goal_status")
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        old_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+            old_risk_op = risk_reservation_migration.op
+            risk_reservation_migration.op = migration.op
+            try:
+                risk_reservation_migration.upgrade()
+                old_eligibility_op = execution_eligibility_migration.op
+                execution_eligibility_migration.op = migration.op
+                try:
+                    execution_eligibility_migration.upgrade()
+                finally:
+                    execution_eligibility_migration.op = old_eligibility_op
+            finally:
+                risk_reservation_migration.op = old_risk_op
+        finally:
+            migration.op = old_op
+        seed.seed_runtime_control_state_foundation(conn)
+        apply_enabled_lifecycle_command_schema(
+            conn,
+            repo_root=REPO_ROOT,
+            module_prefix="goal_status",
+            now_ms=PG_TEST_NOW_MS - 1,
+        )
+        dynamic_risk_migration = _load_module(
+            DYNAMIC_RISK_MIGRATION_PATH,
+            "migration_115_goal_status",
+        )
+        old_dynamic_risk_op = dynamic_risk_migration.op
+        dynamic_risk_migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            dynamic_risk_migration.upgrade()
+        finally:
+            dynamic_risk_migration.op = old_dynamic_risk_op
+    with engine.connect() as conn:
+        yield conn
+    engine.dispose()
+
+
+def _insert_pg_coverage_and_unsatisfied_facts(conn) -> None:
+    rows = conn.execute(
+        text(
+            """
+            SELECT runtime_scope_binding_id, strategy_group_id, symbol, side, runtime_profile_id
+            FROM brc_runtime_scope_bindings
+            WHERE status = 'active'
+            ORDER BY runtime_scope_binding_id
+            """
+        )
+    ).mappings()
+    for index, row in enumerate(rows, start=1):
+        lane_key = f"{row['strategy_group_id']}:{row['symbol']}:{row['side']}"
+        observed_at_ms = 1770000000000 + index
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_watcher_runtime_coverage (
+                  runtime_coverage_id,
+                  strategy_group_id,
+                  symbol,
+                  side,
+                  detector_key,
+                  runtime_profile_id,
+                  coverage_state,
+                  liveness_state,
+                  last_tick_at_ms,
+                  valid_until_ms,
+                  is_current,
+                  created_at_ms
+                ) VALUES (
+                  :runtime_coverage_id,
+                  :strategy_group_id,
+                  :symbol,
+                  :side,
+                  :detector_key,
+                  :runtime_profile_id,
+                  'covered',
+                  'healthy',
+                  :observed_at_ms,
+                  :valid_until_ms,
+                  true,
+                  :observed_at_ms
+                )
+                """
+            ),
+            {
+                "runtime_coverage_id": f"coverage:{lane_key}",
+                "strategy_group_id": row["strategy_group_id"],
+                "symbol": row["symbol"],
+                "side": row["side"],
+                "detector_key": f"detector:{row['strategy_group_id']}:{row['side']}",
+                "runtime_profile_id": row["runtime_profile_id"],
+                "observed_at_ms": observed_at_ms,
+                "valid_until_ms": observed_at_ms + 3_600_000,
             },
-        },
-    )
-    _write(
-        report_dir / "latest-summary.json",
-        {
-            "status": "waiting_for_signal",
-            "selected_runtime_instance_ids": ["runtime-mpg-1"],
-            "blockers": [
-                "runtime-mpg-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
-            ],
-        },
-    )
-    _write(
-        report_dir / "post-signal-resume-pack.json",
-        {
-            "status": "waiting_for_market",
-            "selected_runtime_instance_ids": ["runtime-mpg-1"],
-            "blockers": [
-                "runtime-mpg-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
-            ],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_runtime_fact_snapshots (
+                  fact_snapshot_id,
+                  strategy_group_id,
+                  symbol,
+                  side,
+                  runtime_profile_id,
+                  fact_surface,
+                  source_kind,
+                  source_ref,
+                  computed,
+                  satisfied,
+                  freshness_state,
+                  failed_facts,
+                  fact_values,
+                  blocker_class,
+                  observed_at_ms,
+                  valid_until_ms,
+                  created_at_ms
+                ) VALUES (
+                  :fact_snapshot_id,
+                  :strategy_group_id,
+                  :symbol,
+                  :side,
+                  :runtime_profile_id,
+                  'pretrade_public',
+                  'watcher',
+                  :source_ref,
+                  true,
+                  false,
+                  'fresh',
+                  :failed_facts,
+                  :fact_values,
+                  'computed_not_satisfied',
+                  :observed_at_ms,
+                  :valid_until_ms,
+                  :observed_at_ms
+                )
+                """
+            ),
+            {
+                "fact_snapshot_id": f"fact:{lane_key}:public",
+                "strategy_group_id": row["strategy_group_id"],
+                "symbol": row["symbol"],
+                "side": row["side"],
+                "runtime_profile_id": row["runtime_profile_id"],
+                "source_ref": f"pg_test:{lane_key}",
+                "failed_facts": json.dumps(["market_condition_not_satisfied"]),
+                "fact_values": json.dumps({"market_condition_not_satisfied": False}),
+                "observed_at_ms": observed_at_ms,
+                "valid_until_ms": observed_at_ms + 3_600_000,
             },
-        },
-    )
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "waiting_for_market",
-            "dispatch_status": "no_action_continue_observation",
-            "dispatch_action": "continue_watcher_observation",
-            "blocker_class": "waiting_for_market",
-            "selected_runtime_instance_ids": ["runtime-mpg-1"],
-            "blockers": [],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-    _write(
-        report_dir / "runtime-dry-run-audit-chain.json",
-        {
-            "status": "passed",
-            "checks": {
-                "scenario_count": 14,
-                "required_scenarios_present": True,
-                "all_scenarios_passed": True,
-                "dangerous_effects_absent": True,
-                "disabled_smoke_not_real_execution_proof": True,
-                "execution_attempt_rehearsal_prepare_checked": True,
-                "operation_layer_evidence_relay_checked": True,
-                "scoped_pipeline_operation_layer_submit_projection_checked": True,
-                "fresh_signal_fast_auto_chain_checked": True,
-                "required_facts_readiness_checked": True,
-                "legacy_local_registration_probe_tolerance_checked": True,
-                "mock_operation_layer_closed_loop_checked": True,
-                "operation_layer_blocker_review_policy_checked": True,
-                "operation_layer_hard_safety_blocker_matrix_checked": True,
-                "expanded_watcher_scope_execution_guard_checked": True,
-                "operation_layer_authorization_chain_guard_checked": True,
-                "post_submit_closed_loop_evidence_guard_checked": True,
-                "post_submit_exit_outcome_matrix_checked": True,
-                "reduce_only_recovery_standing_authorization_checked": True,
-                "operation_layer_submit_result_identity_guard_checked": True,
-                "post_submit_finalize_result_identity_guard_checked": True,
-                "shared_runtime_pipeline_checked": True,
-                "common_execution_chain_reuse_checked": True,
-                "strategygroup_adapter_boundary_checked": True,
-                "strategy_intake_no_execution_pipeline_fields_checked": True,
-                "runtime_tier_policy_checked": True,
-                "only_mpg_tiny_real_order_eligible_checked": True,
-                "new_strategygroups_default_observe_only_checked": True,
-                "selected_strategygroup_dispatch_guard_checked": True,
-                "all_selected_strategygroups_reach_finalgate_dispatch_checked": True,
-            },
-            "scenarios": [
-                {
-                    "name": "execution_attempt_rehearsal_prepare",
-                    "status": "passed",
-                    "artifacts": {
-                        "resume_dispatch": {
-                            "non_executing_prepare_result": {
-                                "created_records": {
-                                    "execution_intent_created": True,
-                                    "submit_authorization_created": True,
-                                },
-                                "safety_invariants": {
-                                    "exchange_write_called": False,
-                                    "order_created": False,
-                                    "order_lifecycle_called": False,
-                                    "withdrawal_or_transfer_created": False,
-                                },
-                            },
-                        },
-                    },
-                },
-            ],
-            "safety_invariants": {
-                "dangerous_effects": [],
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-    _write(
-        report_dir / "owner-console-source-readiness.json",
-        {
-            "status": "ready",
-            "owner_summary": {
-                "market_opportunity": "等待机会",
-                "funds": "资金正常",
-                "orders": "暂无订单",
-                "positions": "暂无持仓",
-                "protection": "保护正常",
-                "runtime_dry_run_audit": "审计演练正常",
-            },
-            "blockers": [],
-        },
-    )
-    _write(
-        report_dir / "strategygroup-runtime-pilot-status.json",
-        {
-            "status": "waiting_for_market",
-            "blockers": [],
-            "watcher_scope_alignment": {
-                "status": "aligned",
-                "selected_strategy_group_id": "MPG-001",
-                "matched_runtime_signal_summaries": [
-                    {
-                        "runtime_instance_id": "runtime-mpg-1",
-                        "strategy_family_id": "MPG-001",
-                        "symbol": "MSTR/USDT:USDT",
-                        "side": "long",
-                        "status": "waiting_for_signal",
-                    }
-                ],
-                "out_of_scope_runtime_signal_summaries": [],
-            },
-        },
-    )
-    _write(
-        report_dir / "strategy-group-live-facts-readiness.json",
-        {
-            "status": "strategy_group_live_facts_ready_for_armed_observation",
-            "blockers": [],
-        },
-    )
+        )
 
 
-def _manifest(path: Path, head: str = HEAD) -> Path:
-    _write(
-        path,
+def _insert_pg_action_time_lane_without_ticket(conn) -> str:
+    row = conn.execute(
+        text(
+            """
+            SELECT r.runtime_scope_binding_id,
+                   r.candidate_scope_id,
+                   r.strategy_group_id,
+                   r.symbol,
+                   r.side,
+                   r.runtime_profile_id,
+                   b.event_spec_id,
+                   e.event_id
+            FROM brc_runtime_scope_bindings r
+            JOIN brc_candidate_scope_event_bindings b
+              ON b.candidate_scope_id = r.candidate_scope_id
+             AND b.status = 'active'
+            JOIN brc_strategy_side_event_specs e
+              ON e.event_spec_id = b.event_spec_id
+             AND e.status = 'current'
+            WHERE r.status = 'active'
+              AND r.strategy_group_id = 'SOR-001'
+              AND r.symbol = 'ETHUSDT'
+              AND r.side = 'long'
+            LIMIT 1
+            """
+        )
+    ).mappings().one()
+    lane_id = "lane:SOR-001:ETHUSDT:long:ticket-pending"
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_live_signal_events (
+              signal_event_id, candidate_scope_id, event_spec_id,
+              strategy_group_id, symbol, side, detector_key, signal_type,
+              source_kind, status, freshness_state, confidence, fact_snapshot_id,
+              reason_codes, signal_payload, event_time_ms,
+              trigger_candle_close_time_ms, observed_at_ms, expires_at_ms,
+              invalidated_at_ms, created_at_ms
+            ) VALUES (
+              'signal:SOR-001:ETHUSDT:long',
+              :candidate_scope_id,
+              :event_spec_id,
+              :strategy_group_id,
+              :symbol,
+              :side,
+              'detector:SOR-001:long',
+              :event_id,
+              'live_market',
+              'facts_validated',
+              'fresh',
+              0.9,
+              'fact:SOR-001:ETHUSDT:long:public',
+              '["unit_goal_status_signal"]',
+              '{"time_authority": "trigger_candle_close_time_ms"}',
+              1770000900000,
+              1770000900000,
+              1770000900001,
+              1770001900000,
+              NULL,
+              1770000900002
+            )
+            """
+        ),
         {
-            "local_git": {
-                "head": head,
-                "short_head": head[:8],
-            }
+            "candidate_scope_id": row["candidate_scope_id"],
+            "event_spec_id": row["event_spec_id"],
+            "strategy_group_id": row["strategy_group_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+            "event_id": row["event_id"],
         },
     )
-    return path
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_pretrade_readiness_rows (
+              readiness_row_id, candidate_scope_id, strategy_group_id, symbol,
+              side, readiness_state, detector_state, watcher_state,
+              public_facts_state, signal_lifecycle_status,
+              signal_freshness_state, risk_state, scope_state, promotion_state,
+              first_blocker_class, first_blocker_detail, next_action,
+              stop_condition, evidence_ref, source_watermark, computed_at_ms,
+              valid_until_ms
+            ) VALUES (
+              'readiness:SOR-001:ETHUSDT:long',
+              :candidate_scope_id,
+              :strategy_group_id,
+              :symbol,
+              :side,
+              'ready',
+              'ready',
+              'fresh',
+              'satisfied',
+              'facts_validated',
+              'fresh',
+              'acceptable',
+              'live_submit_allowed',
+              'action_time_lane',
+              'action_time_preflight_ready',
+              'ready',
+              'materialize_action_time_ticket',
+              'ticket_created_or_lane_expires',
+              'fact:SOR-001:ETHUSDT:long:public',
+              'unit',
+              1770000950000,
+              1770001900000
+            )
+            """
+        ),
+        {
+            "candidate_scope_id": row["candidate_scope_id"],
+            "strategy_group_id": row["strategy_group_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+        },
+    )
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_promotion_candidates (
+              promotion_candidate_id, signal_event_id, readiness_row_id,
+              strategy_group_id, symbol, side, promotion_scope, status,
+              scope_state, risk_state, facts_snapshot_id, blockers,
+              arbitration_rank, created_at_ms, expires_at_ms, closed_at_ms,
+              authority_boundary
+            ) VALUES (
+              'promotion:SOR-001:ETHUSDT:long',
+              'signal:SOR-001:ETHUSDT:long',
+              'readiness:SOR-001:ETHUSDT:long',
+              :strategy_group_id,
+              :symbol,
+              :side,
+              'live_submit_candidate',
+              'arbitration_won',
+              'live_submit_allowed',
+              'acceptable',
+              'fact:SOR-001:ETHUSDT:long:public',
+              '[]',
+              1,
+              1770000960000,
+              1770001900000,
+              NULL,
+              'pg_promotion_candidate_non_executing; no_finalgate_no_operation_layer_no_exchange_write'
+            )
+            """
+        ),
+        {
+            "strategy_group_id": row["strategy_group_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+        },
+    )
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_action_time_lane_inputs (
+              action_time_lane_input_id,
+              promotion_candidate_id,
+              strategy_group_id,
+              symbol,
+              side,
+              runtime_profile_id,
+              lane_scope,
+              status,
+              signal_event_id,
+              public_fact_snapshot_id,
+              action_time_fact_snapshot_id,
+              runtime_scope_binding_id,
+              candidate_authorization_ref,
+              runtime_safety_snapshot_id,
+              first_blocker_class,
+              created_at_ms,
+              expires_at_ms,
+              closed_at_ms,
+              authority_boundary
+            ) VALUES (
+              :lane_id,
+              'promotion:SOR-001:ETHUSDT:long',
+              :strategy_group_id,
+              :symbol,
+              :side,
+              :runtime_profile_id,
+              'real_submit_candidate',
+              'ticket_pending',
+              'signal:SOR-001:ETHUSDT:long',
+              'fact:SOR-001:ETHUSDT:long:public',
+              'fact:SOR-001:ETHUSDT:long:action-time',
+              :runtime_scope_binding_id,
+              'candidate_auth:SOR-001:ETHUSDT:long',
+              NULL,
+              'action_time_preflight_ready',
+              1770001000000,
+              1770001900000,
+              NULL,
+              'non_executing_action_time_lane; no_finalgate_no_operation_layer_no_exchange_write'
+            )
+            """
+        ),
+        {
+            "lane_id": lane_id,
+            "strategy_group_id": row["strategy_group_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+            "runtime_profile_id": row["runtime_profile_id"],
+            "runtime_scope_binding_id": row["runtime_scope_binding_id"],
+        },
+    )
+    return lane_id
+
+
+def _insert_pg_action_time_ticket(conn, lane_id: str) -> None:
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_action_time_tickets (
+              ticket_id,
+              action_time_lane_input_id,
+              promotion_candidate_id,
+              signal_event_id,
+              event_spec_id,
+              event_spec_version_id,
+              candidate_scope_id,
+              runtime_scope_binding_id,
+              strategy_group_id,
+              strategy_group_version_id,
+              symbol,
+              exchange_instrument_id,
+              side,
+              event_id,
+              event_time_ms,
+              trigger_candle_close_time_ms,
+              runtime_profile_id,
+              public_fact_snapshot_id,
+              action_time_fact_snapshot_id,
+              account_safe_fact_snapshot_id,
+              account_mode_snapshot_id,
+              budget_reservation_id,
+              protection_ref_id,
+              execution_policy_id,
+              execution_policy_version,
+              owner_policy_version,
+              sizing_policy_version,
+              protection_policy_version,
+              target_notional,
+              leverage,
+              expires_at_ms,
+              status,
+              authority_boundary,
+              ticket_hash,
+              created_under_versions_hash,
+              created_at_ms
+            ) VALUES (
+              'ticket:SOR-001:ETHUSDT:long:unit',
+              :lane_id,
+              'promotion:SOR-001:ETHUSDT:long',
+              'signal:SOR-001:ETHUSDT:long',
+              'event_spec:SOR-001:SOR-LONG:v1',
+              'event_spec:SOR-001:SOR-LONG:v1:v1',
+              'candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG',
+              'runtime_scope:candidate_scope:SOR-001:ETHUSDT:long:SOR-LONG:owner-runtime-console-v1',
+              'SOR-001',
+              'strategy_group_version:SOR-001:v1',
+              'ETHUSDT',
+              'binance_usdm:ETH/USDT:USDT',
+              'long',
+              'SOR-LONG',
+              1770001000000,
+              1770001000000,
+              'owner-runtime-console-v1',
+              'fact:SOR-001:ETHUSDT:long:public',
+              'fact:SOR-001:ETHUSDT:long:action-time',
+              'fact:SOR-001:ETHUSDT:long:account-safe',
+              'fact:SOR-001:ETHUSDT:long:account-mode',
+              'budget:SOR-001:ETHUSDT:long',
+              'protection:SOR-001:ETHUSDT:long',
+              'exec_policy:event_spec:SOR-001:SOR-LONG:v1',
+              'exec-v1',
+              'owner-policy-v1',
+              'owner-policy-v1',
+              'protection-v1',
+              20,
+              2,
+              1770001900000,
+              'created',
+              'action_time_ticket_identity_only; no_finalgate_no_operation_layer_no_exchange_write',
+              'ticket-hash-sor-eth-long-unit',
+              'versions-hash-sor-eth-long-unit',
+              1770001000000
+            )
+            """
+        ),
+        {"lane_id": lane_id},
+    )
 
 
 def _matrix_by_key(packet: dict) -> dict[str, dict]:
@@ -209,1418 +529,655 @@ def _matrix_by_key(packet: dict) -> dict[str, dict]:
     }
 
 
-def test_goal_status_waits_when_runtime_has_no_fresh_signal(tmp_path: Path) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
+def test_pg_non_market_blockers_ignores_action_time_preflight_ready() -> None:
+    candidate_pool = {
+        "symbol_readiness_rows": [
+            {"first_blocker": "action_time_preflight_ready"},
+            {"first_blocker": "computed_not_satisfied"},
+            {"first_blocker": "event_execution_capability_not_certified"},
+            {"first_blocker": "runtime_profile_scope_missing"},
+        ]
+    }
 
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
+    assert goal_status._pg_non_market_blockers(candidate_pool) == [
+        "candidate_pool_blocker:runtime_profile_scope_missing:1"
+    ]
+
+
+def test_goal_owner_action_required_does_not_escalate_engineering_gaps() -> None:
+    assert goal_status._goal_owner_label("runtime_liveness_degraded") == "处理中"
+    assert goal_status._goal_owner_label("missing_fact") == "处理中"
+    assert goal_status._goal_owner_action_required(
+        "runtime_liveness_degraded",
+        "需要介入",
+    ) is False
+    assert goal_status._goal_owner_action_required("missing_fact", "需要介入") is False
+    assert goal_status._goal_owner_action_required("hard_safety_stop", "需要介入") is True
+
+
+def test_goal_status_uses_pg_candidate_pool_without_json_file(
+    tmp_path: Path,
+    pg_control_connection,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
+    )
+
+    assert packet["source_mode"] == "db_backed"
+    assert packet["projection_target"] == "production_current"
+    assert packet["control_state_watermark"]["table_counts"]["candidate_scope"] == 22
+    assert packet["evidence"]["candidate_pool_status"] == (
+        "strategy_live_candidate_pool_ready"
+    )
+    assert packet["evidence"]["candidate_pool_source_mode"] == "db_backed"
+    assert packet["evidence"]["legacy_candidate_pool_json_read"] is False
+    assert packet["evidence"]["candidate_pool_action_time_lane_input_count"] == 0
+    assert packet["ready_for_real_order_action"] is False
+    assert packet["safety_invariants"]["calls_exchange_write"] is False
+
+
+def test_pg_goal_status_uses_pg_current_when_current_is_clear(
+    tmp_path: Path,
+    pg_control_connection,
+) -> None:
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
+    )
+
+    assert packet["status"] == "waiting_for_signal"
+    assert packet["plain_language_stage"] == "等待市场机会"
+    assert packet["plain_language_next_system_action"] == (
+        "系统继续观察市场，不需要 Owner 操作"
+    )
+    assert packet["owner_action_required"] is False
+    assert packet["action_time_ticket_explanation"]["plain_language_stage"] == (
+        "当前没有 action-time lane"
+    )
+    assert packet["checks"]["fresh_signal_present"] is False
+    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
+    assert packet["checks"]["watcher_liveness_healthy"] is True
+    assert packet["evidence"]["legacy_report_dir_read"] is False
+    assert "selected_strategygroup_scope_mismatch" not in packet["blockers"]
+    assert packet["safety_invariants"]["dangerous_effects"] == []
+    assert packet["safety_invariants"]["calls_exchange_write"] is False
+
+
+def test_pg_goal_status_reports_missing_action_time_ticket_for_open_lane(
+    tmp_path: Path,
+    pg_control_connection,
+) -> None:
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    lane_id = _insert_pg_action_time_lane_without_ticket(pg_control_connection)
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
+    )
+
+    assert packet["status"] == "fresh_signal_processing"
+    assert packet["non_authority_checkpoint"] == "materialize_action_time_ticket"
+    assert packet["plain_language_stage"] == "正在把信号推进成正式票据"
+    assert packet["plain_language_next_system_action"] == (
+        "系统为当前 lane 生成 Action-Time Ticket"
+    )
+    assert packet["owner_action_required"] is False
+    assert packet["checks"]["fresh_signal_present"] is True
+    assert packet["evidence"]["pg_action_time_lane_input_count"] == 1
+    assert packet["evidence"]["pg_active_ticket_count"] == 0
+    assert f"action_time_ticket_missing:{lane_id}" in packet["blockers"]
+    assert packet["action_time_ticket_explanation"]["plain_language_stage"] == (
+        "尚未生成正式候选交易票据"
+    )
+    assert packet["action_time_ticket_explanation"]["missing_ticket_lane_ids"] == [
+        lane_id
+    ]
+    assert (
+        packet["action_time_ticket_explanation"]["decides_trade_authority"] is False
+    )
+    matrix = _matrix_by_key(packet)
+    assert matrix["action_time_ticket"]["status"] == "waiting_for_chain"
+    assert matrix["action_time_ticket"]["blocks_real_submit"] is True
+    assert packet["ready_for_real_order_action"] is False
+
+
+def test_pg_goal_status_advances_open_lane_after_action_time_ticket_exists(
+    tmp_path: Path,
+    pg_control_connection,
+) -> None:
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    lane_id = _insert_pg_action_time_lane_without_ticket(pg_control_connection)
+    _insert_pg_action_time_ticket(pg_control_connection, lane_id)
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
+    )
+
+    assert packet["status"] == "action_time_finalgate_ready"
+    assert packet["non_authority_checkpoint"] == "run_official_action_time_finalgate"
+    assert packet["plain_language_stage"] == "正式票据已生成，等待最终安全检查"
+    assert packet["plain_language_next_system_action"] == (
+        "系统使用 ticket 进入官方 FinalGate 检查"
+    )
+    assert packet["owner_action_required"] is False
+    assert packet["evidence"]["pg_action_time_lane_input_count"] == 1
+    assert packet["evidence"]["pg_active_ticket_count"] == 1
+    assert f"action_time_ticket_missing:{lane_id}" not in packet["blockers"]
+    assert packet["action_time_ticket_explanation"]["plain_language_stage"] == (
+        "已有正式候选交易票据"
+    )
+    assert packet["action_time_ticket_explanation"]["active_ticket_ids"] == [
+        "ticket:SOR-001:ETHUSDT:long:unit"
+    ]
+    matrix = _matrix_by_key(packet)
+    assert matrix["action_time_ticket"]["status"] == "pass"
+    assert matrix["action_time_ticket"]["blocks_real_submit"] is False
+    assert packet["ready_for_real_order_action"] is False
+
+
+def test_pg_goal_status_reports_completed_disabled_smoke_after_lane_expires(
+    pg_control_connection,
+) -> None:
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 120_000,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_monitor_control_state(),
+    )
+
+    assert packet["status"] == "protected_submit_rehearsal_completed"
+    assert packet["non_authority_checkpoint"] == "continue_watcher_observation"
+    assert packet["ready_for_real_order_action"] is False
+    assert packet["owner_action_required"] is False
+    assert packet["evidence"]["pg_latest_successful_protected_submit_attempt_id"] == (
+        prepared["protected_submit_attempt_id"]
+    )
+    assert packet["evidence"]["pg_latest_successful_protected_submit_status"] == (
+        "disabled_smoke_passed"
+    )
+    assert not any(
+        "action_time_boundary_not_reproduced" in blocker
+        for blocker in packet["blockers"]
+    )
+    assert packet["action_time_ticket_explanation"][
+        "latest_protected_submit_attempt_id"
+    ] == prepared["protected_submit_attempt_id"]
+    assert packet["action_time_ticket_explanation"][
+        "latest_protected_submit_status"
+    ] == "disabled_smoke_passed"
+    matrix = _matrix_by_key(packet)
+    assert matrix["action_time_ticket"]["status"] == "pass"
+    assert matrix["ticket_bound_protected_submit"]["status"] == "pass"
+    assert matrix["ticket_bound_protected_submit"]["blocks_real_submit"] is False
+
+
+def test_pg_goal_status_newer_lane_supersedes_previous_disabled_smoke_attempt(
+    pg_control_connection,
+) -> None:
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = submit.prepare_ticket_bound_protected_submit_attempt(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        operation_submit_command_id=ids["operation_submit_command_id"],
+        submit_mode="disabled_smoke",
+        now_ms=NOW_MS + 4000,
+    )
+    attempt_created_at_ms = int(
+        pg_control_connection.execute(
+            text(
+                """
+                SELECT created_at_ms
+                FROM brc_ticket_bound_protected_submit_attempts
+                WHERE protected_submit_attempt_id = :attempt_id
+                """
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        ).scalar_one()
+    )
+    newer_lane_created_at_ms = attempt_created_at_ms + 1000
+    new_lane_id = "lane:SOR-001:ETHUSDT:long:newer-ticket-pending"
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET closed_at_ms = :closed_at_ms,
+                expires_at_ms = :closed_at_ms,
+                lane_scope = 'rehearsal'
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"lane_id": ids["lane_id"], "closed_at_ms": NOW_MS + 4500},
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_action_time_lane_inputs (
+              action_time_lane_input_id, promotion_candidate_id,
+              strategy_group_id, symbol, side, runtime_profile_id,
+              lane_scope, status, signal_event_id, public_fact_snapshot_id,
+              action_time_fact_snapshot_id, runtime_scope_binding_id,
+              candidate_authorization_ref, runtime_safety_snapshot_id,
+              first_blocker_class, created_at_ms, expires_at_ms, closed_at_ms,
+              authority_boundary
+            )
+            SELECT
+              :new_lane_id, promotion_candidate_id,
+              strategy_group_id, symbol, side, runtime_profile_id,
+              'real_submit_candidate', 'ticket_pending', signal_event_id,
+              public_fact_snapshot_id, action_time_fact_snapshot_id,
+              runtime_scope_binding_id, candidate_authorization_ref, NULL,
+              first_blocker_class, :created_at_ms, :expires_at_ms, NULL,
+              authority_boundary
+            FROM brc_action_time_lane_inputs
+            WHERE action_time_lane_input_id = :old_lane_id
+            """
+        ),
+        {
+            "new_lane_id": new_lane_id,
+            "old_lane_id": ids["lane_id"],
+            "created_at_ms": newer_lane_created_at_ms,
+            "expires_at_ms": newer_lane_created_at_ms + 600_000,
+        },
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 120_000,
+    )
+
+    control_state = repository.read_monitor_control_state()
+    assert any(
+        row["action_time_lane_input_id"] == new_lane_id
+        for row in control_state["action_time_lane_inputs"]
+    )
+    assert (
+        goal_status._pg_latest_active_signal_chain_created_at(control_state)
+        == newer_lane_created_at_ms
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=control_state,
+    )
+
+    assert packet["status"] == "fresh_signal_processing"
+    assert packet["non_authority_checkpoint"] == "materialize_action_time_ticket"
+    assert packet["ready_for_real_order_action"] is False
+    assert packet["evidence"]["active_action_time_lane_input_ids"] == [new_lane_id]
+    assert packet["evidence"]["pg_latest_successful_protected_submit_attempt_id"] == ""
+    assert packet["action_time_ticket_explanation"][
+        "latest_protected_submit_attempt_id"
+    ] == ""
+
+
+def test_pg_goal_status_ignores_expired_open_lane(pg_control_connection) -> None:
+    now_ms = 1770002000000
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    lane_id = _insert_pg_action_time_lane_without_ticket(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET expires_at_ms = :expires_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"expires_at_ms": now_ms - 1, "lane_id": lane_id},
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
+    )
+
+    assert packet["evidence"]["pg_action_time_lane_input_count"] == 0
+    assert packet["action_time_ticket_explanation"]["plain_language_stage"] == (
+        "当前没有 action-time lane"
+    )
+    assert lane_id not in json.dumps(packet, ensure_ascii=False)
+
+
+def test_pg_goal_status_ignores_expired_action_time_ticket(
+    pg_control_connection,
+) -> None:
+    now_ms = 1770002000000
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    lane_id = _insert_pg_action_time_lane_without_ticket(pg_control_connection)
+    _insert_pg_action_time_ticket(pg_control_connection, lane_id)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET expires_at_ms = :expires_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"expires_at_ms": now_ms + 600_000, "lane_id": lane_id},
+    )
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_tickets
+            SET expires_at_ms = :expires_at_ms
+            WHERE action_time_lane_input_id = :lane_id
+            """
+        ),
+        {"expires_at_ms": now_ms - 1, "lane_id": lane_id},
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
+    )
+
+    assert packet["evidence"]["pg_action_time_lane_input_count"] == 1
+    assert packet["evidence"]["pg_active_ticket_count"] == 0
+    assert packet["action_time_ticket_explanation"]["active_ticket_ids"] == []
+    assert f"action_time_ticket_missing:{lane_id}" in packet["blockers"]
+
+
+def test_pg_goal_status_ignores_expired_runtime_safety_conflict(
+    pg_control_connection,
+) -> None:
+    now_ms = 1770002000000
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_runtime_safety_state_snapshots (
+              runtime_safety_snapshot_id, action_time_lane_input_id,
+              strategy_group_id, symbol, side, runtime_profile_id, safety_state,
+              submit_allowed, finalgate_ready, operation_layer_ready,
+              protection_ready, active_position_conflict, facts_fresh,
+              trusted_fact_refs_complete, blockers, trusted_fact_refs,
+              observed_at_ms, valid_until_ms, created_at_ms, authority_boundary
+            ) VALUES (
+              'runtime_safety:expired-conflict', 'lane:expired-conflict',
+              'SOR-001', 'ETHUSDT', 'long',
+              'runtime-profile:SOR-001:ETHUSDT:long:v1', 'blocked_safety',
+              false, false, false, false, true, false, false,
+              '["active_position_resolution"]', '{}',
+              :observed_at_ms, :valid_until_ms, :created_at_ms,
+              'unit no exchange write'
+            )
+            """
+        ),
+        {
+            "observed_at_ms": now_ms - 1000,
+            "valid_until_ms": now_ms - 1,
+            "created_at_ms": now_ms - 1000,
+        },
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=now_ms,
+    )
+
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
     )
 
     assert packet["status"] == "waiting_for_signal"
     assert packet["ready_for_real_order_action"] is False
-    assert "next_safe_checkpoint" not in packet
-    assert packet["non_authority_checkpoint"] == "continue_watcher_observation"
-    assert packet["owner_state"]["label"] == "等待机会"
-    assert "next_safe_checkpoint" not in packet["owner_state"]
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "continue_watcher_observation"
-    )
-    assert packet["checks"]["fresh_signal_present"] is False
-    assert packet["checks"]["ready_for_real_order_action"] is False
-    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
-    assert packet["checks"]["fresh_signal_fast_auto_chain_checked"] is True
-    assert packet["checks"]["required_facts_readiness_checked"] is True
-    assert packet["checks"]["execution_attempt_rehearsal_prepare_checked"] is True
-    assert packet["checks"]["common_execution_chain_reuse_checked"] is True
-    assert packet["checks"]["strategygroup_adapter_boundary_checked"] is True
-    assert (
-        packet["checks"]["strategy_intake_no_execution_pipeline_fields_checked"]
-        is True
-    )
-    assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is True
-    assert (
-        packet["checks"]["all_selected_strategygroups_reach_finalgate_dispatch_checked"]
-        is True
-    )
-    assert packet["evidence"]["dry_run_required_checks"][
-        "required_facts_readiness_checked"
-    ] is True
-    assert packet["evidence"]["dry_run_required_checks"][
-        "execution_attempt_rehearsal_prepare_checked"
-    ] is True
-    assert packet["evidence"]["dry_run_required_checks"][
-        "common_execution_chain_reuse_checked"
-    ] is True
-    assert packet["evidence"]["dry_run_required_checks"][
-        "strategygroup_adapter_boundary_checked"
-    ] is True
-    assert packet["evidence"]["dry_run_required_checks"][
-        "strategy_intake_no_execution_pipeline_fields_checked"
-    ] is True
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert packet["real_order_boundary"]["submit_blocker_review_required"] is False
-    assert packet["real_order_boundary"]["submit_blocker_review_allowed"] is False
-    assert packet["real_order_boundary"]["project_progress_allowed"] is False
-    assert packet["real_order_boundary"]["continue_observation_allowed"] is False
-    assert packet["real_order_boundary"]["real_submit_allowed"] is False
-    assert packet["evidence"]["submit_blocker_review"] == {
-        "required": False,
-        "allowed": False,
-        "project_progress_allowed": False,
-        "continue_observation_allowed": False,
-        "real_submit_allowed": False,
-        "non_authority_checkpoint": "continue_watcher_observation",
-        "blocker_keys": [],
-    }
-    matrix = _matrix_by_key(packet)
-    assert not any(
-        "-packet.json" in str(item.get("evidence") or "")
-        for item in matrix.values()
-    )
-    assert matrix["fresh_signal"]["status"] == "waiting_for_market"
-    assert matrix["candidate_authorization"]["evidence"] == (
-        "post_signal_resume/resume_dispatch"
-    )
-    assert matrix["candidate_authorization"]["status"] == "waiting_for_market"
-    assert matrix["official_operation_layer"]["evidence"] == "resume_dispatch"
-    assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
-    assert matrix["official_operation_layer"]["blocker_class"] == "waiting_for_market"
-    assert matrix["official_operation_layer"]["blocks_real_submit"] is True
-    assert matrix["deployment_channel"]["status"] == "pass"
-    assert matrix["deployment_channel"]["blocks_real_submit"] is False
-    assert matrix["active_position_open_order"]["status"] == "pass"
-    assert matrix["protection"]["status"] == "pass"
-    assert matrix["budget"]["status"] == "pass"
-    assert matrix["duplicate_submit"]["status"] == "pass"
-    assert matrix["symbol_side_notional_leverage_scope"]["status"] == "pass"
-    assert matrix["hard_safety"]["status"] == "pass"
-    assert packet["safety_invariants"]["calls_operation_layer"] is False
+    assert "active_position_resolution" not in packet["blockers"]
 
 
-def test_goal_status_ignores_legacy_resume_dispatch_packet_source(
+def test_pg_goal_status_blocks_open_lane_with_invalid_runtime_scope_binding(
     tmp_path: Path,
+    pg_control_connection,
 ) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    (report_dir / "resume-dispatch-artifact.json").unlink()
-    _write(
-        report_dir / "resume-dispatch-packet.json",
-        {
-            "status": "ready_for_operation_layer",
-            "dispatch_status": "official_operation_layer_evidence_ready",
-            "dispatch_action": "call_official_operation_layer_submit",
-            "ready_runtime_signals": 1,
-            "blockers": [],
-        },
+    _insert_pg_coverage_and_unsatisfied_facts(pg_control_connection)
+    _insert_pg_action_time_lane_without_ticket(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_action_time_lane_inputs
+            SET runtime_scope_binding_id = 'runtime_scope:missing'
+            WHERE action_time_lane_input_id = 'lane:SOR-001:ETHUSDT:long:ticket-pending'
+            """
+        )
+    )
+    pg_control_connection.commit()
+    repository = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=PG_TEST_NOW_MS,
     )
 
-    artifact = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert artifact["checks"]["required_artifacts_present"] is False
-    assert artifact["checks"]["fresh_signal_present"] is False
-    assert "missing_artifact:resume_dispatch" in artifact["blockers"]
-    assert artifact["real_order_boundary"]["ready_for_real_order_action"] is False
-
-
-def test_goal_status_ignores_legacy_wakeup_packet_source(tmp_path: Path) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "wakeup-packet.json",
-        {
-            "status": "runtime_signal_ready_for_non_executing_prepare",
-            "summary": {"runtime_ready_signal_count": 1},
-        },
-    )
-
-    artifact = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert artifact["checks"]["fresh_signal_present"] is False
-    assert artifact["status"] == "waiting_for_signal"
-
-
-def test_goal_status_requires_specific_dry_run_order_chain_checks(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "runtime-dry-run-audit-chain.json",
-        {
-            "status": "passed",
-            "checks": {
-                "scenario_count": 5,
-                "dangerous_effects_absent": True,
-            },
-            "safety_invariants": {
-                "dangerous_effects": [],
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "dry_run_audit_degraded"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "repair_runtime_dry_run_audit_chain"
-    )
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert packet["checks"]["common_execution_chain_reuse_checked"] is False
-    assert packet["checks"]["strategygroup_adapter_boundary_checked"] is False
-    assert (
-        packet["checks"]["strategy_intake_no_execution_pipeline_fields_checked"]
-        is False
-    )
-    assert packet["checks"]["selected_strategygroup_dispatch_guard_checked"] is False
-    assert "runtime_dry_run_audit_not_passed" in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:operation_layer_evidence_relay_checked"
-        in packet["blockers"]
-    )
-    assert (
-        "runtime_dry_run_missing_required_check:mock_operation_layer_closed_loop_checked"
-        in packet["blockers"]
-    )
-    assert (
-        "runtime_dry_run_missing_required_check:shared_runtime_pipeline_checked"
-        in packet["blockers"]
-    )
-    assert (
-        "runtime_dry_run_missing_required_check:common_execution_chain_reuse_checked"
-        in packet["blockers"]
-    )
-    assert (
-        "runtime_dry_run_missing_required_check:strategygroup_adapter_boundary_checked"
-        in packet["blockers"]
-    )
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "strategy_intake_no_execution_pipeline_fields_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "runtime_tier_policy_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "only_mpg_tiny_real_order_eligible_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "new_strategygroups_default_observe_only_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "selected_strategygroup_dispatch_guard_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "all_selected_strategygroups_reach_finalgate_dispatch_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "operation_layer_hard_safety_blocker_matrix_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "expanded_watcher_scope_execution_guard_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "operation_layer_authorization_chain_guard_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "post_submit_closed_loop_evidence_guard_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "post_submit_exit_outcome_matrix_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "operation_layer_submit_result_identity_guard_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "post_submit_finalize_result_identity_guard_checked"
-    ) in packet["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "execution_attempt_rehearsal_prepare_checked"
-    ) in packet["blockers"]
-
-
-def test_goal_status_ignores_legacy_nested_dry_run_audit_artifact(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    root_artifact = report_dir / "runtime-dry-run-audit-chain.json"
-    nested_artifact = (
-        report_dir
-        / "dry-run-audit-chain"
-        / "runtime-dry-run-audit-chain.json"
-    )
-    root_payload = json.loads(root_artifact.read_text(encoding="utf-8"))
-    root_artifact.unlink()
-    nested_artifact.parent.mkdir(parents=True)
-    _write(nested_artifact, root_payload)
-
-    artifact = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert artifact["status"] == "missing_fact"
-    assert artifact["checks"]["runtime_dry_run_audit_passed"] is False
-    assert "missing_artifact:runtime_dry_run_audit" in artifact["blockers"]
-    assert "runtime_dry_run_audit_not_passed" in artifact["blockers"]
-    assert artifact["evidence"]["dry_run_scenario_count"] is None
-
-
-def test_goal_status_uses_root_dry_run_audit_artifact_even_when_nested_exists(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    root_artifact = report_dir / "runtime-dry-run-audit-chain.json"
-    nested_artifact = (
-        report_dir
-        / "dry-run-audit-chain"
-        / "runtime-dry-run-audit-chain.json"
-    )
-    root_payload = json.loads(root_artifact.read_text(encoding="utf-8"))
-    root_payload["checks"]["scenario_count"] = 12
-    root_payload["checks"]["execution_attempt_rehearsal_prepare_checked"] = False
-    root_payload["checks"][
-        "strategy_intake_no_execution_pipeline_fields_checked"
-    ] = False
-    root_payload["generated_at_ms"] = 1
-    _write(root_artifact, root_payload)
-
-    nested_payload = json.loads(root_artifact.read_text(encoding="utf-8"))
-    nested_payload["checks"]["scenario_count"] = 14
-    nested_payload["checks"]["execution_attempt_rehearsal_prepare_checked"] = True
-    nested_payload["checks"][
-        "strategy_intake_no_execution_pipeline_fields_checked"
-    ] = True
-    nested_payload["generated_at_ms"] = 2
-    nested_artifact.parent.mkdir(parents=True)
-    _write(nested_artifact, nested_payload)
-
-    artifact = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert artifact["checks"]["runtime_dry_run_audit_passed"] is False
-    assert artifact["checks"]["execution_attempt_rehearsal_prepare_checked"] is False
-    assert (
-        artifact["checks"]["strategy_intake_no_execution_pipeline_fields_checked"]
-        is False
-    )
-    assert artifact["evidence"]["dry_run_scenario_count"] == 12
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "execution_attempt_rehearsal_prepare_checked"
-    ) in artifact["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "execution_attempt_rehearsal_prepare_checked"
-    ) in artifact["blockers"]
-    assert (
-        "runtime_dry_run_missing_required_check:"
-        "strategy_intake_no_execution_pipeline_fields_checked"
-    ) in artifact["blockers"]
-
-
-def test_goal_status_does_not_treat_missing_position_fact_as_conflict(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "strategy-group-live-facts-readiness.json",
-        {
-            "status": "blocked_missing_facts",
-            "blockers": [
-                "MPG-001:account:missing",
-                "MPG-001:active_position:missing",
-                "MPG-001:open_orders:missing",
-                "MPG-001:budget:missing",
-            ],
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    matrix = _matrix_by_key(packet)
-    assert matrix["required_facts"]["status"] == "blocked"
-    assert matrix["active_position_open_order"]["status"] == "pass"
-    assert matrix["active_position_open_order"]["blocker_class"] == "none"
-    assert matrix["budget"]["status"] == "blocked"
-
-
-def test_goal_status_routes_fresh_signal_to_action_time_finalgate(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "ready_for_action_time_final_gate",
-            "dispatch_status": "official_finalgate_preflight_dispatch_ready",
-            "dispatch_action": "run_official_action_time_final_gate_preflight",
-            "selected_runtime_instance_ids": ["runtime-mpg-1"],
-            "ready_runtime_signals": 1,
-            "blockers": [],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "action_time_finalgate_ready"
-    assert packet["owner_state"]["label"] == "处理中"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "run_official_action_time_finalgate"
-    )
-    assert packet["checks"]["fresh_signal_present"] is True
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-
-
-def test_goal_status_routes_owner_attention_prepare_signal_without_liveness_degrade(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "watcher-tick.json",
-        {
-            "status": "owner_attention_pending",
-            "blockers": [],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-    _write(
-        report_dir / "wakeup-evidence.json",
-        {
-            "status": "runtime_signal_ready_for_non_executing_prepare",
-            "summary": {
-                "runtime_ready_signal_count": 1,
-                "selected_runtime_instance_ids": [
-                    "runtime-mpg-1",
-                    "runtime-sor-waiting",
-                ],
-            },
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-    _write(
-        report_dir / "strategygroup-runtime-pilot-status.json",
-        {
-            "status": "ready_for_non_executing_prepare",
-            "blockers": [],
-            "watcher_scope_alignment": {
-                "status": "expanded_scope",
-                "selected_strategy_group_id": "MPG-001",
-                "matched_runtime_signal_summaries": [
-                    {
-                        "runtime_instance_id": "runtime-mpg-1",
-                        "strategy_family_id": "MPG-001",
-                        "symbol": "MSTR/USDT:USDT",
-                        "side": "long",
-                        "status": "waiting_for_signal",
-                    }
-                ],
-                "out_of_scope_runtime_signal_summaries": [
-                    {
-                        "runtime_instance_id": "runtime-sor-waiting",
-                        "strategy_family_id": "SOR-001",
-                        "symbol": "XAG/USDT:USDT",
-                        "side": "short",
-                        "status": "waiting_for_signal",
-                    }
-                ],
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "fresh_signal_processing"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "prepare_candidate_grant_authorization_evidence"
-    )
-    assert packet["checks"]["fresh_signal_present"] is True
-    assert packet["checks"]["watcher_liveness_healthy"] is True
-    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
-    assert packet["blockers"] == []
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    matrix = _matrix_by_key(packet)
-    assert matrix["candidate_authorization"]["status"] == "waiting_for_chain"
-    assert matrix["action_time_finalgate"]["status"] == "waiting_for_chain"
-    assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
-
-
-def test_goal_status_ignores_stale_wakeup_when_resume_waits_for_market(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "watcher-tick.json",
-        {
-            "status": "owner_attention_pending",
-            "blockers": [],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-    _write(
-        report_dir / "wakeup-evidence.json",
-        {
-            "status": "runtime_signal_ready_for_non_executing_prepare",
-            "summary": {"runtime_ready_signal_count": 1},
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-    _write(
-        report_dir / "strategygroup-runtime-pilot-status.json",
-        {
-            "scope": "strategygroup_runtime_pilot_status",
-            "status": "blocked_operator_review",
-            "blockers": [],
-            "owner_state": {
-                "blocker_class": "review_only_warning",
-                "status": "blocked_operator_review",
-            },
-            "watcher_scope_alignment": {
-                "status": "aligned",
-                "selected_strategy_group_id": "MPG-001",
-                "matched_runtime_signal_summaries": [
-                    {
-                        "runtime_instance_id": "runtime-mpg-1",
-                        "strategy_family_id": "MPG-001",
-                        "symbol": "MSTR/USDT:USDT",
-                        "side": "long",
-                        "status": "waiting_for_signal",
-                    }
-                ],
-                "out_of_scope_runtime_signal_summaries": [],
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["checks"]["fresh_signal_present"] is False
-    assert packet["checks"]["watcher_liveness_healthy"] is True
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "continue_watcher_observation"
-    )
-    matrix = _matrix_by_key(packet)
-    assert matrix["fresh_signal"]["status"] == "waiting_for_market"
-    assert matrix["candidate_authorization"]["status"] == "waiting_for_market"
-
-
-def test_goal_status_surfaces_watcher_liveness_blockers(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "watcher-tick.json",
-        {
-            "status": "owner_attention_pending",
-            "blockers": [
-                "loop_command_failed:2",
-                "runtime-mpg-1:strategy_signal_not_ready_for_shadow_candidate_prepare",
-            ],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-    _write(
-        report_dir / "latest-summary.json",
-        {
-            "status": "blocked",
-            "active_runtime_count": 11,
-            "selected_runtime_instance_ids": [
-                "runtime-mpg-1",
-                "runtime-teq-1",
-                "runtime-fbs-1",
-            ],
-            "blockers": [
-                "runtime-mpg-1:runtime_attempts_exhausted",
-                "runtime-mpg-1:order_candidate_id_or_authorization_id_required",
-                "runtime-teq-1:strategy_signal_not_ready_for_shadow_candidate_prepare",
-            ],
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "runtime_liveness_degraded"
-    assert packet["owner_state"]["label"] == "需要介入"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "repair_runtime_attempt_renewal_or_scope"
-    )
-    assert packet["checks"]["watcher_liveness_healthy"] is False
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert "watcher_tick:loop_command_failed:2" in packet["blockers"]
-    assert (
-        "latest_summary:runtime-mpg-1:runtime_attempts_exhausted"
-        in packet["blockers"]
-    )
-    assert (
-        "latest_summary:runtime-teq-1:strategy_signal_not_ready_for_shadow_candidate_prepare"
-        not in packet["blockers"]
-    )
-    assert packet["evidence"]["active_runtime_count"] == 11
-    assert packet["evidence"]["selected_runtime_instance_count"] == 3
-
-
-def test_goal_status_prioritizes_operation_layer_missing_fact_after_prepare(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "strategygroup-runtime-pilot-status.json",
-        {
-            "status": "ready_for_action_time_final_gate",
-            "blockers": [],
-            "watcher_scope_alignment": {
-                "status": "aligned",
-                "selected_strategy_group_id": "MPG-001",
-                "matched_runtime_signal_summaries": [
-                    {
-                        "runtime_instance_id": "runtime-fresh-1",
-                        "strategy_family_id": "MPG-001",
-                        "symbol": "MSTR/USDT:USDT",
-                        "side": "long",
-                        "status": "ready_for_action_time_final_gate",
-                    }
-                ],
-                "out_of_scope_runtime_signal_summaries": [],
-            },
-        },
-    )
-    _write(
-        report_dir / "watcher-tick.json",
-        {
-            "status": "watcher_attention",
-            "blockers": [
-                "disabled_smoke:preview_disabled_first_real_submit_action_http_404",
-                "runtime-old-1:runtime_attempts_exhausted",
-                "runtime-old-1:order_candidate_id_or_authorization_id_required",
-                "runtime-waiting-1:strategy_signal_not_ready_for_shadow_candidate_prepare",
-            ],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-    _write(
-        report_dir / "latest-summary.json",
-        {
-            "status": "ready_for_final_gate_preflight",
-            "active_runtime_count": 12,
-            "selected_runtime_instance_ids": [
-                "runtime-fresh-1",
-                "runtime-old-1",
-                "runtime-waiting-1",
-            ],
-            "blockers": [
-                "runtime-old-1:runtime_attempts_exhausted",
-                "runtime-old-1:order_candidate_id_or_authorization_id_required",
-                "runtime-waiting-1:strategy_signal_not_ready_for_shadow_candidate_prepare",
-            ],
-        },
-    )
-    _write(
-        report_dir / "post-signal-resume-pack.json",
-        {
-            "status": "ready_for_action_time_final_gate",
-            "selected_runtime_instance_ids": ["runtime-fresh-1"],
-            "ready_runtime_signals": 1,
-            "action_time_resume": {
-                "prepared_authorization_id": "auth-1",
-                "status": "ready_for_action_time_final_gate",
-            },
-        },
-    )
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "operation_layer_submit_blocked",
-            "dispatch_status": "operation_layer_submit_blocked",
-            "blocker_class": "missing_fact",
-            "selected_runtime_instance_ids": ["runtime-fresh-1"],
-            "ready_runtime_signals": 1,
-            "blockers": [
-                "operation_layer_not_ready:operation_layer_blocked",
-                "missing_evidence_id:exchange_submit_action_authorization_id",
-            ],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "missing_fact"
-    assert packet["owner_state"]["label"] == "需要介入"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "repair_missing_operation_layer_evidence"
-    )
-    assert packet["checks"]["fresh_signal_present"] is True
-    assert packet["checks"]["watcher_liveness_healthy"] is False
-    assert "watcher_tick:runtime-old-1:runtime_attempts_exhausted" in packet["blockers"]
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-
-
-def test_goal_status_marks_operation_layer_ready_only_after_required_evidence(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "ready_for_operation_layer",
-            "dispatch_status": "official_operation_layer_evidence_ready",
-            "dispatch_action": "call_official_operation_layer_submit",
-            "blocker_class": "none",
-            "selected_runtime_instance_ids": ["runtime-mpg-1"],
-            "ready_runtime_signals": 1,
-            "blockers": [],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "operation_layer_ready"
-    assert packet["ready_for_real_order_action"] is True
-    assert packet["owner_state"]["label"] == "处理中"
-    assert packet["checks"]["selected_strategygroup_scope_ready"] is True
-    assert packet["checks"]["ready_for_real_order_action"] is True
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is True
-    assert packet["real_order_boundary"]["submit_blocker_review_required"] is False
-    assert packet["real_order_boundary"]["submit_blocker_review_allowed"] is False
-    assert packet["real_order_boundary"]["project_progress_allowed"] is False
-    assert packet["real_order_boundary"]["continue_observation_allowed"] is False
-    assert packet["real_order_boundary"]["real_submit_allowed"] is True
-    assert packet["real_order_boundary"]["submit_blocker_keys"] == []
-    assert packet["evidence"]["submit_blocker_review"] == {
-        "required": False,
-        "allowed": False,
-        "project_progress_allowed": False,
-        "continue_observation_allowed": False,
-        "real_submit_allowed": True,
-        "non_authority_checkpoint": "call_official_operation_layer_submit_after_action_time_recheck",
-        "blocker_keys": [],
-    }
-    matrix = _matrix_by_key(packet)
-    assert matrix["fresh_signal"]["status"] == "pass"
-    assert matrix["candidate_authorization"]["status"] == "pass"
-    assert matrix["action_time_finalgate"]["status"] == "pass"
-    assert matrix["official_operation_layer"]["status"] == "pass"
-    assert matrix["runtime_order_capable_profile"]["status"] == "pass"
-    assert not [
-        item
-        for item in matrix.values()
-        if item["status"] == "blocked" or item["blocks_real_submit"] is True
-    ]
-
-
-def test_goal_status_blocks_real_submit_when_runtime_order_profile_is_not_capable(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "ready_for_operation_layer",
-            "dispatch_status": "official_operation_layer_evidence_ready",
-            "dispatch_action": "call_official_operation_layer_submit",
-            "blocker_class": "none",
-            "selected_runtime_instance_ids": ["runtime-mpg-1"],
-            "ready_runtime_signals": 1,
-            "blockers": ["brc_execution_permission_max_not_order_allowed"],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "deployment_issue"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "repair_runtime_order_capable_profile_or_deploy_channel"
-    )
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert packet["real_order_boundary"]["real_submit_allowed"] is False
-    assert packet["real_order_boundary"]["submit_blocker_keys"] == [
-        "runtime_order_capable_profile"
-    ]
-    assert (
-        "matrix_submit_blocker:runtime_order_capable_profile"
-        in packet["blockers"]
-    )
-    matrix = _matrix_by_key(packet)
-    assert matrix["runtime_order_capable_profile"]["status"] == "blocked"
-    assert matrix["runtime_order_capable_profile"]["blocker_class"] == (
-        "deployment_issue"
-    )
-    assert matrix["runtime_order_capable_profile"]["blocks_real_submit"] is True
-
-
-@pytest.mark.parametrize(
-    (
-        "blocker",
-        "expected_status",
-        "expected_next_checkpoint",
-        "expected_matrix_key",
-    ),
-    [
-        (
-            "conflicting_active_position",
-            "active_position_resolution",
-            "record_submit_blocker_review_and_resolve_active_position",
-            "active_position_open_order",
-        ),
-        (
-            "conflicting_open_order",
-            "active_position_resolution",
-            "record_submit_blocker_review_and_resolve_active_position",
-            "active_position_open_order",
-        ),
-        (
-            "protection_missing",
-            "missing_fact",
-            "record_submit_blocker_review_and_refresh_required_facts",
-            "protection",
-        ),
-        (
-            "budget_missing",
-            "missing_fact",
-            "record_submit_blocker_review_and_refresh_required_facts",
-            "budget",
-        ),
-        (
-            "duplicate_submit_risk",
-            "hard_safety_stop",
-            "record_submit_blocker_review_artifact",
-            "duplicate_submit",
-        ),
-        (
-            "symbol_scope_mismatch",
-            "hard_safety_stop",
-            "record_submit_blocker_review_artifact",
-            "symbol_side_notional_leverage_scope",
-        ),
-        (
-            "side_scope_mismatch",
-            "hard_safety_stop",
-            "record_submit_blocker_review_artifact",
-            "symbol_side_notional_leverage_scope",
-        ),
-        (
-            "notional_scope_mismatch",
-            "hard_safety_stop",
-            "record_submit_blocker_review_artifact",
-            "symbol_side_notional_leverage_scope",
-        ),
-        (
-            "leverage_scope_mismatch",
-            "hard_safety_stop",
-            "record_submit_blocker_review_artifact",
-            "symbol_side_notional_leverage_scope",
-        ),
-    ],
-)
-def test_goal_status_never_opens_real_order_when_matrix_has_submit_blocker(
-    blocker: str,
-    expected_status: str,
-    expected_next_checkpoint: str,
-    expected_matrix_key: str,
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "ready_for_operation_layer",
-            "dispatch_status": "official_operation_layer_evidence_ready",
-            "dispatch_action": "call_official_operation_layer_submit",
-            "blocker_class": "none",
-            "selected_runtime_instance_ids": ["runtime-mpg-1"],
-            "ready_runtime_signals": 1,
-            "blockers": [blocker],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == expected_status
-    assert packet["owner_state"]["non_authority_checkpoint"] == expected_next_checkpoint
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert packet["real_order_boundary"]["submit_blocker_review_required"] is True
-    assert packet["real_order_boundary"]["submit_blocker_review_allowed"] is True
-    assert packet["real_order_boundary"]["project_progress_allowed"] is True
-    assert packet["real_order_boundary"]["continue_observation_allowed"] is True
-    assert packet["real_order_boundary"]["real_submit_allowed"] is False
-    assert packet["real_order_boundary"]["submit_blocker_keys"] == [
-        expected_matrix_key
-    ]
-    assert f"matrix_submit_blocker:{expected_matrix_key}" in packet["blockers"]
-    assert packet["evidence"]["matrix_submit_blockers"] == [expected_matrix_key]
-    assert packet["evidence"]["submit_blocker_review"] == {
-        "required": True,
-        "allowed": True,
-        "project_progress_allowed": True,
-        "continue_observation_allowed": True,
-        "real_submit_allowed": False,
-        "non_authority_checkpoint": expected_next_checkpoint,
-        "blocker_keys": [expected_matrix_key],
-    }
-    matrix = _matrix_by_key(packet)
-    assert matrix["official_operation_layer"]["status"] == "waiting_for_chain"
-    assert matrix["official_operation_layer"]["blocks_real_submit"] is True
-    assert matrix[expected_matrix_key]["status"] == "blocked"
-    assert matrix[expected_matrix_key]["blocks_real_submit"] is True
-
-
-def test_goal_status_blocks_operation_layer_ready_for_out_of_scope_runtime(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "ready_for_operation_layer",
-            "dispatch_status": "official_operation_layer_evidence_ready",
-            "dispatch_action": "call_official_operation_layer_submit",
-            "blocker_class": "none",
-            "selected_runtime_instance_ids": ["runtime-teq-1"],
-            "ready_runtime_signals": 1,
-            "blockers": [],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
+    packet = goal_status.build_goal_status_artifact_from_control_state(
+        control_state=repository.read_control_state(),
     )
 
     assert packet["status"] == "runtime_scope_mismatch"
-    assert packet["owner_state"]["label"] == "需要介入"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "ignore_out_of_scope_signal_and_continue_selected_scope_observation"
-    )
-    assert packet["checks"]["fresh_signal_present"] is True
     assert packet["checks"]["selected_strategygroup_scope_ready"] is False
-    assert (
-        "fresh_signal_outside_selected_strategygroup_scope:runtime-teq-1"
-        in packet["blockers"]
-    )
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert packet["real_order_boundary"]["selected_strategygroup_scope_ready"] is False
+    assert "selected_strategygroup_scope_mismatch" in packet["blockers"]
     matrix = _matrix_by_key(packet)
     assert matrix["selected_strategygroup_scope"]["status"] == "blocked"
-    assert matrix["selected_strategygroup_scope"]["blocks_real_submit"] is True
     assert matrix["symbol_side_notional_leverage_scope"]["status"] == "blocked"
-    assert (
-        matrix["symbol_side_notional_leverage_scope"]["blocker_class"]
-        == "hard_safety_stop"
-    )
+    assert packet["ready_for_real_order_action"] is False
 
 
-def test_goal_status_does_not_open_operation_layer_when_live_facts_are_blocked(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "strategy-group-live-facts-readiness.json",
-        {
-            "status": "strategy_group_live_facts_blocked",
-            "blockers": ["open_order_facts_stale"],
-        },
-    )
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "ready_for_operation_layer",
-            "dispatch_status": "official_operation_layer_evidence_ready",
-            "dispatch_action": "call_official_operation_layer_submit",
-            "blocker_class": "none",
-            "ready_runtime_signals": 1,
-            "blockers": [],
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "missing_fact"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "refresh_strategy_group_live_facts_readiness"
-    )
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert "live_facts_not_ready" in packet["blockers"]
-    matrix = _matrix_by_key(packet)
-    assert matrix["required_facts"]["status"] == "blocked"
-    assert matrix["required_facts"]["blocker_class"] == "missing_fact"
-    assert matrix["required_facts"]["blocks_real_submit"] is True
-    assert matrix["active_position_open_order"]["status"] == "pass"
-    assert matrix["active_position_open_order"]["blocks_real_submit"] is False
-
-
-def test_goal_status_open_order_facts_stale_does_not_block_active_position_open_order(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "strategy-group-live-facts-readiness.json",
-        {
-            "status": "strategy_group_live_facts_blocked",
-            "blockers": ["open_order_facts_stale"],
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    matrix = _matrix_by_key(packet)
-    assert packet["status"] == "missing_fact"
-    assert matrix["required_facts"]["status"] == "blocked"
-    assert matrix["required_facts"]["blocker_class"] == "missing_fact"
-    assert matrix["active_position_open_order"]["status"] == "pass"
-    assert matrix["active_position_open_order"]["blocker_class"] == "none"
-    assert matrix["active_position_open_order"]["blocks_real_submit"] is False
-
-
-def test_goal_status_scope_matching_ignores_benign_symbol_read_errors(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "waiting_for_market",
-            "dispatch_status": "no_action_continue_observation",
-            "dispatch_action": "continue_watcher_observation",
-            "blocker_class": "waiting_for_market",
-            "selected_runtime_instance_ids": ["runtime-mpg-1"],
-            "blockers": ["symbol_read_error"],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    matrix = _matrix_by_key(packet)
-    assert matrix["symbol_side_notional_leverage_scope"]["status"] == "pass"
-    assert matrix["symbol_side_notional_leverage_scope"]["blocks_real_submit"] is False
-
-
-def test_goal_status_scope_matching_preserves_true_scope_mismatch_blocker(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "waiting_for_market",
-            "dispatch_status": "no_action_continue_observation",
-            "dispatch_action": "continue_watcher_observation",
-            "blocker_class": "waiting_for_market",
-            "selected_runtime_instance_ids": ["runtime-mpg-1"],
-            "blockers": ["scope_mismatch"],
-            "safety_invariants": {
-                "exchange_write_called": False,
-                "order_created": False,
-                "order_lifecycle_called": False,
-                "withdrawal_or_transfer_created": False,
-            },
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    matrix = _matrix_by_key(packet)
-    assert matrix["symbol_side_notional_leverage_scope"]["status"] == "blocked"
-    assert (
-        matrix["symbol_side_notional_leverage_scope"]["blocker_class"]
-        == "hard_safety_stop"
-    )
-    assert matrix["symbol_side_notional_leverage_scope"]["blocks_real_submit"] is True
-
-
-def test_goal_status_blocks_active_position_conflict_before_real_order_boundary(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "resume-dispatch-artifact.json",
-        {
-            "status": "blocked_active_position_resolution",
-            "dispatch_status": "blocked_before_operation_layer",
-            "dispatch_action": "resolve_active_position_first",
-            "blocker_class": "active_position_resolution",
-            "ready_runtime_signals": 1,
-            "blockers": ["conflicting_open_order"],
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "active_position_resolution"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "resolve_active_position_or_open_order_conflict"
-    )
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    matrix = _matrix_by_key(packet)
-    assert matrix["active_position_open_order"]["status"] == "blocked"
-    assert (
-        matrix["active_position_open_order"]["blocker_class"]
-        == "active_position_resolution"
-    )
-    assert matrix["active_position_open_order"]["blocks_real_submit"] is True
-
-
-def test_goal_status_blocks_when_required_packet_is_missing(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    (report_dir / "owner-console-source-readiness.json").unlink()
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "missing_fact"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "refresh_required_runtime_artifacts"
-    )
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert "missing_artifact:source_readiness" in packet["blockers"]
-    assert "required_artifacts_present" in packet["checks"]
-    assert "required_packets_present" not in packet["checks"]
-    assert "missing_packet:source_readiness" not in packet["blockers"]
-
-
-def test_goal_status_blocks_when_deployed_head_is_not_expected(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json", head="old"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "deployment_issue"
-    assert packet["blockers"] == ["deployed_head_mismatch"]
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "repair_deploy_channel_while_continuing_watcher_observation"
-    )
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-
-
-def test_goal_status_surfaces_deploy_channel_degraded_from_source_readiness(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "owner-console-source-readiness.json",
-        {
-            "status": "ready",
-            "owner_summary": {
-                "market_opportunity": "等待机会",
-                "funds": "资金正常",
-                "orders": "暂无订单",
-                "positions": "暂无持仓",
-                "protection": "保护正常",
-                "runtime_dry_run_audit": "审计演练正常",
-                "deploy_channel": "部署通道暂不可用",
-            },
-            "source_health": {
-                "deploy_channel": {
-                    "status": "degraded",
-                    "owner_label": "部署通道暂不可用",
-                    "reason": "tokyo_connectivity:tokyo_tcp_22_unreachable",
-                    "summary": {
-                        "checked": True,
-                        "connectivity_ready": False,
-                        "blockers": ["tokyo_tcp_22_unreachable"],
-                    },
-                }
-            },
-            "blockers": [],
-        },
-    )
-
-    packet = build_goal_status_artifact(
-        report_dir=report_dir,
-        release_manifest=_manifest(tmp_path / "manifest.json"),
-        expected_head=HEAD,
-    )
-
-    assert packet["status"] == "deployment_issue"
-    assert packet["owner_state"]["non_authority_checkpoint"] == (
-        "repair_deploy_channel_while_continuing_watcher_observation"
-    )
-    assert packet["checks"]["source_readiness_ready"] is True
-    assert packet["checks"]["fresh_signal_present"] is False
-    assert "deploy_channel:tokyo_tcp_22_unreachable" in packet["blockers"]
-    matrix = _matrix_by_key(packet)
-    assert matrix["deployment_channel"]["status"] == "blocked"
-    assert matrix["deployment_channel"]["blocker_class"] == "deployment_issue"
-    assert matrix["deployment_channel"]["blocks_real_submit"] is True
-    assert matrix["fresh_signal"]["status"] == "waiting_for_market"
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-    assert "deploy_channel:tokyo_tcp_22_unreachable" in packet["evidence"][
-        "deploy_channel_blockers"
-    ]
-
-
-def test_goal_status_does_not_block_local_dry_run_on_deploy_channel_degraded(
-    tmp_path: Path,
-) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
-    _write(
-        report_dir / "owner-console-source-readiness.json",
-        {
-            "status": "ready",
-            "owner_summary": {
-                "market_opportunity": "等待机会",
-                "funds": "资金正常",
-                "orders": "暂无订单",
-                "positions": "暂无持仓",
-                "protection": "保护正常",
-                "runtime_dry_run_audit": "审计演练正常",
-                "deploy_channel": "部署通道暂不可用",
-            },
-            "source_health": {
-                "deploy_channel": {
-                    "status": "degraded",
-                    "owner_label": "部署通道暂不可用",
-                    "reason": "tokyo_connectivity:tokyo_tcp_22_unreachable",
-                    "summary": {
-                        "checked": True,
-                        "connectivity_ready": False,
-                        "blockers": ["tokyo_tcp_22_unreachable"],
-                    },
-                }
-            },
-            "blockers": [],
-        },
-    )
-
-    packet = build_goal_status_artifact(report_dir=report_dir)
-
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["non_authority_checkpoint"] == "continue_watcher_observation"
-    assert packet["checks"]["deployment_aligned"] is True
-    assert packet["evidence"]["deploy_channel_enforced"] is False
-    assert "deploy_channel:tokyo_tcp_22_unreachable" not in packet["blockers"]
-    assert "deploy_channel:tokyo_tcp_22_unreachable" in packet["evidence"][
-        "deploy_channel_blockers"
-    ]
-    matrix = _matrix_by_key(packet)
-    assert matrix["deployment_channel"]["status"] == "pass"
-    assert matrix["deployment_channel"]["blocks_real_submit"] is False
-    assert packet["real_order_boundary"]["ready_for_real_order_action"] is False
-
-
-def test_goal_status_cli_writes_to_explicit_report_dir_by_default(
+def test_goal_status_cli_blocks_local_file_fallback_without_diagnostic_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    report_dir = tmp_path / "reports"
-    _write_base_artifacts(report_dir)
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
 
     monkeypatch.setattr(
         sys,
         "argv",
         [
             "build_strategygroup_runtime_goal_status.py",
-            "--report-dir",
-            str(report_dir),
+        ],
+    )
+
+    assert goal_status.main() == 2
+    assert "PG_DATABASE_URL is required" in capsys.readouterr().err
+
+
+def test_goal_status_pg_cli_round_trip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    migration = _load_module(MIGRATION_PATH, "migration_086_goal_status_cli")
+    seed = _load_module(SEED_PATH, "seed_runtime_control_state_goal_status_cli")
+    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            old_op = migration.op
+            migration.op = Operations(MigrationContext.configure(conn))
+            try:
+                migration.upgrade()
+            finally:
+                migration.op = old_op
+            seed.seed_runtime_control_state_foundation(conn)
+    finally:
+        engine.dispose()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategygroup_runtime_goal_status.py",
+            "--database-url",
+            database_url,
+            "--allow-non-postgres-for-test",
             "--json",
         ],
     )
 
     assert goal_status.main() == 0
 
-    output_path = report_dir / "strategygroup-runtime-goal-status.json"
-    assert output_path.exists()
-    packet = json.loads(output_path.read_text(encoding="utf-8"))
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["ready_for_real_order_action"] is False
-    assert packet["non_authority_checkpoint"] == "continue_watcher_observation"
-    assert list(report_dir.glob(".strategygroup-runtime-goal-status.json.*.tmp")) == []
-    stdout_packet = json.loads(capsys.readouterr().out)
-    assert stdout_packet["status"] == "waiting_for_signal"
-    assert stdout_packet["ready_for_real_order_action"] is False
-    assert stdout_packet["non_authority_checkpoint"] == "continue_watcher_observation"
+    artifact = json.loads(capsys.readouterr().out)
+    assert artifact["source_mode"] == "db_backed"
+    assert artifact["evidence"]["candidate_pool_source_mode"] == "db_backed"
+    assert artifact["evidence"]["legacy_candidate_pool_json_read"] is False
+
+
+def test_goal_status_pg_cli_normalizes_asyncpg_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, str] = {}
+
+    class FakeEngine:
+        def connect(self):
+            return self
+
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def dispose(self):
+            return None
+
+    def fake_create_engine(database_url: str):
+        captured["database_url"] = database_url
+        return FakeEngine()
+
+    monkeypatch.setattr(goal_status.sa, "create_engine", fake_create_engine)
+    monkeypatch.setattr(
+        goal_status,
+        "PgBackedRuntimeControlStateRepository",
+        lambda conn: type("Repo", (), {"read_control_state": lambda self: {}})(),
+    )
+    monkeypatch.setattr(
+        goal_status,
+        "build_goal_status_artifact_from_control_state",
+        lambda control_state: {
+            "status": "waiting_for_opportunity",
+            "ready_for_real_order_action": False,
+            "non_authority_checkpoint": "continue_observation",
+        },
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategygroup_runtime_goal_status.py",
+            "--database-url",
+            "postgresql+asyncpg://user:pass@localhost/db",
+        ],
+    )
+
+    assert goal_status.main() == 0
+    assert captured["database_url"].startswith("postgresql+psycopg://")
+    assert json.loads(capsys.readouterr().out)["status"] == "waiting_for_opportunity"
+
+
+def test_goal_status_pg_cli_requires_database_url_when_requested(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategygroup_runtime_goal_status.py",
+            "--require-database-url",
+        ],
+    )
+
+    assert goal_status.main() == 2
+    assert "PG_DATABASE_URL is required" in capsys.readouterr().err
+
+def test_goal_status_rejects_legacy_candidate_pool_json_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+    candidate_pool = tmp_path / "candidate-pool.json"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategygroup_runtime_goal_status.py",
+            "--candidate-pool-json",
+            str(candidate_pool),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        goal_status.main()
+
+    assert excinfo.value.code == 2
+    assert "unrecognized arguments: --candidate-pool-json" in capsys.readouterr().err
+
+
+def test_goal_status_rejects_legacy_local_file_diagnostic_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("PG_DATABASE_URL", raising=False)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_strategygroup_runtime_goal_status.py",
+            "--allow-local-file-diagnostic",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        goal_status.main()
+
+    assert excinfo.value.code == 2
+    assert "unrecognized arguments: --allow-local-file-diagnostic" in capsys.readouterr().err
+
+
+def test_goal_status_rejects_non_db_control_state(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="requires DB-backed state"):
+        goal_status.build_goal_status_artifact_from_control_state(
+            control_state={"source_mode": "local_migration_comparison"},
+        )

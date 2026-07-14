@@ -53,15 +53,14 @@ def test_preview_artifact_uses_sample_source_without_side_effects():
         assert row["no_order_permission"] is True
 
 
-def test_preview_script_writes_json_output(tmp_path, capsys):
+def test_preview_script_prints_json_without_file_output(tmp_path, capsys):
     module = _load_module()
     output_path = tmp_path / "preview.json"
 
-    code = module.main(["--source", "sample", "--output-json", str(output_path)])
+    code = module.main(["--source", "sample"])
 
     assert code == 0
     stdout_payload = json.loads(capsys.readouterr().out)
-    file_payload = json.loads(output_path.read_text())
-    assert stdout_payload == file_payload
-    assert file_payload["scope"] == "strategy_group_readonly_observation_preview"
-    assert file_payload["safety_invariants"]["runtime_started"] is False
+    assert stdout_payload["scope"] == "strategy_group_readonly_observation_preview"
+    assert stdout_payload["safety_invariants"]["runtime_started"] is False
+    assert not output_path.exists()

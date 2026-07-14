@@ -148,30 +148,28 @@ Replay may still make a strategy experiment-worthy when it exposes a clear
 right-tail or portfolio-role thesis, known failure modes, bounded loss envelope,
 and a useful next checkpoint.
 
-## Current Local Checkpoint
+## Current PG Checkpoint
 
-The current local checkpoint is implemented:
+The current checkpoint must be implemented as PG strategy-review/current
+projection rows:
 
 ```text
 high-priority no-action rows
--> Strategy Asset State pre-live evidence rows
+-> PG strategy review evidence rows
 -> replay-to-review matching
 -> one current decision per StrategyGroup
--> local monitor sequence integration
+-> Strategy Asset State current projection
 ```
 
-`scripts/build_strategygroup_strategy_asset_state.py` is the direct local
-producer for Strategy Asset State pre-live evidence. It consumes lower-level
-signal coverage and opportunity review work loop evidence, then emits
-`output/runtime-monitor/latest-strategy-asset-state.json` and
-`output/runtime-monitor/latest-strategy-asset-state.md`, whose current
-authoritative payload is `strategy_asset_state`.
+The retired local producer and Strategy Asset State latest-export family are not
+current authority. Useful historical conclusions must be imported as PG strategy
+review rows or kept as archive-only provenance. Current runtime, Owner
+explanation, Tradeability, Daily Table, Candidate Pool, and monitor paths must
+not read old output files.
 
-The local monitor sequence runs this producer after the opportunity decision
-loop and BTPC review-only fact/classifier steps. Current local output produces
-one decision row for `BRF-001`, `BTPC-001`, `LSR-001`, `RBR-001`, and
-`VCB-001` without creating FinalGate, Operation Layer, exchange-write, or
-real-order authority.
+The current projection produces at most one decision row per StrategyGroup for
+`BRF-001`, `BTPC-001`, `LSR-001`, `RBR-001`, and `VCB-001` without creating
+FinalGate, Operation Layer, exchange-write, or real-order authority.
 
 ## Acceptance Constraints
 
@@ -186,7 +184,7 @@ following:
 | Minimal shape preserved | Main rows use the 8 required fields and do not duplicate raw replay samples or source artifact details |
 | Authority denial preserved | Strategy Asset State evidence must deny live/order authority and keep `calls_finalgate`, `calls_operation_layer`, `calls_exchange_write`, and `places_order` false |
 | Capability status explicit | Owner/developer summaries must label the result as deployed, local, planned, blocked, or market-dependent |
-| Monitor integration | The local monitor sequence must include Strategy Asset State status before the checkpoint is deploy-worthy |
+| Monitor integration | Server-side monitor / Owner readmodel may show Strategy Asset State only from PG projection rows, never from local output files |
 
 Rows may support future tier decisions, but Strategy Asset State output itself
 is never tier promotion authority. Promotion still follows the runtime tier
@@ -204,7 +202,7 @@ allowed decisions. Routine diagnostics should stay in existing replay,
 coverage, readiness, or local monitor artifacts.
 
 Each Signal Observation grade phase should have at most one main product. For
-this phase, the main product is Strategy Asset State pre-live evidence exposed
-through the Strategy Asset State path. Additional markdown summaries,
-script forests, or broad opportunity ledgers are out of scope unless they
-replace and reduce existing surfaces.
+this phase, the main product is Strategy Asset State current projection backed
+by PG review rows. Additional markdown summaries, script forests, generated
+JSON, or broad opportunity ledgers are out of scope unless they are archive-only
+material and are absent from runtime, Owner explanation, and tradeability paths.
