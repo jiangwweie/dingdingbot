@@ -4,6 +4,7 @@ import asyncio
 from decimal import Decimal
 import multiprocessing
 
+import pytest
 from sqlalchemy import text
 
 from src.application.action_time import action_time_ticket as ticket_materializer
@@ -63,7 +64,31 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
 )
 
 
-def test_rci_harness_uses_postgresql_revision_122(
+@pytest.fixture(autouse=True)
+def _preserve_release_b_baseline_for_legacy_rci_scenarios(
+    request,
+    postgres_certification_engine,
+):
+    """Keep pre-canary causal tests on the disabled Release B contract."""
+
+    release_c_tests = {
+        "test_rci_harness_uses_postgresql_revision_123",
+        "test_rci_exit_policy_canary_is_exactly_scoped_and_enabled",
+    }
+    if request.node.name not in release_c_tests:
+        with postgres_certification_engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE brc_runtime_capabilities_current "
+                    "SET status = 'disabled', "
+                    "certification_ref = 'rci:release-b-disabled-baseline' "
+                    "WHERE capability_id = 'ticket_exit_policy_v1'"
+                )
+            )
+    yield
+
+
+def test_rci_harness_uses_postgresql_revision_123(
     postgres_certification_engine,
 ):
     assert postgres_certification_engine.dialect.name == "postgresql"
@@ -77,11 +102,11 @@ def test_rci_harness_uses_postgresql_revision_122(
             )
         ).scalar_one()
 
-    assert revision == "122"
+    assert revision == "123"
     assert invocation_table == "brc_action_time_invocations"
 
 
-def test_rci_exit_policy_certification_keeps_production_capability_disabled(
+def test_rci_exit_policy_canary_is_exactly_scoped_and_enabled(
     postgres_certification_engine,
 ):
     with postgres_certification_engine.connect() as conn:
@@ -92,22 +117,28 @@ def test_rci_exit_policy_certification_keeps_production_capability_disabled(
                 "WHERE capability_id = 'ticket_exit_policy_v1'"
             )
         ).mappings().one()
-        policy_count = conn.execute(
-            text("SELECT count(*) FROM brc_strategy_exit_policies")
-        ).scalar_one()
-        current_count = conn.execute(
+        current_policies = list(
+            conn.execute(
             text(
-                "SELECT count(*) FROM brc_strategy_exit_policies "
+                "SELECT strategy_group_id, event_spec_id, side, payload_hash "
+                "FROM brc_strategy_exit_policies "
                 "WHERE status = 'current'"
             )
-        ).scalar_one()
+            ).mappings()
+        )
 
-    assert capability == {
-        "status": "disabled",
-        "certification_ref": "migration-122:future-only-fail-disabled",
-    }
-    assert policy_count == 0
-    assert current_count == 0
+    assert capability["status"] == "enabled"
+    assert "migration-123:sor-long-canary" in capability["certification_ref"]
+    assert current_policies == [
+        {
+            "strategy_group_id": "SOR-001",
+            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v2",
+            "side": "long",
+            "payload_hash": (
+                "324b2be50b3e1f020837e0f4687e76339a52dd757b272d4336b20de196bef02b"
+            ),
+        }
+    ]
 
 
 def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from scripts.plan_tokyo_runtime_governance_git_deploy import (
+    DEFAULT_EXPECTED_LATEST_MIGRATION,
     _plan_phases,
     action_time_capability_certification_command,
     backend_runtime_identity_dropin_install_command,
@@ -10,6 +11,12 @@ from scripts.plan_tokyo_runtime_governance_git_deploy import (
     ticket_lifecycle_phase_two_enable_command,
     ticket_lifecycle_quiesce_and_migrate_command,
 )
+
+
+def test_deploy_plan_default_tracks_exit_policy_canary_migration():
+    assert DEFAULT_EXPECTED_LATEST_MIGRATION == (
+        "2026-07-15-123_activate_sor_long_exit_policy_canary.py"
+    )
 
 
 def test_backend_runtime_identity_dropin_is_repository_owned():

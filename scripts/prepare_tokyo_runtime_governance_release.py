@@ -20,9 +20,9 @@ from typing import Any
 
 
 DEFAULT_DEPLOYED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
-DEFAULT_EXPECTED_MIN_MIGRATIONS = 122
+DEFAULT_EXPECTED_MIN_MIGRATIONS = 123
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-14-122_add_ticket_exit_policy_core.py"
+    "2026-07-15-123_activate_sor_long_exit_policy_canary.py"
 )
 class ReleaseReadinessError(RuntimeError):
     """Raised when release readiness inspection cannot proceed."""

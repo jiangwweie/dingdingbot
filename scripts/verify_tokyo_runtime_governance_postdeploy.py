@@ -23,9 +23,9 @@ from typing import Any, Callable
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 122
+DEFAULT_EXPECTED_MIGRATION_COUNT = 123
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-14-122_add_ticket_exit_policy_core.py"
+    "2026-07-15-123_activate_sor_long_exit_policy_canary.py"
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
 DEFAULT_VENV_PYTHON = (
