@@ -19,6 +19,7 @@ from src.application.action_time.lifecycle_maintenance_scheduler import (
     select_ticket_bound_lifecycle_maintenance_scopes,
 )
 from src.application.action_time.ticket_bound_lifecycle_finalizer import (
+    _stable_id,
     finalize_ticket_bound_lifecycle_if_ready,
 )
 from src.application.action_time.ticket_bound_fill_projector import (
@@ -88,6 +89,68 @@ def test_finalizer_closes_reconciled_flat_lifecycle_and_is_idempotent(
         "WHERE event_type IN ('reconciliation_matched', 'budget_settled', "
         "'review_recorded', 'lifecycle_closed')",
     ) == 4
+
+
+def test_finalizer_appends_exact_fact_repair_when_legacy_event_is_incomplete(
+    pg_control_connection,
+):
+    ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    lifecycle = pg_control_connection.execute(
+        text(
+            "SELECT lifecycle_run_id, protected_submit_attempt_id "
+            "FROM brc_ticket_bound_order_lifecycle_runs "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).mappings().one()
+    reconciliation_tick_id = pg_control_connection.execute(
+        text(
+            "SELECT reconciliation_tick_id "
+            "FROM brc_ticket_bound_reconciliation_ticks "
+            "WHERE ticket_id = :ticket_id AND status = 'matched'"
+        ),
+        {"ticket_id": ticket_id},
+    ).scalar_one()
+    legacy_event_id = _stable_id(
+        "ticket_lifecycle_event",
+        str(lifecycle["lifecycle_run_id"]),
+        "reconciliation_matched",
+        str(reconciliation_tick_id),
+    )
+    pg_control_connection.execute(
+        text(
+            "INSERT INTO brc_ticket_bound_lifecycle_events ("
+            "lifecycle_event_id, lifecycle_run_id, ticket_id, "
+            "protected_submit_attempt_id, event_type, event_payload, created_at_ms"
+            ") VALUES ("
+            ":event_id, :lifecycle_run_id, :ticket_id, :attempt_id, "
+            "'reconciliation_matched', :payload, :now_ms)"
+        ),
+        {
+            "event_id": legacy_event_id,
+            "lifecycle_run_id": lifecycle["lifecycle_run_id"],
+            "ticket_id": ticket_id,
+            "attempt_id": lifecycle["protected_submit_attempt_id"],
+            "payload": json.dumps(
+                {"reconciliation_evidence_id": reconciliation_tick_id}
+            ),
+            "now_ms": NOW_MS + 16_000,
+        },
+    )
+
+    result = finalize_ticket_bound_lifecycle_if_ready(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+
+    assert result["status"] == "lifecycle_closed"
+    assert _scalar(
+        pg_control_connection,
+        "SELECT count(*) FROM brc_ticket_bound_lifecycle_events "
+        "WHERE ticket_id = :ticket_id AND event_type = 'reconciliation_matched'",
+        ticket_id=ticket_id,
+    ) == 2
 
 
 def test_scheduler_selects_closed_incomplete_outcome_until_economics_are_complete(

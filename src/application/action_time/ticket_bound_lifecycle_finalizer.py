@@ -391,12 +391,29 @@ def _upsert_event(
         event_type,
         evidence_id,
     )
-    if conn.execute(
-        sa.select(table.c.lifecycle_event_id).where(
+    existing_payload = conn.execute(
+        sa.select(table.c.event_payload).where(
             table.c.lifecycle_event_id == event_id
         )
-    ).first():
-        return
+    ).scalar_one_or_none()
+    if existing_payload is not None:
+        existing = _json_dict(existing_payload)
+        if all(existing.get(key) == value for key, value in payload.items()):
+            return
+        event_id = _stable_id(
+            "ticket_lifecycle_event",
+            str(lifecycle["lifecycle_run_id"]),
+            event_type,
+            evidence_id,
+            "fact_repair",
+            json.dumps(payload, sort_keys=True, separators=(",", ":")),
+        )
+        if conn.execute(
+            sa.select(table.c.lifecycle_event_id).where(
+                table.c.lifecycle_event_id == event_id
+            )
+        ).first():
+            return
     conn.execute(
         table.insert().values(
             lifecycle_event_id=event_id,
