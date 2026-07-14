@@ -64,15 +64,22 @@ Ticket-bound lifecycle。
   legacy flat-account blockers are replaced only for this narrow active-policy path.
 - **Safety chain continuation**：FinalGate and Runtime Safety State revalidate the exact active
   account-budget projection/version before they can permit submit readiness.
+- **Action-Time current-state boundary**：the bounded PG control-state read now exposes the
+  account policy, exposure, and budget current projections.  Older schema fixtures explicitly
+  install migration `122` before exercising Ticket lifecycle transitions, so the required
+  reservation transition audit table cannot disappear from Action-Time tests.
 - **Lifecycle capacity conservation**：the lifecycle worker now prefetches one full-account
   snapshot per active-policy account outside its PG transaction and passes the typed snapshot
   into reconciliation ticks.  A semantic Tick change reprojects Exposure/Budget Current; an
   identical Tick does not write a duplicate semantic event.  The Tokyo readonly ops summary
   exposes only Owner-readable account-capacity language.
-- **Local evidence**：the PostgreSQL two-transaction lock test passed against local Docker PG;
-  a seeded-baseline temporary PostgreSQL upgrade reached migration `124 (head)`; targeted
-  promotion/Ticket/FinalGate/Runtime Safety/lifecycle regressions passed; production runtime file
-  I/O audit reported `suspicious_runtime_file_authority=0` and `frequent_report_write=0`.
+- **Local evidence**：the PostgreSQL two-transaction lock test passed against an isolated local
+  Docker PG schema; a seeded-baseline temporary PostgreSQL upgrade reached migration `124 (head)`;
+  targeted promotion/Ticket/FinalGate/Runtime Safety/lifecycle regressions passed; the final
+  requirements-backed release suite reported `3126 passed, 3 skipped` in 10m12s.  The API
+  dependency contract now bounds FastAPI to `<0.136.0` and Starlette to `<1.1.0`, because newer
+  router composition no longer exposes the project-required route surface.  Production runtime
+  file I/O audit reported `suspicious_runtime_file_authority=0` and `frequent_report_write=0`.
 
 ### Explicitly Not Performed
 
@@ -83,8 +90,6 @@ Ticket-bound lifecycle。
 
 ### Remaining Release Work
 
-- Complete the full local release-suite run and record any pre-existing external harness blocker
-  separately from account-risk regressions.
 - Perform a separately authorized **production** shadow activation, readonly current-state check,
   and disposable rollback proof.  These are release gates, not implicit consequences of the local
   code commits, and are intentionally excluded from this no-deploy task.
@@ -1122,7 +1127,7 @@ python3 scripts/audit_production_runtime_file_io.py
 python3 scripts/validate_output_artifact_scope.py --git-status --git-tracked
 ```
 
-Expected：migration head 123；`performance_risk.status=clear`；无 tracked output 改动；
+Expected：migration head 124；`performance_risk.status=clear`；无 tracked output 改动；
 无新增生产 JSON/MD reader/writer。
 
 - [ ] **Step 3: 部署 shadow，不改变生产交易容量**

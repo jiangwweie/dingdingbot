@@ -121,6 +121,20 @@ def pg_control_connection():
             dynamic_risk_migration.upgrade()
         finally:
             dynamic_risk_migration.op = old_dynamic_risk_op
+        for revision in ("121", "122"):
+            migration_path = next(
+                REPO_ROOT.glob(f"migrations/versions/*-{revision}_*.py")
+            )
+            account_risk_migration = _load_module(
+                migration_path,
+                f"migration_{revision}_repository",
+            )
+            old_account_risk_op = account_risk_migration.op
+            account_risk_migration.op = Operations(MigrationContext.configure(conn))
+            try:
+                account_risk_migration.upgrade()
+            finally:
+                account_risk_migration.op = old_account_risk_op
     with engine.connect() as conn:
         yield conn
     engine.dispose()
@@ -730,6 +744,19 @@ def test_repository_action_time_read_profile_reuses_bounded_current_truth(
     assert state["read_profile"] == "action_time_hot_path_current"
     assert state["table_counts"]["watcher_runtime_coverage"] == 0
     assert state["table_counts"]["runtime_fact_snapshots"] == 0
+
+
+def test_repository_action_time_read_exposes_account_risk_current_projections(
+    pg_control_connection,
+):
+    state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    ).read_action_time_control_state()
+
+    assert state["table_counts"]["account_risk_policy_current"] == 0
+    assert state["table_counts"]["account_exposure_current"] == 0
+    assert state["table_counts"]["account_budget_current"] == 0
 
 
 def test_repository_monitor_read_profile_retains_protected_submit_lineage(

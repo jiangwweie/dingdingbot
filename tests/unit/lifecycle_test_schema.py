@@ -23,6 +23,8 @@ def apply_enabled_lifecycle_command_schema(
         / "migrations/versions/2026-07-11-113_create_exchange_account_mode_and_domain_holds.py",
         repo_root
         / "migrations/versions/2026-07-11-114_extend_exchange_commands_for_lifecycle.py",
+        repo_root
+        / "migrations/versions/2026-07-14-122_create_account_risk_current_projections.py",
     )
     for index, path in enumerate(paths):
         name = f"{module_prefix}_{index}_{path.stem.replace('-', '_')}"

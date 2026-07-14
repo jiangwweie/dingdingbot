@@ -70,6 +70,9 @@ CONTROL_STATE_TABLES: dict[str, str] = {
     "runtime_process_outcomes": "brc_runtime_process_outcomes",
     "strategy_semantic_admissions": "brc_strategy_semantic_admissions",
     "allocation_decisions": "brc_allocation_decisions",
+    "account_risk_policy_current": "brc_account_risk_policy_current",
+    "account_exposure_current": "brc_account_exposure_current",
+    "account_budget_current": "brc_account_budget_current",
 }
 
 OPTIONAL_CONTROL_STATE_TABLES = {
@@ -80,6 +83,13 @@ OPTIONAL_CONTROL_STATE_TABLES = {
     "ticket_bound_exchange_commands",
     "ticket_bound_scope_freezes",
     "live_outcome_ledger",
+    # Account-risk current projections were introduced after the initial
+    # runtime-control foundation. They remain optional during rolling schema
+    # adoption, but are exposed by every Action-Time read once migration 122
+    # is present.
+    "account_risk_policy_current",
+    "account_exposure_current",
+    "account_budget_current",
 }
 
 REQUIRED_PRODUCTION_PROJECTIONS = {
