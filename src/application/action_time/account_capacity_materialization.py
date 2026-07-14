@@ -1,0 +1,66 @@
+"""Consume a prefetched full-account snapshot inside the short PG transaction."""
+
+from __future__ import annotations
+
+import sqlalchemy as sa
+
+from src.application.action_time.account_capacity_reservation import (
+    AccountCapacityCandidate,
+    AccountCapacityReservationResult,
+    reserve_account_capacity_for_candidate,
+)
+from src.application.action_time.account_exchange_ownership import (
+    classify_account_exchange_truth,
+)
+from src.application.action_time.account_exposure_current import (
+    project_account_exposure_current,
+)
+from src.application.action_time.account_budget_current import (
+    project_account_budget_current,
+)
+from src.application.action_time.account_risk_policy import (
+    load_account_risk_policy_current,
+)
+from src.infrastructure.binance_usdm_account_risk_snapshot import FullAccountRiskSnapshot
+
+
+def materialize_account_capacity_from_snapshot(
+    conn: sa.Connection,
+    *,
+    snapshot: FullAccountRiskSnapshot,
+    runtime_profile_id: str,
+    candidate: AccountCapacityCandidate,
+    now_ms: int,
+) -> AccountCapacityReservationResult:
+    """Classify, project, and atomically claim capacity from a prefetched snapshot."""
+    if not snapshot.snapshot_ready:
+        return _blocked(snapshot.failure_code or "account_risk_snapshot_not_ready")
+    if snapshot.account_id != candidate.account_id or runtime_profile_id != candidate.runtime_profile_id:
+        return _blocked("account_capacity_scope_mismatch")
+    classification = classify_account_exchange_truth(conn, snapshot=snapshot)
+    if classification.blockers:
+        return _blocked(classification.blockers[0])
+    policy = load_account_risk_policy_current(
+        conn, account_id=candidate.account_id, runtime_profile_id=runtime_profile_id
+    )
+    if policy is None:
+        return _blocked("account_risk_policy_missing_or_changed")
+    exposure = project_account_exposure_current(
+        conn, snapshot=snapshot, classification=classification, now_ms=now_ms
+    )
+    if exposure.global_blockers:
+        return _blocked(exposure.global_blockers[0])
+    budget = project_account_budget_current(
+        conn, snapshot=snapshot, runtime_profile_id=runtime_profile_id,
+        policy=policy, now_ms=now_ms
+    )
+    return reserve_account_capacity_for_candidate(
+        conn, candidate=candidate,
+        expected_source_snapshot_id=snapshot.source_snapshot_id,
+        expected_projection_version=budget.projection_version,
+        now_ms=now_ms,
+    )
+
+
+def _blocked(blocker: str) -> AccountCapacityReservationResult:
+    return AccountCapacityReservationResult(allowed=False, first_blocker=blocker)
