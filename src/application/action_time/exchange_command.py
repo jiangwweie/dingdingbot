@@ -141,6 +141,12 @@ def materialize_ticket_bound_exchange_commands(
             command_generation=generation,
             request_fingerprint=fingerprint,
             order_type=str(order.get("gateway_order_type") or ""),
+            execution_style=_optional_text(order.get("execution_style")),
+            time_in_force=_optional_text(order.get("time_in_force")),
+            post_only=order.get("post_only") is True,
+            market_fallback_allowed=(
+                order.get("market_fallback_allowed") is True
+            ),
             amount=_required_decimal(order.get("amount"), "amount"),
             price=_optional_decimal(order.get("price")),
             stop_price=_optional_decimal(order.get("trigger_price")),
@@ -203,6 +209,10 @@ def materialize_ticket_bound_exchange_commands(
                 "netting_domain_key",
                 "command_kind",
                 "desired_leverage",
+                "execution_style",
+                "time_in_force",
+                "post_only",
+                "market_fallback_allowed",
                 "command_source",
                 "source_command_id",
             ):
@@ -557,6 +567,12 @@ def command_request_fingerprint(order: dict[str, Any]) -> str:
         "order_role": str(order.get("order_role") or "").upper(),
         "symbol": str(order.get("symbol") or ""),
         "gateway_order_type": str(order.get("gateway_order_type") or ""),
+        "execution_style": str(order.get("execution_style") or ""),
+        "time_in_force": str(order.get("time_in_force") or ""),
+        "post_only": order.get("post_only") is True,
+        "market_fallback_allowed": (
+            order.get("market_fallback_allowed") is True
+        ),
         "gateway_side": str(order.get("gateway_side") or ""),
         "amount": str(_required_decimal(order.get("amount"), "amount")),
         "price": _decimal_text(order.get("price")),

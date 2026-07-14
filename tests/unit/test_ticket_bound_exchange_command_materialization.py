@@ -41,6 +41,13 @@ def test_real_submit_prepare_commits_entry_sl_tp1_commands(
         for row in commands
     )
     assert all(row["gateway_symbol"] == "ETH/USDT:USDT" for row in commands)
+    tp1 = next(row for row in commands if row["order_role"] == "TP1")
+    assert tp1["order_type"] == "limit"
+    assert tp1["execution_style"] == "limit_gtc"
+    assert tp1["time_in_force"] == "GTC"
+    assert tp1["post_only"] in {False, 0}
+    assert tp1["market_fallback_allowed"] in {False, 0}
+    assert tp1["price"] is not None
 
 
 def test_repeated_materialization_reuses_identity_and_rejects_request_mutation(

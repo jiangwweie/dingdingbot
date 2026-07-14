@@ -235,6 +235,98 @@ def test_live_outcome_projects_actual_exit_fill_fees_pnl_and_r_multiple(
     assert Decimal(str(stored["net_pnl"])) == outcome["net_pnl"]
 
 
+def test_tp1_gtc_taker_fill_records_economic_truth_without_lifecycle_defect(
+    pg_control_connection,
+):
+    ids, _, tp1 = _submitted_attempt_with_protection(pg_control_connection)
+
+    projected = project_ticket_bound_exchange_fills(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        exchange_snapshot={
+            "recent_fills": [
+                {
+                    "exchange_order_id": tp1["exchange_order_id"],
+                    "qty": str(tp1["qty"]),
+                    "price": str(tp1["price"]),
+                    "fee": {"cost": "0.21", "currency": "USDT"},
+                    "liquidity_role": "taker",
+                    "timestamp_ms": NOW_MS + 7_000,
+                }
+            ]
+        },
+        now_ms=NOW_MS + 7_000,
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_order_lifecycle_runs "
+            "SET status = 'reconciliation_matched', first_blocker = NULL, "
+            "blockers = '[]', updated_at_ms = :now_ms "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ids["ticket_id"], "now_ms": NOW_MS + 8_000},
+    )
+
+    payload = materialize_live_outcome_ledger(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        now_ms=NOW_MS + 9_000,
+    )
+
+    assert projected["status"] == "fills_projected"
+    assert payload["status"] == "recorded"
+    outcome = payload["outcome"]
+    assert outcome["tp1_liquidity_role"] == "taker"
+    assert outcome["tp1_fee"] == Decimal("0.21")
+    assert outcome["tp1_fee_asset"] == "USDT"
+    assert outcome["source_refs"]["tp1_order_type"] == "limit"
+    assert outcome["source_refs"]["tp1_time_in_force"] == "GTC"
+    assert "tp1_gtx_taker_contradiction" not in outcome["lifecycle_defects"]
+
+
+def test_tp1_gtx_taker_fill_hard_stops_as_contradictory_truth(
+    pg_control_connection,
+):
+    ids, _, tp1 = _submitted_attempt_with_protection(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET execution_style = 'passive_limit_gtx', time_in_force = 'GTX', "
+            "post_only = true WHERE order_role = 'TP1'"
+        )
+    )
+
+    projected = project_ticket_bound_exchange_fills(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        exchange_snapshot={
+            "recent_fills": [
+                {
+                    "exchange_order_id": tp1["exchange_order_id"],
+                    "qty": str(tp1["qty"]),
+                    "price": str(tp1["price"]),
+                    "fee": {"cost": "0.05", "currency": "USDT"},
+                    "liquidity_role": "taker",
+                    "timestamp_ms": NOW_MS + 7_000,
+                }
+            ]
+        },
+        now_ms=NOW_MS + 7_000,
+    )
+
+    lifecycle = pg_control_connection.execute(
+        text(
+            "SELECT status, first_blocker FROM "
+            "brc_ticket_bound_order_lifecycle_runs WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ids["ticket_id"]},
+    ).mappings().one()
+    assert projected["status"] == "blocked"
+    assert projected["first_blocker"] == "tp1_gtx_taker_contradiction"
+    assert lifecycle["status"] == "blocked"
+    assert lifecycle["first_blocker"] == "tp1_gtx_taker_contradiction"
+
+
 def test_funding_attribution_rejects_conflicting_duplicate_and_excludes_unrelated_rows():
     rows = [
         {
@@ -340,3 +432,42 @@ def test_exit_slippage_is_signed_adverse_cost_for_long_and_short():
         fill_price=Decimal("101"),
         fill_qty=Decimal("2"),
     ) == Decimal("2")
+
+
+def _submitted_attempt_with_protection(conn):
+    ids = _create_ready_protected_submit(conn)
+    prepared = _prepare_real_submit(conn, ids)
+    submitted_orders = _submitted_orders(prepared)
+    result = submit.record_ticket_bound_protected_submit_result(
+        conn,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        submit_result={
+            "status": "exchange_submit_orders_submitted",
+            "ticket_id": ids["ticket_id"],
+            "operation_submit_command_id": ids["operation_submit_command_id"],
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "submitted_orders": submitted_orders,
+        },
+        now_ms=NOW_MS + 5_000,
+    )
+    assert result["status"] == "submitted"
+    exit_protection.materialize_ticket_bound_exit_protection_set(
+        conn,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 6_000,
+    )
+    tp1 = conn.execute(
+        text(
+            "SELECT * FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE role = 'TP1'"
+        )
+    ).mappings().one()
+    return ids, prepared, dict(tp1)

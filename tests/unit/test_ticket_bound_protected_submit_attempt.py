@@ -64,6 +64,13 @@ def test_protected_submit_attempt_disabled_smoke_records_ticket_bound_pg_attempt
     assert payload["submit_request"]["orders"][0]["order_role"] == "ENTRY"
     assert payload["submit_request"]["orders"][1]["order_role"] == "SL"
     assert payload["submit_request"]["orders"][2]["order_role"] == "TP1"
+    tp1 = payload["submit_request"]["orders"][2]
+    assert tp1["gateway_order_type"] == "limit"
+    assert tp1["execution_style"] == "limit_gtc"
+    assert tp1["time_in_force"] == "GTC"
+    assert tp1["post_only"] is False
+    assert tp1["market_fallback_allowed"] is False
+    assert tp1["price"] is not None
 
     row = _protected_submit_row(pg_control_connection)
     assert row["status"] == "disabled_smoke_passed"

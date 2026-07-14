@@ -6,10 +6,84 @@ import ccxt
 import pytest
 
 from src.domain.models import OrderStatus, OrderType
+from src.domain.exceptions import InvalidOrderError
 from src.infrastructure.exchange_gateway import ExchangeGateway
 
 
 SYMBOL = "ETH/USDT:USDT"
+
+
+class _CreateOrderRecorder:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def create_order(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return {"id": "exchange-order-1", "status": "open", "filled": "0"}
+
+
+@pytest.mark.asyncio
+async def test_limit_gtc_and_passive_gtx_send_explicit_ccxt_tif_contracts():
+    rest = _CreateOrderRecorder()
+    gateway = _gateway(rest)
+
+    await gateway.place_order(
+        symbol=SYMBOL,
+        order_type="limit",
+        side="sell",
+        amount=Decimal("0.25"),
+        price=Decimal("2100"),
+        reduce_only=True,
+        time_in_force="GTC",
+        post_only=False,
+    )
+    await gateway.place_order(
+        symbol=SYMBOL,
+        order_type="limit",
+        side="sell",
+        amount=Decimal("0.25"),
+        price=Decimal("2100"),
+        reduce_only=True,
+        time_in_force="GTX",
+        post_only=True,
+    )
+
+    assert rest.calls[0]["params"]["timeInForce"] == "GTC"
+    assert "postOnly" not in rest.calls[0]["params"]
+    assert rest.calls[1]["params"]["timeInForce"] == "GTX"
+    assert rest.calls[1]["params"]["postOnly"] is True
+    assert all(call["type"] == "limit" for call in rest.calls)
+
+
+@pytest.mark.asyncio
+async def test_market_gtx_and_unsupported_post_only_fail_before_exchange_write():
+    rest = _CreateOrderRecorder()
+    gateway = _gateway(rest)
+
+    with pytest.raises(InvalidOrderError):
+        await gateway.place_order(
+            symbol=SYMBOL,
+            order_type="market",
+            side="sell",
+            amount=Decimal("0.25"),
+            reduce_only=True,
+            time_in_force="GTX",
+            post_only=True,
+        )
+    unsupported = _gateway(rest, exchange_name="kraken")
+    with pytest.raises(InvalidOrderError):
+        await unsupported.place_order(
+            symbol=SYMBOL,
+            order_type="limit",
+            side="sell",
+            amount=Decimal("0.25"),
+            price=Decimal("2100"),
+            reduce_only=True,
+            time_in_force="GTX",
+            post_only=True,
+        )
+
+    assert rest.calls == []
 
 
 def _gateway(rest_exchange, *, exchange_name: str = "binance") -> ExchangeGateway:

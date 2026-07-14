@@ -103,6 +103,10 @@ ACTION_TIME_INVOCATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
 )
+EXIT_EXECUTION_SAFETY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-14-121_add_exit_execution_safety.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -374,6 +378,18 @@ def pg_control_connection():
             action_time_invocation_migration.upgrade()
         finally:
             action_time_invocation_migration.op = old_action_time_invocation_op
+        exit_execution_safety_migration = _load_module(
+            EXIT_EXECUTION_SAFETY_MIGRATION_PATH,
+            "migration_121_runtime_safety",
+        )
+        old_exit_execution_safety_op = exit_execution_safety_migration.op
+        exit_execution_safety_migration.op = Operations(
+            MigrationContext.configure(conn)
+        )
+        try:
+            exit_execution_safety_migration.upgrade()
+        finally:
+            exit_execution_safety_migration.op = old_exit_execution_safety_op
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(

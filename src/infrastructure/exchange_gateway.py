@@ -1187,6 +1187,8 @@ class ExchangeGateway:
         position_side: Optional[str] = None,  # Binance futures hedge mode: LONG/SHORT
         desired_leverage: Optional[int] = None,  # ENTRY-only Action-Time leverage
         client_order_id: Optional[str] = None,  # 客户端订单 ID
+        time_in_force: Optional[str] = None,  # normalized GTC/GTX intent
+        post_only: bool = False,  # typed passive-limit intent
     ) -> OrderPlacementResult:
         """
         下单接口
@@ -1201,6 +1203,8 @@ class ExchangeGateway:
             reduce_only: 是否仅减仓（平仓单必须为 True）
             position_side: 持仓方向（Binance futures hedge mode 使用 LONG/SHORT）
             client_order_id: 客户端订单 ID（可选）
+            time_in_force: 限价单有效期（GTC/GTX）
+            post_only: 是否要求只做 maker（当前仅认证 Binance GTX）
 
         Returns:
             OrderPlacementResult: 订单放置结果
@@ -1222,6 +1226,20 @@ class ExchangeGateway:
 
         if order_type == "stop_market" and trigger_price is None:
             raise InvalidOrderError("STOP_MARKET 订单必须指定触发价", "F-011")
+
+        normalized_tif = str(time_in_force or "").strip().upper() or None
+        if normalized_tif not in {None, "GTC", "GTX"}:
+            raise InvalidOrderError("不支持的限价单有效期", "F-011")
+        if order_type != "limit" and (normalized_tif is not None or post_only):
+            raise InvalidOrderError("仅限价单可设置 GTC/GTX 或 post-only", "F-011")
+        if normalized_tif == "GTC" and post_only:
+            raise InvalidOrderError("GTC 限价单不得声明 post-only", "F-011")
+        if normalized_tif == "GTX" and not post_only:
+            raise InvalidOrderError("GTX 必须声明 post-only", "F-011")
+        if post_only and normalized_tif != "GTX":
+            raise InvalidOrderError("post-only 必须使用 GTX", "F-011")
+        if post_only and self.exchange_name.lower() != "binance":
+            raise InvalidOrderError("当前交易所未认证 post-only 限价执行", "F-011")
 
         if desired_leverage is not None:
             if reduce_only:
@@ -1250,6 +1268,8 @@ class ExchangeGateway:
                 reduce_only=reduce_only,
                 position_side=position_side,
                 client_order_id=client_order_id,
+                time_in_force=normalized_tif,
+                post_only=post_only,
             )
 
             # 调用 CCXT create_order 方法
@@ -2352,6 +2372,8 @@ class ExchangeGateway:
         reduce_only: bool,
         position_side: Optional[str],
         client_order_id: Optional[str],
+        time_in_force: Optional[str] = None,
+        post_only: bool = False,
     ) -> CcxtOrderParamsBuildResult:
         """Build the only raw exchange-specific params sent to ccxt.create_order().
 
@@ -2388,6 +2410,11 @@ class ExchangeGateway:
         if order_type == "stop_market" and trigger_price is not None:
             params["stopPrice"] = str(trigger_price)
             params["triggerPrice"] = str(trigger_price)
+
+        if time_in_force is not None:
+            params["timeInForce"] = time_in_force
+        if post_only:
+            params["postOnly"] = True
 
         if client_order_id:
             params["clientOrderId"] = client_order_id

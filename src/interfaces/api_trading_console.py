@@ -2635,6 +2635,7 @@ async def _execute_one_ticket_bound_exchange_command(
     from src.domain.ticket_bound_exchange_command import (
         ExchangeCommandOutcomeClass,
         ExchangeCommandState,
+        validate_tp1_execution_contract,
     )
 
     with engine.connect() as conn:
@@ -2700,6 +2701,26 @@ async def _execute_one_ticket_bound_exchange_command(
             "order_created": False,
             "order_lifecycle_called": False,
         }
+    if str(command.get("order_role") or "").upper() == "TP1":
+        try:
+            validate_tp1_execution_contract(
+                order_type=str(command.get("order_type") or ""),
+                price=_optional_decimal(command.get("price")),
+                execution_style=command.get("execution_style"),
+                time_in_force=command.get("time_in_force"),
+                post_only=command.get("post_only") is True,
+                market_fallback_allowed=(
+                    command.get("market_fallback_allowed") is True
+                ),
+            )
+        except ValueError as exc:
+            return {
+                "status": "tp1_execution_contract_blocked",
+                "blockers": [str(exc)],
+                "exchange_write_called": False,
+                "order_created": False,
+                "order_lifecycle_called": False,
+            }
     try:
         direction = Direction.LONG if command["side"] == "long" else Direction.SHORT
         amount = Decimal(str(command["amount"]))
@@ -2753,17 +2774,22 @@ async def _execute_one_ticket_bound_exchange_command(
         )
 
     try:
-        placement = await gateway.place_order(
-            symbol=str(command["gateway_symbol"]),
-            order_type=str(command["order_type"]),
-            side=str(command["gateway_side"]),
-            amount=Decimal(str(command["amount"])),
-            price=_optional_decimal(command.get("price")),
-            trigger_price=_optional_decimal(command.get("stop_price")),
-            reduce_only=command.get("reduce_only") is True,
-            position_side=command.get("position_side"),
-            client_order_id=str(command["client_order_id"]),
-        )
+        placement_kwargs = {
+            "symbol": str(command["gateway_symbol"]),
+            "order_type": str(command["order_type"]),
+            "side": str(command["gateway_side"]),
+            "amount": Decimal(str(command["amount"])),
+            "price": _optional_decimal(command.get("price")),
+            "trigger_price": _optional_decimal(command.get("stop_price")),
+            "reduce_only": command.get("reduce_only") is True,
+            "position_side": command.get("position_side"),
+            "client_order_id": str(command["client_order_id"]),
+        }
+        if command.get("time_in_force"):
+            placement_kwargs["time_in_force"] = str(command["time_in_force"])
+        if command.get("post_only") is True:
+            placement_kwargs["post_only"] = True
+        placement = await gateway.place_order(**placement_kwargs)
     except (InvalidOrderError, InsufficientMarginError) as exc:
         with engine.begin() as conn:
             record_exchange_command_outcome(
@@ -2983,6 +3009,10 @@ async def _submit_ticket_bound_orders(
     gateway: Any,
     order_lifecycle_service: Any,
 ) -> dict[str, Any]:
+    from src.domain.ticket_bound_exchange_command import (
+        validate_tp1_execution_contract,
+    )
+
     from src.domain.models import Direction, Order, OrderRole, OrderStatus
 
     submit_request = dict(report.get("submit_request") or {})
@@ -3021,6 +3051,29 @@ async def _submit_ticket_bound_orders(
         )
     for order_request in orders:
         local_order_id = str(order_request.get("local_order_id") or "")
+        if str(order_request.get("order_role") or "").upper() == "TP1":
+            try:
+                validate_tp1_execution_contract(
+                    order_type=str(
+                        order_request.get("gateway_order_type") or ""
+                    ),
+                    price=_optional_decimal(order_request.get("price")),
+                    execution_style=order_request.get("execution_style"),
+                    time_in_force=order_request.get("time_in_force"),
+                    post_only=order_request.get("post_only") is True,
+                    market_fallback_allowed=(
+                        order_request.get("market_fallback_allowed") is True
+                    ),
+                )
+            except ValueError as exc:
+                return _ticket_bound_submit_blocked_result(
+                    report,
+                    status="tp1_execution_contract_blocked",
+                    blockers=[str(exc)],
+                    order_created=bool(registered_orders),
+                    order_lifecycle_called=bool(registered_orders),
+                    submitted_orders=submitted_orders,
+                )
         try:
             order_type = _ticket_bound_order_type(
                 order_request.get("gateway_order_type")
@@ -3092,18 +3145,29 @@ async def _submit_ticket_bound_orders(
 
         exchange_call_count += 1
         try:
-            placement_result = await gateway.place_order(
-                symbol=order.symbol,
-                order_type=str(order_request.get("gateway_order_type") or ""),
-                side=str(order_request.get("gateway_side") or ""),
-                amount=amount,
-                price=_optional_decimal(order_request.get("price")),
-                trigger_price=_optional_decimal(order_request.get("trigger_price")),
-                reduce_only=order_request.get("reduce_only") is True,
-                client_order_id=str(
+            placement_kwargs = {
+                "symbol": order.symbol,
+                "order_type": str(
+                    order_request.get("gateway_order_type") or ""
+                ),
+                "side": str(order_request.get("gateway_side") or ""),
+                "amount": amount,
+                "price": _optional_decimal(order_request.get("price")),
+                "trigger_price": _optional_decimal(
+                    order_request.get("trigger_price")
+                ),
+                "reduce_only": order_request.get("reduce_only") is True,
+                "client_order_id": str(
                     order_request.get("client_order_id") or local_order_id
                 ),
-            )
+            }
+            if order_request.get("time_in_force"):
+                placement_kwargs["time_in_force"] = str(
+                    order_request["time_in_force"]
+                )
+            if order_request.get("post_only") is True:
+                placement_kwargs["post_only"] = True
+            placement_result = await gateway.place_order(**placement_kwargs)
         except Exception as exc:
             return _ticket_bound_submit_blocked_result(
                 report,

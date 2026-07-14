@@ -18,6 +18,10 @@ from src.application.action_time.lifecycle_maintenance_scheduler import (
 from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
 )
+from src.application.action_time.exchange_snapshot_provider import (
+    _normalize_fill,
+    normalize_liquidity_role,
+)
 from src.application.action_time.post_submit_reconciliation_tick import (
     _entry_execution_truth,
     materialize_ticket_bound_first_reconciliation_tick,
@@ -47,6 +51,28 @@ def runtime_submit_env(monkeypatch):
         "owner-subaccount-runtime-v0",
     )
     monkeypatch.setenv("BRC_RUNTIME_EXCHANGE_ID", "binance_usdm")
+
+
+def test_fill_normalization_preserves_exact_liquidity_and_fee_truth():
+    normalized = _normalize_fill(
+        {
+            "order": "tp1-order",
+            "side": "sell",
+            "amount": "0.25",
+            "price": "2100",
+            "takerOrMaker": "taker",
+            "info": {
+                "commission": "0.21",
+                "commissionAsset": "USDT",
+            },
+        }
+    )
+
+    assert normalized["liquidity_role"] == "taker"
+    assert normalized["fee"] == {"cost": "0.21", "currency": "USDT"}
+    assert normalize_liquidity_role(None, None, None, trade_side="sell") is None
+    assert normalize_liquidity_role(None, None, True, trade_side="buy") == "maker"
+    assert normalize_liquidity_role(None, None, True, trade_side="sell") == "taker"
 
 
 def test_first_tick_skips_disabled_smoke_without_pg_tick(pg_control_connection):

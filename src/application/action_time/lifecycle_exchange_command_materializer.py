@@ -114,6 +114,17 @@ def _source_intents(
                     f"{source['protection_recovery_command_id']}:"
                     f"{str(order.get('order_role') or '').upper()}"
                 ),
+                **(
+                    {
+                        "gateway_order_type": "limit",
+                        "execution_style": "limit_gtc",
+                        "time_in_force": "GTC",
+                        "post_only": False,
+                        "market_fallback_allowed": False,
+                    }
+                    if str(order.get("order_role") or "").upper() == "TP1"
+                    else {}
+                ),
             }
             for order in plan.get("submit_missing_orders", [])
             if isinstance(order, dict)
@@ -227,6 +238,12 @@ def _insert_or_verify(
         "amount": str(amount),
         "price": _decimal_text(intent.get("price")),
         "trigger_price": _decimal_text(intent.get("trigger_price")),
+        "execution_style": str(intent.get("execution_style") or ""),
+        "time_in_force": str(intent.get("time_in_force") or ""),
+        "post_only": intent.get("post_only") is True,
+        "market_fallback_allowed": (
+            intent.get("market_fallback_allowed") is True
+        ),
         "target_exchange_order_id": str(
             intent.get("target_exchange_order_id") or ""
         ),
@@ -263,6 +280,12 @@ def _insert_or_verify(
         command_generation=generation,
         request_fingerprint=fingerprint,
         order_type=str(intent.get("gateway_order_type") or ""),
+        execution_style=str(intent.get("execution_style") or "") or None,
+        time_in_force=str(intent.get("time_in_force") or "") or None,
+        post_only=intent.get("post_only") is True,
+        market_fallback_allowed=(
+            intent.get("market_fallback_allowed") is True
+        ),
         amount=amount,
         price=_decimal_or_none(intent.get("price")),
         stop_price=_decimal_or_none(intent.get("trigger_price")),

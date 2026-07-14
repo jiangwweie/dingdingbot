@@ -94,6 +94,7 @@ def project_ticket_bound_exchange_fills(
                 "fill_price": str(fill.get("price") or ""),
                 "fill_time_ms": fill.get("timestamp_ms"),
                 "fee": fill.get("fee"),
+                "liquidity_role": fill.get("liquidity_role"),
                 "realized_pnl": fill.get("realized_pnl"),
                 "reference_price": _exit_reference_price(dict(row)),
                 "funding_income": (
@@ -117,6 +118,17 @@ def project_ticket_bound_exchange_fills(
                 fill=projected[-1],
                 now_ms=now_ms,
             )
+            if _tp1_gtx_taker_contradiction(
+                conn,
+                ticket_id=ticket_id,
+                fill=projected[-1],
+            ):
+                return _hard_stop_tp1_gtx_taker_contradiction(
+                    conn,
+                    ticket_id=ticket_id,
+                    fill=projected[-1],
+                    now_ms=now_ms,
+                )
     _review_closed_external_exit_lineage(
         conn,
         ticket_id=ticket_id,
@@ -144,6 +156,80 @@ def project_ticket_bound_exchange_fills(
     if lifecycle_decision is not None:
         payload["lifecycle_decision"] = lifecycle_decision.to_dict()
     return payload
+
+
+def _tp1_gtx_taker_contradiction(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    fill: dict[str, Any],
+) -> bool:
+    if str(fill.get("liquidity_role") or "").lower() != "taker":
+        return False
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
+        return False
+    commands = _table(conn, "brc_ticket_bound_exchange_commands")
+    command = conn.execute(
+        sa.select(commands).where(
+            commands.c.ticket_id == ticket_id,
+            commands.c.order_role == "TP1",
+            commands.c.command_kind == "place_order",
+        )
+    ).mappings().first()
+    if not command:
+        return False
+    return (
+        str(command.get("execution_style") or "") == "passive_limit_gtx"
+        or str(command.get("time_in_force") or "").upper() == "GTX"
+        or command.get("post_only") is True
+    )
+
+
+def _hard_stop_tp1_gtx_taker_contradiction(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    fill: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    blocker = "tp1_gtx_taker_contradiction"
+    lifecycle_table = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
+    lifecycle = conn.execute(
+        sa.select(lifecycle_table).where(lifecycle_table.c.ticket_id == ticket_id)
+    ).mappings().one()
+    decision = reduce_lifecycle_decision(
+        current_status=str(lifecycle.get("status") or ""),
+        target_status="blocked",
+        event_type="hard_stopped",
+        blockers=[blocker],
+        next_action="reconcile_tp1_execution_adapter_truth",
+    )
+    conn.execute(
+        lifecycle_table.update()
+        .where(lifecycle_table.c.lifecycle_run_id == lifecycle["lifecycle_run_id"])
+        .values(
+            status=decision.status,
+            first_blocker=decision.first_blocker,
+            blockers=list(decision.blockers),
+            updated_at_ms=now_ms,
+        )
+    )
+    _insert_fill_event(
+        conn,
+        lifecycle=dict(lifecycle),
+        event_type=decision.event_type,
+        fill={**fill, "first_blocker": blocker},
+        now_ms=now_ms,
+    )
+    return {
+        "status": "blocked",
+        "projected_roles": ["TP1"],
+        "projected_count": 1,
+        "projected_fills": [fill],
+        "first_blocker": blocker,
+        "blockers": [blocker],
+        "lifecycle_decision": decision.to_dict(),
+    }
 
 
 def _review_closed_external_exit_lineage(

@@ -18,6 +18,7 @@ from src.application.action_time.lifecycle_exchange_command_materializer import 
 from src.application.action_time.orphan_protection_cleanup_command import (
     prepare_ticket_bound_orphan_protection_cleanup_command,
 )
+from src.domain.exceptions import InvalidOrderError
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
@@ -113,6 +114,136 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
     assert row["order_role"] == "ENTRY"
     assert row["command_state"] == "confirmed_submitted"
     assert row["claim_token"]
+
+
+@pytest.mark.asyncio
+async def test_worker_hard_stops_tampered_tp1_market_before_gateway_dispatch(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    gateway = _WorkerGateway()
+    engine = pg_control_connection.engine
+
+    for offset in (5000, 6000):
+        result = await run_one_ticket_bound_exchange_command(
+            engine,
+            gateway=gateway,
+            worker_id=f"unit-worker-{offset}",
+            now_ms=NOW_MS + offset,
+            command_sources=("protected_submit",),
+        )
+        assert result["status"] == "command_confirmed"
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_exchange_commands "
+                "SET order_type = 'market', price = NULL "
+                "WHERE order_role = 'TP1'"
+            )
+        )
+
+    result = await run_one_ticket_bound_exchange_command(
+        engine,
+        gateway=gateway,
+        worker_id="unit-worker-tp1",
+        now_ms=NOW_MS + 7000,
+        command_sources=("protected_submit",),
+    )
+
+    assert result["status"] == "command_hard_stopped"
+    assert result["blockers"] == ["tp1_requires_limit_price"]
+    assert result["exchange_write_called"] is False
+    assert len(gateway.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_worker_dispatches_one_explicit_gtc_limit_tp1_without_market_fallback(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    gateway = _WorkerGateway()
+    engine = pg_control_connection.engine
+
+    results = []
+    for offset in (5000, 6000, 7000):
+        results.append(
+            await run_one_ticket_bound_exchange_command(
+                engine,
+                gateway=gateway,
+                worker_id=f"unit-worker-{offset}",
+                now_ms=NOW_MS + offset,
+                command_sources=("protected_submit",),
+            )
+        )
+
+    assert [result["status"] for result in results] == [
+        "command_confirmed",
+        "command_confirmed",
+        "command_confirmed",
+    ]
+    tp1_calls = [call for call in gateway.calls if call["order_type"] == "limit"]
+    assert len(tp1_calls) == 1
+    assert tp1_calls[0]["time_in_force"] == "GTC"
+    assert "post_only" not in tp1_calls[0]
+    assert all(call["order_type"] != "market" for call in tp1_calls)
+
+
+@pytest.mark.asyncio
+async def test_worker_classifies_gtx_post_only_rejection_without_market_retry(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET execution_style = 'passive_limit_gtx', time_in_force = 'GTX', "
+            "post_only = true WHERE order_role = 'TP1'"
+        )
+    )
+    pg_control_connection.commit()
+    engine = pg_control_connection.engine
+
+    class _PostOnlyRejectingGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            if kwargs.get("post_only") is True:
+                raise InvalidOrderError("post_only_would_take", "F-012")
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+            )
+
+    gateway = _PostOnlyRejectingGateway()
+    for offset in (5000, 6000):
+        result = await run_one_ticket_bound_exchange_command(
+            engine,
+            gateway=gateway,
+            worker_id=f"unit-worker-{offset}",
+            now_ms=NOW_MS + offset,
+            command_sources=("protected_submit",),
+        )
+        assert result["status"] == "command_confirmed"
+
+    rejected = await run_one_ticket_bound_exchange_command(
+        engine,
+        gateway=gateway,
+        worker_id="unit-worker-gtx",
+        now_ms=NOW_MS + 7000,
+        command_sources=("protected_submit",),
+    )
+
+    assert rejected["status"] == "command_rejected"
+    assert rejected["command_state"] == "confirmed_rejected"
+    assert rejected["exchange_write_called"] is True
+    gtx_calls = [call for call in gateway.calls if call.get("post_only")]
+    assert len(gtx_calls) == 1
+    assert gtx_calls[0]["order_type"] == "limit"
+    assert gtx_calls[0]["time_in_force"] == "GTX"
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -13,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from src.domain.ticket_bound_exchange_command import (
     ExchangeCommandOutcomeClass,
     ExchangeCommandState,
+    TicketBoundExchangeCommand,
     command_transition_blockers,
     deterministic_client_order_id,
 )
@@ -41,6 +43,41 @@ LIFECYCLE_COMMAND_PATH = (
 )
 
 
+def test_tp1_command_requires_explicit_limit_gtc_contract():
+    command = TicketBoundExchangeCommand.model_validate(_tp1_command())
+
+    assert command.execution_style == "limit_gtc"
+    assert command.time_in_force == "GTC"
+    assert command.post_only is False
+    assert command.market_fallback_allowed is False
+
+
+def test_tp1_command_rejects_market_or_missing_limit_contract():
+    market = _tp1_command(order_type="market", price=None)
+    with pytest.raises(ValueError, match="tp1_requires_limit_price"):
+        TicketBoundExchangeCommand.model_validate(market)
+
+    invalid_gtc = _tp1_command(post_only=True)
+    with pytest.raises(ValueError, match="tp1_gtc_contract_invalid"):
+        TicketBoundExchangeCommand.model_validate(invalid_gtc)
+
+
+def test_tp1_command_accepts_typed_passive_limit_gtx_only():
+    command = TicketBoundExchangeCommand.model_validate(
+        _tp1_command(
+            execution_style="passive_limit_gtx",
+            time_in_force="GTX",
+            post_only=True,
+        )
+    )
+    assert command.execution_style == "passive_limit_gtx"
+
+    with pytest.raises(ValueError):
+        TicketBoundExchangeCommand.model_validate(
+            _tp1_command(market_fallback_allowed=True)
+        )
+
+
 def _load_module(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None
@@ -49,6 +86,54 @@ def _load_module(path: Path, name: str):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _tp1_command(**overrides):
+    payload = {
+        "exchange_command_id": "command-1",
+        "protected_submit_attempt_id": "attempt-1",
+        "ticket_id": "ticket-1",
+        "operation_submit_command_id": "submit-1",
+        "account_id": "account-1",
+        "strategy_group_id": "SOR-001",
+        "runtime_profile_id": "profile-1",
+        "exchange_instrument_id": "binance_usdm:ETH/USDT:USDT",
+        "exchange_id": "binance_usdm",
+        "gateway_symbol": "ETH/USDT:USDT",
+        "symbol": "ETHUSDT",
+        "order_role": "TP1",
+        "side": "long",
+        "gateway_side": "sell",
+        "local_order_id": "tp1-1",
+        "parent_order_id": "entry-1",
+        "client_order_id": "brc-client-tp1-1",
+        "command_generation": 1,
+        "request_fingerprint": "sha256:command-1",
+        "order_type": "limit",
+        "execution_style": "limit_gtc",
+        "time_in_force": "GTC",
+        "post_only": False,
+        "market_fallback_allowed": False,
+        "amount": "0.25",
+        "price": "2100",
+        "stop_price": None,
+        "reduce_only": True,
+        "reduce_intent": "reduce_position",
+        "position_mode": "one_way",
+        "position_side": None,
+        "position_bucket": "BOTH",
+        "netting_domain_key": "account-1|binance_usdm|ETHUSDT|BOTH",
+        "command_kind": "place_order",
+        "command_source": "protected_submit",
+        "source_command_id": "attempt-1",
+        "authority_source_ref": "operation-layer:submit-1",
+        "command_state": "prepared",
+        "outcome_class": "pending",
+        "prepared_at_ms": 1,
+        "updated_at_ms": 1,
+    }
+    payload.update(overrides)
+    return payload
 
 
 def test_network_timeout_transitions_dispatching_to_outcome_unknown():

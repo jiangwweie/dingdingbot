@@ -467,10 +467,25 @@ def _normalize_open_order(order: Any) -> dict[str, Any]:
 def _normalize_fill(fill: Any) -> dict[str, Any]:
     raw = _as_dict(fill)
     info = _as_dict(raw.get("info"))
+    side = str(raw.get("side") or info.get("side") or "").lower()
+    fee = raw.get("fee")
+    if not isinstance(fee, dict):
+        commission = raw.get("commission") or info.get("commission")
+        commission_asset = (
+            raw.get("commissionAsset") or info.get("commissionAsset")
+        )
+        fee = (
+            {
+                "cost": str(commission),
+                "currency": str(commission_asset or "") or None,
+            }
+            if commission not in (None, "")
+            else None
+        )
     return {
         "exchange_order_id": _first(raw, info, "order", "orderId", "exchange_order_id"),
         "symbol": str(raw.get("symbol") or info.get("symbol") or ""),
-        "side": str(raw.get("side") or info.get("side") or "").lower(),
+        "side": side,
         "position_side": str(
             raw.get("positionSide")
             or raw.get("position_side")
@@ -485,7 +500,17 @@ def _normalize_fill(fill: Any) -> dict[str, Any]:
             or ""
         ),
         "price": str(raw.get("price") or info.get("price") or ""),
-        "fee": raw.get("fee") or info.get("commission"),
+        "fee": fee,
+        "liquidity_role": normalize_liquidity_role(
+            raw.get("takerOrMaker") or info.get("takerOrMaker"),
+            raw.get("maker") if raw.get("maker") is not None else info.get("maker"),
+            (
+                raw.get("buyerMaker")
+                if raw.get("buyerMaker") is not None
+                else info.get("buyerMaker")
+            ),
+            trade_side=side,
+        ),
         "realized_pnl": (
             raw.get("realizedPnl")
             or raw.get("realized_pnl")
@@ -495,6 +520,40 @@ def _normalize_fill(fill: Any) -> dict[str, Any]:
             raw.get("timestamp") or raw.get("timestamp_ms") or info.get("time")
         ),
     }
+
+
+def normalize_liquidity_role(
+    taker_or_maker: Any,
+    maker: Any,
+    buyer_maker: Any,
+    *,
+    trade_side: str,
+) -> str | None:
+    direct = str(taker_or_maker or "").strip().lower()
+    if direct in {"maker", "taker"}:
+        return direct
+    maker_flag = _optional_bool(maker)
+    if maker_flag is not None:
+        return "maker" if maker_flag else "taker"
+    buyer_maker_flag = _optional_bool(buyer_maker)
+    normalized_side = str(trade_side or "").strip().lower()
+    if buyer_maker_flag is None or normalized_side not in {"buy", "sell"}:
+        return None
+    owner_is_maker = (
+        buyer_maker_flag if normalized_side == "buy" else not buyer_maker_flag
+    )
+    return "maker" if owner_is_maker else "taker"
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    return None
 
 
 def _normalize_conditional_order_lineage(rows: list[Any]) -> list[dict[str, Any]]:

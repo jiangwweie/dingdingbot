@@ -24,9 +24,11 @@ from src.application.action_time.lifecycle_mutation_capability import (
 from src.application.action_time.netting_domain_hold import (
     upsert_exchange_command_domain_hold,
 )
+from src.domain.exceptions import InsufficientMarginError, InvalidOrderError
 from src.domain.ticket_bound_exchange_command import (
     ExchangeCommandOutcomeClass,
     ExchangeCommandState,
+    validate_tp1_execution_contract,
 )
 
 
@@ -92,8 +94,10 @@ async def run_one_ticket_bound_exchange_command(
             ),
         }
 
-    identity_blockers = _gateway_identity_blockers(command, gateway)
-    if identity_blockers:
+    command_blockers = _gateway_identity_blockers(
+        command, gateway
+    ) + _execution_contract_blockers(command)
+    if command_blockers:
         with engine.begin() as conn:
             recorded = record_claimed_exchange_command_outcome(
                 conn,
@@ -102,15 +106,15 @@ async def run_one_ticket_bound_exchange_command(
                 target_state=ExchangeCommandState.HARD_STOPPED,
                 outcome_class=ExchangeCommandOutcomeClass.CONTRADICTORY_TRUTH,
                 exchange_result={
-                    "error_code": identity_blockers[0],
-                    "error_message": ",".join(identity_blockers),
+                    "error_code": command_blockers[0],
+                    "error_message": ",".join(command_blockers),
                 },
                 now_ms=now_ms,
             )
             upsert_exchange_command_domain_hold(
                 conn,
                 command=recorded,
-                blockers=identity_blockers,
+                blockers=command_blockers,
                 now_ms=now_ms,
             )
             failure_completion = _apply_terminal_source_failure(
@@ -121,7 +125,7 @@ async def run_one_ticket_bound_exchange_command(
         result_payload = _result(
             "command_hard_stopped",
             recorded,
-            blockers=identity_blockers,
+            blockers=command_blockers,
             exchange_write_called=False,
         )
         result_payload["lifecycle_completion"] = failure_completion
@@ -136,6 +140,41 @@ async def run_one_ticket_bound_exchange_command(
             if dispatch_timeout_seconds is not None
             else await _dispatch(command, gateway)
         )
+    except (InvalidOrderError, InsufficientMarginError) as exc:
+        blocker = str(exc)
+        with engine.begin() as conn:
+            recorded = record_claimed_exchange_command_outcome(
+                conn,
+                exchange_command_id=str(command["exchange_command_id"]),
+                claim_token=str(command["claim_token"]),
+                target_state=ExchangeCommandState.CONFIRMED_REJECTED,
+                outcome_class=ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION,
+                exchange_result={
+                    "error_code": getattr(exc, "error_code", None),
+                    "error_message": blocker,
+                },
+                now_ms=now_ms,
+            )
+            upsert_exchange_command_domain_hold(
+                conn,
+                command=recorded,
+                blockers=[blocker],
+                now_ms=now_ms,
+            )
+            failure_completion = _apply_terminal_source_failure(
+                conn,
+                recorded=recorded,
+                now_ms=now_ms,
+            )
+        result_payload = _result(
+            "command_rejected",
+            recorded,
+            blockers=[blocker],
+            exchange_write_called=True,
+        )
+        if failure_completion:
+            result_payload["lifecycle_completion"] = [failure_completion]
+        return result_payload
     except Exception as exc:
         with engine.begin() as conn:
             recorded = record_claimed_exchange_command_outcome(
@@ -270,26 +309,56 @@ async def _dispatch(command: dict[str, Any], gateway: Any) -> Any:
             exchange_order_id=target,
             symbol=str(command["gateway_symbol"]),
         )
-    return await gateway.place_order(
-        symbol=str(command["gateway_symbol"]),
-        order_type=str(command["order_type"]),
-        side=str(command["gateway_side"]),
-        amount=Decimal(str(command["amount"])),
-        price=(
+    placement_kwargs = {
+        "symbol": str(command["gateway_symbol"]),
+        "order_type": str(command["order_type"]),
+        "side": str(command["gateway_side"]),
+        "amount": Decimal(str(command["amount"])),
+        "price": (
             Decimal(str(command["price"]))
             if command.get("price") is not None
             else None
         ),
-        trigger_price=(
+        "trigger_price": (
             Decimal(str(command["stop_price"]))
             if command.get("stop_price") is not None
             else None
         ),
-        reduce_only=command.get("reduce_intent") == "reduce_position",
-        position_side=command.get("position_side"),
-        desired_leverage=command.get("desired_leverage"),
-        client_order_id=str(command["client_order_id"]),
-    )
+        "reduce_only": command.get("reduce_intent") == "reduce_position",
+        "position_side": command.get("position_side"),
+        "desired_leverage": command.get("desired_leverage"),
+        "client_order_id": str(command["client_order_id"]),
+    }
+    if command.get("time_in_force"):
+        placement_kwargs["time_in_force"] = str(command["time_in_force"])
+    if command.get("post_only") is True:
+        placement_kwargs["post_only"] = True
+    return await gateway.place_order(**placement_kwargs)
+
+
+def _execution_contract_blockers(command: dict[str, Any]) -> list[str]:
+    if str(command.get("command_kind") or "") != "place_order":
+        return []
+    if str(command.get("order_role") or "").upper() != "TP1":
+        return []
+    try:
+        validate_tp1_execution_contract(
+            order_type=str(command.get("order_type") or ""),
+            price=(
+                Decimal(str(command["price"]))
+                if command.get("price") is not None
+                else None
+            ),
+            execution_style=command.get("execution_style"),
+            time_in_force=command.get("time_in_force"),
+            post_only=command.get("post_only") is True,
+            market_fallback_allowed=(
+                command.get("market_fallback_allowed") is True
+            ),
+        )
+    except ValueError as exc:
+        return [str(exc)]
+    return []
 
 
 def _gateway_identity_blockers(

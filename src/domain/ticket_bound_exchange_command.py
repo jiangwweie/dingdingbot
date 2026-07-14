@@ -10,7 +10,7 @@ from __future__ import annotations
 from decimal import Decimal
 from enum import Enum
 from hashlib import sha256
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -131,6 +131,10 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     command_generation: int = Field(ge=1)
     request_fingerprint: str = Field(min_length=1, max_length=192)
     order_type: str = Field(min_length=1, max_length=64)
+    execution_style: Optional[Literal["limit_gtc", "passive_limit_gtx"]] = None
+    time_in_force: Optional[Literal["GTC", "GTX"]] = None
+    post_only: bool = False
+    market_fallback_allowed: Literal[False] = False
     amount: Decimal = Field(gt=Decimal("0"))
     price: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
     stop_price: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
@@ -194,7 +198,43 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
             raise ValueError("ENTRY may not carry reduce intent")
         if self.desired_leverage is not None and self.order_role != "ENTRY":
             raise ValueError("only ENTRY may carry desired leverage")
+        if self.command_kind == "place_order" and self.order_role == "TP1":
+            validate_tp1_execution_contract(
+                order_type=self.order_type,
+                price=self.price,
+                execution_style=self.execution_style,
+                time_in_force=self.time_in_force,
+                post_only=self.post_only,
+                market_fallback_allowed=self.market_fallback_allowed,
+            )
         return self
+
+
+def validate_tp1_execution_contract(
+    *,
+    order_type: str,
+    price: Decimal | None,
+    execution_style: str | None,
+    time_in_force: str | None,
+    post_only: bool,
+    market_fallback_allowed: bool,
+) -> None:
+    if str(order_type or "").lower() != "limit" or price is None:
+        raise ValueError("tp1_requires_limit_price")
+    if market_fallback_allowed:
+        raise ValueError("tp1_market_fallback_forbidden")
+    if execution_style == "limit_gtc" and (
+        time_in_force != "GTC" or post_only
+    ):
+        raise ValueError("tp1_gtc_contract_invalid")
+    if execution_style == "passive_limit_gtx" and (
+        time_in_force != "GTX" or not post_only
+    ):
+        raise ValueError("tp1_post_only_requires_gtx")
+    if execution_style is None:
+        raise ValueError("tp1_execution_style_required")
+    if execution_style not in {"limit_gtc", "passive_limit_gtx"}:
+        raise ValueError("tp1_execution_style_invalid")
 
 
 _ALLOWED_TRANSITIONS: dict[

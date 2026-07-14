@@ -180,6 +180,7 @@ def materialize_live_outcome_ledger(
         event_type="tp1_filled",
         payload_key="fill",
     )
+    tp1_command = _tp1_exchange_command(conn, ticket_id)
     final_fill = _lifecycle_fill_event(
         conn,
         lifecycle_run_id=str(lifecycle.get("lifecycle_run_id") or ""),
@@ -218,6 +219,22 @@ def materialize_live_outcome_ledger(
     )
     tp1_fill_price = _positive_decimal(tp1_fill.get("fill_price"))
     tp1_fill_qty = _positive_decimal(tp1_fill.get("fill_qty"))
+    tp1_fee_payload = tp1_fill.get("fee")
+    tp1_fee = (
+        _positive_or_zero_decimal(tp1_fee_payload.get("cost"))
+        if isinstance(tp1_fee_payload, dict)
+        else _positive_or_zero_decimal(tp1_fee_payload)
+    )
+    tp1_fee_asset = (
+        str(tp1_fee_payload.get("currency") or "").upper() or None
+        if isinstance(tp1_fee_payload, dict)
+        else None
+    )
+    tp1_liquidity_role = str(
+        tp1_fill.get("liquidity_role") or ""
+    ).lower()
+    if tp1_liquidity_role not in {"maker", "taker"}:
+        tp1_liquidity_role = None
     final_exit_price = _positive_decimal(final_fill.get("fill_price"))
     final_exit_qty = _positive_decimal(final_fill.get("fill_qty"))
     final_exit_time_ms = _positive_int(
@@ -303,6 +320,9 @@ def materialize_live_outcome_ledger(
         "tp1_exchange_order_id": str(tp1.get("exchange_order_id") or "") or None,
         "tp1_fill_time_ms": tp1_fill.get("fill_time_ms"),
         "tp1_fill_price": tp1_fill_price,
+        "tp1_liquidity_role": tp1_liquidity_role,
+        "tp1_fee": tp1_fee,
+        "tp1_fee_asset": tp1_fee_asset,
         "runner_qty": _positive_decimal(protection_set.get("runner_qty")),
         "runner_sl_price": _positive_decimal(runner_sl.get("trigger_price")),
         "runner_sl_exchange_order_id": str(runner_sl.get("exchange_order_id") or "") or None,
@@ -337,6 +357,14 @@ def materialize_live_outcome_ledger(
             "exit_slippage_complete": exit_slippage is not None,
             "leverage_source": "ticket_selected_leverage",
             "exchange_effective_leverage_known": False,
+            "tp1_order_type": str(tp1_command.get("order_type") or "") or None,
+            "tp1_execution_style": (
+                str(tp1_command.get("execution_style") or "") or None
+            ),
+            "tp1_time_in_force": (
+                str(tp1_command.get("time_in_force") or "") or None
+            ),
+            "tp1_post_only": tp1_command.get("post_only") is True,
         },
         "authority_boundary": AUTHORITY_BOUNDARY,
         "created_at_ms": int(_existing_outcome(conn, ticket_id).get("created_at_ms") or now_ms),
@@ -402,6 +430,25 @@ def _protection_orders(conn: sa.engine.Connection, ticket_id: str) -> list[dict[
             sa.select(table).where(table.c.ticket_id == ticket_id)
         ).mappings()
     ]
+
+
+def _tp1_exchange_command(
+    conn: sa.engine.Connection,
+    ticket_id: str,
+) -> dict[str, Any]:
+    if not ticket_id or not sa.inspect(conn).has_table(
+        "brc_ticket_bound_exchange_commands"
+    ):
+        return {}
+    table = _table(conn, "brc_ticket_bound_exchange_commands")
+    row = conn.execute(
+        sa.select(table).where(
+            table.c.ticket_id == ticket_id,
+            table.c.order_role == "TP1",
+            table.c.command_kind == "place_order",
+        )
+    ).mappings().first()
+    return dict(row) if row else {}
 
 
 def _existing_outcome(conn: sa.engine.Connection, ticket_id: str) -> dict[str, Any]:
