@@ -12,6 +12,9 @@ from alembic.runtime.migration import MigrationContext
 ROOT = Path(__file__).resolve().parents[2]
 FOUNDATION = ROOT / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 ACCOUNT_POLICY = ROOT / "migrations/versions/2026-07-14-121_create_account_risk_policy.py"
+ACCOUNT_CAPACITY_RESERVATION_SCOPE = (
+    ROOT / "migrations/versions/2026-07-14-124_add_account_capacity_reservation_scope.py"
+)
 
 
 def _load(path: Path, name: str):
@@ -74,3 +77,21 @@ def test_migration_121_creates_account_policy_current_with_single_position_shado
         "exchange_instrument_id",
         "risk_cluster_id",
     } <= cluster_columns
+
+
+def test_migration_124_binds_budget_reservations_to_account_capacity_scope() -> None:
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        _upgrade(conn, FOUNDATION, "migration_086_for_account_capacity_scope")
+        _upgrade(conn, ACCOUNT_CAPACITY_RESERVATION_SCOPE, "migration_124_account_capacity_scope")
+        columns = {
+            column["name"]
+            for column in sa.inspect(conn).get_columns("brc_budget_reservations")
+        }
+
+    assert {
+        "exchange_instrument_id",
+        "account_risk_policy_version",
+        "risk_cluster_id",
+        "account_capacity_projection_version",
+    } <= columns

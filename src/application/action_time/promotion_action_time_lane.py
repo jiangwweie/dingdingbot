@@ -523,7 +523,11 @@ def materialize_action_time_invocation_promotion_action_time_lane(
             blockers=terminal_blockers,
             next_action="wait_for_next_fresh_signal_observation",
         )
-    budget = _budget_row(bundle, now_ms=now_ms)
+    budget = _budget_row(
+        bundle,
+        now_ms=now_ms,
+        account_capacity=account_capacity,
+    )
     protection = _protection_row(bundle)
     _upsert_row(
         conn,
@@ -2004,7 +2008,12 @@ def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
     return row
 
 
-def _budget_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
+def _budget_row(
+    bundle: CandidateBundle,
+    *,
+    now_ms: int,
+    account_capacity: AccountCapacityReservationResult | None = None,
+) -> dict[str, Any]:
     decision = bundle.sizing_risk_decision
     if decision is None:
         raise ValueError("selected promotion has no sizing/risk decision")
@@ -2035,6 +2044,26 @@ def _budget_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
         "intended_qty": decision.intended_qty,
         "risk_at_stop": decision.planned_stop_risk,
         "risk_reservation_basis": decision.risk_reservation_basis,
+        "exchange_instrument_id": (
+            account_capacity.exchange_instrument_id
+            if account_capacity is not None
+            else None
+        ),
+        "account_risk_policy_version": (
+            account_capacity.account_risk_policy_version
+            if account_capacity is not None
+            else None
+        ),
+        "risk_cluster_id": (
+            account_capacity.risk_cluster_id
+            if account_capacity is not None
+            else None
+        ),
+        "account_capacity_projection_version": (
+            account_capacity.claimed_projection_version
+            if account_capacity is not None
+            else None
+        ),
         "reserved_at_ms": now_ms,
         "expires_at_ms": min(
             int(bundle.signal["expires_at_ms"]),

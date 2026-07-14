@@ -23,6 +23,9 @@ class AccountCapacityReservationResult(BaseModel):
     allowed: bool; allocated_risk: Decimal = Decimal("0"); intended_qty: Decimal = Decimal("0")
     selected_leverage: int | None = None; reserved_margin: Decimal = Decimal("0")
     claimed_projection_version: int | None = None; first_blocker: str | None = None
+    account_risk_policy_version: str | None = None
+    risk_cluster_id: str | None = None
+    exchange_instrument_id: str | None = None
 
 
 def reserve_account_capacity_for_candidate(conn: sa.Connection, *, candidate: AccountCapacityCandidate, expected_source_snapshot_id: str, expected_projection_version: int, now_ms: int) -> AccountCapacityReservationResult:
@@ -35,6 +38,7 @@ def reserve_account_capacity_for_candidate(conn: sa.Connection, *, candidate: Ac
     if not bool(budget["new_entry_allowed"]): return _blocked(str(budget["first_blocker"] or "account_budget_new_entry_not_allowed"))
     policy = load_account_risk_policy_current(conn, account_id=candidate.account_id, runtime_profile_id=candidate.runtime_profile_id)
     if policy is None or policy.risk_policy_version != str(budget["risk_policy_version"]): return _blocked("account_risk_policy_missing_or_changed")
+    if policy.activation_state != "active": return _blocked("account_risk_policy_not_active")
     if _cluster(conn, policy.risk_policy_version, candidate.exchange_instrument_id) != candidate.risk_cluster_id: return _blocked("risk_cluster_membership_missing_or_changed")
     if _instrument_claimed(conn, candidate.account_id, candidate.exchange_instrument_id): return _blocked("account_instrument_already_claimed")
     decision = decide_account_capacity(wallet_balance=_d(budget["total_wallet_balance"]), available_balance=_d(budget["available_balance"]), exchange_initial_margin=_d(budget["exchange_total_initial_margin"]), unreflected_pending_margin=_d(budget["unreflected_pending_margin"]), existing_portfolio_held_risk=_d(budget["portfolio_held_risk"]), existing_cluster_held_risk=_cluster_held_risk(conn, candidate.account_id, policy.risk_policy_version, candidate.risk_cluster_id, fallback=_d(budget["portfolio_held_risk"])), claimed_position_slots=int(budget["claimed_position_slots"]), instrument_already_claimed=False, per_unit_stop_risk=candidate.per_unit_stop_risk, entry_reference_price=candidate.entry_reference_price, min_qty=candidate.min_qty, qty_step=candidate.qty_step, min_notional=candidate.min_notional, exchange_max_leverage=candidate.exchange_max_leverage, policy=policy)
@@ -42,7 +46,7 @@ def reserve_account_capacity_for_candidate(conn: sa.Connection, *, candidate: Ac
     claimed_version = expected_projection_version + 1
     claimed = conn.execute(budget_table.update().where(budget_table.c.account_budget_current_id == budget["account_budget_current_id"]).where(budget_table.c.projection_version == expected_projection_version).values(projection_version=claimed_version))
     if int(claimed.rowcount or 0) != 1: return _blocked("account_budget_projection_version_changed")
-    return AccountCapacityReservationResult(allowed=True, allocated_risk=decision.allowed_risk, intended_qty=decision.intended_qty, selected_leverage=decision.selected_leverage, reserved_margin=decision.reserved_margin, claimed_projection_version=claimed_version)
+    return AccountCapacityReservationResult(allowed=True, allocated_risk=decision.allowed_risk, intended_qty=decision.intended_qty, selected_leverage=decision.selected_leverage, reserved_margin=decision.reserved_margin, claimed_projection_version=claimed_version, account_risk_policy_version=policy.risk_policy_version, risk_cluster_id=candidate.risk_cluster_id, exchange_instrument_id=candidate.exchange_instrument_id)
 
 
 def _cluster(conn: sa.Connection, version: str, instrument: str) -> str | None:
@@ -75,4 +79,24 @@ def _instrument_claimed(conn: sa.Connection, account_id: str, instrument: str) -
 def _cluster_held_risk(conn: sa.Connection, account_id: str, version: str, cluster: str, *, fallback: Decimal) -> Decimal:
     if not sa.inspect(conn).has_table("brc_account_exposure_current"): return fallback
     exposures = sa.Table("brc_account_exposure_current", sa.MetaData(), autoload_with=conn); memberships = sa.Table("brc_risk_cluster_memberships", sa.MetaData(), autoload_with=conn)
-    return sum((_d(value) for value in conn.execute(sa.select(exposures.c.held_risk).join(memberships, memberships.c.exchange_instrument_id == exposures.c.exchange_instrument_id).where(exposures.c.account_id == account_id).where(memberships.c.risk_policy_version == version).where(memberships.c.risk_cluster_id == cluster)).scalars()), Decimal("0"))
+    exposure_held = sum((_d(value) for value in conn.execute(sa.select(exposures.c.held_risk).join(memberships, memberships.c.exchange_instrument_id == exposures.c.exchange_instrument_id).where(exposures.c.account_id == account_id).where(memberships.c.risk_policy_version == version).where(memberships.c.risk_cluster_id == cluster)).scalars()), Decimal("0"))
+    if not sa.inspect(conn).has_table("brc_budget_reservations"):
+        return exposure_held
+    reservations = sa.Table("brc_budget_reservations", sa.MetaData(), autoload_with=conn)
+    required_columns = {"account_risk_policy_version", "risk_cluster_id", "risk_at_stop", "status"}
+    if not required_columns.issubset(reservations.c.keys()):
+        return exposure_held
+    reservation_held = sum(
+        (
+            _d(value)
+            for value in conn.execute(
+                sa.select(reservations.c.risk_at_stop)
+                .where(reservations.c.account_id == account_id)
+                .where(reservations.c.account_risk_policy_version == version)
+                .where(reservations.c.risk_cluster_id == cluster)
+                .where(reservations.c.status.in_(("active", "consumed")))
+            ).scalars()
+        ),
+        Decimal("0"),
+    )
+    return exposure_held + reservation_held
