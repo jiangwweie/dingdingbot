@@ -14,7 +14,9 @@ ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scri
   --require-database-url \
   --systemd-unit brc-owner-console-backend.service \
   --systemd-unit brc-runtime-signal-watcher.timer \
-  --systemd-unit brc-runtime-signal-watcher.service
+  --systemd-unit brc-runtime-signal-watcher.service \
+  --systemd-unit brc-ticket-lifecycle-maintenance.timer \
+  --systemd-unit brc-ticket-lifecycle-maintenance.service
 
 NoNewPrivileges=true
 PrivateTmp=true

@@ -67,9 +67,12 @@ DEFAULT_SYSTEMD_UNITS = (
     "brc-owner-console-backend.service",
     "brc-runtime-signal-watcher.timer",
     "brc-runtime-signal-watcher.service",
+    "brc-ticket-lifecycle-maintenance.timer",
+    "brc-ticket-lifecycle-maintenance.service",
 )
 ONESHOT_INACTIVE_OK_UNITS = {
     "brc-runtime-signal-watcher.service",
+    "brc-ticket-lifecycle-maintenance.service",
     "brc-runtime-monitor.service",
 }
 FEISHU_WEBHOOK_URL_ENV_NAMES = (

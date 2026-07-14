@@ -21,6 +21,8 @@ def test_runtime_monitor_timer_uses_low_frequency_server_side_pg_monitor() -> No
     assert "Unit=brc-runtime-monitor.service" in timer
     assert "--baseline-json" not in service
     assert "--baseline-json" not in timer
+    assert "--systemd-unit brc-ticket-lifecycle-maintenance.timer" in service
+    assert "--systemd-unit brc-ticket-lifecycle-maintenance.service" in service
     for removed_key in [
         "default_check",
         "heartbeat_check",
@@ -31,3 +33,16 @@ def test_runtime_monitor_timer_uses_low_frequency_server_side_pg_monitor() -> No
         "quiet_monitor_audit_check",
     ]:
         assert removed_key not in service
+
+
+def test_runtime_monitor_health_checks_remain_readonly() -> None:
+    source = Path("scripts/run_tokyo_runtime_server_monitor.py").read_text(
+        encoding="utf-8"
+    )
+    service = Path("deploy/systemd/brc-runtime-monitor.service").read_text(
+        encoding="utf-8"
+    )
+
+    for action in ("start", "stop", "restart", "enable", "disable"):
+        assert f"systemctl {action}" not in source
+        assert f"systemctl {action}" not in service

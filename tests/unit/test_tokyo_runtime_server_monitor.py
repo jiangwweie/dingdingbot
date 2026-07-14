@@ -507,6 +507,51 @@ def test_feishu_acknowledgement_prefers_current_business_code_over_legacy_field(
     assert acknowledgement["business_message"] == "rejected"
 
 
+def test_lifecycle_scheduler_units_are_default_readonly_health_coverage() -> None:
+    module = _load_module()
+
+    assert "brc-ticket-lifecycle-maintenance.timer" in module.DEFAULT_SYSTEMD_UNITS
+    assert "brc-ticket-lifecycle-maintenance.service" in module.DEFAULT_SYSTEMD_UNITS
+    assert (
+        "brc-ticket-lifecycle-maintenance.service"
+        in module.ONESHOT_INACTIVE_OK_UNITS
+    )
+
+
+def test_lifecycle_scheduler_oneshot_and_timer_health_semantics() -> None:
+    module = _load_module()
+
+    inactive_service = module._systemd_status(
+        ["brc-ticket-lifecycle-maintenance.service"],
+        runner=lambda _unit: module.CommandResult(
+            stdout="inactive",
+            stderr="",
+            returncode=3,
+        ),
+    )
+    inactive_timer = module._systemd_status(
+        ["brc-ticket-lifecycle-maintenance.timer"],
+        runner=lambda _unit: module.CommandResult(
+            stdout="inactive",
+            stderr="",
+            returncode=3,
+        ),
+    )
+    failed_service = module._systemd_status(
+        ["brc-ticket-lifecycle-maintenance.service"],
+        runner=lambda _unit: module.CommandResult(
+            stdout="failed",
+            stderr="",
+            returncode=3,
+        ),
+    )
+
+    assert inactive_service["ready"] is True
+    assert inactive_service["rows"][0]["inactive_success"] is True
+    assert inactive_timer["ready"] is False
+    assert failed_service["ready"] is False
+
+
 def _load_file_module(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None
