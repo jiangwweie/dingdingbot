@@ -129,7 +129,12 @@ def materialize_action_time_finalgate_preflight(
             finalgate_pass_id=None,
         )
 
-    blockers = _finalgate_blockers(control_state, ticket=ticket, now_ms=now_ms)
+    blockers = _finalgate_blockers(
+        conn,
+        control_state,
+        ticket=ticket,
+        now_ms=now_ms,
+    )
     if blockers:
         if ticket.get("status") == "created":
             _transition_ticket(
@@ -302,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _finalgate_blockers(
+    conn: sa.Connection,
     control_state: dict[str, Any],
     *,
     ticket: dict[str, Any],
@@ -479,6 +485,21 @@ def _finalgate_blockers(
         blockers.append(f"budget_reservation_status_not_usable:{budget.get('status')}")
     if budget:
         blockers.extend(budget_stop_risk_blockers(budget))
+    capacity_blockers, active_capacity_policy = account_capacity_current_blockers(
+        conn,
+        budget=budget,
+        now_ms=now_ms,
+    )
+    blockers.extend(capacity_blockers)
+    if active_capacity_policy and not capacity_blockers:
+        if account_values.get("account_capacity_base_safe") is not True:
+            blockers.append("account_capacity_base_fact_not_safe")
+        else:
+            blockers = [
+                blocker
+                for blocker in blockers
+                if blocker not in _CAPACITY_REPLACED_LEGACY_BLOCKERS
+            ]
     if protection and int(protection.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("protection_ref_expired")
     if execution_policy and execution_policy.get("status") != "current":
@@ -492,6 +513,67 @@ def _finalgate_blockers(
     ) != str(ticket.get("event_spec_version_id") or ""):
         blockers.append("event_spec_version_mismatch")
     return _dedupe(blockers)
+
+
+_CAPACITY_REPLACED_LEGACY_BLOCKERS = {
+    "account_safe_fact_not_satisfied",
+    "account_safe_fact_not_fresh",
+    "account_safe_fact_not_true",
+    "open_orders_not_clear",
+    "active_position_or_open_order_conflict",
+}
+
+
+def account_capacity_current_blockers(
+    conn: sa.Connection,
+    *,
+    budget: dict[str, Any],
+    now_ms: int,
+) -> tuple[list[str], bool]:
+    """Revalidate the active account-capacity claim without network I/O."""
+
+    policy_version = str(budget.get("account_risk_policy_version") or "").strip()
+    expected_projection_version = budget.get("account_capacity_projection_version")
+    if not policy_version or expected_projection_version is None:
+        return [], False
+    required_tables = {
+        "brc_account_risk_policy_current",
+        "brc_account_budget_current",
+    }
+    if not required_tables.issubset(set(sa.inspect(conn).get_table_names())):
+        return ["account_capacity_current_projection_missing"], True
+    policies = sa.Table(
+        "brc_account_risk_policy_current", sa.MetaData(), autoload_with=conn
+    )
+    policy = conn.execute(
+        sa.select(policies)
+        .where(policies.c.account_id == budget.get("account_id"))
+        .where(policies.c.runtime_profile_id == budget.get("runtime_profile_id"))
+    ).mappings().one_or_none()
+    if policy is None or str(policy.get("risk_policy_version") or "") != policy_version:
+        return ["account_risk_policy_missing_or_changed"], True
+    if str(policy.get("activation_state") or "") != "active":
+        return ["account_risk_policy_not_active"], True
+    current = sa.Table(
+        "brc_account_budget_current", sa.MetaData(), autoload_with=conn
+    )
+    projection = conn.execute(
+        sa.select(current)
+        .where(current.c.account_id == budget.get("account_id"))
+        .where(current.c.runtime_profile_id == budget.get("runtime_profile_id"))
+        .where(current.c.risk_policy_version == policy_version)
+    ).mappings().one_or_none()
+    if projection is None:
+        return ["account_budget_current_missing"], True
+    if int(projection.get("valid_until_ms") or 0) <= now_ms:
+        return ["account_budget_current_stale"], True
+    if int(projection.get("projection_version") or 0) != int(expected_projection_version):
+        return ["account_budget_projection_version_changed"], True
+    if projection.get("new_entry_allowed") is not True:
+        return [
+            str(projection.get("first_blocker") or "account_budget_new_entry_not_allowed")
+        ], True
+    return [], True
 
 
 def _ticket_hash_blockers(ticket: dict[str, Any]) -> list[str]:
