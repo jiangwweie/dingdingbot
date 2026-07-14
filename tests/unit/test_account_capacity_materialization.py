@@ -36,6 +36,23 @@ def test_exchange_classification_blocker_prevents_budget_and_claim(monkeypatch) 
     assert result.first_blocker == "account_exchange_order_unknown_global_fail_closed"
 
 
+def test_snapshot_without_trade_permission_is_blocked_before_classification(monkeypatch) -> None:
+    monkeypatch.setattr(
+        subject,
+        "classify_account_exchange_truth",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not classify")),
+    )
+    result = subject.materialize_account_capacity_from_snapshot(
+        object(),
+        snapshot=_snapshot().model_copy(update={"can_trade": False}),
+        runtime_profile_id="profile-1",
+        candidate=_candidate(),
+        now_ms=1_752_480_000_000,
+    )
+    assert result.allowed is False
+    assert result.first_blocker == "account_trade_permission_not_true"
+
+
 def _snapshot() -> FullAccountRiskSnapshot:
     return FullAccountRiskSnapshot(snapshot_ready=True, account_id="account-1", exchange_id="binance_usdm", total_wallet_balance=Decimal("600"), available_balance=Decimal("500"), exchange_total_initial_margin=Decimal("100"), can_trade=True, position_mode="one_way", source_snapshot_id="snapshot-1", observed_at_ms=1_752_480_000_000, valid_until_ms=1_752_480_060_000)
 

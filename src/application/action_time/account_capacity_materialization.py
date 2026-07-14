@@ -35,6 +35,10 @@ def materialize_account_capacity_from_snapshot(
     """Classify, project, and atomically claim capacity from a prefetched snapshot."""
     if not snapshot.snapshot_ready:
         return _blocked(snapshot.failure_code or "account_risk_snapshot_not_ready")
+    if snapshot.can_trade is not True:
+        return _blocked("account_trade_permission_not_true")
+    if snapshot.position_mode not in {"one_way", "hedge"}:
+        return _blocked("account_position_mode_not_safe")
     if snapshot.account_id != candidate.account_id or runtime_profile_id != candidate.runtime_profile_id:
         return _blocked("account_capacity_scope_mismatch")
     classification = classify_account_exchange_truth(conn, snapshot=snapshot)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 
 from sqlalchemy import text
@@ -20,6 +21,9 @@ from src.application.action_time.ticket_materialization_sequence import (
 )
 from src.application.action_time.account_capacity_reservation import (
     AccountCapacityReservationResult,
+)
+from src.infrastructure.binance_usdm_account_risk_snapshot import (
+    FullAccountRiskSnapshot,
 )
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
@@ -103,6 +107,87 @@ def test_sequence_cli_keeps_watcher_healthy_for_persisted_business_blocker(
         ]
     ) == 0
     assert seen["action_time_invocation_id"] == "action_time_invocation:unit"
+
+
+def test_sequence_cli_prefetches_full_account_snapshot_only_for_active_policy(
+    monkeypatch,
+):
+    seen: dict[str, object] = {}
+
+    class FakeTransaction:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def rollback(self):
+            return None
+
+    class FakeEngine:
+        def connect(self):
+            return FakeTransaction()
+
+        def begin(self):
+            return FakeTransaction()
+
+        def dispose(self):
+            return None
+
+    snapshot = FullAccountRiskSnapshot(
+        snapshot_ready=True,
+        account_id="account-1",
+        exchange_id="binance_usdm",
+        total_wallet_balance=Decimal("600"),
+        available_balance=Decimal("500"),
+        exchange_total_initial_margin=Decimal("100"),
+        can_trade=True,
+        position_mode="one_way",
+        source_snapshot_id="snapshot-1",
+        observed_at_ms=NOW_MS,
+        valid_until_ms=NOW_MS + 60_000,
+    )
+    monkeypatch.setattr(sequence_script.sa, "create_engine", lambda _dsn: FakeEngine())
+    monkeypatch.setattr(
+        sequence_script,
+        "_active_account_risk_scope",
+        lambda _conn, **_kwargs: sequence_script._ActiveAccountRiskScope(
+            account_id="account-1",
+            runtime_profile_id="profile-1",
+            exchange_id="binance_usdm",
+        ),
+    )
+    monkeypatch.setattr(
+        sequence_script,
+        "_fetch_account_risk_snapshot",
+        lambda **kwargs: seen.update({"scope": kwargs["scope"]}) or snapshot,
+    )
+    monkeypatch.setattr(
+        sequence_script,
+        "materialize_action_time_ticket_sequence",
+        lambda _conn, **kwargs: (
+            seen.update(kwargs)
+            or {
+                "status": "action_time_ticket_sequence_rolled_back",
+                "process_outcome": {
+                    "process_state": "business_blocked",
+                    "business_state": "temporarily_unavailable",
+                    "first_blocker": "unit_blocker",
+                },
+            }
+        ),
+    )
+
+    assert sequence_script.main(
+        [
+            "--database-url",
+            "postgresql+psycopg://unit",
+            "--action-time-invocation-id",
+            "action_time_invocation:unit",
+        ]
+    ) == 0
+    assert seen["prefetched_account_snapshot"] == snapshot
+    assert seen["scope"].account_id == "account-1"
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
     _candidate_runtime_row,

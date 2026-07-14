@@ -56,6 +56,7 @@ def test_runtime_account_safe_facts_ready_from_live_facts():
 
     assert artifact["status"] == "runtime_account_safe_facts_ready"
     assert artifact["checks"]["account_safe_facts_ready"] is True
+    assert artifact["checks"]["account_capacity_base_safe"] is True
     assert artifact["checks"]["private_action_time_facts_ready"] is True
     assert artifact["checks"]["active_position_or_open_order_clear"] is True
     assert artifact["checks"]["action_time_available_balance"] is True
@@ -82,6 +83,8 @@ def test_runtime_account_safe_facts_blocks_open_position():
 
     assert artifact["status"] == "runtime_account_safe_facts_blocked"
     assert artifact["checks"]["account_safe_facts_ready"] is False
+    assert artifact["checks"]["account_capacity_base_safe"] is True
+    assert artifact["facts"]["account_capacity_base_safe"] is True
     assert "active_position_clear" in artifact["blockers"]
 
 

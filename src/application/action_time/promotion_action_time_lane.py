@@ -45,6 +45,9 @@ from src.application.action_time.account_capacity_reservation import (  # noqa: 
 from src.application.action_time.account_capacity_materialization import (  # noqa: E402
     materialize_account_capacity_from_snapshot,
 )
+from src.application.action_time.account_risk_policy import (  # noqa: E402
+    load_account_risk_policy_current,
+)
 from src.application.action_time.identity_conservation import (  # noqa: E402
     RuntimeLaneIdentityConservationError,
     RuntimeLaneLineage,
@@ -434,6 +437,18 @@ def materialize_action_time_invocation_promotion_action_time_lane(
     bundle = _invocation_candidate_bundle(control_state, evidence=evidence)
     bundle = _apply_allocation_capital_scope([bundle], now_ms=now_ms)[0]
     if account_snapshot is not None and account_capacity is None:
+        bundle, capacity_gate_blocker = _prepare_active_capacity_bundle(
+            conn,
+            bundle=bundle,
+            snapshot=account_snapshot,
+        )
+        if capacity_gate_blocker:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=[capacity_gate_blocker],
+                next_action="repair_account_capacity_base_safety",
+            )
         candidate, candidate_blocker = _account_capacity_candidate(
             conn, bundle=bundle, snapshot=account_snapshot
         )
@@ -774,6 +789,56 @@ def _account_capacity_candidate(
         min_notional=pricing.min_notional,
         exchange_max_leverage=exchange_max_leverage,
     ), None
+
+
+_CAPACITY_REPLACED_LEGACY_BLOCKERS = {
+    "account_safe_fact_not_satisfied",
+    "account_safe_fact_not_fresh",
+    "account_safe_fact_not_true",
+    "open_orders_not_clear",
+    "active_position_or_open_order_conflict",
+}
+
+
+def _prepare_active_capacity_bundle(
+    conn: sa.Connection,
+    *,
+    bundle: CandidateBundle,
+    snapshot: FullAccountRiskSnapshot,
+) -> tuple[CandidateBundle, str | None]:
+    """Replace only the legacy flat-position gate for an active capacity policy.
+
+    The replacement is deliberately narrow.  The existing account fact must
+    still prove all non-position safety checks, and the caller must provide a
+    fresh, full-account snapshot which the capacity materializer will classify
+    inside the same PG transaction.  No other candidate blocker is relaxed.
+    """
+
+    policy = load_account_risk_policy_current(
+        conn,
+        account_id=bundle.account_id,
+        runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+    )
+    if policy is None:
+        return bundle, "account_risk_policy_missing_or_changed"
+    if policy.activation_state != "active":
+        return bundle, "account_risk_policy_not_active"
+    if snapshot.account_id != bundle.account_id:
+        return bundle, "account_capacity_snapshot_account_mismatch"
+    account_values = _as_dict(bundle.account_safe_fact.get("fact_values"))
+    if account_values.get("account_capacity_base_safe") is not True:
+        return bundle, "account_capacity_base_fact_not_safe"
+    return (
+        replace(
+            bundle,
+            blockers=tuple(
+                blocker
+                for blocker in bundle.blockers
+                if blocker not in _CAPACITY_REPLACED_LEGACY_BLOCKERS
+            ),
+        ),
+        None,
+    )
 
 
 def _row_with_value(

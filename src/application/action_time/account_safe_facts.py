@@ -425,6 +425,26 @@ def build_runtime_account_safe_facts(
         is True,
         "source_order_created": source_safety.get("order_created") is True,
     }
+    # The legacy action-time surface intentionally remains flat-only.  The
+    # account-capacity path needs a narrower fact: all non-position account
+    # safety checks are healthy, while exact position/order ownership will be
+    # reclassified from the full account snapshot inside its PG transaction.
+    account_capacity_base_safe = (
+        all(
+            value is True
+            for key, value in checks.items()
+            if key
+            not in {
+                "active_position_clear",
+                "open_orders_clear",
+                "next_attempt_gate_ready",
+                "source_exchange_write_called",
+                "source_order_created",
+            }
+        )
+        and checks["source_exchange_write_called"] is False
+        and checks["source_order_created"] is False
+    )
     ready = (
         all(
             value is True
@@ -463,6 +483,7 @@ def build_runtime_account_safe_facts(
             **checks,
             "account_safe_facts_ready": ready,
             "account_safe": ready,
+            "account_capacity_base_safe": account_capacity_base_safe,
             "private_action_time_facts_ready": ready,
             "active_position_or_open_order_clear": (
                 checks["active_position_clear"] and checks["open_orders_clear"]
@@ -495,6 +516,7 @@ def build_runtime_account_safe_facts(
             ),
             "exchange_rules_ready": checks["exchange_rules_ready"],
             "protection_template_ready": checks["protection_template_ready"],
+            "account_capacity_base_safe": account_capacity_base_safe,
         },
         "source_status": live_facts.get("status"),
         "safety_invariants": {
