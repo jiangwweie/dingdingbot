@@ -1,6 +1,7 @@
 # Ticket-Bound Exit Policy Program Design
 
-Status: **proposed for Owner review; no implementation authorized by this document**
+Status: **updated from Owner discussion; proposed for final Owner review; no
+implementation authorized by this document**
 
 Date: **2026-07-14**
 
@@ -22,9 +23,9 @@ The program contains three release units:
 
 | Release unit | Purpose | Live behavior after release | Owner decision gate |
 | --- | --- | --- | --- |
-| **Release A — Lifecycle and TP1 Execution Safety Repair** | Restore runner maintenance, deterministic active-protection selection, external-close recovery, and TP1 passive-limit correctness | Existing strategy meaning is unchanged; TP1 cannot silently become market; no new trailing policy | **None** inside the already approved scope |
-| **Release B — Versioned Exit Policy Core** | Add immutable Ticket policy snapshots, typed evaluation, PG current projection, fact cadence, and generation-safe mutation | Capability is deployed **disabled** for new strategy exits; legacy Tickets are not reinterpreted | **None** while capability remains disabled |
-| **Release C — Strategy Exit Activation** | Replay, select, version, and activate one exit policy per Event Spec for future Tickets | One approved Event Spec at a time gains structural trailing, invalidation, or time-stop behavior | **Required** for exact parameter versions and production activation |
+| **Release A — Lifecycle and TP1 Execution Safety Repair** | Restore runner maintenance, deterministic active-protection selection, strict manual-order isolation, leverage truth, and explicit TP1 execution truth | Existing target/fraction/runner meaning is unchanged; default TP1 is explicit `LIMIT_GTC`, never `MARKET`; optional GTX is capability-only | **None** inside the already approved scope |
+| **Release B — Versioned Exit Policy Core** | Add immutable Ticket policy snapshots, fill-derived exit execution snapshots, partial-fill state, fee-adjusted runner floor, typed evaluation, PG current projection, fact cadence, and generation-safe mutation | Capability is deployed **disabled**; existing and legacy Tickets are not reinterpreted | **None** while capability remains disabled |
+| **Release C — Strategy Exit Activation** | Replay, select, version, and activate one exit policy per Event Spec for future Tickets | One approved Event Spec at a time gains actual-fill 1R TP1, immediate post-TP1 runner floor, then structural trailing/invalidation/time-stop behavior | **Required** only for exact parameter versions and production activation |
 
 The design does **not** create a second scheduler, a second order ledger, a
 second exchange-write authority, a fixed TP2 for every strategy, or a hidden
@@ -48,6 +49,18 @@ another confirmation inside Release A or Release B:
    exchange permission is silently expanded.
 6. **TP1 is a reduce-position limit order, never a market order.** The system
    may not silently downgrade it to market to force a fill.
+7. For future right-tail policy versions, after the **TP1 target quantity is
+   fully filled**, the remaining runner must immediately move to a
+   **runner-leg fee/slippage-adjusted break-even floor**. Later structural
+   trailing may only improve that floor.
+8. **Maker is a cost preference, not a fill precondition.** The default TP1
+   execution style is exact-target `LIMIT_GTC`. If the target has already been
+   crossed when the order reaches the venue, a taker fill is accepted and
+   recorded; the system still never emits a `MARKET` TP1.
+9. The current ETH position and the Owner-created **1820 reduce-only stop** and
+   **1899 reduce-only take-profit** are external manual orders. Documentation
+   and future implementation may not adopt, cancel, replace, or reinterpret
+   them as system-owned orders.
 
 ## Verified Objective Facts
 
@@ -70,6 +83,46 @@ A marketable limit order can execute immediately as taker. Consequently, an
 observed taker fee does not by itself prove that the submitted order type was
 `MARKET`; the production evidence must include the exact submitted type,
 time-in-force, maker flag, exchange fill liquidity role, and fee.
+
+### Read-only ETH TP1 evidence
+
+The 2026-07-14 signed, read-only Binance USD-M snapshot established the
+following **current-trade evidence**. It is evidence for adapter and lifecycle
+design, not a future strategy parameter source.
+
+| Fact | Verified value | Interpretation |
+| --- | --- | --- |
+| Exchange order | `8389766233374941626` | Exact venue identity from signed order/trade reads |
+| Type / TIF / state | `LIMIT` / `GTC` / `FILLED` | The TP1 was a limit order, not a market order |
+| Price / quantity | `1811.45` / `0.23 ETH` | Exact submitted and average fill price/quantity |
+| Reduce intent | `reduceOnly=true` | Exit leg, not exposure expansion |
+| Liquidity role | `maker=true` | The actual fill rested as maker |
+| Quote quantity | `416.63350 USDT` | Fee calculation basis |
+| Actual commission | `0.08332670 USDT` | Equals the current `0.000200` maker rate |
+| Realized PnL | `6.1295 USDT` | Outcome fact; not an exit-policy default |
+| Hypothetical taker fee | `0.20831675 USDT` | `416.63350 × 0.000500` |
+| Maker/taker fee delta | `0.12499005 USDT` | Economic value of maker execution for this fill |
+
+Source: **Binance USD-M signed read-only order, user-trade, position, and
+commission-rate APIs**, observed 2026-07-14. The exchange credentials and raw
+signed payloads remain outside the repository and this document.
+
+### Current dependency and adapter facts
+
+- `requirements.txt` pins **`ccxt==4.5.56`** exactly.
+- `src/infrastructure/exchange_gateway.py::place_order` currently has no
+  `time_in_force`, `post_only`, or maker-required argument.
+- `src/domain/ticket_bound_exchange_command.py` currently has no durable TP
+  execution-style/TIF/post-only/fallback fields.
+- `src/application/action_time/protected_submit_attempt.py` currently reads a
+  planned `tp1_price` from the action-time fact; it does not rematerialize TP1
+  from the authoritative entry average fill.
+- The gateway currently calls `set_leverage` immediately before `create_order`
+  but does not perform an independent exact read-back before submitting the
+  entry.
+
+Source: tracked repository code on branch
+`codex/release-risk-analysis-20260714`, inspected 2026-07-14.
 
 ### Current runner behavior
 
@@ -131,17 +184,25 @@ three shared invariant gaps:
 3. **Strategy-to-lifecycle binding:** post-entry exit semantics must be frozen
    into each Ticket and evaluated independently from current registry defaults.
 
-### TP1 fee problem class
+### TP1 execution and fee problem class
 
-The TP1 requirement contains two different guarantees:
+The TP1 requirement contains three different objectives:
 
 1. **Order-type guarantee:** TP1 must be `LIMIT`, never `MARKET`.
-2. **Liquidity-role guarantee:** fee-sensitive TP1 should rest passively and
-   should not silently cross the book as taker.
+2. **Target-integrity guarantee:** the order must remain at the exact
+   fill-derived strategy target and must not chase price in a worse direction.
+3. **Liquidity-cost preference:** maker execution is preferred and actual
+   maker/taker/fee truth must be recorded.
 
-An ordinary limit order satisfies the first guarantee but not the second. The
-selected architecture therefore models TP1 execution style explicitly and
-records actual liquidity-role evidence.
+When the target is crossed during entry-to-TP1 latency, strict post-only and
+target integrity can conflict. The selected default prioritizes target
+integrity and deterministic protection: `LIMIT_GTC` may fill as taker. Optional
+`PASSIVE_LIMIT_GTX` remains a versioned, replay-gated Event Spec choice; it is
+not the global default.
+
+The correct term is **Maker-only/Post-only**, not “Mark-only”. Binance
+`MARK_PRICE` is a trigger-price source and is unrelated to maker-only order
+placement.
 
 ## Alternatives Considered
 
@@ -152,18 +213,33 @@ records actual liquidity-role evidence.
 | **Separate trailing daemon and order table** | Operational isolation | Creates conflicting schedulers, ledgers, and exchange-write authorities | **Rejected** |
 | **Ticket-frozen Exit Policy Core on the existing lifecycle** | Shared invariants, versioned behavior, future asset-class support | Requires schema and full lifecycle certification | **Selected** |
 
+### TP1 execution-style decision
+
+| Style | Target already crossed | Fee behavior | Selected role |
+| --- | --- | --- | --- |
+| **`LIMIT_GTC`** | May execute immediately as taker at the limit price or better | Maker preferred, taker accepted and recorded | **Default for future right-tail policies** |
+| **`PASSIVE_LIMIT_GTX`** | Venue rejects/cancels when it would take liquidity | Maker required; rejection/retry risk exists | **Optional versioned Event Spec candidate** |
+| **`MARKET`** | Executes against available book | Taker plus unbounded price impact | **Forbidden for TP1** |
+
 ## Program Boundaries
 
 ### In scope
 
 1. Runner lifecycle maintenance and external-close closure.
 2. Exact active exit-protection generation selection.
-3. TP1 passive-limit execution contract and maker/taker evidence.
-4. Typed, immutable Exit Policy snapshots attached to future Tickets.
-5. Closed-market-fact evaluation, structural trailing, invalidation, and time
+3. TP1 exact-target limit execution contract, optional post-only capability,
+   and maker/taker/fee evidence.
+4. Actual-entry-fill-based R/TP1 derivation for newly activated future policy
+   versions.
+5. TP1 partial/full-fill state and exact remaining-position protection.
+6. Immediate runner-leg fee/slippage-adjusted floor after TP1 completion.
+7. Strict manual-order ownership isolation and three-layer leverage truth.
+8. Typed, immutable Exit Policy and Exit Execution snapshots for future
+   Tickets.
+9. Closed-market-fact evaluation, structural trailing, invalidation, and time
    stops through the existing lifecycle.
-6. Replay and activation design for all active Event Specs.
-7. Production cadence, performance, notification, deploy, rollback, and
+10. Replay and activation design for all active Event Specs.
+11. Production cadence, performance, notification, deploy, rollback, and
    certification rules.
 
 ### Out of scope
@@ -175,6 +251,8 @@ records actual liquidity-role evidence.
 5. Automated emergency market close policy.
 6. Historical Ticket reinterpretation.
 7. New runtime JSON/Markdown readers or recurring report writers.
+8. Adoption or cancellation of an Owner-created manual exchange order.
+9. Treating configured initial leverage as actual account exposure.
 
 ## Unified Authority Flow
 
@@ -182,13 +260,16 @@ records actual liquidity-role evidence.
 StrategyGroup + Event Spec + side
 -> current versioned Exit Policy in PG
 -> immutable ExitPolicySnapshot frozen into a newly created Ticket
--> entry + exchange-native SL + passive TP1 through FinalGate/Operation Layer
+-> entry through FinalGate/Operation Layer
+-> authoritative entry fill + exact exchange-native initial SL
+-> immutable fill-derived ExitExecutionSnapshot and exact-target LIMIT TP1
 -> existing ticket-bound lifecycle and reconciliation
--> TP1 fill
--> exchange-native RUNNER_SL
+-> TP1 unfilled / partial / complete reconciliation
+-> exact remaining quantity protected at all times
+-> TP1 complete: immediate runner-leg cost-adjusted break-even floor
 -> due closed-market-fact snapshot
 -> pure Exit Policy evaluator
--> no-op / runner-stop replacement / runner close
+-> no-op / monotonic structural runner-stop improvement / runner close
 -> existing durable exchange command authority
 -> exact exchange reconciliation
 -> settlement / Live Outcome / Review
@@ -229,6 +310,19 @@ class TicketTakeProfitLeg(BaseModel):
     market_fallback_allowed: Literal[False] = False
 
 
+class RewardBasis(str, Enum):
+    ACTUAL_ENTRY_R = "actual_entry_r"
+
+
+class RunnerBreakEvenFloorRule(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    kind: Literal["runner_leg_cost_adjusted_break_even"]
+    trigger: Literal["tp1_target_quantity_complete"]
+    exit_fee_basis: Literal["conservative_taker"]
+    slippage_buffer_ticks: int
+    minimum_improvement_ticks: int
+
+
 class StructuralAtrRunnerRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     kind: Literal["structural_atr"]
@@ -250,7 +344,10 @@ class TicketExitPolicySnapshot(BaseModel):
     event_spec_version: str
     side: Literal["long", "short"]
     policy_family: str
+    reward_basis: RewardBasis
     take_profit_legs: tuple[TicketTakeProfitLeg, ...]
+    tp_completion_tolerance_qty_steps: int
+    post_tp1_floor_rule: RunnerBreakEvenFloorRule | None
     invalidation_rules: tuple[object, ...]
     time_stop_rule: object | None
     runner_rule: object | None
@@ -259,6 +356,32 @@ class TicketExitPolicySnapshot(BaseModel):
 
 The production implementation replaces the illustrative `object` types with
 named discriminated models. Unstructured parameter dictionaries are forbidden.
+
+The policy snapshot contains **semantics**, not facts that do not exist at
+Ticket creation. After the entry fill is authoritative, the lifecycle creates
+a second immutable typed value:
+
+```python
+class TicketExitExecutionSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    ticket_id: str
+    exit_policy_id: str
+    exit_policy_version: str
+    entry_avg_fill_price: Decimal
+    entry_filled_qty: Decimal
+    initial_stop_price: Decimal
+    actual_r_per_unit: Decimal
+    resolved_tp1_price: Decimal
+    resolved_tp1_target_qty: Decimal
+    runner_target_qty: Decimal
+    entry_fee_quote: Decimal
+    certified_exit_taker_fee_rate: Decimal
+    slippage_buffer_quote: Decimal
+    payload_hash: str
+```
+
+This snapshot is derived once from exact fill/protection/instrument facts and
+is immutable. A registry update or a later market price cannot rewrite it.
 
 ### Evaluation input and output
 
@@ -302,14 +425,18 @@ The pure evaluator applies this order:
 3. If a versioned strategy invalidation rule is satisfied, return
    `CLOSE_RUNNER`.
 4. If a versioned time-stop rule is satisfied, return `CLOSE_RUNNER`.
-5. If a structural/volatility candidate improves the stop monotonically by at
-   least the versioned minimum tick distance, return `MOVE_RUNNER_STOP`.
-6. Otherwise return `NOOP`.
+5. If TP1 just reached its target quantity within the frozen venue-step
+   tolerance, evaluate the immediate runner-leg break-even floor **without
+   waiting for a candle close**.
+6. If a later structural/volatility candidate improves the current stop
+   monotonically by at least the versioned minimum tick distance, return
+   `MOVE_RUNNER_STOP`.
+7. Otherwise return `NOOP`.
 
 `CLOSE_RUNNER` is a strategy exit decision and must still use the existing
 durable reduce-position command path. It is not an emergency bypass.
 
-## TP1 Passive-Limit Contract
+## TP1 Exact-Target Limit Contract
 
 ### Mandatory invariants
 
@@ -323,18 +450,28 @@ market_fallback_allowed = false
 reduce_intent = reduce_position
 exact position bucket is bound
 quantity is step-aligned and does not exceed the remaining position
-price is tick-aligned and derived from the frozen Ticket policy
+price is tick-aligned and derived from the immutable fill-derived execution snapshot
 ```
 
 The baseline execution style for future right-tail policy candidates is
-**PASSIVE_LIMIT_GTX**. At the Binance adapter boundary it maps to the
-venue-supported post-only time-in-force. A venue without a certified passive
-limit capability blocks that policy; it must not silently use ordinary limit
-or market.
+**`LIMIT_GTC` with maker preference**. The order is placed immediately after
+the entry fill and exact initial stop are authoritative, at the frozen target;
+the system does not move the price toward the market merely to obtain maker
+status.
+
+**`PASSIVE_LIMIT_GTX`** remains an optional execution style. At the Binance
+adapter boundary it maps to the venue-supported post-only TIF. A venue without
+a certified passive capability blocks only a policy that explicitly selects
+GTX; it does not invalidate the default GTC policy.
 
 ### Marketable-at-submit behavior
 
-If TP1 is marketable when the exchange evaluates a post-only request:
+For the default **GTC** style, a marketable limit may fill immediately as
+taker. That is an accepted execution outcome when the exact submitted type,
+TIF, price, quantity, reduce intent, fill price, liquidity role, and fee all
+reconcile. It is not a lifecycle defect and never causes a second TP1 order.
+
+If TP1 is marketable when the exchange evaluates an optional **GTX** request:
 
 1. An authoritative post-only rejection is recorded against the durable
    command.
@@ -360,11 +497,133 @@ The exchange snapshot and fill projection add:
 - exact fee amount and fee asset;
 - submitted order type and time-in-force;
 - target price, submitted price, and realized fill price;
+- accepted economic evidence when `LIMIT_GTC` fills as taker;
 - a lifecycle defect when `PASSIVE_LIMIT_GTX` fills as taker or when exchange
   evidence cannot reconcile the submitted execution style.
 
 The Live Outcome and Review surfaces report actual fee truth. They do not infer
 maker status only from the word `LIMIT`.
+
+## Fill-Derived R, TP1, And Runner Floor
+
+### Actual-fill 1R
+
+For newly activated policy versions:
+
+```text
+actual_R_per_unit = abs(entry_avg_fill_price - initial_stop_price)
+long_tp1_raw = entry_avg_fill_price + reward_multiple * actual_R_per_unit
+short_tp1_raw = entry_avg_fill_price - reward_multiple * actual_R_per_unit
+```
+
+Long TP prices round **up** to the next valid tick; short TP prices round
+**down**. `actual_R_per_unit <= 0`, a stop on the wrong side, missing exact
+fill quantity, or missing instrument precision blocks TP1 preparation. The
+initial exchange-native SL remains the safety authority while the defect is
+reconciled.
+
+The action-time planned entry and planned 1R remain pre-submit intent and replay
+evidence. They do not overwrite the actual-fill execution snapshot.
+
+### TP1 completion state
+
+| TP1 state | Position/protection action | Runner-floor action |
+| --- | --- | --- |
+| **Unfilled** | Original SL covers the exact remaining position | None |
+| **Partially filled** | Reconcile exact fill quantity and generation-safely synchronize protection quantity to the exact exchange remaining position | Do not raise price yet |
+| **Complete within frozen venue qty-step tolerance** | Reconcile runner quantity from exact exchange position | Immediately calculate and apply the runner-leg break-even floor |
+| **Overfill/contradictory quantity** | Freeze mutations and reconcile exact order/position truth | No inferred completion |
+
+No code may interpret `PARTIALLY_FILLED` as TP1 completion merely because the
+remaining quantity is small. Completion uses the frozen target quantity,
+authoritative cumulative fills, exchange position quantity, and venue step
+tolerance together.
+
+### Runner-leg fee/slippage-adjusted break-even
+
+The floor protects the **remaining runner leg**, not the whole Ticket. TP1
+realized profit is preserved as outcome truth and may not be used to lower the
+runner stop below the runner's own cost basis.
+
+Let:
+
+```text
+E = authoritative entry average fill price
+Q = exact remaining runner quantity
+F_entry = entry fee allocated pro rata to Q, normalized into quote value
+f_exit = frozen conservative taker fee rate for STOP_MARKET runner exit
+S = versioned slippage buffer in quote value for Q
+```
+
+The raw floors are:
+
+```text
+long_raw_floor  = (E * Q + F_entry + S) / (Q * (1 - f_exit))
+short_raw_floor = (E * Q - F_entry - S) / (Q * (1 + f_exit))
+```
+
+The long floor rounds **up** to the next valid tick; the short floor rounds
+**down**. The proposed stop must also improve the currently active stop by at
+least the versioned minimum tick count. Because `STOP_MARKET` can slip beyond
+the frozen buffer during a gap, this is a cost-adjusted design target, not an
+absolute profit guarantee.
+
+Exact actual entry fee is preferred. A frozen, certified conservative fee
+schedule may be used only when the policy explicitly allows it. If neither an
+exact normalized fee nor an allowed conservative basis exists, the move is
+`BLOCKED`, the original exchange-native stop remains, and the pre-entry policy
+readiness defect should have prevented that Ticket.
+
+### Immediate floor versus structural trailing
+
+The floor is **event-driven** by TP1 completion and runs once immediately. The
+structural trail is **closed-candle-driven** and runs later on the Event Spec
+timeframe. The effective stop is monotonic:
+
+```text
+long_effective_stop = max(current_stop, break_even_floor, structural_candidate)
+short_effective_stop = min(current_stop, break_even_floor, structural_candidate)
+```
+
+There is no universal fixed TP2. Invalidation and time stop remain versioned
+strategy exits; they may close the runner through the normal durable command
+path.
+
+## Manual Order Ownership Boundary
+
+The exchange snapshot may observe Owner-created orders, but observation does
+not create ownership. System-owned protection requires an exact PG-linked
+client order id, exchange order id, Ticket, protection set, role, generation,
+account, venue, instrument, side, and position bucket.
+
+The current **1820 stop** and **1899 take-profit** are classified as
+`external_manual_reduce_order`. They must be displayed as external protection,
+excluded from BRC active-generation selection, and never cancelled or replaced
+by heuristic symbol matching. If one closes the position, strict signed trade
+and flat-position facts may drive `EXTERNAL_CLOSE` attribution and terminal
+cleanup of BRC-owned residual orders only.
+
+## Leverage Truth Contract
+
+The product and Live Outcome must expose three different values:
+
+| Value | Meaning | Authority |
+| --- | --- | --- |
+| **Ticket-selected leverage** | The bounded policy/sizing choice, such as `10x` | Immutable Ticket intent |
+| **Exchange configured initial leverage** | The symbol leverage confirmed by the venue after `set_leverage` | Signed exchange configuration read-back |
+| **Effective account exposure leverage** | `gross open position notional / account margin balance` for the current account snapshot | Signed account/position facts |
+
+Thus a Ticket may select and configure **10x** while the cross-margin account
+shows only about **2x effective exposure** because actual notional uses only a
+portion of account equity. `10x` is not triggered by price movement; it applies
+only when the bounded leverage decision selects 10 and the venue confirms 10
+before entry submit.
+
+After `set_leverage`, the gateway must perform an exact same-symbol signed
+read-back before `create_order`. Mismatch or missing truth blocks the new entry.
+The system must not mutate leverage while the exact account/instrument/position
+bucket already has an open position. This program does not change the Owner's
+capital, leverage limits, notional, or current ETH position.
 
 ## PostgreSQL Data Model
 
@@ -399,6 +658,9 @@ Event Spec requires a policy and no exact current policy exists.
 Historical rows are backfilled only with explicit `legacy_unbound` metadata.
 No historical strategy meaning is synthesized from the latest registry.
 
+The fill-derived execution snapshot is not synthesized at Ticket creation. It
+is persisted only after authoritative entry-fill and initial-stop facts exist.
+
 ### `brc_ticket_exit_policy_current`
 
 This is the single PG current projection owned by the new application service.
@@ -406,8 +668,10 @@ This is the single PG current projection owned by the new application service.
 | Field group | Fields | Purpose |
 | --- | --- | --- |
 | Identity | `ticket_id`, `exit_protection_set_id`, policy identity/hash | Exact frozen authority |
-| Evaluation | `state`, `last_evaluated_watermark_ms`, `next_evaluation_not_before_ms`, `last_decision_kind`, `last_reason_code` | One evaluation per eligible market watermark |
-| Runner | `active_runner_order_id`, `active_runner_generation`, `active_runner_stop` | Current exact protection |
+| Fill-derived execution | `exit_execution_snapshot`, `exit_execution_hash`, `actual_r_per_unit`, `resolved_tp1_price`, `resolved_tp1_target_qty` | Immutable post-entry target and cost basis |
+| TP1 state | `tp1_cumulative_filled_qty`, `tp1_completion_state`, `remaining_position_qty` | Exact unfilled/partial/complete state |
+| Evaluation | `state`, `last_evaluated_watermark_ms`, `next_evaluation_not_before_ms`, `last_decision_kind`, `last_reason_code` | Immediate event claim plus one evaluation per eligible market watermark |
+| Runner | `active_runner_order_id`, `active_runner_generation`, `active_runner_stop`, `runner_break_even_floor`, `runner_floor_applied_at_ms` | Current exact protection and applied floor |
 | Replacement | `pending_runner_order_id`, `pending_generation`, `replaced_runner_order_id` | Crash-recoverable submit-new-before-cancel-old sequence |
 | Status | `first_blocker`, `updated_at_ms` | Product/readmodel projection |
 
@@ -437,6 +701,12 @@ The existing lifecycle event ledger adds typed events such as:
 - `strategy_exit_prepared`.
 
 No second audit-event table is introduced.
+
+Migration **121** also adds explicit Live Outcome fields for
+`tp1_liquidity_role`, TP1 fee amount/asset,
+`exchange_configured_initial_leverage`, and
+`effective_account_exposure_leverage`. Existing `leverage` remains the
+Ticket-selected value; legacy rows stay null for exchange/effective truth.
 
 ## Active Protection Resolver
 
@@ -506,12 +776,14 @@ The 30-second lifecycle timer remains the only scheduler. It first reads
 | --- | --- | --- | --- |
 | No due runner | One bounded selector/current-projection query | **None** | **Zero** |
 | Healthy runner before next candle close | Current projection/reconciliation query | Existing signed lifecycle snapshot only when already required | **Zero** |
+| First tick after TP1 fill change | Claim exact fill watermark and persist transition/generation rows only | Existing signed order/trade/position snapshot; no public candle fetch | **Zero** |
 | First tick after a policy candle closes | Claim evaluation watermark, then persist fact/decision | One timeout-bounded public candle fetch per exact instrument/timeframe batch | **Zero** |
 | Replacement pending | Existing command reconciliation queries | Exact place/cancel lookup only | **Zero** |
 
 Public market calls occur outside long PG transactions, use explicit timeouts,
 and are coalesced for Tickets sharing the same exact instrument/timeframe
-watermark. Production no-signal/no-due ticks write no JSON/Markdown files.
+watermark. Unchanged fill/candle watermarks create no repeated business event
+or command. Production no-signal/no-due ticks write no JSON/Markdown files.
 
 ## Release A — Lifecycle And TP1 Execution Safety Repair
 
@@ -531,24 +803,28 @@ Introduce the resolver and replace all arbitrary first-role lookups. Release A
 supports the current single-generation runner plus exact historical rows. It
 fails closed on ambiguous active generations.
 
-### A3. TP1 limit and maker-preservation boundary
+### A3. TP1 exact-target limit and liquidity-truth boundary
 
 Release A makes the current intended behavior explicit:
 
-1. Extend the normalized ticket-bound command with typed `time_in_force`,
-   `post_only`, and `market_fallback_allowed=false` fields.
-2. Require every TP1 to use `LIMIT`.
-3. Map the selected passive style to the venue adapter; no business layer emits
-   raw Binance keys.
-4. Add authoritative negative tests proving TP1 cannot be `MARKET`, cannot omit
+1. Extend the normalized ticket-bound command with typed `execution_style`,
+   `time_in_force`, `post_only`, and `market_fallback_allowed=false` fields.
+2. Require every TP1 to use `LIMIT` and an explicit TIF.
+3. Make **`LIMIT_GTC` the default**, with `post_only=false` and maker as an
+   observed preference rather than a submission precondition.
+4. Keep **`PASSIVE_LIMIT_GTX` optional** and map it to the venue adapter; no
+   business layer emits raw Binance keys.
+5. Add authoritative negative tests proving TP1 cannot be `MARKET`, cannot omit
    price, cannot expand quantity, and cannot silently downgrade after a
    post-only rejection.
-5. Capture normalized liquidity role and actual fee from exchange fills.
+6. Capture normalized liquidity role and actual fee from exchange fills;
+   accept GTC+taker as economic truth and classify GTX+taker as a lifecycle
+   defect.
 
 Release A does not alter the current TP1 target formula or fraction. It repairs
 execution semantics and evidence only.
 
-### A4. Manual close recovery
+### A4. Manual order isolation and close recovery
 
 After an Owner manual reduce-only close, the existing strict attribution path
 must prove account, venue, instrument, position bucket, side, quantity, time,
@@ -558,7 +834,18 @@ and notification.
 
 Symbol-wide cancellation and heuristic ownership are forbidden.
 
-### A5. Release gate
+### A5. Leverage truth
+
+Release A preserves the selected leverage value but closes the execution-truth
+gap:
+
+1. persist Ticket-selected, exchange-configured, and effective-account values
+   separately;
+2. after `set_leverage`, perform signed exact-symbol read-back before entry;
+3. block entry on missing or mismatched read-back;
+4. never mutate leverage for an already open exact position bucket.
+
+### A6. Release gate
 
 Release A may deploy only when:
 
@@ -584,12 +871,18 @@ No current strategy policy is activated. New and historical Tickets continue
 to use their explicitly bound prior behavior until Release C creates a future
 policy version.
 
-### B2. Ticket binding
+### B2. Ticket and fill-derived execution binding
 
 The Ticket materializer queries the exact current policy for its Event Spec,
 validates it, hashes it, and stores the immutable snapshot. If a strategy
 version declares that exit policy v1 is required but no exact policy exists,
 Ticket creation fails closed with a typed policy blocker.
+
+After entry fill, the lifecycle independently materializes the immutable
+`TicketExitExecutionSnapshot` from the actual average fill, exact initial stop,
+instrument precision, fee basis, and policy. This step resolves actual R, TP1
+target/quantity, runner quantity, and break-even inputs; it does not rewrite the
+pre-entry Ticket policy snapshot.
 
 ### B3. Evaluation and mutation
 
@@ -603,6 +896,11 @@ The scheduler delegates to the exit-policy application service only when:
 
 The service evaluates purely and prepares commands through the existing durable
 exchange-command authority. It does not dispatch directly.
+
+TP1 fill projection has a separate immediate path: unfilled is no-op, partial
+fill synchronizes protection quantity, and complete fill evaluates the runner
+floor immediately. Closed-candle cadence applies only to later structural,
+invalidation, and time-stop evaluation.
 
 ### B4. Production-shaped matrix
 
@@ -650,7 +948,7 @@ before activation.
 The current catalog baseline **TP1 = 1R, 50%** remains a candidate for each
 right-tail Event Spec. Release C must independently test:
 
-- TP1 fraction and target;
+- TP1 fraction and actual-fill-derived target;
 - `LIMIT_GTC` versus `PASSIVE_LIMIT_GTX` fill/fee behavior;
 - no fixed TP2 versus strategy-specific fixed-target alternatives;
 - structural trail family and parameter grid;
@@ -664,13 +962,13 @@ A universal hard TP2 is not assumed.
 | --- | --- | --- |
 | Return shape | Net R, median/mean R, tail-winner contribution, profit giveback | Preserve the right tail rather than optimize only win rate |
 | Risk | MFE, MAE, stop distance, worst rolling window, false-breakout loss | Prove bounded downside and adverse behavior |
-| Cost | Maker/taker fill rate, actual/simulated fee, slippage, funding | Evaluate the TP1 fee decision explicitly |
+| Cost | Maker/taker fill rate, actual/simulated fee, runner-floor fee basis, slippage, funding | Evaluate TP1 style and runner protection economics explicitly |
 | Operations | Stop-update count, rejected passive orders, order churn, time in trade, capital-slot occupancy | Bound runtime and venue pressure |
 | Robustness | Symbol matrix, long/short separation, regime buckets, out-of-sample windows | Avoid one-sample overfit |
 
 Replay must use realistic bar-touch ambiguity rules and conservative fill
-assumptions. A passive TP1 may not be counted filled merely because a bar high
-or low touched the price without sufficient ordering evidence.
+assumptions. An optional GTX TP1 may not be counted filled merely because a bar
+high or low touched the price without sufficient queue/ordering evidence.
 
 ### Activation sequence
 
@@ -694,7 +992,11 @@ exposed its runner gap. This recommendation does not pre-authorize parameters.
 
 | Failure | Classification | Exchange-write rule | Owner-facing state |
 | --- | --- | --- | --- |
-| TP1 passive request authoritatively rejected | Recoverable placement state | Retry deterministic passive generation; no market fallback | **running** unless retry budget/capability is exhausted |
+| GTC TP1 fills as taker at limit or better | Accepted execution/economic evidence | Reconcile once; never submit a duplicate or market fallback | **running** |
+| Optional GTX TP1 authoritatively rejected | Recoverable placement state | Retry deterministic passive generation; no market fallback | **running** unless retry budget/capability is exhausted |
+| Optional GTX TP1 reports taker fill | Lifecycle/adapter contradiction | Freeze further mutation and reconcile exact venue truth | **temporarily unavailable** |
+| TP1 partially filled | Normal partial lifecycle | Synchronize exact remaining protection quantity; do not apply runner floor | **processing** |
+| TP1 complete but floor fee basis missing | Pre-entry readiness defect exposed post-entry | Keep original SL; block floor mutation and escalate recovery | **temporarily unavailable** |
 | TP1 command outcome unknown | Durable command unknown outcome | Reconcile by client order identity; no duplicate | **temporarily unavailable** if unresolved |
 | Runner missing while position open | Protection degradation | No policy evaluation; recover protection through existing authority | **needs intervention** only if automation cannot recover |
 | Two unexplained active runner generations | Reconciliation mismatch | Freeze mutation; exact reconciliation | **temporarily unavailable** |
@@ -702,6 +1004,8 @@ exposed its runner gap. This recommendation does not pre-authorize parameters.
 | New runner placed, old cancel outcome unknown | Replacement recovery | Keep both exact linked stops until reconciliation | **processing** |
 | Strategy close command outcome unknown | Durable command unknown outcome | No duplicate close; reconcile exact command | **temporarily unavailable** |
 | Manual external close | External action requiring attribution | No heuristic write; exact cleanup after flat proof | **processing**, then **completed** |
+| Manual Owner order observed open | External order, not BRC ownership | Display only; never adopt, cancel, or replace | **running** |
+| Configured leverage read-back mismatch | Action-time exchange-fact mismatch | Do not submit entry | **temporarily unavailable** |
 
 ## Owner-Facing Language
 
@@ -728,14 +1032,20 @@ or audit detail unless they create a real Owner action.
    the new exact order is confirmed.
 4. **No duplicate submit:** all place/cancel actions use deterministic durable
    commands and unknown-outcome reconciliation.
-5. **No market TP1 fallback:** passive placement failure does not authorize
-   market execution.
+5. **No market TP1 fallback:** neither GTC nor optional GTX failure authorizes
+   a `MARKET` TP1.
 6. **No direct file authority:** runtime decisions use PG/current services and
    exact exchange facts only.
 7. **No hidden crypto assumption:** core models use canonical instrument,
    venue capability, session/calendar, side, and quantity/price rules.
 8. **No automatic emergency close expansion:** emergency behavior remains
    outside this program until separately authorized.
+9. **No manual-order adoption:** exchange visibility does not make an
+   Owner-created order system-owned.
+10. **No leverage ambiguity:** selected, configured, and effective exposure
+    values are never collapsed into one field.
+11. **Immediate floor before candle trail:** TP1 completion cannot wait for the
+    next 15m/1h structural evaluation before raising the runner floor.
 
 ## Test And Certification Strategy
 
@@ -745,8 +1055,14 @@ or audit detail unless they create a real Owner action.
 - long/short monotonic trailing;
 - invalidation and time-stop priority;
 - active generation resolver;
-- TP1 type/time-in-force/post-only mapping;
+- GTC-default and optional-GTX type/time-in-force/post-only mapping;
 - maker/taker normalization and fee propagation;
+- actual-fill R and long/short tick rounding;
+- TP1 unfilled/partial/complete transitions and exact remaining quantity;
+- long/short runner break-even formula, fee basis, slippage buffer, and tick
+  rounding;
+- leverage set/read-back match and mismatch;
+- manual Owner order exclusion;
 - exact command idempotency and unknown outcomes.
 
 ### PostgreSQL integration tests
@@ -754,6 +1070,7 @@ or audit detail unless they create a real Owner action.
 - policy uniqueness and future-only Ticket binding;
 - historical `legacy_unbound` behavior;
 - current projection ownership and watermark claims;
+- immutable fill-derived execution snapshot and TP1 completion claim;
 - replacement crash recovery at every step;
 - external-close attribution and orphan cleanup;
 - one Live Outcome and one settlement result.
@@ -763,14 +1080,17 @@ or audit detail unless they create a real Owner action.
 Run all six Event Specs through:
 
 ```text
-signal -> Ticket -> entry -> SL + passive TP1 -> TP1 fill
--> runner -> evaluation -> replacement or strategy close
+signal -> Ticket -> entry -> actual fill + SL -> exact-target LIMIT TP1
+-> partial/full reconciliation -> immediate runner floor
+-> closed-candle evaluation -> replacement or strategy close
 -> reconciliation -> settlement -> review
 ```
 
-Negative cases include partial entry, TP1 rejection, TP1 partial fill, stale
-fact, missing protection, duplicate active generation, exchange timeout,
-restart, manual close, long/short inversion, and venue capability absence.
+Negative cases include partial entry, GTC taker fill, optional GTX rejection,
+GTX contradictory taker fill, TP1 partial fill, missing fee truth, stale fact,
+missing protection, duplicate active generation, exchange timeout, restart,
+manual close/order isolation, leverage mismatch, long/short inversion, and
+venue capability absence.
 
 ### Production release certification
 
@@ -789,9 +1109,12 @@ Each release requires:
 
 ### External adapter references
 
-- Binance USD-M defines **GTX** as Good Till Crossing: the order is cancelled
-  when it cannot become the maker. Source:
-  `https://developers.binance.com/zh-CN/docs/products/derivatives-trading-usds-futures/common-definition`.
+- Binance USD-M defines **GTC** and **GTX**, with GTX meaning Good Till
+  Crossing/Post Only. Source:
+  `https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/common-definition`.
+- Binance USD-M New Order accepts `LIMIT` with explicit `timeInForce`, including
+  GTC and GTX. Source:
+  `https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade#new-order`.
 - The CCXT manual treats post-only support as a feature-detected capability and
   notes that unified post-only time-in-force support varies by exchange.
   Source: `https://github.com/ccxt/ccxt/wiki/manual`.
@@ -807,7 +1130,9 @@ Deploy only after zero active real lifecycles. Rollback to the prior release is
 allowed only after the same quiescence check. Release A deploys additive
 migration **121** for protection generation and TP1 execution/fee truth. Legacy
 time-in-force remains unknown rather than being synthesized; additive columns
-are backfilled only with fail-safe values that old code can ignore.
+and leverage-truth fields are backfilled only with fail-safe/null values that
+old code can ignore. Release A does not activate actual-fill 1R or moving-stop
+policy for an existing Ticket.
 
 ### Release B
 
@@ -835,16 +1160,17 @@ activates them sequentially.
 
 | Stage | Chain position before | Chain position after | First blocker removed | Next blocker |
 | --- | --- | --- | --- | --- |
-| **A** | Runner can become unmaintained; TP1 execution style is under-specified | Existing lifecycle continuously supervised; TP1 cannot silently downgrade | Lifecycle continuity and order-style ambiguity | Generic policy capability absent |
-| **B** | Strategy exit names are not executable Ticket authority | Typed future-only policy capability exists, disabled | Missing shared exit abstraction | Strategy evidence and Owner activation |
-| **C** | Exit parameters are candidates only | One approved Event Spec at a time is active for future Tickets | Strategy-specific exit-policy blocker | Natural production outcome calibration |
+| **A** | Runner can become unmaintained; TP1 and leverage truth are under-specified | Existing lifecycle continuously supervised; GTC default/optional GTX, fee truth, manual isolation, and leverage read-back are explicit | Lifecycle continuity and execution-truth ambiguity | Generic policy capability absent |
+| **B** | Strategy exit names are not executable Ticket authority | Typed future-only policy, fill-derived target, partial-fill state, and runner-floor capability exist disabled | Missing shared exit abstraction | Strategy evidence and Owner activation |
+| **C** | Exit parameters are candidates only | One approved Event Spec at a time uses actual-fill 1R, immediate runner floor, then structural exits for future Tickets | Strategy-specific exit-policy blocker | Natural production outcome calibration |
 
 ## Owner Decision Gates
 
 ### No decision required before Release A
 
 Release A repairs shared invariants and enforces the already stated TP1 limit
-policy. It does not change target, fraction, leverage, notional, or scope.
+policy. It records and verifies leverage but does not change the selected
+leverage, target, fraction, notional, or scope.
 
 ### No decision required before Release B
 
@@ -858,13 +1184,17 @@ activation is written. The Owner decision package must contain:
 
 1. exact policy version per Event Spec;
 2. TP1 target/fraction/execution style;
-3. invalidation and time-stop definitions;
-4. runner structure, timeframe, buffer, and minimum improvement;
-5. maker/taker fill and fee comparison;
-6. tail-return, drawdown, order-churn, and robustness evidence;
-7. recommended first canary Event Spec.
+3. runner break-even slippage buffer and fee-basis version;
+4. invalidation and time-stop definitions;
+5. runner structure, timeframe, buffer, and minimum improvement;
+6. maker/taker fill and fee comparison;
+7. tail-return, drawdown, order-churn, and robustness evidence;
+8. recommended first canary Event Spec.
 
-This is the only currently known Owner policy decision required by the design.
+The **immediate post-TP1 runner floor semantic is already approved**. Release C
+still requires an Owner decision on its exact versioned buffer/fee parameters
+and the Event Spec activation scope. This is the only currently known remaining
+Owner policy decision required by the design.
 
 ## Program Acceptance Criteria
 
@@ -873,19 +1203,30 @@ The design is fully implemented only when:
 1. **Release A** is deployed and an open `runner_protected` lifecycle remains
    continuously selectable and reconcilable.
 2. TP1 durable commands and exchange evidence prove **LIMIT**, explicit
-   time-in-force, no market fallback, liquidity role, and fee truth.
+   time-in-force, GTC-default/optional-GTX semantics, no market fallback,
+   liquidity role, and fee truth.
 3. All lifecycle services resolve active protection by exact generation and
    lineage, not first role match.
-4. **Release B** binds a typed immutable Exit Policy snapshot into future
-   Tickets without reinterpreting historical Tickets.
-5. Exit evaluation is pure and all mutations flow through the existing durable
+4. Manual Owner orders remain visible but unowned and cannot be adopted,
+   cancelled, or replaced by BRC.
+5. New entries prove Ticket-selected leverage equals the signed exchange
+   configured read-back, while effective account exposure remains separate.
+6. **Release B** binds typed immutable Exit Policy and fill-derived Exit
+   Execution snapshots without reinterpreting historical Tickets.
+7. Actual-fill R/TP1 long and short calculations are precision-correct and
+   immutable.
+8. TP1 partial fill synchronizes exact remaining protection; TP1 completion
+   immediately applies the runner-leg fee/slippage-adjusted floor.
+9. Later structural trailing is closed-candle-driven and can only improve the
+   runner floor; no universal fixed TP2 is introduced.
+10. Exit evaluation is pure and all mutations flow through the existing durable
    exchange-command authority.
-6. Replacement survives restart and unknown outcomes without duplicate submit
+11. Replacement survives restart and unknown outcomes without duplicate submit
    or a protection gap.
-7. Production no-due ticks create zero JSON/Markdown files and bounded runtime
+12. Production no-due ticks create zero JSON/Markdown files and bounded runtime
    work.
-8. All six Event Specs pass the production-shaped positive and negative matrix.
-9. **Release C** stops for Owner approval before exact strategy parameter
+13. All six Event Specs pass the production-shaped positive and negative matrix.
+14. **Release C** stops for Owner approval before exact strategy parameter
    activation.
-10. Each activated Event Spec proves one future Ticket end to end through
+15. Each activated Event Spec proves one future Ticket end to end through
     settlement, fee truth, and review before wider in-scope activation.

@@ -1,20 +1,26 @@
 # Ticket-Bound Exit Policy Program Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: use
-> `superpowers:executing-plans` for checkpointed execution. Core-file tasks are
-> executed by the Codex primary agent. Do not spawn or delegate to subagents
-> unless the Owner or then-current project instructions explicitly authorize
-> it.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> `superpowers:subagent-driven-development` (recommended) or
+> `superpowers:executing-plans` to implement this plan task-by-task. Steps use
+> checkbox (`- [ ]`) syntax for tracking. Core-file tasks remain owned by the
+> Codex primary agent; do not spawn or delegate unless the Owner or current
+> project instructions explicitly authorize it.
 
-**Goal:** Repair runner/TP1 lifecycle safety, introduce a disabled versioned
-Exit Policy Core, then replay and activate approved exit semantics for future
-Tickets one Event Spec at a time.
+**Goal:** Repair runner/TP1/leverage execution truth, introduce a disabled
+versioned Exit Policy Core with fill-derived 1R, partial-fill protection, and an
+immediate fee/slippage-adjusted runner floor, then replay and activate approved
+exit semantics for future Tickets one Event Spec at a time.
 
 **Architecture:** One immutable `TicketExitPolicySnapshot` is frozen into each
-new Ticket. A pure evaluator consumes exact closed-market facts and current
-protection state. All mutations use the existing ticket-bound lifecycle and
-durable exchange-command authority. Release A, B, and C have separate schema,
-deploy, rollback, and Owner gates.
+new Ticket; after authoritative entry fill, one immutable
+`TicketExitExecutionSnapshot` resolves actual R, TP1, runner quantity, fee
+basis, and slippage buffer. Default TP1 is exact-target `LIMIT_GTC`; optional
+GTX is versioned and replay-gated. TP1 completion triggers the runner floor
+immediately, while later structural movement consumes exact closed-market
+facts. All mutations use the existing ticket-bound lifecycle and durable
+exchange-command authority. Release A, B, and C retain separate schema,
+deployment, rollback, and Owner gates.
 
 **Tech Stack:** Python 3.12, Pydantic v2, `decimal.Decimal`, SQLAlchemy Core,
 Alembic, PostgreSQL 16, pytest/pytest-asyncio, CCXT **4.5.56**, systemd timers,
@@ -27,6 +33,10 @@ Binance USD-M adapter, existing Tokyo git deployment tooling.
 
 This plan is **not authorized for implementation** until the Owner approves the
 design package.
+
+Documentation work performs **no server mutation**. The current server release,
+ETH position, and Owner-created **1820 stop / 1899 take-profit** continue under
+their current exchange truth. They are never used as future strategy defaults.
 
 After approval:
 
@@ -57,6 +67,13 @@ After approval:
 - No runner replacement that cancels the old stop before confirming the new
   exact exchange order.
 - No TP1 market fallback.
+- Default TP1 is `LIMIT_GTC`; optional `PASSIVE_LIMIT_GTX` is never inferred.
+- A GTC taker fill is accepted economic evidence; a GTX taker fill is a defect.
+- No adoption, cancellation, or replacement of an Owner-created manual order.
+- No collapse of Ticket-selected, exchange-configured, and effective-account
+  leverage into one value.
+- TP1 partial fill must keep the exact remaining position protected; TP1
+  completion must trigger the runner floor without waiting for a candle close.
 - No historical Ticket reinterpretation.
 - No capital, notional, leverage, symbol, side, profile, or credential change.
 
@@ -84,9 +101,19 @@ After approval:
 
 | Release | Migration | Production capability | Rollback boundary | Owner gate |
 | --- | --- | --- | --- | --- |
-| **A** | **121** | Runner maintenance, exact active generation, TP1 passive-limit contract and fee truth | Roll back only with zero active real lifecycle and no unknown command | No new policy decision |
-| **B** | **122** | Typed Exit Policy Core deployed `certified_disabled` | App rollback allowed only before any active non-legacy policy Ticket | No new policy decision |
-| **C** | **123**, created only after approval | One approved Event Spec at a time | Disable new Ticket creation; preserve frozen active Tickets | Exact parameters and activation required |
+| **A** | **121** | Runner maintenance, exact active generation, GTC-default/optional-GTX TP1 truth, manual-order isolation, leverage truth | Roll back only with zero active real lifecycle and no unknown command | No new policy decision |
+| **B** | **122** | Typed policy/execution snapshots, partial-fill state, runner-floor and structural policy core deployed `certified_disabled` | App rollback allowed only before any active non-legacy policy Ticket | No new policy decision |
+| **C** | **123**, created only after approval | One approved Event Spec at a time uses actual-fill 1R, immediate runner floor, and structural exits | Disable new Ticket creation; preserve frozen active Tickets | Exact parameters and activation required |
+
+## Program Checklist
+
+- [ ] **Release A:** complete Tasks **A1-A6**, review, then deploy/certify in
+  **A7** only with zero active real lifecycle.
+- [ ] **Release B:** complete Tasks **B1-B6**, review, then deploy disabled in
+  **B7**.
+- [ ] **Release C research:** complete **C1-C3** and stop at the Owner gate.
+- [ ] **Release C activation:** execute **C4-C5** only after exact policy
+  version, runner-floor buffer/fee basis, and Event Spec scope are approved.
 
 ## Baseline Before Task A1
 
@@ -161,7 +188,9 @@ classify it before changing production code.
   they grant no live authority.
 - **Hard Stop:** any change to submit eligibility or deploy quiescence.
 
-### Step 1: Write the failing scheduler tests
+### Step 1
+
+- [ ] **Write the failing scheduler tests.**
 
 Add tests equivalent to:
 
@@ -189,12 +218,16 @@ python3 -m pytest -q \
 
 Expected: fail because `runner_protected` is omitted.
 
-### Step 2: Apply the minimum production correction
+### Step 2
+
+- [ ] **Apply the minimum production correction.**
 
 Add `runner_protected` to both immutable status sets. Do not add branching,
 special-case SOR logic, or a new timer.
 
-### Step 3: Verify transition behavior
+### Step 3
+
+- [ ] **Verify transition behavior.**
 
 Add/retain cases for:
 
@@ -206,7 +239,9 @@ Add/retain cases for:
 
 Run the two task files again. Expected: pass.
 
-### Step 4: Commit
+### Step 4
+
+- [ ] **Commit the task after verification.**
 
 ```bash
 git add \
@@ -252,7 +287,9 @@ git commit -m "fix(runtime): maintain protected runner lifecycles"
 - **Rehearsal/Simulation Boundary:** pure-domain fixtures only.
 - **Hard Stop:** broad symbol-level order selection.
 
-### Step 1: Add failing pure-domain tests
+### Step 1
+
+- [ ] **Add failing pure-domain tests.**
 
 Define the expected API:
 
@@ -288,7 +325,9 @@ python3 -m pytest -q tests/unit/test_ticket_exit_protection.py
 
 Expected: import failure.
 
-### Step 2: Implement the pure resolver
+### Step 2
+
+- [ ] **Implement the pure resolver.**
 
 Create frozen typed models and this public function:
 
@@ -307,7 +346,9 @@ def resolve_active_exit_protection(
 
 The domain module imports no SQLAlchemy, HTTP, exchange, or filesystem code.
 
-### Step 3: Replace all duplicate lookup helpers
+### Step 3
+
+- [ ] **Replace all duplicate lookup helpers.**
 
 Delete local `_role_order`/first-match helpers and adapt row dictionaries into
 the typed resolver at each application boundary. Every module must branch on
@@ -326,7 +367,9 @@ python3 -m pytest -q \
 
 Expected: pass.
 
-### Step 4: Prove duplicate helpers are gone
+### Step 4
+
+- [ ] **Prove duplicate helpers are gone.**
 
 ```bash
 rg -n "def _role_order|next\(.*role|first.*RUNNER_SL" \
@@ -335,7 +378,9 @@ rg -n "def _role_order|next\(.*role|first.*RUNNER_SL" \
 
 Expected: no competing active-protection selector remains.
 
-### Step 5: Commit
+### Step 5
+
+- [ ] **Commit the task after verification.**
 
 ```bash
 git add \
@@ -360,7 +405,8 @@ git commit -m "refactor(runtime): resolve active exit protection exactly"
 ### Task card
 
 - **Task ID:** `EXIT-A3`
-- **Goal:** Persist generation, TP1 execution style, and liquidity evidence.
+- **Goal:** Persist generation, TP1 execution style, liquidity evidence, and
+  separate exchange/effective leverage truth.
 - **Why:** The command must remain reconstructible after restart and auditable
   against actual fees.
 - **Allowed files:**
@@ -374,9 +420,10 @@ git commit -m "refactor(runtime): resolve active exit protection exactly"
 - **Global Authority Model:** schema records facts; it grants no command or
   submit authority.
 - **Chain Position:** durable command/protection state.
-- **Live Enablement Before:** generation/TIF/post-only/liquidity role are not
-  explicit columns.
-- **Live Enablement After:** these values survive restart and reconciliation.
+- **Live Enablement Before:** generation/style/TIF/post-only/liquidity role and
+  exchange/effective leverage are not explicit columns.
+- **Live Enablement After:** these values survive restart and reconciliation;
+  existing `leverage` remains Ticket-selected leverage.
 - **Blocker Removed:** `tp1_execution_truth_not_durable`.
 - **Per-Symbol / Per-Fact Acceptance:** no symbol-specific default.
 - **Stop Condition:** migration backfills a legacy row as post-only without
@@ -387,18 +434,23 @@ git commit -m "refactor(runtime): resolve active exit protection exactly"
 - **Hard Stop:** destructive table rewrite or non-null backfill without an
   explicit legacy value.
 
-### Step 1: Write the failing migration test
+### Step 1
+
+- [ ] **Write the failing migration test.**
 
 Assert revision/down-revision and DDL text for:
 
 ```text
 brc_ticket_bound_exit_protection_orders.generation INTEGER NOT NULL DEFAULT 1
+brc_ticket_bound_exchange_commands.execution_style VARCHAR(32) NULL
 brc_ticket_bound_exchange_commands.time_in_force VARCHAR(16) NULL
 brc_ticket_bound_exchange_commands.post_only BOOLEAN NOT NULL DEFAULT false
 brc_ticket_bound_exchange_commands.market_fallback_allowed BOOLEAN NOT NULL DEFAULT false
 brc_live_outcome_ledger.tp1_liquidity_role VARCHAR(16) NULL
 brc_live_outcome_ledger.tp1_fee NUMERIC(36,18) NULL
 brc_live_outcome_ledger.tp1_fee_asset VARCHAR(32) NULL
+brc_live_outcome_ledger.exchange_configured_initial_leverage NUMERIC(18,8) NULL
+brc_live_outcome_ledger.effective_account_exposure_leverage NUMERIC(18,8) NULL
 ```
 
 Add the active-generation index with a PostgreSQL identifier shorter than 63
@@ -414,14 +466,18 @@ python3 -m pytest -q \
 
 Expected: fail because migration 121 is absent.
 
-### Step 2: Implement migration 121
+### Step 2
+
+- [ ] **Implement migration 121.**
 
 Use `server_default="1"` only for legacy generation. Leave legacy
 `time_in_force` null; never claim it was GTC/GTX. `post_only=false` is factual
 for rows without evidence and `market_fallback_allowed=false` is the fail-safe
 default.
 
-### Step 3: Update migration inventory and deploy defaults
+### Step 3
+
+- [ ] **Update migration inventory and deploy defaults.**
 
 Update:
 
@@ -443,7 +499,9 @@ python3 -m pytest -q \
 
 Expected: pass.
 
-### Step 4: Commit
+### Step 4
+
+- [ ] **Commit the task after verification.**
 
 ```bash
 git add \
@@ -461,14 +519,16 @@ git commit -m "feat(runtime): persist exit execution safety facts"
 
 ---
 
-## Task A4: Enforce TP1 Passive-Limit Semantics End To End
+## Task A4: Enforce GTC-Default TP1 Limit Semantics End To End
 
 ### Task card
 
 - **Task ID:** `EXIT-A4`
-- **Goal:** Prove TP1 is limit, explicit-TIF, no-market-fallback, and reconcile
-  maker/taker fee truth.
-- **Why:** Ordinary `LIMIT` does not guarantee passive maker execution.
+- **Goal:** Prove TP1 is exact-target limit, explicit-TIF,
+  no-market-fallback, defaults to GTC, supports optional typed GTX, and
+  reconciles maker/taker fee truth.
+- **Why:** Ordinary implicit `LIMIT` hides TIF; global GTX would trade target
+  integrity for maker certainty when the target is already crossed.
 - **Allowed files:**
   - Modify `src/domain/ticket_bound_exchange_command.py`
   - Modify `src/application/action_time/protected_submit_attempt.py`
@@ -486,8 +546,9 @@ git commit -m "feat(runtime): persist exit execution safety facts"
 - **Chain Position:** protection preparation, gateway dispatch, fill truth.
 - **Live Enablement Before:** TP1 is ordinary limit with implicit TIF and no
   liquidity-role evidence.
-- **Live Enablement After:** TP1 is explicit passive limit with no market
-  downgrade and exact fee evidence.
+- **Live Enablement After:** TP1 is explicit `LIMIT_GTC` by default, optional
+  `PASSIVE_LIMIT_GTX` only when frozen, with no market downgrade and exact fee
+  evidence.
 - **Blocker Removed:** `tp1_limit_maker_contract_incomplete`.
 - **Per-Symbol / Per-Fact Acceptance:** price/quantity precision comes from the
   exact exchange instrument; best-book facts are exact symbol and bounded-age.
@@ -500,12 +561,15 @@ git commit -m "feat(runtime): persist exit execution safety facts"
   capability verification; no test exchange write is authority.
 - **Hard Stop:** market fallback or canceling SL to place TP1.
 
-### Step 1: Add failing command-model tests
+### Step 1
+
+- [ ] **Add failing command-model tests.**
 
 Expected model shape:
 
 ```python
 class TicketBoundExchangeCommand(...):
+    execution_style: Literal["limit_gtc", "passive_limit_gtx"] | None
     time_in_force: Literal["GTC", "GTX"] | None
     post_only: bool
     market_fallback_allowed: Literal[False]
@@ -519,7 +583,13 @@ if self.order_role == "TP1":
         raise ValueError("tp1_requires_limit_price")
     if self.market_fallback_allowed:
         raise ValueError("tp1_market_fallback_forbidden")
-    if self.post_only and self.time_in_force != "GTX":
+    if self.execution_style == "limit_gtc" and (
+        self.time_in_force != "GTC" or self.post_only
+    ):
+        raise ValueError("tp1_gtc_contract_invalid")
+    if self.execution_style == "passive_limit_gtx" and (
+        self.time_in_force != "GTX" or not self.post_only
+    ):
         raise ValueError("tp1_post_only_requires_gtx")
 ```
 
@@ -534,15 +604,18 @@ python3 -m pytest -q \
 
 Expected: fail until fields and validators exist.
 
-### Step 2: Make protected submit explicit
+### Step 2
 
-For TP1 emit:
+- [ ] **Make protected submit explicit.**
+
+For the Release A default TP1 emit:
 
 ```python
 {
     "gateway_order_type": "limit",
-    "time_in_force": "GTX",
-    "post_only": True,
+    "execution_style": "limit_gtc",
+    "time_in_force": "GTC",
+    "post_only": False,
     "market_fallback_allowed": False,
     "price": str(tp1_price),
     "reduce_only": True,
@@ -552,7 +625,12 @@ For TP1 emit:
 Entry and SL behavior remain unchanged. Add negative tests that monkeypatch any
 TP1 type to `market` and assert fail-closed before gateway dispatch.
 
-### Step 3: Extend the gateway adapter
+Add a separate typed optional-GTX fixture. No code may infer GTX from venue,
+symbol, fee rate, or a generic “maker preferred” flag.
+
+### Step 3
+
+- [ ] **Extend the gateway adapter.**
 
 Extend the core signature without exposing Binance-specific terms to callers:
 
@@ -565,20 +643,27 @@ async def place_order(
     ...
 ```
 
-At the Binance adapter boundary, map certified passive style to
-`timeInForce=GTX`. CCXT's unified `PO` capability remains feature-detected and
-version-tested; the adapter test asserts the actual params sent by CCXT
-**4.5.56**. Do not assume `LIMIT` means maker.
+At the Binance adapter boundary, map `LIMIT_GTC` to `timeInForce=GTC` and
+`PASSIVE_LIMIT_GTX` to `timeInForce=GTX`. The adapter test asserts the actual
+params sent by pinned CCXT **4.5.56**. Do not assume `LIMIT` means maker.
 
 Add gateway tests proving:
 
-- limit + GTX sends the certified post-only param;
+- limit + GTC sends the default exact TIF without post-only;
+- limit + GTX sends the certified post-only TIF;
 - market + GTX is rejected locally;
 - post-only on an unsupported venue is rejected, not downgraded;
 - hedge-mode position side remains exact;
 - no secret value enters logs.
 
-### Step 4: Add passive-rejection state
+### Step 4
+
+- [ ] **Distinguish accepted GTC crossing from GTX rejection.**
+
+For GTC, test a target that is non-marketable at preparation and a target that
+becomes marketable before venue evaluation. The latter may fill taker at the
+limit or better; accept it once, record fee/liquidity truth, and prove no
+`MARKET` or duplicate TP1 command exists.
 
 Treat authoritative post-only rejection as a typed recoverable result. The
 existing SL remains. Prepare no market command. A fresh bounded BBO fact may
@@ -587,7 +672,9 @@ worse than the policy target.
 
 Add tests for long and short price inequalities and retry idempotency.
 
-### Step 5: Normalize liquidity role and fees
+### Step 5
+
+- [ ] **Normalize liquidity role and fees.**
 
 Extend fill normalization:
 
@@ -601,8 +688,13 @@ Extend fill normalization:
 
 Do not invent maker/taker when exchange evidence is absent. Propagate TP1 fee,
 fee asset, submitted type/TIF, and liquidity role into the Live Outcome.
+GTC+taker is economic evidence, not a lifecycle defect. GTX+taker is a
+contradictory adapter/lifecycle defect and freezes further mutation pending
+exact reconciliation.
 
-### Step 6: Run targeted tests
+### Step 6
+
+- [ ] **Run targeted tests.**
 
 ```bash
 python3 -m pytest -q \
@@ -617,7 +709,9 @@ python3 -m pytest -q \
 
 Expected: pass.
 
-### Step 7: Commit
+### Step 7
+
+- [ ] **Commit the task after verification.**
 
 ```bash
 git add \
@@ -636,18 +730,121 @@ git add \
   tests/unit/test_exchange_gateway_open_order_views.py \
   tests/unit/test_ticket_bound_post_submit_reconciliation_tick.py \
   tests/unit/test_live_outcome_ledger.py
-git commit -m "fix(execution): enforce passive limit tp1 semantics"
+git commit -m "fix(execution): enforce explicit limit tp1 semantics"
 ```
 
 ---
 
-## Task A5: Certify Strict Manual External-Close Recovery
+## Task A5: Verify Exchange Leverage And Persist Three-Layer Truth
 
 ### Task card
 
 - **Task ID:** `EXIT-A5`
-- **Goal:** Prove a manual reduce-only close settles the exact Ticket and cleans
-  only its residual protection.
+- **Goal:** Confirm the exact configured initial leverage before entry and keep
+  it separate from Ticket-selected and effective-account exposure leverage.
+- **Why:** A configured `10x` and an account showing about `2x` exposure are
+  different facts; the current gateway sets leverage without independent
+  read-back before entry.
+- **Allowed files:**
+  - Modify `src/infrastructure/exchange_gateway.py` (**Codex core file**)
+  - Modify `src/application/action_time/exchange_command_worker.py`
+  - Modify `src/application/action_time/exchange_snapshot_provider.py`
+  - Modify `src/application/action_time/live_outcome_ledger.py`
+  - Modify the corresponding gateway/worker/snapshot/Live Outcome tests
+- **Forbidden files:** sizing policy, leverage selection formula, maximum
+  leverage, capital/notional/profile/symbol/side scope, current ETH position.
+- **Global Authority Model:** this task verifies an already selected value; it
+  does not select or increase leverage.
+- **Chain Position:** ENTRY command dispatch immediately before create-order,
+  then lifecycle/Live Outcome fact projection.
+- **Live Enablement Before:** `set_leverage` is called but exact configured
+  read-back is not a pre-entry invariant.
+- **Live Enablement After:** selected, configured, and effective exposure values
+  are explicit; mismatch blocks entry.
+- **Blocker Removed:** `exchange_configured_leverage_not_proven`.
+- **Per-Symbol / Per-Fact Acceptance:** same account, venue, canonical
+  instrument/gateway symbol, position mode, observed time, and exact integer
+  leverage.
+- **Stop Condition:** an open exact position exists, read-back is missing or
+  mismatched, or code would alter the selected leverage.
+- **Capability Unlocked:** trustworthy entry and Live Outcome leverage facts.
+- **Next Bottleneck:** strict manual-order recovery certification.
+- **Rehearsal/Simulation Boundary:** mocked signed config/account facts; no
+  production leverage mutation during tests.
+- **Hard Stop:** mutating leverage while the exact position bucket is open.
+
+### Step 1
+
+- [ ] **Write failing gateway tests.**
+
+Add tests proving:
+
+- no-open-position path calls `set_leverage(selected)`;
+- the gateway then reads exact same-symbol signed configured leverage before
+  `create_order`;
+- matching read-back allows one entry submit;
+- missing/mismatched read-back emits no `create_order`;
+- an already open exact position bucket emits neither `set_leverage` nor entry;
+- protection and exit orders never carry leverage mutation.
+
+Use the pinned CCXT **4.5.56** adapter in the payload contract test. The signed
+read-back implementation remains inside the gateway and returns a typed neutral
+result to the worker.
+
+### Step 2
+
+- [ ] **Add three-layer projection tests.**
+
+Assert:
+
+```python
+assert outcome["leverage"] == ticket_selected_leverage
+assert outcome["exchange_configured_initial_leverage"] == configured_leverage
+assert outcome["effective_account_exposure_leverage"] == (
+    gross_open_position_notional / account_margin_balance
+)
+```
+
+Cover zero/missing margin balance, no position, cross-margin multi-position
+gross notional, stale/mismatched account snapshot, and `Decimal` precision.
+Missing effective exposure may remain null with an explicit blocker/source
+status; it may not be replaced by configured leverage.
+
+### Step 3
+
+- [ ] **Implement and verify.**
+
+Keep public/signed requests timeout-bounded and outside long PG transactions.
+Run:
+
+```bash
+python3 -m pytest -q \
+  tests/unit/test_exchange_gateway_position_rows.py \
+  tests/unit/test_ticket_bound_exchange_command_worker.py \
+  tests/unit/test_ticket_bound_exchange_snapshot_provider.py \
+  tests/unit/test_live_outcome_ledger.py
+```
+
+Expected: pass with no selected-leverage/sizing behavior change.
+
+### Step 4
+
+- [ ] **Commit the task after verification.**
+
+```bash
+git commit -m "fix(execution): verify and project leverage truth"
+```
+
+---
+
+## Task A6: Certify Manual-Order Isolation And External-Close Recovery
+
+### Task card
+
+- **Task ID:** `EXIT-A6`
+- **Goal:** Prove Owner-created reduce-only orders are never adopted or
+  cancelled, and a resulting manual close settles the exact Ticket while
+  cleaning only BRC-owned residual protection.
 - **Why:** Release A cannot deploy around an ambiguous live lifecycle.
 - **Allowed files:**
   - Modify the four targeted test files listed below
@@ -685,7 +882,9 @@ git commit -m "fix(execution): enforce passive limit tp1 semantics"
   manual close remains Owner action.
 - **Hard Stop:** direct production row edits.
 
-### Step 1: Add the production-shaped regression
+### Step 1
+
+- [ ] **Add the production-shaped regression.**
 
 Extend:
 
@@ -706,9 +905,19 @@ assert unrelated_symbol_orders_untouched is True
 ```
 
 Add negative cases for wrong bucket, wrong side, quantity mismatch, two
-candidate Tickets, and missing exchange order identity.
+candidate Tickets, and missing exchange order identity. Add the current-shape
+case containing external manual **1820 stop** and **1899 take-profit** rows:
 
-### Step 2: Run the tests before editing production code
+```python
+assert external_manual_orders_are_visible is True
+assert external_manual_orders_adopted == []
+assert external_manual_orders_cancelled == []
+assert brc_cleanup_targets == exact_pg_linked_brc_orders_only
+```
+
+### Step 2
+
+- [ ] **Run the tests before editing production code.**
 
 ```bash
 python3 -m pytest -q \
@@ -722,7 +931,9 @@ If all pass, this is a test-only certification task. If a test fails, implement
 the smallest shared-invariant correction in the already existing modules and
 rerun the full set.
 
-### Step 3: Commit
+### Step 3
+
+- [ ] **Commit the task after verification.**
 
 Stage only the actual touched files and commit:
 
@@ -732,9 +943,11 @@ git commit -m "test(runtime): certify exact external close recovery"
 
 ---
 
-## Task A6: Review, Certify, And Deploy Release A
+## Task A7: Review, Certify, And Deploy Release A
 
 ### Pre-deploy acceptance
+
+- [ ] **Run the complete Release A acceptance suite and review.**
 
 Run:
 
@@ -753,9 +966,15 @@ Required results:
 - no output artifact violation;
 - no unstaged implementation file;
 - code review has no P0/P1 finding;
+- `requirements.txt` contains the exact line `ccxt==4.5.56`;
+- deploy/postdeploy tests prove every remote CCXT check uses the explicit
+  `/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python` path and
+  never bare `python`;
 - exchange is flat and active real lifecycle count is zero.
 
 ### Release A dry run
+
+- [ ] **Generate and inspect the Release A deployment dry run.**
 
 Collect current read-only deployment facts using the existing preflight script,
 then invoke:
@@ -778,6 +997,8 @@ Tokyo preflight output, never from a stale note.
 
 ### Deploy and postdeploy
 
+- [ ] **Deploy Release A and complete read-only postdeploy acceptance.**
+
 Use the existing apply executor only after its dry-run reports ready. Pass the
 same explicit venv Python. After release switch:
 
@@ -796,7 +1017,12 @@ Postdeploy acceptance:
 - a read-only production-shaped `runner_protected` fixture/simulation is
   selectable;
 - no exchange write occurs during certification;
-- new TP1 command preview is `limit + GTX + no market fallback`.
+- default TP1 command preview is
+  `LIMIT + GTC + post_only=false + no market fallback`;
+- optional typed GTX fixture is
+  `LIMIT + GTX + post_only=true + no market fallback`;
+- leverage preview/read-only facts keep selected, configured, and effective
+  values separate.
 
 Record the exact deployed commit and release identity in PG/current capability
 state, not a recurring report file.
@@ -829,17 +1055,23 @@ state, not a recurring report file.
 - **Rehearsal/Simulation Boundary:** pure tests only.
 - **Hard Stop:** evaluator dispatches commands.
 
-### Step 1: Write failing model tests
+### Step 1
+
+- [ ] **Write failing model tests.**
 
 Test discriminated models for:
 
 - `RIGHT_TAIL_RUNNER`, `FIXED_TARGETS`, `LIFECYCLE_ONLY`;
 - `LIMIT_GTC`, `PASSIVE_LIMIT_GTX`;
+- `ACTUAL_ENTRY_R` and exact TP completion quantity tolerance;
+- runner-leg cost-adjusted break-even with conservative taker exit fee basis;
 - structural ATR, reference trail, no runner;
 - invalidation and time-stop rules;
 - canonical payload hash independent of mapping insertion order;
 - invalid fraction totals, non-positive R, malformed side/timeframe;
 - `market_fallback_allowed=True` rejected.
+- zero/negative quantity, invalid fee rate, missing fee basis, and invalid
+  slippage/minimum-improvement ticks rejected.
 
 Run:
 
@@ -849,12 +1081,16 @@ python3 -m pytest -q tests/unit/test_ticket_exit_policy.py
 
 Expected: import failure.
 
-### Step 2: Implement frozen typed models
+### Step 2
+
+- [ ] **Implement frozen typed models.**
 
 Use `ConfigDict(frozen=True, extra="forbid")` and `Decimal` for every financial
 number. Add one canonical serialization/hash function.
 
-### Step 3: Add evaluator tests before evaluator code
+### Step 3
+
+- [ ] **Add evaluator tests before evaluator code.**
 
 Cover:
 
@@ -869,8 +1105,13 @@ assert evaluate_exit_policy(non_improvement).kind is ExitDecisionKind.NOOP
 ```
 
 Priority tests must prove invalidation wins over a simultaneous trail move.
+Separate tests must prove TP1-completion floor evaluation is immediate and does
+not require a closed-candle fact; later structural candidates can only improve
+the applied floor.
 
-### Step 4: Implement and verify
+### Step 4
+
+- [ ] **Implement and verify.**
 
 Run:
 
@@ -881,7 +1122,9 @@ python3 -m compileall -q src/domain/ticket_exit_policy.py
 
 Expected: pass.
 
-### Step 5: Commit
+### Step 5
+
+- [ ] **Commit the task after verification.**
 
 ```bash
 git add src/domain/ticket_exit_policy.py tests/unit/test_ticket_exit_policy.py
@@ -918,7 +1161,9 @@ git commit -m "feat(domain): add versioned ticket exit policy"
 - **Rehearsal/Simulation Boundary:** capability remains disabled.
 - **Hard Stop:** seeding `status=current`.
 
-### Step 1: Write the failing migration test
+### Step 1
+
+- [ ] **Write the failing migration test.**
 
 Assert:
 
@@ -929,6 +1174,16 @@ brc_action_time_tickets.exit_policy_id
 brc_action_time_tickets.exit_policy_version
 brc_action_time_tickets.exit_policy_snapshot
 brc_action_time_tickets.exit_policy_hash
+brc_ticket_exit_policy_current.exit_execution_snapshot
+brc_ticket_exit_policy_current.exit_execution_hash
+brc_ticket_exit_policy_current.actual_r_per_unit
+brc_ticket_exit_policy_current.resolved_tp1_price
+brc_ticket_exit_policy_current.resolved_tp1_target_qty
+brc_ticket_exit_policy_current.tp1_cumulative_filled_qty
+brc_ticket_exit_policy_current.tp1_completion_state
+brc_ticket_exit_policy_current.remaining_position_qty
+brc_ticket_exit_policy_current.runner_break_even_floor
+brc_ticket_exit_policy_current.runner_floor_applied_at_ms
 ```
 
 Require a partial unique index for one `current` exact policy scope and a
@@ -939,7 +1194,9 @@ a new command table or dispatcher.
 
 Run migration and identifier tests. Expected: fail.
 
-### Step 2: Implement migration 122
+### Step 2
+
+- [ ] **Implement migration 122.**
 
 Backfill historical Tickets with:
 
@@ -952,12 +1209,16 @@ backfill. Add capability `ticket_exit_policy_v1` as
 `certified_disabled` only if the existing capability table contract supports
 the row; otherwise the application must treat absence as disabled.
 
-### Step 3: Update deploy defaults and verify
+### Step 3
+
+- [ ] **Update deploy defaults and verify.**
 
 Run the same migration/deploy test set as A3 with expected latest migration
 **122**.
 
-### Step 4: Commit
+### Step 4
+
+- [ ] **Commit the task after verification.**
 
 ```bash
 git commit -m "feat(runtime): add ticket exit policy postgres core"
@@ -965,25 +1226,30 @@ git commit -m "feat(runtime): add ticket exit policy postgres core"
 
 ---
 
-## Task B3: Bind Immutable Exit Policies Into Future Tickets
+## Task B3: Bind Policy And Fill-Derived Execution Snapshots
 
 ### Task card
 
 - **Task ID:** `EXIT-B3`
 - **Goal:** Query, validate, hash, and freeze the exact policy into Ticket
-  identity.
+  identity, then derive one immutable execution snapshot after entry fill.
 - **Why:** Current registry changes must not reinterpret open positions.
 - **Allowed files:**
   - Create `src/application/action_time/ticket_exit_policy_binding.py`
   - Create `tests/unit/test_ticket_exit_policy_binding.py`
+  - Create `src/application/action_time/ticket_exit_execution_binding.py`
+  - Create `tests/unit/test_ticket_exit_execution_binding.py`
   - Modify `src/application/action_time/action_time_ticket.py`
+  - Modify `src/application/action_time/protected_submit_attempt.py`
+  - Modify `src/application/action_time/ticket_bound_fill_projector.py`
   - Modify `tests/unit/test_action_time_ticket_materialization.py`
 - **Forbidden files:** default policy invention, historical row mutation,
   strategy activation.
 - **Global Authority Model:** binding supplies semantics, not submit authority.
 - **Chain Position:** Ticket materialization before action-time safety.
 - **Live Enablement Before:** Ticket hash omits exit semantics.
-- **Live Enablement After:** exact policy identity/hash is immutable.
+- **Live Enablement After:** exact policy identity/hash and post-entry
+  fill-derived execution values are immutable.
 - **Blocker Removed:** `ticket_exit_policy_not_frozen`.
 - **Per-Symbol / Per-Fact Acceptance:** exact StrategyGroup/version/Event
   Spec/version/side match.
@@ -993,13 +1259,17 @@ git commit -m "feat(runtime): add ticket exit policy postgres core"
 - **Rehearsal/Simulation Boundary:** capability remains disabled.
 - **Hard Stop:** policy row upgrades Ticket authority.
 
-### Step 1: Add failing binding tests
+### Step 1
+
+- [ ] **Add failing binding tests.**
 
 Cover exact match, missing policy, duplicate current policy, invalid payload,
 hash mismatch, version mismatch, side mismatch, legacy Ticket, and identity
 hash changes when policy version changes.
 
-### Step 2: Implement the binding service
+### Step 2
+
+- [ ] **Implement the binding service.**
 
 Public function:
 
@@ -1018,18 +1288,46 @@ def load_ticket_exit_policy_binding(
 
 Validate through `TicketExitPolicySnapshot` before returning.
 
-### Step 3: Extend Ticket hashes
+### Step 3
+
+- [ ] **Extend Ticket hashes.**
 
 Add policy identity/hash to `TICKET_IDENTITY_HASH_FIELDS` and
 `created_under_versions_hash`. Persist the complete immutable snapshot.
 
-### Step 4: Verify and commit
+### Step 4
+
+- [ ] **Resolve actual-fill R and TP1 after entry.**
+
+Add failing tests first for:
+
+```text
+actual_R = abs(entry_avg_fill - exact_initial_stop)
+long_tp1 = tick_round_up(entry_avg_fill + reward_multiple * actual_R)
+short_tp1 = tick_round_down(entry_avg_fill - reward_multiple * actual_R)
+```
+
+Cover long/short, partial entry before final average fill, tick precision,
+wrong-side stop, zero R, missing entry fee, fee in non-quote asset without a
+conversion fact, and immutable retry hashing. TP1 preparation must occur only
+after authoritative entry fill and initial-stop facts exist. The planned
+action-time TP1 remains intent/evidence and is not reused as actual fill truth.
+
+Persist `TicketExitExecutionSnapshot` with resolved target quantity, runner
+quantity, allocated entry fee, certified taker exit fee rate, and versioned
+slippage buffer. Re-running with the same facts returns the same hash; different
+facts after binding are a reconciliation contradiction, not an update.
+
+### Step 5
+
+- [ ] **Verify and commit.**
 
 ```bash
 python3 -m pytest -q \
   tests/unit/test_ticket_exit_policy_binding.py \
+  tests/unit/test_ticket_exit_execution_binding.py \
   tests/unit/test_action_time_ticket_materialization.py
-git commit -m "feat(runtime): freeze exit policy into action-time tickets"
+git commit -m "feat(runtime): freeze ticket exit policy and execution"
 ```
 
 ---
@@ -1063,7 +1361,9 @@ git commit -m "feat(runtime): freeze exit policy into action-time tickets"
 - **Rehearsal/Simulation Boundary:** injected fake candle source.
 - **Hard Stop:** using open/incomplete candle as exit authority.
 
-### Step 1: Add failing cadence tests
+### Step 1
+
+- [ ] **Add failing cadence tests.**
 
 Assert:
 
@@ -1075,7 +1375,9 @@ Assert:
 - API timeout -> existing runner unchanged;
 - zero JSON/MD writes.
 
-### Step 2: Implement a typed port
+### Step 2
+
+- [ ] **Implement a typed port.**
 
 ```python
 class ClosedCandleSource(Protocol):
@@ -1094,12 +1396,16 @@ class ClosedCandleSource(Protocol):
 Use the existing Binance public source as the first adapter. Persist fact
 snapshots under `fact_surface=ticket_exit_market`.
 
-### Step 3: Implement one current projection owner
+### Step 3
+
+- [ ] **Implement one current projection owner.**
 
 Use compare-and-set on `last_evaluated_watermark_ms` and
 `next_evaluation_not_before_ms`. No other service writes the current projection.
 
-### Step 4: Verify performance boundary
+### Step 4
+
+- [ ] **Verify the performance boundary.**
 
 ```bash
 python3 -m pytest -q \
@@ -1110,7 +1416,9 @@ python3 scripts/audit_production_runtime_file_io.py --fail-on-risk --json
 
 Expected: tests pass and performance risk is clear.
 
-### Step 5: Commit
+### Step 5
+
+- [ ] **Commit the task after verification.**
 
 ```bash
 git commit -m "feat(runtime): add due exit market facts and projection"
@@ -1123,8 +1431,9 @@ git commit -m "feat(runtime): add due exit market facts and projection"
 ### Task card
 
 - **Task ID:** `EXIT-B5`
-- **Goal:** Convert typed decisions into generation-safe existing exchange
-  commands and wire them into the existing scheduler.
+- **Goal:** Convert TP1 fill transitions and typed policy decisions into
+  generation-safe existing exchange commands and wire them into the existing
+  scheduler.
 - **Why:** Pure policy capability is not useful until it can safely maintain a
   runner.
 - **Allowed files:**
@@ -1139,7 +1448,8 @@ git commit -m "feat(runtime): add due exit market facts and projection"
   direct exchange call from policy service.
 - **Global Authority Model:** existing durable command worker remains the only
   write executor.
-- **Chain Position:** typed decision -> durable command -> reconciliation.
+- **Chain Position:** TP1 fill transition or typed decision -> durable command
+  -> reconciliation.
 - **Live Enablement Before:** decision is rehearsal-only.
 - **Live Enablement After:** disabled capability can run full-chain simulation.
 - **Blocker Removed:** `exit_policy_command_bridge_missing`.
@@ -1152,12 +1462,27 @@ git commit -m "feat(runtime): add due exit market facts and projection"
 - **Rehearsal/Simulation Boundary:** production capability remains disabled.
 - **Hard Stop:** direct exchange mutation or activation row.
 
-### Step 1: Add failing orchestration tests
+### Step 1
+
+- [ ] **Add failing orchestration tests.**
 
 Test:
 
 - `NOOP` creates no command;
 - `BLOCKED` creates no command and preserves SL;
+- TP1 unfilled leaves original protection unchanged;
+- TP1 partial fill synchronizes stop quantity to exact remaining exchange
+  position but does not raise the stop price;
+- TP1 complete within frozen venue-step tolerance immediately calculates the
+  runner-leg floor without a candle fact;
+- long floor uses
+  `(E*Q + allocated_entry_fee + slippage_buffer) / (Q*(1-exit_taker_rate))`
+  and rounds up;
+- short floor uses
+  `(E*Q - allocated_entry_fee - slippage_buffer) / (Q*(1+exit_taker_rate))`
+  and rounds down;
+- zero/invalid Q, missing fee basis, invalid rate, or contradictory fill truth
+  creates no mutation and preserves the original SL;
 - `MOVE_RUNNER_STOP` prepares generation N+1;
 - new stop must be monotonic and tick-aligned;
 - new place confirmed before old cancel command exists;
@@ -1167,13 +1492,17 @@ Test:
 - `CLOSE_RUNNER` prepares one reduce-position exit command;
 - restart at every state resumes idempotently.
 
-### Step 2: Extend command-source enum without a second authority
+### Step 2
+
+- [ ] **Extend command-source enum without a second authority.**
 
 Add exact sources such as `exit_policy_runner` and `exit_policy_close` to the
 existing typed domain and check constraints. Preserve the existing unique
 command identity of source/kind/role/generation.
 
-### Step 3: Implement the service
+### Step 3
+
+- [ ] **Implement the service.**
 
 ```python
 async def maintain_ticket_exit_policy(
@@ -1190,13 +1519,27 @@ The service performs short PG reads/claims, releases the transaction for market
 I/O, persists exact fact/decision, and prepares a command. It never calls
 `gateway.place_order` or `gateway.cancel_order`.
 
-### Step 4: Wire the existing scheduler
+The TP1-completion branch consumes the already signed lifecycle
+order/trade/position snapshot and uses no public candle call. It persists one
+completion claim and one decision per exact cumulative-fill watermark.
 
-After existing lifecycle reconciliation, call the service only for due,
-capability-enabled runner states. A disabled capability returns a no-write
-product state and preserves existing fixed runner behavior.
+### Step 4
 
-### Step 5: Verify and commit
+- [ ] **Wire the existing scheduler.**
+
+After existing lifecycle reconciliation:
+
+1. route changed TP1 fill watermark to unfilled/partial/complete handling;
+2. if completion is claimed, evaluate the immediate floor once;
+3. otherwise call structural evaluation only for due, capability-enabled
+   runner states with a new closed-candle watermark.
+
+A disabled capability returns a no-write product state and preserves existing
+fixed runner behavior.
+
+### Step 5
+
+- [ ] **Verify and commit.**
 
 ```bash
 python3 -m pytest -q \
@@ -1238,7 +1581,9 @@ git commit -m "feat(runtime): route exit policies through durable commands"
 - **Rehearsal/Simulation Boundary:** explicit in every result.
 - **Hard Stop:** certification changes capability to enabled.
 
-### Step 1: Build the matrix
+### Step 1
+
+- [ ] **Build the matrix.**
 
 Parametrize:
 
@@ -1253,18 +1598,26 @@ ACTIVE_EVENT_SPECS = (
 )
 ```
 
-For each, prove Ticket snapshot, passive TP1, TP1 fill, runner creation,
+For each, prove Ticket policy/execution snapshots, actual-fill 1R target,
+default GTC TP1, optional GTX fixture, TP1 unfilled/partial/complete states,
+exact runner quantity, immediate cost-adjusted floor, later closed-candle
 evaluation, replacement/invalidation, terminal reconciliation, settlement,
-fees, and one Live Outcome.
+fees, three-layer leverage truth, and one Live Outcome.
 
-### Step 2: Add negative matrix
+### Step 2
+
+- [ ] **Add the negative matrix.**
 
 Cover stale/missing fact, wrong side, wrong Event Spec version, missing runner,
-duplicate runner, partial TP1, post-only rejection, unknown place/cancel/close,
-restart, manual external close, venue passive-limit absence, and non-improving
-trail.
+duplicate runner, GTC taker fill, optional GTX rejection, contradictory GTX
+taker fill, TP1 partial/overfill, missing floor fee truth, zero runner quantity,
+unknown place/cancel/close, restart at every floor/replacement boundary, manual
+Owner-order isolation/external close, leverage read-back mismatch, venue
+passive-limit absence, and non-improving trail.
 
-### Step 3: Run certification
+### Step 3
+
+- [ ] **Run certification.**
 
 ```bash
 python3 -m pytest -q \
@@ -1274,7 +1627,9 @@ python3 -m pytest -q \
 
 Expected: pass with capability still disabled.
 
-### Step 4: Commit
+### Step 4
+
+- [ ] **Commit the task after verification.**
 
 ```bash
 git commit -m "test(runtime): certify exit policy full chain"
@@ -1283,6 +1638,8 @@ git commit -m "test(runtime): certify exit policy full chain"
 ---
 
 ## Task B7: Review, Certify, And Deploy Release B Disabled
+
+- [ ] **Review, certify, and deploy Release B with capability disabled.**
 
 Run:
 
@@ -1301,6 +1658,10 @@ Review must prove:
 - no current policy seed;
 - capability is `certified_disabled` or absent/fail-disabled;
 - historical Tickets are `legacy_unbound` without synthesized meaning;
+- default GTC/optional GTX semantics remain exact and no `MARKET` TP1 exists;
+- fill-derived R, partial-fill state, and runner-floor capability remain
+  disabled for production Tickets;
+- unchanged fill/candle watermarks create no repeated command/event;
 - no production file I/O regression;
 - no P0/P1 finding.
 
@@ -1353,7 +1714,9 @@ Postdeploy read-only acceptance:
 - **Rehearsal/Simulation Boundary:** all outputs labeled research-only.
 - **Hard Stop:** modifying the existing dirty research worktree.
 
-### Step 1: Create the isolated worktree
+### Step 1
+
+- [ ] **Create the isolated worktree.**
 
 After verifying the research repository and current dirty worktree:
 
@@ -1366,18 +1729,26 @@ git -C /Users/jiangwei/Documents/final-strategy-research worktree add \
 
 Do not clean, reset, or reuse the dirty primary research worktree.
 
-### Step 2: Write failing replay tests
+### Step 2
 
-Test bar ordering, TP1 partial fill, passive maker/taker model, ambiguous
-same-bar TP1/SL touch, structural trail monotonicity, invalidation priority,
-time stop, fee/funding, MFE/MAE, tail contribution, and no look-ahead.
+- [ ] **Write failing replay tests.**
 
-### Step 3: Implement the shared harness
+Test bar ordering, actual-entry-fill R, long/short tick rounding, TP1 partial
+fill, GTC maker/taker and optional GTX rejection models, ambiguous same-bar
+TP1/SL touch, immediate runner-floor formula, structural trail monotonicity,
+invalidation priority, time stop, fee/funding, MFE/MAE, tail contribution, and
+no look-ahead.
+
+### Step 3
+
+- [ ] **Implement the shared harness.**
 
 The harness accepts typed candidates and returns typed per-trade and aggregate
 results. Runtime does not import this module.
 
-### Step 4: Verify and commit in the research worktree
+### Step 4
+
+- [ ] **Verify and commit in the research worktree.**
 
 ```bash
 python3 -m pytest -q tests/test_exit_policy_replay.py
@@ -1417,20 +1788,27 @@ git commit -m "feat(research): add shared exit policy replay"
 
 ### Candidate grid
 
+- [ ] **Execute the complete candidate grid for every active Event Spec.**
+
 For each Event Spec, compare:
 
-1. current TP1 1R/50% baseline;
-2. `LIMIT_GTC` and `PASSIVE_LIMIT_GTX` with conservative fill assumptions;
-3. no hard TP2 and relevant fixed-target controls;
-4. strategy-native invalidation;
-5. time-stop candidates;
-6. structural window and volatility buffer ranges;
-7. minimum stop-improvement ticks and evaluation timeframe.
+1. current TP1 **1R/50%** baseline recalculated from actual entry average fill;
+2. default `LIMIT_GTC` and optional `PASSIVE_LIMIT_GTX` with conservative fill
+   assumptions;
+3. the already approved immediate runner-leg break-even semantic, sweeping only
+   the exact slippage buffer and certified fee-basis version;
+4. no hard TP2 and relevant fixed-target controls;
+5. strategy-native invalidation;
+6. time-stop candidates;
+7. structural window and volatility buffer ranges;
+8. minimum stop-improvement ticks and evaluation timeframe.
 
 The old SOR `3 bars / ATR(14) / 0.5 ATR` values are one candidate, not a
 default.
 
 ### Required metrics
+
+- [ ] **Produce and validate every required economic, risk, and operations metric.**
 
 Produce net R, mean/median R, tail contribution, profit giveback, MFE, MAE,
 false-breakout loss, worst rolling windows, maker/taker fill rate, fee,
@@ -1438,6 +1816,8 @@ slippage, funding, stop-update count, rejection/retry count, time in trade, and
 capital-slot occupancy.
 
 ### Verification
+
+- [ ] **Rerun deterministically and commit the bounded research decision artifact.**
 
 Run the research repository's complete test suite plus deterministic reruns
 with a fixed data/version manifest. The two runs must produce identical policy
@@ -1449,6 +1829,8 @@ repository. Do not copy generated replay data into the production repo.
 ---
 
 ## Task C3: Produce The Owner Decision Package And Stop
+
+- [ ] **Produce the exact Owner decision package and stop before activation.**
 
 ### Task card
 
@@ -1474,6 +1856,9 @@ repository. Do not copy generated replay data into the production repo.
 The package must contain, for each Event Spec:
 
 - exact TP1 target/fraction/execution style;
+- actual-fill reward basis and TP1 completion tolerance;
+- exact runner-floor fee-basis version, slippage buffer, and minimum
+  improvement ticks;
 - invalidation rule;
 - time stop;
 - runner structure/timeframe/window/buffer/minimum improvement;
@@ -1512,12 +1897,14 @@ policy values.
 
 ### TDD sequence after approval
 
-1. Write a migration test containing the exact approved id/version/hash.
-2. Assert no historical Ticket row changes.
-3. Assert only one future-current policy exists for the exact Event Spec/side.
-4. Implement migration 123.
-5. Rerun migration, Ticket binding, policy service, and six-spec negative tests.
-6. Commit:
+- [ ] **Execute C4 only after the approved policy hash is available.**
+
+- [ ] Write a migration test containing the exact approved id/version/hash.
+- [ ] Assert no historical Ticket row changes.
+- [ ] Assert only one future-current policy exists for the exact Event Spec/side.
+- [ ] Implement migration 123.
+- [ ] Rerun migration, Ticket binding, policy service, and six-spec negative tests.
+- [ ] Commit:
 
 ```bash
 git commit -m "feat(strategy): activate approved exit policy canary"
@@ -1529,6 +1916,8 @@ git commit -m "feat(strategy): activate approved exit policy canary"
 
 ### Preconditions
 
+- [ ] **Prove every C5 precondition before enabling the canary.**
+
 - Owner-approved migration 123 exists.
 - Release A and B are deployed and green.
 - Zero conflicting active position/open order exists at deploy.
@@ -1539,12 +1928,16 @@ git commit -m "feat(strategy): activate approved exit policy canary"
 
 ### Canary sequence
 
+- [ ] **Execute and observe the one-Event-Spec canary without widening scope.**
+
 ```text
 activate one exact Event Spec version
 -> create only future Ticket with frozen policy hash
--> prove passive TP1 command preview
+-> prove fill-derived execution hash and default GTC/optional GTX command preview
 -> wait for natural eligible opportunity
 -> prove actual TP1 type/TIF/liquidity role/fee
+-> prove partial/full TP1 state and exact remaining protection
+-> prove immediate runner-leg floor after full TP1 completion
 -> prove runner creation and continuous monitoring
 -> prove one trail/invalidation/time-stop decision if naturally reached
 -> prove replacement or final close
@@ -1556,6 +1949,8 @@ about realized production economics.
 
 ### Canary rollback
 
+- [ ] **Apply the forward-safe canary rollback if an invariant fails.**
+
 If an invariant fails:
 
 1. disable new Ticket creation for the policy version;
@@ -1566,6 +1961,8 @@ If an invariant fails:
 6. do not cancel protective orders merely to switch releases.
 
 ## Final Program Verification
+
+- [ ] **Run final program verification after the approved canary completes.**
 
 After the approved C canary completes, run:
 
@@ -1585,7 +1982,7 @@ the Owner-approved Event Spec has one fully reconciled future Ticket outcome.
 
 | Release | Code tasks | Review checkpoint | Deployment checkpoint | Mandatory stop |
 | --- | --- | --- | --- | --- |
-| **A** | A1-A5 | After A5 | A6 | Any active/ambiguous lifecycle |
+| **A** | A1-A6 | After A6 | A7 | Any active/ambiguous lifecycle |
 | **B** | B1-B6 | After B6 | B7 disabled | Any accidental activation |
 | **C** | C1-C2 | C3 decision package | C5 after C4 | **C3 Owner approval gate** |
 
