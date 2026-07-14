@@ -16,6 +16,9 @@ from src.application.action_time.action_time_ticket import (
 from src.application.action_time.account_capacity_reservation import (
     AccountCapacityReservationResult,
 )
+from src.infrastructure.binance_usdm_account_risk_snapshot import (
+    FullAccountRiskSnapshot,
+)
 from src.application.action_time.action_time_invocation import (
     ActionTimeInvocationBlocked,
     bind_action_time_invocation_ticket,
@@ -76,6 +79,7 @@ def materialize_action_time_ticket_sequence(
         _materialize_invocation_promotion
     ),
     prefetched_account_capacity: AccountCapacityReservationResult | None = None,
+    prefetched_account_snapshot: FullAccountRiskSnapshot | None = None,
 ) -> dict[str, Any]:
     """Commit a complete fact-to-Ticket unit or no partial action rows.
 
@@ -146,6 +150,8 @@ def materialize_action_time_ticket_sequence(
                 promotion_kwargs: dict[str, Any] = {"evidence": evidence}
                 if prefetched_account_capacity is not None:
                     promotion_kwargs["account_capacity"] = prefetched_account_capacity
+                if prefetched_account_snapshot is not None:
+                    promotion_kwargs["account_snapshot"] = prefetched_account_snapshot
                 promotion_payload = invocation_promotion_materializer(
                     conn,
                     **promotion_kwargs,

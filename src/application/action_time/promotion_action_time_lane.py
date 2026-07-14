@@ -38,8 +38,12 @@ from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
 from src.application.action_time.account_capacity_reservation import (  # noqa: E402
+    AccountCapacityCandidate,
     AccountCapacityReservationResult,
     apply_account_capacity_to_sizing,
+)
+from src.application.action_time.account_capacity_materialization import (  # noqa: E402
+    materialize_account_capacity_from_snapshot,
 )
 from src.application.action_time.identity_conservation import (  # noqa: E402
     RuntimeLaneIdentityConservationError,
@@ -78,6 +82,9 @@ from src.application.strategy_semantic_admission import (  # noqa: E402
 from src.domain.runtime_lane_identity import (  # noqa: E402
     RuntimeLaneIdentity,
     RuntimeLaneIdentityMismatch,
+)
+from src.infrastructure.binance_usdm_account_risk_snapshot import (  # noqa: E402
+    FullAccountRiskSnapshot,
 )
 
 
@@ -364,6 +371,7 @@ def materialize_action_time_invocation_promotion_action_time_lane(
     *,
     evidence: ActionTimeInvocationEvidence,
     account_capacity: AccountCapacityReservationResult | None = None,
+    account_snapshot: FullAccountRiskSnapshot | None = None,
 ) -> dict[str, Any]:
     """Promote exactly one invocation; never reselect from Candidate Pool.
 
@@ -425,6 +433,21 @@ def materialize_action_time_invocation_promotion_action_time_lane(
 
     bundle = _invocation_candidate_bundle(control_state, evidence=evidence)
     bundle = _apply_allocation_capital_scope([bundle], now_ms=now_ms)[0]
+    if account_snapshot is not None and account_capacity is None:
+        candidate, candidate_blocker = _account_capacity_candidate(
+            conn, bundle=bundle, snapshot=account_snapshot
+        )
+        if candidate_blocker:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked", evidence=evidence,
+                blockers=[candidate_blocker],
+                next_action="repair_account_capacity_candidate",
+            )
+        account_capacity = materialize_account_capacity_from_snapshot(
+            conn, snapshot=account_snapshot,
+            runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+            candidate=candidate, now_ms=now_ms,
+        )
     if account_capacity is not None:
         if not account_capacity.allowed:
             return _invocation_promotion_result(
@@ -687,6 +710,66 @@ def _invocation_candidate_bundle(
         source_lineage=source_lineage,
         action_time_invocation_id=invocation.action_time_invocation_id,
     )
+
+
+def _account_capacity_candidate(
+    conn: sa.Connection,
+    *,
+    bundle: CandidateBundle,
+    snapshot: FullAccountRiskSnapshot,
+) -> tuple[AccountCapacityCandidate | None, str | None]:
+    decision = bundle.sizing_risk_decision
+    if decision is None:
+        return None, "account_capacity_sizing_decision_missing"
+    if snapshot.account_id != bundle.account_id:
+        return None, "account_capacity_snapshot_account_mismatch"
+    instrument_id = f"{snapshot.exchange_id}:{bundle.candidate['symbol']}"
+    policies = sa.Table("brc_account_risk_policy_current", sa.MetaData(), autoload_with=conn)
+    policy_version = conn.execute(
+        sa.select(policies.c.risk_policy_version)
+        .where(policies.c.account_id == bundle.account_id)
+        .where(policies.c.runtime_profile_id == bundle.runtime_scope["runtime_profile_id"])
+    ).scalar_one_or_none()
+    if not policy_version:
+        return None, "account_risk_policy_missing_or_changed"
+    memberships = sa.Table("brc_risk_cluster_memberships", sa.MetaData(), autoload_with=conn)
+    cluster_id = conn.execute(
+        sa.select(memberships.c.risk_cluster_id)
+        .where(memberships.c.risk_policy_version == policy_version)
+        .where(memberships.c.exchange_instrument_id == instrument_id)
+    ).scalar_one_or_none()
+    if not cluster_id:
+        return None, "risk_cluster_membership_missing_or_changed"
+    pricing = pricing_reference_from_action_time_fact_values(
+        _as_dict(bundle.action_time_fact.get("fact_values"))
+    ).reference
+    if pricing is None:
+        return None, "account_capacity_pricing_reference_missing"
+    leverage_by_symbol = _as_dict(
+        _as_dict(bundle.account_safe_fact.get("fact_values")).get(
+            "exchange_max_leverage_by_symbol"
+        )
+    )
+    try:
+        exchange_max_leverage = int(leverage_by_symbol.get(decision.symbol) or 0)
+    except (TypeError, ValueError):
+        exchange_max_leverage = 0
+    if exchange_max_leverage <= 0:
+        return None, "exchange_leverage_bracket_missing_or_invalid"
+    return AccountCapacityCandidate(
+        account_id=bundle.account_id,
+        runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+        exchange_instrument_id=instrument_id,
+        risk_cluster_id=str(cluster_id),
+        per_unit_stop_risk=abs(
+            decision.entry_reference_price - decision.protective_stop_price
+        ),
+        entry_reference_price=decision.entry_reference_price,
+        min_qty=pricing.min_qty,
+        qty_step=pricing.qty_step,
+        min_notional=pricing.min_notional,
+        exchange_max_leverage=exchange_max_leverage,
+    ), None
 
 
 def _row_with_value(
