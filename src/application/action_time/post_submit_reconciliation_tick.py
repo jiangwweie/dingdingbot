@@ -49,11 +49,24 @@ def select_ticket_bound_first_reconciliation_tick_scopes(
 ) -> list[dict[str, Any]]:
     now_ms = int(now_ms or time.time() * 1000)
     attempts = _table(conn, "brc_ticket_bound_protected_submit_attempts")
+    lifecycles = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
     query = (
         sa.select(attempts)
+        .select_from(
+            attempts.outerjoin(
+                lifecycles,
+                lifecycles.c.ticket_id == attempts.c.ticket_id,
+            )
+        )
         .where(attempts.c.submit_mode == "real_gateway_action")
         .where(attempts.c.exchange_write_called.is_(True))
         .where(~attempts.c.status.in_(TERMINAL_ATTEMPT_STATUSES))
+        .where(
+            sa.or_(
+                lifecycles.c.ticket_id.is_(None),
+                lifecycles.c.status != "lifecycle_closed",
+            )
+        )
         .order_by(attempts.c.updated_at_ms.asc(), attempts.c.created_at_ms.asc())
         .limit(max(max_scopes * 4, max_scopes))
     )

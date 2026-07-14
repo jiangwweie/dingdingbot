@@ -283,6 +283,12 @@ async def test_scheduler_repairs_closed_outcome_from_exact_tracked_fill(
     )
 
     assert payload["status"] == "scheduler_complete", payload
+    assert payload["runs"][0]["scope"]["lifecycle_status"] == (
+        "lifecycle_closed"
+    ), payload["runs"][0]["scope"]
+    assert payload["runs"][0]["maintenance"]["status"] == (
+        "closed_fact_repair_only"
+    ), payload
     outcome = pg_control_connection.execute(
         text(
             "SELECT final_exit_time_ms, final_exit_price, fees, realized_pnl, "
@@ -302,6 +308,12 @@ async def test_scheduler_repairs_closed_outcome_from_exact_tracked_fill(
         "SELECT status FROM brc_action_time_tickets WHERE ticket_id = :ticket_id",
         ticket_id=ticket_id,
     ) == "closed"
+    assert _scalar(
+        pg_control_connection,
+        "SELECT status FROM brc_ticket_bound_order_lifecycle_runs "
+        "WHERE ticket_id = :ticket_id",
+        ticket_id=ticket_id,
+    ) == "lifecycle_closed"
 
 
 def test_legitimate_external_close_stops_lineage_repair_after_exact_review(

@@ -248,6 +248,9 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
 
         scheduled_tick: dict[str, Any] = {}
         fill_projection: dict[str, Any] = {}
+        closed_fact_repair = (
+            str(scope.get("lifecycle_status") or "") == "lifecycle_closed"
+        )
         if exchange_snapshot:
             fill_projection = project_ticket_bound_exchange_fills(
                 conn,
@@ -255,7 +258,11 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
                 exchange_snapshot=exchange_snapshot,
                 now_ms=now_ms + index + 25,
             )
-        if exchange_snapshot and scope.get("protected_submit_attempt_id"):
+        if (
+            not closed_fact_repair
+            and exchange_snapshot
+            and scope.get("protected_submit_attempt_id")
+        ):
             scheduled_tick = materialize_ticket_bound_reconciliation_tick(
                 conn,
                 protected_submit_attempt_id=str(scope["protected_submit_attempt_id"]),
@@ -265,16 +272,34 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             )
             blockers.extend(_result_blockers(scheduled_tick))
 
-        maintenance = await run_ticket_bound_lifecycle_maintenance(
-            conn,
-            ticket_id=str(scope.get("ticket_id") or ""),
-            protected_submit_attempt_id=str(scope.get("protected_submit_attempt_id") or ""),
-            exit_protection_set_id=str(scope.get("exit_protection_set_id") or ""),
-            exchange_snapshot=exchange_snapshot,
-            gateway=gateway,
-            allow_exchange_mutation=allow_exchange_mutation,
-            max_actions=max_actions_per_scope,
-            now_ms=now_ms + index + 100,
+        maintenance = (
+            {
+                "status": "closed_fact_repair_only",
+                "blockers": [],
+                "exchange_read_called": False,
+                "exchange_write_called": False,
+                "actions": [],
+                "authority_boundary": (
+                    "closed lifecycle fact repair; fill/outcome/Ticket projection "
+                    "only; no lifecycle transition or exchange mutation"
+                ),
+            }
+            if closed_fact_repair
+            else await run_ticket_bound_lifecycle_maintenance(
+                conn,
+                ticket_id=str(scope.get("ticket_id") or ""),
+                protected_submit_attempt_id=str(
+                    scope.get("protected_submit_attempt_id") or ""
+                ),
+                exit_protection_set_id=str(
+                    scope.get("exit_protection_set_id") or ""
+                ),
+                exchange_snapshot=exchange_snapshot,
+                gateway=gateway,
+                allow_exchange_mutation=allow_exchange_mutation,
+                max_actions=max_actions_per_scope,
+                now_ms=now_ms + index + 100,
+            )
         )
         blockers.extend(_result_blockers(maintenance))
         exchange_read_called = (
