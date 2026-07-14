@@ -6,6 +6,14 @@ import sys
 
 import sqlalchemy as sa
 
+from src.application.owner_notification import (
+    OwnerNotificationIntent,
+    OwnerNotificationKind,
+    OwnerNotificationSeverity,
+    owner_notification_delivery_identity,
+    project_owner_notification_intents,
+    select_owner_notification_delivery_batch,
+)
 from tests.support.runtime_control_state_schema import (
     install_runtime_control_state_revision,
     install_runtime_control_state_schema,
@@ -51,6 +59,214 @@ def _fresh_signal(now_ms: int) -> dict:
             }
         ]
     }
+
+
+def _fresh_signals(now_ms: int, count: int) -> dict:
+    return {
+        "live_signal_events": [
+            {
+                **_fresh_signal(now_ms)["live_signal_events"][0],
+                "signal_event_id": f"signal-{index}",
+                "observed_at_ms": now_ms - index,
+            }
+            for index in range(1, count + 1)
+        ]
+    }
+
+
+def _intent(
+    identity: str,
+    *,
+    kind: OwnerNotificationKind = OwnerNotificationKind.OPPORTUNITY_DETECTED,
+    severity: OwnerNotificationSeverity = OwnerNotificationSeverity.INFO,
+    occurred_at_ms: int = 10_000,
+) -> OwnerNotificationIntent:
+    return OwnerNotificationIntent(
+        notification_kind=kind,
+        severity=severity,
+        correlation_id=f"test:{identity}",
+        strategy_group_id="SOR-001",
+        symbol="BTCUSDT",
+        side="long",
+        occurred_at_ms=occurred_at_ms,
+        headline="测试通知",
+        current_state="测试状态",
+        result_summary="测试结果",
+        plain_reason="测试原因",
+        next_system_action="测试下一步",
+        owner_action_required=False,
+    )
+
+
+def _insert_ledger_row(
+    conn: sa.engine.Connection,
+    *,
+    dedupe_key: str,
+    intent: OwnerNotificationIntent,
+    notification_state: str,
+    send_attempts: int,
+    resolved_at_ms: int | None = None,
+) -> None:
+    conn.execute(
+        _table(conn).insert().values(
+            notification_id=f"row:{dedupe_key[-16:]}",
+            dedupe_key=dedupe_key,
+            automation_id="runtime-monitor",
+            strategy_group_id=intent.strategy_group_id,
+            symbol=intent.symbol,
+            blocker_class=intent.notification_kind.value,
+            checkpoint="owner_notification",
+            notification_state=notification_state,
+            first_seen_at_ms=9_000,
+            last_notified_at_ms=9_000,
+            last_seen_at_ms=9_000,
+            send_attempts=send_attempts,
+            feishu_response={},
+            created_at_ms=9_000,
+            updated_at_ms=9_000,
+            notification_kind=intent.notification_kind.value,
+            severity=intent.severity.value,
+            correlation_id=intent.correlation_id,
+            template_version=intent.template_version,
+            owner_action_required=intent.owner_action_required,
+            occurred_at_ms=intent.occurred_at_ms,
+            resolved_at_ms=resolved_at_ms,
+        )
+    )
+
+
+def _table(conn: sa.engine.Connection) -> sa.Table:
+    return sa.Table(
+        "brc_server_monitor_notifications",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+
+
+def test_owner_notification_projection_keeps_more_than_five_candidates_for_delivery() -> None:
+    intents = project_owner_notification_intents(
+        _fresh_signals(10_000, 6),
+        now_ms=10_000,
+    )
+
+    assert len(intents) == 6
+
+
+def test_delivery_selection_ignores_sent_and_exhausted_rows_before_five_card_limit() -> None:
+    intents = [
+        _intent(str(index), occurred_at_ms=10_000 - index)
+        for index in range(1, 7)
+    ]
+    sent_and_exhausted = {
+        owner_notification_delivery_identity(intent): {
+            "notification_state": "sent" if index <= 5 else "failed",
+            "send_attempts": 1 if index <= 5 else 3,
+        }
+        for index, intent in enumerate(intents, start=1)
+    }
+    fresh = _intent("fresh", severity=OwnerNotificationSeverity.CRITICAL)
+
+    selection = select_owner_notification_delivery_batch(
+        [*intents, fresh],
+        sent_and_exhausted,
+        limit=5,
+    )
+
+    assert selection.selected == (fresh,)
+    assert selection.suppressed_count == 5
+    assert selection.retry_exhausted_count == 1
+
+
+def test_delivery_selection_limits_eligible_attempts_and_prioritizes_retryable_failures() -> None:
+    retry_one = _intent("retry-one", severity=OwnerNotificationSeverity.CRITICAL)
+    retry_two = _intent("retry-two", severity=OwnerNotificationSeverity.WARNING)
+    fresh = [_intent(f"fresh-{index}") for index in range(1, 5)]
+    ledger = {
+        owner_notification_delivery_identity(retry_one): {
+            "notification_state": "failed",
+            "send_attempts": 1,
+        },
+        owner_notification_delivery_identity(retry_two): {
+            "notification_state": "failed",
+            "send_attempts": 2,
+        },
+    }
+
+    selection = select_owner_notification_delivery_batch(
+        [retry_one, retry_two, *fresh],
+        ledger,
+        limit=5,
+    )
+
+    assert selection.selected == (retry_one, retry_two, *fresh[:3])
+    assert len(selection.selected) == 5
+
+
+def test_active_resolved_incident_starts_a_new_delivery_episode() -> None:
+    incident = _intent(
+        "incident-1",
+        kind=OwnerNotificationKind.INTERVENTION_REQUIRED,
+        severity=OwnerNotificationSeverity.CRITICAL,
+    )
+    key = owner_notification_delivery_identity(incident)
+
+    selection = select_owner_notification_delivery_batch(
+        [incident],
+        {
+            key: {
+                "notification_state": "resolved",
+                "send_attempts": 3,
+                "resolved_at_ms": 9_000,
+            }
+        },
+        limit=5,
+    )
+
+    assert selection.selected == (incident,)
+    assert selection.reopened_dedupe_keys == frozenset({key})
+    assert selection.reopened_incident_count == 1
+
+
+def test_already_sent_candidates_do_not_starve_a_new_critical_card() -> None:
+    module = _load_monitor()
+    engine, conn, transaction = _connection()
+    calls: list[dict] = []
+    state = _fresh_signals(10_000, 6)
+    try:
+        projected = project_owner_notification_intents(state, now_ms=10_000)
+        for intent in projected[:5]:
+            _insert_ledger_row(
+                conn,
+                dedupe_key=module.owner_notification_dedupe_key(
+                    "runtime-monitor",
+                    intent,
+                ),
+                intent=intent,
+                notification_state="sent",
+                send_attempts=1,
+            )
+
+        summary = module._apply_pg_owner_notifications(
+            conn=conn,
+            automation_id="runtime-monitor",
+            control_state=state,
+            now_ms=10_000,
+            webhook_url="https://example.test/webhook",
+            webhook_secret=None,
+            notification_timeout_seconds=3,
+            notification_dry_run=False,
+            notifier=lambda _url, _secret, body, _timeout: (
+                calls.append(body) or {"sent": True, "status_code": 200}
+            ),
+        )
+
+        assert summary["suppressed_count"] == 5
+        assert summary["sent_count"] == 1
+        assert len(calls) == 1
+    finally:
+        transaction.rollback()
+        conn.close()
+        engine.dispose()
 
 
 def test_owner_notification_delivery_sends_static_card_and_persists_typed_row() -> None:
@@ -273,7 +489,8 @@ def test_persistent_monitor_incident_does_not_emit_false_recovery() -> None:
 
         assert first["sent_count"] == 1
         assert second["sent_count"] == 0
-        assert second["results"][0]["notification_kind"] == "system_temporarily_unavailable"
+        assert second["suppressed_count"] == 1
+        assert second["results"] == []
         assert len(calls) == 1
         content = calls[0]["card"]["elements"][0]["content"]
         assert "systemd" not in content

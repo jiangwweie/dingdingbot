@@ -78,6 +78,15 @@ class OwnerNotificationIntent(BaseModel):
         return self
 
 
+@dataclass(frozen=True)
+class OwnerNotificationDeliverySelection:
+    selected: tuple[OwnerNotificationIntent, ...]
+    suppressed_count: int
+    retry_exhausted_count: int
+    reopened_incident_count: int
+    reopened_dedupe_keys: frozenset[str]
+
+
 def owner_notification_dedupe_key(
     automation_id: str,
     intent: OwnerNotificationIntent,
@@ -90,6 +99,78 @@ def owner_notification_dedupe_key(
         )
     )
     return "owner_notification:" + sha256(identity.encode("utf-8")).hexdigest()
+
+
+def owner_notification_delivery_identity(intent: OwnerNotificationIntent) -> str:
+    """Return a stable in-memory identity for bounded delivery selection."""
+    return "|".join((intent.notification_kind.value, intent.correlation_id))
+
+
+def select_owner_notification_delivery_batch(
+    candidates: list[OwnerNotificationIntent],
+    ledger_rows: dict[str, dict[str, object]],
+    *,
+    limit: int,
+) -> OwnerNotificationDeliverySelection:
+    """Select new/retryable cards after bounded ledger eligibility checks."""
+    severity_rank = {
+        OwnerNotificationSeverity.CRITICAL: 4,
+        OwnerNotificationSeverity.WARNING: 3,
+        OwnerNotificationSeverity.POSITIVE: 2,
+        OwnerNotificationSeverity.INFO: 1,
+    }
+    incident_kinds = {
+        OwnerNotificationKind.INTERVENTION_REQUIRED,
+        OwnerNotificationKind.SYSTEM_TEMPORARILY_UNAVAILABLE,
+    }
+    unique: dict[str, OwnerNotificationIntent] = {}
+    for candidate in candidates:
+        unique.setdefault(owner_notification_delivery_identity(candidate), candidate)
+
+    eligible: list[tuple[int, OwnerNotificationIntent]] = []
+    suppressed_count = 0
+    retry_exhausted_count = 0
+    reopened_dedupe_keys: set[str] = set()
+    for index, (identity, intent) in enumerate(unique.items()):
+        row = ledger_rows.get(identity, {})
+        state = str(row.get("notification_state") or "")
+        attempts = int(row.get("send_attempts") or 0)
+        is_reopened_incident = (
+            state == "resolved" and intent.notification_kind in incident_kinds
+        )
+        if is_reopened_incident:
+            reopened_dedupe_keys.add(identity)
+        elif state == "sent":
+            suppressed_count += 1
+            continue
+        elif attempts >= 3:
+            retry_exhausted_count += 1
+            continue
+        eligible.append((index, intent))
+
+    selected = tuple(
+        intent
+        for _, intent in sorted(
+            eligible,
+            key=lambda item: (
+                severity_rank[item[1].severity],
+                item[1].occurred_at_ms,
+                -item[0],
+            ),
+            reverse=True,
+        )[:max(0, limit)]
+    )
+    selected_identities = {
+        owner_notification_delivery_identity(intent) for intent in selected
+    }
+    reopened_selected = reopened_dedupe_keys & selected_identities
+    return OwnerNotificationDeliverySelection(
+        selected=selected,
+        suppressed_count=suppressed_count,
+        retry_exhausted_count=retry_exhausted_count,
+        reopened_incident_count=len(reopened_selected),
+        reopened_dedupe_keys=frozenset(reopened_selected),
+    )
 
 
 def render_owner_notification_card(intent: OwnerNotificationIntent) -> dict[str, Any]:
@@ -288,7 +369,7 @@ def project_owner_notification_intents(
         unique.values(),
         key=lambda item: (severity_rank[item.severity], item.occurred_at_ms),
         reverse=True,
-    )[:MAX_INTENTS_PER_RUN]
+    )
 
 
 def _ticket_lifecycle_notification_projection(

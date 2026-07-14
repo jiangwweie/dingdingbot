@@ -41,13 +41,16 @@ from src.application.action_time.process_outcome_relevance import (  # noqa: E40
     process_outcome_has_current_blocking_authority,
 )
 from src.application.owner_notification import (  # noqa: E402
+    MAX_INTENTS_PER_RUN,
     OwnerNotificationIntent,
     OwnerNotificationKind,
     OwnerNotificationSeverity,
+    owner_notification_delivery_identity,
     normalize_owner_correlation_id,
     owner_notification_dedupe_key,
     project_owner_notification_intents,
     render_owner_notification_card,
+    select_owner_notification_delivery_batch,
 )
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
@@ -1168,33 +1171,35 @@ def _apply_pg_owner_notifications(
             and item.notification_kind is fallback.notification_kind
             for item in intents
         ):
-            intents = [fallback, *intents][:5]
+            intents = [fallback, *intents]
     table = _table(conn, "brc_server_monitor_notifications")
     sender = notifier or send_feishu_payload
     results: list[dict[str, Any]] = []
     sent_count = 0
-    suppressed_count = 0
-    retry_exhausted_count = 0
-    for intent in intents:
+    ledger_rows = _pg_owner_notification_rows(
+        conn,
+        automation_id=automation_id,
+        intents=intents,
+    )
+    selection = select_owner_notification_delivery_batch(
+        intents,
+        ledger_rows,
+        limit=MAX_INTENTS_PER_RUN,
+    )
+    for intent in selection.selected:
+        delivery_identity = owner_notification_delivery_identity(intent)
         dedupe_key = owner_notification_dedupe_key(automation_id, intent)
-        existing = _pg_owner_notification_row(
-            conn,
-            dedupe_key=dedupe_key,
-            intent=intent,
-        )
+        existing = ledger_rows.get(delivery_identity, {})
         attempts = int(existing.get("send_attempts") or 0)
         previous_state = str(existing.get("notification_state") or "")
+        reopened = delivery_identity in selection.reopened_dedupe_keys
+        if reopened:
+            attempts = 0
         attempted = False
         sent = False
         skipped_reason: str | None = None
         response: dict[str, Any] = {}
-        if previous_state == "sent":
-            suppressed_count += 1
-            skipped_reason = "dedupe_suppressed"
-        elif attempts >= 3:
-            retry_exhausted_count += 1
-            skipped_reason = "retry_exhausted"
-        elif not webhook_url:
+        if not webhook_url:
             skipped_reason = "feishu_webhook_url_missing"
         elif notification_dry_run:
             skipped_reason = "notification_dry_run"
@@ -1252,7 +1257,9 @@ def _apply_pg_owner_notifications(
             "template_version": intent.template_version,
             "owner_action_required": intent.owner_action_required,
             "occurred_at_ms": intent.occurred_at_ms,
-            "resolved_at_ms": None,
+            "resolved_at_ms": (
+                None if reopened else existing.get("resolved_at_ms")
+            ),
         }
         if not notification_dry_run:
             if existing:
@@ -1302,8 +1309,9 @@ def _apply_pg_owner_notifications(
         "attempted": any(item["attempted"] for item in results),
         "sent": sent_count > 0,
         "sent_count": sent_count,
-        "suppressed_count": suppressed_count,
-        "retry_exhausted_count": retry_exhausted_count,
+        "suppressed_count": selection.suppressed_count,
+        "retry_exhausted_count": selection.retry_exhausted_count,
+        "reopened_incident_count": selection.reopened_incident_count,
         "intent_count": len(intents),
         "results": results,
         "skipped_reason": (
@@ -1346,6 +1354,80 @@ def _pg_owner_notification_row(
         },
     ).mappings().first()
     return dict(row) if row else {}
+
+
+def _pg_owner_notification_rows(
+    conn: sa.engine.Connection,
+    *,
+    automation_id: str,
+    intents: list[OwnerNotificationIntent],
+) -> dict[str, dict[str, Any]]:
+    """Load bounded ledger state once for the current candidate batch."""
+    if not intents:
+        return {}
+    dedupe_keys = [
+        owner_notification_dedupe_key(automation_id, intent) for intent in intents
+    ]
+    correlations: set[str] = set()
+    notification_kinds: set[str] = set()
+    for intent in intents:
+        normalized = normalize_owner_correlation_id(intent.correlation_id)
+        correlations.add(normalized)
+        notification_kinds.add(intent.notification_kind.value)
+        for prefix in ("signal", "ticket"):
+            if normalized.startswith(f"{prefix}:"):
+                correlations.add(f"{prefix}:{normalized}")
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            sa.text(
+                """
+                SELECT *
+                FROM brc_server_monitor_notifications
+                WHERE dedupe_key IN :dedupe_keys
+                   OR (
+                        notification_kind IN :notification_kinds
+                    AND correlation_id IN :correlation_ids
+                   )
+                ORDER BY updated_at_ms DESC
+                LIMIT 1000
+                """
+            ).bindparams(
+                sa.bindparam("dedupe_keys", expanding=True),
+                sa.bindparam("notification_kinds", expanding=True),
+                sa.bindparam("correlation_ids", expanding=True),
+            ),
+            {
+                "dedupe_keys": dedupe_keys,
+                "notification_kinds": sorted(notification_kinds),
+                "correlation_ids": sorted(correlations),
+            },
+        ).mappings()
+    ]
+    by_dedupe_key = {str(row.get("dedupe_key") or ""): row for row in rows}
+    resolved: dict[str, dict[str, Any]] = {}
+    for intent in intents:
+        delivery_identity = owner_notification_delivery_identity(intent)
+        exact = by_dedupe_key.get(
+            owner_notification_dedupe_key(automation_id, intent)
+        )
+        if exact:
+            resolved[delivery_identity] = exact
+            continue
+        normalized = normalize_owner_correlation_id(intent.correlation_id)
+        for row in rows:
+            if (
+                str(row.get("notification_kind") or "")
+                != intent.notification_kind.value
+            ):
+                continue
+            if (
+                normalize_owner_correlation_id(str(row.get("correlation_id") or ""))
+                == normalized
+            ):
+                resolved[delivery_identity] = row
+                break
+    return resolved
 
 
 def _apply_pg_notification(
