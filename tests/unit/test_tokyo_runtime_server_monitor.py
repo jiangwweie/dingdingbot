@@ -18,6 +18,9 @@ from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _prepare_real_submit,
 )
 from tests.unit.lifecycle_test_schema import apply_enabled_lifecycle_command_schema
+from tests.support.runtime_control_state_schema import (
+    install_runtime_control_state_revision,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -698,6 +701,8 @@ def _seed_pg_engine():
             dynamic_risk_migration.upgrade()
         finally:
             dynamic_risk_migration.op = old_dynamic_risk_op
+        install_runtime_control_state_revision(conn, revision="121")
+        install_runtime_control_state_revision(conn, revision="122")
     return engine
 
 
