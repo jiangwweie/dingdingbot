@@ -37,6 +37,10 @@ from src.application.readmodels.daily_live_enablement_table import WIP_LANES  # 
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
+from src.application.action_time.account_capacity_reservation import (  # noqa: E402
+    AccountCapacityReservationResult,
+    apply_account_capacity_to_sizing,
+)
 from src.application.action_time.identity_conservation import (  # noqa: E402
     RuntimeLaneIdentityConservationError,
     RuntimeLaneLineage,
@@ -359,6 +363,7 @@ def materialize_action_time_invocation_promotion_action_time_lane(
     conn: sa.engine.Connection,
     *,
     evidence: ActionTimeInvocationEvidence,
+    account_capacity: AccountCapacityReservationResult | None = None,
 ) -> dict[str, Any]:
     """Promote exactly one invocation; never reselect from Candidate Pool.
 
@@ -420,6 +425,39 @@ def materialize_action_time_invocation_promotion_action_time_lane(
 
     bundle = _invocation_candidate_bundle(control_state, evidence=evidence)
     bundle = _apply_allocation_capital_scope([bundle], now_ms=now_ms)[0]
+    if account_capacity is not None:
+        if not account_capacity.allowed:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=[
+                    account_capacity.first_blocker
+                    or "account_capacity_not_allowed"
+                ],
+                next_action="preserve_account_capacity_blocker",
+            )
+        if bundle.sizing_risk_decision is None:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=["account_capacity_sizing_decision_missing"],
+                next_action="repair_action_time_sizing_before_capacity_claim",
+            )
+        try:
+            bundle = replace(
+                bundle,
+                sizing_risk_decision=apply_account_capacity_to_sizing(
+                    bundle.sizing_risk_decision,
+                    account_capacity,
+                ),
+            )
+        except ValueError as exc:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=[f"account_capacity_sizing_conflict:{exc}"],
+                next_action="repair_account_capacity_projection",
+            )
     if bundle.blockers:
         return _invocation_promotion_result(
             "action_time_invocation_promotion_blocked",
