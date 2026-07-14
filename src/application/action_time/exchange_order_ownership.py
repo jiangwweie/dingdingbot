@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 import json
@@ -158,6 +159,71 @@ def classify_exchange_order_ownership(
     return results
 
 
+def lifecycle_ownership_blockers_after_flat_position(
+    *,
+    ownership: list[ExchangeOrderOwnership],
+    open_orders: list[dict[str, Any]],
+    current_scope: TicketBoundExchangeScope,
+) -> tuple[list[str], list[str]]:
+    """Separate safe external manual exits from lifecycle-owned protection.
+
+    The caller must already have proved that the exchange position is flat.
+    Returned manual order ids remain visible exchange facts, but they are not
+    adopted or made eligible for Ticket-bound cancellation.
+    """
+
+    by_exchange_id = {
+        str(order.get("exchange_order_id") or "").strip(): order
+        for order in open_orders
+        if str(order.get("exchange_order_id") or "").strip()
+    }
+    blockers: list[str] = []
+    external_manual_order_ids: list[str] = []
+    for item in ownership:
+        if not item.blocks_current_domain or not item.blocker:
+            continue
+        order = by_exchange_id.get(str(item.exchange_order_id or "").strip(), {})
+        if _is_external_manual_reduce_only_exit_order(
+            ownership=item,
+            order=order,
+            current_scope=current_scope,
+        ):
+            external_manual_order_ids.append(item.exchange_order_id)
+        else:
+            blockers.append(str(item.blocker))
+    return _dedupe(blockers), _dedupe(external_manual_order_ids)
+
+
+def _is_external_manual_reduce_only_exit_order(
+    *,
+    ownership: ExchangeOrderOwnership,
+    order: dict[str, Any],
+    current_scope: TicketBoundExchangeScope,
+) -> bool:
+    if ownership.ownership_class != "unowned_same_domain":
+        return False
+    client_order_id = str(order.get("client_order_id") or "").strip().lower()
+    if client_order_id.startswith("brc-"):
+        return False
+    if not (
+        order.get("reduce_only") is True
+        or order.get("close_position") is True
+    ):
+        return False
+    expected_side = "sell" if current_scope.side == "long" else "buy"
+    if str(order.get("side") or "").strip().lower() != expected_side:
+        return False
+    if current_scope.position_mode == "hedge":
+        if (
+            str(order.get("position_side") or "").strip().upper()
+            != current_scope.position_side
+        ):
+            return False
+    elif str(order.get("position_side") or "").strip().upper() not in {"", "BOTH"}:
+        return False
+    return _decimal(order.get("qty") or order.get("amount")) > 0
+
+
 def _pg_order_identities(
     conn: sa.engine.Connection,
 ) -> dict[str, dict[str, set[str]]]:
@@ -225,3 +291,14 @@ def _json_object(value: Any) -> dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _decimal(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0")
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(str(item) for item in items if str(item)))

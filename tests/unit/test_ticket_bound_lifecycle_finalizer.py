@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
 )
 from src.application.action_time.exchange_scope import resolve_ticket_bound_exchange_scope
+from src.application.action_time import external_close_attribution
 from src.application.action_time.external_close_attribution import (
     attribute_exact_ticket_bound_external_close,
 )
@@ -609,6 +611,7 @@ async def test_production_scheduler_drives_final_fill_to_closed_outcome_without_
 @pytest.mark.asyncio
 async def test_production_scheduler_closes_exactly_attributed_manual_exchange_exit(
     pg_control_connection,
+    monkeypatch,
 ):
     set_id = _materialized_exit_protection_set(pg_control_connection)
     scope = pg_control_connection.execute(
@@ -638,12 +641,48 @@ async def test_production_scheduler_closes_exactly_attributed_manual_exchange_ex
         ),
         {"ticket_id": scope["ticket_id"]},
     ).mappings().one()
-    manual_exit_qty = lifecycle["entry_filled_qty"] - orders["TP1"]["qty"]
+    manual_exit_qty = Decimal(str(lifecycle["entry_filled_qty"])) - Decimal(
+        str(orders["TP1"]["qty"])
+    )
+    manual_open_orders = [
+        {
+            "exchange_order_id": "exchange-owner-manual-stop-1820",
+            "symbol": "ETH/USDT:USDT",
+            "side": "sell",
+            "position_side": "BOTH",
+            "reduce_only": True,
+            "qty": str(manual_exit_qty),
+            "trigger_price": "1820",
+            "status": "open",
+        },
+        {
+            "exchange_order_id": "exchange-owner-manual-tp-1899",
+            "symbol": "ETH/USDT:USDT",
+            "side": "sell",
+            "position_side": "BOTH",
+            "reduce_only": True,
+            "qty": str(manual_exit_qty),
+            "price": "1899",
+            "status": "open",
+        },
+    ]
     snapshot = {
         "snapshot_ref": f"unit-manual-exit:{set_id}",
         "symbol": "ETHUSDT",
         "exchange_symbol": "ETH/USDT:USDT",
-        "open_orders": [],
+        "open_orders": [
+            {
+                "exchange_order_id": orders["SL"]["exchange_order_id"],
+                "symbol": "ETH/USDT:USDT",
+                "side": "sell",
+                "position_side": "BOTH",
+                "reduce_only": True,
+                "qty": str(orders["SL"]["qty"]),
+                "trigger_price": str(orders["SL"]["price"]),
+                "status": "open",
+            },
+            *manual_open_orders,
+        ],
         "recent_fills": [
             {
                 "exchange_order_id": lifecycle["entry_exchange_order_id"],
@@ -702,86 +741,216 @@ async def test_production_scheduler_closes_exactly_attributed_manual_exchange_ex
         ticket_id=str(scope["ticket_id"]),
         now_ms=NOW_MS + 21_500,
     )
-    external_fill, attribution_blockers = attribute_exact_ticket_bound_external_close(
-        pg_control_connection,
-        lifecycle=dict(
-            pg_control_connection.execute(
-                text(
-                    "SELECT * FROM brc_ticket_bound_order_lifecycle_runs "
-                    "WHERE ticket_id = :ticket_id"
-                ),
-                {"ticket_id": scope["ticket_id"]},
-            ).mappings().one()
-        ),
-        orders=[
-            dict(row)
-            for row in pg_control_connection.execute(
-                text(
-                    "SELECT * FROM brc_ticket_bound_exit_protection_orders "
-                    "WHERE ticket_id = :ticket_id"
-                ),
-                {"ticket_id": scope["ticket_id"]},
-            ).mappings()
-        ],
-        exchange_scope=resolved.scope,
-        recent_fills=snapshot["recent_fills"],
-        position=snapshot["position"],
+    lifecycle_row = dict(
+        pg_control_connection.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_order_lifecycle_runs "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": scope["ticket_id"]},
+        ).mappings().one()
     )
+    order_rows = [
+        dict(row)
+        for row in pg_control_connection.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_exit_protection_orders "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": scope["ticket_id"]},
+        ).mappings()
+    ]
+
+    def attribute(recent_fills):
+        return attribute_exact_ticket_bound_external_close(
+            pg_control_connection,
+            lifecycle=lifecycle_row,
+            orders=order_rows,
+            exchange_scope=resolved.scope,
+            recent_fills=recent_fills,
+            position=snapshot["position"],
+        )
+
+    external_fill, attribution_blockers = attribute(snapshot["recent_fills"])
     assert attribution_blockers == []
     assert external_fill["exchange_order_id"] == "exchange-owner-manual-exit-1"
 
-    payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
+    negative_fill_cases = {
+        "wrong_side": {"side": "buy"},
+        "wrong_bucket": {"position_side": "SHORT"},
+        "quantity_mismatch": {"qty": str(manual_exit_qty + Decimal("0.001"))},
+        "missing_exchange_order_identity": {"exchange_order_id": ""},
+    }
+    for case_name, mutation in negative_fill_cases.items():
+        recent_fills = deepcopy(snapshot["recent_fills"])
+        recent_fills[-1].update(mutation)
+        rejected, blockers = attribute(recent_fills)
+        assert rejected == {}, case_name
+        if case_name == "quantity_mismatch":
+            assert "external_close_fill_qty_mismatch" in blockers
+
+    ambiguous_fills = deepcopy(snapshot["recent_fills"])
+    ambiguous_fill = ambiguous_fills.pop()
+    half_qty = manual_exit_qty / Decimal("2")
+    ambiguous_fills.extend(
+        [
+            {
+                **ambiguous_fill,
+                "exchange_order_id": "exchange-owner-manual-exit-part-1",
+                "qty": str(half_qty),
+            },
+            {
+                **ambiguous_fill,
+                "exchange_order_id": "exchange-owner-manual-exit-part-2",
+                "qty": str(manual_exit_qty - half_qty),
+            },
+        ]
+    )
+    ambiguous, ambiguous_blockers = attribute(ambiguous_fills)
+    assert ambiguous == {}
+    assert "external_close_fill_attribution_ambiguous" in ambiguous_blockers
+
+    with monkeypatch.context() as attribution_patch:
+        attribution_patch.setattr(
+            external_close_attribution,
+            "_competing_open_ticket_ids",
+            lambda *args, **kwargs: ["competing-ticket"],
+        )
+        competing_fill, competing_blockers = attribute(snapshot["recent_fills"])
+    assert competing_fill == {}
+    assert "external_close_ticket_scope_ambiguous" in competing_blockers
+
+    first = await run_ticket_bound_lifecycle_maintenance_scheduler(
         pg_control_connection,
         provided_exchange_snapshots=provided,
         fetch_exchange_snapshot=False,
         allow_exchange_mutation=False,
         now_ms=NOW_MS + 22_000,
     )
-    assert payload["exchange_write_called"] is False
-    assert _scalar(
-        pg_control_connection,
-        "SELECT status FROM brc_ticket_bound_order_lifecycle_runs "
-        "WHERE ticket_id = :ticket_id",
-        ticket_id=scope["ticket_id"],
-    ) == "lifecycle_closed", payload
-    reconciliation = pg_control_connection.execute(
-        text(
-            "SELECT reconciliation_evidence "
-            "FROM brc_ticket_bound_post_submit_closures "
-            "WHERE ticket_id = :ticket_id"
-        ),
-        {"ticket_id": scope["ticket_id"]},
-    ).scalar_one()
-    if isinstance(reconciliation, str):
-        reconciliation = json.loads(reconciliation)
-    assert reconciliation["final_exit_role"] == "EXTERNAL_CLOSE"
-    assert reconciliation["final_exit_exchange_order_id"] == (
-        "exchange-owner-manual-exit-1"
+    pg_control_connection.commit()
+    gateway = _FinalizerGateway()
+    worker = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="unit-manual-close-cleanup-worker",
+        command_sources=("orphan_cleanup",),
+        now_ms=NOW_MS + 23_000,
     )
-    final_event = pg_control_connection.execute(
-        text(
-            "SELECT event_payload FROM brc_ticket_bound_lifecycle_events "
-            "WHERE ticket_id = :ticket_id AND event_type = 'final_exit_detected' "
-            "ORDER BY created_at_ms DESC LIMIT 1"
-        ),
-        {"ticket_id": scope["ticket_id"]},
-    ).scalar_one()
-    if isinstance(final_event, str):
-        final_event = json.loads(final_event)
-    assert final_event["fill"]["role"] == "EXTERNAL_CLOSE"
-    assert final_event["fill"]["fill_qty"] == str(manual_exit_qty)
-    assert _scalar(
-        pg_control_connection,
-        "SELECT status FROM brc_budget_reservations WHERE ticket_id = :ticket_id",
-        ticket_id=scope["ticket_id"],
-    ) == "released"
+    post_cleanup_snapshot = deepcopy(snapshot)
+    post_cleanup_snapshot["snapshot_ref"] = f"unit-manual-exit-clean:{set_id}"
+    post_cleanup_snapshot["open_orders"] = manual_open_orders
+    post_cleanup_provided = {
+        identity: {
+            "status": "snapshot_ready",
+            "exchange_read_called": True,
+            "exchange_write_called": False,
+            "snapshot": post_cleanup_snapshot,
+        }
+        for identity in (set_id, str(scope["protected_submit_attempt_id"]))
+    }
+    with pg_control_connection.engine.begin() as conn:
+        second = await run_ticket_bound_lifecycle_maintenance_scheduler(
+            conn,
+            provided_exchange_snapshots=post_cleanup_provided,
+            fetch_exchange_snapshot=False,
+            allow_exchange_mutation=False,
+            now_ms=NOW_MS + 24_000,
+        )
+
+    assert first["exchange_write_called"] is False
+    assert worker["status"] == "command_confirmed", json.dumps(first, default=str)
+    assert second["exchange_write_called"] is False
+    assert [call["exchange_order_id"] for call in gateway.cancel_calls] == [
+        orders["SL"]["exchange_order_id"]
+    ]
+    manual_order_ids = {
+        "exchange-owner-manual-stop-1820",
+        "exchange-owner-manual-tp-1899",
+    }
+    assert manual_order_ids.isdisjoint(
+        call["exchange_order_id"] for call in gateway.cancel_calls
+    )
+
+    with pg_control_connection.engine.connect() as conn:
+        assert _scalar(
+            conn,
+            "SELECT status FROM brc_ticket_bound_order_lifecycle_runs "
+            "WHERE ticket_id = :ticket_id",
+            ticket_id=scope["ticket_id"],
+        ) == "lifecycle_closed", second
+        reconciliation = conn.execute(
+            text(
+                "SELECT reconciliation_evidence "
+                "FROM brc_ticket_bound_post_submit_closures "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": scope["ticket_id"]},
+        ).scalar_one()
+        if isinstance(reconciliation, str):
+            reconciliation = json.loads(reconciliation)
+        assert reconciliation["final_exit_role"] == "EXTERNAL_CLOSE"
+        assert reconciliation["final_exit_exchange_order_id"] == (
+            "exchange-owner-manual-exit-1"
+        )
+        final_event = conn.execute(
+            text(
+                "SELECT event_payload FROM brc_ticket_bound_lifecycle_events "
+                "WHERE ticket_id = :ticket_id AND event_type = 'final_exit_detected' "
+                "ORDER BY created_at_ms DESC LIMIT 1"
+            ),
+            {"ticket_id": scope["ticket_id"]},
+        ).scalar_one()
+        if isinstance(final_event, str):
+            final_event = json.loads(final_event)
+        assert final_event["fill"]["role"] == "EXTERNAL_CLOSE"
+        assert final_event["fill"]["fill_qty"] == str(manual_exit_qty)
+        assert _scalar(
+            conn,
+            "SELECT status FROM brc_budget_reservations "
+            "WHERE ticket_id = :ticket_id",
+            ticket_id=scope["ticket_id"],
+        ) == "released"
+        assert _scalar(
+            conn,
+            "SELECT count(*) FROM brc_live_outcome_ledger "
+            "WHERE ticket_id = :ticket_id",
+            ticket_id=scope["ticket_id"],
+        ) == 1
+        assert _scalar(
+            conn,
+            "SELECT count(*) FROM brc_ticket_bound_lifecycle_events "
+            "WHERE ticket_id = :ticket_id AND event_type = 'budget_settled'",
+            ticket_id=scope["ticket_id"],
+        ) == 1
+        assert _scalar(
+            conn,
+            "SELECT count(*) FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE ticket_id = :ticket_id AND status IN "
+            "('submitted', 'open', 'partially_filled')",
+            ticket_id=scope["ticket_id"],
+        ) == 0
+        tracked_exchange_ids = set(
+            conn.execute(
+                text(
+                    "SELECT exchange_order_id FROM "
+                    "brc_ticket_bound_exit_protection_orders "
+                    "WHERE ticket_id = :ticket_id"
+                ),
+                {"ticket_id": scope["ticket_id"]},
+            ).scalars()
+        )
+    assert manual_order_ids.isdisjoint(tracked_exchange_ids)
 
 
 class _FinalizerGateway:
     runtime_account_id = "owner-subaccount-runtime-v0"
     runtime_exchange_id = "binance_usdm"
 
+    def __init__(self) -> None:
+        self.cancel_calls: list[dict] = []
+
     async def cancel_order(self, **kwargs):
+        self.cancel_calls.append(dict(kwargs))
         return SimpleNamespace(
             is_success=True,
             exchange_order_id=kwargs["exchange_order_id"],

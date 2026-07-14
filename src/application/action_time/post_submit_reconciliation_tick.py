@@ -13,6 +13,7 @@ import sqlalchemy as sa
 
 from src.application.action_time.exchange_order_ownership import (
     classify_exchange_order_ownership,
+    lifecycle_ownership_blockers_after_flat_position,
 )
 from src.application.action_time.exchange_scope import (
     resolve_ticket_bound_exchange_scope,
@@ -241,6 +242,21 @@ def materialize_ticket_bound_reconciliation_tick(
         for item in ownership
         if item.blocks_current_domain and item.blocker
     ]
+    external_manual_order_ids: list[str] = []
+    if (
+        position_state == "flat"
+        and entry_state == "filled"
+        and position.get("complete") is True
+    ):
+        ownership_blockers, external_manual_order_ids = (
+            lifecycle_ownership_blockers_after_flat_position(
+                ownership=ownership,
+                open_orders=open_orders,
+                current_scope=exchange_scope,
+            )
+        )
+        if external_manual_order_ids:
+            warnings.append("external_manual_reduce_only_orders_visible")
     if ownership_blockers:
         blockers.extend(ownership_blockers)
         status = "hard_stopped"

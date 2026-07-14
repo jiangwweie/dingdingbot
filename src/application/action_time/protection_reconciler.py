@@ -18,6 +18,7 @@ import sqlalchemy as sa
 
 from src.application.action_time.exchange_order_ownership import (
     classify_exchange_order_ownership,
+    lifecycle_ownership_blockers_after_flat_position,
 )
 from src.application.action_time.exchange_scope import (
     resolve_ticket_bound_exchange_scope,
@@ -207,6 +208,12 @@ def reconcile_ticket_bound_exit_protection_set(
                 recent_fills=recent_fills,
                 position=position,
             )
+        )
+    if position_flat and external_close and not external_close_blockers:
+        ownership_blockers, _ = lifecycle_ownership_blockers_after_flat_position(
+            ownership=ownership,
+            open_orders=open_orders,
+            current_scope=exchange_scope,
         )
     if (
         position_flat
@@ -746,8 +753,7 @@ def _live_protection_orders(
     return [
         order
         for order in open_orders
-        if order.get("reduce_only") is True
-        or str(order.get("exchange_order_id") or "") in pg_exchange_ids
+        if str(order.get("exchange_order_id") or "") in pg_exchange_ids
     ]
 
 
