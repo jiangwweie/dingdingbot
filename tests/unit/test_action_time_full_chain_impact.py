@@ -142,6 +142,18 @@ ACTION_TIME_INVOCATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
 )
+TERMINAL_PREDISPATCH_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-120_reconcile_terminal_predispatch_commands.py"
+)
+EXIT_EXECUTION_SAFETY_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-14-121_add_exit_execution_safety.py"
+)
+TICKET_EXIT_POLICY_CORE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-14-122_add_ticket_exit_policy_core.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -619,6 +631,18 @@ def pg_control_connection():
             (
                 ACTION_TIME_INVOCATION_MIGRATION_PATH,
                 "migration_119_action_time_full_chain",
+            ),
+            (
+                TERMINAL_PREDISPATCH_MIGRATION_PATH,
+                "migration_120_action_time_full_chain",
+            ),
+            (
+                EXIT_EXECUTION_SAFETY_MIGRATION_PATH,
+                "migration_121_action_time_full_chain",
+            ),
+            (
+                TICKET_EXIT_POLICY_CORE_MIGRATION_PATH,
+                "migration_122_action_time_full_chain",
             ),
         ):
             extension = _load_module(path, module_name)
