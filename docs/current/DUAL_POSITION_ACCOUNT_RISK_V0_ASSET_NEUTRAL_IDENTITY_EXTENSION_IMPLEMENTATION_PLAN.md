@@ -5,6 +5,7 @@ authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXT
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md
 last_verified: 2026-07-15
 deployment_state: LOCAL_ONLY_NO_DEPLOY
+checkpoint_d2_commit: abe8d300
 ---
 
 # Dual-Position Account Risk V0 Asset-Neutral Identity Extension Implementation Plan
