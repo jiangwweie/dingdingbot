@@ -187,6 +187,19 @@ def materialize_ticket_bound_reconciliation_tick(
             next_action="repair_ticket_bound_exchange_scope",
         )
     exchange_scope = scope_resolution.scope
+    episode_blockers = _exchange_command_episode_blockers(
+        conn,
+        ticket_id=exchange_scope.ticket_id,
+        expected_episode_id=exchange_scope.exposure_episode_id,
+    )
+    if episode_blockers:
+        return _result(
+            "blocked",
+            now_ms=now_ms,
+            tick={},
+            blockers=episode_blockers,
+            next_action="repair_exchange_command_exposure_episode_lineage",
+        )
 
     existing = _existing_tick(conn, attempt_id, tick_kind)
     if tick_kind == FIRST_TICK_KIND and existing and not _pending_tick_due(existing, now_ms=now_ms):
@@ -330,6 +343,7 @@ def materialize_ticket_bound_reconciliation_tick(
     tick = {
         "reconciliation_tick_id": _tick_id(attempt_id, tick_kind),
         "ticket_id": str(attempt["ticket_id"]),
+        "exposure_episode_id": exchange_scope.exposure_episode_id,
         "protected_submit_attempt_id": attempt_id,
         "tick_kind": tick_kind,
         "status": status,
@@ -370,6 +384,30 @@ def materialize_ticket_bound_reconciliation_tick(
         next_action=next_action,
         extra={"account_risk_reprojection": account_risk_reprojection},
     )
+
+
+def _exchange_command_episode_blockers(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    expected_episode_id: str,
+) -> list[str]:
+    rows = conn.execute(
+        sa.text(
+            """
+            SELECT exposure_episode_id
+            FROM brc_ticket_bound_exchange_commands
+            WHERE ticket_id = :ticket_id
+            ORDER BY operation_submit_command_id, exchange_command_id
+            """
+        ),
+        {"ticket_id": ticket_id},
+    ).scalars().all()
+    if not rows:
+        return ["post_submit_exchange_command_lineage_missing"]
+    if any(str(row or "").strip() != expected_episode_id for row in rows):
+        return ["post_submit_exposure_episode_mismatch"]
+    return []
 
 
 def _entry_state(

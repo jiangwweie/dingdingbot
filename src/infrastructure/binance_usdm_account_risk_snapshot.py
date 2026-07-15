@@ -162,9 +162,24 @@ def _normalize_snapshot(
 ) -> FullAccountRiskSnapshot:
     if not isinstance(account, dict):
         raise ValueError("account payload is malformed")
-    if not isinstance(positions, list):
+    typed_positions = isinstance(positions, tuple) and all(
+        isinstance(row, ExchangePositionRow) for row in positions
+    )
+    if not typed_positions and not isinstance(positions, list):
         raise ValueError("position payload is malformed")
-    if not isinstance(regular_orders, list) or not isinstance(algo_orders, list):
+    typed_regular_orders = isinstance(regular_orders, tuple) and all(
+        isinstance(row, ExchangeOpenOrderRow) for row in regular_orders
+    )
+    typed_algo_orders = isinstance(algo_orders, tuple) and all(
+        isinstance(row, ExchangeOpenOrderRow) for row in algo_orders
+    )
+    if (
+        not typed_regular_orders
+        and not isinstance(regular_orders, list)
+    ) or (
+        not typed_algo_orders
+        and not isinstance(algo_orders, list)
+    ):
         raise ValueError("open-order payload is malformed")
     if not isinstance(account_mode, dict) or not isinstance(
         account_mode.get("dualSidePosition"), bool
@@ -181,13 +196,25 @@ def _normalize_snapshot(
         or not isinstance(can_trade, bool)
     ):
         raise ValueError("account capacity fields are malformed")
-    normalized_positions = tuple(
-        _position_row(row)
-        for row in positions
-        if _nonzero_position(row)
+    normalized_positions = (
+        positions
+        if typed_positions
+        else tuple(
+            _position_row(row)
+            for row in positions
+            if _nonzero_position(row)
+        )
     )
-    normalized_regular = tuple(_order_row(row, algo=False) for row in regular_orders)
-    normalized_algo = tuple(_order_row(row, algo=True) for row in algo_orders)
+    normalized_regular = (
+        regular_orders
+        if typed_regular_orders
+        else tuple(_order_row(row, algo=False) for row in regular_orders)
+    )
+    normalized_algo = (
+        algo_orders
+        if typed_algo_orders
+        else tuple(_order_row(row, algo=True) for row in algo_orders)
+    )
     return FullAccountRiskSnapshot(
         snapshot_ready=True,
         account_id=account_id,

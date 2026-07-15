@@ -20,10 +20,77 @@ from src.infrastructure.binance_usdm_account_risk_snapshot import (
     ExchangePositionRow,
     FullAccountRiskSnapshot,
 )
+from src.infrastructure.account_capacity_hot_path_repository import (
+    AccountCapacityClaimRecord,
+    load_effective_reservation_rows,
+)
 
 
 _ZERO = Decimal("0")
 _STOP_PURPOSES = {"initial_stop", "runner_stop"}
+_CURRENT_WRITE_COLUMNS = (
+    "account_exposure_current_id",
+    "account_id",
+    "exchange_id",
+    "exchange_instrument_id",
+    "exchange_symbol",
+    "asset_class",
+    "instrument_type",
+    "current_exposure_episode_id",
+    "primary_risk_cluster_id",
+    "cluster_membership_snapshot_id",
+    "account_source_fact_snapshot_id",
+    "account_fact_schema_version",
+    "position_mode",
+    "position_bucket",
+    "netting_domain_key",
+    "owner_ticket_id",
+    "ownership_state",
+    "position_slot_claimed",
+    "exposure_state",
+    "position_qty",
+    "entry_price",
+    "confirmed_stop_price",
+    "working_entry_qty",
+    "planned_reserved_risk",
+    "actual_directional_risk",
+    "held_risk",
+    "exchange_initial_margin",
+    "unreflected_pending_margin",
+    "protection_state",
+    "stop_covered_qty",
+    "tp1_open_qty",
+    "runner_stop_open_qty",
+    "reconciliation_state",
+    "first_blocker",
+    "source_snapshot_id",
+    "observed_at_ms",
+    "valid_until_ms",
+    "projection_version",
+    "semantic_fingerprint",
+    "updated_at_ms",
+)
+_CURRENT_NUMERIC_COLUMNS = {
+    "position_qty",
+    "entry_price",
+    "confirmed_stop_price",
+    "working_entry_qty",
+    "planned_reserved_risk",
+    "actual_directional_risk",
+    "held_risk",
+    "exchange_initial_margin",
+    "unreflected_pending_margin",
+    "stop_covered_qty",
+    "tp1_open_qty",
+    "runner_stop_open_qty",
+}
+_CURRENT_BOOLEAN_COLUMNS = {"position_slot_claimed"}
+_CURRENT_BIGINT_COLUMNS = {
+    "observed_at_ms",
+    "valid_until_ms",
+    "projection_version",
+    "updated_at_ms",
+}
 
 
 class AccountExposureCurrentRow(BaseModel):
@@ -34,6 +101,13 @@ class AccountExposureCurrentRow(BaseModel):
     exchange_id: str
     exchange_instrument_id: str
     exchange_symbol: str
+    asset_class: str | None
+    instrument_type: str | None
+    current_exposure_episode_id: str | None
+    primary_risk_cluster_id: str | None
+    cluster_membership_snapshot_id: str | None
+    account_source_fact_snapshot_id: str
+    account_fact_schema_version: str
     position_mode: str
     position_bucket: str
     owner_ticket_id: str | None
@@ -68,6 +142,8 @@ def project_account_exposure_current(
     *,
     snapshot: FullAccountRiskSnapshot,
     classification: AccountExchangeTruthClassification,
+    runtime_profile_id: str,
+    max_concurrent_positions: int,
     now_ms: int,
 ) -> AccountExposureProjectionResult:
     """Persist fresh per-instrument truth; network I/O belongs to the caller."""
@@ -79,7 +155,39 @@ def project_account_exposure_current(
         return AccountExposureProjectionResult(
             rows=(), global_blockers=(blocker,), semantic_event_count=0
         )
-    reservations = _active_reservations(conn, snapshot.account_id)
+    reservation_result = load_effective_reservation_rows(
+        conn,
+        account_id=snapshot.account_id,
+        runtime_profile_id=runtime_profile_id,
+        max_concurrent_positions=max_concurrent_positions,
+    )
+    if reservation_result.overflow:
+        return AccountExposureProjectionResult(
+            rows=(),
+            global_blockers=("account_capacity_claim_current_overflow",),
+            semantic_event_count=0,
+        )
+    reservations = {
+        str(row.ticket_id): row
+        for row in reservation_result.rows
+        if row.ticket_id
+    }
+    incomplete_owned = [
+        position.owner_ticket_id
+        for position in classification.positions
+        if position.ownership_state
+        in {"owned_by_ticket", "owned_by_other_known_ticket"}
+        and (
+            not position.owner_ticket_id
+            or position.owner_ticket_id not in reservations
+        )
+    ]
+    if incomplete_owned:
+        return AccountExposureProjectionResult(
+            rows=(),
+            global_blockers=("account_exposure_episode_identity_missing",),
+            semantic_event_count=0,
+        )
     rows = _position_rows(snapshot, classification, reservations)
     owned_ticket_ids = {row.owner_ticket_id for row in rows if row.owner_ticket_id}
     rows.extend(_reservation_only_rows(snapshot, reservations, owned_ticket_ids))
@@ -100,7 +208,7 @@ def project_account_exposure_current(
 def _position_rows(
     snapshot: FullAccountRiskSnapshot,
     classification: AccountExchangeTruthClassification,
-    reservations: dict[str, dict[str, object]],
+    reservations: dict[str, AccountCapacityClaimRecord],
 ) -> list[AccountExposureCurrentRow]:
     classified_positions = {
         (item.exchange_symbol, item.exchange_instrument_id): item
@@ -109,13 +217,8 @@ def _position_rows(
     rows: list[AccountExposureCurrentRow] = []
     for position in snapshot.positions:
         classified = _find_position_classification(position, classified_positions)
-        if classified is None:
-            classified = AccountPositionClassification(
-                exchange_symbol=position.exchange_symbol,
-                exchange_instrument_id=f"{snapshot.exchange_id}:{position.exchange_symbol}",
-                ownership_state="external_unowned",
-                blocker="account_exchange_position_unknown_global_fail_closed",
-            )
+        if classified is None or classified.exchange_instrument_id == "unresolved":
+            continue
         rows.append(
             _row_for_position(
                 snapshot,
@@ -124,6 +227,11 @@ def _position_rows(
                 classification.orders,
                 planned_reserved_risk=_reservation_risk(
                     reservations, classified.owner_ticket_id
+                ),
+                reservation=(
+                    reservations.get(classified.owner_ticket_id)
+                    if classified.owner_ticket_id
+                    else None
                 ),
             )
         )
@@ -146,6 +254,7 @@ def _row_for_position(
     classified: AccountPositionClassification,
     classifications: tuple[AccountOrderClassification, ...],
     planned_reserved_risk: Decimal,
+    reservation: AccountCapacityClaimRecord | None,
 ) -> AccountExposureCurrentRow:
     qty = abs(position.position_qty)
     side = "long" if position.position_qty > 0 else "short"
@@ -213,6 +322,25 @@ def _row_for_position(
         exchange_id=snapshot.exchange_id,
         exchange_instrument_id=classified.exchange_instrument_id,
         exchange_symbol=position.exchange_symbol,
+        asset_class=(
+            reservation.asset_class if reservation else classified.asset_class
+        ),
+        instrument_type=(
+            reservation.instrument_type
+            if reservation
+            else classified.instrument_type
+        ),
+        current_exposure_episode_id=(
+            reservation.exposure_episode_id if reservation else None
+        ),
+        primary_risk_cluster_id=(
+            reservation.primary_risk_cluster_id if reservation else None
+        ),
+        cluster_membership_snapshot_id=(
+            reservation.cluster_membership_snapshot_id if reservation else None
+        ),
+        account_source_fact_snapshot_id=snapshot.source_snapshot_id,
+        account_fact_schema_version="brc.account-risk-snapshot.v1",
         position_mode=str(snapshot.position_mode or "one_way"),
         position_bucket="BOTH",
         owner_ticket_id=classified.owner_ticket_id,
@@ -335,17 +463,17 @@ def _working_entry(
 
 def _reservation_only_rows(
     snapshot: FullAccountRiskSnapshot,
-    reservations: dict[str, dict[str, object]],
+    reservations: dict[str, AccountCapacityClaimRecord],
     position_ticket_ids: set[str],
 ) -> list[AccountExposureCurrentRow]:
     rows: list[AccountExposureCurrentRow] = []
     for reservation in reservations.values():
-        ticket_id = str(reservation["ticket_id"] or "")
+        ticket_id = str(reservation.ticket_id or "")
         if ticket_id and ticket_id in position_ticket_ids:
             continue
-        symbol = str(reservation["symbol"])
-        instrument_id = f"{snapshot.exchange_id}:{symbol}"
-        risk = _decimal(reservation["risk_at_stop"])
+        symbol = reservation.exchange_symbol
+        instrument_id = reservation.exchange_instrument_id
+        risk = reservation.risk_at_stop
         rows.append(
             AccountExposureCurrentRow(
                 account_exposure_current_id=_stable_id(
@@ -355,6 +483,17 @@ def _reservation_only_rows(
                 exchange_id=snapshot.exchange_id,
                 exchange_instrument_id=instrument_id,
                 exchange_symbol=symbol,
+                asset_class=reservation.asset_class,
+                instrument_type=reservation.instrument_type,
+                current_exposure_episode_id=reservation.exposure_episode_id,
+                primary_risk_cluster_id=reservation.primary_risk_cluster_id,
+                cluster_membership_snapshot_id=(
+                    reservation.cluster_membership_snapshot_id
+                ),
+                account_source_fact_snapshot_id=(
+                    reservation.account_source_fact_snapshot_id
+                ),
+                account_fact_schema_version=reservation.account_fact_schema_version,
                 position_mode=str(snapshot.position_mode or "one_way"),
                 position_bucket="BOTH",
                 owner_ticket_id=ticket_id or None,
@@ -379,34 +518,13 @@ def _reservation_only_rows(
     return rows
 
 
-def _active_reservations(
-    conn: sa.Connection,
-    account_id: str,
-) -> dict[str, dict[str, object]]:
-    if not sa.inspect(conn).has_table("brc_budget_reservations"):
-        return {}
-    table = sa.Table("brc_budget_reservations", sa.MetaData(), autoload_with=conn)
-    required = {"ticket_id", "account_id", "symbol", "status", "risk_at_stop", "reserved_margin"}
-    if not required <= set(table.c.keys()):
-        return {}
-    return {
-        str(row["ticket_id"]): dict(row)
-        for row in conn.execute(
-            sa.select(table)
-            .where(table.c.account_id == account_id)
-            .where(table.c.status.in_(("active", "consumed")))
-        ).mappings()
-        if str(row["ticket_id"] or "")
-    }
-
-
 def _reservation_risk(
-    reservations: dict[str, dict[str, object]],
+    reservations: dict[str, AccountCapacityClaimRecord],
     ticket_id: str | None,
 ) -> Decimal:
     if not ticket_id or ticket_id not in reservations:
         return _ZERO
-    return _decimal(reservations[ticket_id]["risk_at_stop"])
+    return reservations[ticket_id].risk_at_stop
 
 
 def _flat_rows_absent_from_snapshot(
@@ -414,16 +532,25 @@ def _flat_rows_absent_from_snapshot(
     snapshot: FullAccountRiskSnapshot,
     projected_rows: list[AccountExposureCurrentRow],
 ) -> list[AccountExposureCurrentRow]:
-    if not sa.inspect(conn).has_table("brc_account_exposure_current"):
-        return []
-    table = sa.Table("brc_account_exposure_current", sa.MetaData(), autoload_with=conn)
     projected_keys = {
         (row.exchange_instrument_id, row.position_mode, row.position_bucket)
         for row in projected_rows
     }
     result: list[AccountExposureCurrentRow] = []
     for existing in conn.execute(
-        sa.select(table).where(table.c.account_id == snapshot.account_id)
+        sa.text(
+            """
+            SELECT account_exposure_current_id, exchange_instrument_id,
+                   exchange_symbol, asset_class, instrument_type,
+                   primary_risk_cluster_id, cluster_membership_snapshot_id,
+                   position_mode, position_bucket, owner_ticket_id,
+                   ownership_state
+            FROM brc_account_exposure_current
+            WHERE account_id = :account_id
+            ORDER BY account_exposure_current_id
+            """
+        ),
+        {"account_id": snapshot.account_id},
     ).mappings():
         key = (
             str(existing["exchange_instrument_id"]),
@@ -439,6 +566,29 @@ def _flat_rows_absent_from_snapshot(
                 exchange_id=snapshot.exchange_id,
                 exchange_instrument_id=key[0],
                 exchange_symbol=str(existing["exchange_symbol"]),
+                asset_class=(
+                    str(existing["asset_class"])
+                    if existing.get("asset_class") is not None
+                    else None
+                ),
+                instrument_type=(
+                    str(existing["instrument_type"])
+                    if existing.get("instrument_type") is not None
+                    else None
+                ),
+                current_exposure_episode_id=None,
+                primary_risk_cluster_id=(
+                    str(existing["primary_risk_cluster_id"])
+                    if existing.get("primary_risk_cluster_id") is not None
+                    else None
+                ),
+                cluster_membership_snapshot_id=(
+                    str(existing["cluster_membership_snapshot_id"])
+                    if existing.get("cluster_membership_snapshot_id") is not None
+                    else None
+                ),
+                account_source_fact_snapshot_id=snapshot.source_snapshot_id,
+                account_fact_schema_version="brc.account-risk-snapshot.v1",
                 position_mode=key[1],
                 position_bucket=key[2],
                 owner_ticket_id=(
@@ -474,17 +624,26 @@ def _persist_rows(
     snapshot: FullAccountRiskSnapshot,
     now_ms: int,
 ) -> int:
-    current = sa.Table("brc_account_exposure_current", sa.MetaData(), autoload_with=conn)
-    events = sa.Table("brc_account_risk_projection_events", sa.MetaData(), autoload_with=conn)
     event_count = 0
     for row in rows:
         existing = conn.execute(
-            sa.select(current).where(
-                current.c.account_id == row.account_id,
-                current.c.exchange_instrument_id == row.exchange_instrument_id,
-                current.c.position_mode == row.position_mode,
-                current.c.position_bucket == row.position_bucket,
-            )
+            sa.text(
+                """
+                SELECT account_exposure_current_id, projection_version,
+                       semantic_fingerprint
+                FROM brc_account_exposure_current
+                WHERE account_id = :account_id
+                  AND exchange_instrument_id = :exchange_instrument_id
+                  AND position_mode = :position_mode
+                  AND position_bucket = :position_bucket
+                """
+            ),
+            {
+                "account_id": row.account_id,
+                "exchange_instrument_id": row.exchange_instrument_id,
+                "position_mode": row.position_mode,
+                "position_bucket": row.position_bucket,
+            },
         ).mappings().one_or_none()
         fingerprint = _semantic_fingerprint(row)
         projection_version = int(existing["projection_version"] or 0) + 1 if existing else 1
@@ -494,12 +653,28 @@ def _persist_rows(
         )
         if existing:
             conn.execute(
-                current.update()
-                .where(current.c.account_exposure_current_id == existing["account_exposure_current_id"])
-                .values(**values)
+                _typed_current_statement(
+                    "UPDATE brc_account_exposure_current SET "
+                    + ", ".join(
+                        f"{column_name} = :{column_name}"
+                        for column_name in _CURRENT_WRITE_COLUMNS
+                        if column_name != "account_exposure_current_id"
+                    )
+                    + " WHERE account_exposure_current_id = :account_exposure_current_id"
+                ),
+                values,
             )
         else:
-            conn.execute(current.insert().values(**values))
+            conn.execute(
+                _typed_current_statement(
+                    "INSERT INTO brc_account_exposure_current ("
+                    + ", ".join(_CURRENT_WRITE_COLUMNS)
+                    + ") VALUES ("
+                    + ", ".join(f":{column_name}" for column_name in _CURRENT_WRITE_COLUMNS)
+                    + ")"
+                ),
+                values,
+            )
         if existing and str(existing["semantic_fingerprint"]) == fingerprint:
             continue
         event_count += 1
@@ -509,10 +684,30 @@ def _persist_rows(
             ),
             "account_exposure_current_id": row.account_exposure_current_id,
             "semantic_fingerprint": fingerprint,
-            "event_payload": _event_payload(events, row),
+            "event_payload": _event_payload(row),
             "created_at_ms": now_ms,
         }
-        conn.execute(events.insert().values(**event_values))
+        event_payload_expr = (
+            "CAST(:event_payload AS JSON)"
+            if conn.dialect.name == "postgresql"
+            else ":event_payload"
+        )
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO brc_account_risk_projection_events (
+                  account_risk_projection_event_id,
+                  account_exposure_current_id, semantic_fingerprint,
+                  event_payload, created_at_ms
+                ) VALUES (
+                  :account_risk_projection_event_id,
+                  :account_exposure_current_id, :semantic_fingerprint,
+                  """
+                + event_payload_expr
+                + ", :created_at_ms)"
+            ),
+            event_values,
+        )
     return event_count
 
 
@@ -542,6 +737,7 @@ def _row_values(
 def _semantic_fingerprint(row: AccountExposureCurrentRow) -> str:
     payload = {
         "ownership_state": row.ownership_state,
+        "current_exposure_episode_id": row.current_exposure_episode_id,
         "exposure_state": row.exposure_state,
         "held_risk": str(row.held_risk),
         "protection_state": row.protection_state,
@@ -551,7 +747,7 @@ def _semantic_fingerprint(row: AccountExposureCurrentRow) -> str:
     return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _event_payload(events: sa.Table, row: AccountExposureCurrentRow) -> object:
+def _event_payload(row: AccountExposureCurrentRow) -> str:
     payload = {
         "ownership_state": row.ownership_state,
         "exposure_state": row.exposure_state,
@@ -560,7 +756,23 @@ def _event_payload(events: sa.Table, row: AccountExposureCurrentRow) -> object:
         "reconciliation_state": row.reconciliation_state,
         "first_blocker": row.first_blocker,
     }
-    return payload if isinstance(events.c.event_payload.type, sa.JSON) else json.dumps(payload, sort_keys=True)
+    return json.dumps(payload, sort_keys=True)
+
+
+def _typed_current_statement(sql: str) -> sa.TextClause:
+    bind_types: dict[str, sa.types.TypeEngine[object]] = {}
+    for column_name in _CURRENT_NUMERIC_COLUMNS:
+        bind_types[column_name] = sa.Numeric(36, 18)
+    for column_name in _CURRENT_BOOLEAN_COLUMNS:
+        bind_types[column_name] = sa.Boolean()
+    for column_name in _CURRENT_BIGINT_COLUMNS:
+        bind_types[column_name] = sa.BigInteger()
+    return sa.text(sql).bindparams(
+        *(
+            sa.bindparam(column_name, type_=column_type)
+            for column_name, column_type in bind_types.items()
+        )
+    )
 
 
 def _order_identity(order: ExchangeOpenOrderRow) -> str:

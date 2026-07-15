@@ -126,8 +126,27 @@ def test_lifecycle_flat_release_updates_account_budget_once() -> None:
             )
             conn.execute(
                 sa.text(
-                    """INSERT INTO brc_budget_reservations VALUES
-                    ('reservation-1', 'account-1', 'ticket-1', 'consumed', 15, 150)"""
+                    """INSERT INTO brc_exchange_instruments VALUES
+                    ('instrument-1', 'SOLUSDT')"""
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """INSERT INTO brc_budget_reservations (
+                        budget_reservation_id, account_id, runtime_profile_id,
+                        ticket_id, status, risk_at_stop, reserved_margin,
+                        exchange_instrument_id, exposure_episode_id, symbol,
+                        asset_class, instrument_type, primary_risk_cluster_id,
+                        cluster_membership_snapshot_id,
+                        account_source_fact_snapshot_id,
+                        account_fact_schema_version, margin_accounting_state
+                    ) VALUES (
+                        'reservation-1', 'account-1', 'profile-1', 'ticket-1',
+                        'consumed', 15, 150, 'instrument-1', 'episode-1',
+                        'SOLUSDT', 'crypto', 'perpetual', 'crypto-beta',
+                        'cluster-snapshot-1', 'account-snapshot-1', 'v1',
+                        'consumed_by_ticket'
+                    )"""
                 )
             )
             first = project_account_budget_current(
@@ -176,6 +195,7 @@ def test_lifecycle_flat_release_updates_account_budget_once() -> None:
             for table in (
                 "brc_account_exposure_current",
                 "brc_budget_reservations",
+                "brc_exchange_instruments",
                 "brc_account_budget_current",
             ):
                 conn.execute(sa.text(f"DROP TABLE IF EXISTS {table}"))
@@ -554,6 +574,10 @@ def _seed(engine: sa.Engine) -> None:
 
 def _create_budget_projection_tables(engine: sa.Engine) -> None:
     statements = (
+        """CREATE TABLE brc_exchange_instruments (
+            exchange_instrument_id TEXT PRIMARY KEY,
+            exchange_symbol TEXT NOT NULL
+        )""",
         """CREATE TABLE brc_account_exposure_current (
             account_exposure_current_id TEXT PRIMARY KEY, account_id TEXT,
             owner_ticket_id TEXT, position_slot_claimed BOOLEAN, exposure_state TEXT,
@@ -563,7 +587,13 @@ def _create_budget_projection_tables(engine: sa.Engine) -> None:
         )""",
         """CREATE TABLE brc_budget_reservations (
             budget_reservation_id TEXT PRIMARY KEY, account_id TEXT, ticket_id TEXT,
-            status TEXT, risk_at_stop NUMERIC, reserved_margin NUMERIC
+            runtime_profile_id TEXT, status TEXT, risk_at_stop NUMERIC,
+            reserved_margin NUMERIC, exchange_instrument_id TEXT,
+            exposure_episode_id TEXT, symbol TEXT, asset_class TEXT,
+            instrument_type TEXT, primary_risk_cluster_id TEXT,
+            cluster_membership_snapshot_id TEXT,
+            account_source_fact_snapshot_id TEXT,
+            account_fact_schema_version TEXT, margin_accounting_state TEXT
         )""",
         """CREATE TABLE brc_account_budget_current (
             account_budget_current_id TEXT PRIMARY KEY, account_id TEXT,

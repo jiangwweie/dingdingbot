@@ -65,6 +65,8 @@ def reproject_account_risk_current(
         conn,
         snapshot=snapshot,
         classification=classification,
+        runtime_profile_id=runtime_profile_id,
+        max_concurrent_positions=policy.max_concurrent_positions,
         now_ms=now_ms,
     )
     budget = project_account_budget_current(

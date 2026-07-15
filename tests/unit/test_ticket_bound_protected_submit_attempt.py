@@ -869,6 +869,21 @@ def test_protected_submit_result_preserves_unknown_outcome_for_reconciliation(
 
 def _create_ready_protected_submit(conn) -> dict[str, str]:
     ids = _create_handoff_ready(conn)
+    exposure_episode_id = f"exposure_episode:test:{ids['ticket_id']}"
+    conn.execute(
+        text(
+            "UPDATE brc_action_time_tickets SET exposure_episode_id = :episode_id "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"episode_id": exposure_episode_id, "ticket_id": ids["ticket_id"]},
+    )
+    conn.execute(
+        text(
+            "UPDATE brc_budget_reservations SET exposure_episode_id = :episode_id "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"episode_id": exposure_episode_id, "ticket_id": ids["ticket_id"]},
+    )
     safety_payload = safety.materialize_ticket_bound_runtime_safety_state(
         conn,
         ticket_id=ids["ticket_id"],

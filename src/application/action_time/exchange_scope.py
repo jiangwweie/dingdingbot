@@ -33,6 +33,7 @@ class TicketBoundExchangeScope(BaseModel):
     account_id: str
     canonical_symbol: str
     exchange_instrument_id: str
+    exposure_episode_id: str
     exchange_instrument_status: str
     exchange_id: str
     exchange_symbol: str
@@ -151,6 +152,12 @@ def resolve_ticket_bound_exchange_scope(
     budget_ticket_id = str(budget.get("ticket_id") or "").strip()
     if budget_ticket_id and budget_ticket_id != normalized_ticket_id:
         return _blocked("ticket_exchange_scope_budget_ticket_id_mismatch")
+    ticket_episode_id = str(ticket.get("exposure_episode_id") or "").strip()
+    budget_episode_id = str(budget.get("exposure_episode_id") or "").strip()
+    if not ticket_episode_id or not budget_episode_id:
+        return _blocked("ticket_exchange_scope_exposure_episode_missing")
+    if ticket_episode_id != budget_episode_id:
+        return _blocked("ticket_exchange_scope_exposure_episode_mismatch")
 
     frozen_fact_id = str(ticket.get("account_mode_snapshot_id") or "").strip()
     frozen_fact = _row_by_id(
@@ -204,6 +211,7 @@ def resolve_ticket_bound_exchange_scope(
         account_id=account_id,
         canonical_symbol=canonical_symbol,
         exchange_instrument_id=instrument_id,
+        exposure_episode_id=ticket_episode_id,
         exchange_instrument_status=str(instrument.get("status") or ""),
         exchange_id=exchange_id,
         exchange_symbol=exchange_symbol,

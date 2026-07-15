@@ -13,6 +13,10 @@ from src.infrastructure.binance_usdm_account_risk_snapshot import (
     ExchangePositionRow,
     FullAccountRiskSnapshot,
 )
+from src.infrastructure.account_capacity_hot_path_repository import (
+    load_current_account_ticket_ids,
+    load_current_command_identity_evidence,
+)
 
 
 OwnershipState = Literal[
@@ -66,6 +70,8 @@ class AccountPositionClassification(BaseModel):
 
     exchange_symbol: str
     exchange_instrument_id: str
+    asset_class: str | None = None
+    instrument_type: str | None = None
     ownership_state: OwnershipState
     owner_ticket_id: str | None = None
     blocker: str | None = None
@@ -94,7 +100,10 @@ def classify_account_exchange_truth(
             new_entry_allowed=False,
             blockers=(snapshot.failure_code or "account_risk_snapshot_not_ready",),
         )
-    identities, ticket_instruments = _command_identity_evidence(conn)
+    identities, ticket_instruments = _command_identity_evidence(
+        conn,
+        account_id=snapshot.account_id,
+    )
     order_rows = tuple(
         _classify_order(
             order,
@@ -168,18 +177,21 @@ def _classify_position(
     position_mode: str,
     ticket_instruments: dict[str, set[str]],
 ) -> AccountPositionClassification:
-    instrument_id = _instrument_id(conn, exchange_id, position.exchange_symbol)
-    if instrument_id is None:
+    instrument = _instrument_identity(conn, exchange_id, position.exchange_symbol)
+    if instrument is None:
         return AccountPositionClassification(
             exchange_symbol=position.exchange_symbol,
             exchange_instrument_id="unresolved",
             ownership_state="external_unowned",
             blocker="account_exchange_instrument_identity_missing",
         )
+    instrument_id, asset_class, instrument_type = instrument
     if position_mode == "hedge" and position.position_side not in {"LONG", "SHORT"}:
         return AccountPositionClassification(
             exchange_symbol=position.exchange_symbol,
             exchange_instrument_id=instrument_id,
+            asset_class=asset_class,
+            instrument_type=instrument_type,
             ownership_state="mode_or_side_ambiguous",
             blocker="account_exchange_position_side_ambiguous",
         )
@@ -192,6 +204,8 @@ def _classify_position(
         return AccountPositionClassification(
             exchange_symbol=position.exchange_symbol,
             exchange_instrument_id=instrument_id,
+            asset_class=asset_class,
+            instrument_type=instrument_type,
             ownership_state="identity_conflict",
             blocker="account_exchange_position_multiple_ticket_claims",
         )
@@ -199,12 +213,16 @@ def _classify_position(
         return AccountPositionClassification(
             exchange_symbol=position.exchange_symbol,
             exchange_instrument_id=instrument_id,
+            asset_class=asset_class,
+            instrument_type=instrument_type,
             ownership_state="owned_by_ticket",
             owner_ticket_id=next(iter(owner_tickets)),
         )
     return AccountPositionClassification(
         exchange_symbol=position.exchange_symbol,
         exchange_instrument_id=instrument_id,
+        asset_class=asset_class,
+        instrument_type=instrument_type,
         ownership_state="external_unowned",
         blocker="account_exchange_position_unknown_global_fail_closed",
     )
@@ -212,35 +230,29 @@ def _classify_position(
 
 def _command_identity_evidence(
     conn: sa.Connection,
+    *,
+    account_id: str,
 ) -> tuple[dict[str, set[tuple[str, str]]], dict[str, set[str]]]:
-    table = _table_if_present(conn, "brc_ticket_bound_exchange_commands")
-    if table is None:
-        return {}, {}
     identity_map: dict[str, set[tuple[str, str]]] = defaultdict(set)
     ticket_instruments: dict[str, set[str]] = defaultdict(set)
-    columns = table.c
-    tickets = _table_if_present(conn, "brc_action_time_tickets")
-    statement = sa.select(table)
-    if tickets is not None and {"ticket_id", "status"} <= set(tickets.c.keys()):
-        statement = (
-            statement.join(tickets, tickets.c.ticket_id == table.c.ticket_id)
-            .where(tickets.c.status.not_in(_TERMINAL_TICKET_STATUSES))
-        )
-    rows = conn.execute(statement).mappings()
+    ticket_ids = load_current_account_ticket_ids(conn, account_id=account_id)
+    rows = load_current_command_identity_evidence(
+        conn,
+        account_id=account_id,
+        ticket_ids=ticket_ids,
+    )
     for row in rows:
-        if str(row.get("command_state") or "") in _TERMINAL_COMMAND_STATES:
-            continue
-        ticket_id = str(row.get("ticket_id") or "").strip()
-        role = str(row.get("order_role") or "").strip()
-        instrument_id = str(row.get("exchange_instrument_id") or "").strip()
+        ticket_id = row.ticket_id
+        role = row.order_role
+        instrument_id = row.exchange_instrument_id
         if not ticket_id:
             continue
         if instrument_id:
             ticket_instruments[ticket_id].add(instrument_id)
         for identity in (
-            row.get("exchange_order_id"),
-            row.get("client_order_id"),
-            row.get("parent_order_id"),
+            row.exchange_order_id,
+            row.client_order_id,
+            row.parent_order_id,
         ):
             text = str(identity or "").strip()
             if text:
@@ -248,33 +260,36 @@ def _command_identity_evidence(
     return dict(identity_map), dict(ticket_instruments)
 
 
-def _instrument_id(conn: sa.Connection, exchange_id: str, symbol: str) -> str | None:
-    mapping = _table_if_present(conn, "brc_symbol_instrument_mappings")
-    instruments = _table_if_present(conn, "brc_exchange_instruments")
-    if mapping is None or instruments is None:
+def _instrument_identity(
+    conn: sa.Connection,
+    exchange_id: str,
+    symbol: str,
+) -> tuple[str, str, str] | None:
+    rows = conn.execute(
+        sa.text(
+            """
+            SELECT mapping.exchange_instrument_id, instrument.asset_class,
+                   instrument.instrument_type
+            FROM brc_symbol_instrument_mappings AS mapping
+            JOIN brc_exchange_instruments AS instrument
+              ON instrument.exchange_instrument_id = mapping.exchange_instrument_id
+            WHERE mapping.symbol = :symbol
+              AND mapping.status = 'active'
+              AND instrument.exchange_id = :exchange_id
+              AND instrument.status = 'active'
+            ORDER BY mapping.exchange_instrument_id
+            LIMIT 2
+            """
+        ),
+        {"symbol": symbol, "exchange_id": exchange_id},
+    ).mappings().all()
+    if len(rows) != 1:
         return None
-    required_mapping = {"symbol", "exchange_instrument_id", "status"}
-    required_instruments = {"exchange_instrument_id", "exchange_id", "status"}
-    if not required_mapping <= set(mapping.c.keys()) or not required_instruments <= set(instruments.c.keys()):
-        return None
-    row = conn.execute(
-        sa.select(mapping.c.exchange_instrument_id)
-        .join(
-            instruments,
-            instruments.c.exchange_instrument_id == mapping.c.exchange_instrument_id,
-        )
-        .where(mapping.c.symbol == symbol)
-        .where(mapping.c.status == "active")
-        .where(instruments.c.exchange_id == exchange_id)
-        .where(instruments.c.status == "active")
-    ).scalar_one_or_none()
-    return str(row) if row else None
-
-
-def _table_if_present(conn: sa.Connection, table_name: str) -> sa.Table | None:
-    if not sa.inspect(conn).has_table(table_name):
-        return None
-    return sa.Table(table_name, sa.MetaData(), autoload_with=conn)
+    return (
+        str(rows[0]["exchange_instrument_id"]),
+        str(rows[0]["asset_class"]),
+        str(rows[0]["instrument_type"]),
+    )
 
 
 def _order_result(

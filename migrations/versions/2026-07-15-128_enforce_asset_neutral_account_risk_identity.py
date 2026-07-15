@@ -180,16 +180,27 @@ def _assert_no_incomplete_current_exposure(bind: sa.Connection) -> None:
               AND (
                 asset_class IS NULL OR trim(asset_class) = ''
                 OR instrument_type IS NULL OR trim(instrument_type) = ''
-                OR current_exposure_episode_id IS NULL
-                OR trim(current_exposure_episode_id) = ''
-                OR primary_risk_cluster_id IS NULL
-                OR trim(primary_risk_cluster_id) = ''
-                OR cluster_membership_snapshot_id IS NULL
-                OR trim(cluster_membership_snapshot_id) = ''
                 OR account_source_fact_snapshot_id IS NULL
                 OR trim(account_source_fact_snapshot_id) = ''
                 OR account_fact_schema_version IS NULL
                 OR trim(account_fact_schema_version) = ''
+                OR (
+                  ownership_state IN
+                    ('owned_by_ticket', 'owned_by_other_known_ticket')
+                  AND (
+                    current_exposure_episode_id IS NULL
+                    OR trim(current_exposure_episode_id) = ''
+                    OR primary_risk_cluster_id IS NULL
+                    OR trim(primary_risk_cluster_id) = ''
+                    OR cluster_membership_snapshot_id IS NULL
+                    OR trim(cluster_membership_snapshot_id) = ''
+                  )
+                )
+                OR (
+                  ownership_state NOT IN
+                    ('owned_by_ticket', 'owned_by_other_known_ticket')
+                  AND current_exposure_episode_id IS NOT NULL
+                )
               )
             """
         )

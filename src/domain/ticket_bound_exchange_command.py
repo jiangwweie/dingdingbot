@@ -50,6 +50,7 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     strategy_group_id: str = Field(min_length=1, max_length=128)
     runtime_profile_id: str = Field(min_length=1, max_length=128)
     exchange_instrument_id: str = Field(min_length=1, max_length=192)
+    exposure_episode_id: str = Field(min_length=1, max_length=192)
     exchange_id: str = Field(min_length=1, max_length=128)
     gateway_symbol: str = Field(min_length=1, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)

@@ -24,6 +24,7 @@ NOW_MS = 1_752_480_000_000
 
 def test_owned_position_with_confirmed_stop_projects_directional_risk_once() -> None:
     conn = _connection()
+    _insert_claim(conn, status="consumed", risk="10")
     snapshot = _snapshot(
         positions=(
             ExchangePositionRow(
@@ -65,12 +66,16 @@ def test_owned_position_with_confirmed_stop_projects_directional_risk_once() -> 
         conn,
         snapshot=snapshot,
         classification=classification,
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
         now_ms=NOW_MS,
     )
     second = project_account_exposure_current(
         conn,
         snapshot=snapshot,
         classification=classification,
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
         now_ms=NOW_MS + 1,
     )
 
@@ -84,6 +89,7 @@ def test_owned_position_with_confirmed_stop_projects_directional_risk_once() -> 
 
 def test_multiple_protection_stops_preserve_quantity_specific_directional_risk() -> None:
     conn = _connection()
+    _insert_claim(conn, status="consumed", risk="5")
     snapshot = _snapshot(
         positions=(
             ExchangePositionRow(
@@ -148,6 +154,8 @@ def test_multiple_protection_stops_preserve_quantity_specific_directional_risk()
         conn,
         snapshot=snapshot,
         classification=classification,
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
         now_ms=NOW_MS,
     )
 
@@ -159,6 +167,7 @@ def test_multiple_protection_stops_preserve_quantity_specific_directional_risk()
 
 def test_owned_position_without_confirmed_stop_is_global_fail_closed() -> None:
     conn = _connection()
+    _insert_claim(conn, status="consumed", risk="15")
     result = project_account_exposure_current(
         conn,
         snapshot=_snapshot(
@@ -178,6 +187,8 @@ def test_owned_position_without_confirmed_stop_is_global_fail_closed() -> None:
                 owner_ticket_id="ticket-1",
             )
         ),
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
         now_ms=NOW_MS,
     )
 
@@ -186,21 +197,9 @@ def test_owned_position_without_confirmed_stop_is_global_fail_closed() -> None:
     assert result.global_blockers == ("account_exposure_protection_missing",)
 
 
-def test_active_reservation_without_position_projects_reserved_slot() -> None:
+def test_reservation_only_row_uses_persisted_instrument_and_episode() -> None:
     conn = _connection()
-    conn.execute(
-        sa.text(
-            """
-            INSERT INTO brc_budget_reservations (
-                budget_reservation_id, ticket_id, account_id, symbol, side, status,
-                risk_at_stop, reserved_margin
-            ) VALUES (
-                'budget-1', 'ticket-1', 'account-1', 'ETHUSDT', 'long', 'active',
-                '15', '30'
-            )
-            """
-        )
-    )
+    _insert_claim(conn, status="active", risk="15")
 
     result = project_account_exposure_current(
         conn,
@@ -208,27 +207,21 @@ def test_active_reservation_without_position_projects_reserved_slot() -> None:
         classification=AccountExchangeTruthClassification(
             orders=(), positions=(), new_entry_allowed=True, blockers=()
         ),
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
         now_ms=NOW_MS,
     )
 
     assert result.rows[0].exposure_state == "reserved"
     assert result.rows[0].held_risk == Decimal("15")
     assert result.rows[0].position_slot_claimed is True
+    assert result.rows[0].exchange_instrument_id == "binance_usdm:ETHUSDT"
+    assert result.rows[0].current_exposure_episode_id == "episode-1"
 
 
 def test_partial_fill_with_remaining_entry_holds_the_larger_planned_risk() -> None:
     conn = _connection()
-    conn.execute(
-        sa.text(
-            """
-            INSERT INTO brc_budget_reservations (
-                budget_reservation_id, ticket_id, account_id, symbol, side, status,
-                risk_at_stop, reserved_margin
-            ) VALUES ('budget-1', 'ticket-1', 'account-1', 'ETHUSDT', 'long',
-                      'consumed', '15', '30')
-            """
-        )
-    )
+    _insert_claim(conn, status="consumed", risk="15")
     snapshot = _snapshot(
         positions=(
             ExchangePositionRow(
@@ -273,7 +266,12 @@ def test_partial_fill_with_remaining_entry_holds_the_larger_planned_risk() -> No
     )
 
     result = project_account_exposure_current(
-        conn, snapshot=snapshot, classification=classification, now_ms=NOW_MS
+        conn,
+        snapshot=snapshot,
+        classification=classification,
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
+        now_ms=NOW_MS,
     )
 
     assert result.rows[0].exposure_state == "working_entry"
@@ -282,7 +280,7 @@ def test_partial_fill_with_remaining_entry_holds_the_larger_planned_risk() -> No
     assert result.rows[0].held_risk == Decimal("15")
 
 
-def test_unowned_position_projects_unknown_and_blocks_new_entry() -> None:
+def test_external_known_instrument_has_null_episode_and_global_hold() -> None:
     conn = _connection()
     result = project_account_exposure_current(
         conn,
@@ -297,19 +295,24 @@ def test_unowned_position_projects_unknown_and_blocks_new_entry() -> None:
         classification=_classification(
             position=AccountPositionClassification(
                 exchange_symbol="SOLUSDT", exchange_instrument_id="binance_usdm:SOLUSDT",
+                asset_class="crypto", instrument_type="perpetual",
                 ownership_state="external_unowned",
                 blocker="account_exchange_position_unknown_global_fail_closed",
             )
         ),
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
         now_ms=NOW_MS,
     )
 
     assert result.rows[0].exposure_state == "unknown"
+    assert result.rows[0].current_exposure_episode_id is None
     assert result.global_blockers == ("account_exchange_position_unknown_global_fail_closed",)
 
 
-def test_flat_matched_snapshot_releases_previously_projected_slot() -> None:
+def test_flat_current_row_clears_current_episode_id() -> None:
     conn = _connection()
+    _insert_claim(conn, status="consumed", risk="15")
     position = ExchangePositionRow(
         exchange_symbol="ETHUSDT", position_qty=Decimal("0.1"),
         entry_price=Decimal("2000"),
@@ -338,7 +341,15 @@ def test_flat_matched_snapshot_releases_previously_projected_slot() -> None:
             ),
         ),
         classification=classification,
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
         now_ms=NOW_MS,
+    )
+    conn.execute(
+        sa.text(
+            "UPDATE brc_budget_reservations SET status = 'released' "
+            "WHERE ticket_id = 'ticket-1'"
+        )
     )
 
     result = project_account_exposure_current(
@@ -347,12 +358,47 @@ def test_flat_matched_snapshot_releases_previously_projected_slot() -> None:
         classification=AccountExchangeTruthClassification(
             orders=(), positions=(), new_entry_allowed=True, blockers=()
         ),
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
         now_ms=NOW_MS + 1,
     )
 
     assert result.rows[0].exposure_state == "flat"
     assert result.rows[0].held_risk == Decimal("0")
     assert result.rows[0].position_slot_claimed is False
+    assert result.rows[0].current_exposure_episode_id is None
+
+
+def test_unresolved_instrument_creates_budget_blocker_without_fake_exposure() -> None:
+    conn = _connection()
+    result = project_account_exposure_current(
+        conn,
+        snapshot=_snapshot(
+            positions=(
+                ExchangePositionRow(
+                    exchange_symbol="UNKNOWN",
+                    position_qty=Decimal("1"),
+                    entry_price=Decimal("100"),
+                ),
+            )
+        ),
+        classification=_classification(
+            position=AccountPositionClassification(
+                exchange_symbol="UNKNOWN",
+                exchange_instrument_id="unresolved",
+                ownership_state="external_unowned",
+                blocker="account_exchange_instrument_identity_missing",
+            )
+        ),
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
+        now_ms=NOW_MS,
+    )
+
+    assert result.rows == ()
+    assert result.global_blockers == (
+        "account_exchange_instrument_identity_missing",
+    )
 
 
 def _snapshot(
@@ -385,8 +431,8 @@ def _classification(
     return AccountExchangeTruthClassification(
         orders=(order,) if order else (),
         positions=(position,),
-        new_entry_allowed=True,
-        blockers=(),
+        new_entry_allowed=not bool(position.blocker),
+        blockers=((position.blocker,) if position.blocker else ()),
     )
 
 
@@ -399,7 +445,12 @@ def _connection() -> sa.Connection:
             CREATE TABLE brc_account_exposure_current (
                 account_exposure_current_id TEXT PRIMARY KEY,
                 account_id TEXT, exchange_id TEXT, exchange_instrument_id TEXT,
-                exchange_symbol TEXT, position_mode TEXT, position_bucket TEXT,
+                exchange_symbol TEXT, asset_class TEXT, instrument_type TEXT,
+                current_exposure_episode_id TEXT, primary_risk_cluster_id TEXT,
+                cluster_membership_snapshot_id TEXT,
+                account_source_fact_snapshot_id TEXT,
+                account_fact_schema_version TEXT,
+                position_mode TEXT, position_bucket TEXT,
                 netting_domain_key TEXT, owner_ticket_id TEXT, ownership_state TEXT,
                 position_slot_claimed BOOLEAN, exposure_state TEXT, position_qty NUMERIC,
                 entry_price NUMERIC, confirmed_stop_price NUMERIC, working_entry_qty NUMERIC,
@@ -430,10 +481,59 @@ def _connection() -> sa.Connection:
             """
             CREATE TABLE brc_budget_reservations (
                 budget_reservation_id TEXT PRIMARY KEY, ticket_id TEXT, account_id TEXT,
-                symbol TEXT, side TEXT, status TEXT, risk_at_stop NUMERIC,
-                reserved_margin NUMERIC
+                runtime_profile_id TEXT, symbol TEXT, side TEXT,
+                exchange_instrument_id TEXT, exposure_episode_id TEXT,
+                asset_class TEXT, instrument_type TEXT,
+                primary_risk_cluster_id TEXT,
+                cluster_membership_snapshot_id TEXT,
+                account_source_fact_snapshot_id TEXT,
+                account_fact_schema_version TEXT,
+                status TEXT, risk_at_stop NUMERIC, reserved_margin NUMERIC,
+                margin_accounting_state TEXT
             )
             """
         )
     )
+    conn.execute(
+        sa.text(
+            """CREATE TABLE brc_exchange_instruments (
+              exchange_instrument_id TEXT PRIMARY KEY,
+              exchange_symbol TEXT NOT NULL)"""
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_exchange_instruments VALUES "
+            "('binance_usdm:ETHUSDT','ETHUSDT')"
+        )
+    )
     return conn
+
+
+def _insert_claim(
+    conn: sa.Connection,
+    *,
+    status: str,
+    risk: str,
+) -> None:
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_budget_reservations (
+              budget_reservation_id, ticket_id, account_id, runtime_profile_id,
+              symbol, side, exchange_instrument_id, exposure_episode_id,
+              asset_class, instrument_type, primary_risk_cluster_id,
+              cluster_membership_snapshot_id, account_source_fact_snapshot_id,
+              account_fact_schema_version, status, risk_at_stop,
+              reserved_margin, margin_accounting_state
+            ) VALUES (
+              'budget-1', 'ticket-1', 'account-1', 'profile-1',
+              'ETHUSDT', 'long', 'binance_usdm:ETHUSDT', 'episode-1',
+              'crypto', 'perpetual', 'crypto-beta', 'membership-1',
+              'account-fact-1', 'v1', :status, :risk, '30',
+              'reserved_unreflected'
+            )
+            """
+        ),
+        {"status": status, "risk": risk},
+    )

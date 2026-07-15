@@ -35,10 +35,12 @@ from src.infrastructure.binance_usdm_account_risk_snapshot import (  # noqa: E40
     BinanceUsdmAccountRiskSnapshotProvider,
     FullAccountRiskSnapshot,
 )
+from src.infrastructure.binance_usdm_streaming_signed_reader import (  # noqa: E402
+    BinanceUsdmStreamingSignedReader,
+)
 from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
     DEFAULT_BASE_URL,
     _env_value,
-    _request_json,
 )
 
 
@@ -140,16 +142,18 @@ def _active_account_risk_scope(
         conn,
         action_time_invocation_id=action_time_invocation_id,
     )
-    policies = sa.Table(
-        "brc_account_risk_policy_current", sa.MetaData(), autoload_with=conn
-    )
     rows = conn.execute(
-        sa.select(policies.c.account_id, policies.c.runtime_profile_id)
-        .where(
-            policies.c.runtime_profile_id
-            == invocation.lane_identity.runtime_profile_id
-        )
-        .where(policies.c.activation_state == "active")
+        sa.text(
+            """
+            SELECT account_id, runtime_profile_id
+            FROM brc_account_risk_policy_current
+            WHERE runtime_profile_id = :runtime_profile_id
+              AND activation_state = 'active'
+            ORDER BY account_id
+            LIMIT 2
+            """
+        ),
+        {"runtime_profile_id": invocation.lane_identity.runtime_profile_id},
     ).mappings().all()
     if not rows:
         return None
@@ -181,16 +185,21 @@ def _fetch_account_risk_snapshot(
         env_file=env_file,
     )
 
-    async def signed_get(path: str):
-        return await asyncio.to_thread(
-            _request_json,
+    reader = (
+        BinanceUsdmStreamingSignedReader(
             base_url=base_url,
-            path=path,
             api_key=api_key,
             api_secret=api_secret,
-            signed=True,
             timeout_seconds=timeout_seconds,
         )
+        if api_key and api_secret
+        else None
+    )
+
+    async def signed_get(path: str):
+        if reader is None:
+            raise RuntimeError("exchange_api_key_or_secret_missing")
+        return await asyncio.to_thread(reader.get, path)
 
     provider = BinanceUsdmAccountRiskSnapshotProvider(
         account_id=scope.account_id,

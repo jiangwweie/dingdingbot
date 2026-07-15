@@ -20,10 +20,13 @@ def _connection() -> sa.Connection:
             """
             CREATE TABLE brc_ticket_bound_exchange_commands (
               exchange_command_id TEXT PRIMARY KEY,
+              operation_submit_command_id TEXT NOT NULL,
+              account_id TEXT NOT NULL,
               ticket_id TEXT NOT NULL,
               exchange_instrument_id TEXT NOT NULL,
               exchange_order_id TEXT,
               client_order_id TEXT,
+              parent_order_id TEXT,
               order_role TEXT NOT NULL,
               command_state TEXT NOT NULL
             )
@@ -47,6 +50,8 @@ def _connection() -> sa.Connection:
             CREATE TABLE brc_exchange_instruments (
               exchange_instrument_id TEXT PRIMARY KEY,
               exchange_id TEXT NOT NULL,
+              asset_class TEXT NOT NULL,
+              instrument_type TEXT NOT NULL,
               status TEXT NOT NULL
             )
             """
@@ -61,7 +66,7 @@ def _connection() -> sa.Connection:
     conn.execute(
         sa.text(
             "INSERT INTO brc_exchange_instruments VALUES "
-            "('binance_usdm:ETHUSDT', 'binance_usdm', 'active')"
+            "('binance_usdm:ETHUSDT', 'binance_usdm', 'crypto', 'perpetual', 'active')"
         )
     )
     conn.execute(
@@ -122,10 +127,12 @@ def _insert_command(
         sa.text(
             """
             INSERT INTO brc_ticket_bound_exchange_commands (
-              exchange_command_id, ticket_id, exchange_instrument_id,
-              exchange_order_id, client_order_id, order_role, command_state
-            ) VALUES (:command_id, :ticket_id, :instrument, :exchange_order_id,
-                      :client_order_id, :role, 'confirmed_submitted')
+              exchange_command_id, operation_submit_command_id, account_id,
+              ticket_id, exchange_instrument_id, exchange_order_id,
+              client_order_id, parent_order_id, order_role, command_state
+            ) VALUES (:command_id, :command_id, 'account-1', :ticket_id,
+                      :instrument, :exchange_order_id, :client_order_id, NULL,
+                      :role, 'confirmed_submitted')
             """
         ),
         {

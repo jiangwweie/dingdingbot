@@ -52,10 +52,12 @@ from src.infrastructure.binance_usdm_account_risk_snapshot import (  # noqa: E40
     BinanceUsdmAccountRiskSnapshotProvider,
     FullAccountRiskSnapshot,
 )
+from src.infrastructure.binance_usdm_streaming_signed_reader import (  # noqa: E402
+    BinanceUsdmStreamingSignedReader,
+)
 from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
     DEFAULT_BASE_URL,
     _env_value,
-    _request_json,
 )
 
 
@@ -322,22 +324,18 @@ def _blocked_gateway_payload(gateway_binding: dict[str, Any]) -> dict[str, Any]:
 
 
 def _prepared_or_unknown_command_exists(conn: sa.engine.Connection) -> bool:
-    if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
-        return False
-    table = sa.Table(
-        "brc_ticket_bound_exchange_commands",
-        sa.MetaData(),
-        autoload_with=conn,
-    )
     return conn.execute(
-        sa.select(table.c.exchange_command_id)
-        .where(
-            table.c.command_source.in_(LIFECYCLE_MUTATION_COMMAND_SOURCES),
-            table.c.command_state.in_(
-                ("prepared", "dispatching", "outcome_unknown")
-            )
-        )
-        .limit(1)
+        sa.text(
+            """
+            SELECT exchange_command_id
+            FROM brc_ticket_bound_exchange_commands
+            WHERE command_source IN :command_sources
+              AND command_state IN ('prepared', 'dispatching', 'outcome_unknown')
+            ORDER BY exchange_command_id
+            LIMIT 1
+            """
+        ).bindparams(sa.bindparam("command_sources", expanding=True)),
+        {"command_sources": tuple(LIFECYCLE_MUTATION_COMMAND_SOURCES)},
     ).first() is not None
 
 
@@ -412,18 +410,18 @@ def _active_account_risk_scopes(
     from per-Ticket exchange snapshots.
     """
 
-    if not prepared_scopes or not sa.inspect(conn).has_table(
-        "brc_account_risk_policy_current"
-    ):
+    if not prepared_scopes:
         return {}
-    policies = sa.Table(
-        "brc_account_risk_policy_current", sa.MetaData(), autoload_with=conn
-    )
     active_pairs = {
         (str(row["account_id"]), str(row["runtime_profile_id"]))
         for row in conn.execute(
-            sa.select(policies.c.account_id, policies.c.runtime_profile_id).where(
-                policies.c.activation_state == "active"
+            sa.text(
+                """
+                SELECT account_id, runtime_profile_id
+                FROM brc_account_risk_policy_current
+                WHERE activation_state = 'active'
+                ORDER BY account_id, runtime_profile_id
+                """
             )
         ).mappings()
     }
@@ -489,16 +487,21 @@ async def _fetch_account_risk_snapshot(
         env_file=env_file,
     )
 
-    async def signed_get(path: str) -> Any:
-        return await asyncio.to_thread(
-            _request_json,
+    reader = (
+        BinanceUsdmStreamingSignedReader(
             base_url=base_url,
-            path=path,
             api_key=api_key,
             api_secret=api_secret,
-            signed=True,
             timeout_seconds=timeout_seconds,
         )
+        if api_key and api_secret
+        else None
+    )
+
+    async def signed_get(path: str) -> Any:
+        if reader is None:
+            raise RuntimeError("exchange_api_key_or_secret_missing")
+        return await asyncio.to_thread(reader.get, path)
 
     provider = BinanceUsdmAccountRiskSnapshotProvider(
         account_id=account_id,

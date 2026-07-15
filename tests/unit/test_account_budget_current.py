@@ -27,9 +27,22 @@ def test_consumed_reservation_is_claim_ceiling_not_additive_to_open_exposure() -
     conn.execute(
         sa.text(
             """
-            INSERT INTO brc_budget_reservations VALUES
-              ('budget-1', 'account-1', 'ticket-1', 'consumed', '15', '30', 'exchange_reflected'),
-              ('budget-2', 'account-1', 'ticket-2', 'active', '9', '18', 'reserved_unreflected')
+            INSERT INTO brc_budget_reservations (
+              budget_reservation_id, account_id, runtime_profile_id, ticket_id,
+              exchange_instrument_id, exposure_episode_id, status,
+              risk_at_stop, reserved_margin, margin_accounting_state,
+              symbol, asset_class, instrument_type, primary_risk_cluster_id,
+              cluster_membership_snapshot_id, account_source_fact_snapshot_id,
+              account_fact_schema_version
+            ) VALUES
+              ('budget-1', 'account-1', 'profile-1', 'ticket-1',
+               'instrument-1', 'episode-1', 'consumed', '15', '30',
+               'exchange_reflected', 'SOLUSDT', 'crypto', 'perpetual',
+               'crypto-beta', 'membership-1', 'account-fact-1', 'v1'),
+              ('budget-2', 'account-1', 'profile-1', 'ticket-2',
+               'instrument-2', 'episode-2', 'active', '9', '18',
+               'reserved_unreflected', 'SOLUSDT', 'crypto', 'perpetual',
+               'crypto-beta', 'membership-1', 'account-fact-1', 'v1')
             """
         )
     )
@@ -79,9 +92,18 @@ def test_active_unreflected_claim_margin_reduces_account_margin_capacity() -> No
     conn.execute(
         sa.text(
             """
-            INSERT INTO brc_budget_reservations VALUES
-              ('budget-1', 'account-1', 'ticket-1', 'active', '9', '100',
-               'reserved_unreflected')
+            INSERT INTO brc_budget_reservations (
+              budget_reservation_id, account_id, runtime_profile_id, ticket_id,
+              exchange_instrument_id, exposure_episode_id, status,
+              risk_at_stop, reserved_margin, margin_accounting_state,
+              symbol, asset_class, instrument_type, primary_risk_cluster_id,
+              cluster_membership_snapshot_id, account_source_fact_snapshot_id,
+              account_fact_schema_version
+            ) VALUES
+              ('budget-1', 'account-1', 'profile-1', 'ticket-1',
+               'instrument-1', 'episode-1', 'active', '9', '100',
+               'reserved_unreflected', 'SOLUSDT', 'crypto', 'perpetual',
+               'crypto-beta', 'membership-1', 'account-fact-1', 'v1')
             """
         )
     )
@@ -158,11 +180,29 @@ def _connection() -> sa.Connection:
         sa.text(
             """
             CREATE TABLE brc_budget_reservations (
-                budget_reservation_id TEXT PRIMARY KEY, account_id TEXT, ticket_id TEXT,
+                budget_reservation_id TEXT PRIMARY KEY, account_id TEXT,
+                runtime_profile_id TEXT, ticket_id TEXT,
+                exchange_instrument_id TEXT, exposure_episode_id TEXT,
                 status TEXT, risk_at_stop NUMERIC, reserved_margin NUMERIC,
-                margin_accounting_state TEXT
+                margin_accounting_state TEXT, symbol TEXT, asset_class TEXT,
+                instrument_type TEXT, primary_risk_cluster_id TEXT,
+                cluster_membership_snapshot_id TEXT,
+                account_source_fact_snapshot_id TEXT,
+                account_fact_schema_version TEXT
             )
             """
+        )
+    )
+    conn.execute(
+        sa.text(
+            "CREATE TABLE brc_exchange_instruments ("
+            "exchange_instrument_id TEXT PRIMARY KEY, exchange_symbol TEXT)"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_exchange_instruments VALUES "
+            "('instrument-1','SOLUSDT'),('instrument-2','ETHUSDT')"
         )
     )
     conn.execute(

@@ -38,6 +38,7 @@ def upgrade() -> None:
     _release_terminal_presubmit_capacity(bind)
     _backfill_candidate_scope_instruments(bind)
     _backfill_reservation_instruments(bind)
+    _backfill_exposure_episode_lineage(bind)
     _backfill_asset_neutral_dimensions(bind)
     _mark_unresolved_terminal_history_audit_only(bind)
 
@@ -312,6 +313,79 @@ def _backfill_asset_neutral_dimensions(bind: sa.Connection) -> None:
         asset_class_column="asset_class",
         instrument_type_column="instrument_type",
     )
+
+
+def _backfill_exposure_episode_lineage(bind: sa.Connection) -> None:
+    tables = _tables(bind)
+    if "brc_budget_reservations" in tables and {
+        "ticket_id",
+        "exposure_episode_id",
+    } <= _columns(bind, "brc_budget_reservations"):
+        bind.execute(sa.text("""
+          UPDATE brc_budget_reservations
+          SET exposure_episode_id = 'exposure_episode:migration-127:' || ticket_id
+          WHERE ticket_id IS NOT NULL AND trim(ticket_id) <> ''
+            AND (exposure_episode_id IS NULL OR trim(exposure_episode_id) = '')
+        """))
+    if "brc_action_time_tickets" in tables and {
+        "ticket_id",
+        "exposure_episode_id",
+    } <= _columns(bind, "brc_action_time_tickets"):
+        bind.execute(sa.text("""
+          UPDATE brc_action_time_tickets
+          SET exposure_episode_id = COALESCE(
+            (SELECT reservation.exposure_episode_id
+             FROM brc_budget_reservations AS reservation
+             WHERE reservation.ticket_id = brc_action_time_tickets.ticket_id
+             LIMIT 1),
+            'exposure_episode:migration-127:' || ticket_id
+          )
+          WHERE exposure_episode_id IS NULL OR trim(exposure_episode_id) = ''
+        """))
+    for table_name in (
+        "brc_ticket_bound_exchange_commands",
+        "brc_ticket_bound_reconciliation_ticks",
+        "brc_live_outcome_ledger",
+    ):
+        if table_name not in tables or not {
+            "ticket_id",
+            "exposure_episode_id",
+        } <= _columns(bind, table_name):
+            continue
+        bind.execute(sa.text(f"""
+          UPDATE {table_name}
+          SET exposure_episode_id = (
+            SELECT ticket.exposure_episode_id
+            FROM brc_action_time_tickets AS ticket
+            WHERE ticket.ticket_id = {table_name}.ticket_id
+            LIMIT 1
+          )
+          WHERE (exposure_episode_id IS NULL OR trim(exposure_episode_id) = '')
+            AND EXISTS (
+              SELECT 1 FROM brc_action_time_tickets AS ticket
+              WHERE ticket.ticket_id = {table_name}.ticket_id
+                AND ticket.exposure_episode_id IS NOT NULL
+                AND trim(ticket.exposure_episode_id) <> ''
+            )
+        """))
+    if "brc_account_exposure_current" in tables and {
+        "owner_ticket_id",
+        "current_exposure_episode_id",
+        "ownership_state",
+    } <= _columns(bind, "brc_account_exposure_current"):
+        bind.execute(sa.text("""
+          UPDATE brc_account_exposure_current
+          SET current_exposure_episode_id = (
+            SELECT ticket.exposure_episode_id
+            FROM brc_action_time_tickets AS ticket
+            WHERE ticket.ticket_id = brc_account_exposure_current.owner_ticket_id
+            LIMIT 1
+          )
+          WHERE ownership_state IN
+              ('owned_by_ticket', 'owned_by_other_known_ticket')
+            AND (current_exposure_episode_id IS NULL
+                 OR trim(current_exposure_episode_id) = '')
+        """))
 
 
 def _backfill_table_instrument_dimensions(

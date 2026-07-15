@@ -125,10 +125,28 @@ def upgrade() -> None:
         "exposure_episode_id",
         sa.String(192),
     )
+    _add_column(
+        "brc_ticket_bound_reconciliation_ticks",
+        "exposure_episode_id",
+        sa.String(192),
+    )
+    _add_column(
+        "brc_live_outcome_ledger",
+        "exposure_episode_id",
+        sa.String(192),
+    )
 
 
 def downgrade() -> None:
     for table_name, columns in (
+        (
+            "brc_live_outcome_ledger",
+            ("exposure_episode_id",),
+        ),
+        (
+            "brc_ticket_bound_reconciliation_ticks",
+            ("exposure_episode_id",),
+        ),
         (
             "brc_ticket_bound_exchange_commands",
             ("exposure_episode_id",),
