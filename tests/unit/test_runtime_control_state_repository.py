@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, text
@@ -172,6 +173,75 @@ def test_pg_backed_runtime_control_state_repository_reads_seeded_state(
         "squeeze_clear",
         "liquidity_clear",
     ]
+
+
+def test_watcher_candidate_universe_uses_four_explicit_bounded_queries(
+    pg_control_connection,
+):
+    statements: list[str] = []
+
+    def capture_sql(_conn, _cursor, statement, _parameters, _context, _many):
+        statements.append(" ".join(statement.split()))
+
+    sa.event.listen(
+        pg_control_connection.engine,
+        "before_cursor_execute",
+        capture_sql,
+    )
+    try:
+        projection = PgBackedRuntimeControlStateRepository(
+            pg_control_connection,
+            now_ms=1770000120100,
+        ).read_watcher_candidate_universe_current()
+    finally:
+        sa.event.remove(
+            pg_control_connection.engine,
+            "before_cursor_execute",
+            capture_sql,
+        )
+
+    assert projection.schema == "brc.watcher_candidate_universe_current.v1"
+    assert len(projection.candidate_scope) == 22
+    assert len(projection.candidate_scope_event_bindings) == 22
+    assert len(projection.runtime_scope_bindings) == 22
+    assert len(projection.strategy_side_event_specs) == 6
+
+    row_queries = [
+        statement
+        for statement in statements
+        if statement.startswith("SELECT ") and " FROM brc_" in statement
+    ]
+    assert len(row_queries) == 4
+    assert {
+        table
+        for table in (
+            "brc_strategy_group_candidate_scope",
+            "brc_candidate_scope_event_bindings",
+            "brc_runtime_scope_bindings",
+            "brc_strategy_side_event_specs",
+        )
+        if any(f" FROM {table}" in statement for statement in row_queries)
+    } == {
+        "brc_strategy_group_candidate_scope",
+        "brc_candidate_scope_event_bindings",
+        "brc_runtime_scope_bindings",
+        "brc_strategy_side_event_specs",
+    }
+    assert all(" WHERE " in statement for statement in row_queries)
+    assert all(" LIMIT " in statement for statement in row_queries)
+    assert all(".*" not in statement for statement in row_queries)
+
+
+def test_watcher_candidate_universe_fails_closed_on_row_257(
+    pg_control_connection,
+):
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+
+    with pytest.raises(
+        RuntimeControlStateRepositoryError,
+        match="watcher_candidate_universe_overflow:candidate_scope",
+    ):
+        repository.read_watcher_candidate_universe_current(row_limit_per_table=21)
 
 
 def test_current_chain_helpers_reject_future_dated_rows() -> None:

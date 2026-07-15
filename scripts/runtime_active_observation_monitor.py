@@ -317,7 +317,10 @@ def _read_candidate_universe_from_pg(
     try:
         with engine.connect() as conn:
             repository = PgBackedRuntimeControlStateRepository(conn)
-            return _candidate_universe_from_control_state(repository.read_control_state())
+            projection = repository.read_watcher_candidate_universe_current()
+            return _candidate_universe_from_control_state(
+                projection.to_control_state()
+            )
     finally:
         engine.dispose()
 

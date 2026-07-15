@@ -12,6 +12,14 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.readmodels.watcher_candidate_universe import (
+    WatcherCandidateEventBindingRow,
+    WatcherCandidateScopeRow,
+    WatcherCandidateUniverseCurrentProjection,
+    WatcherRuntimeScopeBindingRow,
+    WatcherStrategySideEventSpecRow,
+)
+
 from src.application.action_time.identity_conservation import (
     RuntimeLaneIdentityConservationError,
     require_runtime_lane_lineage_match,
@@ -105,6 +113,56 @@ RUNTIME_LANE_IDENTITY_COLUMN_SENTINELS = (
     "source_watermark",
 )
 
+WATCHER_CANDIDATE_TABLES: dict[str, str] = {
+    "candidate_scope": "brc_strategy_group_candidate_scope",
+    "candidate_scope_event_bindings": "brc_candidate_scope_event_bindings",
+    "runtime_scope_bindings": "brc_runtime_scope_bindings",
+    "strategy_side_event_specs": "brc_strategy_side_event_specs",
+}
+
+WATCHER_CANDIDATE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "candidate_scope": (
+        "candidate_scope_id",
+        "strategy_group_id",
+        "symbol",
+        "asset_class",
+        "side",
+        "policy_current_id",
+        "priority_rank",
+        "status",
+    ),
+    "candidate_scope_event_bindings": (
+        "binding_id",
+        "candidate_scope_id",
+        "event_spec_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+        "status",
+    ),
+    "runtime_scope_bindings": (
+        "runtime_scope_binding_id",
+        "candidate_scope_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+        "runtime_profile_id",
+        "policy_current_id",
+        "status",
+    ),
+    "strategy_side_event_specs": (
+        "event_spec_id",
+        "strategy_group_id",
+        "strategy_group_version_id",
+        "event_spec_version",
+        "event_id",
+        "side",
+        "timeframe",
+        "time_authority",
+        "status",
+    ),
+}
+
 
 class PgBackedRuntimeControlStateRepository:
     """Read production runtime control-state from PG current tables."""
@@ -157,6 +215,75 @@ class PgBackedRuntimeControlStateRepository:
     def read_monitor_control_state(self) -> dict[str, Any]:
         return self._read_bounded_current_state(
             read_profile="monitor_bounded_current",
+        )
+
+    def read_watcher_candidate_universe_current(
+        self,
+        *,
+        row_limit_per_table: int = 256,
+    ) -> WatcherCandidateUniverseCurrentProjection:
+        if row_limit_per_table <= 0 or row_limit_per_table > 256:
+            raise RuntimeControlStateRepositoryError(
+                "watcher_candidate_universe_row_limit_invalid"
+            )
+        inspector = sa.inspect(self.conn)
+        existing = set(inspector.get_table_names())
+        missing = sorted(set(WATCHER_CANDIDATE_TABLES.values()) - existing)
+        if missing:
+            raise RuntimeControlStateRepositoryError(
+                "PG watcher candidate tables missing: " + ", ".join(missing)
+            )
+        if self.conn.dialect.name == "postgresql":
+            self.conn.exec_driver_sql("SET LOCAL lock_timeout = '1s'")
+            self.conn.exec_driver_sql("SET LOCAL statement_timeout = '5s'")
+
+        rows: dict[str, list[dict[str, Any]]] = {}
+        for logical_key, table_name in WATCHER_CANDIDATE_TABLES.items():
+            metadata = sa.MetaData()
+            table = sa.Table(table_name, metadata, autoload_with=self.conn)
+            column_names = WATCHER_CANDIDATE_COLUMNS[logical_key]
+            missing_columns = [name for name in column_names if name not in table.c]
+            if missing_columns:
+                raise RuntimeControlStateRepositoryError(
+                    f"watcher_candidate_schema_invalid:{logical_key}:"
+                    + ",".join(missing_columns)
+                )
+            status = "current" if logical_key == "strategy_side_event_specs" else "active"
+            statement = (
+                sa.select(*(table.c[name] for name in column_names))
+                .where(table.c.status == status)
+                .order_by(*table.primary_key.columns)
+                .limit(row_limit_per_table + 1)
+            )
+            selected = [
+                {key: _json_safe(value) for key, value in row.items()}
+                for row in self.conn.execute(statement).mappings()
+            ]
+            if len(selected) > row_limit_per_table:
+                raise RuntimeControlStateRepositoryError(
+                    f"watcher_candidate_universe_overflow:{logical_key}"
+                )
+            rows[logical_key] = selected
+
+        _validate_watcher_candidate_universe(rows)
+        return WatcherCandidateUniverseCurrentProjection(
+            read_now_ms=self.now_ms,
+            candidate_scope=tuple(
+                WatcherCandidateScopeRow.model_validate(row)
+                for row in rows["candidate_scope"]
+            ),
+            candidate_scope_event_bindings=tuple(
+                WatcherCandidateEventBindingRow.model_validate(row)
+                for row in rows["candidate_scope_event_bindings"]
+            ),
+            runtime_scope_bindings=tuple(
+                WatcherRuntimeScopeBindingRow.model_validate(row)
+                for row in rows["runtime_scope_bindings"]
+            ),
+            strategy_side_event_specs=tuple(
+                WatcherStrategySideEventSpecRow.model_validate(row)
+                for row in rows["strategy_side_event_specs"]
+            ),
         )
 
     def read_action_time_control_state(
@@ -1334,6 +1461,118 @@ class PgBackedRuntimeControlStateRepository:
                 downstream=ticket,
                 boundary="action_time_lane_to_ticket",
                 entity_id=ticket_id,
+            )
+
+
+def _validate_watcher_candidate_universe(
+    rows: dict[str, list[dict[str, Any]]],
+) -> None:
+    candidates = rows["candidate_scope"]
+    if not candidates:
+        raise RuntimeControlStateRepositoryError("active candidate scope is empty")
+
+    def unique_by(
+        values: list[dict[str, Any]],
+        key: str,
+        logical_key: str,
+    ) -> dict[str, dict[str, Any]]:
+        indexed: dict[str, dict[str, Any]] = {}
+        for row in values:
+            identity = str(row.get(key) or "").strip()
+            if not identity or identity in indexed:
+                raise RuntimeControlStateRepositoryError(
+                    f"watcher_candidate_duplicate_identity:{logical_key}:{identity}"
+                )
+            indexed[identity] = row
+        return indexed
+
+    candidate_by_id = unique_by(
+        candidates,
+        "candidate_scope_id",
+        "candidate_scope",
+    )
+    event_by_id = unique_by(
+        rows["strategy_side_event_specs"],
+        "event_spec_id",
+        "strategy_side_event_specs",
+    )
+    binding_by_id = unique_by(
+        rows["candidate_scope_event_bindings"],
+        "binding_id",
+        "candidate_scope_event_bindings",
+    )
+    runtime_by_id = unique_by(
+        rows["runtime_scope_bindings"],
+        "runtime_scope_binding_id",
+        "runtime_scope_bindings",
+    )
+
+    candidate_keys: set[tuple[str, str, str]] = set()
+    for candidate in candidates:
+        lane_key = tuple(str(candidate.get(key) or "") for key in (
+            "strategy_group_id",
+            "symbol",
+            "side",
+        ))
+        if lane_key in candidate_keys:
+            raise RuntimeControlStateRepositoryError(
+                "watcher_candidate_duplicate_lane:" + ":".join(lane_key)
+            )
+        candidate_keys.add(lane_key)
+
+    bindings_by_candidate: dict[str, list[dict[str, Any]]] = {}
+    for binding in binding_by_id.values():
+        candidate_id = str(binding.get("candidate_scope_id") or "")
+        candidate = candidate_by_id.get(candidate_id)
+        if candidate is None:
+            raise RuntimeControlStateRepositoryError(
+                f"{binding.get('binding_id')} has no active candidate scope"
+            )
+        event = event_by_id.get(str(binding.get("event_spec_id") or ""))
+        if event is None:
+            raise RuntimeControlStateRepositoryError(
+                f"{binding.get('binding_id')} does not reference a current event spec"
+            )
+        for key in ("strategy_group_id", "symbol", "side"):
+            if binding.get(key) != candidate.get(key):
+                raise RuntimeControlStateRepositoryError(
+                    f"{binding.get('binding_id')} mismatches candidate {key}"
+                )
+        for key in ("strategy_group_id", "side"):
+            if event.get(key) != candidate.get(key):
+                raise RuntimeControlStateRepositoryError(
+                    f"{binding.get('binding_id')} mismatches event {key}"
+                )
+        bindings_by_candidate.setdefault(candidate_id, []).append(binding)
+
+    runtimes_by_candidate: dict[str, list[dict[str, Any]]] = {}
+    for runtime in runtime_by_id.values():
+        candidate_id = str(runtime.get("candidate_scope_id") or "")
+        candidate = candidate_by_id.get(candidate_id)
+        if candidate is None:
+            raise RuntimeControlStateRepositoryError(
+                f"{runtime.get('runtime_scope_binding_id')} has no active candidate scope"
+            )
+        for key in (
+            "strategy_group_id",
+            "symbol",
+            "side",
+            "policy_current_id",
+        ):
+            if runtime.get(key) != candidate.get(key):
+                raise RuntimeControlStateRepositoryError(
+                    f"{runtime.get('runtime_scope_binding_id')} mismatches candidate {key}"
+                )
+        runtimes_by_candidate.setdefault(candidate_id, []).append(runtime)
+
+    for candidate_id in candidate_by_id:
+        if len(bindings_by_candidate.get(candidate_id, ())) != 1:
+            raise RuntimeControlStateRepositoryError(
+                f"{candidate_id} must have exactly one active event binding"
+            )
+        if len(runtimes_by_candidate.get(candidate_id, ())) != 1:
+            raise RuntimeControlStateRepositoryError(
+                f"{candidate_id} must have exactly one active runtime scope binding"
             )
 
 

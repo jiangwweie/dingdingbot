@@ -11,6 +11,11 @@ from scripts import runtime_active_observation_monitor
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 
 
+_REAL_READ_CANDIDATE_UNIVERSE_FROM_PG = (
+    runtime_active_observation_monitor._read_candidate_universe_from_pg
+)
+
+
 def _typed_coverage_identity(
     *,
     strategy_group_id: str,
@@ -183,6 +188,64 @@ def _patch_pg_candidate_scope(
         "_read_candidate_universe_from_pg",
         fake_pg_candidate_universe,
     )
+
+
+def test_pg_candidate_universe_uses_watcher_current_projection(monkeypatch):
+    calls: list[str] = []
+
+    class FakeProjection:
+        def to_control_state(self):
+            return {
+                "source_mode": "db_backed",
+                "projection_target": "production_current",
+                "candidate_scope": [],
+                "candidate_scope_event_bindings": [],
+                "runtime_scope_bindings": [],
+                "strategy_side_event_specs": [],
+            }
+
+    class FakeRepository:
+        def __init__(self, _conn):
+            pass
+
+        def read_control_state(self):
+            raise AssertionError("watcher must not read the full control state")
+
+        def read_watcher_candidate_universe_current(self):
+            calls.append("watcher_current")
+            return FakeProjection()
+
+    class FakeConnection:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_args):
+            return None
+
+    class FakeEngine:
+        def connect(self):
+            return FakeConnection()
+
+        def dispose(self):
+            calls.append("disposed")
+
+    monkeypatch.setattr(sa, "create_engine", lambda _dsn: FakeEngine())
+    monkeypatch.setattr(
+        runtime_active_observation_monitor,
+        "PgBackedRuntimeControlStateRepository",
+        FakeRepository,
+    )
+
+    universe, metadata = (
+        _REAL_READ_CANDIDATE_UNIVERSE_FROM_PG(
+            database_url="sqlite://",
+            allow_non_postgres_for_test=True,
+        )
+    )
+
+    assert universe == {}
+    assert metadata["source_mode"] == "db_backed"
+    assert calls == ["watcher_current", "disposed"]
 
 
 def _runtime(
