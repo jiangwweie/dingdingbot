@@ -648,6 +648,25 @@ def test_persistent_runtime_config_is_copied_outside_immutable_release_once(tmp_
     assert first["status"] == second["status"] == "persistent_runtime_config_ready"
 
 
+def test_existing_persistent_runtime_config_does_not_require_previous_release_copy(tmp_path):
+    previous = tmp_path / "previous-without-data"
+    previous.mkdir()
+    target_dir = tmp_path / "var/lib/brc-runtime/config"
+    target_dir.mkdir(parents=True, mode=0o750)
+    target = target_dir / "v3_dev.db"
+    target.write_bytes(b"existing-config")
+    target.chmod(0o640)
+
+    result = machine._provision_persistent_runtime_config(
+        previous_release_path=previous,
+        target_dir=target_dir,
+    )
+
+    assert result["status"] == "persistent_runtime_config_ready"
+    assert result["source_sha256"] is None
+    assert target.read_bytes() == b"existing-config"
+
+
 def test_fact_refresh_returns_exact_ids_for_v2_certification(tmp_path):
     release = tmp_path / "candidate"
     python = release / ".venv/bin/python"

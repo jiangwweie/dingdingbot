@@ -678,30 +678,44 @@ def _provision_persistent_runtime_config(
     previous_release_path: Path,
     target_dir: Path = Path("/var/lib/brc-runtime/config"),
 ) -> dict[str, Any]:
-    source = Path(previous_release_path).resolve(strict=True) / "data/v3_dev.db"
-    if not source.is_file():
-        raise ValueError("previous_runtime_config_db_missing")
-    source_info = source.stat()
     target_dir = Path(target_dir)
     target = target_dir / "v3_dev.db"
-    target_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
-    os.chown(target_dir, source_info.st_uid, source_info.st_gid)
-    os.chmod(target_dir, 0o750)
-    if not target.exists():
+    source = Path(previous_release_path).resolve(strict=True) / "data/v3_dev.db"
+    if target.exists():
+        target_info = target.stat()
+        directory_info = target_dir.stat()
+        if (
+            not stat.S_ISREG(target_info.st_mode)
+            or target_info.st_uid == 0
+            or stat.S_IMODE(target_info.st_mode) != 0o640
+            or not stat.S_ISDIR(directory_info.st_mode)
+            or directory_info.st_uid != target_info.st_uid
+            or directory_info.st_gid != target_info.st_gid
+            or stat.S_IMODE(directory_info.st_mode) != 0o750
+        ):
+            raise ValueError("persistent_runtime_config_identity_invalid")
+        source_sha256 = None
+    else:
+        if not source.is_file():
+            raise ValueError("previous_runtime_config_db_missing")
+        source_info = source.stat()
+        target_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
+        os.chown(target_dir, source_info.st_uid, source_info.st_gid)
+        os.chmod(target_dir, 0o750)
         _atomic_bytes_write(target, source.read_bytes(), mode=0o640)
         os.chown(target, source_info.st_uid, source_info.st_gid)
+        source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
     target_info = target.stat()
     if (
         not stat.S_ISREG(target_info.st_mode)
-        or target_info.st_uid != source_info.st_uid
-        or target_info.st_gid != source_info.st_gid
+        or target_info.st_uid == 0
         or stat.S_IMODE(target_info.st_mode) != 0o640
     ):
         raise ValueError("persistent_runtime_config_identity_invalid")
     return {
         "status": "persistent_runtime_config_ready",
         "path": str(target),
-        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "source_sha256": source_sha256,
         "target_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
     }
 
