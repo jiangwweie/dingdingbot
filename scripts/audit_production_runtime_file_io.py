@@ -45,6 +45,11 @@ PRODUCTION_CADENCE_SCRIPT_NAMES = {
     "runtime_signal_watcher_resume_dispatcher.py",
     "run_tokyo_runtime_server_monitor.py",
 }
+BOUNDED_ONE_SHOT_DEPLOY_SCRIPT_NAMES = {
+    "atomic_switch_release_pointer.py",
+    "set_production_writer_fence.py",
+    "tokyo_runtime_deploy_remote_state_machine.py",
+}
 FAIL_ON_RISK_FLAGS = (
     "blocking_cleanup_required",
     "frequent_report_write",
@@ -885,6 +890,8 @@ def _runtime_surface(rel_path: str) -> str:
         return "server_monitor"
     if rel_path.startswith("scripts/"):
         name = rel_path.rsplit("/", 1)[-1]
+        if name in BOUNDED_ONE_SHOT_DEPLOY_SCRIPT_NAMES:
+            return "one_shot_ops"
         if name in PRODUCTION_CADENCE_SCRIPT_NAMES:
             return "production_cadence_script"
     if "materialize_action_time" in rel_path or "materialize_ticket_bound" in rel_path:
@@ -1231,7 +1238,7 @@ def _is_bounded_destructive_file_mutation(
     runtime_surface: str,
     source: str,
 ) -> bool:
-    if runtime_surface == "test":
+    if runtime_surface in {"test", "one_shot_ops"}:
         return True
     if rel_path.startswith("scripts/ops/"):
         return True
