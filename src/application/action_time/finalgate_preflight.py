@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import sqlalchemy as sa
@@ -43,6 +44,21 @@ from src.application.action_time.budget_stop_risk import (  # noqa: E402
 )
 from src.application.action_time.action_time_ticket import (  # noqa: E402
     compute_action_time_ticket_hash,
+)
+from src.application.action_time.account_capacity_claim import (  # noqa: E402
+    AccountCapacityClaimConflict,
+    load_account_capacity_claim_by_invocation,
+)
+from src.application.action_time.instrument_risk_facts import (  # noqa: E402
+    InstrumentRiskFactsError,
+    load_instrument_risk_facts,
+)
+from src.domain.account_capacity_claim import (  # noqa: E402
+    capacity_claim_hash,
+    revalidate_capacity_totals,
+)
+from src.infrastructure.account_capacity_hot_path_repository import (  # noqa: E402
+    load_live_exposure_rows,
 )
 
 
@@ -530,28 +546,78 @@ def account_capacity_current_blockers(
     budget: dict[str, Any],
     now_ms: int,
 ) -> tuple[list[str], bool]:
-    """Revalidate the active account-capacity claim without network I/O."""
+    """Revalidate one immutable, already-counted claim by current semantics."""
 
     policy_version = str(budget.get("account_risk_policy_version") or "").strip()
     policy_event_id = str(budget.get("account_risk_policy_event_id") or "").strip()
-    expected_projection_version = budget.get("account_capacity_projection_version")
-    if not policy_version or expected_projection_version is None:
+    invocation_id = str(budget.get("action_time_invocation_id") or "").strip()
+    ticket_id = str(budget.get("ticket_id") or "").strip()
+    if not policy_version or budget.get("account_capacity_projection_version") is None:
         return [], False
     if not policy_event_id:
         return ["account_risk_policy_event_missing"], True
-    required_tables = {
-        "brc_account_risk_policy_current",
-        "brc_account_budget_current",
-    }
-    if not required_tables.issubset(set(sa.inspect(conn).get_table_names())):
-        return ["account_capacity_current_projection_missing"], True
-    policies = sa.Table(
-        "brc_account_risk_policy_current", sa.MetaData(), autoload_with=conn
+    if not invocation_id or not ticket_id:
+        return ["account_capacity_claim_lineage_missing"], True
+
+    try:
+        claim = load_account_capacity_claim_by_invocation(
+            conn,
+            action_time_invocation_id=invocation_id,
+        )
+    except (AccountCapacityClaimConflict, TypeError, ValueError):
+        return ["account_capacity_claim_invalid"], True
+    if claim is None or claim.payload.ticket_id != ticket_id:
+        return ["account_capacity_claim_missing"], True
+    if (
+        claim.capacity_claim_hash != capacity_claim_hash(claim.payload)
+        or claim.capacity_claim_hash
+        != str(budget.get("capacity_claim_hash") or "").strip()
+    ):
+        return ["account_capacity_claim_hash_mismatch"], True
+
+    claim_count = int(
+        conn.execute(
+            sa.text(
+                """
+                SELECT count(*)
+                FROM brc_budget_reservations
+                WHERE account_id = :account_id
+                  AND runtime_profile_id = :runtime_profile_id
+                  AND ticket_id = :ticket_id
+                  AND status IN ('active', 'consumed')
+                """
+            ),
+            {
+                "account_id": claim.payload.account_id,
+                "runtime_profile_id": claim.payload.runtime_profile_id,
+                "ticket_id": ticket_id,
+            },
+        ).scalar_one()
     )
+    if claim_count == 0:
+        return ["account_capacity_claim_not_counted"], True
+    if claim_count != 1:
+        return ["account_capacity_claim_count_mismatch"], True
+
     policy = conn.execute(
-        sa.select(policies)
-        .where(policies.c.account_id == budget.get("account_id"))
-        .where(policies.c.runtime_profile_id == budget.get("runtime_profile_id"))
+        sa.text(
+            """
+            SELECT risk_policy_version, activation_state, source_event_id,
+                   max_concurrent_positions,
+                   max_portfolio_open_risk_fraction,
+                   max_cluster_open_risk_fraction,
+                   max_portfolio_initial_margin_fraction
+            FROM brc_account_risk_policy_current
+            WHERE account_id = :account_id
+              AND runtime_profile_id = :runtime_profile_id
+            ORDER BY risk_policy_version
+            LIMIT 2
+            """
+        ),
+        {
+            "account_id": claim.payload.account_id,
+            "runtime_profile_id": claim.payload.runtime_profile_id,
+        },
     ).mappings().one_or_none()
     if policy is None or str(policy.get("risk_policy_version") or "") != policy_version:
         return ["account_risk_policy_missing_or_changed"], True
@@ -559,26 +625,157 @@ def account_capacity_current_blockers(
         return ["account_risk_policy_event_changed"], True
     if str(policy.get("activation_state") or "") != "active":
         return ["account_risk_policy_not_active"], True
-    current = sa.Table(
-        "brc_account_budget_current", sa.MetaData(), autoload_with=conn
-    )
+
     projection = conn.execute(
-        sa.select(current)
-        .where(current.c.account_id == budget.get("account_id"))
-        .where(current.c.runtime_profile_id == budget.get("runtime_profile_id"))
-        .where(current.c.risk_policy_version == policy_version)
+        sa.text(
+            """
+            SELECT total_wallet_balance, available_balance,
+                   portfolio_held_risk, unreflected_pending_margin,
+                   exchange_total_initial_margin,
+                   claimed_position_slots, valid_until_ms,
+                   reconciliation_state, first_blocker
+            FROM brc_account_budget_current
+            WHERE account_id = :account_id
+              AND runtime_profile_id = :runtime_profile_id
+              AND risk_policy_version = :risk_policy_version
+            ORDER BY account_budget_current_id
+            LIMIT 2
+            """
+        ),
+        {
+            "account_id": claim.payload.account_id,
+            "runtime_profile_id": claim.payload.runtime_profile_id,
+            "risk_policy_version": policy_version,
+        },
     ).mappings().one_or_none()
     if projection is None:
         return ["account_budget_current_missing"], True
     if int(projection.get("valid_until_ms") or 0) <= now_ms:
         return ["account_budget_current_stale"], True
-    if int(projection.get("projection_version") or 0) != int(expected_projection_version):
-        return ["account_budget_projection_version_changed"], True
-    if projection.get("new_entry_allowed") is not True:
-        return [
-            str(projection.get("first_blocker") or "account_budget_new_entry_not_allowed")
-        ], True
-    return [], True
+
+    max_positions = int(policy["max_concurrent_positions"])
+    exposure_rows = load_live_exposure_rows(
+        conn,
+        account_id=claim.payload.account_id,
+        max_concurrent_positions=max_positions,
+    )
+    if exposure_rows.overflow:
+        return ["account_exposure_current_overflow"], True
+    exposure_blockers = sorted(
+        {str(row.first_blocker) for row in exposure_rows.rows if row.first_blocker}
+    )
+    if exposure_blockers:
+        return exposure_blockers, True
+    own_slot_count = sum(
+        1
+        for row in exposure_rows.rows
+        if row.owner_ticket_id == ticket_id and row.position_slot_claimed
+    )
+    if own_slot_count == 0:
+        return ["account_capacity_claim_slot_not_counted"], True
+    if own_slot_count != 1:
+        return ["account_capacity_claim_slot_count_mismatch"], True
+
+    try:
+        current_facts = load_instrument_risk_facts(
+            conn,
+            exchange_instrument_id=claim.payload.instrument.exchange_instrument_id,
+            risk_policy_version=policy_version,
+            planned_notional=claim.payload.target_notional,
+            now_ms=now_ms,
+        )
+    except InstrumentRiskFactsError as exc:
+        return [str(exc)], True
+    if current_facts.identity != claim.payload.instrument:
+        return ["account_capacity_claim_instrument_identity_changed"], True
+    if (
+        current_facts.cluster_snapshot.primary_risk_cluster_id
+        != claim.payload.cluster_snapshot.primary_risk_cluster_id
+    ):
+        return ["account_capacity_primary_cluster_changed"], True
+    rule_blockers = _current_rule_legality_blockers(
+        claim=claim.payload,
+        current_rule=current_facts.rule_snapshot,
+    )
+    if rule_blockers:
+        return rule_blockers, True
+
+    cluster_held_risk = _decimal(
+        conn.execute(
+            sa.text(
+                """
+                SELECT COALESCE(sum(held_risk), 0)
+                FROM brc_account_exposure_current
+                WHERE account_id = :account_id
+                  AND primary_risk_cluster_id = :primary_risk_cluster_id
+                  AND exposure_state NOT IN ('flat', 'closed')
+                """
+            ),
+            {
+                "account_id": claim.payload.account_id,
+                "primary_risk_cluster_id": (
+                    current_facts.cluster_snapshot.primary_risk_cluster_id
+                ),
+            },
+        ).scalar_one()
+    )
+    wallet = _decimal(projection["total_wallet_balance"])
+    blockers = revalidate_capacity_totals(
+        current_portfolio_held_risk=_decimal(projection["portfolio_held_risk"]),
+        current_primary_cluster_held_risk=cluster_held_risk,
+        current_pending_margin=_decimal(projection["unreflected_pending_margin"]),
+        current_claimed_position_slots=int(projection["claimed_position_slots"]),
+        available_balance=_decimal(projection["available_balance"]),
+        claim_risk=claim.payload.planned_stop_risk,
+        claim_margin=claim.payload.reserved_margin,
+        portfolio_limit=(
+            wallet * _decimal(policy["max_portfolio_open_risk_fraction"])
+        ),
+        cluster_limit=(
+            wallet * _decimal(policy["max_cluster_open_risk_fraction"])
+        ),
+        margin_limit=max(
+            Decimal("0"),
+            wallet * _decimal(policy["max_portfolio_initial_margin_fraction"])
+            - _decimal(projection["exchange_total_initial_margin"]),
+        ),
+        max_concurrent_positions=max_positions,
+    )
+    return list(blockers), True
+
+
+def _current_rule_legality_blockers(*, claim: Any, current_rule: Any) -> list[str]:
+    quantities = (claim.intended_qty,)
+    prices = (claim.entry_reference_price, claim.stop_price)
+    if any(quantity % current_rule.quantity_step != 0 for quantity in quantities):
+        return ["account_capacity_claim_quantity_rule_invalid"]
+    if claim.intended_qty < current_rule.min_qty:
+        return ["account_capacity_claim_quantity_rule_invalid"]
+    if any(price % current_rule.price_tick != 0 for price in prices):
+        return ["account_capacity_claim_price_rule_invalid"]
+    notional = (
+        claim.intended_qty
+        * claim.entry_reference_price
+        * current_rule.contract_multiplier
+    )
+    if notional < current_rule.min_notional:
+        return ["account_capacity_claim_min_notional_invalid"]
+    if (
+        claim.selected_leverage
+        > current_rule.exchange_max_leverage_for_claim_notional
+    ):
+        return ["account_capacity_claim_leverage_rule_invalid"]
+    return []
+
+
+def _decimal(value: object) -> Decimal:
+    try:
+        result = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("account_capacity_decimal_invalid") from exc
+    if not result.is_finite():
+        raise ValueError("account_capacity_decimal_invalid")
+    return result
 
 
 def _ticket_hash_blockers(ticket: dict[str, Any]) -> list[str]:

@@ -30,6 +30,10 @@ def pg_control_connection():
         seed_runtime_control_state(conn)
         install_runtime_control_state_revision(conn, revision="115")
         install_runtime_control_state_revision(conn, revision="122")
+        install_runtime_control_state_revision(conn, revision="124")
+        install_runtime_control_state_revision(conn, revision="125")
+        install_runtime_control_state_revision(conn, revision="126")
+        install_runtime_control_state_revision(conn, revision="127")
     with engine.connect() as conn:
         yield conn
     engine.dispose()

@@ -99,3 +99,60 @@ def reservation_idempotency_key(payload: AccountCapacityClaimPayload) -> str:
         payload.action_time_invocation_id,
     )
     return "account_capacity:" + sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def revalidate_capacity_totals(
+    *,
+    current_portfolio_held_risk: Decimal,
+    current_primary_cluster_held_risk: Decimal,
+    current_pending_margin: Decimal,
+    current_claimed_position_slots: int,
+    available_balance: Decimal,
+    claim_risk: Decimal,
+    claim_margin: Decimal,
+    portfolio_limit: Decimal,
+    cluster_limit: Decimal,
+    margin_limit: Decimal,
+    max_concurrent_positions: int,
+) -> tuple[str, ...]:
+    """Recheck one already-counted immutable claim against current capacity."""
+
+    decimal_values = (
+        current_portfolio_held_risk,
+        current_primary_cluster_held_risk,
+        current_pending_margin,
+        available_balance,
+        claim_risk,
+        claim_margin,
+        portfolio_limit,
+        cluster_limit,
+        margin_limit,
+    )
+    if (
+        not all(value.is_finite() and value >= 0 for value in decimal_values)
+        or current_claimed_position_slots < 0
+        or max_concurrent_positions < 1
+    ):
+        return ("account_capacity_revalidation_input_invalid",)
+
+    other_risk = max(
+        Decimal("0"), current_portfolio_held_risk - claim_risk
+    )
+    other_cluster = max(
+        Decimal("0"), current_primary_cluster_held_risk - claim_risk
+    )
+    other_margin = max(
+        Decimal("0"), current_pending_margin - claim_margin
+    )
+    blockers: list[str] = []
+    if other_risk + claim_risk > portfolio_limit:
+        blockers.append("portfolio_open_risk_capacity_exhausted")
+    if other_cluster + claim_risk > cluster_limit:
+        blockers.append("risk_cluster_open_risk_capacity_exhausted")
+    if other_margin + claim_margin > margin_limit:
+        blockers.append("portfolio_initial_margin_capacity_exhausted")
+    if other_margin + claim_margin > available_balance:
+        blockers.append("available_balance_capacity_exhausted")
+    if current_claimed_position_slots > max_concurrent_positions:
+        blockers.append("max_concurrent_positions_reached")
+    return tuple(blockers)
