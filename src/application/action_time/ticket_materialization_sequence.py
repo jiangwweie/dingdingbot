@@ -41,6 +41,7 @@ ClockMs = Callable[[], int]
 
 SCHEMA = "brc.action_time_ticket_materialization_sequence.v1"
 PROCESS_NAME = "action_time_ticket_sequence"
+BATCH_PROCESS_NAME = "action_time_ticket_sequence_batch"
 AUTHORITY_BOUNDARY = (
     "pg_atomic_action_time_fact_reservation_lane_ticket_only; "
     "no_finalgate_no_operation_layer_no_exchange_write"
@@ -262,7 +263,7 @@ def materialize_action_time_ticket_sequence(
     process_outcomes = [
         materialize_runtime_process_outcome(
             conn,
-            process_name=PROCESS_NAME,
+            process_name=(PROCESS_NAME if invocation_mode else BATCH_PROCESS_NAME),
             scope_key=spec["scope_key"],
             run_id=_run_id(
                 spec["scope_key"],

@@ -17,7 +17,7 @@ from tests.unit.test_pg_promotion_action_time_lane_materialization import (
 def _blocked_lane(conn):
     return materialize_runtime_process_outcome(
         conn,
-        process_name="action_time_ticket_sequence",
+        process_name="action_time_ticket_sequence_batch",
         scope_key="lane:SOR-001:ETHUSDT:long",
         run_id="run:blocked",
         result_status="action_time_ticket_sequence_blocked",

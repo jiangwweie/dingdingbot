@@ -485,7 +485,12 @@ def test_fresh_signal_can_recertify_and_clear_previous_lane_engineering_blocker(
     blocked = materialize_action_time_ticket_sequence(
         pg_control_connection,
         now_ms=NOW_MS,
-        projection_publisher=publisher.publish_runtime_control_current_projections,
+        projection_publisher=lambda conn: (
+            publisher.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head="a" * 40,
+            )
+        ),
         ticket_materializer=lambda conn, now_ms: {
             "status": "blocked",
             "blockers": ["unit_repairable_ticket_blocker"],
@@ -497,7 +502,8 @@ def test_fresh_signal_can_recertify_and_clear_previous_lane_engineering_blocker(
     )
     assert blocked["status"] == "action_time_ticket_sequence_rolled_back"
     owner_projection = publisher.publish_runtime_control_current_projections(
-        pg_control_connection
+        pg_control_connection,
+        target_runtime_head="a" * 40,
     )
     assert owner_projection["status"] == "current_projections_published"
     visible_blocker = pg_control_connection.execute(
@@ -530,7 +536,12 @@ def test_fresh_signal_can_recertify_and_clear_previous_lane_engineering_blocker(
     repaired = materialize_action_time_ticket_sequence(
         pg_control_connection,
         now_ms=NOW_MS + 2,
-        projection_publisher=publisher.publish_runtime_control_current_projections,
+        projection_publisher=lambda conn: (
+            publisher.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head="a" * 40,
+            )
+        ),
         completion_clock_ms=lambda: NOW_MS + 3,
     )
 
@@ -595,7 +606,7 @@ def test_sequence_persists_each_blocked_lane_when_multiple_signals_fail_facts(
             """
             SELECT scope_key, first_blocker
             FROM brc_runtime_process_outcomes
-            WHERE process_name = 'action_time_ticket_sequence'
+            WHERE process_name = 'action_time_ticket_sequence_batch'
               AND scope_key LIKE 'lane:%'
             ORDER BY scope_key
             """
@@ -608,7 +619,8 @@ def test_sequence_persists_each_blocked_lane_when_multiple_signals_fail_facts(
     assert len(payload["process_outcomes"]) == 2
     monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
     owner_projection = publisher.publish_runtime_control_current_projections(
-        pg_control_connection
+        pg_control_connection,
+        target_runtime_head="a" * 40,
     )
     assert owner_projection["status"] == "current_projections_published"
     readiness_details = {
@@ -864,7 +876,7 @@ def test_expired_signal_preserves_unresolved_action_time_engineering_blocker(
             """
             SELECT scope_key, business_state, first_blocker
             FROM brc_runtime_process_outcomes
-            WHERE process_name = 'action_time_ticket_sequence'
+            WHERE process_name = 'action_time_ticket_sequence_batch'
             ORDER BY scope_key
             """
         )
@@ -879,7 +891,8 @@ def test_expired_signal_preserves_unresolved_action_time_engineering_blocker(
 
     monkeypatch.setattr(publisher.time, "time", lambda: (NOW_MS + 4) / 1000)
     projection = publisher.publish_runtime_control_current_projections(
-        pg_control_connection
+        pg_control_connection,
+        target_runtime_head="a" * 40,
     )
     assert projection["status"] == "current_projections_published"
     readiness = pg_control_connection.execute(
@@ -1081,7 +1094,7 @@ def _sequence_outcome(conn):
             """
             SELECT scope_key, process_state, business_state, first_blocker
             FROM brc_runtime_process_outcomes
-            WHERE process_name = 'action_time_ticket_sequence'
+            WHERE process_name = 'action_time_ticket_sequence_batch'
               AND scope_key LIKE 'lane:%'
             """
         )

@@ -131,7 +131,7 @@ def test_process_outcome_materializes_one_current_row_per_scope():
                 module.op = old_op
         materialize_runtime_process_outcome(
             conn,
-            process_name="promotion_action_time_lane",
+            process_name="promotion_action_time_lane_batch",
             scope_key="global",
             run_id="run-1",
             result_status="no_fresh_signal",
@@ -143,7 +143,7 @@ def test_process_outcome_materializes_one_current_row_per_scope():
         )
         materialize_runtime_process_outcome(
             conn,
-            process_name="promotion_action_time_lane",
+            process_name="promotion_action_time_lane_batch",
             scope_key="global",
             run_id="run-2",
             result_status="promotion_action_time_lane_created",
@@ -168,8 +168,57 @@ def test_process_outcome_materializes_one_current_row_per_scope():
             )
         )
         assert _validate_runtime_process_outcomes(conn) == [
-            "runtime process projector mismatch: promotion_action_time_lane:global"
+            "runtime process projector mismatch: promotion_action_time_lane_batch:global"
         ]
+    engine.dispose()
+
+
+def test_current_runtime_lane_process_rejects_legacy_unscoped_outcome():
+    modules = [
+        _load(FOUNDATION, "migration_086_reject_unscoped"),
+        _load(MIGRATION_104, "migration_104_reject_unscoped"),
+        _load(MIGRATION_105, "migration_105_reject_unscoped"),
+        _load(MIGRATION_106, "migration_106_reject_unscoped"),
+        _load(MIGRATION_118, "migration_118_reject_unscoped"),
+    ]
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.begin() as conn:
+        operations = Operations(MigrationContext.configure(conn))
+        for module in modules:
+            old_op = module.op
+            module.op = operations
+            try:
+                module.upgrade()
+            finally:
+                module.op = old_op
+
+        for process_name in (
+            "live_signal_materialization",
+            "action_time_fact_snapshots",
+            "promotion_action_time_lane",
+            "action_time_ticket_sequence",
+            "action_time_capability_certification",
+        ):
+            with pytest.raises(
+                ValueError,
+                match=f"runtime_lane_identity_required:{process_name}",
+            ):
+                materialize_runtime_process_outcome(
+                    conn,
+                    process_name=process_name,
+                    scope_key="global",
+                    run_id="unscoped-run",
+                    result_status="no_fresh_signal",
+                    blockers=[],
+                    started_at_ms=100,
+                    completed_at_ms=120,
+                    runtime_head="head-1",
+                    source_watermark="signals:0",
+                )
     engine.dispose()
 
 

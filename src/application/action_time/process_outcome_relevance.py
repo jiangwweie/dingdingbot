@@ -14,6 +14,7 @@ _BLOCKING_PROCESS_STATES = {
 }
 _ACTION_TIME_PROCESS_NAMES = {
     "action_time_ticket_sequence",
+    "action_time_ticket_sequence_batch",
     "action_time_refresh_sequence",
 }
 _SIGNAL_ALREADY_PROCESSED_PREFIXES = (

@@ -35,6 +35,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         runtime_head=args.runtime_head,
         certification_ref=args.certification_ref,
         expected_lane_count=args.expected_lane_count,
+        fact_snapshot_ids=tuple(args.fact_snapshot_id),
         now_ms=args.now_ms,
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
@@ -47,6 +48,7 @@ def run_pg_certification(
     runtime_head: str,
     certification_ref: str,
     expected_lane_count: int,
+    fact_snapshot_ids: tuple[str, ...],
     now_ms: int,
 ) -> dict[str, object]:
     dsn = normalize_sync_postgres_dsn(database_url)
@@ -61,26 +63,46 @@ def run_pg_certification(
     try:
         with engine.connect() as prepare_conn:
             with prepare_conn.begin():
-                prepare_state = PgBackedRuntimeControlStateRepository(
+                prepare_repository = PgBackedRuntimeControlStateRepository(
                     prepare_conn,
                     now_ms=now_ms,
-                ).read_action_time_capability_certification_state()
+                )
+                prepare_state = (
+                    prepare_repository
+                    .read_action_time_capability_certification_state()
+                )
+                prepare_fact_rows = (
+                    prepare_repository.read_action_time_fact_digest_rows(
+                        expected_fact_snapshot_ids=fact_snapshot_ids,
+                    )
+                )
                 prepared = prepare_action_time_capability_certification(
                     prepare_state,
                     runtime_head=runtime_head,
+                    fact_digest_rows=prepare_fact_rows,
                 )
         with engine.connect().execution_options(
             isolation_level="SERIALIZABLE"
         ) as apply_conn:
             with apply_conn.begin():
-                apply_state = PgBackedRuntimeControlStateRepository(
+                apply_repository = PgBackedRuntimeControlStateRepository(
                     apply_conn,
                     now_ms=now_ms,
-                ).reread_action_time_capability_certification_state_for_apply()
+                )
+                apply_state = (
+                    apply_repository
+                    .reread_action_time_capability_certification_state_for_apply()
+                )
+                apply_fact_rows = (
+                    apply_repository.reread_action_time_fact_digest_rows_for_apply(
+                        expected_fact_snapshot_ids=fact_snapshot_ids,
+                    )
+                )
                 return apply_prepared_action_time_capability_certification(
                     apply_conn,
                     prepared=prepared,
                     control_state=apply_state,
+                    fact_digest_rows=apply_fact_rows,
                     runtime_head=runtime_head,
                     certification_ref=certification_ref,
                     expected_lane_count=expected_lane_count,
@@ -105,6 +127,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runtime-head", required=True)
     parser.add_argument("--certification-ref", required=True)
     parser.add_argument("--expected-lane-count", type=int, required=True)
+    parser.add_argument(
+        "--fact-snapshot-id",
+        action="append",
+        required=True,
+        help="Exact fact snapshot ID from the bounded refresh; repeat as needed.",
+    )
     parser.add_argument("--now-ms", type=int, default=int(time.time() * 1000))
     return parser.parse_args(argv)
 

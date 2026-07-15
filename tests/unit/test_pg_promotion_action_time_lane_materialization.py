@@ -330,7 +330,7 @@ def test_action_time_fact_no_signal_materializes_pg_process_noop(
             """
             SELECT process_name, process_state, business_state, first_blocker
             FROM brc_runtime_process_outcomes
-            WHERE process_name = 'action_time_fact_snapshots'
+            WHERE process_name = 'action_time_fact_snapshots_batch'
             """
         )
     ).mappings().one()
@@ -1055,6 +1055,7 @@ def test_materializes_action_time_facts_projection_lane_and_ticket_from_raw_sign
     monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
     projection_payload = publisher.publish_runtime_control_current_projections(
         pg_control_connection,
+        target_runtime_head="a" * 40,
     )
     assert projection_payload["status"] == "current_projections_published"
 
@@ -1276,6 +1277,7 @@ def test_all_active_strategygroups_reach_ticket_bound_disabled_smoke_from_raw_si
     monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
     projection_payload = publisher.publish_runtime_control_current_projections(
         pg_control_connection,
+        target_runtime_head="a" * 40,
     )
     assert projection_payload["status"] == "current_projections_published"
 
@@ -1375,7 +1377,7 @@ def test_action_time_fact_materializer_blocks_missing_protection_reference(
             """
             SELECT process_name, process_state, business_state, first_blocker
             FROM brc_runtime_process_outcomes
-            WHERE process_name = 'action_time_fact_snapshots'
+            WHERE process_name = 'action_time_fact_snapshots_batch'
             """
         )
     ).mappings().one()

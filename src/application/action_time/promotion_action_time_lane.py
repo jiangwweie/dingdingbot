@@ -175,7 +175,7 @@ def materialize_pg_promotion_action_time_lane(
             return payload
         process_row = materialize_runtime_process_outcome(
             conn,
-            process_name="promotion_action_time_lane",
+            process_name="promotion_action_time_lane_batch",
             scope_key="global",
             run_id=_stable_id("promotion_process_run", str(now_ms), status),
             result_status=status,

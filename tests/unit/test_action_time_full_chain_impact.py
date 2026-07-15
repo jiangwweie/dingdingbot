@@ -324,7 +324,13 @@ def test_historical_ticket_reaches_durable_pre_exchange_boundary_without_gateway
     result = run_ticket_bound_pre_exchange_acceptance(
         pg_control_connection,
         case,
-        projection_publisher=publisher.publish_runtime_control_current_projections,
+        projection_publisher=lambda conn, now_ms=None: (
+            publisher.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head="a" * 40,
+                now_ms=now_ms,
+            )
+        ),
     )
 
     assert result["status"] == "pre_exchange_acceptance_ready"
@@ -370,7 +376,13 @@ def test_six_historical_events_reach_current_pre_exchange_boundary(
     result = run_ticket_bound_pre_exchange_acceptance(
         pg_control_connection,
         acceptance_case,
-        projection_publisher=publisher.publish_runtime_control_current_projections,
+        projection_publisher=lambda conn, now_ms=None: (
+            publisher.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head="a" * 40,
+                now_ms=now_ms,
+            )
+        ),
     )
 
     assert result["status"] == "pre_exchange_acceptance_ready"
@@ -1210,7 +1222,12 @@ def test_each_active_candidate_scope_reaches_mock_real_submit_and_closure_from_r
             side=side,
             now_ms=NOW_MS,
         ),
-        projection_publisher=publisher.publish_runtime_control_current_projections,
+        projection_publisher=lambda conn: (
+            publisher.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head="a" * 40,
+            )
+        ),
     )
 
     assert payloads["submit_mode_decision"]["decision"] == "real_gateway_action"
@@ -1291,7 +1308,12 @@ def test_full_chain_failure_matrix_stops_at_exact_lifecycle_state(
             },
             now_ms=NOW_MS,
         ),
-        projection_publisher=publisher.publish_runtime_control_current_projections,
+        projection_publisher=lambda conn: (
+            publisher.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head="a" * 40,
+            )
+        ),
         scenario=scenario,
     )
 
@@ -1646,7 +1668,10 @@ def _run_raw_pg_input_to_runtime_safety(
     assert ticket_payload["side"] == side
     assert ticket_payload["forbidden_effects"] == ticket_materializer.FORBIDDEN_EFFECTS
 
-    projection_payload = publisher.publish_runtime_control_current_projections(conn)
+    projection_payload = publisher.publish_runtime_control_current_projections(
+        conn,
+        target_runtime_head="a" * 40,
+    )
     assert projection_payload["status"] == "current_projections_published"
 
     finalgate_payload = finalgate.materialize_action_time_finalgate_preflight(

@@ -27,6 +27,7 @@ CAPABILITY_INPUT_DIGEST_SCHEMA = (
 LANE_IDENTITY_DIGEST_SCHEMA = "brc.action_time_capability_lane_identity.v2"
 CANONICAL_ENCODING = "brc.typed_canonical_json.v1"
 DIGEST_ALGORITHM = "sha256"
+FACT_SET_DIGEST_SCHEMA = "brc.action_time_fact_set_digest.v1"
 
 CAPABILITY_DIGEST_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
     "strategy_groups": (
@@ -211,6 +212,9 @@ class ActionTimeCapabilityCertificationPreparation(CapabilityModel):
     release_activation_source_watermark: str = Field(min_length=1)
     referenced_ids: dict[str, tuple[str, ...]]
     lane_source_watermarks: tuple[tuple[str, str], ...]
+    fact_set_digest_schema: str = FACT_SET_DIGEST_SCHEMA
+    fact_snapshot_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
+    fact_set_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     certification_input_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
@@ -233,10 +237,18 @@ class ActionTimeFactDigestRowV1(CapabilityModel):
     valid_until_ms: int
 
 
+class ActionTimeFactSetDigestV1(CapabilityModel):
+    fact_set_digest_schema: str = FACT_SET_DIGEST_SCHEMA
+    canonical_encoding: str = CANONICAL_ENCODING
+    fact_snapshot_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
+    fact_set_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
 def prepare_action_time_capability_certification(
     control_state: Mapping[str, Any],
     *,
     runtime_head: str,
+    fact_digest_rows: Sequence[ActionTimeFactDigestRowV1],
 ) -> ActionTimeCapabilityCertificationPreparation:
     runtime_head = str(runtime_head or "").strip()
     if not runtime_head:
@@ -280,6 +292,7 @@ def prepare_action_time_capability_certification(
             for identity in identities
         )
     )
+    fact_set = compute_action_time_fact_set_digest(fact_digest_rows)
     tables = []
     for table_name, column_names in CAPABILITY_DIGEST_TABLE_COLUMNS.items():
         canonical_rows = []
@@ -311,6 +324,7 @@ def prepare_action_time_capability_certification(
         },
         "referenced_ids": referenced_ids,
         "lane_source_watermarks": lane_source_watermarks,
+        "fact_set": fact_set.model_dump(mode="json"),
         "tables": tables,
     }
     canonical_bytes = json.dumps(
@@ -329,6 +343,9 @@ def prepare_action_time_capability_certification(
         release_activation_source_watermark=str(activation["source_watermark"]),
         referenced_ids=referenced_ids,
         lane_source_watermarks=lane_source_watermarks,
+        fact_set_digest_schema=fact_set.fact_set_digest_schema,
+        fact_snapshot_ids=fact_set.fact_snapshot_ids,
+        fact_set_digest=fact_set.fact_set_digest,
         certification_input_digest=digest,
     )
 
@@ -338,6 +355,7 @@ def apply_prepared_action_time_capability_certification(
     *,
     prepared: ActionTimeCapabilityCertificationPreparation,
     control_state: Mapping[str, Any],
+    fact_digest_rows: Sequence[ActionTimeFactDigestRowV1],
     runtime_head: str,
     certification_ref: str,
     expected_lane_count: int,
@@ -346,6 +364,7 @@ def apply_prepared_action_time_capability_certification(
     current = prepare_action_time_capability_certification(
         control_state,
         runtime_head=runtime_head,
+        fact_digest_rows=fact_digest_rows,
     )
     if current != prepared:
         result = _certification_result(
@@ -385,6 +404,51 @@ def apply_prepared_action_time_capability_certification(
         }
     )
     return result
+
+
+def compute_action_time_fact_set_digest(
+    rows: Sequence[ActionTimeFactDigestRowV1],
+) -> ActionTimeFactSetDigestV1:
+    ordered = sorted(rows, key=lambda row: row.fact_snapshot_id)
+    fact_ids = tuple(row.fact_snapshot_id for row in ordered)
+    if not fact_ids or len(fact_ids) > 128 or len(set(fact_ids)) != len(fact_ids):
+        raise ValueError("fact_digest_id_set_invalid")
+    fields = tuple(ActionTimeFactDigestRowV1.model_fields)
+    payload_rows = []
+    for row in ordered:
+        values = row.model_dump(mode="python")
+        payload_rows.append(
+            [
+                [
+                    field,
+                    _canonical_sql_value(
+                        values[field],
+                        json_semantic=field in {"failed_facts", "fact_values"},
+                    ),
+                ]
+                for field in fields
+            ]
+        )
+    payload = {
+        "schema": FACT_SET_DIGEST_SCHEMA,
+        "encoding": CANONICAL_ENCODING,
+        "algorithm": DIGEST_ALGORITHM,
+        "fact_snapshot_ids": fact_ids,
+        "rows": payload_rows,
+    }
+    canonical_bytes = json.dumps(
+        payload,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(canonical_bytes) > 1024 * 1024:
+        raise ValueError("fact_digest_canonical_input_too_large")
+    return ActionTimeFactSetDigestV1(
+        fact_snapshot_ids=fact_ids,
+        fact_set_digest="sha256:" + sha256(canonical_bytes).hexdigest(),
+    )
 
 
 def _strict_digest_rows(

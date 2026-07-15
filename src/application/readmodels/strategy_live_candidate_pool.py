@@ -578,6 +578,7 @@ def _unresolved_action_time_sequence_outcomes(
     for row in _dict_rows(control_state.get("runtime_process_outcomes")):
         if row.get("process_name") not in {
             "action_time_ticket_sequence",
+            "action_time_ticket_sequence_batch",
             "action_time_refresh_sequence",
         }:
             continue

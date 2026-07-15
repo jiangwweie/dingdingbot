@@ -29,6 +29,8 @@ def test_cli_requires_pg_and_prints_stdout_only(monkeypatch, capsys) -> None:
             "pytest:22-scope",
             "--expected-lane-count",
             "22",
+            "--fact-snapshot-id",
+            "fact:pytest:one",
             "--now-ms",
             "1800000000000",
         ]
@@ -40,6 +42,7 @@ def test_cli_requires_pg_and_prints_stdout_only(monkeypatch, capsys) -> None:
         "runtime_head": "d" * 40,
         "certification_ref": "pytest:22-scope",
         "expected_lane_count": 22,
+        "fact_snapshot_ids": ("fact:pytest:one",),
         "now_ms": 1_800_000_000_000,
     }
     assert json.loads(capsys.readouterr().out)["certified_lane_count"] == 22
@@ -56,6 +59,8 @@ def test_cli_has_no_file_output_or_authority_flags() -> None:
             "pytest:shape",
             "--expected-lane-count",
             "22",
+            "--fact-snapshot-id",
+            "fact:pytest:shape",
         ]
     )
 

@@ -69,6 +69,7 @@ def test_pg_current_projection_validators_accept_published_current(tmp_path: Pat
         with engine.begin() as conn:
             publish.publish_runtime_control_current_projections(
                 conn,
+                target_runtime_head="a" * 40,
             )
             assert ownership.validate_current_projection_ownership(conn) == []
             assert lineage.validate_pg_current_projection_lineage(conn) == []
@@ -87,6 +88,7 @@ def test_export_validator_rejects_current_projection_export_path(tmp_path: Path)
         with engine.begin() as conn:
             publish.publish_runtime_control_current_projections(
                 conn,
+                target_runtime_head="a" * 40,
             )
             conn.execute(
                 sa.text(

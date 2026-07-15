@@ -88,7 +88,7 @@ def materialize_action_time_fact_snapshots(
         )
         process_row = materialize_runtime_process_outcome(
             conn,
-            process_name="action_time_fact_snapshots",
+            process_name="action_time_fact_snapshots_batch",
             scope_key="global",
             run_id=_stable_id("action_time_fact_process_run", str(now), status),
             result_status=status,

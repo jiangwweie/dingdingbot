@@ -322,7 +322,10 @@ def _configure_pg_runtime_control_state(
                 RUNTIME_CONTROL_PROJECTION_PUBLISH_PATH,
                 f"runtime_control_projection_publish_{id(tmp_path)}",
             )
-            report = publisher.publish_runtime_control_current_projections(conn)
+            report = publisher.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head="a" * 40,
+            )
             assert report["status"] == "current_projections_published"
     engine.dispose()
     monkeypatch.setenv("PG_DATABASE_URL", f"sqlite:///{db_path}")

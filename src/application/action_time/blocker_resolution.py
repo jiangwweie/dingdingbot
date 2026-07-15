@@ -9,9 +9,13 @@ import sqlalchemy as sa
 from src.application.runtime_process_outcome import (
     materialize_runtime_process_outcome,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 
 
-PROCESS_NAME = "action_time_ticket_sequence"
+PROCESS_NAMES = {
+    "action_time_ticket_sequence",
+    "action_time_ticket_sequence_batch",
+}
 BLOCKING_STATES = {"business_blocked", "retryable_failure", "hard_failure"}
 
 
@@ -45,7 +49,7 @@ def certify_action_time_blocker_resolution(
     if outcome is None:
         blockers.append("process_outcome_missing")
     else:
-        if str(outcome.get("process_name") or "") != PROCESS_NAME:
+        if str(outcome.get("process_name") or "") not in PROCESS_NAMES:
             blockers.append("process_outcome_name_mismatch")
         scope_key = str(outcome.get("scope_key") or "")
         if not scope_key.startswith("lane:") or len(scope_key.split(":")) != 4:
@@ -58,6 +62,19 @@ def certify_action_time_blocker_resolution(
             blockers.append("process_outcome_first_blocker_mismatch")
     certification_ref = str(certification_ref or "").strip()
     runtime_head = str(runtime_head or "").strip()
+    lane_identity: RuntimeLaneIdentity | None = None
+    if outcome is not None and str(outcome.get("process_name") or "") == (
+        "action_time_ticket_sequence"
+    ):
+        try:
+            lane_identity = RuntimeLaneIdentity.model_validate(
+                {
+                    field: outcome.get(field)
+                    for field in RuntimeLaneIdentity.model_fields
+                }
+            )
+        except (TypeError, ValueError):
+            blockers.append("runtime_lane_identity_invalid")
     if not certification_ref:
         blockers.append("certification_ref_required")
     if not runtime_head:
@@ -73,7 +90,7 @@ def certify_action_time_blocker_resolution(
     scope_key = str(outcome["scope_key"])
     resolved = materialize_runtime_process_outcome(
         conn,
-        process_name=PROCESS_NAME,
+        process_name=str(outcome["process_name"]),
         scope_key=scope_key,
         run_id=f"certification:{certification_ref}:{now_ms}",
         result_status="action_time_blocker_resolution_certified",
@@ -83,6 +100,10 @@ def certify_action_time_blocker_resolution(
         runtime_head=runtime_head,
         source_watermark=f"certification:{certification_ref}",
         projector_owner="action_time_blocker_resolution_certifier",
+        lane_identity=lane_identity,
+        action_time_invocation_id=(
+            str(outcome.get("action_time_invocation_id") or "").strip() or None
+        ),
     )
     return {
         "status": "blocker_resolution_certified",

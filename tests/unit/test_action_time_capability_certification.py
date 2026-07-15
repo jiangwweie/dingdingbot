@@ -17,6 +17,29 @@ from src.application.action_time.capability_certification import (
 RUNTIME_HEAD = "a" * 40
 
 
+def _fact_digest_rows():
+    return (
+        certification_module.ActionTimeFactDigestRowV1(
+            fact_snapshot_id="fact:digest:test",
+            strategy_group_id="SOR-001",
+            symbol="ETHUSDT",
+            side="long",
+            runtime_profile_id="owner-runtime-console-v1",
+            fact_surface="action_time_private",
+            source_kind="live_account",
+            source_ref="pytest",
+            computed=True,
+            satisfied=True,
+            freshness_state="fresh",
+            failed_facts=[],
+            fact_values={"mark_price": "1888.50"},
+            blocker_class=None,
+            observed_at_ms=1_800_000_000_000,
+            valid_until_ms=1_800_000_060_000,
+        ),
+    )
+
+
 def _bounded_certification_state() -> dict[str, object]:
     state = _control_state()
     columns = {
@@ -145,6 +168,7 @@ def test_certification_input_digest_is_typed_stable_and_release_bound() -> None:
     prepared = certification_module.prepare_action_time_capability_certification(
         state,
         runtime_head=RUNTIME_HEAD,
+        fact_digest_rows=_fact_digest_rows(),
     )
     reordered = deepcopy(state)
     for value in reordered.values():
@@ -153,6 +177,7 @@ def test_certification_input_digest_is_typed_stable_and_release_bound() -> None:
     stable = certification_module.prepare_action_time_capability_certification(
         reordered,
         runtime_head=RUNTIME_HEAD,
+        fact_digest_rows=_fact_digest_rows(),
     )
 
     assert prepared.digest_schema == (
@@ -169,6 +194,7 @@ def test_certification_input_digest_is_typed_stable_and_release_bound() -> None:
         certification_module.prepare_action_time_capability_certification(
             changed,
             runtime_head=RUNTIME_HEAD,
+            fact_digest_rows=_fact_digest_rows(),
         )
     )
     assert (
@@ -185,6 +211,7 @@ def test_certification_input_digest_rejects_binary_float() -> None:
         certification_module.prepare_action_time_capability_certification(
             state,
             runtime_head=RUNTIME_HEAD,
+            fact_digest_rows=_fact_digest_rows(),
         )
 
 
@@ -193,6 +220,7 @@ def test_certification_apply_rejects_prepare_digest_drift_before_write() -> None
     prepared = certification_module.prepare_action_time_capability_certification(
         state,
         runtime_head=RUNTIME_HEAD,
+        fact_digest_rows=_fact_digest_rows(),
     )
     changed = deepcopy(state)
     changed["owner_policy_current"][0]["max_leverage"] = 9
@@ -201,6 +229,7 @@ def test_certification_apply_rejects_prepare_digest_drift_before_write() -> None
         None,
         prepared=prepared,
         control_state=changed,
+        fact_digest_rows=_fact_digest_rows(),
         runtime_head=RUNTIME_HEAD,
         certification_ref="pytest:digest-drift",
         expected_lane_count=22,
@@ -210,6 +239,37 @@ def test_certification_apply_rejects_prepare_digest_drift_before_write() -> None
     assert result["status"] == "blocked"
     assert result["first_blocker"] == "certification_input_digest_drift"
     assert result["certified_lane_count"] == 0
+
+
+def test_fact_set_digest_changes_when_content_changes_with_same_id() -> None:
+    row = certification_module.ActionTimeFactDigestRowV1(
+        fact_snapshot_id="fact:digest:stable-id",
+        strategy_group_id="SOR-001",
+        symbol="ETHUSDT",
+        side="long",
+        runtime_profile_id="owner-runtime-console-v1",
+        fact_surface="action_time_private",
+        source_kind="live_account",
+        source_ref="pytest",
+        computed=True,
+        satisfied=True,
+        freshness_state="fresh",
+        failed_facts=[],
+        fact_values={"mark_price": "1888.50"},
+        blocker_class=None,
+        observed_at_ms=1_800_000_000_000,
+        valid_until_ms=1_800_000_060_000,
+    )
+
+    before = certification_module.compute_action_time_fact_set_digest((row,))
+    changed = row.model_copy(
+        update={"fact_values": {"mark_price": "1888.51"}}
+    )
+    after = certification_module.compute_action_time_fact_set_digest((changed,))
+
+    assert before.fact_snapshot_ids == ("fact:digest:stable-id",)
+    assert before.fact_set_digest_schema == "brc.action_time_fact_set_digest.v1"
+    assert before.fact_set_digest != after.fact_set_digest
 
 
 def _control_state() -> dict[str, object]:

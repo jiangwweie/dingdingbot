@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
 from typing import Any
@@ -43,6 +44,7 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 PROJECTOR_NAME = "pg_current_projection_publisher"
 SCHEMA = "brc.runtime_control_current_projection_publish.v1"
 ACTION_TIME_READINESS_SCHEMA = "brc.action_time_pretrade_readiness_publish.v1"
+FULL_GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         with engine.begin() as conn:
             report = publish_runtime_control_current_projections(
                 conn,
+                target_runtime_head=args.target_runtime_head,
             )
     finally:
         engine.dispose()
@@ -80,8 +83,10 @@ def main(argv: list[str] | None = None) -> int:
 def publish_runtime_control_current_projections(
     conn: sa.engine.Connection,
     *,
+    target_runtime_head: str,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
+    runtime_head = _validated_target_runtime_head(target_runtime_head)
     started_ms = int(now_ms if now_ms is not None else time.time() * 1000)
     generated = datetime.fromtimestamp(
         started_ms / 1000,
@@ -123,21 +128,25 @@ def publish_runtime_control_current_projections(
             owner_projector="pg_candidate_pool_projector",
             started_ms=started_ms,
             input_watermark=_input_watermark(control_state, candidate_pool),
+            target_runtime_head=runtime_head,
         ),
         _projection_run(
             model_type="daily_live_enablement_table",
             owner_projector="pg_daily_table_projector",
             started_ms=started_ms,
             input_watermark=_input_watermark(control_state, daily_table),
+            target_runtime_head=runtime_head,
         ),
         _projection_run(
             model_type="goal_status",
             owner_projector="pg_goal_status_projector",
             started_ms=started_ms,
             input_watermark=_input_watermark(control_state, goal_status),
+            target_runtime_head=runtime_head,
         ),
     ]
     _validate_projection_ownership(conn, projector_runs)
+    _validate_projection_runtime_head(projector_runs, runtime_head)
     snapshots = [
         _snapshot_row(
             model_type="candidate_pool",
@@ -188,6 +197,7 @@ def publish_runtime_control_current_projections(
     return {
         "schema": SCHEMA,
         "status": "current_projections_published",
+        "runtime_head": runtime_head,
         "generated_at_utc": generated,
         "published_tables": {
             "brc_pretrade_readiness_rows": len(readiness_rows),
@@ -316,7 +326,31 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Allow SQLite/non-PG DSNs only in tests.",
     )
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--target-runtime-head",
+        default=os.getenv("BRC_RUNTIME_HEAD", ""),
+        help="Exact 40-character deployed git SHA for projection lineage.",
+    )
     return parser.parse_args(argv)
+
+
+def _validated_target_runtime_head(value: str) -> str:
+    runtime_head = str(value or "").strip()
+    if not FULL_GIT_SHA_RE.fullmatch(runtime_head):
+        raise ValueError("target_runtime_head_must_be_exact_full_git_sha")
+    return runtime_head
+
+
+def _validate_projection_runtime_head(
+    projector_runs: list[dict[str, Any]],
+    target_runtime_head: str,
+) -> None:
+    for run in projector_runs:
+        if run.get("code_version") != target_runtime_head:
+            raise RuntimeError(
+                "current projection runtime head mismatch: "
+                f"{run.get('model_type')}:{run.get('code_version')}"
+            )
 
 
 def _validate_projection_ownership(
@@ -496,12 +530,13 @@ def _projection_run(
     owner_projector: str,
     started_ms: int,
     input_watermark: dict[str, Any],
+    target_runtime_head: str,
 ) -> dict[str, Any]:
     return {
         "projection_run_id": f"projection:{model_type}:{started_ms}",
         "model_type": model_type,
         "owner_projector": owner_projector,
-        "code_version": "current",
+        "code_version": target_runtime_head,
         "source_mode": "db_backed",
         "projection_target": "production_current",
         "input_watermark": input_watermark,

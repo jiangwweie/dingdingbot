@@ -532,7 +532,12 @@ def _runtime_process_failure_event(
     scope_parts = scope_key.split(":")
     if (
         str(row.get("process_state") or "") == "business_blocked"
-        and process_name in {"action_time_ticket_sequence", "action_time_refresh_sequence"}
+        and process_name
+        in {
+            "action_time_ticket_sequence",
+            "action_time_ticket_sequence_batch",
+            "action_time_refresh_sequence",
+        }
     ):
         return {
             "event_type": "action_time_processing_blocked",
@@ -603,13 +608,18 @@ def _runtime_process_outcome_requires_monitor_attention(
     process_name = str(row.get("process_name") or "")
     if process_state in {"retryable_failure", "hard_failure"}:
         return (
-            process_name != "action_time_ticket_sequence"
+            process_name
+            not in {"action_time_ticket_sequence", "action_time_ticket_sequence_batch"}
             or process_outcome_has_current_blocking_authority(control_state, row)
         )
     return (
         process_state == "business_blocked"
         and process_name
-        in {"action_time_ticket_sequence", "action_time_refresh_sequence"}
+        in {
+            "action_time_ticket_sequence",
+            "action_time_ticket_sequence_batch",
+            "action_time_refresh_sequence",
+        }
         and process_outcome_has_current_blocking_authority(control_state, row)
     )
 

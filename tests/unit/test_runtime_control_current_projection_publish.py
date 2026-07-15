@@ -20,6 +20,7 @@ MIGRATION_PATH = (
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
+TEST_RUNTIME_HEAD = "a" * 40
 
 
 def _load_module(path: Path, name: str):
@@ -56,7 +57,10 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
     engine = _seeded_engine()
     try:
         with engine.begin() as conn:
-            report = module.publish_runtime_control_current_projections(conn)
+            report = module.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head=TEST_RUNTIME_HEAD,
+            )
             readiness_count = conn.execute(
                 sa.text("SELECT COUNT(*) FROM brc_pretrade_readiness_rows")
             ).scalar_one()
@@ -75,6 +79,18 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
                     "WHERE projection_run_id LIKE 'projection:%'"
                 )
             ).scalar_one()
+            projection_heads = conn.execute(
+                sa.text(
+                    "SELECT DISTINCT code_version FROM brc_projection_runs "
+                    "WHERE projection_run_id LIKE 'projection:%'"
+                )
+            ).scalars().all()
+            snapshot_payloads = conn.execute(
+                sa.text(
+                    "SELECT payload FROM brc_control_read_model_snapshots "
+                    "WHERE is_current = true"
+                )
+            ).scalars().all()
             output_path_count = conn.execute(
                 sa.text(
                     "SELECT COUNT(*) FROM brc_control_read_model_snapshots "
@@ -88,6 +104,15 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
         assert goal_count == 1
         assert current_snapshot_count == 3
         assert projection_run_count == 3
+        assert projection_heads == [TEST_RUNTIME_HEAD]
+        assert {
+            (
+                json.loads(payload)
+                if isinstance(payload, str)
+                else dict(payload)
+            )["code_version"]
+            for payload in snapshot_payloads
+        } == {TEST_RUNTIME_HEAD}
         assert output_path_count == 0
         assert report["safety_invariants"]["calls_exchange_write"] is False
         assert not (tmp_path / "candidate-pool.json").exists()
@@ -95,6 +120,40 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
         assert not (tmp_path / "goal-status.json").exists()
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("runtime_head", ["", "current", "a" * 39, "g" * 40])
+def test_publish_current_projections_rejects_non_exact_runtime_head(runtime_head):
+    module = _load_module(
+        SCRIPT_PATH,
+        f"publish_runtime_control_current_projections_bad_head_{len(runtime_head)}",
+    )
+    engine = _seeded_engine()
+    try:
+        with engine.begin() as conn:
+            with pytest.raises(
+                ValueError,
+                match="target_runtime_head_must_be_exact_full_git_sha",
+            ):
+                module.publish_runtime_control_current_projections(
+                    conn,
+                    target_runtime_head=runtime_head,
+                )
+    finally:
+        engine.dispose()
+
+
+def test_projection_runtime_head_validator_rejects_different_sha():
+    module = _load_module(
+        SCRIPT_PATH,
+        "publish_runtime_control_current_projections_mismatched_head",
+    )
+
+    with pytest.raises(RuntimeError, match="current projection runtime head mismatch"):
+        module._validate_projection_runtime_head(
+            [{"model_type": "candidate_pool", "code_version": "b" * 40}],
+            "a" * 40,
+        )
 
 
 def test_action_time_readiness_refresh_skips_owner_projection_snapshots():
@@ -146,9 +205,11 @@ def test_publish_current_projections_keeps_one_current_snapshot_per_model(tmp_pa
         with engine.begin() as conn:
             module.publish_runtime_control_current_projections(
                 conn,
+                target_runtime_head=TEST_RUNTIME_HEAD,
             )
             module.publish_runtime_control_current_projections(
                 conn,
+                target_runtime_head=TEST_RUNTIME_HEAD,
             )
             rows = conn.execute(
                 sa.text(
@@ -223,7 +284,10 @@ def test_publish_current_projections_uses_bounded_current_control_state(
                     },
                 )
 
-            module.publish_runtime_control_current_projections(conn)
+            module.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head=TEST_RUNTIME_HEAD,
+            )
             watermark_raw = conn.execute(
                 sa.text(
                     """
@@ -266,6 +330,7 @@ def test_publish_current_projections_rejects_legacy_projection_owner(tmp_path: P
             with pytest.raises(RuntimeError, match="current projection owner mismatch"):
                 module.publish_runtime_control_current_projections(
                     conn,
+                    target_runtime_head=TEST_RUNTIME_HEAD,
                 )
     finally:
         engine.dispose()

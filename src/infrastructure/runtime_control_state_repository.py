@@ -350,6 +350,7 @@ class PgBackedRuntimeControlStateRepository:
         self.source_mode = source_mode
         self.projection_target = projection_target
         self.now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+        self._read_only_profile_configured = False
 
     def read_control_state(self) -> dict[str, Any]:
         self._require_tables()
@@ -539,9 +540,12 @@ class PgBackedRuntimeControlStateRepository:
     def _configure_read_only_profile(self) -> None:
         if self.conn.dialect.name != "postgresql":
             return
+        if self._read_only_profile_configured:
+            return
         self.conn.exec_driver_sql("SET TRANSACTION READ ONLY")
         self.conn.exec_driver_sql("SET LOCAL lock_timeout = '1s'")
         self.conn.exec_driver_sql("SET LOCAL statement_timeout = '5s'")
+        self._read_only_profile_configured = True
 
     def read_action_time_capability_certification_state(
         self,

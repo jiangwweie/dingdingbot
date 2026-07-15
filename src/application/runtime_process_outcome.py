@@ -37,6 +37,13 @@ class RuntimeProcessOutcome(BaseModel):
 
 PROCESS_SUCCESS_STATES = {"succeeded", "noop", "business_blocked"}
 PROCESS_FAILURE_STATES = {"retryable_failure", "hard_failure"}
+RUNTIME_LANE_PROCESS_NAMES = {
+    "live_signal_materialization",
+    "action_time_fact_snapshots",
+    "promotion_action_time_lane",
+    "action_time_ticket_sequence",
+    "action_time_capability_certification",
+}
 
 
 def runtime_process_exit_code(
@@ -179,6 +186,8 @@ def materialize_runtime_process_outcome(
     lane_identity: RuntimeLaneIdentity | None = None,
     action_time_invocation_id: str | None = None,
 ) -> dict[str, object]:
+    if process_name in RUNTIME_LANE_PROCESS_NAMES and lane_identity is None:
+        raise ValueError(f"runtime_lane_identity_required:{process_name}")
     outcome = classify_process_outcome(
         process_name=process_name,
         result_status=result_status,
