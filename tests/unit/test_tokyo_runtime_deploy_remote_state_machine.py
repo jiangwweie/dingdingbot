@@ -289,6 +289,7 @@ def test_candidate_staging_exports_exact_sha_and_writes_manifest_atomically(
     assert result["status"] == "candidate_release_staged"
     assert release.is_dir()
     assert manifest.is_file()
+    assert stat.S_IMODE(manifest.stat().st_mode) == 0o644
     assert json.loads(manifest.read_text(encoding="utf-8"))["target_sha"] == "a" * 40
     git_repo_commands = [
         command
@@ -334,6 +335,29 @@ def test_previous_release_gets_compatible_venv_before_unit_mutation(tmp_path):
             previous,
         )
     ]
+
+
+def test_previous_immutable_release_keeps_its_existing_venv_binding(tmp_path):
+    previous = tmp_path / "releases/old"
+    previous.mkdir(parents=True)
+    immutable = tmp_path / "venvs/immutable/runtime"
+    (immutable / "bin").mkdir(parents=True)
+    (immutable / "bin/python").write_text("", encoding="utf-8")
+    fallback = tmp_path / "venvs/legacy"
+    (fallback / "bin").mkdir(parents=True)
+    (fallback / "bin/python").write_text("", encoding="utf-8")
+    (previous / ".venv").symlink_to(immutable)
+
+    result = machine.ensure_previous_release_venv_compatibility(
+        previous_release_path=previous,
+        deployed_venv_path=fallback,
+        runner=lambda command, **kwargs: machine.ChildResult(
+            returncode=0, stdout="", stderr=""
+        ),
+    )
+
+    assert (previous / ".venv").resolve() == immutable.resolve()
+    assert result["venv_path"] == str(immutable.resolve())
 
 
 def test_writer_fence_installs_all_interlocks_before_stopping_writers(tmp_path):

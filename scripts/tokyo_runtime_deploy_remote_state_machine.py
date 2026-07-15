@@ -588,18 +588,20 @@ def ensure_previous_release_venv_compatibility(
     """Bind the legacy release to its existing interpreter before unit changes."""
 
     previous = Path(previous_release_path).resolve(strict=True)
-    deployed = Path(deployed_venv_path).resolve(strict=True)
-    if not (deployed / "bin/python").is_file():
-        raise ValueError("previous_release_deployed_venv_invalid")
+    fallback_deployed = Path(deployed_venv_path).resolve(strict=True)
     link = previous / ".venv"
     if os.path.lexists(link):
-        if not link.is_symlink() or link.resolve() != deployed:
+        if not link.is_symlink():
             raise ValueError("previous_release_venv_binding_mismatch")
+        deployed = link.resolve(strict=True)
     else:
+        deployed = fallback_deployed
         temporary = previous / f".venv.{uuid.uuid4().hex}.tmp"
         os.symlink(str(deployed), temporary)
         os.replace(temporary, link)
         _fsync_directory(previous)
+    if not (deployed / "bin/python").is_file():
+        raise ValueError("previous_release_deployed_venv_invalid")
     command = [str(link / "bin/python"), "-c", "import src.main"]
     if runner is not None:
         result = runner(command, cwd=previous, timeout=60)
