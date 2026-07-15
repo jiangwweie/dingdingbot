@@ -18,6 +18,9 @@ ACCOUNT_CAPACITY_RESERVATION_SCOPE = (
 ACCOUNT_CAPACITY_CLAIM_POLICY_EVENT = (
     ROOT / "migrations/versions/2026-07-14-125_add_account_capacity_claim_policy_event.py"
 )
+ASSET_NEUTRAL_EXPAND = (
+    ROOT / "migrations/versions/2026-07-15-126_expand_asset_neutral_account_risk_identity.py"
+)
 
 
 def _load(path: Path, name: str):
@@ -115,3 +118,23 @@ def test_migration_125_binds_capacity_claims_to_policy_event_and_margin_state() 
         "allowed_risk_budget",
         "margin_accounting_state",
     } <= columns
+
+
+def test_migration_126_versions_cluster_membership_without_replacing_policy_authority() -> None:
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        _upgrade(conn, FOUNDATION, "migration_086_for_asset_neutral_policy")
+        _upgrade(conn, ACCOUNT_POLICY, "migration_121_for_asset_neutral_policy")
+        _upgrade(conn, ASSET_NEUTRAL_EXPAND, "migration_126_asset_neutral_policy")
+        columns = {
+            column["name"]
+            for column in sa.inspect(conn).get_columns("brc_risk_cluster_memberships")
+        }
+        tables = set(sa.inspect(conn).get_table_names())
+
+    assert {
+        "cluster_membership_snapshot_id",
+        "membership_role",
+        "status",
+    } <= columns
+    assert "brc_risk_cluster_membership_snapshots" in tables
