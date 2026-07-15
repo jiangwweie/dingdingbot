@@ -21,18 +21,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "brc_runtime_capabilities_current",
-        sa.Column("proof_schema", sa.String(length=128), nullable=True),
+    proof_schema_column = sa.Column(
+        "proof_schema", sa.String(length=128), nullable=True
     )
-    op.add_column(
-        "brc_runtime_capabilities_current",
-        sa.Column(
-            "proof_payload",
-            postgresql.JSONB().with_variant(sa.JSON(), "sqlite"),
-            nullable=True,
-        ),
+    proof_payload_column = sa.Column(
+        "proof_payload",
+        postgresql.JSONB().with_variant(sa.JSON(), "sqlite"),
+        nullable=True,
     )
+    proof_constraint = (
+        "capability_id <> 'ticket_lifecycle_durable_mutation' "
+        "OR status <> 'enabled' OR ("
+        "certification_ref LIKE 'lifecycle-cert:v2:%' "
+        "AND proof_schema = 'brc.lifecycle_mutation_enablement_proof.v2' "
+        "AND proof_payload IS NOT NULL)"
+    )
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("brc_runtime_capabilities_current") as batch_op:
+            batch_op.add_column(proof_schema_column)
+            batch_op.add_column(proof_payload_column)
+    else:
+        op.add_column("brc_runtime_capabilities_current", proof_schema_column)
+        op.add_column("brc_runtime_capabilities_current", proof_payload_column)
     op.execute(
         sa.text(
             "UPDATE brc_runtime_capabilities_current "
@@ -42,15 +52,18 @@ def upgrade() -> None:
             "WHERE capability_id='ticket_lifecycle_durable_mutation'"
         )
     )
-    op.create_check_constraint(
-        "ck_brc_lifecycle_capability_v2_proof",
-        "brc_runtime_capabilities_current",
-        "capability_id <> 'ticket_lifecycle_durable_mutation' "
-        "OR status <> 'enabled' OR ("
-        "certification_ref LIKE 'lifecycle-cert:v2:%' "
-        "AND proof_schema = 'brc.lifecycle_mutation_enablement_proof.v2' "
-        "AND proof_payload IS NOT NULL)",
-    )
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("brc_runtime_capabilities_current") as batch_op:
+            batch_op.create_check_constraint(
+                "ck_brc_lifecycle_capability_v2_proof",
+                proof_constraint,
+            )
+    else:
+        op.create_check_constraint(
+            "ck_brc_lifecycle_capability_v2_proof",
+            "brc_runtime_capabilities_current",
+            proof_constraint,
+        )
     op.create_index(
         "idx_brc_runtime_outcome_lane_process_latest",
         "brc_runtime_process_outcomes",
@@ -76,14 +89,23 @@ def downgrade() -> None:
         "idx_brc_runtime_outcome_canary_window",
         table_name="brc_runtime_process_outcomes",
     )
-    op.drop_constraint(
-        "ck_brc_lifecycle_capability_v2_proof",
-        "brc_runtime_capabilities_current",
-        type_="check",
-    )
     op.drop_index(
         "idx_brc_runtime_outcome_lane_process_latest",
         table_name="brc_runtime_process_outcomes",
     )
-    op.drop_column("brc_runtime_capabilities_current", "proof_payload")
-    op.drop_column("brc_runtime_capabilities_current", "proof_schema")
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("brc_runtime_capabilities_current") as batch_op:
+            batch_op.drop_constraint(
+                "ck_brc_lifecycle_capability_v2_proof",
+                type_="check",
+            )
+            batch_op.drop_column("proof_payload")
+            batch_op.drop_column("proof_schema")
+    else:
+        op.drop_constraint(
+            "ck_brc_lifecycle_capability_v2_proof",
+            "brc_runtime_capabilities_current",
+            type_="check",
+        )
+        op.drop_column("brc_runtime_capabilities_current", "proof_payload")
+        op.drop_column("brc_runtime_capabilities_current", "proof_schema")

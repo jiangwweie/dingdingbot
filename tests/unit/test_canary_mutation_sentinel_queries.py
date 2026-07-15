@@ -82,12 +82,6 @@ def test_storage_contract_names_only_explicitly_excluded_volatile_columns():
 
 
 def test_storage_contract_matches_schema_124_fixture(pg_control_connection):
-    pg_control_connection.execute(
-        sa.text("ALTER TABLE brc_runtime_capabilities_current ADD COLUMN proof_schema VARCHAR(128)")
-    )
-    pg_control_connection.execute(
-        sa.text("ALTER TABLE brc_runtime_capabilities_current ADD COLUMN proof_payload JSON")
-    )
     inspector = sa.inspect(pg_control_connection)
     for relation, expected in expected_storage_columns().items():
         actual = {str(column["name"]) for column in inspector.get_columns(relation)}
