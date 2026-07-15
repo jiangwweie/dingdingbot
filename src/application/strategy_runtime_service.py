@@ -33,6 +33,10 @@ from src.domain.strategy_runtime_promotion_gate import (
     StrategyRuntimePromotionGateConfirmationRecord,
     StrategyRuntimePromotionGateStatus,
 )
+from src.application.readmodels.strategy_runtime_watcher_identity import (
+    StrategyRuntimeWatcherIdentityPage,
+    WatcherCandidateLaneKey,
+)
 
 
 def _now_ms() -> int:
@@ -58,6 +62,15 @@ class StrategyRuntimeRepositoryPort(Protocol):
         ...
 
     async def list(self, *, status: Optional[StrategyRuntimeInstanceStatus] = None, limit: int = 100) -> list[StrategyRuntimeInstance]:
+        ...
+
+    async def list_watcher_candidate_identity_page(
+        self,
+        *,
+        candidate_lane_keys: tuple[WatcherCandidateLaneKey, ...],
+        after_runtime_instance_id: str | None,
+        limit: int = 16,
+    ) -> StrategyRuntimeWatcherIdentityPage:
         ...
 
     async def update_status(self, runtime: StrategyRuntimeInstance) -> StrategyRuntimeInstance:
@@ -352,6 +365,23 @@ class StrategyRuntimeInstanceService:
         limit: int = 100,
     ) -> list[StrategyRuntimeInstance]:
         return await self._runtime_repo.list(status=status, limit=limit)
+
+    async def list_watcher_candidate_identity_page(
+        self,
+        *,
+        candidate_lane_keys: tuple[WatcherCandidateLaneKey, ...],
+        after_runtime_instance_id: str | None,
+        limit: int = 16,
+    ) -> StrategyRuntimeWatcherIdentityPage:
+        if not 1 <= limit <= 100:
+            raise StrategyRuntimeError("watcher_candidate_page_limit_invalid")
+        if not candidate_lane_keys or len(candidate_lane_keys) > 256:
+            raise StrategyRuntimeError("watcher_candidate_lane_keys_invalid")
+        return await self._runtime_repo.list_watcher_candidate_identity_page(
+            candidate_lane_keys=candidate_lane_keys,
+            after_runtime_instance_id=after_runtime_instance_id,
+            limit=limit,
+        )
 
     async def apply_runtime_attempt_mutation(
         self,

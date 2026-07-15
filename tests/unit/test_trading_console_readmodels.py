@@ -922,6 +922,7 @@ def test_trading_console_router_keeps_read_models_get_only_and_posts_allowlisted
     from src.interfaces.api_trading_console import router
 
     allowed_post_paths = {
+        "/api/trading-console/strategy-runtimes/watcher-active-candidate-page",
         "/api/trading-console/strategy-observations/scheduled-runs",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/next-attempt-observation-cycle",
         "/api/trading-console/strategy-runtimes/{runtime_instance_id}/next-attempt-strategy-plans",

@@ -166,6 +166,7 @@ class UrlLibApiClient:
         *,
         query: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
+        max_response_bytes: int = 16 * 1024 * 1024,
     ) -> dict[str, Any]:
         url = self._api_base + path
         if query:
@@ -182,13 +183,19 @@ class UrlLibApiClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=90) as response:
-                raw = response.read().decode("utf-8")
+                raw = _read_response_body_bounded(
+                    response,
+                    max_bytes=max_response_bytes,
+                ).decode("utf-8")
                 return {
                     "http_status": response.status,
                     "body": json.loads(raw) if raw else None,
                 }
         except urllib.error.HTTPError as exc:
-            raw = exc.read().decode("utf-8", errors="replace")
+            raw = _read_response_body_bounded(
+                exc,
+                max_bytes=max_response_bytes,
+            ).decode("utf-8", errors="replace")
             try:
                 parsed: Any = json.loads(raw)
             except json.JSONDecodeError:
@@ -198,6 +205,15 @@ class UrlLibApiClient:
                 "body": parsed,
                 "error": True,
             }
+
+
+def _read_response_body_bounded(response: Any, *, max_bytes: int) -> bytes:
+    if max_bytes <= 0:
+        raise ValueError("max_response_bytes_must_be_positive")
+    raw = response.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise RuntimeError(f"api_response_oversize:{max_bytes}")
+    return raw
 
 
 class FirstRealSubmitApiFlow:

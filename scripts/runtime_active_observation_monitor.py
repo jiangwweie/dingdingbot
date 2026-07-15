@@ -42,6 +42,11 @@ from src.application.runtime_process_outcome import (  # noqa: E402
     materialize_runtime_process_outcome,
 )
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity  # noqa: E402
+from src.application.readmodels.watcher_decision_fact_projection import (  # noqa: E402
+    WATCHER_SAFETY_BOOLEAN_KEYS,
+    WatcherRuntimeEffect,
+    compact_json_size,
+)
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
     API_BASE_ENV as FIRST_REAL_SUBMIT_API_BASE_ENV,
     DEFAULT_API_BASE,
@@ -113,6 +118,105 @@ def _active_runtimes(*, client: Any) -> list[dict[str, Any]]:
         for item in items
         if isinstance(item, dict) and str(item.get("status") or "").lower() == "active"
     ]
+
+
+def _candidate_lane_keys(
+    candidate_universe: dict[str, list[str]],
+    *,
+    side_scope: dict[str, tuple[str, ...]],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "side": side,
+        }
+        for strategy_group_id in sorted(candidate_universe)
+        for symbol in sorted(set(candidate_universe[strategy_group_id]))
+        for side in _expected_sides(strategy_group_id, side_scope=side_scope)
+    ]
+
+
+def _active_candidate_runtime_pages(
+    *,
+    client: Any,
+    candidate_universe: dict[str, list[str]],
+    side_scope: dict[str, tuple[str, ...]],
+    page_size: int = 16,
+) -> tuple[list[dict[str, Any]], int, list[str]]:
+    lane_keys = _candidate_lane_keys(
+        candidate_universe,
+        side_scope=side_scope,
+    )
+    if not lane_keys:
+        return [], 0, []
+    cursor: str | None = None
+    previous_id = ""
+    active: list[dict[str, Any]] = []
+    excluded_count: int | None = None
+    excluded_sample: list[str] = []
+    while True:
+        response = client.request_json(
+            "POST",
+            "/api/trading-console/strategy-runtimes/watcher-active-candidate-page",
+            body={
+                "candidate_lane_keys": lane_keys,
+                "after_runtime_instance_id": cursor,
+                "limit": page_size,
+            },
+            max_response_bytes=128 * 1024,
+        )
+        if response.get("http_status", 0) >= 300 or response.get("error"):
+            raise RuntimeError(
+                f"strategy_runtime_candidate_page_http_{response.get('http_status')}"
+            )
+        body = response.get("body")
+        if not isinstance(body, dict) or not isinstance(body.get("items"), list):
+            raise RuntimeError("active_runtime_pagination_invalid")
+        items = body["items"]
+        for item in items:
+            if not isinstance(item, dict):
+                raise RuntimeError("active_runtime_pagination_invalid")
+            runtime_id = str(item.get("runtime_instance_id") or "")
+            if not runtime_id or runtime_id <= previous_id:
+                raise RuntimeError("active_runtime_pagination_invalid")
+            previous_id = runtime_id
+            active.append(
+                {
+                    **item,
+                    "strategy_family_id": item.get("strategy_group_id"),
+                    "strategy_family_version_id": item.get(
+                        "strategy_group_version_id"
+                    ),
+                }
+            )
+        current_excluded = body.get("excluded_active_count")
+        current_sample = body.get("excluded_active_sample_ids")
+        if type(current_excluded) is not int or current_excluded < 0:
+            raise RuntimeError("active_runtime_pagination_invalid")
+        if not isinstance(current_sample, list) or len(current_sample) > 32:
+            raise RuntimeError("active_runtime_pagination_invalid")
+        if excluded_count is None:
+            excluded_count = current_excluded
+            excluded_sample = [str(value) for value in current_sample]
+        elif excluded_count != current_excluded or excluded_sample != [
+            str(value) for value in current_sample
+        ]:
+            raise RuntimeError("active_runtime_pagination_invalid")
+        has_more = body.get("has_more")
+        next_cursor = body.get("next_cursor")
+        if type(has_more) is not bool:
+            raise RuntimeError("active_runtime_pagination_invalid")
+        if has_more:
+            if not items or str(next_cursor or "") != previous_id:
+                raise RuntimeError("active_runtime_pagination_invalid")
+            if next_cursor == cursor:
+                raise RuntimeError("active_runtime_pagination_invalid")
+            cursor = str(next_cursor)
+            continue
+        if next_cursor is not None:
+            raise RuntimeError("active_runtime_pagination_invalid")
+        return active, int(excluded_count or 0), excluded_sample
 
 
 def _selected_active_runtimes(
@@ -1929,6 +2033,11 @@ def _build_runtime_observation_cycle_artifact(
         "one_hour_limit": args.one_hour_limit,
         "four_hour_limit": args.four_hour_limit,
         "timeout_seconds": args.timeout_seconds,
+        "response_projection": (
+            "full"
+            if bool(getattr(args, "include_runtime_artifacts", False))
+            else "watcher_compact"
+        ),
         "non_executing": True,
     }
     response = client.request_json(
@@ -1938,6 +2047,11 @@ def _build_runtime_observation_cycle_artifact(
             f"{args.runtime_instance_id}/next-attempt-observation-cycle"
         ),
         body=body,
+        max_response_bytes=(
+            16 * 1024 * 1024
+            if body["response_projection"] == "full"
+            else 512 * 1024
+        ),
     )
     payload = response.get("body")
     if response.get("http_status", 0) >= 300 or response.get("error"):
@@ -2070,6 +2184,18 @@ def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
             for observation in fact_observations
             if isinstance(observation, dict)
         ],
+        "action_time_fact_values": (
+            output.get("action_time_fact_values")
+            if isinstance(output.get("action_time_fact_values"), dict)
+            else {
+                str(observation.get("fact_key")): observation.get(
+                    "observed_value"
+                )
+                for observation in fact_observations
+                if isinstance(observation, dict)
+                and str(observation.get("fact_key") or "")
+            }
+        ),
         "evidence_payload": output.get("evidence_payload")
         if isinstance(output.get("evidence_payload"), dict)
         else {},
@@ -2077,9 +2203,7 @@ def _signal_summary(artifact: dict[str, Any]) -> dict[str, Any]:
 
 
 def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
-    safety = artifact.get("safety_invariants")
-    if not isinstance(safety, dict):
-        safety = {}
+    safety = _validated_runtime_safety(artifact)
     plan = (
         artifact.get("observation_cycle_plan")
         or artifact.get("observation_monitor_plan")
@@ -2096,7 +2220,7 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
         except ValueError:
             lane_identity = None
 
-    return {
+    summary = {
         "runtime_instance_id": (
             lane_identity.runtime_instance_id
             if lane_identity is not None
@@ -2171,6 +2295,34 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
             ),
         },
     }
+    if artifact.get("response_projection") == "watcher_compact" and (
+        compact_json_size(summary) > 256 * 1024
+    ):
+        raise RuntimeError("watcher_compact_projection_oversize:signal_summary")
+    return summary
+
+
+def _validated_runtime_safety(artifact: dict[str, Any]) -> dict[str, bool]:
+    safety = artifact.get("safety_invariants")
+    if artifact.get("response_projection") != "watcher_compact":
+        return safety if isinstance(safety, dict) else {}
+    try:
+        effect = WatcherRuntimeEffect.model_validate(
+            {
+                "status": str(artifact.get("status") or "unknown"),
+                "safety_invariants": (
+                    {key: safety.get(key) for key in WATCHER_SAFETY_BOOLEAN_KEYS}
+                    if isinstance(safety, dict)
+                    else {}
+                ),
+            }
+        )
+    except ValueError as exc:
+        message = str(exc)
+        marker = "watcher_safety_projection_invalid:"
+        detail = message[message.find(marker) :] if marker in message else message
+        raise RuntimeError(detail) from exc
+    return dict(effect.safety_invariants)
 
 
 def _safety(
@@ -2180,7 +2332,7 @@ def _safety(
 ) -> dict[str, Any]:
     def any_flag(name: str) -> bool:
         return any(
-            bool((artifact.get("safety_invariants") or {}).get(name))
+            _validated_runtime_safety(artifact).get(name) is True
             for artifact in artifacts
         )
 
@@ -2240,7 +2392,6 @@ def _build_monitor_artifact(
     _load_env_file(args.env_file)
     api_client = client or UrlLibApiClient(api_base=_api_base(args))
     builder = runtime_artifact_builder or _build_runtime_observation_cycle_artifact
-    active = _active_runtimes(client=api_client)
     requested_runtime_instance_ids = list(
         getattr(args, "runtime_instance_id", None) or []
     )
@@ -2249,26 +2400,45 @@ def _build_monitor_artifact(
     )
     candidate_universe, candidate_universe_source = _candidate_universe_for_args(args)
     side_scope = _side_scope_from_source(candidate_universe_source)
-    selected, missing_runtime_instance_ids = _selected_active_runtimes(
-        active,
-        runtime_instance_ids=requested_runtime_instance_ids,
-        strategy_family_ids=requested_strategy_family_ids,
-        max_runtimes=int(args.max_runtimes or 100),
-    )
     enforce_candidate_universe_scope = (
         candidate_universe_source.get("source")
         == "pg_runtime_control_state:candidate_scope"
         and candidate_universe_source.get("loaded") is True
     )
-    selected, candidate_universe_excluded_runtime_instance_ids = (
-        _filter_selected_to_candidate_universe(
+    excluded_active_count = 0
+    if enforce_candidate_universe_scope:
+        (
+            active,
+            excluded_active_count,
+            candidate_universe_excluded_runtime_instance_ids,
+        ) = _active_candidate_runtime_pages(
+            client=api_client,
+            candidate_universe=candidate_universe,
+            side_scope=side_scope,
+        )
+    else:
+        active = _active_runtimes(client=api_client)
+        candidate_universe_excluded_runtime_instance_ids = []
+    configured_max_runtimes = getattr(args, "max_runtimes", None)
+    effective_max_runtimes = (
+        len(active)
+        if enforce_candidate_universe_scope and not configured_max_runtimes
+        else int(configured_max_runtimes or 100)
+    )
+    selected, missing_runtime_instance_ids = _selected_active_runtimes(
+        active,
+        runtime_instance_ids=requested_runtime_instance_ids,
+        strategy_family_ids=requested_strategy_family_ids,
+        max_runtimes=effective_max_runtimes,
+    )
+    if enforce_candidate_universe_scope:
+        selected, unexpected_excluded = _filter_selected_to_candidate_universe(
             selected,
             candidate_universe,
             side_scope=side_scope,
         )
-        if enforce_candidate_universe_scope
-        else (selected, [])
-    )
+        if unexpected_excluded:
+            raise RuntimeError("active_runtime_pagination_invalid")
     candidate_universe_coverage = _candidate_universe_coverage(
         candidate_universe=candidate_universe,
         source=candidate_universe_source,
@@ -2278,15 +2448,26 @@ def _build_monitor_artifact(
     )
 
     runtime_artifacts: list[dict[str, Any]] = []
+    runtime_effects: list[dict[str, Any]] = []
     summaries: list[dict[str, Any]] = []
     for runtime in selected:
         runtime_args = _monitor_args(args, runtime)
         runtime_artifact = builder(runtime_args)
         runtime_artifact["runtime_instance_id"] = runtime_args.runtime_instance_id
-        runtime_artifacts.append(runtime_artifact)
         summaries.append(_summary(runtime, runtime_artifact))
+        runtime_effects.append(
+            {
+                "status": runtime_artifact.get("status"),
+                "response_projection": runtime_artifact.get(
+                    "response_projection"
+                ),
+                "safety_invariants": _validated_runtime_safety(runtime_artifact),
+            }
+        )
+        if args.include_runtime_artifacts:
+            runtime_artifacts.append(runtime_artifact)
 
-    status = _overall_status(runtime_artifacts)
+    status = _overall_status(runtime_effects)
     blockers: list[str] = []
     for item in summaries:
         for blocker in item["blockers"]:
@@ -2321,8 +2502,13 @@ def _build_monitor_artifact(
     return {
         "scope": "runtime_active_observation_monitor",
         "status": status,
-        "active_runtime_count": len(active),
+        "active_runtime_count": len(active) + excluded_active_count,
+        "candidate_universe_excluded_active_count": excluded_active_count,
         "monitored_runtime_count": len(selected),
+        "partial_by_operator_scope": bool(
+            configured_max_runtimes
+            and len(selected) < len(active)
+        ),
         "requested_runtime_instance_ids": requested_runtime_instance_ids,
         "requested_strategy_family_ids": requested_strategy_family_ids,
         "selected_runtime_instance_ids": [
@@ -2340,7 +2526,7 @@ def _build_monitor_artifact(
         "requested_timeout_seconds": args.timeout_seconds,
         "effective_observation_timeout_seconds": effective_timeout,
         "runtime_summaries": summaries,
-        "runtime_artifacts": runtime_artifacts if args.include_runtime_artifacts else [],
+        "runtime_artifacts": runtime_artifacts,
         "blockers": blockers,
         "warnings": warnings,
         "observation_monitor_plan": {
@@ -2350,7 +2536,7 @@ def _build_monitor_artifact(
             "action_time_ticket_id": action_time_ticket_id,
             "creates_action_time_ticket": any(
                 bool((artifact.get("safety_invariants") or {}).get("action_time_ticket_created"))
-                for artifact in runtime_artifacts
+                for artifact in runtime_effects
             ),
             "creates_execution_intent": False,
             "places_order": False,
@@ -2366,7 +2552,7 @@ def _build_monitor_artifact(
             allow_action_time_ticket_materialization=(
                 getattr(args, "allow_action_time_ticket_materialization", False)
             ),
-            artifacts=runtime_artifacts,
+            artifacts=runtime_effects,
         ),
     }
 
@@ -2454,7 +2640,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Allow SQLite/non-PG DSNs only in tests.",
     )
-    parser.add_argument("--max-runtimes", type=int, default=100)
+    parser.add_argument(
+        "--max-runtimes",
+        type=int,
+        default=None,
+        help="Manual diagnostic limit; production default covers every candidate runtime.",
+    )
     parser.add_argument("--max-cycles-per-runtime", type=int, default=1)
     parser.add_argument("--interval-seconds", type=float, default=0.0)
     parser.add_argument("--continue-on-blocked", action="store_true", default=False)

@@ -18,6 +18,17 @@ from src.application.readmodels.trading_console import (
     TradingConsoleReadModelResponse,
     TradingConsoleReadModelService,
 )
+from src.application.readmodels.strategy_runtime_watcher_identity import (
+    StrategyRuntimeWatcherIdentityPage,
+    WatcherCandidateLaneKey,
+)
+from src.application.readmodels.watcher_decision_fact_projection import (
+    ActionTimeDecisionFactProjection,
+    WATCHER_SAFETY_BOOLEAN_KEYS,
+    WatcherRuntimeEffect,
+    compact_json_size,
+    validate_compact_text_array,
+)
 from src.domain.execution_intent import ExecutionIntent
 from src.domain.experimental_runtime_profile_proposal import (
     ExperimentalRuntimeProfileProposal,
@@ -471,6 +482,17 @@ class StrategyRuntimeInspectionView(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class StrategyRuntimeWatcherCandidatePageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_lane_keys: tuple[WatcherCandidateLaneKey, ...] = Field(
+        min_length=1,
+        max_length=256,
+    )
+    after_runtime_instance_id: str | None = Field(default=None, max_length=220)
+    limit: int = Field(default=16, ge=1, le=100)
+
+
 class RuntimeStrategySignalShadowPlanningRequest(BaseModel):
     signal_input: StrategyFamilySignalInput
     allow_shadow_candidate_creation: bool = False
@@ -629,6 +651,7 @@ class RuntimeNextAttemptObservationCycleRequest(BaseModel):
     one_hour_limit: int = Field(default=25, ge=5, le=200)
     four_hour_limit: int = Field(default=25, ge=2, le=100)
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    response_projection: Literal["full", "watcher_compact"] = "full"
     non_executing: Literal[True] = True
 
 
@@ -716,6 +739,24 @@ async def list_strategy_runtimes(
     service = await _strategy_runtime_service()
     runtimes = await service.list_runtimes(status=status, limit=limit)
     return [_runtime_view(runtime) for runtime in runtimes]
+
+
+@router.post(
+    "/strategy-runtimes/watcher-active-candidate-page",
+    response_model=StrategyRuntimeWatcherIdentityPage,
+)
+async def watcher_active_candidate_runtime_page(
+    request: StrategyRuntimeWatcherCandidatePageRequest,
+) -> StrategyRuntimeWatcherIdentityPage:
+    service = await _strategy_runtime_service()
+    try:
+        return await service.list_watcher_candidate_identity_page(
+            candidate_lane_keys=request.candidate_lane_keys,
+            after_runtime_instance_id=request.after_runtime_instance_id,
+            limit=request.limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get(
@@ -1394,9 +1435,13 @@ async def runtime_next_attempt_observation_cycle(
             ),
         )
     try:
-        return await _runtime_next_attempt_observation_cycle_payload(
+        payload = await _runtime_next_attempt_observation_cycle_payload(
             runtime_instance_id=runtime_instance_id,
             request=request,
+        )
+        return _runtime_observation_response_projection(
+            payload,
+            response_projection=request.response_projection,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -1405,6 +1450,137 @@ async def runtime_next_attempt_observation_cycle(
         if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+
+
+def _runtime_observation_response_projection(
+    payload: dict[str, Any],
+    *,
+    response_projection: Literal["full", "watcher_compact"],
+) -> dict[str, Any]:
+    if response_projection == "full":
+        return payload
+    safety = payload.get("safety_invariants")
+    effect = WatcherRuntimeEffect.model_validate(
+        {
+            "status": str(payload.get("status") or "unknown"),
+            "safety_invariants": (
+                {
+                    key: safety.get(key)
+                    for key in WATCHER_SAFETY_BOOLEAN_KEYS
+                }
+                if isinstance(safety, dict)
+                else {}
+            ),
+        }
+    )
+    blockers = validate_compact_text_array(
+        "blockers",
+        list(payload.get("blockers") or []),
+    )
+    warnings = validate_compact_text_array(
+        "warnings",
+        list(payload.get("warnings") or []),
+    )
+    signal_artifact = _compact_signal_artifact(payload.get("signal_artifact"))
+    compact = {
+        "response_projection": "watcher_compact",
+        "scope": payload.get("scope"),
+        "status": payload.get("status"),
+        "blocked_stage": payload.get("blocked_stage"),
+        "runtime_instance_id": payload.get("runtime_instance_id"),
+        "owner_action_scope": payload.get("owner_action_scope"),
+        "include_exchange": payload.get("include_exchange"),
+        "signal_artifact": signal_artifact,
+        "action_time_ticket": payload.get("action_time_ticket"),
+        "blockers": blockers,
+        "warnings": warnings,
+        "observation_cycle_plan": payload.get("observation_cycle_plan") or {},
+        "safety_invariants": effect.safety_invariants,
+    }
+    if compact_json_size(compact) > 256 * 1024:
+        raise ValueError("watcher_compact_projection_oversize:signal_summary")
+    return compact
+
+
+def _compact_signal_artifact(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("watcher_compact_projection_oversize:signal_artifact")
+    evaluation = value.get("evaluation_result")
+    evaluation = evaluation if isinstance(evaluation, dict) else {}
+    output = evaluation.get("signal")
+    if not isinstance(output, dict):
+        output = evaluation.get("output")
+    output = output if isinstance(output, dict) else {}
+    raw_observations = output.get("fact_observations") or []
+    if not isinstance(raw_observations, list):
+        raise ValueError("watcher_compact_projection_oversize:fact_observations")
+    action_time_fact_values = output.get("action_time_fact_values")
+    if not isinstance(action_time_fact_values, dict):
+        action_time_fact_values = {
+            str(item.get("fact_key")): item.get("observed_value")
+            for item in raw_observations
+            if isinstance(item, dict) and str(item.get("fact_key") or "")
+        }
+    decision = ActionTimeDecisionFactProjection.model_validate(
+        {
+            "signal_snapshot": output.get("signal_snapshot") or {},
+            "evidence_payload": output.get("evidence_payload") or {},
+            "action_time_fact_values": action_time_fact_values,
+            "fact_observations": raw_observations,
+        }
+    )
+    reason_codes = validate_compact_text_array(
+        "reason_codes",
+        list(output.get("reason_codes") or evaluation.get("reason_codes") or []),
+    )
+    compact_output = {
+        key: output.get(key)
+        for key in (
+            "signal_type",
+            "signal_grade",
+            "required_execution_mode",
+            "side",
+            "human_summary",
+            "confidence",
+            "timestamp_ms",
+            "time_authority",
+            "trigger_candle_close_time_ms",
+            "data_quality",
+        )
+    }
+    compact_output.update(decision.model_dump(mode="json"))
+    compact_output["reason_codes"] = reason_codes
+    return {
+        "scope": value.get("scope"),
+        "status": value.get("status"),
+        "runtime_instance_id": value.get("runtime_instance_id"),
+        "strategy_family_id": value.get("strategy_family_id"),
+        "strategy_family_version_id": value.get("strategy_family_version_id"),
+        "symbol": value.get("symbol"),
+        "side": value.get("side"),
+        "lane_identity": value.get("lane_identity"),
+        "lane_identity_key": value.get("lane_identity_key"),
+        "can_materialize_live_signal_event": value.get(
+            "can_materialize_live_signal_event"
+        ),
+        "source": value.get("source"),
+        "source_type": value.get("source_type"),
+        "evaluation_result": {
+            key: evaluation.get(key)
+            for key in (
+                "status",
+                "evaluator_id",
+                "evaluated_at_ms",
+                "valid_until_ms",
+                "can_call_semantic_binding",
+                "semantics_binding_found",
+                "strategy_candidate_mode",
+            )
+        }
+        | {"signal": compact_output},
+    }
 
 
 @router.post(
@@ -6074,6 +6250,12 @@ def _runtime_next_attempt_observation_safety() -> dict[str, bool]:
     return {
         "api_non_executing": True,
         "allow_action_time_ticket_materialization": False,
+        "action_time_ticket_created": False,
+        "runtime_execution_intent_draft_created": False,
+        "recorded_execution_intent_created": False,
+        "submit_authorization_created": False,
+        "protection_plan_created": False,
+        "executable_execution_intent_created": False,
         "local_registration_armed": False,
         "exchange_submit_armed": False,
         "execute_real_submit": False,

@@ -55,12 +55,17 @@ from src.infrastructure.pg_models import (
     PGStrategyRuntimeInstanceORM,
 )
 from src.infrastructure.pg_strategy_runtime_repository import PgStrategyRuntimeRepository
+from src.application.readmodels.strategy_runtime_watcher_identity import (
+    WatcherCandidateLaneKey,
+)
 from src.interfaces import api as api_module
 from src.interfaces.api_trading_console import (
+    StrategyRuntimeWatcherCandidatePageRequest,
     StrategyRuntimeLiveEnablementMutationRequest,
     apply_strategy_runtime_live_enablement_mutation,
     get_strategy_runtime,
     list_strategy_runtimes,
+    watcher_active_candidate_runtime_page,
 )
 
 
@@ -670,6 +675,105 @@ async def test_repository_persists_runtime_status_and_events():
             assert count is not None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_repository_pages_only_active_candidate_runtime_identities():
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(PGStrategyRuntimeInstanceORM.__table__.create)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    repo = PgStrategyRuntimeRepository(session_maker=session_maker)
+    try:
+        for index in range(17):
+            await repo.create(
+                _runtime(
+                    runtime_instance_id=f"runtime-{index:03d}",
+                    trial_binding_id=f"binding-{index:03d}",
+                    status=StrategyRuntimeInstanceStatus.ACTIVE,
+                )
+            )
+        await repo.create(
+            _runtime(
+                runtime_instance_id="runtime-inactive",
+                trial_binding_id="binding-inactive",
+                status=StrategyRuntimeInstanceStatus.PAUSED,
+            )
+        )
+        await repo.create(
+            _runtime(
+                runtime_instance_id="runtime-out-of-scope",
+                trial_binding_id="binding-out-of-scope",
+                strategy_family_id="other-family",
+                status=StrategyRuntimeInstanceStatus.ACTIVE,
+            )
+        )
+        lane = WatcherCandidateLaneKey(
+            strategy_group_id="family-1",
+            symbol="ETH/USDT:USDT",
+            side="long",
+        )
+
+        first = await repo.list_watcher_candidate_identity_page(
+            candidate_lane_keys=(lane,),
+            after_runtime_instance_id=None,
+            limit=16,
+        )
+        second = await repo.list_watcher_candidate_identity_page(
+            candidate_lane_keys=(lane,),
+            after_runtime_instance_id=first.next_cursor,
+            limit=16,
+        )
+
+        ids = [item.runtime_instance_id for item in (*first.items, *second.items)]
+        assert ids == [f"runtime-{index:03d}" for index in range(17)]
+        assert first.has_more is True
+        assert first.next_cursor == "runtime-015"
+        assert second.has_more is False
+        assert second.next_cursor is None
+        assert first.excluded_active_count == 1
+        assert first.excluded_active_sample_ids == ("runtime-out-of-scope",)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_watcher_candidate_page_endpoint_delegates_without_full_list(monkeypatch):
+    expected = type("Page", (), {"marker": "bounded"})()
+
+    class _Service:
+        async def list_watcher_candidate_identity_page(self, **kwargs):
+            assert kwargs["limit"] == 16
+            assert kwargs["after_runtime_instance_id"] is None
+            assert kwargs["candidate_lane_keys"][0].strategy_group_id == "family-1"
+            return expected
+
+        async def list_runtimes(self, **kwargs):
+            raise AssertionError("full runtime list must not be called")
+
+    async def _service():
+        return _Service()
+
+    monkeypatch.setattr(
+        "src.interfaces.api_trading_console._strategy_runtime_service",
+        _service,
+    )
+    result = await watcher_active_candidate_runtime_page(
+        StrategyRuntimeWatcherCandidatePageRequest(
+            candidate_lane_keys=(
+                WatcherCandidateLaneKey(
+                    strategy_group_id="family-1",
+                    symbol="ETHUSDT",
+                    side="long",
+                ),
+            )
+        )
+    )
+    assert result is expected
 
 
 def test_migration_creates_strategy_runtime_shadow_tables():

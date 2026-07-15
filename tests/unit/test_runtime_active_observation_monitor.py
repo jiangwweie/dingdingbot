@@ -103,7 +103,16 @@ class _FakeClient:
         self.items = items
         self.calls = []
 
-    def request_json(self, method, path, *, query=None, body=None):
+    def request_json(
+        self,
+        method,
+        path,
+        *,
+        query=None,
+        body=None,
+        max_response_bytes=16 * 1024 * 1024,
+    ):
+        _ = max_response_bytes
         self.calls.append(
             {
                 "method": method,
@@ -112,7 +121,146 @@ class _FakeClient:
                 "body": body,
             }
         )
+        if path.endswith("/watcher-active-candidate-page"):
+            lane_keys = {
+                (
+                    str(item["strategy_group_id"]),
+                    str(item["symbol"]),
+                    str(item["side"]),
+                )
+                for item in body["candidate_lane_keys"]
+            }
+            active = [
+                item
+                for item in self.items
+                if str(item.get("status") or "").lower() == "active"
+            ]
+            matched = sorted(
+                [
+                    item
+                    for item in active
+                    if (
+                        str(item.get("strategy_family_id") or ""),
+                        runtime_active_observation_monitor._compact_symbol(
+                            item.get("symbol")
+                        ),
+                        str(item.get("side") or ""),
+                    )
+                    in lane_keys
+                    and str(item.get("runtime_instance_id") or "")
+                    > str(body.get("after_runtime_instance_id") or "")
+                ],
+                key=lambda item: str(item.get("runtime_instance_id") or ""),
+            )
+            excluded = sorted(
+                str(item.get("runtime_instance_id") or "")
+                for item in active
+                if (
+                    str(item.get("strategy_family_id") or ""),
+                    runtime_active_observation_monitor._compact_symbol(
+                        item.get("symbol")
+                    ),
+                    str(item.get("side") or ""),
+                )
+                not in lane_keys
+            )
+            limit = int(body["limit"])
+            page = matched[:limit]
+            has_more = len(matched) > limit
+            return {
+                "http_status": 200,
+                "body": {
+                    "items": [
+                        {
+                            "runtime_instance_id": item["runtime_instance_id"],
+                            "strategy_group_id": item["strategy_family_id"],
+                            "strategy_group_version_id": item[
+                                "strategy_family_version_id"
+                            ],
+                            "symbol": item["symbol"],
+                            "side": item["side"],
+                            "carrier_id": item.get("carrier_id"),
+                            "status": "active",
+                        }
+                        for item in page
+                    ],
+                    "next_cursor": (
+                        str(page[-1]["runtime_instance_id"])
+                        if has_more
+                        else None
+                    ),
+                    "has_more": has_more,
+                    "excluded_active_count": len(excluded),
+                    "excluded_active_sample_ids": excluded[:32],
+                },
+            }
         return {"http_status": 200, "body": self.items}
+
+
+def test_candidate_runtime_page_walk_covers_33_ids_once():
+    items = [
+        {
+            "runtime_instance_id": f"runtime-{index:03d}",
+            "strategy_family_id": "SG-1",
+            "strategy_family_version_id": "v1",
+            "symbol": "ETH/USDT:USDT",
+            "side": "long",
+            "carrier_id": "carrier",
+            "status": "active",
+        }
+        for index in range(33)
+    ]
+    client = _FakeClient(items)
+
+    active, excluded_count, excluded_sample = (
+        runtime_active_observation_monitor._active_candidate_runtime_pages(
+            client=client,
+            candidate_universe={"SG-1": ["ETHUSDT"]},
+            side_scope={"SG-1": ("long",)},
+            page_size=16,
+        )
+    )
+
+    assert [row["runtime_instance_id"] for row in active] == [
+        f"runtime-{index:03d}" for index in range(33)
+    ]
+    assert excluded_count == 0
+    assert excluded_sample == []
+    assert len(client.calls) == 3
+
+
+def test_production_candidate_page_has_no_legacy_100_runtime_truncation(monkeypatch):
+    _patch_pg_candidate_scope(
+        monkeypatch,
+        universe={"SG-1": ["ETHUSDT"]},
+        side_scope={"SG-1": ["long"]},
+    )
+    items = [
+        {
+            "runtime_instance_id": f"runtime-{index:03d}",
+            "strategy_family_id": "SG-1",
+            "strategy_family_version_id": "v1",
+            "symbol": "ETH/USDT:USDT",
+            "side": "long",
+            "carrier_id": "carrier",
+            "status": "active",
+        }
+        for index in range(256)
+    ]
+
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
+        _args(max_runtimes=None),
+        client=_FakeClient(items),
+        runtime_artifact_builder=lambda args: {
+            "status": "waiting_for_signal",
+            "blockers": [],
+            "warnings": [],
+            "safety_invariants": {},
+        },
+    )
+
+    assert packet["monitored_runtime_count"] == 256
+    assert packet["partial_by_operator_scope"] is False
 
 
 def _args(**overrides):
@@ -1321,10 +1469,10 @@ def test_active_monitor_projects_runtime_profile_boundary_for_runtime_scope(
     }
     profile = rows[("SOLUSDT", "long")]["runtime_profile"]
     assert rows[("SOLUSDT", "long")]["state"] == "active_watcher_scope"
-    assert profile["max_notional"] == "8"
-    assert profile["leverage"] == "1"
-    assert profile["runtime_profile_id"] == "profile:sor-sol-long"
-    assert profile["profile_source"] == "runtime"
+    assert profile["max_notional"] == ""
+    assert profile["leverage"] == ""
+    assert profile["runtime_profile_id"] == ""
+    assert profile["profile_source"] == "missing_runtime_profile_boundary"
     assert profile["authority_boundary"] == (
         "runtime_profile_projection_only; no_live_profile_or_sizing_change"
     )

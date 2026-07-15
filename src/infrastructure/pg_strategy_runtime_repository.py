@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import String, and_, column, func, or_, select, values
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.domain.strategy_runtime import (
@@ -19,6 +19,11 @@ from src.infrastructure.database import get_pg_session_maker, init_pg_core_db
 from src.infrastructure.pg_models import (
     PGStrategyRuntimeEventORM,
     PGStrategyRuntimeInstanceORM,
+)
+from src.application.readmodels.strategy_runtime_watcher_identity import (
+    StrategyRuntimeWatcherIdentity,
+    StrategyRuntimeWatcherIdentityPage,
+    WatcherCandidateLaneKey,
 )
 
 
@@ -61,6 +66,128 @@ class PgStrategyRuntimeRepository:
             stmt = stmt.order_by(PGStrategyRuntimeInstanceORM.updated_at_ms.desc()).limit(limit)
             result = await session.execute(stmt)
             return [self._to_domain(row) for row in result.scalars().all()]
+
+    async def list_watcher_candidate_identity_page(
+        self,
+        *,
+        candidate_lane_keys: tuple[WatcherCandidateLaneKey, ...],
+        after_runtime_instance_id: str | None,
+        limit: int = 16,
+    ) -> StrategyRuntimeWatcherIdentityPage:
+        if not 1 <= limit <= 100:
+            raise ValueError("watcher_candidate_page_limit_invalid")
+        if not candidate_lane_keys or len(candidate_lane_keys) > 256:
+            raise ValueError("watcher_candidate_lane_keys_invalid")
+        normalized_symbol = func.replace(
+            func.replace(PGStrategyRuntimeInstanceORM.symbol, "/", ""),
+            ":USDT",
+            "",
+        )
+        lane_predicate = or_(
+            *(
+                and_(
+                    PGStrategyRuntimeInstanceORM.strategy_family_id
+                    == lane.strategy_group_id,
+                    normalized_symbol
+                    == lane.symbol.replace("/", "").replace(":USDT", ""),
+                    PGStrategyRuntimeInstanceORM.side == lane.side,
+                )
+                for lane in candidate_lane_keys
+            )
+        )
+        active_predicate = PGStrategyRuntimeInstanceORM.status == "active"
+        columns = (
+            PGStrategyRuntimeInstanceORM.runtime_instance_id,
+            PGStrategyRuntimeInstanceORM.strategy_family_id,
+            PGStrategyRuntimeInstanceORM.strategy_family_version_id,
+            PGStrategyRuntimeInstanceORM.symbol,
+            PGStrategyRuntimeInstanceORM.side,
+            PGStrategyRuntimeInstanceORM.carrier_id,
+            PGStrategyRuntimeInstanceORM.status,
+        )
+        async with self._session_maker() as session:
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                candidate_lanes = values(
+                    column("strategy_group_id", String),
+                    column("symbol", String),
+                    column("side", String),
+                    name="candidate_lanes",
+                ).data(
+                    [
+                        (
+                            lane.strategy_group_id,
+                            lane.symbol.replace("/", "").replace(":USDT", ""),
+                            lane.side,
+                        )
+                        for lane in candidate_lane_keys
+                    ]
+                )
+                stmt = select(*columns).select_from(
+                    PGStrategyRuntimeInstanceORM.__table__.join(
+                        candidate_lanes,
+                        and_(
+                            PGStrategyRuntimeInstanceORM.strategy_family_id
+                            == candidate_lanes.c.strategy_group_id,
+                            normalized_symbol == candidate_lanes.c.symbol,
+                            PGStrategyRuntimeInstanceORM.side
+                            == candidate_lanes.c.side,
+                        ),
+                    )
+                ).where(active_predicate)
+            else:
+                # SQLite is retained only for local deterministic unit tests;
+                # production PostgreSQL always uses the bounded VALUES join.
+                stmt = select(*columns).where(active_predicate, lane_predicate)
+            if after_runtime_instance_id:
+                stmt = stmt.where(
+                    PGStrategyRuntimeInstanceORM.runtime_instance_id
+                    > after_runtime_instance_id
+                )
+            stmt = stmt.order_by(
+                PGStrategyRuntimeInstanceORM.runtime_instance_id.asc()
+            ).limit(limit + 1)
+            rows = (await session.execute(stmt)).mappings().all()
+            excluded_count = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(PGStrategyRuntimeInstanceORM)
+                    .where(active_predicate, ~lane_predicate)
+                )
+                or 0
+            )
+            excluded_rows = (
+                await session.execute(
+                    select(PGStrategyRuntimeInstanceORM.runtime_instance_id)
+                    .where(active_predicate, ~lane_predicate)
+                    .order_by(PGStrategyRuntimeInstanceORM.runtime_instance_id.asc())
+                    .limit(32)
+                )
+            ).scalars().all()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        items = tuple(
+            StrategyRuntimeWatcherIdentity(
+                runtime_instance_id=str(row["runtime_instance_id"]),
+                strategy_group_id=str(row["strategy_family_id"]),
+                strategy_group_version_id=str(row["strategy_family_version_id"]),
+                symbol=str(row["symbol"]),
+                side=str(row["side"]),
+                carrier_id=(
+                    str(row["carrier_id"])
+                    if row["carrier_id"] is not None
+                    else None
+                ),
+                status="active",
+            )
+            for row in page_rows
+        )
+        return StrategyRuntimeWatcherIdentityPage(
+            items=items,
+            next_cursor=(items[-1].runtime_instance_id if has_more else None),
+            has_more=has_more,
+            excluded_active_count=excluded_count,
+            excluded_active_sample_ids=tuple(str(value) for value in excluded_rows),
+        )
 
     async def update_status(self, runtime: StrategyRuntimeInstance) -> StrategyRuntimeInstance:
         async with self._session_maker() as session:
