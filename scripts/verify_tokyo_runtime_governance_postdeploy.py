@@ -29,7 +29,7 @@ DEFAULT_EXPECTED_LATEST_MIGRATION = (
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
 DEFAULT_VENV_PYTHON = (
-    "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
+    "/home/ubuntu/brc-deploy/app/current/.venv/bin/python"
 )
 CERTIFIED_CCXT_VERSION = "4.5.56"
 

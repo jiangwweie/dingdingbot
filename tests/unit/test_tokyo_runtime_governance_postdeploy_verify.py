@@ -15,7 +15,7 @@ LATEST_MIGRATION = (
 )
 CERTIFIED_CCXT_VERSION = "4.5.56"
 RUNTIME_VENV_PYTHON = (
-    "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
+    "/home/ubuntu/brc-deploy/app/current/.venv/bin/python"
 )
 
 
