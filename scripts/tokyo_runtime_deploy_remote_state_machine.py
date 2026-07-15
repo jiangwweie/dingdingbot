@@ -412,10 +412,15 @@ def stage_candidate_release(
         commands.append(
             (["/usr/bin/git", "clone", "--no-checkout", repo_url, str(source_repo)], source_root, 300)
         )
+    git_in_source_repo = [
+        "/usr/bin/git",
+        "-c",
+        f"safe.directory={source_repo}",
+    ]
     commands.extend(
         [
-            (["/usr/bin/git", "fetch", "--prune", "origin", git_ref], source_repo, 300),
-            (["/usr/bin/git", "rev-parse", "FETCH_HEAD"], source_repo, 30),
+            (git_in_source_repo + ["fetch", "--prune", "origin", git_ref], source_repo, 300),
+            (git_in_source_repo + ["rev-parse", "FETCH_HEAD"], source_repo, 30),
         ]
     )
     resolved = None
@@ -423,7 +428,7 @@ def stage_candidate_release(
         result = run(command, cwd=cwd, timeout=timeout)
         if result.returncode != 0:
             raise RuntimeError("candidate_export_command_failed:" + Path(command[0]).name)
-        if command[1:3] == ["rev-parse", "FETCH_HEAD"]:
+        if command[-2:] == ["rev-parse", "FETCH_HEAD"]:
             resolved = result.stdout.strip()
     if resolved != target_sha:
         raise ValueError("candidate_fetch_head_mismatch")
@@ -434,7 +439,7 @@ def stage_candidate_release(
         shutil.rmtree(temporary)
     temporary.mkdir(mode=0o755)
     for command, cwd, timeout in (
-        (["/usr/bin/git", "archive", "--format=tar", "-o", str(archive), target_sha], source_repo, 120),
+        (git_in_source_repo + ["archive", "--format=tar", "-o", str(archive), target_sha], source_repo, 120),
         (["/usr/bin/tar", "-xf", str(archive), "-C", str(temporary)], releases, 120),
     ):
         result = run(command, cwd=cwd, timeout=timeout)
