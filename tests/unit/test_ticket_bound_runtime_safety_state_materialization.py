@@ -406,15 +406,45 @@ def pg_control_connection():
             exit_policy_core_migration.upgrade()
         finally:
             exit_policy_core_migration.op = old_exit_policy_core_op
+        conn.execute(
+            text(
+                "ALTER TABLE brc_runtime_capabilities_current "
+                "ADD COLUMN proof_schema TEXT"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE brc_runtime_capabilities_current "
+                "ADD COLUMN proof_payload JSON"
+            )
+        )
         seed.seed_runtime_control_state_foundation(conn)
+        from src.application.readmodels.lifecycle_mutation_enablement_proof import (
+            LifecycleMutationEnablementProof,
+        )
+
+        proof = LifecycleMutationEnablementProof(
+            target_runtime_head="a" * 40,
+            lane_digest="b" * 64,
+            release_activation_ref="release-activation:unit-fixture",
+            action_time_certification_ref="action-time-cert:v2:" + "c" * 64,
+            certification_projection_digest="d" * 64,
+            enablement_fact_refs=("fact-unit-fixture",),
+        )
         conn.execute(
             text(
                 "UPDATE brc_runtime_capabilities_current "
-                "SET status = 'enabled', certification_ref = 'unit-fixture:certified', "
+                "SET status = 'enabled', certification_ref = :certification_ref, "
+                "proof_schema = :proof_schema, proof_payload = :proof_payload, "
                 "updated_at_ms = :now_ms "
                 "WHERE capability_id = 'ticket_lifecycle_durable_mutation'"
             ),
-            {"now_ms": NOW_MS},
+            {
+                "now_ms": NOW_MS,
+                "certification_ref": proof.lifecycle_certification_ref(),
+                "proof_schema": proof.proof_schema,
+                "proof_payload": json.dumps(proof.canonical_payload()),
+            },
         )
     with engine.connect() as conn:
         yield conn

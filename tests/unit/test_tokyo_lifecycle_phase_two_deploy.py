@@ -15,7 +15,7 @@ from scripts.plan_tokyo_runtime_governance_git_deploy import (
 
 def test_deploy_plan_default_tracks_exit_policy_canary_migration():
     assert DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-07-15-123_activate_sor_long_exit_policy_canary.py"
+        "2026-07-15-124_persist_lifecycle_mutation_enablement_proof.py"
     )
 
 

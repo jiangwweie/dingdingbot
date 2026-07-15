@@ -56,12 +56,22 @@ def evaluate_phase_two_readiness(
         return _result(blockers, {}, deploy_quiescence=deploy_quiescence)
 
     capability = lifecycle_mutation_capability_decision(conn)
-    if capability.get("enabled") is True and not deploy_quiescence:
+    capability_enabled = _count(
+        conn,
+        "SELECT count(*) FROM brc_runtime_capabilities_current "
+        "WHERE capability_id = 'ticket_lifecycle_durable_mutation' "
+        "AND status = 'enabled'",
+    ) > 0
+    if capability_enabled and not deploy_quiescence:
         blockers.append("phase_two_capability_already_enabled")
     blockers.extend(
         blocker
         for blocker in capability.get("blockers") or []
         if blocker != "lifecycle_mutation_capability_not_ready"
+        and not (
+            deploy_quiescence
+            and blocker.startswith("lifecycle_mutation_enablement_proof_")
+        )
     )
 
     safe_modes = _count(
@@ -113,7 +123,7 @@ def evaluate_phase_two_readiness(
             conn,
             """
             SELECT count(*) FROM brc_ticket_bound_exchange_commands
-            WHERE command_state IN ('outcome_unknown', 'hard_stopped', 'dispatching')
+            WHERE command_state IN ('prepared', 'outcome_unknown', 'dispatching')
             """,
         ),
         "active_domain_holds": _count(

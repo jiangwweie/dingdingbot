@@ -6,6 +6,10 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.readmodels.lifecycle_mutation_enablement_proof import (
+    LifecycleMutationEnablementProof,
+)
+
 
 CAPABILITY_ID = "ticket_lifecycle_durable_mutation"
 REQUIRED_COMMAND_COLUMNS = {
@@ -41,6 +45,21 @@ def lifecycle_mutation_capability_decision(
         blockers.append("lifecycle_mutation_capability_row_missing")
     elif str(capability.get("status") or "") != "enabled":
         blockers.append("lifecycle_mutation_capability_not_ready")
+    else:
+        proof_columns = {"proof_schema", "proof_payload"}
+        if not proof_columns <= set(table.c.keys()):
+            blockers.append("lifecycle_mutation_enablement_proof_schema_missing")
+        else:
+            try:
+                proof = LifecycleMutationEnablementProof.model_validate(
+                    capability.get("proof_payload")
+                )
+                if capability.get("proof_schema") != proof.proof_schema:
+                    raise ValueError("proof_schema_mismatch")
+                if capability.get("certification_ref") != proof.lifecycle_certification_ref():
+                    raise ValueError("proof_ref_mismatch")
+            except (TypeError, ValueError):
+                blockers.append("lifecycle_mutation_enablement_proof_invalid")
     if not inspector.has_table("brc_ticket_bound_exchange_commands"):
         blockers.append("lifecycle_exchange_command_authority_missing")
     else:
@@ -59,11 +78,18 @@ def set_lifecycle_mutation_capability(
     enabled: bool,
     certification_ref: str,
     now_ms: int,
+    proof: LifecycleMutationEnablementProof | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_ref = str(certification_ref or "").strip()
     if not normalized_ref:
         raise ValueError("lifecycle_mutation_certification_ref_required")
     if enabled:
+        if proof is None:
+            raise ValueError("lifecycle_mutation_enablement_proof_required")
+        typed_proof = LifecycleMutationEnablementProof.model_validate(proof)
+        expected_ref = typed_proof.lifecycle_certification_ref()
+        if normalized_ref != expected_ref:
+            raise ValueError("lifecycle_mutation_certification_ref_mismatch")
         structural = lifecycle_mutation_capability_decision(conn)
         structural_blockers = [
             blocker
@@ -83,6 +109,15 @@ def set_lifecycle_mutation_capability(
         "certification_ref": normalized_ref,
         "updated_at_ms": int(now_ms),
     }
+    if "proof_schema" in table.c and "proof_payload" in table.c:
+        values.update(
+            {
+                "proof_schema": typed_proof.proof_schema if enabled else None,
+                "proof_payload": typed_proof.canonical_payload() if enabled else None,
+            }
+        )
+    elif enabled:
+        raise ValueError("lifecycle_mutation_enablement_proof_schema_missing")
     existing = conn.execute(
         sa.select(table.c.capability_id).where(table.c.capability_id == CAPABILITY_ID)
     ).first()

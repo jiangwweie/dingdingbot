@@ -11,6 +11,36 @@ from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
+from tests.unit.test_ticket_bound_exchange_command_worker import (
+    _create_ready_protected_submit,
+    _prepare_real_submit,
+)
+from src.application.readmodels.lifecycle_mutation_enablement_proof import (
+    LifecycleMutationEnablementProof,
+)
+
+
+def _install_v2_capability_proof(conn) -> None:
+    proof = LifecycleMutationEnablementProof(
+        target_runtime_head="a" * 40,
+        lane_digest="b" * 64,
+        release_activation_ref="release-activation:test",
+        action_time_certification_ref="action-time-cert:v2:" + "c" * 64,
+        certification_projection_digest="d" * 64,
+        enablement_fact_refs=("fact-1",),
+    )
+    conn.execute(
+        text(
+            "UPDATE brc_runtime_capabilities_current SET proof_schema=:schema, "
+            "proof_payload=:payload, certification_ref=:ref WHERE capability_id="
+            "'ticket_lifecycle_durable_mutation'"
+        ),
+        {
+            "schema": proof.proof_schema,
+            "payload": __import__("json").dumps(proof.canonical_payload()),
+            "ref": proof.lifecycle_certification_ref(),
+        },
+    )
 
 
 def _insert_real_lifecycle(
@@ -194,6 +224,44 @@ def test_phase_two_rejects_enabled_capability_or_missing_account_truth(
     assert payload["status"] == "blocked"
     assert "phase_two_capability_already_enabled" in payload["blockers"]
     assert "phase_two_safe_account_mode_count:0" in payload["blockers"]
+
+
+def test_phase_two_blocks_prepared_exchange_command(pg_control_connection):
+    _install_v2_capability_proof(pg_control_connection)
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+
+    payload = evaluate_phase_two_readiness(
+        pg_control_connection,
+        now_ms=NOW_MS + 1_000,
+        deploy_quiescence=True,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "phase_two_critical_exchange_commands:3" in payload["blockers"]
+
+
+def test_phase_two_ignores_closed_historical_hard_stop_without_active_freeze(
+    pg_control_connection,
+):
+    _install_v2_capability_proof(pg_control_connection)
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET command_state = 'hard_stopped'"
+        )
+    )
+
+    payload = evaluate_phase_two_readiness(
+        pg_control_connection,
+        now_ms=NOW_MS + 1_000,
+        deploy_quiescence=True,
+    )
+
+    assert payload["status"] == "phase_two_ready"
+    assert payload["counts"]["critical_exchange_commands"] == 0
 
 
 def test_deploy_quiescence_ignores_expired_account_mode_but_not_live_risk(

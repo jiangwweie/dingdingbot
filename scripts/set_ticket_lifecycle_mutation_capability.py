@@ -36,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--disable", action="store_true")
     mode.add_argument("--status", action="store_true")
     parser.add_argument("--certification-ref", default="")
+    parser.add_argument("--proof-json", default="")
     parser.add_argument("--now-ms", type=int, default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -62,6 +63,11 @@ def main(argv: list[str] | None = None) -> int:
                     enabled=args.enable,
                     certification_ref=args.certification_ref,
                     now_ms=int(args.now_ms or time.time() * 1000),
+                    proof=(
+                        json.loads(args.proof_json)
+                        if args.enable and args.proof_json
+                        else None
+                    ),
                 )
             )
     except (sa.exc.SQLAlchemyError, ValueError) as exc:
