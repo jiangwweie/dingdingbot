@@ -16,6 +16,9 @@ from src.application.action_time import finalgate_preflight as finalgate
 from src.application.action_time import operation_layer_handoff as handoff
 from src.application.action_time import action_time_ticket as ticket_materializer
 from src.application.action_time import runtime_safety_state as safety
+from src.application.action_time.lifecycle_mutation_capability import (
+    set_lifecycle_mutation_capability,
+)
 from tests.unit.test_action_time_ticket_materialization import (
     NOW_MS,
     _insert_action_time_lane_graph,
@@ -444,21 +447,14 @@ def pg_control_connection():
             action_time_certification_payload=action_time,
             certification_projection_digest="sha256:" + "e" * 64,
         )
-        conn.execute(
-            text(
-                "UPDATE brc_runtime_capabilities_current "
-                "SET status = 'enabled', certification_ref = :certification_ref, "
-                "proof_schema = :proof_schema, proof_payload = :proof_payload, "
-                "updated_at_ms = :now_ms "
-                "WHERE capability_id = 'ticket_lifecycle_durable_mutation'"
-            ),
-            {
-                "now_ms": NOW_MS,
-                "certification_ref": proof.lifecycle_certification_ref(),
-                "proof_schema": proof.proof_schema,
-                "proof_payload": json.dumps(proof.canonical_payload()),
-            },
+        enabled = set_lifecycle_mutation_capability(
+            conn,
+            enabled=True,
+            certification_ref=proof.lifecycle_certification_ref(),
+            now_ms=NOW_MS,
+            proof=proof,
         )
+        assert enabled["status"] == "ready"
     with engine.connect() as conn:
         yield conn
     engine.dispose()

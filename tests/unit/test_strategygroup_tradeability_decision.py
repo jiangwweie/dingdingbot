@@ -2396,6 +2396,29 @@ def _attach_current_action_time_capability(
     now_ms: int,
     runtime_head: str = "f" * 40,
 ) -> None:
+    event_by_id = {
+        row["event_spec_id"]: row
+        for row in control_state["strategy_side_event_specs"]
+    }
+    event_by_candidate = {
+        row["candidate_scope_id"]: event_by_id[row["event_spec_id"]]
+        for row in control_state["candidate_scope_event_bindings"]
+        if row["status"] == "active"
+    }
+    control_state["strategy_runtime_instances"] = [
+        {
+            "runtime_instance_id": "runtime:" + row["candidate_scope_id"],
+            "strategy_family_id": row["strategy_group_id"],
+            "strategy_family_version_id": event_by_candidate[
+                row["candidate_scope_id"]
+            ]["strategy_group_version_id"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+            "status": "active",
+        }
+        for row in control_state["candidate_scope"]
+        if row["status"] == "active"
+    ]
     control_state["server_monitor_runs"] = [
         {
             "monitor_run_id": "monitor:capability-test",
