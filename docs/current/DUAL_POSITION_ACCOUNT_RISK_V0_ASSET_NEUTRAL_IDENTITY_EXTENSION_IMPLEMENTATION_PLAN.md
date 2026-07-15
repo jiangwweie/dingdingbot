@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN
-status: READY_FOR_LOCAL_EXECUTION_NO_DEPLOY
+status: READY_FOR_LOCAL_EXECUTION_PERFORMANCE_CONTRACT_CLOSED_NO_DEPLOY
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md
 last_verified: 2026-07-15
@@ -24,10 +24,12 @@ classes without creating another risk engine or enabling new live scope.
 Stable instrument identity and versioned rule facts feed the existing account-capacity
 decision. The existing `brc_budget_reservations` row is the physical capacity claim;
 one ActionTimeInvocation creates at most one Reservation, Ticket and ExposureEpisode
-inside one short PG transaction. Ticket remains the sole business lifecycle owner.
+inside one short PG transaction. A typed current repository keeps historical PG rows out
+of Action-Time, while streaming HTTP parsing preserves complete active account facts
+without retaining full raw bodies. Ticket remains the sole business lifecycle owner.
 
 **Tech Stack:** Python 3, Pydantic v2, `decimal.Decimal`, SQLAlchemy, Alembic,
-PostgreSQL, pytest.
+PostgreSQL, `ijson>=3.5.1,<4.0.0`, pytest.
 
 ## Global Constraints
 
@@ -45,6 +47,26 @@ PostgreSQL, pytest.
 - Candidate Scope, rule snapshots and cluster membership changes are admin/policy
   cadence only; no-signal ticks create zero new files, zero claim/Ticket rows and
   zero exposure-episode identities.
+- Budget Action-Time reads use a dedicated typed current repository. Production
+  budget code must not call `read_control_state()`, use `SELECT *`, reflect tables
+  with `autoload_with`, or load terminal history for Python filtering.
+- Budget current rows are bounded by exact keys and
+  `max_concurrent_positions + 1`; the extra row proves overflow and stops further
+  materialization.
+- Full-account HTTP success bodies use endpoint-schema incremental parsing with a
+  configurable **65536-byte transport chunk** default and consumer backpressure.
+  There is no **512 KiB/endpoint**, **2.5 MiB/five-endpoint**, response-total or
+  typed-row rejection threshold. All required account scalars, nonzero positions
+  and open orders remain functionally complete.
+- HTTP error diagnostics retain at most **65536 bytes** of masked body. Budget code
+  must not impose a low `max_positions`, `max_orders`, or total typed-row cap.
+- Historical migration classification uses set-based SQL or stable-key keyset
+  batches of at most **1000 rows**, with **5-second lock timeout** and **60-second
+  statement timeout** defaults. The batch and timeout bound one attempt; they do not
+  skip rows or cap total migration size.
+- PostgreSQL scale certification seeds **100000 terminal reservations**, **100000
+  terminal commands** and **100000 historical rule/membership rows**. Large-history
+  hot-path peak Python allocation may exceed the small fixture by at most **16 MiB**.
 - Capacity transactions perform zero network calls and zero subprocess calls.
 - Action-Time stays inside the existing **30-second** refresh budget and may not
   extend source freshness windows.
@@ -72,6 +94,10 @@ PostgreSQL, pytest.
 | Candidate uniqueness omitted timeframe | Active uniqueness becomes group + exact instrument + side + timeframe | Tasks 2-3 |
 | Terminal consumed history could be mis-backfilled | Migration 123-equivalent cleanup and audit precede strict backfill | Task 2 |
 | Performance/cadence contract was missing | Zero file growth, bounded PG rows, indexed hot path and 30-second budget are explicit | Task 8 |
+| Budget projector loaded all account Reservation history | Dedicated current repository applies account/profile/status predicates and bounded overflow reads in SQL | Task 6 |
+| Full-account snapshot transport had timeout but no memory ceiling | Core streaming HTTP/JSON transport bounds resident raw buffers while preserving all active account facts | Task 6 |
+| Migration 127 could materialize all history in Python | Set-based SQL or 1000-row keyset batches with lock/statement timeouts are mandatory | Task 2 |
+| Small fixtures could make O(n) reads look green | 100000-row PostgreSQL scale, EXPLAIN, SQL-shape and tracemalloc gates are mandatory | Task 8 |
 
 ## Chain Position And State Transition
 
@@ -87,19 +113,24 @@ local_state_before:
 dual-position risk remediation implemented
 + symbol-derived instrument paths still exist
 + capacity claim lacks asset-neutral identity and episode lineage
++ Budget projector materializes account history before Python filtering
++ full-account HTTP collector retains unbounded raw responses
 
 local_state_after:
 exact-instrument asset-neutral claim is locally certified
 + two-position risk calculations unchanged
++ Budget hot path cost follows current active facts, not terminal history
++ full valid account facts remain complete through streaming normalization
 + no production deploy or policy activation
 
 production_state_after:
 unchanged until a separately authorized deploy and shadow certification
 ```
 
-**Blocker removed or reclassified:** local `schema_invalid` and
-`action_time_boundary_not_reproduced` risks caused by symbol-derived instrument
-identity are removed. The production legacy second-position blocker remains until a
+**Blocker removed or reclassified:** local `schema_invalid`,
+`action_time_boundary_not_reproduced` and production-performance risks caused by
+symbol-derived identity, historical hot-path materialization and unbounded raw HTTP
+responses are removed. The production legacy second-position blocker remains until a
 later deploy/shadow/activation stage.
 
 ## File Responsibility Map
@@ -118,6 +149,11 @@ later deploy/shadow/activation stage.
 | `src/application/action_time/promotion_action_time_lane.py` | Pre-generate and conserve reservation/Ticket/episode IDs |
 | `src/application/action_time/action_time_ticket.py` | Materialize Ticket from exact claim lineage |
 | `src/application/action_time/account_exposure_current.py` | Netting-domain current projection plus episode lineage |
+| `src/infrastructure/account_capacity_hot_path_repository.py` | Exact current/active Budget reads with typed overflow evidence; replaces generic `_rows()` |
+| `src/infrastructure/streaming_http_json.py` | Backpressured, endpoint-schema success parsing and bounded error diagnostics for Budget snapshots |
+| `src/infrastructure/binance_usdm_streaming_signed_reader.py` | Signed Binance request opening plus streaming endpoint normalization |
+| `src/infrastructure/binance_usdm_account_risk_snapshot.py` | Functionally complete, streaming and resident-memory-bounded full-account snapshot |
+| `requirements.txt` | Add `ijson>=3.5.1,<4.0.0` for maintained nested event-stream parsing |
 | `src/application/action_time/finalgate_preflight.py` | Latest semantic claim revalidation before exchange write |
 | `src/infrastructure/runtime_control_state_repository.py` | PG/current read shape and negative schema validation |
 
@@ -345,6 +381,7 @@ git commit -m "feat: define asset-neutral account risk identities"
 - Create: `migrations/versions/2026-07-15-127_backfill_asset_neutral_account_risk_identity.py`
 - Create: `migrations/versions/2026-07-15-128_enforce_asset_neutral_account_risk_identity.py`
 - Create: `tests/unit/test_asset_neutral_account_risk_migrations.py`
+- Create: `tests/integration/test_asset_neutral_account_risk_migration_scale.py`
 - Modify: `tests/unit/test_account_risk_policy_migration.py`
 - Modify: `tests/unit/test_account_risk_current_migration.py`
 
@@ -354,6 +391,8 @@ git commit -m "feat: define asset-neutral account risk identities"
 - Migration 127 performs terminal cleanup audit and historical-time backfill.
 - Migration 128 rejects incomplete active/current/live-eligible rows, adds unique/FK
   constraints and removes old active unique indexes.
+- Migration 127 uses set-based SQL or `budget_reservation_id` keyset batches of at
+  most 1000 rows; no Python operation may materialize the complete history.
 
 - [ ] **Step 1: Write failing migration-shape tests**
 
@@ -466,6 +505,26 @@ Cover:
 | `test_current_mapping_cannot_rewrite_historical_ticket` | Ticket already carries instrument A while current alias points to B | Ticket remains instrument A |
 | `test_unresolved_active_claim_aborts_constraint_phase` | Active reservation has no unique historical mapping | Migration 128 raises and adds no constraints |
 | `test_terminal_released_history_may_remain_audit_only` | Released terminal reservation has no mapping | Migration succeeds while row remains non-current audit history |
+| `test_backfill_does_not_fetchall_terminal_history` | 100001 terminal rows plus one active row | No `.all()`/`fetchall()` path; each Python batch is at most 1000 rows |
+| `test_backfill_timeout_aborts_before_constraint_phase` | Backfill statement exceeds 60 seconds or lock waits over 5 seconds | Migration fails and migration 128 constraints are absent |
+
+Migration implementation is fixed to:
+
+```text
+SET LOCAL lock_timeout = '5s'
+SET LOCAL statement_timeout = '60s'
+preflight -> SELECT count(*), min(primary_key), max(primary_key)
+normal rows -> set-based UPDATE ... FROM
+exception rows -> WHERE primary_key > :cursor ORDER BY primary_key LIMIT 1000
+```
+
+`5s/60s` are defaults exposed as migration session parameters. A maintenance run may
+raise them after preflight without changing migration semantics; lowering or raising a
+timeout never skips a row, changes a fact, or advances the constraint phase after failure.
+
+The exception classifier consumes one batch iterator and discards it before the next
+query. It must not use `.all()`, `.fetchall()`, `list(result)` or a dictionary keyed by
+every historical row.
 
 - [ ] **Step 6: Implement migration 128 constraints**
 
@@ -478,11 +537,23 @@ active Candidate Scope unique:
 current rule snapshot unique:
   exchange_instrument_id WHERE status='current'
 
+active exposure hot path:
+  account_id + exposure_state
+  WHERE exposure_state NOT IN ('flat','closed') OR first_blocker IS NOT NULL
+
 membership primary unique:
   cluster_membership_snapshot_id WHERE membership_role='primary' AND status='active'
 
 reservation idempotency unique:
   reservation_idempotency_key
+
+effective reservation hot path:
+  account_id + runtime_profile_id + status
+  WHERE status IN ('active','consumed')
+
+nonterminal command evidence hot path:
+  ticket_id + command_state
+  WHERE command_state NOT IN ('confirmed_rejected','reconciled_absent')
 
 one claim per Invocation unique:
   action_time_invocation_id
@@ -506,6 +577,18 @@ python3 -m pytest -q \
   tests/unit/test_account_risk_current_migration.py
 ```
 
+Run the PostgreSQL scale gate without skips:
+
+```bash
+test -n "$BRC_LOCAL_TEST_POSTGRES_DSN"
+BRC_LOCAL_TEST_POSTGRES_DSN="$BRC_LOCAL_TEST_POSTGRES_DSN" \
+python3 -m pytest -q \
+  tests/integration/test_asset_neutral_account_risk_migration_scale.py
+```
+
+Expected: 100001 historical rows are fully classified through set-based/keyset work;
+observed Python batch size never exceeds 1000 and no constraint phase follows timeout.
+
 - [ ] **Step 8: Commit checkpoint A2**
 
 ```bash
@@ -514,6 +597,7 @@ git add \
   migrations/versions/2026-07-15-127_backfill_asset_neutral_account_risk_identity.py \
   migrations/versions/2026-07-15-128_enforce_asset_neutral_account_risk_identity.py \
   tests/unit/test_asset_neutral_account_risk_migrations.py \
+  tests/integration/test_asset_neutral_account_risk_migration_scale.py \
   tests/unit/test_account_risk_policy_migration.py \
   tests/unit/test_account_risk_current_migration.py
 git commit -m "feat: add asset-neutral account risk schema"
@@ -553,6 +637,8 @@ git commit -m "feat: add asset-neutral account risk schema"
 | `test_runtime_lane_identity_copies_candidate_exchange_instrument_id` | Candidate carries opaque instrument ID | Identity and identity hash contain that exact ID |
 | `test_action_time_ticket_rejects_symbol_derived_instrument` | Lane exact ID differs from a value constructible from exchange + symbol | Ticket uses lane ID and rejects the fabricated value |
 | `test_current_mapping_change_does_not_rewrite_existing_ticket` | Alias mapping changes after Ticket creation | Current Ticket scope remains valid when its Candidate Scope/instrument registry remain active |
+| `test_candidate_hot_path_never_calls_read_control_state` | Spy makes generic full-state reader raise | Exact Candidate Scope still resolves through bounded SQL |
+| `test_display_key_ambiguity_reads_at_most_two_rows` | 100 Candidate history rows share the display key | Repository reads only two active candidates and fails `candidate_scope_ambiguous` |
 
 - [ ] **Step 2: Run focused tests RED**
 
@@ -567,28 +653,31 @@ Expected: Candidate Scope query does not select the new field and Ticket still u
 
 - [ ] **Step 3: Change RuntimeLaneIdentity resolution**
 
-The candidate query must select and require:
+The production candidate query must consume `candidate_scope_id` or the already-bound
+`exchange_instrument_id + timeframe` and select only required columns:
 
 ```sql
 SELECT candidate_scope_id, strategy_group_id, symbol,
        exchange_instrument_id, asset_class, side, timeframe,
        policy_current_id
 FROM brc_strategy_group_candidate_scope
-WHERE strategy_group_id = :strategy_group_id
-  AND symbol = :symbol
-  AND side = :side
+WHERE candidate_scope_id = :candidate_scope_id
   AND status = 'active'
+LIMIT 1
 ```
 
-When multiple exact instruments share a display symbol, callers must supply
-`candidate_scope_id` or `exchange_instrument_id`; display-key ambiguity fails with
-`candidate_scope_ambiguous`.
+The display-key compatibility lookup is diagnostic-only and adds
+`ORDER BY candidate_scope_id LIMIT 2`. Zero rows mean missing; one row may be returned;
+two rows are sufficient to prove `candidate_scope_ambiguous`. It must never load every
+matching timeframe/instrument row.
 
 - [ ] **Step 4: Propagate exact identity through readmodels and repository validation**
 
 Require `exchange_instrument_id` in current Candidate Scope, runtime coverage,
 signal input and hot-path repository rows. Reject blank/mismatched values as
-`schema_invalid`; do not fall back to symbol mapping.
+`schema_invalid`; do not fall back to symbol mapping. The production path must use the
+`action_time_hot_path_current` profile or its exact typed selector and must not call
+`read_control_state()`.
 
 - [ ] **Step 5: Delete Action-Time identity construction**
 
@@ -671,6 +760,8 @@ git commit -m "refactor: conserve exact instrument through runtime lane"
 | `test_loader_rejects_expired_rule_snapshot` | One row with `valid_until_ms <= now_ms` | `instrument_rule_snapshot_stale` |
 | `test_membership_requires_exactly_one_primary` | Membership snapshot has zero or two primary rows | `primary_risk_cluster_membership_invalid` |
 | `test_secondary_membership_does_not_reduce_v0_capacity` | Primary and two secondary memberships exist | Capacity uses only primary held-risk cap |
+| `test_loader_ignores_large_rule_and_membership_history` | 100000 old snapshots plus one current snapshot | Exact current result; materialized rows remain constant |
+| `test_identical_membership_semantics_reuse_current_snapshot` | Admin repeats the same membership set | No new header/member history rows |
 
 - [ ] **Step 2: Run tests RED**
 
@@ -717,8 +808,10 @@ def load_instrument_risk_facts(
     )
 ```
 
-The loader performs bounded primary-key/current-index reads only. It must not call
-exchange APIs or parse `exchange_instrument_id`.
+The loader performs bounded primary-key/current-index reads only. Every query selects
+named columns and uses `LIMIT 2`: one row is valid, two rows prove an identity conflict.
+It must not call exchange APIs, parse `exchange_instrument_id`, reflect tables at runtime,
+or scan historical rule/membership rows.
 
 Private helper contracts in the same file are fixed as:
 
@@ -752,8 +845,9 @@ def _load_one_primary_cluster_snapshot(
 - [ ] **Step 4: Version cluster membership replacement**
 
 `replace_risk_cluster_memberships()` appends a snapshot header and member rows;
-it no longer deletes history. It requires exactly one primary membership per
-instrument/policy snapshot. Secondary rows remain non-enforcing in V0.
+it no longer deletes history. Before append it computes the canonical semantic hash and
+reuses the current snapshot when the hash is unchanged. It requires exactly one primary
+membership per instrument/policy snapshot. Secondary rows remain non-enforcing in V0.
 
 - [ ] **Step 5: Adapt capacity candidate**
 
@@ -955,12 +1049,17 @@ git add \
 git commit -m "feat: seal atomic account capacity claims"
 ```
 
-### Task 6: Exposure Episode Projection And External-Truth Fail-Closed Behavior
+### Task 6: Bounded Account Truth, Exposure Projection And Episode Conservation
 
 **Task ID:** `DAR-AI-06`
 
 **Files:**
 
+- Create: `src/infrastructure/account_capacity_hot_path_repository.py`
+- Create: `src/infrastructure/streaming_http_json.py`
+- Create: `src/infrastructure/binance_usdm_streaming_signed_reader.py`
+- Modify: `src/infrastructure/binance_usdm_account_risk_snapshot.py`
+- Modify: `requirements.txt`
 - Modify: `src/application/action_time/account_exchange_ownership.py`
 - Modify: `src/application/action_time/account_exposure_current.py`
 - Modify: `src/application/action_time/account_budget_current.py`
@@ -968,6 +1067,11 @@ git commit -m "feat: seal atomic account capacity claims"
 - Modify: `src/application/action_time/exchange_command.py`
 - Modify: `src/application/action_time/post_submit_reconciliation_tick.py`
 - Modify: `src/application/action_time/live_outcome_ledger.py`
+- Modify: `scripts/materialize_action_time_ticket_sequence.py`
+- Modify: `scripts/run_ticket_bound_lifecycle_maintenance_once.py`
+- Create: `tests/unit/test_account_capacity_hot_path_repository.py`
+- Create: `tests/unit/test_streaming_http_json.py`
+- Modify: `tests/unit/test_binance_usdm_account_risk_snapshot.py`
 - Modify: `tests/unit/test_account_exchange_ownership.py`
 - Modify: `tests/unit/test_account_exposure_current.py`
 - Modify: `tests/unit/test_account_budget_current.py`
@@ -979,6 +1083,10 @@ git commit -m "feat: seal atomic account capacity claims"
 - System-owned commands/outcomes conserve episode lineage.
 - Unowned or unresolved exchange truth creates a global new-entry hold without
   fabricating an instrument or episode.
+- Budget aggregation consumes only exact current/active typed rows; terminal history
+  never enters Python merely to be filtered.
+- Full-account collection remains complete but streams success payloads and stores
+  only normalized nonzero positions plus all open orders.
 
 - [ ] **Step 1: Write failing episode/external tests**
 
@@ -989,18 +1097,182 @@ git commit -m "feat: seal atomic account capacity claims"
 | `test_external_known_instrument_has_null_episode_and_global_hold` | Exchange position maps to registry but no Ticket owns it | `external_unowned`, null episode, new entry false |
 | `test_unresolved_instrument_creates_budget_blocker_without_fake_exposure` | Exchange symbol has no unique instrument | No fabricated exposure row; budget blocker is identity missing |
 | `test_exchange_command_conserves_exposure_episode_id` | Ticket and command use same episode | Command persists exact episode; mismatch rejects |
+| `test_budget_hot_path_filters_terminal_history_in_sql` | 100 terminal claims plus one active claim | Repository returns one active row; no Python terminal filter |
+| `test_budget_hot_path_overflow_reads_only_policy_limit_plus_one` | Policy limit 2 and 100 corrupt active claims | Three rows materialize, overflow blocker returns, remaining rows are not loaded |
+| `test_command_evidence_is_scoped_to_current_account_tickets` | Other-account and terminal command history exists | Only current account's nonterminal Ticket commands return |
+| `test_hot_path_uses_no_select_star_or_runtime_reflection` | SQL recorder wraps the connection | No `SELECT *`, `information_schema`, `autoload_with` or `read_control_state` |
+| `test_large_account_object_streams_required_scalars_without_tree` | Valid `/account` object contains large nested assets/positions arrays | Required top-level budget scalars complete; ignored nested rows are not retained |
+| `test_large_position_and_order_arrays_stream_without_truncation` | Each valid response is several MiB and contains many items | All nonzero positions and all open orders retained; no total-byte or typed-row cap |
+| `test_malformed_or_interrupted_stream_fails_closed` | JSON ends mid-item after prior valid items | `account_risk_snapshot_fetch_failed`; no partial snapshot published |
+| `test_transport_never_calls_unbounded_read` | Response spy rejects `read()` without positive size | Every success read is positive and at most the configured chunk size |
+| `test_error_body_keeps_only_masked_64k_excerpt` | HTTP error body exceeds 64 KiB and contains secret-like text | Diagnostic is bounded/masked; snapshot fails closed |
 
 - [ ] **Step 2: Run focused tests RED**
 
 ```bash
 python3 -m pytest -q \
+  tests/unit/test_account_capacity_hot_path_repository.py \
+  tests/unit/test_streaming_http_json.py \
+  tests/unit/test_binance_usdm_account_risk_snapshot.py \
   tests/unit/test_account_exchange_ownership.py \
   tests/unit/test_account_exposure_current.py \
   tests/unit/test_account_budget_current.py \
   tests/unit/test_ticket_bound_exchange_command_materialization.py
 ```
 
-- [ ] **Step 3: Remove all exposure identity fabrication**
+- [ ] **Step 3: Implement exact bounded PG readers**
+
+`account_capacity_hot_path_repository.py` owns explicit-column SQL only and exposes:
+
+```python
+T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class AccountExposureCurrentRecord:
+    account_exposure_current_id: str
+    owner_ticket_id: str | None
+    exposure_state: str
+    actual_directional_risk: Decimal
+    held_risk: Decimal
+    unreflected_pending_margin: Decimal
+    reconciliation_state: str
+    position_slot_claimed: bool
+    first_blocker: str | None
+
+
+@dataclass(frozen=True)
+class AccountCapacityClaimRecord:
+    budget_reservation_id: str
+    ticket_id: str | None
+    exchange_instrument_id: str
+    exposure_episode_id: str
+    status: str
+    risk_at_stop: Decimal
+    reserved_margin: Decimal
+    margin_accounting_state: str
+
+
+@dataclass(frozen=True)
+class AccountCommandEvidenceRecord:
+    ticket_id: str
+    exchange_instrument_id: str
+    exchange_order_id: str | None
+    client_order_id: str | None
+    parent_order_id: str | None
+    order_role: str
+    command_state: str
+
+
+@dataclass(frozen=True)
+class BoundedCurrentRows(Generic[T]):
+    rows: tuple[T, ...]
+    overflow: bool
+
+
+def load_live_exposure_rows(
+    conn: sa.Connection,
+    *,
+    account_id: str,
+    max_concurrent_positions: int,
+) -> BoundedCurrentRows[AccountExposureCurrentRecord]:
+    """Read at most policy limit plus one non-flat/current exposure rows."""
+
+
+def load_effective_reservation_rows(
+    conn: sa.Connection,
+    *,
+    account_id: str,
+    runtime_profile_id: str,
+    max_concurrent_positions: int,
+) -> BoundedCurrentRows[AccountCapacityClaimRecord]:
+    """Read active/consumed claims only, bounded by policy limit plus one."""
+
+
+def load_current_command_identity_evidence(
+    conn: sa.Connection,
+    *,
+    account_id: str,
+    ticket_ids: tuple[str, ...],
+) -> tuple[AccountCommandEvidenceRecord, ...]:
+    """Read nonterminal commands for the already-bounded current Ticket set."""
+```
+
+The SQL must use named columns, exact account/profile predicates, current status
+predicates, stable `ORDER BY`, and `LIMIT max_concurrent_positions + 1`. Overflow is a
+typed fail-closed result; no caller issues a second query to load the remainder.
+
+The three query shapes are fixed as:
+
+```sql
+SELECT account_exposure_current_id, owner_ticket_id, exposure_state,
+       actual_directional_risk, held_risk, unreflected_pending_margin,
+       reconciliation_state, position_slot_claimed, first_blocker
+FROM brc_account_exposure_current
+WHERE account_id = :account_id
+  AND (exposure_state NOT IN ('flat', 'closed') OR first_blocker IS NOT NULL)
+ORDER BY account_exposure_current_id
+LIMIT :policy_limit_plus_one;
+
+SELECT budget_reservation_id, ticket_id, exchange_instrument_id,
+       exposure_episode_id, status, risk_at_stop, reserved_margin,
+       margin_accounting_state
+FROM brc_budget_reservations
+WHERE account_id = :account_id
+  AND runtime_profile_id = :runtime_profile_id
+  AND status IN ('active', 'consumed')
+ORDER BY budget_reservation_id
+LIMIT :policy_limit_plus_one;
+
+SELECT c.ticket_id, c.exchange_instrument_id, c.exchange_order_id,
+       c.client_order_id, c.parent_order_id, c.order_role, c.command_state
+FROM brc_ticket_bound_exchange_commands AS c
+WHERE c.ticket_id = ANY(:current_ticket_ids)
+  AND c.command_state NOT IN ('confirmed_rejected', 'reconciled_absent')
+ORDER BY c.ticket_id, c.operation_submit_command_id;
+```
+
+Delete `account_budget_current._rows()`. Replace ownership's broad command statement
+with `load_current_command_identity_evidence()`. Table metadata is not reflected inside
+Action-Time; the repository uses fixed `sa.text()` statements matching migrations 126-128.
+
+- [ ] **Step 4: Implement streaming, function-preserving HTTP reads**
+
+Add `ijson>=3.5.1,<4.0.0` to `requirements.txt`. `streaming_http_json.py` wraps
+`ijson.parse()` and `ijson.items()` so nested objects and arrays are consumed without
+first materializing the root document. Do not implement a home-grown parser with
+`json.JSONDecoder.raw_decode`, because a large top-level object would still require the
+entire object in memory. The transport default is a configurable 64 KiB positive-size
+read and must never invoke unbounded `read()`.
+
+```python
+def iter_json_events(
+    response: BinaryIO,
+    *,
+    chunk_bytes: int = 65_536,
+) -> Iterator[tuple[str, str, object]]:
+    """Yield nested JSON events with transport backpressure."""
+
+
+def read_masked_error_excerpt(
+    response: BinaryIO, *, max_bytes: int = 65_536
+) -> str:
+    """Retain diagnostic text only; never publish it as account truth."""
+```
+
+`binance_usdm_streaming_signed_reader.py` owns signing and response opening. Success arrays
+are mapped item-by-item: PositionRisk drops zero-position rows immediately; regular and
+Algo order readers retain every open order. The Account and Position Mode object readers
+consume only the required top-level scalar events and skip nested collections without
+building a general-purpose object tree. Error bodies retain at most 64 KiB after masking.
+The two Budget runtime scripts stop importing script-local `_request_json()` and construct
+this infrastructure reader instead.
+
+The account snapshot provider returns `snapshot_ready=False` on streaming/parser failure.
+It must not truncate a valid list, impose a response-byte/typed-row business cap, reject a
+large valid item merely because of size, or turn a partial list into a complete snapshot.
+
+- [ ] **Step 5: Remove all exposure identity fabrication**
 
 Delete both position and reservation fallbacks shaped as:
 
@@ -1012,22 +1284,26 @@ Reservation-only rows require persisted claim identity. Unresolved raw exchange 
 remain in the account fact snapshot and set
 `account_exchange_instrument_identity_missing` on Account Budget Current.
 
-- [ ] **Step 4: Project episode-aware current state**
+- [ ] **Step 6: Project episode-aware current state**
 
 Owned working/open exposure copies the Ticket episode. External/unowned exposure uses
 `current_exposure_episode_id=None`. Flat rows clear the episode ID but retain normal
-Ticket/claim/lifecycle history outside the current projection.
+Ticket/claim/lifecycle history outside the current projection. Budget aggregation calls
+the bounded repository and never reloads flat rows merely to discard them.
 
-- [ ] **Step 5: Propagate lineage after Ticket**
+- [ ] **Step 7: Propagate lineage after Ticket**
 
 Require matching `exposure_episode_id` on entry/protection command materialization,
 post-submit reconciliation and Live Outcome. A mismatch is a hard identity blocker;
 recovery may not invent a new episode.
 
-- [ ] **Step 6: Run focused tests GREEN**
+- [ ] **Step 8: Run focused tests GREEN**
 
 ```bash
 python3 -m pytest -q \
+  tests/unit/test_account_capacity_hot_path_repository.py \
+  tests/unit/test_streaming_http_json.py \
+  tests/unit/test_binance_usdm_account_risk_snapshot.py \
   tests/unit/test_account_exchange_ownership.py \
   tests/unit/test_account_exposure_current.py \
   tests/unit/test_account_budget_current.py \
@@ -1036,10 +1312,15 @@ python3 -m pytest -q \
   tests/unit/test_ticket_bound_post_submit_reconciliation_tick.py
 ```
 
-- [ ] **Step 7: Commit checkpoint C2**
+- [ ] **Step 9: Commit checkpoint C2**
 
 ```bash
 git add \
+  src/infrastructure/account_capacity_hot_path_repository.py \
+  src/infrastructure/streaming_http_json.py \
+  src/infrastructure/binance_usdm_streaming_signed_reader.py \
+  src/infrastructure/binance_usdm_account_risk_snapshot.py \
+  requirements.txt \
   src/application/action_time/account_exchange_ownership.py \
   src/application/action_time/account_exposure_current.py \
   src/application/action_time/account_budget_current.py \
@@ -1047,13 +1328,18 @@ git add \
   src/application/action_time/exchange_command.py \
   src/application/action_time/post_submit_reconciliation_tick.py \
   src/application/action_time/live_outcome_ledger.py \
+  scripts/materialize_action_time_ticket_sequence.py \
+  scripts/run_ticket_bound_lifecycle_maintenance_once.py \
+  tests/unit/test_account_capacity_hot_path_repository.py \
+  tests/unit/test_streaming_http_json.py \
+  tests/unit/test_binance_usdm_account_risk_snapshot.py \
   tests/unit/test_account_exchange_ownership.py \
   tests/unit/test_account_exposure_current.py \
   tests/unit/test_account_budget_current.py \
   tests/unit/test_ticket_bound_exchange_command_materialization.py \
   tests/unit/test_ticket_bound_exchange_command.py \
   tests/unit/test_ticket_bound_post_submit_reconciliation_tick.py
-git commit -m "feat: conserve exposure episode through account truth"
+git commit -m "feat: bound account truth and conserve exposure identity"
 ```
 
 ### Task 7: FinalGate Semantic Claim Revalidation
@@ -1089,6 +1375,8 @@ git commit -m "feat: conserve exposure episode through account truth"
 | `test_rule_change_that_invalidates_qty_blocks` | New quantity step makes prepared quantity illegal | Claim/Ticket invalidates before dispatch |
 | `test_policy_or_primary_cluster_change_invalidates` | Policy event or primary membership differs | Entry blocked; original claim remains auditable |
 | `test_entry_invalidation_does_not_block_protection_or_exit` | Command already dispatched | Recovery/protection path does not invoke new-entry gate |
+| `test_finalgate_never_loads_terminal_history` | 100000 terminal claims/commands plus one current Ticket | Same result and bounded query rows as empty history |
+| `test_finalgate_rejects_generic_control_state_reader` | `read_control_state()` spy raises | FinalGate succeeds through exact Ticket/current selectors only |
 
 - [ ] **Step 2: Run tests RED**
 
@@ -1147,6 +1435,10 @@ Retain original snapshot IDs in the claim. Remove
 `account_budget_projection_version_changed` as a blocker when the latest projection
 is fresh and semantically contains the exact claim once. Keep policy event, scope,
 account, instrument, rule legality, capacity and external/unknown blockers fail-closed.
+All reads consume the typed hot-path repository from Task 6: one exact Ticket/claim,
+one Account Budget Current row, at most policy-limit-plus-one exposure/reservation rows,
+and exact current rule/cluster rows. No FinalGate code may call `read_control_state()`,
+reflect tables, select terminal history or build an Owner readmodel.
 
 - [ ] **Step 5: Preserve lifecycle recovery authority**
 
@@ -1186,6 +1478,7 @@ git commit -m "fix: revalidate account capacity by current semantics"
 - Modify: `tests/unit/test_dual_position_account_risk_release_acceptance.py`
 - Modify: `tests/integration/test_account_capacity_postgres.py`
 - Create: `tests/integration/test_asset_neutral_account_risk_full_chain.py`
+- Create: `tests/integration/test_account_capacity_hot_path_scale.py`
 - Modify: `docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md`
 - Modify: `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md`
 - Modify: `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md`
@@ -1195,6 +1488,8 @@ git commit -m "fix: revalidate account capacity by current semantics"
 - One production-shaped test starts before Candidate Scope resolution and reaches
   Ticket + non-executing FinalGate preparation without exchange write.
 - Old symbol/prefix/mapping fallback paths are absent from Action-Time/account-risk code.
+- A PostgreSQL scale test proves that terminal history changes neither hot-path result
+  cardinality nor Python memory complexity.
 
 - [ ] **Step 1: Write the full-chain test before final cleanup**
 
@@ -1237,7 +1532,28 @@ external unowned position
 unknown exchange outcome
 claim hash mutation
 terminal released history
+100000 terminal reservations/commands/rule-membership rows
+multi-MiB valid account/position/order responses
 ```
+
+`test_account_capacity_hot_path_scale.py` seeds history with PostgreSQL
+`generate_series()` so the test does not create 300000 Python objects. After warming the
+typed repository, it runs the same current read against the small and large fixtures under
+`tracemalloc` and asserts:
+
+```python
+assert large.rows == small.rows
+assert large.sql_statement_count == small.sql_statement_count
+assert large.materialized_row_count == small.materialized_row_count
+assert large.peak_bytes - small.peak_bytes <= 16 * 1024 * 1024
+assert "read_control_state" not in large.call_names
+assert "SELECT *" not in large.normalized_sql
+assert "information_schema" not in large.normalized_sql
+assert large.history_seq_scan_count == 0
+```
+
+The 16 MiB assertion measures additional Python allocation caused by historical data;
+it is not an OS/process memory limit and does not cap legitimate active account facts.
 
 - [ ] **Step 3: Delete obsolete fallback code**
 
@@ -1252,10 +1568,26 @@ Expected after cleanup: no active Action-Time/account-risk consumer constructs o
 parses instrument identity. Historical migrations may retain literal provenance only
 when no runtime consumer imports it.
 
+Run the Budget hot-path static guard:
+
+```bash
+rg -n 'read_control_state\(|SELECT \*|autoload_with=|def _rows\(' \
+  src/application/action_time/account_budget_current.py \
+  src/application/action_time/account_exchange_ownership.py \
+  src/application/action_time/finalgate_preflight.py \
+  src/infrastructure/account_capacity_hot_path_repository.py
+```
+
+Expected: no matches. Audit/forensics readers outside these production Budget files are
+not deleted by this task and remain outside Action-Time cadence.
+
 - [ ] **Step 4: Run focused unit regression**
 
 ```bash
 python3 -m pytest -q \
+  tests/unit/test_account_capacity_hot_path_repository.py \
+  tests/unit/test_streaming_http_json.py \
+  tests/unit/test_binance_usdm_account_risk_snapshot.py \
   tests/unit/test_instrument_risk_identity.py \
   tests/unit/test_account_capacity_claim.py \
   tests/unit/test_runtime_lane_identity.py \
@@ -1282,10 +1614,14 @@ BRC_LOCAL_TEST_POSTGRES_SCHEMA="$BRC_LOCAL_TEST_POSTGRES_SCHEMA" \
 python3 -m pytest -q \
   tests/integration/test_account_capacity_postgres.py \
   tests/integration/test_runtime_lane_identity_certification.py \
-  tests/integration/test_asset_neutral_account_risk_full_chain.py
+  tests/integration/test_asset_neutral_account_risk_full_chain.py \
+  tests/integration/test_asset_neutral_account_risk_migration_scale.py \
+  tests/integration/test_account_capacity_hot_path_scale.py
 ```
 
-Expected: all selected tests pass and pytest reports zero skipped tests.
+Expected: all selected tests pass and pytest reports zero skipped tests. The scale test
+must report 100000 rows in each history family while the typed current result remains
+bounded by policy-limit-plus-one.
 
 - [ ] **Step 6: Run authority, output and performance gates**
 
@@ -1316,6 +1652,13 @@ no-signal new claim/Ticket rows = 0/0
 no-signal new exposure_episode_id values = 0
 one Invocation claim/Ticket rows = 1/1
 one Invocation distinct exposure_episode_id values across claim/Ticket = 1
+terminal history rows materialized by hot path = 0
+current exposure/reservation rows <= max_concurrent_positions + 1
+Action-Time SELECT * / table reflection / read_control_state calls = 0
+stream read chunk bytes = 65536 (configurable default)
+unbounded response.read calls = 0
+response-total / typed-row rejection caps = 0
+all nonzero positions and all open orders conserved = true
 capacity transaction network calls = 0
 capacity transaction subprocess calls = 0
 Action-Time refresh elapsed <= 30 seconds
@@ -1346,6 +1689,7 @@ git add \
   tests/unit/test_dual_position_account_risk_release_acceptance.py \
   tests/integration/test_account_capacity_postgres.py \
   tests/integration/test_asset_neutral_account_risk_full_chain.py \
+  tests/integration/test_account_capacity_hot_path_scale.py \
   docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md \
   docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md \
   docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md
@@ -1358,8 +1702,8 @@ git commit -m "test: certify asset-neutral account risk chain"
 | --- | --- | --- |
 | **A — Contract and schema** | 1-2 | Types are pure; migrations preserve history and reject incomplete active rows |
 | **B — Exact identity and rules** | 3-4 | Symbol/prefix inference is absent from Action-Time and primary cluster semantics are versioned |
-| **C — Claim and exposure** | 5-6 | One Invocation produces one atomic claim/Ticket row pair and one conserved episode identity; external truth blocks without fabrication |
-| **D — FinalGate and certification** | 7-8 | Semantic revalidation, PostgreSQL concurrency, full-chain negative matrix and performance gates pass |
+| **C — Claim and bounded account truth** | 5-6 | One Invocation produces one atomic claim/Ticket pair; account facts remain complete while hot-path rows and raw buffers stay bounded |
+| **D — FinalGate and certification** | 7-8 | Semantic revalidation, PostgreSQL concurrency, 100000-row history scale, full-chain negative matrix and performance gates pass |
 
 Each checkpoint is an independently reviewable local commit range. A failed checkpoint
 does not authorize continuing into later tasks by adding compatibility fallbacks.
@@ -1378,6 +1722,11 @@ Stop the local execution and report the exact blocker when any of these occurs:
 - Operation Layer or gateway exchange write is reached by a test in this plan;
 - PostgreSQL integration is skipped or unavailable;
 - file-I/O audit reports runtime file authority or frequent report writes;
+- any Budget Action-Time path calls `read_control_state()`, uses `SELECT *`, reflects
+  tables at runtime or filters terminal history in Python;
+- a valid account response is truncated by bytes, item count, symbol count or typed-row cap;
+- large terminal history changes materialized current row count or adds more than 16 MiB
+  of Python allocation relative to the small fixture;
 - Action-Time exceeds 30 seconds because of the new indexed PG work;
 - implementation requires changing Owner risk parameters, live profile, StrategyGroup
   scope or production stage.
@@ -1389,6 +1738,9 @@ identity contract** across Candidate Scope, Reservation, Ticket, Exposure Curren
 FinalGate and lifecycle lineage. This makes future equity-linked and precious-metals
 adapters possible without copying the crypto budget engine, while leaving their actual
 live scope, session, expiry, settlement and risk policy for future Owner authorization.
+The same completion also proves that Budget Action-Time cost follows current active facts,
+not accumulated Ticket history, while complete account responses are streamed rather than
+functionally truncated.
 
 ## Next Engineering Bottleneck
 
