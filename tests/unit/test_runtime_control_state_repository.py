@@ -320,6 +320,7 @@ def test_repository_rejects_typed_live_signal_with_altered_identity_key(
         strategy_group_id="SOR-001",
         strategy_group_version_id="sgv:SOR-001:v2",
         symbol="ETHUSDT",
+        exchange_instrument_id="instrument:binance-usdm:ETHUSDT",
         asset_class="crypto_perpetual",
         side="long",
         event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
@@ -442,6 +443,9 @@ def test_live_signal_writer_output_is_readable_by_repository(pg_control_connecti
         strategy_group_id=str(lane_row["strategy_group_id"]),
         strategy_group_version_id=str(lane_row["strategy_group_version_id"]),
         symbol=str(lane_row["symbol"]),
+        exchange_instrument_id=(
+            f"instrument:test:{lane_row['candidate_scope_id']}"
+        ),
         asset_class=str(lane_row["asset_class"]),
         side=str(lane_row["side"]),
         event_spec_id=str(lane_row["event_spec_id"]),

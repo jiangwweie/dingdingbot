@@ -832,6 +832,9 @@ def _insert_action_time_lane_graph(
             strategy_group_id=str(row["strategy_group_id"]),
             strategy_group_version_id=str(row["strategy_group_version_id"]),
             symbol=str(row["symbol"]),
+            exchange_instrument_id=(
+                f"instrument:test:{row['candidate_scope_id']}"
+            ),
             asset_class=str(row["asset_class"]),
             side=str(row["side"]),
             event_spec_id=str(row["event_spec_id"]),

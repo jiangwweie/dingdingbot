@@ -22,6 +22,7 @@ class RuntimeLaneIdentity(BaseModel):
     strategy_group_id: str = Field(min_length=1, max_length=128)
     strategy_group_version_id: str = Field(min_length=1, max_length=192)
     symbol: str = Field(min_length=1, max_length=128)
+    exchange_instrument_id: str = Field(min_length=1, max_length=192)
     asset_class: str = Field(min_length=1, max_length=96)
     side: Literal["long", "short"]
     event_spec_id: str = Field(min_length=1, max_length=192)
@@ -40,6 +41,7 @@ class RuntimeLaneIdentity(BaseModel):
         "strategy_group_id",
         "strategy_group_version_id",
         "symbol",
+        "exchange_instrument_id",
         "asset_class",
         "event_spec_id",
         "event_spec_version",

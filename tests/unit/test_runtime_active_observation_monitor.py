@@ -33,6 +33,9 @@ def _typed_coverage_identity(
         strategy_group_id=strategy_group_id,
         strategy_group_version_id=f"sgv:{strategy_group_id}:v2",
         symbol=symbol,
+        exchange_instrument_id=(
+            f"instrument:test:{strategy_group_id}:{symbol}:{side}"
+        ),
         asset_class="crypto_perpetual",
         side=side,
         event_spec_id=f"event_spec:{strategy_group_id}:event:v2",

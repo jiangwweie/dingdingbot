@@ -1657,6 +1657,9 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
         strategy_group_id=str(lane_row["strategy_group_id"]),
         strategy_group_version_id=str(lane_row["strategy_group_version_id"]),
         symbol=str(lane_row["symbol"]),
+        exchange_instrument_id=(
+            f"instrument:test:{lane_row['candidate_scope_id']}"
+        ),
         asset_class=str(lane_row["asset_class"]),
         side=str(lane_row["side"]),
         event_spec_id=str(lane_row["event_spec_id"]),
@@ -2857,6 +2860,7 @@ def _insert_coverage(conn, row, *, expires_at_ms: int) -> None:
         strategy_group_id=str(row["strategy_group_id"]),
         strategy_group_version_id=str(row["strategy_group_version_id"]),
         symbol=str(row["symbol"]),
+        exchange_instrument_id=f"instrument:test:{row['candidate_scope_id']}",
         asset_class=str(row["asset_class"]),
         side=str(row["side"]),
         event_spec_id=str(row["event_spec_id"]),
@@ -2959,6 +2963,7 @@ def _insert_signal(
         strategy_group_id=str(row["strategy_group_id"]),
         strategy_group_version_id=str(row["strategy_group_version_id"]),
         symbol=str(row["symbol"]),
+        exchange_instrument_id=f"instrument:test:{row['candidate_scope_id']}",
         asset_class=str(row["asset_class"]),
         side=str(row["side"]),
         event_spec_id=str(row["event_spec_id"]),
