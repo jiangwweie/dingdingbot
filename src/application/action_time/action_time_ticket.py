@@ -206,7 +206,10 @@ def materialize_action_time_ticket(
     except TicketMaterializationBlocked as exc:
         return _blocked(exc.blockers, now_ms=now_ms, lane=lane)
 
-    _insert_ticket_bundle(conn, bundle)
+    try:
+        _insert_ticket_bundle(conn, bundle)
+    except TicketMaterializationBlocked as exc:
+        return _blocked(exc.blockers, now_ms=now_ms, lane=lane)
     return _result(
         "action_time_ticket_created",
         now_ms=now_ms,
@@ -672,7 +675,7 @@ def _build_ticket_bundle(
         int(budget["expires_at_ms"]),
         int(protection["expires_at_ms"]),
     )
-    ticket_id = _stable_id(
+    ticket_id = str(budget.get("ticket_id") or "") or _stable_id(
         "ticket",
         lane_id,
         str(signal["signal_event_id"]),
@@ -702,6 +705,10 @@ def _build_ticket_bundle(
         "strategy_group_version_id": event_spec["strategy_group_version_id"],
         "symbol": lane["symbol"],
         "exchange_instrument_id": exchange_instrument_id,
+        "exposure_episode_id": budget.get("exposure_episode_id"),
+        "asset_class": budget.get("asset_class"),
+        "instrument_type": budget.get("instrument_type"),
+        "capacity_claim_hash": budget.get("capacity_claim_hash"),
         "side": lane["side"],
         "event_id": event_spec["event_id"],
         "event_time_ms": signal["event_time_ms"],
@@ -1146,16 +1153,57 @@ def _insert_ticket_bundle(
         sa.MetaData(),
         autoload_with=conn,
     )
-    bound = conn.execute(
-        reservations.update()
-        .where(
-            reservations.c.budget_reservation_id == ticket["budget_reservation_id"]
+    lineage_columns = {"exposure_episode_id", "capacity_claim_hash"}
+    sealed_lineage = False
+    if lineage_columns <= set(reservations.c.keys()):
+        reservation = conn.execute(
+            sa.select(
+                reservations.c.ticket_id,
+                reservations.c.exposure_episode_id,
+                reservations.c.capacity_claim_hash,
+            )
+            .where(
+                reservations.c.budget_reservation_id
+                == ticket["budget_reservation_id"]
+            )
+            .where(reservations.c.status == "active")
+            .with_for_update()
+        ).mappings().one_or_none()
+        if reservation is None:
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_not_active_for_ticket"]
+            )
+        sealed_lineage = bool(str(reservation["capacity_claim_hash"] or ""))
+        if sealed_lineage and str(reservation["ticket_id"] or "") != str(ticket["ticket_id"]):
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_ticket_lineage_mismatch"]
+            )
+        if sealed_lineage and str(reservation["exposure_episode_id"] or "") != str(
+            ticket.get("exposure_episode_id") or ""
+        ):
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_episode_lineage_mismatch"]
+            )
+        if sealed_lineage and str(reservation["capacity_claim_hash"] or "") != str(
+            ticket.get("capacity_claim_hash") or ""
+        ):
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_claim_hash_mismatch"]
+            )
+    if not sealed_lineage:
+        bound = conn.execute(
+            reservations.update()
+            .where(
+                reservations.c.budget_reservation_id
+                == ticket["budget_reservation_id"]
+            )
+            .where(reservations.c.status == "active")
+            .values(ticket_id=ticket["ticket_id"])
         )
-        .where(reservations.c.status == "active")
-        .values(ticket_id=ticket["ticket_id"])
-    )
-    if int(bound.rowcount or 0) != 1:
-        raise TicketMaterializationBlocked(["budget_reservation_not_active_for_ticket"])
+        if int(bound.rowcount or 0) != 1:
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_not_active_for_ticket"]
+            )
     transition = transition_budget_reservation(
         conn,
         budget_reservation_id=str(ticket["budget_reservation_id"]),

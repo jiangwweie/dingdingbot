@@ -54,6 +54,11 @@ def upgrade() -> None:
         sa.String(192),
     )
     _add_column(
+        "brc_action_time_invocations",
+        "exchange_instrument_id",
+        sa.String(192),
+    )
+    _add_column(
         "brc_runtime_process_outcomes",
         "exchange_instrument_id",
         sa.String(192),
@@ -184,6 +189,10 @@ def downgrade() -> None:
         ),
         (
             "brc_live_signal_events",
+            ("exchange_instrument_id",),
+        ),
+        (
+            "brc_action_time_invocations",
             ("exchange_instrument_id",),
         ),
         (

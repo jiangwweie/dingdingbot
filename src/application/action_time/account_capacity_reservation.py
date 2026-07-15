@@ -34,6 +34,9 @@ class AccountCapacityReservationResult(BaseModel):
     exchange_instrument_id: str | None = None
     instrument_rule_snapshot_id: str | None = None
     cluster_membership_snapshot_id: str | None = None
+    instrument_facts: InstrumentRiskFacts | None = None
+    account_source_fact_snapshot_id: str | None = None
+    account_fact_schema_version: str | None = None
 
 
 def reserve_account_capacity_for_candidate(conn: sa.Connection, *, candidate: AccountCapacityCandidate, expected_source_snapshot_id: str, expected_projection_version: int, now_ms: int) -> AccountCapacityReservationResult:
@@ -71,7 +74,7 @@ def reserve_account_capacity_for_candidate(conn: sa.Connection, *, candidate: Ac
     claimed_version = expected_projection_version + 1
     claimed = conn.execute(budget_table.update().where(budget_table.c.account_budget_current_id == budget["account_budget_current_id"]).where(budget_table.c.projection_version == expected_projection_version).values(projection_version=claimed_version))
     if int(claimed.rowcount or 0) != 1: return _blocked("account_budget_projection_version_changed")
-    return AccountCapacityReservationResult(allowed=True, allocated_risk=decision.allowed_risk, intended_qty=decision.intended_qty, selected_leverage=decision.selected_leverage, reserved_margin=decision.reserved_margin, claimed_projection_version=claimed_version, account_risk_policy_version=policy.risk_policy_version, account_risk_policy_event_id=policy_current.source_event_id, risk_cluster_id=cluster.primary_risk_cluster_id, exchange_instrument_id=identity.exchange_instrument_id, instrument_rule_snapshot_id=rule.instrument_rule_snapshot_id, cluster_membership_snapshot_id=cluster.cluster_membership_snapshot_id)
+    return AccountCapacityReservationResult(allowed=True, allocated_risk=decision.allowed_risk, intended_qty=decision.intended_qty, selected_leverage=decision.selected_leverage, reserved_margin=decision.reserved_margin, claimed_projection_version=claimed_version, account_risk_policy_version=policy.risk_policy_version, account_risk_policy_event_id=policy_current.source_event_id, risk_cluster_id=cluster.primary_risk_cluster_id, exchange_instrument_id=identity.exchange_instrument_id, instrument_rule_snapshot_id=rule.instrument_rule_snapshot_id, cluster_membership_snapshot_id=cluster.cluster_membership_snapshot_id, instrument_facts=candidate.instrument_facts, account_source_fact_snapshot_id=expected_source_snapshot_id, account_fact_schema_version="brc.account-risk-snapshot.v1")
 
 
 def _validate_instrument_facts_current(

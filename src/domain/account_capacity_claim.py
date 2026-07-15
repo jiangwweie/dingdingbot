@@ -29,9 +29,11 @@ class AccountCapacityClaimPayload(BaseModel):
     action_time_lane_input_id: str = Field(min_length=1, max_length=192)
     promotion_candidate_id: str = Field(min_length=1, max_length=192)
     signal_event_id: str = Field(min_length=1, max_length=192)
+    event_spec_id: str = Field(min_length=1, max_length=192)
     account_id: str = Field(min_length=1, max_length=192)
     runtime_profile_id: str = Field(min_length=1, max_length=192)
     strategy_group_id: str = Field(min_length=1, max_length=128)
+    symbol: str = Field(min_length=1, max_length=128)
     side: Literal["long", "short"]
     instrument: InstrumentRiskIdentity
     rule_snapshot: InstrumentRuleSnapshotRef
@@ -41,6 +43,7 @@ class AccountCapacityClaimPayload(BaseModel):
     account_fact_schema_version: str = Field(min_length=1, max_length=32)
     account_risk_policy_version: str = Field(min_length=1, max_length=192)
     account_risk_policy_event_id: str = Field(min_length=1, max_length=192)
+    owner_policy_version: str = Field(min_length=1, max_length=192)
     claimed_budget_projection_version: int = Field(ge=0)
     entry_reference_price: Decimal = Field(gt=0)
     stop_price: Decimal = Field(gt=0)

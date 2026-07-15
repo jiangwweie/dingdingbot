@@ -7,6 +7,11 @@ from hashlib import sha256
 from pydantic import BaseModel, ConfigDict
 import sqlalchemy as sa
 
+from src.application.action_time.account_capacity_claim import (
+    load_account_capacity_claim_by_invocation,
+)
+from src.domain.account_capacity_claim import capacity_claim_hash
+
 
 _ALLOWED_EDGES = {
     ("active", "consumed"),
@@ -19,6 +24,15 @@ _TERMINAL_PRESUBMIT_TICKET_STATUSES = {
     "finalgate_rejected",
     "invalidated",
     "superseded",
+}
+MUTABLE_RESERVATION_COLUMNS = {
+    "status",
+    "margin_accounting_state",
+    "reconciliation_state",
+    "release_reason",
+    "released_at_ms",
+    "invalidated_at_ms",
+    "current_first_blocker",
 }
 
 
@@ -39,6 +53,7 @@ def transition_budget_reservation(
     reason: str,
     evidence_ref: str,
     now_ms: int,
+    reservation_updates: dict[str, object] | None = None,
 ) -> BudgetReservationTransitionResult:
     """Lock, validate, transition, and audit one reservation exactly once."""
 
@@ -72,9 +87,49 @@ def transition_budget_reservation(
             transitioned=False,
             first_blocker="budget_reservation_transition_invalid",
         )
-    values: dict[str, object] = {"status": to_status}
+    immutable_updates = set(reservation_updates or {}) - MUTABLE_RESERVATION_COLUMNS
+    if immutable_updates:
+        return BudgetReservationTransitionResult(
+            budget_reservation_id=budget_reservation_id,
+            status=str(row["status"]),
+            transitioned=False,
+            first_blocker="budget_reservation_immutable_payload_update_rejected",
+        )
+    claim_columns = {"action_time_invocation_id", "capacity_claim_hash"}
+    if claim_columns <= set(reservations.c.keys()):
+        invocation_id = str(row.get("action_time_invocation_id") or "")
+        persisted_hash = str(row.get("capacity_claim_hash") or "")
+        expanded_but_unsealed = not invocation_id and not persisted_hash
+        # Migration 126 deliberately permits this expand-phase shape. Migration
+        # 128 makes it impossible for active/consumed production rows.
+        if expanded_but_unsealed:
+            invocation_id = ""
+        elif not invocation_id or not persisted_hash:
+            return BudgetReservationTransitionResult(
+                budget_reservation_id=budget_reservation_id,
+                status=from_status,
+                transitioned=False,
+                first_blocker="account_capacity_claim_payload_missing",
+            )
+        if invocation_id:
+            claim = load_account_capacity_claim_by_invocation(
+                conn,
+                action_time_invocation_id=invocation_id,
+            )
+            if claim is None or capacity_claim_hash(claim.payload) != persisted_hash:
+                return BudgetReservationTransitionResult(
+                    budget_reservation_id=budget_reservation_id,
+                    status=from_status,
+                    transitioned=False,
+                    first_blocker="account_capacity_claim_hash_mismatch",
+                )
+    values: dict[str, object] = {**(reservation_updates or {}), "status": to_status}
     if "release_reason" in reservations.c and to_status in {"released", "expired", "invalidated"}:
         values["release_reason"] = reason
+    if "released_at_ms" in reservations.c and to_status in {"released", "expired"}:
+        values["released_at_ms"] = now_ms
+    if "invalidated_at_ms" in reservations.c and to_status == "invalidated":
+        values["invalidated_at_ms"] = now_ms
     conn.execute(
         reservations.update()
         .where(reservations.c.budget_reservation_id == budget_reservation_id)

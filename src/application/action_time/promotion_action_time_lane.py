@@ -42,6 +42,10 @@ from src.application.action_time.account_capacity_reservation import (  # noqa: 
     AccountCapacityReservationResult,
     apply_account_capacity_to_sizing,
 )
+from src.application.action_time.account_capacity_claim import (  # noqa: E402
+    AccountCapacityClaimConflict,
+    insert_or_get_account_capacity_claim,
+)
 from src.application.action_time.account_capacity_materialization import (  # noqa: E402
     materialize_account_capacity_from_snapshot,
 )
@@ -51,6 +55,9 @@ from src.application.action_time.account_risk_policy import (  # noqa: E402
 from src.application.action_time.instrument_risk_facts import (  # noqa: E402
     InstrumentRiskFactsError,
     load_instrument_risk_facts,
+)
+from src.application.action_time.action_time_ticket import (  # noqa: E402
+    materialize_action_time_ticket,
 )
 from src.application.action_time.identity_conservation import (  # noqa: E402
     RuntimeLaneIdentityConservationError,
@@ -73,6 +80,7 @@ from src.domain.execution_sizing import (  # noqa: E402
     ExecutionSizingPolicy,
     decide_execution_sizing,
 )
+from src.domain.account_capacity_claim import AccountCapacityClaimPayload  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -160,7 +168,42 @@ class CandidateBundle:
 
     @property
     def budget_reservation_id(self) -> str:
+        if self.action_time_invocation_id:
+            return _stable_id(
+                "budget",
+                self.account_id,
+                str(self.runtime_scope["runtime_profile_id"]),
+                self.action_time_invocation_id,
+            )
         return _stable_id("budget", self.action_time_lane_input_id)
+
+    @property
+    def ticket_id(self) -> str:
+        if self.action_time_invocation_id:
+            return _stable_id(
+                "ticket",
+                self.account_id,
+                str(self.runtime_scope["runtime_profile_id"]),
+                self.action_time_invocation_id,
+            )
+        return _stable_id(
+            "ticket",
+            self.action_time_lane_input_id,
+            str(self.signal["signal_event_id"]),
+            str(self.signal["observed_at_ms"]),
+        )
+
+    @property
+    def exposure_episode_id(self) -> str:
+        invocation_id = self.action_time_invocation_id or str(
+            self.signal["signal_event_id"]
+        )
+        return _stable_id(
+            "exposure_episode",
+            self.account_id,
+            str(self.runtime_scope["runtime_profile_id"]),
+            invocation_id,
+        )
 
     @property
     def protection_ref_id(self) -> str:
@@ -560,8 +603,41 @@ def materialize_action_time_invocation_promotion_action_time_lane(
         "action_time_lane_input_id",
         lane,
     )
-    _upsert_row(conn, "brc_budget_reservations", "budget_reservation_id", budget)
+    if account_capacity is None:
+        _upsert_row(conn, "brc_budget_reservations", "budget_reservation_id", budget)
+    else:
+        try:
+            insert_or_get_account_capacity_claim(
+                conn,
+                payload=_capacity_claim_payload(
+                    bundle,
+                    account_capacity=account_capacity,
+                    now_ms=now_ms,
+                ),
+            )
+        except AccountCapacityClaimConflict as exc:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=[str(exc)],
+                next_action="reconcile_account_capacity_claim_conflict",
+            )
     _upsert_row(conn, "brc_protection_references", "protection_ref_id", protection)
+    if account_capacity is not None:
+        ticket_result = materialize_action_time_ticket(conn, now_ms=now_ms)
+        if ticket_result.get("status") not in {
+            "action_time_ticket_created",
+            "action_time_ticket_already_exists",
+        }:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=list(ticket_result.get("blockers") or ()) or [
+                    "atomic_account_capacity_ticket_materialization_failed:"
+                    + str(ticket_result.get("status") or "missing")
+                ],
+                next_action="repair_atomic_account_capacity_ticket_materialization",
+            )
     return _invocation_promotion_result(
         "promotion_action_time_lane_created",
         evidence=evidence,
@@ -2071,6 +2147,85 @@ def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
             }
         )
     return row
+
+
+def _capacity_claim_payload(
+    bundle: CandidateBundle,
+    *,
+    account_capacity: AccountCapacityReservationResult,
+    now_ms: int,
+) -> AccountCapacityClaimPayload:
+    decision = bundle.sizing_risk_decision
+    facts = account_capacity.instrument_facts
+    if decision is None or facts is None or account_capacity.selected_leverage is None:
+        raise ValueError("complete account capacity facts are required for claim")
+    if not all(
+        (
+            bundle.action_time_invocation_id,
+            account_capacity.account_source_fact_snapshot_id,
+            account_capacity.account_fact_schema_version,
+            account_capacity.account_risk_policy_version,
+            account_capacity.account_risk_policy_event_id,
+            account_capacity.claimed_projection_version is not None,
+        )
+    ):
+        raise ValueError("account capacity claim lineage is incomplete")
+    target_notional = account_capacity.intended_qty * decision.entry_reference_price
+    planned_stop_risk = (
+        abs(decision.entry_reference_price - decision.protective_stop_price)
+        * account_capacity.intended_qty
+    )
+    return AccountCapacityClaimPayload(
+        capacity_claim_schema_version="v1",
+        reservation_id=bundle.budget_reservation_id,
+        ticket_id=bundle.ticket_id,
+        exposure_episode_id=bundle.exposure_episode_id,
+        action_time_invocation_id=str(bundle.action_time_invocation_id),
+        action_time_lane_input_id=bundle.action_time_lane_input_id,
+        promotion_candidate_id=bundle.promotion_candidate_id,
+        signal_event_id=str(bundle.signal["signal_event_id"]),
+        event_spec_id=str(bundle.event_spec["event_spec_id"]),
+        account_id=bundle.account_id,
+        runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+        strategy_group_id=str(bundle.candidate["strategy_group_id"]),
+        symbol=str(bundle.candidate["symbol"]),
+        side=str(bundle.candidate["side"]),
+        instrument=facts.identity,
+        rule_snapshot=facts.rule_snapshot,
+        cluster_snapshot=facts.cluster_snapshot,
+        pricing_source_fact_snapshot_id=str(
+            bundle.action_time_fact["fact_snapshot_id"]
+        ),
+        account_source_fact_snapshot_id=str(
+            account_capacity.account_source_fact_snapshot_id
+        ),
+        account_fact_schema_version=str(account_capacity.account_fact_schema_version),
+        account_risk_policy_version=str(
+            account_capacity.account_risk_policy_version
+        ),
+        account_risk_policy_event_id=str(
+            account_capacity.account_risk_policy_event_id
+        ),
+        owner_policy_version=bundle.owner_policy_version,
+        claimed_budget_projection_version=int(
+            account_capacity.claimed_projection_version
+        ),
+        entry_reference_price=decision.entry_reference_price,
+        stop_price=decision.protective_stop_price,
+        intended_qty=account_capacity.intended_qty,
+        target_notional=target_notional,
+        allowed_risk_budget=account_capacity.allocated_risk,
+        planned_stop_risk=planned_stop_risk,
+        reserved_margin=account_capacity.reserved_margin,
+        selected_leverage=account_capacity.selected_leverage,
+        reserved_at_ms=now_ms,
+        expires_at_ms=min(
+            int(bundle.signal["expires_at_ms"]),
+            int(bundle.action_time_fact["valid_until_ms"]),
+            facts.rule_snapshot.valid_until_ms,
+            decision.valid_until_ms,
+        ),
+    )
 
 
 def _budget_row(
