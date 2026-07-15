@@ -395,9 +395,15 @@ def stage_candidate_release(
     releases.mkdir(parents=True, exist_ok=True, mode=0o755)
     archive.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-    def run(command: list[str], *, cwd: Path, timeout: int) -> ChildResult:
+    def run(
+        command: list[str],
+        *,
+        cwd: Path,
+        timeout: int,
+        env: Mapping[str, str] | None = None,
+    ) -> ChildResult:
         if runner is not None:
-            return runner(command, cwd=cwd, timeout=timeout)
+            return runner(command, cwd=cwd, timeout=timeout, env=env)
         return spawn_locked_mutation_child(
             command,
             lock_handle=lock_handle,
@@ -405,6 +411,7 @@ def stage_candidate_release(
             require_root_owner=require_root_owner,
             cwd=cwd,
             timeout=timeout,
+            env=env,
         )
 
     commands: list[tuple[list[str], Path, int]] = []
@@ -412,11 +419,7 @@ def stage_candidate_release(
         commands.append(
             (["/usr/bin/git", "clone", "--no-checkout", repo_url, str(source_repo)], source_root, 300)
         )
-    git_in_source_repo = [
-        "/usr/bin/git",
-        "-c",
-        f"safe.directory={source_repo}",
-    ]
+    git_in_source_repo = ["/usr/bin/git"]
     commands.extend(
         [
             (git_in_source_repo + ["fetch", "--prune", "origin", git_ref], source_repo, 300),
@@ -425,7 +428,11 @@ def stage_candidate_release(
     )
     resolved = None
     for command, cwd, timeout in commands:
-        result = run(command, cwd=cwd, timeout=timeout)
+        environment = None
+        if command[0] == "/usr/bin/git" and "clone" not in command:
+            environment = dict(os.environ)
+            environment["SUDO_UID"] = str(source_repo.stat().st_uid)
+        result = run(command, cwd=cwd, timeout=timeout, env=environment)
         if result.returncode != 0:
             raise RuntimeError("candidate_export_command_failed:" + Path(command[0]).name)
         if command[-2:] == ["rev-parse", "FETCH_HEAD"]:
@@ -442,7 +449,11 @@ def stage_candidate_release(
         (git_in_source_repo + ["archive", "--format=tar", "-o", str(archive), target_sha], source_repo, 120),
         (["/usr/bin/tar", "-xf", str(archive), "-C", str(temporary)], releases, 120),
     ):
-        result = run(command, cwd=cwd, timeout=timeout)
+        environment = None
+        if command[0] == "/usr/bin/git":
+            environment = dict(os.environ)
+            environment["SUDO_UID"] = str(source_repo.stat().st_uid)
+        result = run(command, cwd=cwd, timeout=timeout, env=environment)
         if result.returncode != 0:
             raise RuntimeError("candidate_export_command_failed:" + Path(command[0]).name)
     _atomic_json_write(

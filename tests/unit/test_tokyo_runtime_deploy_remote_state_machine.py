@@ -256,9 +256,11 @@ def test_candidate_staging_exports_exact_sha_and_writes_manifest_atomically(
     lock = machine.acquire_deploy_lock(lock_path, require_root_owner=False)
     assert lock is not None
     commands = []
+    command_environments = []
 
     def runner(command, **kwargs):
         commands.append(tuple(command))
+        command_environments.append((tuple(command), kwargs.get("env")))
         if command[:2] == ["/usr/bin/git", "clone"]:
             (source_repo / ".git").mkdir(parents=True)
         if command[-2:] == ["rev-parse", "FETCH_HEAD"]:
@@ -287,16 +289,17 @@ def test_candidate_staging_exports_exact_sha_and_writes_manifest_atomically(
     assert release.is_dir()
     assert manifest.is_file()
     assert json.loads(manifest.read_text(encoding="utf-8"))["target_sha"] == "a" * 40
-    expected_safe_directory = f"safe.directory={source_repo}"
     git_repo_commands = [
         command
         for command in commands
         if command[0] == "/usr/bin/git" and command[1] != "clone"
     ]
     assert git_repo_commands
+    expected_owner_uid = str(source_repo.stat().st_uid)
     assert all(
-        command[1:3] == ("-c", expected_safe_directory)
-        for command in git_repo_commands
+        environment is not None and environment["SUDO_UID"] == expected_owner_uid
+        for command, environment in command_environments
+        if command in git_repo_commands
     )
     assert any("fetch" in command for command in git_repo_commands)
     assert any("archive" in command for command in git_repo_commands)
