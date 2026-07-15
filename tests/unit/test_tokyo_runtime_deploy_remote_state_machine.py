@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -91,7 +92,7 @@ def test_incomplete_immutable_venv_is_rebuilt_with_hashed_lock(tmp_path):
 
     def runner(command, **kwargs):
         commands.append(tuple(command))
-        if command[1:4] == ("-m", "venv", str(target)):
+        if tuple(command[1:4]) == ("-m", "venv", str(target)):
             (target / "bin").mkdir(parents=True, exist_ok=True)
             (target / "bin/python").write_text("", encoding="utf-8")
         return machine.ChildResult(returncode=0, stdout="", stderr="")
@@ -110,3 +111,121 @@ def test_incomplete_immutable_venv_is_rebuilt_with_hashed_lock(tmp_path):
     assert (release / ".venv").resolve() == target.resolve()
     assert any("--require-hashes" in command for command in commands)
     assert all("requirements.txt" not in command for command in commands)
+
+
+def test_bootstrap_source_can_be_supplied_in_memory_without_remote_file(tmp_path, monkeypatch, capsys):
+    source = b"print('tracked state machine')\n"
+    lock_path = tmp_path / "deploy-state" / "tokyo-runtime-deploy.lock"
+    monkeypatch.setattr(machine, "CANONICAL_LOCK_PATH", lock_path)
+    monkeypatch.setattr(machine.platform, "python_implementation", lambda: "CPython")
+    monkeypatch.setattr(machine.sys, "version_info", (3, 10, 14))
+
+    result = machine.main(
+        [
+            "--bootstrap-sha256",
+            hashlib.sha256(source).hexdigest(),
+            "--transaction-id",
+            "a1b2c3d4",
+            "--deploy-nonce",
+            "nonce-a1b2c3d4",
+            "--old-sha",
+            "b" * 40,
+            "--target-sha",
+            "a" * 40,
+        ],
+        bootstrap_source=source,
+        bootstrap_euid=0,
+        require_root_lock_owner=False,
+    )
+
+    assert result == 0
+    assert '"status": "lock_acquired"' in capsys.readouterr().out
+    assert lock_path.is_file()
+
+
+def test_mutation_child_inherits_exact_lock_fd_and_rejects_escape_commands(
+    tmp_path, monkeypatch
+):
+    lock_path = tmp_path / "deploy-state" / "tokyo-runtime-deploy.lock"
+    lock = machine.acquire_deploy_lock(lock_path, require_root_owner=False)
+    assert lock is not None
+    expected_fd = lock.fileno()
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return machine.ChildResult(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(machine, "_subprocess_run_locked", fake_run)
+    try:
+        result = machine.spawn_locked_mutation_child(
+            ["/usr/bin/true"],
+            lock_handle=lock,
+            canonical_lock_path=lock_path,
+            require_root_owner=False,
+            cwd=tmp_path,
+            timeout=5,
+        )
+        with pytest.raises(ValueError, match="mutation_child_escape_forbidden"):
+            machine.spawn_locked_mutation_child(
+                ["/usr/bin/systemd-run", "true"],
+                lock_handle=lock,
+                canonical_lock_path=lock_path,
+                require_root_owner=False,
+                cwd=tmp_path,
+                timeout=5,
+            )
+    finally:
+        lock.close()
+
+    assert result.returncode == 0
+    assert captured["pass_fds"] == (expected_fd,)
+    assert captured["start_new_session"] is False
+    assert captured["timeout"] == 5
+
+
+def test_candidate_staging_exports_exact_sha_and_writes_manifest_atomically(
+    tmp_path
+):
+    deploy_root = tmp_path / "brc-deploy"
+    source_repo = deploy_root / "source" / "dingdingbot"
+    release = deploy_root / "releases" / "candidate"
+    lock_path = tmp_path / "deploy-state" / "tokyo-runtime-deploy.lock"
+    lock = machine.acquire_deploy_lock(lock_path, require_root_owner=False)
+    assert lock is not None
+    commands = []
+
+    def runner(command, **kwargs):
+        commands.append(tuple(command))
+        if command[:2] == ["/usr/bin/git", "clone"]:
+            (source_repo / ".git").mkdir(parents=True)
+        if command[:3] == ["/usr/bin/git", "rev-parse", "FETCH_HEAD"]:
+            return machine.ChildResult(returncode=0, stdout="a" * 40 + "\n", stderr="")
+        if command[:2] == ["/usr/bin/tar", "-xf"]:
+            (release.parent / "candidate.tmp" / "src").mkdir(parents=True)
+        return machine.ChildResult(returncode=0, stdout="", stderr="")
+
+    try:
+        result = machine.stage_candidate_release(
+            deploy_root=deploy_root,
+            repo_url="https://example.invalid/repo.git",
+            git_ref="codex/release",
+            target_sha="a" * 40,
+            release_name="candidate",
+            lock_handle=lock,
+            canonical_lock_path=lock_path,
+            require_root_owner=False,
+            runner=runner,
+        )
+    finally:
+        lock.close()
+
+    manifest = release / ".brc-release-manifest.json"
+    assert result["status"] == "candidate_release_staged"
+    assert release.is_dir()
+    assert manifest.is_file()
+    assert json.loads(manifest.read_text(encoding="utf-8"))["target_sha"] == "a" * 40
+    assert any(command[:2] == ("/usr/bin/git", "fetch") for command in commands)
+    assert any(command[:2] == ("/usr/bin/git", "archive") for command in commands)
+    assert any(command[:2] == ("/usr/bin/tar", "-xf") for command in commands)

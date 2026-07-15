@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import fcntl
 import hashlib
 import json
@@ -11,6 +12,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -22,9 +24,9 @@ import uuid
 
 STDLIB_IMPORT_ALLOWLIST = frozenset(
     {
-        "__future__", "argparse", "fcntl", "hashlib", "json", "os",
+        "__future__", "argparse", "ctypes", "fcntl", "hashlib", "json", "os",
         "pathlib", "platform", "stat", "sys", "tempfile", "time", "typing",
-        "uuid", "shutil", "subprocess",
+        "uuid", "shutil", "signal", "subprocess",
     }
 )
 CANONICAL_LOCK_PATH = Path(
@@ -38,6 +40,88 @@ class ChildResult:
         self.returncode = int(returncode)
         self.stdout = str(stdout)
         self.stderr = str(stderr)
+
+
+_subprocess_run_locked = subprocess.run
+
+
+def spawn_locked_mutation_child(
+    command: list[str],
+    *,
+    lock_handle: Any,
+    canonical_lock_path: Path = CANONICAL_LOCK_PATH,
+    require_root_owner: bool = True,
+    cwd: Path,
+    timeout: int,
+) -> ChildResult:
+    """Run one bounded mutation while retaining and revalidating the deploy lock."""
+
+    forbidden = {"systemd-run", "setsid", "daemonize"}
+    if not command or any(Path(token).name in forbidden for token in command):
+        raise ValueError("mutation_child_escape_forbidden")
+    lock_fd = int(lock_handle.fileno())
+    expected_uid = 0 if require_root_owner else os.geteuid()
+    identity = _verify_lock_identity(
+        lock_fd,
+        Path(canonical_lock_path),
+        expected_uid=expected_uid,
+    )
+    parent_pid = os.getpid()
+
+    def child_guard() -> None:
+        if os.getppid() != parent_pid:
+            os._exit(125)
+        _verify_lock_identity(
+            lock_fd,
+            Path(canonical_lock_path),
+            expected_uid=expected_uid,
+            expected_identity=identity,
+        )
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:
+            os._exit(126)
+        if os.getppid() != parent_pid:
+            os._exit(125)
+
+    completed = _subprocess_run_locked(
+        command,
+        cwd=Path(cwd),
+        timeout=int(timeout),
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        pass_fds=(lock_fd,),
+        start_new_session=False,
+        preexec_fn=child_guard,
+    )
+    return ChildResult(
+        returncode=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+    )
+
+
+def _verify_lock_identity(
+    lock_fd: int,
+    canonical_lock_path: Path,
+    *,
+    expected_uid: int,
+    expected_identity: tuple[int, int] | None = None,
+) -> tuple[int, int]:
+    fd_info = os.fstat(lock_fd)
+    path_info = Path(canonical_lock_path).lstat()
+    identity = (fd_info.st_dev, fd_info.st_ino)
+    if (
+        not stat.S_ISREG(fd_info.st_mode)
+        or fd_info.st_uid != expected_uid
+        or stat.S_IMODE(fd_info.st_mode) != 0o600
+        or fd_info.st_nlink != 1
+        or identity != (path_info.st_dev, path_info.st_ino)
+        or (expected_identity is not None and identity != expected_identity)
+    ):
+        raise ValueError("deploy_lock_identity_invalid")
+    return identity
 
 
 def validate_bootstrap_environment(
@@ -113,6 +197,107 @@ def dependency_identity(lock_path: Path) -> str:
     return hashlib.sha256(raw).hexdigest() + "-cp310-linux_x86_64"
 
 
+def stage_candidate_release(
+    *,
+    deploy_root: Path,
+    repo_url: str,
+    git_ref: str,
+    target_sha: str,
+    release_name: str,
+    lock_handle: Any,
+    canonical_lock_path: Path = CANONICAL_LOCK_PATH,
+    require_root_owner: bool = True,
+    runner: Callable[..., ChildResult] | None = None,
+) -> dict[str, Any]:
+    """Fetch and export one exact commit without relying on candidate code."""
+
+    target_sha = _sha(target_sha, "target_sha")
+    repo_url = _required(repo_url, "repo_url")
+    git_ref = _required(git_ref, "git_ref")
+    release_name = _required(release_name, "release_name")
+    if "/" in release_name or release_name in {".", ".."}:
+        raise ValueError("release_name_invalid")
+    deploy_root = Path(deploy_root)
+    source_root = deploy_root / "source"
+    source_repo = source_root / "dingdingbot"
+    releases = deploy_root / "releases"
+    release = releases / release_name
+    temporary = releases / f"{release_name}.tmp"
+    archive = deploy_root / "deploy-state" / f"{release_name}.{target_sha}.tar"
+    manifest = release / ".brc-release-manifest.json"
+
+    if release.exists():
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        if payload.get("target_sha") != target_sha:
+            raise ValueError("candidate_release_identity_mismatch")
+        return {"status": "candidate_release_staged", "release_path": str(release)}
+
+    source_root.mkdir(parents=True, exist_ok=True, mode=0o755)
+    releases.mkdir(parents=True, exist_ok=True, mode=0o755)
+    archive.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def run(command: list[str], *, cwd: Path, timeout: int) -> ChildResult:
+        if runner is not None:
+            return runner(command, cwd=cwd, timeout=timeout)
+        return spawn_locked_mutation_child(
+            command,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock_path,
+            require_root_owner=require_root_owner,
+            cwd=cwd,
+            timeout=timeout,
+        )
+
+    commands: list[tuple[list[str], Path, int]] = []
+    if not (source_repo / ".git").is_dir():
+        commands.append(
+            (["/usr/bin/git", "clone", "--no-checkout", repo_url, str(source_repo)], source_root, 300)
+        )
+    commands.extend(
+        [
+            (["/usr/bin/git", "fetch", "--prune", "origin", git_ref], source_repo, 300),
+            (["/usr/bin/git", "rev-parse", "FETCH_HEAD"], source_repo, 30),
+        ]
+    )
+    resolved = None
+    for command, cwd, timeout in commands:
+        result = run(command, cwd=cwd, timeout=timeout)
+        if result.returncode != 0:
+            raise RuntimeError("candidate_export_command_failed:" + Path(command[0]).name)
+        if command[1:3] == ["rev-parse", "FETCH_HEAD"]:
+            resolved = result.stdout.strip()
+    if resolved != target_sha:
+        raise ValueError("candidate_fetch_head_mismatch")
+
+    if temporary.exists():
+        if temporary.is_symlink():
+            raise ValueError("candidate_temporary_path_unsafe")
+        shutil.rmtree(temporary)
+    temporary.mkdir(mode=0o755)
+    for command, cwd, timeout in (
+        (["/usr/bin/git", "archive", "--format=tar", "-o", str(archive), target_sha], source_repo, 120),
+        (["/usr/bin/tar", "-xf", str(archive), "-C", str(temporary)], releases, 120),
+    ):
+        result = run(command, cwd=cwd, timeout=timeout)
+        if result.returncode != 0:
+            raise RuntimeError("candidate_export_command_failed:" + Path(command[0]).name)
+    _atomic_json_write(
+        temporary / ".brc-release-manifest.json",
+        {
+            "schema": "brc.runtime_release_manifest.v2",
+            "target_sha": target_sha,
+            "git_ref": git_ref,
+            "repo_url": repo_url,
+        },
+    )
+    os.replace(temporary, release)
+    _fsync_directory(releases)
+    if archive.exists():
+        archive.unlink()
+        _fsync_directory(archive.parent)
+    return {"status": "candidate_release_staged", "release_path": str(release)}
+
+
 def build_immutable_venv(
     *,
     release_path: Path,
@@ -120,6 +305,9 @@ def build_immutable_venv(
     venv_root: Path,
     base_python: str = "/usr/bin/python3",
     runner: Callable[..., ChildResult] | None = None,
+    lock_handle: Any | None = None,
+    canonical_lock_path: Path = CANONICAL_LOCK_PATH,
+    require_root_owner: bool = True,
 ) -> dict[str, Any]:
     release_path = Path(release_path).resolve(strict=True)
     lock_path = Path(lock_path).resolve(strict=True)
@@ -130,7 +318,20 @@ def build_immutable_venv(
         if target.is_symlink():
             raise ValueError("immutable_venv_partial_path_unsafe")
         shutil.rmtree(target)
-    command_runner = runner or _run_child
+    if runner is not None:
+        command_runner = runner
+    elif lock_handle is not None:
+        def command_runner(command, *, cwd, timeout):
+            return spawn_locked_mutation_child(
+                command,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+                cwd=cwd,
+                timeout=timeout,
+            )
+    else:
+        raise ValueError("immutable_venv_lock_required")
     if not complete.is_file():
         target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
         commands = (
@@ -352,21 +553,45 @@ def _sha(value: str, name: str) -> str:
     return text
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    bootstrap_source: bytes | None = None,
+    bootstrap_euid: int | None = None,
+    require_root_lock_owner: bool = True,
+) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bootstrap-sha256", required=True)
     parser.add_argument("--transaction-id", required=True)
     parser.add_argument("--deploy-nonce", required=True)
     parser.add_argument("--old-sha", required=True)
     parser.add_argument("--target-sha", required=True)
-    parser.add_argument("--source-path", required=True)
+    parser.add_argument("--source-path")
+    parser.add_argument("--deploy-root")
+    parser.add_argument("--repo-url")
+    parser.add_argument("--git-ref")
+    parser.add_argument("--release-name")
+    parser.add_argument("--previous-release-path")
+    parser.add_argument("--service-name")
+    parser.add_argument("--env-path")
+    parser.add_argument("--expected-latest-migration")
     args = parser.parse_args(argv)
-    source = Path(args.source_path).read_bytes()
+    source = bootstrap_source
+    if source is None:
+        source = globals().get("__bootstrap_source__")
+    if source is None and args.source_path:
+        source = Path(args.source_path).read_bytes()
+    if not isinstance(source, bytes):
+        raise ValueError("bootstrap_source_missing")
     validate_bootstrap_environment(
         source=source,
         expected_sha256=args.bootstrap_sha256,
+        euid=bootstrap_euid,
     )
-    lock = acquire_deploy_lock()
+    lock = acquire_deploy_lock(
+        CANONICAL_LOCK_PATH,
+        require_root_owner=require_root_lock_owner,
+    )
     if lock is None:
         print(json.dumps({"status": "deploy_in_progress"}))
         return 3

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from scripts.execute_tokyo_runtime_governance_git_deploy import (
     ShellResult,
+    build_remote_state_machine_invocation,
     execute_git_deploy_plan,
 )
 from src.domain.standing_authorization import OWNER_STANDING_AUTHORIZATION_REFERENCE
@@ -53,3 +54,47 @@ def test_post_mutation_failure_engages_persistent_writer_fence():
         "set_ticket_lifecycle_mutation_capability.py --disable" in command
         for command in calls
     )
+
+
+def test_remote_state_machine_invocation_is_one_bounded_transient_service(tmp_path):
+    script = tmp_path / "tokyo_runtime_deploy_remote_state_machine.py"
+    script.write_text("print('verified bootstrap')\n", encoding="utf-8")
+    plan = {
+        "repo_root": str(tmp_path),
+        "inputs": {
+            "host": "tokyo",
+            "deploy_root": "/home/ubuntu/brc-deploy",
+            "repo_url": "https://example.invalid/repo.git",
+            "git_ref": "codex/release",
+            "target_commit": "a" * 40,
+            "release_name": "brc-runtime-governance-a1",
+            "service_name": "brc-owner-console-backend.service",
+            "env_path": "/home/ubuntu/brc-deploy/env/live-readonly.env",
+            "previous_release_path": "/home/ubuntu/brc-deploy/releases/old",
+            "expected_latest_migration": "2026-07-15-124_x.py",
+        },
+        "release": {
+            "remote_release_path": "/home/ubuntu/brc-deploy/releases/new",
+        },
+    }
+
+    invocation = build_remote_state_machine_invocation(
+        plan,
+        transaction_id="a1b2c3d4",
+        deploy_nonce="nonce-a1b2c3d4",
+        bootstrap_path=script,
+    )
+
+    command = invocation["command"]
+    assert command.count("ssh tokyo") == 1
+    assert "sudo -n /usr/bin/systemd-run" in command
+    assert "--wait --pipe --collect --service-type=exec" in command
+    assert "--unit=brc-deploy-a1b2c3d4.service" in command
+    assert "KillMode=control-group" in command
+    assert "RuntimeMaxSec=60min" in command
+    assert "/usr/bin/python3 -c" in command
+    assert str(script) in command
+    assert command.rstrip().endswith("< " + str(script))
+    assert invocation["transaction_id"] == "a1b2c3d4"
+    assert invocation["deploy_nonce"] == "nonce-a1b2c3d4"
+    assert len(invocation["bootstrap_sha256"]) == 64

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -48,6 +50,77 @@ class ShellResult:
 
 
 ShellRunner = Callable[[str], ShellResult]
+
+_LOWER_HEX_TRANSACTION_ID = re.compile(r"^[0-9a-f]{8,64}$")
+
+
+def build_remote_state_machine_invocation(
+    plan: dict[str, Any],
+    *,
+    transaction_id: str,
+    deploy_nonce: str,
+    bootstrap_path: Path | None = None,
+) -> dict[str, str]:
+    """Build the one bounded, stdin-bootstrapped remote mutation session."""
+
+    if not _LOWER_HEX_TRANSACTION_ID.fullmatch(transaction_id):
+        raise GitDeployExecutionError("deploy_transaction_id_invalid")
+    if not deploy_nonce or any(char.isspace() for char in deploy_nonce):
+        raise GitDeployExecutionError("deploy_nonce_invalid")
+    inputs = plan.get("inputs") or {}
+    release = plan.get("release") or {}
+    repo_root = Path(str(plan.get("repo_root") or _repo_root()))
+    source = bootstrap_path or (
+        repo_root / "scripts/tokyo_runtime_deploy_remote_state_machine.py"
+    )
+    raw = source.read_bytes()
+    bootstrap_sha256 = hashlib.sha256(raw).hexdigest()
+    host = str(inputs.get("host") or DEFAULT_HOST)
+    target_sha = str(inputs.get("target_commit") or release.get("head") or "")
+    old_sha = str(inputs.get("expected_deployed_head") or "")
+    loader = (
+        "import hashlib,os,platform,sys;"
+        "b=sys.stdin.buffer.read();e=sys.argv[1];"
+        "assert hashlib.sha256(b).hexdigest()==e,'bootstrap_sha256_mismatch';"
+        "assert platform.python_implementation()=='CPython' and "
+        "sys.version_info[:2]==(3,10),'bootstrap_python_abi_mismatch';"
+        "assert os.geteuid()==0,'bootstrap_root_required';"
+        "sys.argv=['tokyo_runtime_deploy_remote_state_machine.py']+sys.argv[2:];"
+        "exec(compile(b,'tokyo_runtime_deploy_remote_state_machine.py','exec'),"
+        "{'__name__':'__main__','__bootstrap_source__':b})"
+    )
+    remote_argv = [
+        "sudo", "-n", "/usr/bin/systemd-run", "--wait", "--pipe",
+        "--collect", "--service-type=exec",
+        f"--unit=brc-deploy-{transaction_id}.service",
+        "-p", "KillMode=control-group", "-p", "SendSIGKILL=yes",
+        "-p", "TimeoutStopSec=30s", "-p", "RuntimeMaxSec=60min",
+        "-p", "Restart=no", "/usr/bin/python3", "-c", loader,
+        bootstrap_sha256,
+        "--bootstrap-sha256", bootstrap_sha256,
+        "--transaction-id", transaction_id,
+        "--deploy-nonce", deploy_nonce,
+        "--old-sha", old_sha,
+        "--target-sha", target_sha,
+        "--deploy-root", str(inputs.get("deploy_root") or DEFAULT_DEPLOY_ROOT),
+        "--repo-url", str(inputs.get("repo_url") or ""),
+        "--git-ref", str(inputs.get("git_ref") or ""),
+        "--release-name", str(inputs.get("release_name") or release.get("release_name") or ""),
+        "--previous-release-path", str(inputs.get("previous_release_path") or ""),
+        "--service-name", str(inputs.get("service_name") or DEFAULT_SERVICE_NAME),
+        "--env-path", str(inputs.get("env_path") or DEFAULT_ENV_PATH),
+        "--expected-latest-migration", str(inputs.get("expected_latest_migration") or ""),
+    ]
+    command = (
+        f"ssh {shlex.quote(host)} {shlex.quote(shlex.join(remote_argv))} "
+        f"< {shlex.quote(str(source))}"
+    )
+    return {
+        "command": command,
+        "transaction_id": transaction_id,
+        "deploy_nonce": deploy_nonce,
+        "bootstrap_sha256": bootstrap_sha256,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
