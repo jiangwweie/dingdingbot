@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
 from decimal import Decimal
+from hashlib import sha256
+import json
 from typing import Sequence
 from uuid import uuid4
 
@@ -151,34 +152,216 @@ def replace_risk_cluster_memberships(
     created_by: str,
     now_ms: int,
 ) -> None:
-    """Replace one policy version's explicit static cluster mapping atomically."""
+    """Append one immutable snapshot per instrument and supersede its old current."""
 
     _require_text(risk_policy_version, "risk_policy_version")
     _require_text(created_by, "created_by")
     if now_ms <= 0:
         raise ValueError("now_ms must be positive")
-    instrument_ids = [item.exchange_instrument_id for item in memberships]
-    if len(instrument_ids) != len(set(instrument_ids)):
-        raise ValueError("risk cluster memberships must be unique per instrument")
-    table = _table(conn, "brc_risk_cluster_memberships")
-    conn.execute(
-        table.delete().where(table.c.risk_policy_version == risk_policy_version)
-    )
+    grouped: dict[str, list[RiskClusterMembership]] = {}
     for membership in memberships:
+        grouped.setdefault(membership.exchange_instrument_id, []).append(membership)
+
+    member_table = _table(conn, "brc_risk_cluster_memberships")
+    snapshot_table = _table(conn, "brc_risk_cluster_membership_snapshots")
+    current_instruments = set(
         conn.execute(
-            table.insert().values(
-                risk_cluster_membership_id=_stable_id(
-                    "risk_cluster_membership",
-                    risk_policy_version,
-                    membership.exchange_instrument_id,
+            sa.select(member_table.c.exchange_instrument_id)
+            .select_from(
+                member_table.join(
+                    snapshot_table,
+                    snapshot_table.c.cluster_membership_snapshot_id
+                    == member_table.c.cluster_membership_snapshot_id,
+                )
+            )
+            .where(snapshot_table.c.risk_policy_version == risk_policy_version)
+            .where(snapshot_table.c.status == "current")
+            .where(member_table.c.status == "active")
+            .distinct()
+        ).scalars()
+    )
+    for removed_instrument_id in current_instruments - set(grouped):
+        _supersede_current_membership_snapshot(
+            conn,
+            member_table=member_table,
+            snapshot_table=snapshot_table,
+            risk_policy_version=risk_policy_version,
+            exchange_instrument_id=removed_instrument_id,
+        )
+    for instrument_id, instrument_memberships in grouped.items():
+        semantic_memberships = {
+            (item.membership_role, item.risk_cluster_id)
+            for item in instrument_memberships
+        }
+        if len(semantic_memberships) != len(instrument_memberships):
+            raise ValueError("risk cluster memberships contain duplicate semantics")
+        primary = [
+            item for item in instrument_memberships
+            if item.membership_role == "primary"
+        ]
+        if len(primary) != 1:
+            raise ValueError(
+                "risk cluster memberships require exactly one primary per instrument"
+            )
+        semantic_hash = _membership_semantic_hash(
+            risk_policy_version,
+            instrument_id,
+            instrument_memberships,
+        )
+        current_rows = conn.execute(
+            sa.select(
+                snapshot_table.c.cluster_membership_snapshot_id,
+                snapshot_table.c.semantic_hash,
+            )
+            .select_from(
+                snapshot_table.join(
+                    member_table,
+                    member_table.c.cluster_membership_snapshot_id
+                    == snapshot_table.c.cluster_membership_snapshot_id,
+                )
+            )
+            .where(snapshot_table.c.risk_policy_version == risk_policy_version)
+            .where(snapshot_table.c.status == "current")
+            .where(member_table.c.exchange_instrument_id == instrument_id)
+            .where(member_table.c.status == "active")
+            .distinct()
+            .limit(2)
+        ).mappings().all()
+        if len(current_rows) > 1:
+            raise ValueError("multiple current cluster membership snapshots")
+        if current_rows and str(current_rows[0]["semantic_hash"]) == semantic_hash:
+            continue
+        if current_rows:
+            _supersede_membership_snapshot(
+                conn,
+                member_table=member_table,
+                snapshot_table=snapshot_table,
+                snapshot_id=str(
+                    current_rows[0]["cluster_membership_snapshot_id"]
                 ),
+            )
+
+        snapshot_id = _stable_id(
+            "cluster_membership_snapshot",
+            risk_policy_version,
+            instrument_id,
+            semantic_hash,
+        )
+        conn.execute(
+            snapshot_table.insert().values(
+                cluster_membership_snapshot_id=snapshot_id,
                 risk_policy_version=risk_policy_version,
-                exchange_instrument_id=membership.exchange_instrument_id,
-                risk_cluster_id=membership.risk_cluster_id,
+                primary_risk_cluster_id=primary[0].risk_cluster_id,
+                semantic_hash=semantic_hash,
+                status="current",
                 created_at_ms=now_ms,
-                created_by=created_by,
             )
         )
+        for membership in sorted(
+            instrument_memberships,
+            key=lambda item: (item.membership_role, item.risk_cluster_id),
+        ):
+            conn.execute(
+                member_table.insert().values(
+                    risk_cluster_membership_id=_stable_id(
+                        "risk_cluster_membership",
+                        snapshot_id,
+                        membership.membership_role,
+                        membership.risk_cluster_id,
+                    ),
+                    risk_policy_version=risk_policy_version,
+                    exchange_instrument_id=instrument_id,
+                    risk_cluster_id=membership.risk_cluster_id,
+                    cluster_membership_snapshot_id=snapshot_id,
+                    membership_role=membership.membership_role,
+                    status="active",
+                    created_at_ms=now_ms,
+                    created_by=created_by,
+                )
+            )
+
+
+def _supersede_current_membership_snapshot(
+    conn: sa.Connection,
+    *,
+    member_table: sa.Table,
+    snapshot_table: sa.Table,
+    risk_policy_version: str,
+    exchange_instrument_id: str,
+) -> None:
+    snapshot_ids = conn.execute(
+        sa.select(snapshot_table.c.cluster_membership_snapshot_id)
+        .select_from(
+            snapshot_table.join(
+                member_table,
+                member_table.c.cluster_membership_snapshot_id
+                == snapshot_table.c.cluster_membership_snapshot_id,
+            )
+        )
+        .where(snapshot_table.c.risk_policy_version == risk_policy_version)
+        .where(snapshot_table.c.status == "current")
+        .where(member_table.c.exchange_instrument_id == exchange_instrument_id)
+        .where(member_table.c.status == "active")
+        .distinct()
+        .limit(2)
+    ).scalars().all()
+    if len(snapshot_ids) != 1:
+        raise ValueError("current cluster membership snapshot is ambiguous")
+    _supersede_membership_snapshot(
+        conn,
+        member_table=member_table,
+        snapshot_table=snapshot_table,
+        snapshot_id=str(snapshot_ids[0]),
+    )
+
+
+def _supersede_membership_snapshot(
+    conn: sa.Connection,
+    *,
+    member_table: sa.Table,
+    snapshot_table: sa.Table,
+    snapshot_id: str,
+) -> None:
+    conn.execute(
+        snapshot_table.update()
+        .where(snapshot_table.c.cluster_membership_snapshot_id == snapshot_id)
+        .where(snapshot_table.c.status == "current")
+        .values(status="superseded")
+    )
+    conn.execute(
+        member_table.update()
+        .where(member_table.c.cluster_membership_snapshot_id == snapshot_id)
+        .where(member_table.c.status == "active")
+        .values(status="superseded")
+    )
+
+
+def _membership_semantic_hash(
+    risk_policy_version: str,
+    exchange_instrument_id: str,
+    memberships: Sequence[RiskClusterMembership],
+) -> str:
+    payload = {
+        "risk_policy_version": risk_policy_version,
+        "exchange_instrument_id": exchange_instrument_id,
+        "memberships": sorted(
+            (
+                {
+                    "membership_role": item.membership_role,
+                    "risk_cluster_id": item.risk_cluster_id,
+                }
+                for item in memberships
+            ),
+            key=lambda item: (item["membership_role"], item["risk_cluster_id"]),
+        ),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()
 
 
 def _table(conn: sa.Connection, table_name: str) -> sa.Table:

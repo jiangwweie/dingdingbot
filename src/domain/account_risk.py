@@ -43,12 +43,13 @@ class AccountRiskPolicy(BaseModel):
 
 
 class RiskClusterMembership(BaseModel):
-    """Static, versioned instrument-to-risk-cluster membership."""
+    """Versioned instrument-to-risk-cluster membership input."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     exchange_instrument_id: str = Field(min_length=1)
     risk_cluster_id: str = Field(min_length=1)
+    membership_role: Literal["primary", "secondary"] = "primary"
 
 
 class CapacityDecision(BaseModel):

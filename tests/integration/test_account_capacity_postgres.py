@@ -18,10 +18,16 @@ from src.application.action_time.account_capacity_reservation import (
     AccountCapacityCandidate,
     reserve_account_capacity_for_candidate,
 )
+from src.application.action_time.instrument_risk_facts import InstrumentRiskFacts
 from src.application.action_time.account_budget_current import (
     project_account_budget_current,
 )
 from src.domain.account_risk import AccountRiskPolicy
+from src.domain.instrument_risk_identity import (
+    InstrumentRiskIdentity,
+    InstrumentRuleSnapshotRef,
+    RiskClusterMembershipSnapshotRef,
+)
 from src.infrastructure.binance_usdm_account_risk_snapshot import FullAccountRiskSnapshot
 
 
@@ -89,6 +95,9 @@ def test_only_one_concurrent_candidate_claims_account_budget_projection() -> Non
                 "brc_account_exposure_current",
                 "brc_budget_reservations",
                 "brc_risk_cluster_memberships",
+                "brc_risk_cluster_membership_snapshots",
+                "brc_instrument_rule_snapshots",
+                "brc_exchange_instruments",
                 "brc_account_risk_policy_current",
                 "brc_account_budget_current",
             ):
@@ -193,10 +202,35 @@ def _create_tables(engine: sa.Engine) -> None:
             max_leverage INTEGER NOT NULL, max_new_action_time_lanes INTEGER NOT NULL,
             automatic_downsize_enabled BOOLEAN NOT NULL,
             unknown_exposure_policy TEXT NOT NULL, activation_state TEXT NOT NULL
+            , source_event_id TEXT NOT NULL
         )""",
         """CREATE TABLE brc_risk_cluster_memberships (
+            risk_cluster_membership_id TEXT PRIMARY KEY,
             risk_policy_version TEXT NOT NULL, exchange_instrument_id TEXT NOT NULL,
-            risk_cluster_id TEXT NOT NULL
+            risk_cluster_id TEXT NOT NULL, cluster_membership_snapshot_id TEXT NOT NULL,
+            membership_role TEXT NOT NULL, status TEXT NOT NULL
+        )""",
+        """CREATE TABLE brc_risk_cluster_membership_snapshots (
+            cluster_membership_snapshot_id TEXT PRIMARY KEY,
+            risk_policy_version TEXT NOT NULL, primary_risk_cluster_id TEXT NOT NULL,
+            semantic_hash TEXT NOT NULL, status TEXT NOT NULL
+        )""",
+        """CREATE TABLE brc_exchange_instruments (
+            exchange_instrument_id TEXT PRIMARY KEY, exchange_id TEXT NOT NULL,
+            exchange_symbol TEXT NOT NULL, asset_class TEXT NOT NULL,
+            instrument_type TEXT NOT NULL, settlement_asset TEXT NOT NULL,
+            margin_asset TEXT NOT NULL, instrument_identity_schema_version TEXT NOT NULL,
+            status TEXT NOT NULL
+        )""",
+        """CREATE TABLE brc_instrument_rule_snapshots (
+            instrument_rule_snapshot_id TEXT PRIMARY KEY,
+            exchange_instrument_id TEXT NOT NULL, rule_schema_version TEXT NOT NULL,
+            price_tick NUMERIC NOT NULL, quantity_step NUMERIC NOT NULL,
+            min_qty NUMERIC NOT NULL, min_notional NUMERIC NOT NULL,
+            contract_multiplier NUMERIC NOT NULL,
+            exchange_max_leverage_for_claim_notional INTEGER NOT NULL,
+            source_fact_snapshot_id TEXT NOT NULL, valid_until_ms BIGINT NOT NULL,
+            status TEXT NOT NULL
         )""",
         """CREATE TABLE brc_account_exposure_current (
             account_id TEXT NOT NULL, exchange_instrument_id TEXT NOT NULL,
@@ -227,15 +261,25 @@ def _seed(engine: sa.Engine) -> None:
             sa.text(
                 """INSERT INTO brc_account_risk_policy_current VALUES
                 ('account-1', 'profile-1', 'policy-1', .025, 2, .06, .04, .90,
-                 10, 1, true, 'global_fail_closed', 'active')"""
+                 10, 1, true, 'global_fail_closed', 'active', 'policy-event-1')"""
             )
         )
         conn.execute(
             sa.text(
                 """INSERT INTO brc_risk_cluster_memberships VALUES
-                ('policy-1', 'binance_usdm:SOLUSDT', 'crypto_usd_beta')"""
+                ('member-sol', 'policy-1', 'binance_usdm:SOLUSDT',
+                 'crypto_usd_beta', 'membership-sol', 'primary', 'active')"""
             )
         )
+        conn.execute(sa.text("""INSERT INTO brc_risk_cluster_membership_snapshots
+            VALUES ('membership-sol', 'policy-1', 'crypto_usd_beta',
+                    'membership-sol', 'current')"""))
+        conn.execute(sa.text("""INSERT INTO brc_exchange_instruments VALUES (
+            'binance_usdm:SOLUSDT', 'binance_usdm', 'SOLUSDT', 'crypto',
+            'perpetual', 'USDT', 'USDT', 'v1', 'active')"""))
+        conn.execute(sa.text("""INSERT INTO brc_instrument_rule_snapshots VALUES (
+            'rule-sol', 'binance_usdm:SOLUSDT', 'v1', .01, .01, .01, 5, 1,
+            20, 'source-sol', 1752480060000, 'current')"""))
 
 
 def _create_budget_projection_tables(engine: sa.Engine) -> None:
@@ -309,12 +353,35 @@ def _candidate() -> AccountCapacityCandidate:
     return AccountCapacityCandidate(
         account_id="account-1",
         runtime_profile_id="profile-1",
-        exchange_instrument_id="binance_usdm:SOLUSDT",
-        risk_cluster_id="crypto_usd_beta",
+        instrument_facts=InstrumentRiskFacts(
+            identity=InstrumentRiskIdentity(
+                exchange_instrument_id="binance_usdm:SOLUSDT",
+                exchange_id="binance_usdm",
+                exchange_symbol="SOLUSDT",
+                asset_class="crypto",
+                instrument_type="perpetual",
+                settlement_asset="USDT",
+                margin_asset="USDT",
+                instrument_identity_schema_version="v1",
+            ),
+            rule_snapshot=InstrumentRuleSnapshotRef(
+                instrument_rule_snapshot_id="rule-sol",
+                rule_schema_version="v1",
+                price_tick=Decimal(".01"),
+                quantity_step=Decimal(".01"),
+                min_qty=Decimal(".01"),
+                min_notional=Decimal("5"),
+                contract_multiplier=Decimal("1"),
+                exchange_max_leverage_for_claim_notional=20,
+                source_fact_snapshot_id="source-sol",
+                valid_until_ms=1_752_480_060_000,
+            ),
+            cluster_snapshot=RiskClusterMembershipSnapshotRef(
+                cluster_membership_snapshot_id="membership-sol",
+                primary_risk_cluster_id="crypto_usd_beta",
+                semantic_hash="membership-sol",
+            ),
+        ),
         per_unit_stop_risk=Decimal("3"),
         entry_reference_price=Decimal("150"),
-        min_qty=Decimal("0.01"),
-        qty_step=Decimal("0.01"),
-        min_notional=Decimal("5"),
-        exchange_max_leverage=20,
     )

@@ -48,6 +48,10 @@ from src.application.action_time.account_capacity_materialization import (  # no
 from src.application.action_time.account_risk_policy import (  # noqa: E402
     load_account_risk_policy_current,
 )
+from src.application.action_time.instrument_risk_facts import (  # noqa: E402
+    InstrumentRiskFactsError,
+    load_instrument_risk_facts,
+)
 from src.application.action_time.identity_conservation import (  # noqa: E402
     RuntimeLaneIdentityConservationError,
     RuntimeLaneLineage,
@@ -450,7 +454,7 @@ def materialize_action_time_invocation_promotion_action_time_lane(
                 next_action="repair_account_capacity_base_safety",
             )
         candidate, candidate_blocker = _account_capacity_candidate(
-            conn, bundle=bundle, snapshot=account_snapshot
+            conn, bundle=bundle, snapshot=account_snapshot, now_ms=now_ms
         )
         if candidate_blocker:
             return _invocation_promotion_result(
@@ -736,6 +740,7 @@ def _account_capacity_candidate(
     *,
     bundle: CandidateBundle,
     snapshot: FullAccountRiskSnapshot,
+    now_ms: int,
 ) -> tuple[AccountCapacityCandidate | None, str | None]:
     decision = bundle.sizing_risk_decision
     if decision is None:
@@ -760,43 +765,26 @@ def _account_capacity_candidate(
     ).scalar_one_or_none()
     if not policy_version:
         return None, "account_risk_policy_missing_or_changed"
-    memberships = sa.Table("brc_risk_cluster_memberships", sa.MetaData(), autoload_with=conn)
-    cluster_id = conn.execute(
-        sa.select(memberships.c.risk_cluster_id)
-        .where(memberships.c.risk_policy_version == policy_version)
-        .where(memberships.c.exchange_instrument_id == instrument_id)
-    ).scalar_one_or_none()
-    if not cluster_id:
-        return None, "risk_cluster_membership_missing_or_changed"
-    pricing = pricing_reference_from_action_time_fact_values(
-        _as_dict(bundle.action_time_fact.get("fact_values"))
-    ).reference
-    if pricing is None:
-        return None, "account_capacity_pricing_reference_missing"
-    leverage_by_symbol = _as_dict(
-        _as_dict(bundle.account_safe_fact.get("fact_values")).get(
-            "exchange_max_leverage_by_symbol"
-        )
-    )
     try:
-        exchange_max_leverage = int(leverage_by_symbol.get(decision.symbol) or 0)
-    except (TypeError, ValueError):
-        exchange_max_leverage = 0
-    if exchange_max_leverage <= 0:
-        return None, "exchange_leverage_bracket_missing_or_invalid"
+        instrument_facts = load_instrument_risk_facts(
+            conn,
+            exchange_instrument_id=instrument_id,
+            risk_policy_version=str(policy_version),
+            planned_notional=(
+                decision.intended_qty * decision.entry_reference_price
+            ),
+            now_ms=now_ms,
+        )
+    except InstrumentRiskFactsError as exc:
+        return None, str(exc)
     return AccountCapacityCandidate(
         account_id=bundle.account_id,
         runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
-        exchange_instrument_id=instrument_id,
-        risk_cluster_id=str(cluster_id),
+        instrument_facts=instrument_facts,
         per_unit_stop_risk=abs(
             decision.entry_reference_price - decision.protective_stop_price
         ),
         entry_reference_price=decision.entry_reference_price,
-        min_qty=pricing.min_qty,
-        qty_step=pricing.qty_step,
-        min_notional=pricing.min_notional,
-        exchange_max_leverage=exchange_max_leverage,
     ), None
 
 

@@ -64,7 +64,8 @@ def test_rollback_does_not_replace_the_existing_cluster_memberships(
             sa.text(
                 """INSERT INTO brc_risk_cluster_memberships VALUES
                 ('membership-1', 'account-risk-v0-owner-20260714',
-                 'binance_usdm:ETHUSDT', 'crypto_usd_beta', 1, 'seed')"""
+                 'binance_usdm:ETHUSDT', 'crypto_usd_beta', 'snapshot-1',
+                 'primary', 'active', 1, 'seed')"""
             )
         )
 
@@ -103,7 +104,13 @@ def _create_tables(conn: sa.Connection) -> None:
         """CREATE TABLE brc_risk_cluster_memberships (
             risk_cluster_membership_id TEXT PRIMARY KEY, risk_policy_version TEXT,
             exchange_instrument_id TEXT, risk_cluster_id TEXT,
+            cluster_membership_snapshot_id TEXT, membership_role TEXT, status TEXT,
             created_at_ms BIGINT, created_by TEXT
+        )""",
+        """CREATE TABLE brc_risk_cluster_membership_snapshots (
+            cluster_membership_snapshot_id TEXT PRIMARY KEY,
+            risk_policy_version TEXT, primary_risk_cluster_id TEXT,
+            semantic_hash TEXT, status TEXT, created_at_ms BIGINT
         )""",
         """CREATE TABLE brc_strategy_group_candidate_scope (
             candidate_scope_id TEXT, symbol TEXT, asset_class TEXT, status TEXT

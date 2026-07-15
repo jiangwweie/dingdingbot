@@ -7,6 +7,12 @@ from src.application.action_time.account_capacity_reservation import (
     AccountCapacityCandidate,
     AccountCapacityReservationResult,
 )
+from src.application.action_time.instrument_risk_facts import InstrumentRiskFacts
+from src.domain.instrument_risk_identity import (
+    InstrumentRiskIdentity,
+    InstrumentRuleSnapshotRef,
+    RiskClusterMembershipSnapshotRef,
+)
 from src.infrastructure.binance_usdm_account_risk_snapshot import FullAccountRiskSnapshot
 
 
@@ -59,4 +65,38 @@ def _snapshot() -> FullAccountRiskSnapshot:
 
 
 def _candidate() -> AccountCapacityCandidate:
-    return AccountCapacityCandidate(account_id="account-1", runtime_profile_id="profile-1", exchange_instrument_id="binance_usdm:SOLUSDT", risk_cluster_id="crypto_usd_beta", per_unit_stop_risk=Decimal("3"), entry_reference_price=Decimal("150"), min_qty=Decimal(".01"), qty_step=Decimal(".01"), min_notional=Decimal("5"), exchange_max_leverage=20)
+    return AccountCapacityCandidate(
+        account_id="account-1",
+        runtime_profile_id="profile-1",
+        instrument_facts=InstrumentRiskFacts(
+            identity=InstrumentRiskIdentity(
+                exchange_instrument_id="binance_usdm:SOLUSDT",
+                exchange_id="binance_usdm",
+                exchange_symbol="SOLUSDT",
+                asset_class="crypto",
+                instrument_type="perpetual",
+                settlement_asset="USDT",
+                margin_asset="USDT",
+                instrument_identity_schema_version="v1",
+            ),
+            rule_snapshot=InstrumentRuleSnapshotRef(
+                instrument_rule_snapshot_id="rule-sol",
+                rule_schema_version="v1",
+                price_tick=Decimal(".01"),
+                quantity_step=Decimal(".01"),
+                min_qty=Decimal(".01"),
+                min_notional=Decimal("5"),
+                contract_multiplier=Decimal("1"),
+                exchange_max_leverage_for_claim_notional=20,
+                source_fact_snapshot_id="source-sol",
+                valid_until_ms=1_752_480_060_000,
+            ),
+            cluster_snapshot=RiskClusterMembershipSnapshotRef(
+                cluster_membership_snapshot_id="membership-sol",
+                primary_risk_cluster_id="crypto_usd_beta",
+                semantic_hash="membership-sol",
+            ),
+        ),
+        per_unit_stop_risk=Decimal("3"),
+        entry_reference_price=Decimal("150"),
+    )
