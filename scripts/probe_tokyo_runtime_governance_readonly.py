@@ -571,13 +571,14 @@ def _remote_release_identity(
         manifest = json.loads(manifest_result.stdout)
     except json.JSONDecodeError as exc:
         raise TokyoProbeError("remote release manifest is not valid JSON") from exc
+    local_git = manifest.get("local_git") if isinstance(manifest, dict) else None
     head = (
-        manifest.get("local_git", {}).get("head")
-        if isinstance(manifest.get("local_git"), dict)
-        else None
+        manifest.get("target_sha")
+        if isinstance(manifest, dict) and manifest.get("schema") == "brc.runtime_release_manifest.v2"
+        else local_git.get("head") if isinstance(local_git, dict) else None
     )
     if not head:
-        raise TokyoProbeError("remote release manifest missing local_git.head")
+        raise TokyoProbeError("remote release manifest missing release head")
     return {
         "source": "release_manifest",
         "head": str(head).strip(),
@@ -585,9 +586,8 @@ def _remote_release_identity(
         "manifest": {
             "scope": manifest.get("scope"),
             "generated_at_utc": manifest.get("generated_at_utc"),
-            "short_head": manifest.get("local_git", {}).get("short_head")
-            if isinstance(manifest.get("local_git"), dict)
-            else None,
+            "short_head": local_git.get("short_head") if isinstance(local_git, dict) else None,
+            "schema": manifest.get("schema"),
         },
     }
 

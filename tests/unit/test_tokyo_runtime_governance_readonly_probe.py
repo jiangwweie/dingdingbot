@@ -396,3 +396,31 @@ def test_tokyo_probe_accepts_git_archive_release_manifest_identity():
     assert report["checks"]["warnings"] == [
         "remote_release_identity_from_manifest_without_git_status"
     ]
+
+
+def test_tokyo_probe_accepts_runtime_release_manifest_v2_target_sha():
+    module = _load_module()
+    expected_head = "b" * 40
+    manifest = {
+        "schema": "brc.runtime_release_manifest.v2",
+        "target_sha": expected_head,
+        "git_ref": "codex/release",
+    }
+
+    def runner(command):
+        remote = command[-1]
+        if "git rev-parse HEAD" in remote:
+            return module.CommandResult("", "fatal: not a git repository\n", 128)
+        if "cat .brc-release-manifest.json" in remote:
+            return module.CommandResult(json.dumps(manifest), "", 0)
+        raise AssertionError(remote)
+
+    identity = module._remote_release_identity(
+        "tokyo",
+        quoted_current_path="/home/ubuntu/brc-deploy/app/current",
+        connect_timeout_seconds=8,
+        runner=runner,
+    )
+
+    assert identity["head"] == expected_head
+    assert identity["manifest"]["schema"] == "brc.runtime_release_manifest.v2"
