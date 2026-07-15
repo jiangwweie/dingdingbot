@@ -70,6 +70,13 @@ PRODUCTION_WRITER_UNITS = (
     "brc-ticket-lifecycle-maintenance.service",
     "brc-ticket-lifecycle-maintenance.timer",
 )
+TIMER_OWNED_SERVICES = {
+    "brc-runtime-monitor.timer": "brc-runtime-monitor.service",
+    "brc-ticket-lifecycle-maintenance.timer": (
+        "brc-ticket-lifecycle-maintenance.service"
+    ),
+    "brc-runtime-signal-watcher.timer": "brc-runtime-signal-watcher.service",
+}
 DEPLOY_STOP_UNITS = PRODUCTION_WRITER_UNITS + (
     "brc-runtime-signal-watcher-canary.service",
     "brc-owner-console-canary-readonly.service",
@@ -1496,9 +1503,11 @@ def capture_candidate_mutation_sentinel(
             require_root_owner=require_root_owner,
         )
     except RuntimeError as exc:
-        if scope is not None or not str(exc).endswith(
-            ":canary_scope_fact_limit_exceeded"
-        ):
+        error = str(exc)
+        if scope is not None or not error.endswith((
+            ":canary_scope_fact_limit_exceeded",
+            ":canary_scope_signal_limit_exceeded",
+        )):
             raise
         # Compatibility for immutable candidates created before bounded fact
         # discovery prioritized lane references. The wrapper changes discovery
@@ -1708,14 +1717,29 @@ def apply_committed_activation(
             canonical_lock_path=canonical_lock_path,
             require_root_owner=require_root_owner,
         )
+    timer_owned_services = set(TIMER_OWNED_SERVICES.values())
     restore_order = [
-        unit for unit in PRODUCTION_WRITER_UNITS
-        if unit != "brc-runtime-signal-watcher.timer"
+        unit
+        for unit in PRODUCTION_WRITER_UNITS
+        if unit not in timer_owned_services
+        and unit != "brc-runtime-signal-watcher.timer"
     ] + ["brc-runtime-signal-watcher.timer"]
     restored: list[str] = []
     for unit in restore_order:
         if not bool((unit_prepolicy.get(unit) or {}).get("active")):
             continue
+        timer_service = TIMER_OWNED_SERVICES.get(unit)
+        if timer_service is not None:
+            _run_candidate_command(
+                ["/usr/bin/systemctl", "reset-failed", timer_service],
+                release=release,
+                timeout=30,
+                env=None,
+                runner=runner,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+            )
         _run_candidate_command(
             ["/usr/bin/systemctl", "start", unit],
             release=release,
@@ -1738,8 +1762,71 @@ def apply_committed_activation(
         )
         if active.stdout.strip() != "active":
             raise RuntimeError("restored_unit_not_active:" + unit)
+        if timer_service is not None:
+            _wait_for_immediate_timer_service(
+                release=release,
+                service=timer_service,
+                runner=runner,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+            )
         restored.append(unit)
     return {"status": "activation_applied", "restored_units": restored}
+
+
+def _wait_for_immediate_timer_service(
+    *,
+    release: Path,
+    service: str,
+    runner: Callable[..., ChildResult] | None,
+    lock_handle: Any | None,
+    canonical_lock_path: Path,
+    require_root_owner: bool,
+    timeout_seconds: int = 300,
+) -> None:
+    """Serialize overdue timer ticks without waiting for newly scheduled ticks."""
+
+    deadline = time.monotonic() + timeout_seconds
+    observed_running = False
+    while True:
+        result = _run_candidate_command(
+            [
+                "/usr/bin/systemctl",
+                "show",
+                service,
+                "--property=ActiveState",
+                "--property=Result",
+                "--property=ExecMainStatus",
+            ],
+            release=release,
+            timeout=30,
+            env=None,
+            runner=runner,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock_path,
+            require_root_owner=require_root_owner,
+        )
+        facts = dict(
+            line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+        )
+        active_state = facts.get("ActiveState")
+        if active_state in {"active", "activating", "deactivating"}:
+            observed_running = True
+        elif active_state == "failed":
+            raise RuntimeError("restored_timer_service_failed:" + service)
+        elif active_state == "inactive":
+            if observed_running and (
+                facts.get("Result") != "success"
+                or facts.get("ExecMainStatus") != "0"
+            ):
+                raise RuntimeError("restored_timer_service_result_invalid:" + service)
+            return
+        else:
+            raise RuntimeError("restored_timer_service_state_invalid:" + service)
+        if time.monotonic() >= deadline:
+            raise RuntimeError("restored_timer_service_timeout:" + service)
+        time.sleep(1)
 
 
 def collect_activation_machine_facts(
@@ -2368,11 +2455,14 @@ def _run_candidate_command(
     else:
         raise ValueError("candidate_command_lock_required")
     if result.returncode != 0:
-        detail = (
-            ":canary_scope_fact_limit_exceeded"
-            if "canary_scope_fact_limit_exceeded" in result.stderr
-            else ""
-        )
+        detail = ""
+        if "canary_scope_fact_limit_exceeded" in result.stderr:
+            detail = ":canary_scope_fact_limit_exceeded"
+        elif (
+            "canary_scope_signal_limit_exceeded" in result.stderr
+            or ("signal_event_ids" in result.stderr and "too_long" in result.stderr)
+        ):
+            detail = ":canary_scope_signal_limit_exceeded"
         raise RuntimeError("candidate_command_failed:" + Path(command[0]).name + detail)
     return result
 
@@ -2384,6 +2474,16 @@ import scripts.capture_canary_mutation_sentinel as cli
 import src.infrastructure.canary_mutation_sentinel_repository as repository
 
 original_ids = repository._ids
+
+def bounded_scope_ids(*, required_ids, recent_ids, limit, overflow_error):
+    selected = {str(value) for value in required_ids}
+    if len(selected) > limit:
+        raise ValueError(overflow_error)
+    for value in recent_ids:
+        if len(selected) >= limit:
+            break
+        selected.add(str(value))
+    return selected
 
 class BoundedReferencedSet(set):
     def __init__(self, ordered_values, limit, overflow_error):
@@ -2421,6 +2521,7 @@ def bounded_ids(rows, name):
     return original_ids(rows, name)
 
 repository._ids = bounded_ids
+repository._bounded_scope_ids = bounded_scope_ids
 cli.discover_canary_mutation_scope = repository.discover_canary_mutation_scope
 raise SystemExit(cli.main(sys.argv[1:]))
 '''.strip()

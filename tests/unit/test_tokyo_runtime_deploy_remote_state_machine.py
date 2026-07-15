@@ -856,7 +856,9 @@ def test_lifecycle_policy_restore_persists_v2_proof_when_prestate_enabled(tmp_pa
     assert result["lifecycle_proof_ref"] == typed_proof.lifecycle_certification_ref()
 
 
-def test_activation_apply_removes_fence_then_restores_watcher_timer_last(tmp_path):
+def test_activation_apply_removes_fence_then_restores_timers_without_transient_services(
+    tmp_path, monkeypatch,
+):
     release = tmp_path / "candidate"
     python = release / ".venv/bin/python"
     python.parent.mkdir(parents=True)
@@ -864,8 +866,11 @@ def test_activation_apply_removes_fence_then_restores_watcher_timer_last(tmp_pat
     env_file = tmp_path / "runtime.env"
     env_file.write_text("PG_DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
     commands = []
+    watcher_show_count = 0
+    monkeypatch.setattr(machine.time, "sleep", lambda _seconds: None)
 
     def runner(command, **kwargs):
+        nonlocal watcher_show_count
         commands.append(tuple(command))
         if "set_production_writer_fence.py" in " ".join(command):
             return machine.ChildResult(
@@ -873,11 +878,37 @@ def test_activation_apply_removes_fence_then_restores_watcher_timer_last(tmp_pat
                 stdout='{"status":"fence_removed"}',
                 stderr="",
             )
+        if command[1:3] == ["show", "brc-runtime-monitor.service"]:
+            return machine.ChildResult(
+                returncode=0,
+                stdout="ActiveState=inactive\nResult=success\nExecMainStatus=0\n",
+                stderr="",
+            )
+        if command[1:3] == ["show", "brc-ticket-lifecycle-maintenance.service"]:
+            return machine.ChildResult(
+                returncode=0,
+                stdout="ActiveState=inactive\nResult=success\nExecMainStatus=0\n",
+                stderr="",
+            )
+        if command[1:3] == ["show", "brc-runtime-signal-watcher.service"]:
+            watcher_show_count += 1
+            if watcher_show_count == 1:
+                return machine.ChildResult(
+                    returncode=0,
+                    stdout="ActiveState=activating\nResult=success\nExecMainStatus=0\n",
+                    stderr="",
+                )
+            return machine.ChildResult(
+                returncode=0,
+                stdout="ActiveState=inactive\nResult=success\nExecMainStatus=0\n",
+                stderr="",
+            )
         return machine.ChildResult(returncode=0, stdout="active\n", stderr="")
 
     prepolicy = {
         unit: {"active": unit in {
             "brc-owner-console-backend.service",
+            "brc-ticket-lifecycle-maintenance.service",
             "brc-runtime-monitor.timer",
             "brc-ticket-lifecycle-maintenance.timer",
             "brc-runtime-signal-watcher.timer",
@@ -897,6 +928,21 @@ def test_activation_apply_removes_fence_then_restores_watcher_timer_last(tmp_pat
 
     starts = [command for command in commands if command[1:2] == ("start",)]
     assert starts[-1][-1] == "brc-runtime-signal-watcher.timer"
+    assert not any(
+        command[-1] == "brc-ticket-lifecycle-maintenance.service"
+        for command in starts
+    )
+    reset_services = [
+        command[-1]
+        for command in commands
+        if command[1:2] == ("reset-failed",)
+    ]
+    assert reset_services == [
+        "brc-runtime-monitor.service",
+        "brc-ticket-lifecycle-maintenance.service",
+        "brc-runtime-signal-watcher.service",
+    ]
+    assert watcher_show_count == 2
     assert commands[0][1].endswith("set_production_writer_fence.py")
     assert result["status"] == "activation_applied"
 
@@ -1018,7 +1064,17 @@ def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
     assert calls == ["stage"]
 
 
-def test_canary_sentinel_retries_legacy_fact_scope_overflow_with_bounded_wrapper(tmp_path):
+@pytest.mark.parametrize(
+    "candidate_error",
+    [
+        "ValueError: canary_scope_fact_limit_exceeded",
+        "ValueError: canary_scope_signal_limit_exceeded",
+        "1 validation error for CanaryMutationSentinelScopeV1 signal_event_ids too_long",
+    ],
+)
+def test_canary_sentinel_retries_legacy_scope_overflow_with_bounded_wrapper(
+    tmp_path, candidate_error
+):
     release = tmp_path / "release"
     release.mkdir()
     env_file = tmp_path / "runtime.env"
@@ -1031,7 +1087,7 @@ def test_canary_sentinel_retries_legacy_fact_scope_overflow_with_bounded_wrapper
             return machine.ChildResult(
                 returncode=1,
                 stdout="",
-                stderr="ValueError: canary_scope_fact_limit_exceeded",
+                stderr=candidate_error,
             )
         return machine.ChildResult(
             returncode=0,

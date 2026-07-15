@@ -384,3 +384,64 @@ def test_projection_publisher_rejects_cross_projection_first_blocker_drift():
             daily_table=daily,
             goal_status=goal,
         )
+
+
+def test_projection_publisher_does_not_feed_materialized_readiness_back_into_goal(monkeypatch):
+    module = _load_module(
+        SCRIPT_PATH,
+        "publish_runtime_control_current_projections_no_stale_goal_feedback",
+    )
+    candidate_row = {
+        "strategy_group_id": "CPM-RO-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "first_blocker": "action_time_boundary_not_reproduced",
+    }
+    stale_materialized_row = {
+        **candidate_row,
+        "first_blocker": "market_wait_validated",
+    }
+    projection_control_state = {
+        "source_mode": "db_backed",
+        "pretrade_readiness_rows": [],
+    }
+    monkeypatch.setattr(
+        module,
+        "_build_candidate_readiness",
+        lambda *args, **kwargs: (
+            {"source_mode": "db_backed"},
+            projection_control_state,
+            {"symbol_readiness_rows": [candidate_row]},
+            [stale_materialized_row],
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "build_daily_live_enablement_table_from_control_state",
+        lambda *args, **kwargs: {"rows": [candidate_row]},
+    )
+
+    seen = {}
+
+    def goal_builder(*, control_state):
+        seen["readiness_rows"] = control_state["pretrade_readiness_rows"]
+        return {
+            "evidence": {
+                "pg_blocker_counts": {"action_time_boundary_not_reproduced": 1}
+            }
+        }
+
+    monkeypatch.setattr(module, "build_goal_status_artifact_from_control_state", goal_builder)
+    monkeypatch.setattr(
+        module,
+        "_validate_projection_ownership",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("stop_after_models")),
+    )
+
+    with pytest.raises(RuntimeError, match="stop_after_models"):
+        module.publish_runtime_control_current_projections(
+            None,
+            target_runtime_head=TEST_RUNTIME_HEAD,
+        )
+
+    assert seen["readiness_rows"] == []

@@ -111,10 +111,10 @@ def publish_runtime_control_current_projections(
         generated_at_utc=generated,
     )
     goal_status = build_goal_status_artifact_from_control_state(
-        control_state={
-            **projection_control_state,
-            "pretrade_readiness_rows": readiness_rows,
-        },
+        # Rebuild from the same base state as candidate_pool. Feeding the
+        # newly materialized readiness rows back into this builder can mix
+        # current action-time outcomes with the previous projection version.
+        control_state=projection_control_state,
     )
     _validate_projection_blocker_consistency(
         candidate_pool=candidate_pool,

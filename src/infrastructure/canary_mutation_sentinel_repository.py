@@ -263,9 +263,9 @@ def _bounded_scope_ids(
     if len(selected) > limit:
         raise ValueError(overflow_error)
     for value in recent_ids:
-        selected.add(str(value))
-        if len(selected) == limit:
+        if len(selected) >= limit:
             break
+        selected.add(str(value))
     return selected
 
 

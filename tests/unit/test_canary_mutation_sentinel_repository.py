@@ -24,3 +24,14 @@ def test_bounded_scope_ids_rejects_required_references_above_limit():
         assert str(exc) == "scope_overflow"
     else:
         raise AssertionError("required scope overflow must fail closed")
+
+
+def test_bounded_scope_ids_does_not_add_recent_rows_when_required_scope_is_full():
+    selected = _bounded_scope_ids(
+        required_ids={"required-1", "required-2"},
+        recent_ids=["recent-1", "recent-2"],
+        limit=2,
+        overflow_error="scope_overflow",
+    )
+
+    assert selected == {"required-1", "required-2"}
