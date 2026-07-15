@@ -163,6 +163,30 @@ def _bounded_certification_state() -> dict[str, object]:
     return bounded
 
 
+def test_builds_post_canary_action_time_v2_reference_from_frozen_inputs():
+    state = _bounded_certification_state()
+    facts = _fact_digest_rows()
+    prepared = certification_module.prepare_action_time_capability_certification(
+        state,
+        runtime_head=RUNTIME_HEAD,
+        fact_digest_rows=facts,
+    )
+
+    reference = certification_module.build_action_time_certification_reference_v2(
+        prepared=prepared,
+        control_state=state,
+        fact_digest_rows=facts,
+        stage="post_canary",
+        deploy_nonce="deploy-nonce-1",
+    )
+
+    assert reference.stage == "post_canary"
+    assert reference.target_runtime_head == RUNTIME_HEAD
+    assert reference.fact_min_valid_until_ms == facts[0].valid_until_ms
+    assert reference.certification_ref().startswith("action-time-cert:v2:")
+    assert len(reference.lane_source_watermarks) == 22
+
+
 def test_certification_input_digest_is_typed_stable_and_release_bound() -> None:
     state = _bounded_certification_state()
     prepared = certification_module.prepare_action_time_capability_certification(

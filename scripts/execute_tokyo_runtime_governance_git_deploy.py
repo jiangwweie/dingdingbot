@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -131,6 +132,7 @@ def execute_git_deploy_plan(
 
     command_runner = runner or _run_shell
     command_results: list[dict[str, Any]] = []
+    mutation_started = False
     for phase in plan.get("plan_phases", []):
         if phase.get("remote_mutation") and not _remote_mutation_phase_authorized(
             phase,
@@ -150,6 +152,7 @@ def execute_git_deploy_plan(
                 confirmation_phrase_matches=confirmation_phrase_matches,
             )
         for command in phase.get("commands") or []:
+            mutation_started = mutation_started or bool(phase.get("remote_mutation"))
             result = command_runner(str(command))
             command_results.append(
                 {
@@ -161,14 +164,35 @@ def execute_git_deploy_plan(
                 }
             )
             if result.returncode != 0:
+                writers_left_disabled = False
+                status = "failed"
+                if mutation_started:
+                    containment_command = _failure_containment_command(plan)
+                    containment = command_runner(containment_command)
+                    command_results.append(
+                        {
+                            "phase": "failure_containment",
+                            "command": containment.command,
+                            "returncode": containment.returncode,
+                            "stdout_tail": _tail(containment.stdout),
+                            "stderr_tail": _tail(containment.stderr),
+                        }
+                    )
+                    writers_left_disabled = containment.returncode == 0
+                    status = (
+                        "failed_contained"
+                        if writers_left_disabled
+                        else "failed_uncontained"
+                    )
                 return _execution_report(
                     plan=plan,
-                    status="failed",
+                    status=status,
                     apply=True,
                     blockers=[f"command_failed:{phase.get('phase')}"],
                     command_results=command_results,
                     confirmation_phrase_required=require_confirmation_phrase,
                     confirmation_phrase_matches=confirmation_phrase_matches,
+                    writers_left_disabled=writers_left_disabled,
                 )
 
     return _execution_report(
@@ -210,6 +234,7 @@ def _execution_report(
     command_results: list[dict[str, Any]],
     confirmation_phrase_required: bool = False,
     confirmation_phrase_matches: bool = False,
+    writers_left_disabled: bool = False,
 ) -> dict[str, Any]:
     commands = [
         {"phase": phase.get("phase"), "command": command}
@@ -252,11 +277,47 @@ def _execution_report(
             ),
             "commands_planned": len(commands),
             "commands_executed": len(command_results),
+            "writers_left_disabled": writers_left_disabled,
         },
         "planned_commands": commands if not apply else [],
         "command_results": command_results,
         "effects": effects,
     }
+
+
+def _failure_containment_command(plan: dict[str, Any]) -> str:
+    inputs = plan.get("inputs") or {}
+    release = plan.get("release") or {}
+    host = str(inputs.get("host") or DEFAULT_HOST)
+    env_path = str(inputs.get("env_path") or DEFAULT_ENV_PATH)
+    release_path = str(
+        release.get("remote_release_path")
+        or f"{DEFAULT_DEPLOY_ROOT}/app/current"
+    )
+    python = f"{release_path.rstrip('/')}/.venv/bin/python"
+    services = (
+        "brc-runtime-signal-watcher.timer",
+        "brc-runtime-monitor.timer",
+        "brc-ticket-lifecycle-maintenance.timer",
+        "brc-runtime-signal-watcher.service",
+        "brc-runtime-monitor.service",
+        "brc-ticket-lifecycle-maintenance.service",
+        "brc-runtime-signal-watcher-canary.service",
+        "brc-owner-console-canary-readonly.service",
+    )
+    remote = (
+        "set -eu; "
+        + " ".join(
+            f"sudo -n systemctl stop {shlex.quote(service)};"
+            for service in services
+        )
+        + f" cd {shlex.quote(release_path)}; "
+        + f"set -a; . {shlex.quote(env_path)}; set +a; "
+        + f"PYTHONPATH=$PWD {shlex.quote(python)} "
+        + "scripts/set_ticket_lifecycle_mutation_capability.py --disable "
+        + "--require-database-url --certification-ref deploy-failure-containment --json"
+    )
+    return f"ssh {shlex.quote(host)} {shlex.quote(remote)}"
 
 
 def _interaction_summary(

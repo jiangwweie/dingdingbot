@@ -6,10 +6,15 @@ from collections import defaultdict
 from decimal import Decimal
 from hashlib import sha256
 import json
-from typing import Any, Mapping, Sequence
+from typing import Any, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 import sqlalchemy as sa
+
+from src.application.readmodels.lifecycle_mutation_enablement_proof import (
+    ActionTimeCertificationReferenceV2,
+    LaneSourceWatermarkV1,
+)
 
 from src.application.runtime_process_outcome import (
     materialize_runtime_process_outcome,
@@ -242,6 +247,61 @@ class ActionTimeFactSetDigestV1(CapabilityModel):
     canonical_encoding: str = CANONICAL_ENCODING
     fact_snapshot_ids: tuple[str, ...] = Field(min_length=1, max_length=128)
     fact_set_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+def build_action_time_certification_reference_v2(
+    *,
+    prepared: ActionTimeCapabilityCertificationPreparation,
+    control_state: Mapping[str, Any],
+    fact_digest_rows: Sequence[ActionTimeFactDigestRowV1],
+    stage: Literal["pre_canary", "post_canary"],
+    deploy_nonce: str,
+) -> ActionTimeCertificationReferenceV2:
+    identities = build_action_time_capability_identities(control_state)
+    lane_refs = tuple(
+        sorted(
+            (
+                LaneSourceWatermarkV1(
+                    lane_scope_key=identity.scope_key,
+                    lane_identity_key=identity.runtime_lane_identity.identity_key,
+                    source_watermark=identity.source_watermark,
+                    process_outcome_id=(
+                        "process_outcome:"
+                        + sha256(
+                            (
+                                f"{PROCESS_NAME}|"
+                                f"{identity.runtime_lane_identity.identity_key}"
+                            ).encode("utf-8")
+                        ).hexdigest()[:32]
+                    ),
+                )
+                for identity in identities
+            ),
+            key=lambda item: item.lane_identity_key,
+        )
+    )
+    fact_set = compute_action_time_fact_set_digest(fact_digest_rows)
+    if (
+        fact_set.fact_snapshot_ids != prepared.fact_snapshot_ids
+        or fact_set.fact_set_digest != prepared.fact_set_digest
+    ):
+        raise ValueError("action_time_fact_digest_drift")
+    return ActionTimeCertificationReferenceV2(
+        stage=stage,
+        target_runtime_head=prepared.runtime_head,
+        certification_input_digest=prepared.certification_input_digest,
+        release_activation_outcome_id=(
+            prepared.release_activation_process_outcome_id
+        ),
+        release_activation_source_watermark=(
+            prepared.release_activation_source_watermark
+        ),
+        lane_source_watermarks=lane_refs,
+        fact_snapshot_ids=prepared.fact_snapshot_ids,
+        fact_set_digest=prepared.fact_set_digest,
+        fact_min_valid_until_ms=min(row.valid_until_ms for row in fact_digest_rows),
+        deploy_nonce=deploy_nonce,
+    )
 
 
 def prepare_action_time_capability_certification(

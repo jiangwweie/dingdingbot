@@ -420,16 +420,29 @@ def pg_control_connection():
         )
         seed.seed_runtime_control_state_foundation(conn)
         from src.application.readmodels.lifecycle_mutation_enablement_proof import (
+            ActionTimeCertificationReferenceV2,
+            LaneSourceWatermarkV1,
             LifecycleMutationEnablementProof,
         )
 
+        action_time = ActionTimeCertificationReferenceV2(
+            stage="post_canary",
+            target_runtime_head="a" * 40,
+            certification_input_digest="sha256:" + "b" * 64,
+            release_activation_outcome_id="activation-1",
+            release_activation_source_watermark="release:1",
+            lane_source_watermarks=(LaneSourceWatermarkV1(lane_scope_key="scope-1", lane_identity_key="lane-1", source_watermark="watermark-1", process_outcome_id="process-1"),),
+            fact_snapshot_ids=("fact-unit-fixture",),
+            fact_set_digest="sha256:" + "c" * 64,
+            fact_min_valid_until_ms=NOW_MS + 60_000,
+            deploy_nonce="nonce-1",
+        )
         proof = LifecycleMutationEnablementProof(
             target_runtime_head="a" * 40,
-            lane_digest="b" * 64,
-            release_activation_ref="release-activation:unit-fixture",
-            action_time_certification_ref="action-time-cert:v2:" + "c" * 64,
-            certification_projection_digest="d" * 64,
-            enablement_fact_refs=("fact-unit-fixture",),
+            lane_identity_digest="sha256:" + "d" * 64,
+            action_time_certification_ref=action_time.certification_ref(),
+            action_time_certification_payload=action_time,
+            certification_projection_digest="sha256:" + "e" * 64,
         )
         conn.execute(
             text(

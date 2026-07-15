@@ -1162,16 +1162,15 @@ def ticket_lifecycle_phase_two_enable_command(
     venv_python: str,
     certification_ref: str,
 ) -> str:
-    """Build fail-closed phase-two activation with automatic PG rollback."""
+    """Run zero-exchange phase-two readiness and five API-only canaries."""
 
     q = shlex.quote
-    runtime_identity_env_path = str(
-        Path(env_path).with_name("runtime-order-capable.env")
-    )
     watcher_timer = q(DEFAULT_RUNTIME_SIGNAL_WATCHER_TIMER_NAME)
     monitor_timer = q(DEFAULT_RUNTIME_MONITOR_TIMER_NAME)
     lifecycle_timer = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_TIMER_NAME)
     lifecycle_service = q(DEFAULT_TICKET_LIFECYCLE_MAINTENANCE_SERVICE_NAME)
+    canary_api_service = q("brc-owner-console-canary-readonly.service")
+    canary_watcher_service = q("brc-runtime-signal-watcher-canary.service")
     disable = (
         f"PYTHONPATH=$PWD {q(venv_python)} "
         "scripts/set_ticket_lifecycle_mutation_capability.py --disable "
@@ -1181,13 +1180,11 @@ def ticket_lifecycle_phase_two_enable_command(
     return (
         "set -eu; SUCCESS=0; "
         f"cd {q(remote_release_path)}; "
-        f"test -f {q(runtime_identity_env_path)}; "
-        f"set -a; . {q(env_path)}; . {q(runtime_identity_env_path)}; set +a; "
+        f"set -a; . {q(env_path)}; set +a; "
         "rollback_phase_two() { "
         f"if [ \"$SUCCESS\" != 1 ]; then {disable} >/dev/null 2>&1 || true; fi; "
-        f"sudo -n systemctl start {watcher_timer} >/dev/null 2>&1 || true; "
-        f"sudo -n systemctl start {monitor_timer} >/dev/null 2>&1 || true; "
-        f"sudo -n systemctl start {lifecycle_timer} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl stop {canary_watcher_service} >/dev/null 2>&1 || true; "
+        f"sudo -n systemctl stop {canary_api_service} >/dev/null 2>&1 || true; "
         "}; trap rollback_phase_two EXIT; "
         f"sudo -n systemctl stop {watcher_timer}; "
         f"sudo -n systemctl stop {monitor_timer}; "
@@ -1201,40 +1198,27 @@ def ticket_lifecycle_phase_two_enable_command(
         "--require-database-url --json; "
         f"PYTHONPATH=$PWD {q(venv_python)} "
         "scripts/audit_production_runtime_file_io.py --json; "
-        f"PYTHONPATH=$PWD {q(venv_python)} "
-        "scripts/set_ticket_lifecycle_mutation_capability.py --enable "
-        f"--require-database-url --certification-ref {q(certification_ref)} --json; "
-        f"LIFECYCLE_OUTPUT=$(PYTHONPATH=$PWD {q(venv_python)} "
-        "scripts/run_ticket_bound_lifecycle_maintenance_once.py "
-        "--require-database-url --max-lifecycle-scopes 1 "
-        "--max-actions-per-scope 16 --snapshot-timeout-seconds 8); "
-        "export LIFECYCLE_OUTPUT; "
-        f"{q(venv_python)} -c "
-        + q(
-            "import json,os; p=json.loads(os.environ['LIFECYCLE_OUTPUT']); "
-            "assert p['status'] in {'no_maintainable_lifecycle','scheduler_complete'}; "
-            "assert p['exchange_write_called'] is False; "
-            "assert p['network_inside_pg_transaction'] is False; "
-            "assert 0<=p['selected_scope_count']<=1"
-        )
-        + "; "
         f"CAPABILITY_OUTPUT=$(PYTHONPATH=$PWD {q(venv_python)} "
         "scripts/set_ticket_lifecycle_mutation_capability.py --status "
         "--require-database-url --json); export CAPABILITY_OUTPUT; "
         f"{q(venv_python)} -c "
         + q(
             "import json,os; p=json.loads(os.environ['CAPABILITY_OUTPUT']); "
-            "assert p['status']=='ready'; "
-            "assert p['enabled'] is True; assert p['exchange_write_called'] is False"
+            "assert p['enabled'] is False; assert p['exchange_write_called'] is False"
         )
         + "; "
-        f"sudo -n systemctl start {lifecycle_service}; "
-        f"test $(systemctl show {lifecycle_service} --property=Result --value) = success; "
-        "SUCCESS=1; trap - EXIT; "
-        f"sudo -n systemctl start {monitor_timer}; "
-        f"sudo -n systemctl start {lifecycle_timer}; "
-        f"systemctl is-active {monitor_timer}; "
-        f"systemctl is-active {lifecycle_timer}"
+        f"sudo -n systemctl start {canary_api_service}; "
+        f"systemctl is-active {canary_api_service}; "
+        + "".join(
+            f"sudo -n systemctl start {canary_watcher_service}; "
+            f"test $(systemctl show {canary_watcher_service} --property=Result --value) = success; "
+            for _ in range(5)
+        )
+        + f"sudo -n systemctl stop {canary_api_service}; "
+        f"PYTHONPATH=$PWD {q(venv_python)} "
+        "scripts/verify_ticket_lifecycle_phase_two_readiness.py "
+        "--require-database-url --json; "
+        "SUCCESS=1; trap - EXIT"
     )
 
 

@@ -309,7 +309,7 @@ def test_watcher_timer_starts_only_after_action_time_capability_truth_publish():
     ) < certification.rindex("systemctl start brc-runtime-signal-watcher.timer")
 
 
-def test_phase_two_deploy_is_pg_gated_and_rolls_back_capability_on_failure():
+def test_phase_two_certification_is_zero_exchange_and_uses_readonly_canary():
     command = ticket_lifecycle_phase_two_enable_command(
         remote_release_path="/home/ubuntu/brc-deploy/releases/release-1",
         env_path="/home/ubuntu/brc-deploy/env/live-readonly.env",
@@ -319,26 +319,28 @@ def test_phase_two_deploy_is_pg_gated_and_rolls_back_capability_on_failure():
 
     assert "verify_ticket_lifecycle_phase_two_readiness.py" in command
     assert "build_runtime_account_safe_facts.py" in command
-    assert "/home/ubuntu/brc-deploy/env/runtime-order-capable.env" in command
     assert command.index("build_runtime_account_safe_facts.py") < command.index(
         "verify_ticket_lifecycle_phase_two_readiness.py"
     )
     assert "audit_production_runtime_file_io.py --json" in command
-    assert "set_ticket_lifecycle_mutation_capability.py --enable" in command
     assert "set_ticket_lifecycle_mutation_capability.py --disable" in command
     assert "set_ticket_lifecycle_mutation_capability.py --status" in command
-    assert "CAPABILITY_OUTPUT" in command
     assert "rollback_phase_two" in command
-    assert "run_ticket_bound_lifecycle_maintenance_once.py" in command
-    assert "scheduler_complete" in command
-    assert "selected_scope_count" in command
-    assert "exchange_write_called" in command
-    assert command.index("verify_ticket_lifecycle_phase_two_readiness.py") < command.index(
-        "set_ticket_lifecycle_mutation_capability.py --enable"
-    )
-    assert command.index("set_ticket_lifecycle_mutation_capability.py --enable") < (
-        command.index("set_ticket_lifecycle_mutation_capability.py --status")
-    )
+    assert "systemctl start brc-owner-console-canary-readonly.service" in command
+    assert command.count("systemctl start brc-runtime-signal-watcher-canary.service") == 5
+    assert "systemctl stop brc-owner-console-canary-readonly.service" in command
+    for forbidden in (
+        "run_ticket_bound_lifecycle_maintenance_once.py",
+        "--allow-exchange-mutation",
+        "--execute-operation-layer-submit",
+        "runtime_signal_watcher_resume_dispatcher.py",
+        "materialize_action_time_finalgate_preflight",
+        "gateway.place_order",
+        "real_gateway_action",
+        "set_ticket_lifecycle_mutation_capability.py --enable",
+        "runtime-order-capable.env",
+    ):
+        assert forbidden not in command
 
 
 def test_repeat_deploy_checks_enabled_capability_before_quiescing_it():

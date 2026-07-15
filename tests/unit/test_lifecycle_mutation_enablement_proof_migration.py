@@ -13,7 +13,10 @@ def test_revision_124_adds_proof_columns_and_bounded_indexes():
     assert 'down_revision: Union[str, None] = "123"' in source
     assert '"proof_schema"' in source
     assert '"proof_payload"' in source
+    assert "length=128" in source
+    assert "migration-124:proof-required" in source
+    assert "ck_brc_lifecycle_capability_v2_proof" in source
+    assert "lifecycle-cert:v2:" in source
     assert "idx_brc_runtime_outcome_lane_process_latest" in source
     assert "scope_kind = 'runtime_lane'" in source
     assert "idx_brc_runtime_outcome_canary_window" in source
-
