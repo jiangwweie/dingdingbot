@@ -749,7 +749,7 @@ def build_action_time_capability_identities(
         runtimes_by_lane[
             (
                 str(runtime.get("strategy_family_id") or ""),
-                str(runtime.get("symbol") or ""),
+                _canonical_lane_symbol(runtime.get("symbol")),
                 str(runtime.get("side") or ""),
             )
         ].append(runtime)
@@ -803,16 +803,22 @@ def build_action_time_capability_identities(
         runtime = runtime_bindings.get(candidate_id)
         if runtime is None:
             raise _identity_error(candidate_id, "runtime_scope_binding_missing")
-        runtime_instances = runtimes_by_lane.get((group_id, symbol, side), [])
+        runtime_instances = runtimes_by_lane.get(
+            (group_id, _canonical_lane_symbol(symbol), side),
+            [],
+        )
         if not runtime_instances:
             raise _identity_error(candidate_id, "runtime_instance_missing")
         if len(runtime_instances) != 1:
             raise _identity_error(candidate_id, "runtime_instance_ambiguous")
         runtime_instance = runtime_instances[0]
-        if str(runtime_instance.get("strategy_family_version_id") or "") != str(
-            event.get("strategy_group_version_id") or ""
-        ):
-            raise _identity_error(candidate_id, "runtime_instance_version_mismatch")
+        if not str(
+            runtime_instance.get("strategy_family_version_id") or ""
+        ).strip():
+            raise _identity_error(
+                candidate_id,
+                "runtime_instance_evaluator_version_missing",
+            )
         policy_id = _required(candidate, "policy_current_id")
         policy = policies.get(policy_id)
         if policy is None:
@@ -942,6 +948,16 @@ def build_action_time_capability_identities(
             )
         )
     return identities
+
+
+def _canonical_lane_symbol(value: Any) -> str:
+    """Compare venue symbols without conflating registry/evaluator versions."""
+
+    text = str(value or "").strip().upper()
+    if not text:
+        return ""
+    contract = text.split(":", 1)[0]
+    return contract.replace("/", "")
 
 
 def current_action_time_capability_truth_by_lane(

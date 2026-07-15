@@ -399,6 +399,37 @@ def test_builds_one_stable_identity_for_each_current_candidate_scope() -> None:
     assert all(identity.required_fact_contract_refs for identity in identities)
 
 
+def test_runtime_venue_symbol_and_evaluator_version_are_independent_dimensions() -> None:
+    state = _control_state()
+    candidates = state["candidate_scope"]
+    runtimes = state["strategy_runtime_instances"]
+    assert isinstance(candidates, list)
+    assert isinstance(runtimes, list)
+    candidate = candidates[0]
+    runtime = next(
+        row
+        for row in runtimes
+        if row["strategy_family_id"] == candidate["strategy_group_id"]
+        and row["symbol"] == candidate["symbol"]
+        and row["side"] == candidate["side"]
+    )
+    compact_symbol = str(candidate["symbol"])
+    runtime["symbol"] = compact_symbol.removesuffix("USDT") + "/USDT:USDT"
+    runtime["strategy_family_version_id"] = (
+        f"{candidate['strategy_group_id']}-evaluator-v0"
+    )
+
+    identities = build_action_time_capability_identities(state)
+
+    identity = next(
+        item
+        for item in identities
+        if item.candidate_scope_id == candidate["candidate_scope_id"]
+    )
+    assert identity.symbol == compact_symbol
+    assert len(identities) == 22
+
+
 def test_required_fact_contract_change_invalidates_lineage() -> None:
     state = _control_state()
     before = build_action_time_capability_identities(state)[0]
