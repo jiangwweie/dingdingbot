@@ -21,6 +21,9 @@ from src.application.action_time.exchange_command_worker import (
 from src.application.action_time.exit_protection_materializer import (
     materialize_ticket_bound_exit_protection_set,
 )
+from src.application.action_time.lifecycle_mutation_capability import (
+    set_lifecycle_mutation_capability,
+)
 from src.application.action_time.protected_submit_attempt import (
     record_ticket_bound_protected_submit_result,
 )
@@ -31,6 +34,11 @@ from src.application.action_time.ticket_bound_fill_projector import (
     project_ticket_bound_exchange_fills,
 )
 from src.application.readmodels import strategy_live_candidate_pool
+from src.application.readmodels.lifecycle_mutation_enablement_proof import (
+    ActionTimeCertificationReferenceV2,
+    LaneSourceWatermarkV1,
+    LifecycleMutationEnablementProof,
+)
 from src.application.runtime_process_outcome import (
     materialize_runtime_process_outcome,
 )
@@ -72,7 +80,7 @@ def _preserve_release_b_baseline_for_legacy_rci_scenarios(
     """Keep pre-canary causal tests on the disabled Release B contract."""
 
     release_c_tests = {
-        "test_rci_harness_uses_postgresql_revision_123",
+        "test_rci_harness_uses_postgresql_revision_124",
         "test_rci_exit_policy_canary_is_exactly_scoped_and_enabled",
     }
     if request.node.name not in release_c_tests:
@@ -88,7 +96,7 @@ def _preserve_release_b_baseline_for_legacy_rci_scenarios(
     yield
 
 
-def test_rci_harness_uses_postgresql_revision_123(
+def test_rci_harness_uses_postgresql_revision_124(
     postgres_certification_engine,
 ):
     assert postgres_certification_engine.dialect.name == "postgresql"
@@ -102,7 +110,7 @@ def test_rci_harness_uses_postgresql_revision_123(
             )
         ).scalar_one()
 
-    assert revision == "123"
+    assert revision == "124"
     assert invocation_table == "brc_action_time_invocations"
 
 
@@ -164,16 +172,40 @@ def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:
     assert operation_handoff["status"] == "operation_layer_handoff_ready", (
         operation_handoff
     )
-    conn.execute(
-        text(
-            "UPDATE brc_runtime_capabilities_current "
-            "SET status = 'enabled', "
-            "certification_ref = 'rci-test:ticket-lifecycle', "
-            "updated_at_ms = :now_ms "
-            "WHERE capability_id = 'ticket_lifecycle_durable_mutation'"
+    action_time_reference = ActionTimeCertificationReferenceV2(
+        stage="post_canary",
+        target_runtime_head="a" * 40,
+        certification_input_digest="sha256:" + "1" * 64,
+        release_activation_outcome_id="process:rci:release",
+        release_activation_source_watermark="release:rci:watermark",
+        lane_source_watermarks=(
+            LaneSourceWatermarkV1(
+                lane_scope_key="lane:rci",
+                lane_identity_key="identity:rci",
+                source_watermark="watermark:rci",
+                process_outcome_id="process:rci:lane",
+            ),
         ),
-        {"now_ms": NOW_MS + 2_500},
+        fact_snapshot_ids=("fact:rci:one",),
+        fact_set_digest="sha256:" + "2" * 64,
+        fact_min_valid_until_ms=NOW_MS + 120_000,
+        deploy_nonce="rci-deploy-nonce",
     )
+    proof = LifecycleMutationEnablementProof(
+        target_runtime_head="a" * 40,
+        lane_identity_digest="sha256:" + "3" * 64,
+        action_time_certification_ref=action_time_reference.certification_ref(),
+        action_time_certification_payload=action_time_reference,
+        certification_projection_digest="sha256:" + "4" * 64,
+    )
+    capability = set_lifecycle_mutation_capability(
+        conn,
+        enabled=True,
+        certification_ref=proof.lifecycle_certification_ref(),
+        now_ms=NOW_MS + 2_500,
+        proof=proof,
+    )
+    assert capability["status"] == "ready", capability
     runtime_safety = safety.materialize_ticket_bound_runtime_safety_state(
         conn,
         ticket_id=ticket_id,
@@ -370,7 +402,7 @@ def test_rci_s2_ticket_blocker_rolls_back_all_action_authority_rows(
             text(
                 "SELECT scope_key, first_blocker, process_state "
                 "FROM brc_runtime_process_outcomes "
-                "WHERE process_name = 'action_time_ticket_sequence'"
+                "WHERE process_name = 'action_time_ticket_sequence_batch'"
             )
         ).mappings().one()
         assert outcome["scope_key"] == "lane:SOR-001:ETHUSDT:long"
@@ -410,7 +442,7 @@ def test_rci_s3_ttl_expiry_survives_reconnect_without_ticket(
             text(
                 "SELECT first_blocker, process_state "
                 "FROM brc_runtime_process_outcomes "
-                "WHERE process_name = 'action_time_ticket_sequence' "
+                "WHERE process_name = 'action_time_ticket_sequence_batch' "
                 "AND scope_key = 'lane:SOR-001:ETHUSDT:short'"
             )
         ).mappings().one()

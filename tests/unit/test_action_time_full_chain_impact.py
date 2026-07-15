@@ -38,6 +38,14 @@ from src.application.action_time.full_chain_simulation_harness import (
 from src.application.action_time.lifecycle_safety_core import (
     lifecycle_decision_for_status,
 )
+from src.application.action_time.lifecycle_mutation_capability import (
+    set_lifecycle_mutation_capability,
+)
+from src.application.readmodels.lifecycle_mutation_enablement_proof import (
+    ActionTimeCertificationReferenceV2,
+    LaneSourceWatermarkV1,
+    LifecycleMutationEnablementProof,
+)
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
 )
@@ -665,18 +673,51 @@ def pg_control_connection():
             finally:
                 extension.op = old_extension_op
         seed.seed_runtime_control_state_foundation(conn)
-        conn.execute(
-            text(
-                """
-                UPDATE brc_runtime_capabilities_current
-                SET status = 'enabled',
-                    certification_ref = 'test:production-shaped-lifecycle',
-                    updated_at_ms = :now_ms
-                WHERE capability_id = 'ticket_lifecycle_durable_mutation'
-                """
-            ),
-            {"now_ms": NOW_MS - 1},
+        # SQLite cannot ALTER an existing table to add migration 124's check
+        # constraint. The unit fixture mirrors its two storage columns; the
+        # PostgreSQL integration suite executes the real migration.
+        conn.exec_driver_sql(
+            "ALTER TABLE brc_runtime_capabilities_current "
+            "ADD COLUMN proof_schema VARCHAR(128)"
         )
+        conn.exec_driver_sql(
+            "ALTER TABLE brc_runtime_capabilities_current "
+            "ADD COLUMN proof_payload JSON"
+        )
+        action_time_reference = ActionTimeCertificationReferenceV2(
+            stage="post_canary",
+            target_runtime_head="a" * 40,
+            certification_input_digest="sha256:" + "1" * 64,
+            release_activation_outcome_id="process:test:release",
+            release_activation_source_watermark="release:test:watermark",
+            lane_source_watermarks=(
+                LaneSourceWatermarkV1(
+                    lane_scope_key="lane:test",
+                    lane_identity_key="identity:test",
+                    source_watermark="watermark:test",
+                    process_outcome_id="process:test:lane",
+                ),
+            ),
+            fact_snapshot_ids=("fact:test:one",),
+            fact_set_digest="sha256:" + "2" * 64,
+            fact_min_valid_until_ms=NOW_MS + 120_000,
+            deploy_nonce="test-deploy-nonce",
+        )
+        proof = LifecycleMutationEnablementProof(
+            target_runtime_head="a" * 40,
+            lane_identity_digest="sha256:" + "3" * 64,
+            action_time_certification_ref=action_time_reference.certification_ref(),
+            action_time_certification_payload=action_time_reference,
+            certification_projection_digest="sha256:" + "4" * 64,
+        )
+        enabled = set_lifecycle_mutation_capability(
+            conn,
+            enabled=True,
+            certification_ref=proof.lifecycle_certification_ref(),
+            now_ms=NOW_MS - 1,
+            proof=proof,
+        )
+        assert enabled["status"] == "ready"
     with engine.connect() as conn:
         yield conn
     engine.dispose()
