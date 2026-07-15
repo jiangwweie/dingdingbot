@@ -7,6 +7,14 @@ last_verified: 2026-07-06
 
 # Runtime Control State DB Table Design
 
+> **Current asset-neutral override:** `brc_strategy_group_candidate_scope`、
+> Symbol/Instrument Authority 和 `brc_budget_reservations` 中涉及 exact instrument、
+> InstrumentRuleSnapshot、AccountCapacityClaim、ExposureEpisode 与 risk-cluster membership
+> 的目标结构，以
+> `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md`
+> 为当前权威。本文其余 PG/current、Ticket、FinalGate、Operation Layer 和 file-authority
+> 约束继续有效。
+
 ## Purpose
 
 This document defines the DB table design for moving StrategyGroup runtime
