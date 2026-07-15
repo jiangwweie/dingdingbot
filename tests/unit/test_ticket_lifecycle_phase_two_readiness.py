@@ -13,7 +13,129 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
 )
 
 
-def test_phase_two_requires_disabled_capability_and_one_fresh_safe_account_mode(
+def _insert_real_lifecycle(
+    conn,
+    *,
+    suffix: str,
+    status: str,
+    protection_complete: bool,
+    reconciled_with_exchange: bool | None = None,
+    first_blocker: str | None = None,
+) -> None:
+    attempt_id = f"attempt-{suffix}"
+    ticket_id = f"ticket-{suffix}"
+    protection_id = f"protection-{suffix}"
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_ticket_bound_protected_submit_attempts (
+                protected_submit_attempt_id, ticket_id, finalgate_pass_id,
+                operation_layer_handoff_id, operation_submit_command_id,
+                runtime_safety_snapshot_id, action_time_lane_input_id,
+                strategy_group_id, symbol, side, runtime_profile_id, submit_mode,
+                status, submit_allowed, blockers, warnings, trusted_fact_refs,
+                submit_request, submit_result, identity_evidence,
+                official_operation_layer_submit_called, exchange_write_called,
+                order_created, order_lifecycle_called,
+                withdrawal_or_transfer_created, live_profile_changed,
+                order_sizing_changed, authority_boundary, created_at_ms,
+                updated_at_ms, signal_grade, required_execution_mode,
+                execution_eligible, authority_source_ref
+            ) VALUES (
+                :attempt_id, :ticket_id, :finalgate_pass_id, :handoff_id,
+                :command_id, :safety_id, :lane_id, 'SOR-001', 'AVAXUSDT',
+                'long', 'runtime-profile-1', 'real_gateway_action', 'submitted',
+                true, '[]', '[]', '{}', '{}', '{}', '{}', true, true, true,
+                true, false, false, false, 'ticket_bound_submit', :now_ms,
+                :now_ms, 'trial_grade_signal', 'trial_live', true, 'unit:test'
+            )
+            """
+        ),
+        {
+            "attempt_id": attempt_id,
+            "ticket_id": ticket_id,
+            "finalgate_pass_id": f"finalgate-{suffix}",
+            "handoff_id": f"handoff-{suffix}",
+            "command_id": f"command-{suffix}",
+            "safety_id": f"safety-{suffix}",
+            "lane_id": f"lane-{suffix}",
+            "now_ms": NOW_MS,
+        },
+    )
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_ticket_bound_exit_protection_sets (
+                exit_protection_set_id, ticket_id, protected_submit_attempt_id,
+                entry_local_order_id, entry_exchange_order_id, strategy_group_id,
+                symbol, side, entry_filled_qty, entry_avg_price, status,
+                sl_order_id, tp1_order_id, runner_qty, protection_complete,
+                reconciled_with_exchange, first_blocker, blockers, warnings,
+                authority_boundary, created_at_ms, updated_at_ms
+            ) VALUES (
+                :protection_id, :ticket_id, :attempt_id, :entry_local_id,
+                :entry_exchange_id, 'SOR-001', 'AVAXUSDT', 'long', 65, 6.65,
+                :protection_status, :sl_id, :tp1_id, 33, :protection_complete,
+                :reconciled_with_exchange, :first_blocker, :blockers, '[]',
+                'ticket_bound_exit_protection', :now_ms, :now_ms
+            )
+            """
+        ),
+        {
+            "protection_id": protection_id,
+            "ticket_id": ticket_id,
+            "attempt_id": attempt_id,
+            "entry_local_id": f"entry-local-{suffix}",
+            "entry_exchange_id": f"entry-exchange-{suffix}",
+            "protection_status": "reconciled" if protection_complete else "failed",
+            "sl_id": f"sl-{suffix}" if protection_complete else None,
+            "tp1_id": f"tp1-{suffix}" if protection_complete else None,
+            "protection_complete": protection_complete,
+            "reconciled_with_exchange": (
+                protection_complete
+                if reconciled_with_exchange is None
+                else reconciled_with_exchange
+            ),
+            "first_blocker": first_blocker,
+            "blockers": "[]" if first_blocker is None else f'["{first_blocker}"]',
+            "now_ms": NOW_MS,
+        },
+    )
+    conn.execute(
+        text(
+            """
+            INSERT INTO brc_ticket_bound_order_lifecycle_runs (
+                lifecycle_run_id, ticket_id, protected_submit_attempt_id,
+                strategy_group_id, symbol, side, runtime_profile_id, status,
+                entry_local_order_id, entry_exchange_order_id,
+                entry_fill_confirmed, entry_filled_qty, entry_avg_price,
+                exit_protection_set_id, first_blocker, blockers, warnings,
+                authority_boundary, created_at_ms, updated_at_ms
+            ) VALUES (
+                :lifecycle_id, :ticket_id, :attempt_id, 'SOR-001', 'AVAXUSDT',
+                'long', 'runtime-profile-1', :status, :entry_local_id,
+                :entry_exchange_id, true, 65, 6.65, :protection_id,
+                :first_blocker, :blockers, '[]', 'ticket_bound_lifecycle',
+                :now_ms, :now_ms
+            )
+            """
+        ),
+        {
+            "lifecycle_id": f"lifecycle-{suffix}",
+            "ticket_id": ticket_id,
+            "attempt_id": attempt_id,
+            "status": status,
+            "entry_local_id": f"entry-local-{suffix}",
+            "entry_exchange_id": f"entry-exchange-{suffix}",
+            "protection_id": protection_id,
+            "first_blocker": first_blocker,
+            "blockers": "[]" if first_blocker is None else f'["{first_blocker}"]',
+            "now_ms": NOW_MS,
+        },
+    )
+
+
+def test_phase_two_accepts_protected_lifecycle_with_disabled_capability_and_safe_mode(
     pg_control_connection,
 ):
     pg_control_connection.execute(
@@ -36,6 +158,12 @@ def test_phase_two_requires_disabled_capability_and_one_fresh_safe_account_mode(
         ),
         {"now_ms": NOW_MS, "valid_until_ms": NOW_MS + 60_000},
     )
+    _insert_real_lifecycle(
+        pg_control_connection,
+        suffix="phase-two-protected",
+        status="position_protected",
+        protection_complete=True,
+    )
 
     payload = evaluate_phase_two_readiness(
         pg_control_connection,
@@ -48,7 +176,9 @@ def test_phase_two_requires_disabled_capability_and_one_fresh_safe_account_mode(
         "safe_account_mode_count": 1,
         "critical_exchange_commands": 0,
         "active_domain_holds": 0,
-        "active_real_lifecycles": 0,
+        "active_real_lifecycles": 1,
+        "protected_active_real_lifecycles": 1,
+        "unsafe_active_real_lifecycles": 0,
         "unprotected_real_attempts": 0,
     }
 
@@ -114,3 +244,85 @@ def test_pre_switch_mode_still_rejects_active_lifecycle_risk(pg_control_connecti
     assert readiness_exit_code(payload) == 2
     assert payload["first_blocker"] == "phase_two_active_domain_holds:1"
     assert payload["counts"]["active_domain_holds"] == 1
+
+
+def test_deploy_quiescence_accepts_protection_complete_position(pg_control_connection):
+    _insert_real_lifecycle(
+        pg_control_connection,
+        suffix="position-protected",
+        status="position_protected",
+        protection_complete=True,
+    )
+
+    payload = evaluate_phase_two_readiness(
+        pg_control_connection,
+        now_ms=NOW_MS + 1_000,
+        deploy_quiescence=True,
+    )
+
+    assert payload["status"] == "phase_two_ready"
+    assert payload["blockers"] == []
+    assert payload["counts"]["active_real_lifecycles"] == 1
+    assert payload["counts"]["protected_active_real_lifecycles"] == 1
+    assert payload["counts"]["unsafe_active_real_lifecycles"] == 0
+
+
+def test_deploy_quiescence_accepts_protection_complete_runner(pg_control_connection):
+    _insert_real_lifecycle(
+        pg_control_connection,
+        suffix="runner-protected",
+        status="runner_protected",
+        protection_complete=True,
+    )
+
+    payload = evaluate_phase_two_readiness(
+        pg_control_connection,
+        now_ms=NOW_MS + 1_000,
+        deploy_quiescence=True,
+    )
+
+    assert payload["status"] == "phase_two_ready"
+    assert payload["counts"]["protected_active_real_lifecycles"] == 1
+    assert payload["counts"]["unsafe_active_real_lifecycles"] == 0
+
+
+def test_deploy_quiescence_rejects_active_lifecycle_with_incomplete_protection(
+    pg_control_connection,
+):
+    _insert_real_lifecycle(
+        pg_control_connection,
+        suffix="unprotected",
+        status="entry_filled",
+        protection_complete=False,
+        first_blocker="exit_protection_incomplete",
+    )
+
+    payload = evaluate_phase_two_readiness(
+        pg_control_connection,
+        now_ms=NOW_MS + 1_000,
+        deploy_quiescence=True,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "phase_two_unsafe_active_real_lifecycles:1" in payload["blockers"]
+    assert payload["counts"]["protected_active_real_lifecycles"] == 0
+    assert payload["counts"]["unsafe_active_real_lifecycles"] == 1
+
+
+def test_deploy_quiescence_rejects_unreconciled_protection(pg_control_connection):
+    _insert_real_lifecycle(
+        pg_control_connection,
+        suffix="unreconciled",
+        status="position_protected",
+        protection_complete=True,
+        reconciled_with_exchange=False,
+    )
+
+    payload = evaluate_phase_two_readiness(
+        pg_control_connection,
+        now_ms=NOW_MS + 1_000,
+        deploy_quiescence=True,
+    )
+
+    assert payload["status"] == "blocked"
+    assert "phase_two_unsafe_active_real_lifecycles:1" in payload["blockers"]

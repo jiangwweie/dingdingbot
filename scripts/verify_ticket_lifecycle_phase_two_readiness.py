@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Verify PG lifecycle truth before enabling durable exchange mutation."""
+"""Verify PG lifecycle truth before enabling durable exchange mutation.
+
+Stable protection-complete positions may survive a quiesced release switch.
+Unstable, blocked, or unprotected real lifecycles remain fail-closed.
+"""
 
 from __future__ import annotations
 
@@ -74,6 +78,36 @@ def evaluate_phase_two_readiness(
     if safe_modes != 1 and not deploy_quiescence:
         blockers.append(f"phase_two_safe_account_mode_count:{safe_modes}")
 
+    active_real_lifecycles = _count(
+        conn,
+        """
+        SELECT count(*)
+        FROM brc_ticket_bound_order_lifecycle_runs AS l
+        JOIN brc_ticket_bound_protected_submit_attempts AS a
+          ON a.protected_submit_attempt_id = l.protected_submit_attempt_id
+        WHERE a.submit_mode = 'real_gateway_action'
+          AND a.exchange_write_called = true
+          AND l.status <> 'lifecycle_closed'
+        """,
+    )
+    protected_active_real_lifecycles = _count(
+        conn,
+        """
+        SELECT count(*)
+        FROM brc_ticket_bound_order_lifecycle_runs AS l
+        JOIN brc_ticket_bound_protected_submit_attempts AS a
+          ON a.protected_submit_attempt_id = l.protected_submit_attempt_id
+        JOIN brc_ticket_bound_exit_protection_sets AS s
+          ON s.protected_submit_attempt_id = a.protected_submit_attempt_id
+        WHERE a.submit_mode = 'real_gateway_action'
+          AND a.exchange_write_called = true
+          AND l.status IN ('position_protected', 'runner_protected')
+          AND l.first_blocker IS NULL
+          AND s.protection_complete = true
+          AND s.reconciled_with_exchange = true
+          AND s.first_blocker IS NULL
+        """,
+    )
     counts = {
         "critical_exchange_commands": _count(
             conn,
@@ -86,17 +120,10 @@ def evaluate_phase_two_readiness(
             conn,
             "SELECT count(*) FROM brc_ticket_bound_scope_freezes WHERE status = 'active'",
         ),
-        "active_real_lifecycles": _count(
-            conn,
-            """
-            SELECT count(*)
-            FROM brc_ticket_bound_order_lifecycle_runs AS l
-            JOIN brc_ticket_bound_protected_submit_attempts AS a
-              ON a.protected_submit_attempt_id = l.protected_submit_attempt_id
-            WHERE a.submit_mode = 'real_gateway_action'
-              AND a.exchange_write_called = true
-              AND l.status <> 'lifecycle_closed'
-            """,
+        "active_real_lifecycles": active_real_lifecycles,
+        "protected_active_real_lifecycles": protected_active_real_lifecycles,
+        "unsafe_active_real_lifecycles": (
+            active_real_lifecycles - protected_active_real_lifecycles
         ),
         "unprotected_real_attempts": _count(
             conn,
@@ -112,7 +139,14 @@ def evaluate_phase_two_readiness(
             """,
         ),
     }
-    for name, count in counts.items():
+    blocking_count_names = (
+        "critical_exchange_commands",
+        "active_domain_holds",
+        "unsafe_active_real_lifecycles",
+        "unprotected_real_attempts",
+    )
+    for name in blocking_count_names:
+        count = counts[name]
         if count:
             blockers.append(f"phase_two_{name}:{count}")
     return _result(
@@ -132,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "Read-only deploy gate: ignore capability/account-mode enablement "
-            "preconditions while still rejecting active lifecycle risk."
+            "preconditions while accepting only stable protection-complete "
+            "active lifecycles."
         ),
     )
     parser.add_argument("--json", action="store_true")

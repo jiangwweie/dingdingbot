@@ -41,7 +41,8 @@ runner_protected
 ```
 
 An active real lifecycle is unsafe when its status is outside that set, its
-protection set is absent/incomplete, it carries a non-empty `first_blocker`, or
+protection set is absent/incomplete or not reconciled with exchange truth, it
+carries a non-empty `first_blocker`, or
 the deploy verifier finds a critical exchange command, active scope freeze, or
 unprotected real attempt.
 

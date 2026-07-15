@@ -107,7 +107,8 @@ The controlled repeat-deploy sequence is:
 ```text
 target release exported
 -> read-only pre-switch check accepts enabled or disabled capability
--> reject active real lifecycle / critical command / domain hold /
+-> accept only protection-complete `position_protected` or `runner_protected`
+   real lifecycles; reject unsafe lifecycle / critical command / domain hold /
    unprotected real attempt
 -> stop watcher, monitor, lifecycle, and backend units
 -> repeat the same safety check under quiescence
@@ -115,7 +116,8 @@ target release exported
 -> migrate / seed / validate
 -> switch release and run postdeploy checks while capability is disabled
 -> mechanically certify and re-enable capability
--> run one no-active, zero-exchange-write lifecycle invocation
+-> run one PG-only, zero-exchange-write lifecycle invocation that may inspect
+   one protected active lifecycle
 -> keep watcher timer stopped while release activation, 22-scope Action-Time
    capability certification, and current projection truth are published
 -> restore watcher timer only after capability truth publication succeeds
@@ -125,7 +127,12 @@ target release exported
 safety checks. It deliberately does not certify account-mode freshness; that
 fact is refreshed and required by phase-two enablement after the release
 switch. The mode does not enable capability, authorize exchange mutation,
-bypass phase-two certification, or weaken any active-risk blocker.
+bypass phase-two certification, or weaken any active-risk blocker. A real
+lifecycle is deployable only when its status is `position_protected` or
+`runner_protected`, its protection set is complete and reconciled with exchange
+truth, and neither the lifecycle nor protection set carries a first blocker.
+Merely having an active position is not a deploy blocker; unstable or
+unprotected lifecycle state remains one.
 
 The verifier keeps one success status, `phase_two_ready`, and exposes
 `mode=deploy_quiescence|phase_two_enablement` as an orthogonal field. Process
