@@ -123,7 +123,7 @@ def test_runtime_units_use_tracked_venv_readiness_and_containment():
         "TimeoutStartSec=300s",
         "TimeoutStopSec=20s",
         "KillMode=control-group",
-        "StartLimitIntervalSec=15min",
+        "StartLimitIntervalSec=2min",
         "StartLimitBurst=3",
         "--cycle-timeout-seconds 120",
     ):
@@ -218,6 +218,18 @@ def test_signal_watcher_timer_does_not_persistent_catch_up():
     assert "AccuracySec=15s" in timer_text
     assert "Persistent=false" in timer_text
     assert "Persistent=true" not in timer_text
+
+
+def test_signal_watcher_start_limit_window_is_shorter_than_normal_cadence():
+    service_text = SERVICE_PATH.read_text(encoding="utf-8")
+    timer_text = (
+        REPO_ROOT / "deploy" / "systemd" / "brc-runtime-signal-watcher.timer"
+    ).read_text(encoding="utf-8")
+
+    assert "StartLimitIntervalSec=2min" in service_text
+    assert "StartLimitBurst=3" in service_text
+    assert "OnUnitActiveSec=3min" in timer_text
+    assert "StartLimitIntervalSec=15min" not in service_text
 
 
 def test_signal_watcher_dry_run_audit_dropin_is_removed_from_production_tick():

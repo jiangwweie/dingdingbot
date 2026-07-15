@@ -1162,7 +1162,7 @@ for required in (
     "TimeoutStartSec=300s",
     "TimeoutStopSec=20s",
     "KillMode=control-group",
-    "StartLimitIntervalSec=15min",
+    "StartLimitIntervalSec=2min",
     "StartLimitBurst=3",
     "--cycle-timeout-seconds 120",
 ):

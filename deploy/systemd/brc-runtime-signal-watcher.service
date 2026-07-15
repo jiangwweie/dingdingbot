@@ -2,7 +2,7 @@
 Description=BRC runtime signal watcher tick
 Wants=network-online.target
 After=network-online.target brc-owner-console-backend.service
-StartLimitIntervalSec=15min
+StartLimitIntervalSec=2min
 StartLimitBurst=3
 
 [Service]

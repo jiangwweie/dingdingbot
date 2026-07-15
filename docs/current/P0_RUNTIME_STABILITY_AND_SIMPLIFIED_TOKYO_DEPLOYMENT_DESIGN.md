@@ -453,10 +453,16 @@ MemoryMax=512M
 MemorySwapMax=0
 OOMPolicy=stop
 TimeoutStopSec=20s
-StartLimitIntervalSec=15min
+StartLimitIntervalSec=2min
 StartLimitBurst=3
 KillMode=control-group
 ```
+
+The start-limit window is intentionally shorter than the normal three-minute
+timer cadence. systemd counts successful oneshot activations as starts; a
+window longer than the cadence would eventually rate-limit a healthy watcher.
+The two-minute window still blocks a manual or dependency-driven rapid-start
+storm without consuming normal scheduled activations.
 
 The watcher core cycle deadline becomes **120 seconds**. The complete oneshot
 uses `TimeoutStartSec=300s`, covering PostgreSQL readiness, two fact-building
