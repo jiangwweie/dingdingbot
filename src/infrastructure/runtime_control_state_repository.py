@@ -12,6 +12,9 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.capability_certification import (
+    ActionTimeFactDigestRowV1,
+)
 from src.application.readmodels.watcher_candidate_universe import (
     WatcherCandidateEventBindingRow,
     WatcherCandidateScopeRow,
@@ -113,14 +116,109 @@ RUNTIME_LANE_IDENTITY_COLUMN_SENTINELS = (
     "source_watermark",
 )
 
-WATCHER_CANDIDATE_TABLES: dict[str, str] = {
-    "candidate_scope": "brc_strategy_group_candidate_scope",
-    "candidate_scope_event_bindings": "brc_candidate_scope_event_bindings",
-    "runtime_scope_bindings": "brc_runtime_scope_bindings",
-    "strategy_side_event_specs": "brc_strategy_side_event_specs",
+WATCHER_CANDIDATE_PROFILE: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "candidate_scope": (
+        "brc_strategy_group_candidate_scope",
+        "active",
+        (
+        "candidate_scope_id",
+        "strategy_group_id",
+        "symbol",
+        "asset_class",
+        "side",
+        "policy_current_id",
+        "status",
+        ),
+    ),
+    "candidate_scope_event_bindings": (
+        "brc_candidate_scope_event_bindings",
+        "active",
+        (
+        "binding_id",
+        "candidate_scope_id",
+        "event_spec_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+        "status",
+        ),
+    ),
+    "runtime_scope_bindings": (
+        "brc_runtime_scope_bindings",
+        "active",
+        (
+        "runtime_scope_binding_id",
+        "candidate_scope_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+        "runtime_profile_id",
+        "status",
+        ),
+    ),
+    "strategy_side_event_specs": (
+        "brc_strategy_side_event_specs",
+        "current",
+        (
+        "event_spec_id",
+        "strategy_group_id",
+        "strategy_group_version_id",
+        "event_spec_version",
+        "event_id",
+        "side",
+        "timeframe",
+        "time_authority",
+        "status",
+        ),
+    ),
 }
 
-WATCHER_CANDIDATE_COLUMNS: dict[str, tuple[str, ...]] = {
+DEPLOY_VALIDATION_OWNERSHIP_COLUMNS = (
+    "projection_key",
+    "model_type",
+    "projection_scope_key",
+    "owner_projector",
+    "legacy_writer_allowed",
+    "current_source_mode",
+    "updated_at_ms",
+)
+
+ACTION_TIME_FACT_DIGEST_COLUMNS = (
+    "fact_snapshot_id",
+    "strategy_group_id",
+    "symbol",
+    "side",
+    "runtime_profile_id",
+    "fact_surface",
+    "source_kind",
+    "source_ref",
+    "computed",
+    "satisfied",
+    "freshness_state",
+    "blocker_class",
+    "observed_at_ms",
+    "valid_until_ms",
+)
+
+CAPABILITY_CERTIFICATION_COLUMNS: dict[str, tuple[str, ...]] = {
+    "strategy_groups": (
+        "strategy_group_id",
+        "current_version_id",
+        "status",
+    ),
+    "strategy_group_versions": (
+        "strategy_group_version_id",
+        "strategy_group_id",
+        "status",
+    ),
+    "strategy_runtime_instances": (
+        "runtime_instance_id",
+        "strategy_family_id",
+        "strategy_family_version_id",
+        "symbol",
+        "side",
+        "status",
+    ),
     "candidate_scope": (
         "candidate_scope_id",
         "strategy_group_id",
@@ -146,8 +244,13 @@ WATCHER_CANDIDATE_COLUMNS: dict[str, tuple[str, ...]] = {
         "strategy_group_id",
         "symbol",
         "side",
-        "runtime_profile_id",
         "policy_current_id",
+        "runtime_profile_id",
+        "selected_strategygroup_scope",
+        "symbol_side_scope_closed",
+        "notional_leverage_scope_closed",
+        "live_submit_allowed",
+        "server_runtime_coverage_required",
         "status",
     ),
     "strategy_side_event_specs": (
@@ -158,9 +261,69 @@ WATCHER_CANDIDATE_COLUMNS: dict[str, tuple[str, ...]] = {
         "event_id",
         "side",
         "timeframe",
+        "execution_eligibility_enabled",
+        "declared_signal_grade",
+        "declared_required_execution_mode",
+        "freshness_window_ms",
         "time_authority",
+        "protection_ref_type",
         "status",
     ),
+    "owner_policy_current": (
+        "policy_current_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+        "runtime_profile_id",
+        "enabled_state",
+        "pretrade_candidate_allowed",
+        "action_time_rehearsal_allowed",
+        "live_submit_allowed",
+        "planned_stop_risk_fraction",
+        "max_initial_margin_utilization",
+        "max_leverage",
+        "attempt_cap",
+    ),
+    "strategy_event_required_facts": (
+        "event_required_fact_id",
+        "event_spec_id",
+        "required_facts_version_id",
+        "fact_key",
+        "fact_role",
+        "fact_surface",
+        "operator",
+        "disable_on_match",
+        "freshness_ms",
+        "required_for_promotion",
+        "required_for_ticket",
+        "required_for_finalgate",
+        "missing_blocker_class",
+        "failed_blocker_class",
+        "value_source",
+        "status",
+    ),
+    "runtime_process_outcomes": (
+        "process_outcome_id",
+        "process_name",
+        "scope_key",
+        "process_state",
+        "runtime_head",
+        "source_watermark",
+        "updated_at_ms",
+    ),
+}
+
+CAPABILITY_CERTIFICATION_TABLES: dict[str, str] = {
+    "strategy_groups": "brc_strategy_groups",
+    "strategy_group_versions": "brc_strategy_group_versions",
+    "strategy_runtime_instances": "strategy_runtime_instances",
+    "candidate_scope": "brc_strategy_group_candidate_scope",
+    "candidate_scope_event_bindings": "brc_candidate_scope_event_bindings",
+    "runtime_scope_bindings": "brc_runtime_scope_bindings",
+    "strategy_side_event_specs": "brc_strategy_side_event_specs",
+    "owner_policy_current": "brc_owner_policy_current",
+    "strategy_event_required_facts": "brc_strategy_event_required_facts",
+    "runtime_process_outcomes": "brc_runtime_process_outcomes",
 }
 
 
@@ -197,6 +360,9 @@ class PgBackedRuntimeControlStateRepository:
             )
             for key, table_name in CONTROL_STATE_TABLES.items()
         }
+        self._validate_watcher_candidate_universe_current(
+            _watcher_current_rows(rows)
+        )
         self._validate_projection_ownership(rows)
         self._validate_active_event_semantics(rows)
         self._validate_candidate_scope_event_bindings(rows)
@@ -222,33 +388,36 @@ class PgBackedRuntimeControlStateRepository:
         *,
         row_limit_per_table: int = 256,
     ) -> WatcherCandidateUniverseCurrentProjection:
-        if row_limit_per_table <= 0 or row_limit_per_table > 256:
+        if row_limit_per_table < 1:
             raise RuntimeControlStateRepositoryError(
-                "watcher_candidate_universe_row_limit_invalid"
+                "watcher_candidate_row_limit_must_be_positive"
             )
+        self._configure_read_only_profile()
         inspector = sa.inspect(self.conn)
         existing = set(inspector.get_table_names())
-        missing = sorted(set(WATCHER_CANDIDATE_TABLES.values()) - existing)
+        missing = sorted(
+            table_name
+            for table_name, _status, _columns in WATCHER_CANDIDATE_PROFILE.values()
+            if table_name not in existing
+        )
         if missing:
             raise RuntimeControlStateRepositoryError(
                 "PG watcher candidate tables missing: " + ", ".join(missing)
             )
-        if self.conn.dialect.name == "postgresql":
-            self.conn.exec_driver_sql("SET LOCAL lock_timeout = '1s'")
-            self.conn.exec_driver_sql("SET LOCAL statement_timeout = '5s'")
-
         rows: dict[str, list[dict[str, Any]]] = {}
-        for logical_key, table_name in WATCHER_CANDIDATE_TABLES.items():
+        for logical_key, (
+            table_name,
+            status,
+            column_names,
+        ) in WATCHER_CANDIDATE_PROFILE.items():
             metadata = sa.MetaData()
             table = sa.Table(table_name, metadata, autoload_with=self.conn)
-            column_names = WATCHER_CANDIDATE_COLUMNS[logical_key]
             missing_columns = [name for name in column_names if name not in table.c]
             if missing_columns:
                 raise RuntimeControlStateRepositoryError(
                     f"watcher_candidate_schema_invalid:{logical_key}:"
                     + ",".join(missing_columns)
                 )
-            status = "current" if logical_key == "strategy_side_event_specs" else "active"
             statement = (
                 sa.select(*(table.c[name] for name in column_names))
                 .where(table.c.status == status)
@@ -261,11 +430,12 @@ class PgBackedRuntimeControlStateRepository:
             ]
             if len(selected) > row_limit_per_table:
                 raise RuntimeControlStateRepositoryError(
-                    f"watcher_candidate_universe_overflow:{logical_key}"
+                    f"watcher_candidate_row_limit_exceeded:{logical_key}:"
+                    f"{row_limit_per_table}"
                 )
             rows[logical_key] = selected
 
-        _validate_watcher_candidate_universe(rows)
+        self._validate_watcher_candidate_universe_current(rows)
         return WatcherCandidateUniverseCurrentProjection(
             read_now_ms=self.now_ms,
             candidate_scope=tuple(
@@ -285,6 +455,588 @@ class PgBackedRuntimeControlStateRepository:
                 for row in rows["strategy_side_event_specs"]
             ),
         )
+
+    def _validate_watcher_candidate_universe_current(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        _validate_watcher_candidate_universe(rows)
+
+    def read_deploy_validation_state(
+        self,
+        *,
+        row_limit_per_table: int = 256,
+    ) -> dict[str, Any]:
+        if row_limit_per_table < 1:
+            raise RuntimeControlStateRepositoryError(
+                "deploy_validation_row_limit_must_be_positive"
+            )
+        self._configure_read_only_profile()
+        inspector = sa.inspect(self.conn)
+        required_tables = {
+            table_name
+            for table_name, _status, _columns in WATCHER_CANDIDATE_PROFILE.values()
+        } | {CONTROL_STATE_TABLES["current_projection_ownership"]}
+        existing = set(inspector.get_table_names())
+        missing = sorted(required_tables - existing)
+        if missing:
+            raise RuntimeControlStateRepositoryError(
+                "PG deploy validation tables missing: " + ", ".join(missing)
+            )
+
+        rows: dict[str, list[dict[str, Any]]] = {}
+        for logical_key, (
+            table_name,
+            status,
+            column_names,
+        ) in WATCHER_CANDIDATE_PROFILE.items():
+            rows[logical_key] = self._read_explicit_bounded_rows(
+                logical_key=logical_key,
+                table_name=table_name,
+                column_names=column_names,
+                predicate=lambda table, status=status: table.c.status == status,
+                row_limit=row_limit_per_table,
+                overflow_prefix="deploy_validation_row_limit_exceeded",
+            )
+
+        ownership_table = CONTROL_STATE_TABLES["current_projection_ownership"]
+        rows["current_projection_ownership"] = self._read_explicit_bounded_rows(
+            logical_key="current_projection_ownership",
+            table_name=ownership_table,
+            column_names=DEPLOY_VALIDATION_OWNERSHIP_COLUMNS,
+            predicate=lambda table: table.c.projection_key.is_not(None),
+            row_limit=row_limit_per_table,
+            overflow_prefix="deploy_validation_row_limit_exceeded",
+        )
+
+        self._validate_watcher_candidate_universe_current(
+            {key: rows[key] for key in WATCHER_CANDIDATE_PROFILE}
+        )
+        self._validate_projection_ownership(
+            {
+                "current_projection_ownership": rows[
+                    "current_projection_ownership"
+                ],
+                "projection_runs": [],
+            }
+        )
+        return {
+            "schema": "brc.runtime_control_state_deploy_validation.v1",
+            "source_mode": self.source_mode,
+            "projection_target": self.projection_target,
+            "read_profile": "deploy_validation",
+            "read_now_ms": self.now_ms,
+            "strategy_group_count": len(
+                {
+                    str(row["strategy_group_id"])
+                    for row in rows["candidate_scope"]
+                }
+            ),
+            "table_counts": {key: len(value) for key, value in rows.items()},
+            **rows,
+        }
+
+    def _configure_read_only_profile(self) -> None:
+        if self.conn.dialect.name != "postgresql":
+            return
+        self.conn.exec_driver_sql("SET TRANSACTION READ ONLY")
+        self.conn.exec_driver_sql("SET LOCAL lock_timeout = '1s'")
+        self.conn.exec_driver_sql("SET LOCAL statement_timeout = '5s'")
+
+    def read_action_time_capability_certification_state(
+        self,
+        *,
+        identity_limit: int = 256,
+        fact_limit: int = 2048,
+    ) -> dict[str, Any]:
+        return self._read_action_time_capability_certification_state(
+            identity_limit=identity_limit,
+            fact_limit=fact_limit,
+            read_only=True,
+        )
+
+    def reread_action_time_capability_certification_state_for_apply(
+        self,
+        *,
+        identity_limit: int = 256,
+        fact_limit: int = 2048,
+    ) -> dict[str, Any]:
+        return self._read_action_time_capability_certification_state(
+            identity_limit=identity_limit,
+            fact_limit=fact_limit,
+            read_only=False,
+        )
+
+    def _read_action_time_capability_certification_state(
+        self,
+        *,
+        identity_limit: int,
+        fact_limit: int,
+        read_only: bool,
+    ) -> dict[str, Any]:
+        if identity_limit < 1 or fact_limit < 1:
+            raise RuntimeControlStateRepositoryError(
+                "capability_certification_row_limit_must_be_positive"
+            )
+        if read_only:
+            self._configure_read_only_profile()
+        elif self.conn.dialect.name == "postgresql":
+            self.conn.exec_driver_sql("SET LOCAL lock_timeout = '1s'")
+            self.conn.exec_driver_sql("SET LOCAL statement_timeout = '5s'")
+        existing = set(sa.inspect(self.conn).get_table_names())
+        missing = sorted(set(CAPABILITY_CERTIFICATION_TABLES.values()) - existing)
+        if missing:
+            raise RuntimeControlStateRepositoryError(
+                "PG capability certification tables missing: " + ", ".join(missing)
+            )
+
+        tables = {
+            key: sa.Table(table_name, sa.MetaData(), autoload_with=self.conn)
+            for key, table_name in CAPABILITY_CERTIFICATION_TABLES.items()
+        }
+
+        candidate_table = tables["candidate_scope"]
+        candidates = self._execute_capability_statement(
+            logical_key="candidate_scope",
+            statement=(
+                self._capability_select(candidate_table, "candidate_scope")
+                .where(candidate_table.c.status == "active")
+                .order_by(*candidate_table.primary_key.columns)
+                .limit(identity_limit + 1)
+            ),
+            row_limit=identity_limit,
+        )
+        if not candidates:
+            raise RuntimeControlStateRepositoryError(
+                "capability_certification_active_candidate_scope_missing"
+            )
+
+        candidate_ids = sorted(
+            {str(row["candidate_scope_id"]) for row in candidates}
+        )
+        group_ids = sorted({str(row["strategy_group_id"]) for row in candidates})
+        policy_ids = sorted({str(row["policy_current_id"]) for row in candidates})
+        lane_keys = sorted(
+            {
+                (
+                    str(row["strategy_group_id"]),
+                    str(row["symbol"]),
+                    str(row["side"]),
+                )
+                for row in candidates
+            }
+        )
+
+        group_table = tables["strategy_groups"]
+        groups = self._execute_capability_statement(
+            logical_key="strategy_groups",
+            statement=(
+                self._capability_select(group_table, "strategy_groups")
+                .where(
+                    group_table.c.status == "active",
+                    group_table.c.strategy_group_id.in_(group_ids),
+                )
+                .order_by(*group_table.primary_key.columns)
+                .limit(identity_limit + 1)
+            ),
+            row_limit=identity_limit,
+        )
+        version_ids = sorted({str(row["current_version_id"]) for row in groups})
+
+        version_table = tables["strategy_group_versions"]
+        versions = self._execute_capability_statement(
+            logical_key="strategy_group_versions",
+            statement=(
+                self._capability_select(version_table, "strategy_group_versions")
+                .where(
+                    version_table.c.status == "current",
+                    version_table.c.strategy_group_version_id.in_(version_ids),
+                )
+                .order_by(*version_table.primary_key.columns)
+                .limit(identity_limit + 1)
+            ),
+            row_limit=identity_limit,
+        )
+
+        runtime_instance_table = tables["strategy_runtime_instances"]
+        runtimes = self._execute_capability_statement(
+            logical_key="strategy_runtime_instances",
+            statement=(
+                self._capability_select(
+                    runtime_instance_table,
+                    "strategy_runtime_instances",
+                )
+                .where(
+                    runtime_instance_table.c.status == "active",
+                    sa.tuple_(
+                        runtime_instance_table.c.strategy_family_id,
+                        runtime_instance_table.c.symbol,
+                        runtime_instance_table.c.side,
+                    ).in_(lane_keys),
+                )
+                .order_by(*runtime_instance_table.primary_key.columns)
+                .limit(identity_limit + 1)
+            ),
+            row_limit=identity_limit,
+        )
+
+        binding_table = tables["candidate_scope_event_bindings"]
+        event_bindings = self._execute_capability_statement(
+            logical_key="candidate_scope_event_bindings",
+            statement=(
+                self._capability_select(
+                    binding_table,
+                    "candidate_scope_event_bindings",
+                )
+                .where(
+                    binding_table.c.status == "active",
+                    binding_table.c.candidate_scope_id.in_(candidate_ids),
+                )
+                .order_by(*binding_table.primary_key.columns)
+                .limit(identity_limit + 1)
+            ),
+            row_limit=identity_limit,
+        )
+        event_ids = sorted({str(row["event_spec_id"]) for row in event_bindings})
+
+        runtime_binding_table = tables["runtime_scope_bindings"]
+        runtime_bindings = self._execute_capability_statement(
+            logical_key="runtime_scope_bindings",
+            statement=(
+                self._capability_select(
+                    runtime_binding_table,
+                    "runtime_scope_bindings",
+                    guarded_json=("conditional_hard_gates", 16_384),
+                )
+                .where(
+                    runtime_binding_table.c.status == "active",
+                    runtime_binding_table.c.candidate_scope_id.in_(candidate_ids),
+                )
+                .order_by(*runtime_binding_table.primary_key.columns)
+                .limit(identity_limit + 1)
+            ),
+            row_limit=identity_limit,
+        )
+
+        event_table = tables["strategy_side_event_specs"]
+        events = self._execute_capability_statement(
+            logical_key="strategy_side_event_specs",
+            statement=(
+                self._capability_select(event_table, "strategy_side_event_specs")
+                .where(
+                    event_table.c.status == "current",
+                    event_table.c.event_spec_id.in_(event_ids),
+                )
+                .order_by(*event_table.primary_key.columns)
+                .limit(identity_limit + 1)
+            ),
+            row_limit=identity_limit,
+        )
+
+        policy_table = tables["owner_policy_current"]
+        policies = self._execute_capability_statement(
+            logical_key="owner_policy_current",
+            statement=(
+                self._capability_select(
+                    policy_table,
+                    "owner_policy_current",
+                    guarded_json=("policy_event_ids", 16_384),
+                )
+                .where(policy_table.c.policy_current_id.in_(policy_ids))
+                .order_by(*policy_table.primary_key.columns)
+                .limit(identity_limit + 1)
+            ),
+            row_limit=identity_limit,
+        )
+
+        fact_table = tables["strategy_event_required_facts"]
+        facts = self._execute_capability_statement(
+            logical_key="strategy_event_required_facts",
+            statement=(
+                self._capability_select(
+                    fact_table,
+                    "strategy_event_required_facts",
+                    guarded_json=("expected_value", 4_096),
+                )
+                .where(
+                    fact_table.c.status == "current",
+                    fact_table.c.event_spec_id.in_(event_ids),
+                )
+                .order_by(*fact_table.primary_key.columns)
+                .limit(fact_limit + 1)
+            ),
+            row_limit=fact_limit,
+        )
+        expected_value_bytes = sum(
+            int(row.get("expected_value_bytes") or 0) for row in facts
+        )
+        if expected_value_bytes > 8 * 1024 * 1024:
+            raise RuntimeControlStateRepositoryError(
+                "capability_certification_expected_value_total_bytes_exceeded"
+            )
+
+        outcome_table = tables["runtime_process_outcomes"]
+        activations = self._execute_capability_statement(
+            logical_key="runtime_process_outcomes",
+            statement=(
+                self._capability_select(
+                    outcome_table,
+                    "runtime_process_outcomes",
+                )
+                .where(
+                    outcome_table.c.process_name == "runtime_release_activation",
+                    outcome_table.c.scope_key == "production:tokyo",
+                    outcome_table.c.process_state == "succeeded",
+                )
+                .order_by(
+                    outcome_table.c.updated_at_ms.desc(),
+                    outcome_table.c.process_outcome_id.desc(),
+                )
+                .limit(2)
+            ),
+            row_limit=1,
+        )
+        if len(activations) != 1:
+            raise RuntimeControlStateRepositoryError(
+                "capability_certification_release_activation_not_unique"
+            )
+
+        state = {
+            "strategy_groups": groups,
+            "strategy_group_versions": versions,
+            "strategy_runtime_instances": runtimes,
+            "candidate_scope": candidates,
+            "candidate_scope_event_bindings": event_bindings,
+            "runtime_scope_bindings": runtime_bindings,
+            "strategy_side_event_specs": events,
+            "owner_policy_current": policies,
+            "strategy_event_required_facts": facts,
+            "runtime_process_outcomes": activations,
+        }
+        self._validate_watcher_candidate_universe_current(
+            {key: state[key] for key in WATCHER_CANDIDATE_PROFILE}
+        )
+        _validate_capability_runtime_instances(state)
+        for row in runtime_bindings:
+            _require_guarded_json_bytes(row, "conditional_hard_gates", 16_384)
+        for row in policies:
+            _require_guarded_json_bytes(row, "policy_event_ids", 16_384)
+        for row in facts:
+            _require_guarded_json_bytes(row, "expected_value", 4_096)
+        return {
+            "schema": "brc.action_time_capability_certification_state.v1",
+            "source_mode": self.source_mode,
+            "projection_target": self.projection_target,
+            "read_profile": "action_time_capability_certification",
+            "read_now_ms": self.now_ms,
+            "current_runtime_head": str(activations[0]["runtime_head"]),
+            "table_counts": {key: len(value) for key, value in state.items()},
+            **state,
+        }
+
+    def _capability_select(
+        self,
+        table: sa.Table,
+        logical_key: str,
+        *,
+        guarded_json: tuple[str, int] | None = None,
+    ) -> sa.sql.Select:
+        column_names = CAPABILITY_CERTIFICATION_COLUMNS[logical_key]
+        missing = [name for name in column_names if name not in table.c]
+        if guarded_json and guarded_json[0] not in table.c:
+            missing.append(guarded_json[0])
+        if missing:
+            raise RuntimeControlStateRepositoryError(
+                f"capability_certification_schema_invalid:{logical_key}:"
+                + ",".join(missing)
+            )
+        selected: list[Any] = [table.c[name] for name in column_names]
+        if guarded_json:
+            field_name, max_bytes = guarded_json
+            field = table.c[field_name]
+            logical_bytes = (
+                sa.func.octet_length(sa.cast(field, sa.Text))
+                if self.conn.dialect.name == "postgresql"
+                else sa.func.length(sa.cast(field, sa.Text))
+            )
+            guarded = sa.type_coerce(
+                sa.case(
+                    (field.is_(None), None),
+                    (logical_bytes <= max_bytes, field),
+                    else_=None,
+                ),
+                field.type,
+            ).label(field_name)
+            selected.extend(
+                [guarded, logical_bytes.label(f"{field_name}_bytes")]
+            )
+        return sa.select(*selected)
+
+    def read_action_time_fact_digest_rows(
+        self,
+        *,
+        expected_fact_snapshot_ids: tuple[str, ...],
+        row_limit: int = 128,
+    ) -> tuple[ActionTimeFactDigestRowV1, ...]:
+        return self._read_action_time_fact_digest_rows(
+            expected_fact_snapshot_ids=expected_fact_snapshot_ids,
+            row_limit=row_limit,
+            read_only=True,
+        )
+
+    def reread_action_time_fact_digest_rows_for_apply(
+        self,
+        *,
+        expected_fact_snapshot_ids: tuple[str, ...],
+        row_limit: int = 128,
+    ) -> tuple[ActionTimeFactDigestRowV1, ...]:
+        return self._read_action_time_fact_digest_rows(
+            expected_fact_snapshot_ids=expected_fact_snapshot_ids,
+            row_limit=row_limit,
+            read_only=False,
+        )
+
+    def _read_action_time_fact_digest_rows(
+        self,
+        *,
+        expected_fact_snapshot_ids: tuple[str, ...],
+        row_limit: int,
+        read_only: bool,
+    ) -> tuple[ActionTimeFactDigestRowV1, ...]:
+        expected_ids = tuple(sorted(str(value or "").strip() for value in expected_fact_snapshot_ids))
+        if (
+            not expected_ids
+            or any(not value for value in expected_ids)
+            or len(set(expected_ids)) != len(expected_ids)
+            or row_limit < 1
+            or len(expected_ids) > row_limit
+        ):
+            raise RuntimeControlStateRepositoryError(
+                "action_time_fact_digest_expected_id_set_invalid"
+            )
+        if read_only:
+            self._configure_read_only_profile()
+        elif self.conn.dialect.name == "postgresql":
+            self.conn.exec_driver_sql("SET LOCAL lock_timeout = '1s'")
+            self.conn.exec_driver_sql("SET LOCAL statement_timeout = '5s'")
+        table_name = CONTROL_STATE_TABLES["runtime_fact_snapshots"]
+        if not sa.inspect(self.conn).has_table(table_name):
+            raise RuntimeControlStateRepositoryError(
+                "action_time_fact_digest_table_missing"
+            )
+        table = sa.Table(table_name, sa.MetaData(), autoload_with=self.conn)
+        missing = [name for name in ACTION_TIME_FACT_DIGEST_COLUMNS if name not in table.c]
+        missing.extend(
+            name for name in ("failed_facts", "fact_values") if name not in table.c
+        )
+        if missing:
+            raise RuntimeControlStateRepositoryError(
+                "action_time_fact_digest_schema_invalid:" + ",".join(missing)
+            )
+        selected: list[Any] = [
+            table.c[name] for name in ACTION_TIME_FACT_DIGEST_COLUMNS
+        ]
+        for field_name in ("failed_facts", "fact_values"):
+            field = table.c[field_name]
+            logical_bytes = (
+                sa.func.octet_length(sa.cast(field, sa.Text))
+                if self.conn.dialect.name == "postgresql"
+                else sa.func.length(sa.cast(field, sa.Text))
+            )
+            selected.extend(
+                [
+                    sa.type_coerce(
+                        sa.case(
+                            (logical_bytes <= 65_536, field),
+                            else_=None,
+                        ),
+                        field.type,
+                    ).label(field_name),
+                    logical_bytes.label(f"{field_name}_bytes"),
+                ]
+            )
+        statement = (
+            sa.select(*selected)
+            .where(table.c.fact_snapshot_id.in_(expected_ids))
+            .order_by(table.c.fact_snapshot_id)
+            .limit(row_limit + 1)
+        )
+        raw_rows = [
+            {key: _preserve_typed_value(value) for key, value in row.items()}
+            for row in self.conn.execute(statement).mappings()
+        ]
+        if len(raw_rows) > row_limit:
+            raise RuntimeControlStateRepositoryError(
+                f"action_time_fact_digest_row_limit_exceeded:{row_limit}"
+            )
+        for row in raw_rows:
+            _require_guarded_json_bytes(row, "failed_facts", 65_536)
+            _require_guarded_json_bytes(row, "fact_values", 65_536)
+        actual_ids = tuple(sorted(str(row["fact_snapshot_id"]) for row in raw_rows))
+        if actual_ids != expected_ids:
+            raise RuntimeControlStateRepositoryError(
+                "action_time_fact_digest_id_set_mismatch"
+            )
+        models = tuple(ActionTimeFactDigestRowV1.model_validate(row) for row in raw_rows)
+        canonical_size = sum(
+            len(model.model_dump_json().encode("utf-8")) for model in models
+        )
+        if canonical_size > 1024 * 1024:
+            raise RuntimeControlStateRepositoryError(
+                "action_time_fact_digest_canonical_input_too_large"
+            )
+        return models
+
+    def _execute_capability_statement(
+        self,
+        *,
+        logical_key: str,
+        statement: sa.sql.Select,
+        row_limit: int,
+    ) -> list[dict[str, Any]]:
+        rows = [
+            {key: _preserve_typed_value(value) for key, value in row.items()}
+            for row in self.conn.execute(statement).mappings()
+        ]
+        if len(rows) > row_limit:
+            raise RuntimeControlStateRepositoryError(
+                f"capability_certification_row_limit_exceeded:{logical_key}:"
+                f"{row_limit}"
+            )
+        return rows
+
+    def _read_explicit_bounded_rows(
+        self,
+        *,
+        logical_key: str,
+        table_name: str,
+        column_names: tuple[str, ...],
+        predicate: Any,
+        row_limit: int,
+        overflow_prefix: str,
+    ) -> list[dict[str, Any]]:
+        table = sa.Table(table_name, sa.MetaData(), autoload_with=self.conn)
+        missing_columns = [name for name in column_names if name not in table.c]
+        if missing_columns:
+            raise RuntimeControlStateRepositoryError(
+                f"{overflow_prefix.replace('row_limit_exceeded', 'schema_invalid')}:"
+                f"{logical_key}:" + ",".join(missing_columns)
+            )
+        statement = (
+            sa.select(*(table.c[name] for name in column_names))
+            .where(predicate(table))
+            .order_by(*table.primary_key.columns)
+            .limit(row_limit + 1)
+        )
+        selected = [
+            {key: _json_safe(value) for key, value in row.items()}
+            for row in self.conn.execute(statement).mappings()
+        ]
+        if len(selected) > row_limit:
+            raise RuntimeControlStateRepositoryError(
+                f"{overflow_prefix}:{logical_key}:{row_limit}"
+            )
+        return selected
 
     def read_action_time_control_state(
         self,
@@ -1557,7 +2309,6 @@ def _validate_watcher_candidate_universe(
             "strategy_group_id",
             "symbol",
             "side",
-            "policy_current_id",
         ):
             if runtime.get(key) != candidate.get(key):
                 raise RuntimeControlStateRepositoryError(
@@ -1566,13 +2317,95 @@ def _validate_watcher_candidate_universe(
         runtimes_by_candidate.setdefault(candidate_id, []).append(runtime)
 
     for candidate_id in candidate_by_id:
-        if len(bindings_by_candidate.get(candidate_id, ())) != 1:
+        event_binding_count = len(bindings_by_candidate.get(candidate_id, ()))
+        if event_binding_count == 0:
+            raise RuntimeControlStateRepositoryError(
+                f"{candidate_id} has no active event binding"
+            )
+        if event_binding_count != 1:
             raise RuntimeControlStateRepositoryError(
                 f"{candidate_id} must have exactly one active event binding"
             )
-        if len(runtimes_by_candidate.get(candidate_id, ())) != 1:
+        runtime_binding_count = len(runtimes_by_candidate.get(candidate_id, ()))
+        if runtime_binding_count == 0:
+            raise RuntimeControlStateRepositoryError(
+                f"{candidate_id} has no active runtime scope binding"
+            )
+        if runtime_binding_count != 1:
             raise RuntimeControlStateRepositoryError(
                 f"{candidate_id} must have exactly one active runtime scope binding"
+            )
+
+
+def _watcher_current_rows(
+    rows: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    return {
+        logical_key: [
+            row
+            for row in rows.get(logical_key, [])
+            if row.get("status") == (
+                "current" if logical_key == "strategy_side_event_specs" else "active"
+            )
+        ]
+        for logical_key in WATCHER_CANDIDATE_PROFILE
+    }
+
+
+def _require_guarded_json_bytes(
+    row: dict[str, Any],
+    field_name: str,
+    max_bytes: int,
+) -> None:
+    byte_count = row.pop(f"{field_name}_bytes", None)
+    if byte_count is None and row.get(field_name) is None:
+        return
+    if byte_count is None or int(byte_count) > max_bytes:
+        raise RuntimeControlStateRepositoryError(
+            f"capability_certification_json_bytes_exceeded:{field_name}:"
+            f"{max_bytes}"
+        )
+
+
+def _validate_capability_runtime_instances(
+    state: dict[str, list[dict[str, Any]]],
+) -> None:
+    runtimes_by_lane: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for runtime in state["strategy_runtime_instances"]:
+        lane = (
+            str(runtime.get("strategy_family_id") or ""),
+            str(runtime.get("symbol") or ""),
+            str(runtime.get("side") or ""),
+        )
+        runtimes_by_lane.setdefault(lane, []).append(runtime)
+
+    event_by_id = {
+        str(row["event_spec_id"]): row
+        for row in state["strategy_side_event_specs"]
+    }
+    binding_by_candidate = {
+        str(row["candidate_scope_id"]): row
+        for row in state["candidate_scope_event_bindings"]
+    }
+    for candidate in state["candidate_scope"]:
+        candidate_id = str(candidate["candidate_scope_id"])
+        lane = (
+            str(candidate["strategy_group_id"]),
+            str(candidate["symbol"]),
+            str(candidate["side"]),
+        )
+        runtime_rows = runtimes_by_lane.get(lane, [])
+        if len(runtime_rows) != 1:
+            raise RuntimeControlStateRepositoryError(
+                f"capability_certification_runtime_not_unique:{candidate_id}"
+            )
+        binding = binding_by_candidate[candidate_id]
+        event = event_by_id[str(binding["event_spec_id"])]
+        if str(runtime_rows[0]["strategy_family_version_id"]) != str(
+            event["strategy_group_version_id"]
+        ):
+            raise RuntimeControlStateRepositoryError(
+                f"capability_certification_runtime_version_mismatch:{candidate_id}"
             )
 
 
@@ -1627,6 +2460,14 @@ def _json_safe(value: Any) -> Any:
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
+    return value
+
+
+def _preserve_typed_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _preserve_typed_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_preserve_typed_value(item) for item in value]
     return value
 
 

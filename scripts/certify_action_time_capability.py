@@ -20,7 +20,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 from src.application.action_time.capability_certification import (  # noqa: E402
-    certify_action_time_capabilities,
+    apply_prepared_action_time_capability_certification,
+    prepare_action_time_capability_certification,
 )
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
@@ -58,19 +59,33 @@ def run_pg_certification(
         }
     engine = sa.create_engine(dsn)
     try:
-        with engine.begin() as conn:
-            control_state = PgBackedRuntimeControlStateRepository(
-                conn,
-                now_ms=now_ms,
-            ).read_control_state()
-            return certify_action_time_capabilities(
-                conn,
-                control_state=control_state,
-                runtime_head=runtime_head,
-                certification_ref=certification_ref,
-                expected_lane_count=expected_lane_count,
-                now_ms=now_ms,
-            )
+        with engine.connect() as prepare_conn:
+            with prepare_conn.begin():
+                prepare_state = PgBackedRuntimeControlStateRepository(
+                    prepare_conn,
+                    now_ms=now_ms,
+                ).read_action_time_capability_certification_state()
+                prepared = prepare_action_time_capability_certification(
+                    prepare_state,
+                    runtime_head=runtime_head,
+                )
+        with engine.connect().execution_options(
+            isolation_level="SERIALIZABLE"
+        ) as apply_conn:
+            with apply_conn.begin():
+                apply_state = PgBackedRuntimeControlStateRepository(
+                    apply_conn,
+                    now_ms=now_ms,
+                ).reread_action_time_capability_certification_state_for_apply()
+                return apply_prepared_action_time_capability_certification(
+                    apply_conn,
+                    prepared=prepared,
+                    control_state=apply_state,
+                    runtime_head=runtime_head,
+                    certification_ref=certification_ref,
+                    expected_lane_count=expected_lane_count,
+                    now_ms=now_ms,
+                )
     finally:
         engine.dispose()
 

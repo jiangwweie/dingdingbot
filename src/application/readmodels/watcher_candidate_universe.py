@@ -8,7 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class _FrozenProjectionModel(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        serialize_by_alias=True,
+        validate_by_name=True,
+    )
 
 
 class WatcherCandidateScopeRow(_FrozenProjectionModel):
@@ -18,7 +23,6 @@ class WatcherCandidateScopeRow(_FrozenProjectionModel):
     asset_class: str = Field(min_length=1)
     side: Literal["long", "short"]
     policy_current_id: str = Field(min_length=1)
-    priority_rank: int
     status: Literal["active"]
 
 
@@ -39,7 +43,6 @@ class WatcherRuntimeScopeBindingRow(_FrozenProjectionModel):
     symbol: str = Field(min_length=1)
     side: Literal["long", "short"]
     runtime_profile_id: str = Field(min_length=1)
-    policy_current_id: str = Field(min_length=1)
     status: Literal["active"]
 
 

@@ -239,9 +239,54 @@ def test_watcher_candidate_universe_fails_closed_on_row_257(
 
     with pytest.raises(
         RuntimeControlStateRepositoryError,
-        match="watcher_candidate_universe_overflow:candidate_scope",
+        match="watcher_candidate_row_limit_exceeded:candidate_scope:21",
     ):
         repository.read_watcher_candidate_universe_current(row_limit_per_table=21)
+
+
+def test_deploy_validation_state_uses_five_explicit_bounded_queries(
+    pg_control_connection,
+):
+    statements: list[str] = []
+
+    def capture_sql(_conn, _cursor, statement, _parameters, _context, _many):
+        statements.append(" ".join(statement.split()))
+
+    sa.event.listen(
+        pg_control_connection.engine,
+        "before_cursor_execute",
+        capture_sql,
+    )
+    try:
+        state = PgBackedRuntimeControlStateRepository(
+            pg_control_connection,
+            now_ms=1770000120100,
+        ).read_deploy_validation_state()
+    finally:
+        sa.event.remove(
+            pg_control_connection.engine,
+            "before_cursor_execute",
+            capture_sql,
+        )
+
+    assert state["read_profile"] == "deploy_validation"
+    assert state["strategy_group_count"] == 5
+    assert state["table_counts"] == {
+        "candidate_scope": 22,
+        "candidate_scope_event_bindings": 22,
+        "runtime_scope_bindings": 22,
+        "strategy_side_event_specs": 6,
+        "current_projection_ownership": 6,
+    }
+    row_queries = [
+        statement
+        for statement in statements
+        if statement.startswith("SELECT ") and " FROM brc_" in statement
+    ]
+    assert len(row_queries) == 5
+    assert all(" WHERE " in statement for statement in row_queries)
+    assert all(" LIMIT " in statement for statement in row_queries)
+    assert all(".*" not in statement for statement in row_queries)
 
 
 def test_current_chain_helpers_reject_future_dated_rows() -> None:

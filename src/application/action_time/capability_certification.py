@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from decimal import Decimal
 from hashlib import sha256
 import json
 from typing import Any, Mapping, Sequence
@@ -13,12 +14,141 @@ import sqlalchemy as sa
 from src.application.runtime_process_outcome import (
     materialize_runtime_process_outcome,
 )
+from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 
 
 PROCESS_NAME = "action_time_capability_certification"
 RELEASE_ACTIVATION_PROCESS_NAME = "runtime_release_activation"
 RELEASE_ACTIVATION_SCOPE_KEY = "production:tokyo"
 FIRST_BLOCKER = "action_time_boundary_not_reproduced"
+CAPABILITY_INPUT_DIGEST_SCHEMA = (
+    "brc.action_time_capability_certification_input.v1"
+)
+LANE_IDENTITY_DIGEST_SCHEMA = "brc.action_time_capability_lane_identity.v2"
+CANONICAL_ENCODING = "brc.typed_canonical_json.v1"
+DIGEST_ALGORITHM = "sha256"
+
+CAPABILITY_DIGEST_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "strategy_groups": (
+        "strategy_group_id",
+        "current_version_id",
+        "status",
+    ),
+    "strategy_group_versions": (
+        "strategy_group_version_id",
+        "strategy_group_id",
+        "status",
+    ),
+    "strategy_runtime_instances": (
+        "runtime_instance_id",
+        "strategy_family_id",
+        "strategy_family_version_id",
+        "symbol",
+        "side",
+        "status",
+    ),
+    "candidate_scope": (
+        "candidate_scope_id",
+        "strategy_group_id",
+        "symbol",
+        "asset_class",
+        "side",
+        "policy_current_id",
+        "priority_rank",
+        "status",
+    ),
+    "candidate_scope_event_bindings": (
+        "binding_id",
+        "candidate_scope_id",
+        "event_spec_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+        "status",
+    ),
+    "runtime_scope_bindings": (
+        "runtime_scope_binding_id",
+        "candidate_scope_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+        "policy_current_id",
+        "runtime_profile_id",
+        "selected_strategygroup_scope",
+        "symbol_side_scope_closed",
+        "notional_leverage_scope_closed",
+        "live_submit_allowed",
+        "server_runtime_coverage_required",
+        "status",
+        "conditional_hard_gates",
+    ),
+    "strategy_side_event_specs": (
+        "event_spec_id",
+        "strategy_group_id",
+        "strategy_group_version_id",
+        "event_spec_version",
+        "event_id",
+        "side",
+        "timeframe",
+        "execution_eligibility_enabled",
+        "declared_signal_grade",
+        "declared_required_execution_mode",
+        "freshness_window_ms",
+        "time_authority",
+        "protection_ref_type",
+        "status",
+    ),
+    "owner_policy_current": (
+        "policy_current_id",
+        "strategy_group_id",
+        "symbol",
+        "side",
+        "runtime_profile_id",
+        "enabled_state",
+        "pretrade_candidate_allowed",
+        "action_time_rehearsal_allowed",
+        "live_submit_allowed",
+        "planned_stop_risk_fraction",
+        "max_initial_margin_utilization",
+        "max_leverage",
+        "attempt_cap",
+        "policy_event_ids",
+    ),
+    "strategy_event_required_facts": (
+        "event_required_fact_id",
+        "event_spec_id",
+        "required_facts_version_id",
+        "fact_key",
+        "fact_role",
+        "fact_surface",
+        "operator",
+        "expected_value",
+        "disable_on_match",
+        "freshness_ms",
+        "required_for_promotion",
+        "required_for_ticket",
+        "required_for_finalgate",
+        "missing_blocker_class",
+        "failed_blocker_class",
+        "value_source",
+        "status",
+    ),
+    "runtime_process_outcomes": (
+        "process_outcome_id",
+        "process_name",
+        "scope_key",
+        "process_state",
+        "runtime_head",
+        "source_watermark",
+        "updated_at_ms",
+    ),
+}
+
+JSON_SEMANTIC_FIELDS = {
+    ("runtime_scope_bindings", "conditional_hard_gates"),
+    ("owner_policy_current", "policy_event_ids"),
+    ("strategy_event_required_facts", "expected_value"),
+}
 
 
 class ActionTimeCapabilityIdentityError(ValueError):
@@ -40,6 +170,7 @@ class CapabilityModel(BaseModel):
 
 
 class ActionTimeCapabilityIdentity(CapabilityModel):
+    runtime_lane_identity: RuntimeLaneIdentity
     candidate_scope_id: str = Field(min_length=1)
     strategy_group_id: str = Field(min_length=1)
     symbol: str = Field(min_length=1)
@@ -69,6 +200,260 @@ class ActionTimeCapabilityTruth(CapabilityModel):
     reason: str
     certification_ref: str = ""
     certified_runtime_head: str = ""
+
+
+class ActionTimeCapabilityCertificationPreparation(CapabilityModel):
+    digest_schema: str = CAPABILITY_INPUT_DIGEST_SCHEMA
+    canonical_encoding: str = CANONICAL_ENCODING
+    digest_algorithm: str = DIGEST_ALGORITHM
+    runtime_head: str = Field(min_length=1)
+    release_activation_process_outcome_id: str = Field(min_length=1)
+    release_activation_source_watermark: str = Field(min_length=1)
+    referenced_ids: dict[str, tuple[str, ...]]
+    lane_source_watermarks: tuple[tuple[str, str], ...]
+    certification_input_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class ActionTimeFactDigestRowV1(CapabilityModel):
+    fact_snapshot_id: str = Field(min_length=1)
+    strategy_group_id: str = Field(min_length=1)
+    symbol: str = Field(min_length=1)
+    side: str = Field(min_length=1)
+    runtime_profile_id: str = Field(min_length=1)
+    fact_surface: str = Field(min_length=1)
+    source_kind: str = Field(min_length=1)
+    source_ref: str = Field(min_length=1)
+    computed: bool
+    satisfied: bool
+    freshness_state: str = Field(min_length=1)
+    failed_facts: list[Any]
+    fact_values: dict[str, Any]
+    blocker_class: str | None
+    observed_at_ms: int
+    valid_until_ms: int
+
+
+def prepare_action_time_capability_certification(
+    control_state: Mapping[str, Any],
+    *,
+    runtime_head: str,
+) -> ActionTimeCapabilityCertificationPreparation:
+    runtime_head = str(runtime_head or "").strip()
+    if not runtime_head:
+        raise ValueError("runtime_head_required")
+    identities = build_action_time_capability_identities(control_state)
+    activations = _strict_digest_rows(control_state, "runtime_process_outcomes")
+    if len(activations) != 1:
+        raise ValueError("release_activation_not_unique")
+    activation = activations[0]
+    if str(activation["runtime_head"]) != runtime_head:
+        raise ValueError("runtime_head_mismatch")
+
+    referenced_ids = {
+        "strategy_group_ids": tuple(
+            sorted({identity.strategy_group_id for identity in identities})
+        ),
+        "strategy_group_version_ids": tuple(
+            sorted({identity.strategy_group_version_id for identity in identities})
+        ),
+        "candidate_scope_ids": tuple(
+            sorted({identity.candidate_scope_id for identity in identities})
+        ),
+        "event_spec_ids": tuple(
+            sorted({identity.event_spec_id for identity in identities})
+        ),
+        "policy_current_ids": tuple(
+            sorted(
+                {
+                    identity.runtime_lane_identity.policy_current_id
+                    for identity in identities
+                }
+            )
+        ),
+        "runtime_scope_binding_ids": tuple(
+            sorted({identity.runtime_scope_binding_id for identity in identities})
+        ),
+    }
+    lane_source_watermarks = tuple(
+        sorted(
+            (identity.scope_key, identity.source_watermark)
+            for identity in identities
+        )
+    )
+    tables = []
+    for table_name, column_names in CAPABILITY_DIGEST_TABLE_COLUMNS.items():
+        canonical_rows = []
+        for row in _strict_digest_rows(control_state, table_name):
+            canonical_rows.append(
+                [
+                    [
+                        column,
+                        _canonical_sql_value(
+                            row[column],
+                            json_semantic=(table_name, column)
+                            in JSON_SEMANTIC_FIELDS,
+                        ),
+                    ]
+                    for column in column_names
+                ]
+            )
+        tables.append([table_name, canonical_rows])
+    payload = {
+        "schema": CAPABILITY_INPUT_DIGEST_SCHEMA,
+        "encoding": CANONICAL_ENCODING,
+        "algorithm": DIGEST_ALGORITHM,
+        "runtime_head": runtime_head,
+        "release_activation": {
+            key: activation[key]
+            for key in CAPABILITY_DIGEST_TABLE_COLUMNS[
+                "runtime_process_outcomes"
+            ]
+        },
+        "referenced_ids": referenced_ids,
+        "lane_source_watermarks": lane_source_watermarks,
+        "tables": tables,
+    }
+    canonical_bytes = json.dumps(
+        payload,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = "sha256:" + sha256(canonical_bytes).hexdigest()
+    return ActionTimeCapabilityCertificationPreparation(
+        runtime_head=runtime_head,
+        release_activation_process_outcome_id=str(
+            activation["process_outcome_id"]
+        ),
+        release_activation_source_watermark=str(activation["source_watermark"]),
+        referenced_ids=referenced_ids,
+        lane_source_watermarks=lane_source_watermarks,
+        certification_input_digest=digest,
+    )
+
+
+def apply_prepared_action_time_capability_certification(
+    conn: sa.engine.Connection | None,
+    *,
+    prepared: ActionTimeCapabilityCertificationPreparation,
+    control_state: Mapping[str, Any],
+    runtime_head: str,
+    certification_ref: str,
+    expected_lane_count: int,
+    now_ms: int,
+) -> dict[str, Any]:
+    current = prepare_action_time_capability_certification(
+        control_state,
+        runtime_head=runtime_head,
+    )
+    if current != prepared:
+        result = _certification_result(
+            status="blocked",
+            certified_lane_count=0,
+            first_blocker="certification_input_digest_drift",
+            blockers=["certification_input_digest_drift"],
+        )
+        result.update(
+            {
+                "digest_schema": current.digest_schema,
+                "canonical_encoding": current.canonical_encoding,
+                "prepared_certification_input_digest": (
+                    prepared.certification_input_digest
+                ),
+                "current_certification_input_digest": (
+                    current.certification_input_digest
+                ),
+            }
+        )
+        return result
+    if conn is None:
+        raise ValueError("certification_apply_connection_required")
+    result = certify_action_time_capabilities(
+        conn,
+        control_state=control_state,
+        runtime_head=runtime_head,
+        certification_ref=certification_ref,
+        expected_lane_count=expected_lane_count,
+        now_ms=now_ms,
+    )
+    result.update(
+        {
+            "digest_schema": prepared.digest_schema,
+            "canonical_encoding": prepared.canonical_encoding,
+            "certification_input_digest": prepared.certification_input_digest,
+        }
+    )
+    return result
+
+
+def _strict_digest_rows(
+    control_state: Mapping[str, Any],
+    table_name: str,
+) -> list[dict[str, Any]]:
+    expected_columns = CAPABILITY_DIGEST_TABLE_COLUMNS[table_name]
+    rows = _rows(control_state.get(table_name))
+    for row in rows:
+        if set(row) != set(expected_columns):
+            raise ValueError(f"digest_row_shape_invalid:{table_name}")
+    return sorted(rows, key=lambda row: str(row[expected_columns[0]]))
+
+
+def _canonical_sql_value(value: Any, *, json_semantic: bool) -> list[Any]:
+    if json_semantic:
+        return _canonical_json_value(value)
+    if value is None:
+        return ["sql:null"]
+    if type(value) is bool:
+        return ["sql:bool", value]
+    if type(value) is int:
+        return ["sql:int", str(value)]
+    if isinstance(value, Decimal):
+        return ["sql:decimal", _canonical_decimal(value)]
+    if isinstance(value, float):
+        raise ValueError("binary_float_forbidden")
+    if isinstance(value, str):
+        return ["sql:text", value]
+    raise ValueError(f"unsupported_sql_scalar:{type(value).__name__}")
+
+
+def _canonical_json_value(value: Any) -> list[Any]:
+    if value is None:
+        return ["json:null"]
+    if type(value) is bool:
+        return ["json:bool", value]
+    if type(value) is int:
+        return ["json:number", _canonical_decimal(Decimal(value))]
+    if isinstance(value, Decimal):
+        return ["json:number", _canonical_decimal(value)]
+    if isinstance(value, float):
+        raise ValueError("binary_float_forbidden")
+    if isinstance(value, str):
+        return ["json:string", value]
+    if isinstance(value, list):
+        return ["json:array", [_canonical_json_value(item) for item in value]]
+    if isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise ValueError("json_object_key_must_be_string")
+        return [
+            "json:object",
+            [
+                [key, _canonical_json_value(value[key])]
+                for key in sorted(value)
+            ],
+        ]
+    raise ValueError(f"unsupported_json_scalar:{type(value).__name__}")
+
+
+def _canonical_decimal(value: Decimal) -> str:
+    if not value.is_finite():
+        raise ValueError("non_finite_decimal_forbidden")
+    if value.is_zero():
+        return "0e0"
+    normalized = value.normalize()
+    sign, digits, exponent = normalized.as_tuple()
+    coefficient = ("-" if sign else "") + "".join(str(digit) for digit in digits)
+    return f"{coefficient}e{exponent}"
 
 
 def record_runtime_release_activation(
@@ -182,6 +567,7 @@ def certify_action_time_capabilities(
                 completed_at_ms=now_ms,
                 runtime_head=runtime_head,
                 source_watermark=identity.source_watermark,
+                lane_identity=identity.runtime_lane_identity,
             )
     return _certification_result(
         status="action_time_capability_certified",
@@ -221,6 +607,17 @@ def build_action_time_capability_identities(
         key="candidate_scope_id",
         status="active",
     )
+    runtimes_by_lane: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for runtime in _rows(control_state.get("strategy_runtime_instances")):
+        if runtime.get("status") != "active":
+            continue
+        runtimes_by_lane[
+            (
+                str(runtime.get("strategy_family_id") or ""),
+                str(runtime.get("symbol") or ""),
+                str(runtime.get("side") or ""),
+            )
+        ].append(runtime)
     policies = {
         str(row.get("policy_current_id") or ""): row
         for row in _rows(control_state.get("owner_policy_current"))
@@ -271,6 +668,16 @@ def build_action_time_capability_identities(
         runtime = runtime_bindings.get(candidate_id)
         if runtime is None:
             raise _identity_error(candidate_id, "runtime_scope_binding_missing")
+        runtime_instances = runtimes_by_lane.get((group_id, symbol, side), [])
+        if not runtime_instances:
+            raise _identity_error(candidate_id, "runtime_instance_missing")
+        if len(runtime_instances) != 1:
+            raise _identity_error(candidate_id, "runtime_instance_ambiguous")
+        runtime_instance = runtime_instances[0]
+        if str(runtime_instance.get("strategy_family_version_id") or "") != str(
+            event.get("strategy_group_version_id") or ""
+        ):
+            raise _identity_error(candidate_id, "runtime_instance_version_mismatch")
         policy_id = _required(candidate, "policy_current_id")
         policy = policies.get(policy_id)
         if policy is None:
@@ -288,7 +695,38 @@ def build_action_time_capability_identities(
         if not fact_rows:
             raise _identity_error(candidate_id, "required_fact_contract_missing")
         fact_refs = tuple(sorted(_fact_contract_ref(row) for row in fact_rows))
+        try:
+            runtime_lane_identity = RuntimeLaneIdentity(
+                candidate_scope_id=candidate_id,
+                candidate_scope_event_binding_id=_required(binding, "binding_id"),
+                runtime_scope_binding_id=_required(
+                    runtime,
+                    "runtime_scope_binding_id",
+                ),
+                runtime_instance_id=_required(
+                    runtime_instance,
+                    "runtime_instance_id",
+                ),
+                runtime_profile_id=runtime_profile_id,
+                policy_current_id=policy_id,
+                strategy_group_id=group_id,
+                strategy_group_version_id=group_version_id,
+                symbol=symbol,
+                asset_class=_required(candidate, "asset_class"),
+                side=side,
+                event_spec_id=event_spec_id,
+                event_spec_version=_required(event, "event_spec_version"),
+                event_id=_required(event, "event_id"),
+                timeframe=_required(event, "timeframe"),
+                time_authority=_required(event, "time_authority"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise _identity_error(
+                candidate_id,
+                f"runtime_lane_identity_invalid:{exc}",
+            ) from exc
         identity_values = {
+            "runtime_lane_identity": runtime_lane_identity.model_dump(mode="json"),
             "candidate_scope_id": candidate_id,
             "strategy_group_id": group_id,
             "symbol": symbol,

@@ -49,7 +49,10 @@ def main(argv: list[str] | None = None) -> int:
     engine = sa.create_engine(args.database_url)
     try:
         with engine.connect() as conn:
-            state = PgBackedRuntimeControlStateRepository(conn).read_control_state()
+            state = (
+                PgBackedRuntimeControlStateRepository(conn)
+                .read_deploy_validation_state()
+            )
     except (RuntimeControlStateRepositoryError, sa.exc.SQLAlchemyError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -73,7 +76,7 @@ def _report(state: dict[str, Any]) -> dict[str, Any]:
         "status": "runtime_control_state_repository_valid",
         "source_mode": state.get("source_mode"),
         "projection_target": state.get("projection_target"),
-        "strategy_group_count": table_counts.get("strategy_groups", 0),
+        "strategy_group_count": int(state.get("strategy_group_count") or 0),
         "event_spec_count": table_counts.get("strategy_side_event_specs", 0),
         "candidate_scope_count": table_counts.get("candidate_scope", 0),
         "runtime_scope_binding_count": table_counts.get("runtime_scope_bindings", 0),
