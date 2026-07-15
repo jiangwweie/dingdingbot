@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import sys
 import time
-from typing import Sequence
+from typing import Literal, Sequence
 
 import sqlalchemy as sa
 
@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 from src.application.action_time.capability_certification import (  # noqa: E402
     apply_prepared_action_time_capability_certification,
+    build_action_time_certification_reference_v2,
     prepare_action_time_capability_certification,
 )
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
@@ -33,7 +34,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     result = run_pg_certification(
         database_url=args.database_url,
         runtime_head=args.runtime_head,
-        certification_ref=args.certification_ref,
+        stage=args.stage,
+        deploy_nonce=args.deploy_nonce,
         expected_lane_count=args.expected_lane_count,
         fact_snapshot_ids=tuple(args.fact_snapshot_id),
         now_ms=args.now_ms,
@@ -46,7 +48,8 @@ def run_pg_certification(
     *,
     database_url: str,
     runtime_head: str,
-    certification_ref: str,
+    stage: Literal["pre_canary", "post_canary"],
+    deploy_nonce: str,
     expected_lane_count: int,
     fact_snapshot_ids: tuple[str, ...],
     now_ms: int,
@@ -81,6 +84,13 @@ def run_pg_certification(
                     runtime_head=runtime_head,
                     fact_digest_rows=prepare_fact_rows,
                 )
+                reference = build_action_time_certification_reference_v2(
+                    prepared=prepared,
+                    control_state=prepare_state,
+                    fact_digest_rows=prepare_fact_rows,
+                    stage=stage,
+                    deploy_nonce=deploy_nonce,
+                )
         with engine.connect().execution_options(
             isolation_level="SERIALIZABLE"
         ) as apply_conn:
@@ -98,16 +108,21 @@ def run_pg_certification(
                         expected_fact_snapshot_ids=fact_snapshot_ids,
                     )
                 )
-                return apply_prepared_action_time_capability_certification(
+                result = apply_prepared_action_time_capability_certification(
                     apply_conn,
                     prepared=prepared,
                     control_state=apply_state,
                     fact_digest_rows=apply_fact_rows,
                     runtime_head=runtime_head,
-                    certification_ref=certification_ref,
+                    certification_ref=reference.certification_ref(),
                     expected_lane_count=expected_lane_count,
                     now_ms=now_ms,
                 )
+                return {
+                    **result,
+                    "certification_ref": reference.certification_ref(),
+                    "certification_reference": reference.model_dump(mode="json"),
+                }
     finally:
         engine.dispose()
 
@@ -125,7 +140,10 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         required=not bool(os.getenv("PG_DATABASE_URL")),
     )
     parser.add_argument("--runtime-head", required=True)
-    parser.add_argument("--certification-ref", required=True)
+    parser.add_argument(
+        "--stage", choices=("pre_canary", "post_canary"), required=True
+    )
+    parser.add_argument("--deploy-nonce", required=True)
     parser.add_argument("--expected-lane-count", type=int, required=True)
     parser.add_argument(
         "--fact-snapshot-id",

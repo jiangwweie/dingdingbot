@@ -13,9 +13,36 @@ from src.infrastructure.runtime_control_state_repository import (
     RuntimeControlStateRepositoryError,
 )
 from tests.unit.test_action_time_full_chain_impact import pg_control_connection
+from scripts import certify_action_time_capability as certification_script
 
 
 RUNTIME_HEAD = "c" * 40
+
+
+def test_cli_requires_v2_stage_and_deploy_nonce(monkeypatch, capsys):
+    captured = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return {"status": "action_time_capability_certified"}
+
+    monkeypatch.setattr(certification_script, "run_pg_certification", fake_run)
+    result = certification_script.main(
+        [
+            "--database-url", "postgresql://example.invalid/db",
+            "--runtime-head", RUNTIME_HEAD,
+            "--stage", "post_canary",
+            "--deploy-nonce", "nonce-1",
+            "--expected-lane-count", "22",
+            "--fact-snapshot-id", "fact:one",
+        ]
+    )
+
+    assert result == 0
+    assert captured["stage"] == "post_canary"
+    assert captured["deploy_nonce"] == "nonce-1"
+    assert "certification_ref" not in captured
+    assert "action_time_capability_certified" in capsys.readouterr().out
 
 
 def _attach_strategy_runtime_instances(state: dict[str, object]) -> None:

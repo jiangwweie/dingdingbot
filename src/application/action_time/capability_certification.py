@@ -270,7 +270,8 @@ def build_action_time_certification_reference_v2(
                         + sha256(
                             (
                                 f"{PROCESS_NAME}|"
-                                f"{identity.runtime_lane_identity.identity_key}"
+                                f"{identity.runtime_lane_identity.identity_key}|"
+                                f"{identity.source_watermark}"
                             ).encode("utf-8")
                         ).hexdigest()[:32]
                     ),

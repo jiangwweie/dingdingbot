@@ -34,6 +34,31 @@ CANONICAL_LOCK_PATH = Path(
     "/var/lib/brc-deploy/deploy-state/tokyo-runtime-deploy.lock"
 )
 MAX_JOURNAL_ENTRIES = 48
+DEPLOY_PHASES = (
+    "bootstrap_locked",
+    "candidate_staged",
+    "immutable_venv_ready",
+    "previous_release_venv_compatible",
+    "production_writers_fenced",
+    "pre_migration",
+    "migration_in_progress",
+    "schema_migrated",
+    "pointer_active",
+    "release_activation_recorded",
+    "pre_canary_facts",
+    "pre_canary_certified",
+    "pre_canary_projection",
+    "pre_canary_sentinel",
+    "readonly_canary_complete",
+    "post_canary_sentinel",
+    "post_canary_facts",
+    "post_canary_certified",
+    "post_canary_projection",
+    "lifecycle_proof_persisted",
+    "runtime_activation_committed",
+    "policy_applied",
+    "terminal_manifest_consumed",
+)
 PRODUCTION_WRITER_UNITS = (
     "brc-owner-console-backend.service",
     "brc-runtime-signal-watcher.service",
@@ -767,6 +792,9 @@ class DeployJournal:
     def append(self, phase: str, facts: Mapping[str, Any]) -> dict[str, Any]:
         if len(self.entries) >= MAX_JOURNAL_ENTRIES:
             raise ValueError("deploy_journal_entry_limit_exceeded")
+        expected_index = len(self.entries)
+        if expected_index >= len(DEPLOY_PHASES) or phase != DEPLOY_PHASES[expected_index]:
+            raise ValueError("deploy_journal_phase_transition_invalid")
         previous = self.entries[-1] if self.entries else None
         entry = {
             "sequence": len(self.entries) + 1,
@@ -810,6 +838,7 @@ class DeployJournal:
             digest = candidate.pop("entry_digest", None)
             if (
                 entry.get("sequence") != index
+                or entry.get("phase") != DEPLOY_PHASES[index - 1]
                 or entry.get("previous_digest") != (
                     previous.get("entry_digest") if previous else None
                 )

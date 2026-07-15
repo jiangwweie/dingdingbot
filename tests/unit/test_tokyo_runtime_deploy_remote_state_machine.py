@@ -59,16 +59,32 @@ def test_journal_is_hash_chained_and_reloaded(tmp_path):
         old_sha="b" * 40,
         target_sha="a" * 40,
     )
-    journal.append("pre_migration", {"revision": "120"})
-    journal.append("migration_in_progress", {"revision": "120"})
+    journal.append("bootstrap_locked", {"revision": "120"})
+    journal.append("candidate_staged", {"revision": "120"})
 
     reloaded = machine.DeployJournal.load(tmp_path / "journal.json")
 
     assert [entry["phase"] for entry in reloaded.entries] == [
-        "pre_migration",
-        "migration_in_progress",
+        "bootstrap_locked",
+        "candidate_staged",
     ]
     assert reloaded.entries[1]["previous_digest"] == reloaded.entries[0]["entry_digest"]
+
+
+def test_journal_rejects_skipped_or_regressed_phase(tmp_path):
+    journal = machine.DeployJournal(
+        tmp_path / "journal.json",
+        transaction_id="a1",
+        deploy_nonce="nonce-1",
+        old_sha="b" * 40,
+        target_sha="a" * 40,
+    )
+    with pytest.raises(ValueError, match="deploy_journal_phase_transition_invalid"):
+        journal.append("candidate_staged", {})
+    journal.append("bootstrap_locked", {})
+    journal.append("candidate_staged", {})
+    with pytest.raises(ValueError, match="deploy_journal_phase_transition_invalid"):
+        journal.append("bootstrap_locked", {})
 
 
 def test_dependency_identity_binds_lock_and_abi(tmp_path):
