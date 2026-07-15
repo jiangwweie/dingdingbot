@@ -350,6 +350,53 @@ def test_runtime_account_safe_facts_cli_forwards_action_time_invocation_id(
     ]
 
 
+def test_runtime_account_safe_facts_cli_persists_unbound_business_block(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        module._impl,
+        "collect_account_safe_live_facts_from_pg_scope",
+        lambda *args, **kwargs: {"status": "partial"},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "build_runtime_account_safe_facts",
+        lambda **kwargs: {
+            "status": "runtime_account_safe_facts_blocked",
+            "checks": {"account_safe_facts_ready": False},
+            "blockers": ["active_position_or_open_order_not_clear"],
+        },
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "write_account_safe_fact_snapshots",
+        lambda *args, **kwargs: (
+            seen.update(kwargs) or ["fact:account-safe", "fact:account-mode"]
+        ),
+    )
+
+    exit_code = module.main(
+        [
+            "--database-url",
+            "sqlite:///:memory:",
+            "--allow-non-postgres-for-test",
+            "--action-time-invocation-id",
+            "action_time_invocation:unit",
+        ]
+    )
+
+    assert exit_code == 0
+    assert seen["action_time_invocation_id"] is None
+    output = json.loads(capsys.readouterr().out)
+    assert output["process_outcome"] == {
+        "process_state": "business_blocked",
+        "business_state": "temporarily_unavailable",
+        "first_blocker": "active_position_or_open_order_not_clear",
+    }
+
+
 def test_runtime_account_safe_facts_normalizes_asyncpg_dsn_for_sync_projector(
     monkeypatch: pytest.MonkeyPatch,
 ):

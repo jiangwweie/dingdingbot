@@ -90,11 +90,25 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_seconds=args.timeout_seconds,
             )
             artifact = build_runtime_account_safe_facts(live_facts=live_facts)
+            account_safe_ready = (
+                artifact["checks"]["account_safe_facts_ready"] is True
+            )
+            business_blocker = None
+            fact_binding_invocation_id = args.action_time_invocation_id
+            if args.action_time_invocation_id and not account_safe_ready:
+                business_blocker = str(
+                    (artifact.get("blockers") or [
+                        "action_time_account_safe_facts_not_satisfied"
+                    ])[0]
+                )
+                # Persist the fail-closed facts, but never bind an unsatisfied
+                # fact set into the action-time invocation.
+                fact_binding_invocation_id = None
             fact_snapshot_ids = write_account_safe_fact_snapshots(
                 conn,
                 artifact=artifact,
                 source_ref="runtime_account_safe_pg_scope_readonly",
-                action_time_invocation_id=args.action_time_invocation_id,
+                action_time_invocation_id=fact_binding_invocation_id,
             )
     finally:
         engine.dispose()
@@ -106,11 +120,22 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "status": artifact["status"],
-                "account_safe_facts_ready": artifact["checks"][
-                    "account_safe_facts_ready"
-                ],
+                "account_safe_facts_ready": account_safe_ready,
                 "action_time_invocation_id": args.action_time_invocation_id,
                 "pg_fact_snapshot_ids": sorted(fact_snapshot_ids),
+                "process_outcome": (
+                    {
+                        "process_state": "business_blocked",
+                        "business_state": "temporarily_unavailable",
+                        "first_blocker": business_blocker,
+                    }
+                    if business_blocker
+                    else {
+                        "process_state": "succeeded",
+                        "business_state": "ready",
+                        "first_blocker": None,
+                    }
+                ),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -119,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
     return (
         0
         if (
-            artifact["checks"]["account_safe_facts_ready"] is True
+            account_safe_ready
+            or business_blocker is not None
             or args.allow_blocked_current_projection
         )
         else 2

@@ -27,6 +27,7 @@ from src.application.readmodels.watcher_decision_fact_projection import (
     WATCHER_SAFETY_BOOLEAN_KEYS,
     WatcherRuntimeEffect,
     compact_json_size,
+    project_compact_text_array,
     validate_compact_text_array,
 )
 from src.domain.execution_intent import ExecutionIntent
@@ -1473,11 +1474,11 @@ def _runtime_observation_response_projection(
             ),
         }
     )
-    blockers = validate_compact_text_array(
+    blockers = project_compact_text_array(
         "blockers",
         list(payload.get("blockers") or []),
     )
-    warnings = validate_compact_text_array(
+    warnings = project_compact_text_array(
         "warnings",
         list(payload.get("warnings") or []),
     )

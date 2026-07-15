@@ -57,6 +57,21 @@ def validate_compact_text_array(field: str, values: Any) -> list[str]:
     return result
 
 
+def project_compact_text_array(field: str, values: Any) -> list[str]:
+    """Bound transport cardinality while preserving the first decision blocker."""
+
+    if not isinstance(values, list):
+        raise ValueError(f"watcher_compact_projection_oversize:{field}")
+    for value in values:
+        if not isinstance(value, str) or len(value.encode("utf-8")) > 256:
+            raise ValueError(f"watcher_compact_projection_oversize:{field}")
+    if len(values) <= 64:
+        return validate_compact_text_array(field, values)
+    retained = list(values[:63])
+    retained.append(f"additional_{field}_omitted:{len(values) - len(retained)}")
+    return validate_compact_text_array(field, retained)
+
+
 class ActionTimeDecisionFactProjection(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 

@@ -123,3 +123,30 @@ def test_compact_observation_drops_raw_artifacts_and_preserves_decision_facts():
     assert output["signal_snapshot"] == {"logic_version": "v1"}
     assert output["evidence_payload"] == {"breakout": False}
     assert output["action_time_fact_values"] == {"breakout": False}
+
+
+def test_compact_observation_bounds_blocker_cardinality_without_hiding_first_blocker():
+    blockers = [f"missing_required_fact:{index}" for index in range(80)]
+    payload = {
+        "scope": "runtime_next_attempt_observation_cycle_api",
+        "status": "blocked",
+        "runtime_instance_id": "runtime-1",
+        "owner_action_scope": {},
+        "include_exchange": False,
+        "signal_artifact": None,
+        "action_time_ticket": None,
+        "blockers": blockers,
+        "warnings": [],
+        "observation_cycle_plan": {"next_step": "repair_required_facts"},
+        "safety_invariants": _runtime_next_attempt_observation_safety(),
+    }
+
+    compact = _runtime_observation_response_projection(
+        payload,
+        response_projection="watcher_compact",
+    )
+
+    assert len(compact["blockers"]) == 64
+    assert compact["blockers"][0] == blockers[0]
+    assert compact["blockers"][-1] == "additional_blockers_omitted:17"
+    assert payload["blockers"] == blockers
