@@ -8,6 +8,12 @@ implementation_state: LOCAL_IMPLEMENTED_NOT_DEPLOYED
 
 # Dual-Position Hard-Cap Account Risk Model V0
 
+> **Asset-neutral identity override:** instrument identity、rule snapshot、
+> capacity claim、exposure episode 与 risk-cluster membership 的目标设计，以
+> `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md`
+> 为当前权威。本文风险参数继续有效；现有本地实现尚未满足该扩展设计，因此不得据此
+> 宣称 release eligible。
+
 ## Decision Summary
 
 **Owner 已确认采用“双仓位硬上限账户风险模型 V0”**，在保留当前单一

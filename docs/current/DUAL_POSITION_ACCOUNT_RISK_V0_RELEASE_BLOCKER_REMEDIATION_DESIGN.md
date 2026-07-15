@@ -9,6 +9,12 @@ implementation_state: LOCAL_IMPLEMENTED_NO_DEPLOY_PG_CERTIFICATION_PENDING
 
 # Dual-Position Account Risk V0 Release-Blocker Remediation Design
 
+> **Current identity extension:** 本文关于 Account Capacity Claim 的风险守恒修复继续有效；
+> Candidate Scope exact instrument、InstrumentRiskIdentity / RuleSnapshot 分层、
+> exposure episode、snapshot 语义重验和 cluster membership 的新增约束，以
+> `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md`
+> 为当前权威。现有本地实现通过旧 remediation tests 不等于满足资产中立 release gate。
+
 Status: Draft for Owner confirmation
 
 Date: 2026-07-14
