@@ -502,7 +502,10 @@ def test_fact_refresh_returns_exact_ids_for_v2_certification(tmp_path):
     env_file = tmp_path / "runtime.env"
     env_file.write_text("PG_DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
 
+    commands = []
+
     def runner(command, **kwargs):
+        commands.append(tuple(command))
         if any(str(item).endswith("build_runtime_account_safe_facts.py") for item in command):
             return machine.ChildResult(
                 returncode=0,
@@ -526,6 +529,50 @@ def test_fact_refresh_returns_exact_ids_for_v2_certification(tmp_path):
     assert result == {
         "status": "candidate_account_facts_refreshed",
         "fact_snapshot_ids": ("fact:1", "fact:2"),
+        "account_safe_facts_ready": True,
+    }
+    assert "--allow-blocked-current-projection" in next(
+        command for command in commands
+        if "scripts/build_runtime_account_safe_facts.py" in command
+    )
+
+
+def test_fact_refresh_persists_blocked_existing_position_without_granting_submit(
+    tmp_path,
+):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text(
+        "PG_DATABASE_URL='postgresql://example.invalid/db'\n",
+        encoding="utf-8",
+    )
+
+    def runner(command, **kwargs):
+        return machine.ChildResult(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "status": "runtime_account_safe_facts_blocked",
+                    "account_safe_facts_ready": False,
+                    "pg_fact_snapshot_ids": ["fact:existing-position"],
+                }
+            ),
+            stderr="",
+        )
+
+    result = machine.refresh_candidate_account_facts(
+        release_path=release,
+        env_path=env_file,
+        runner=runner,
+    )
+
+    assert result == {
+        "status": "candidate_account_facts_refreshed",
+        "fact_snapshot_ids": ("fact:existing-position",),
+        "account_safe_facts_ready": False,
     }
 
 

@@ -925,6 +925,7 @@ def refresh_candidate_account_facts(
         [
             str(python), "scripts/build_runtime_account_safe_facts.py",
             "--require-database-url", "--env-file", str(env_path),
+            "--allow-blocked-current-projection",
         ],
         release=release,
         timeout=90,
@@ -940,7 +941,11 @@ def refresh_candidate_account_facts(
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("account_fact_refresh_receipt_invalid") from exc
     if (
-        payload.get("account_safe_facts_ready") is not True
+        payload.get("status") not in {
+            "runtime_account_safe_facts_ready",
+            "runtime_account_safe_facts_blocked",
+        }
+        or not isinstance(payload.get("account_safe_facts_ready"), bool)
         or not ids
         or len(ids) > 128
         or len(ids) != len(set(ids))
@@ -949,6 +954,7 @@ def refresh_candidate_account_facts(
     return {
         "status": "candidate_account_facts_refreshed",
         "fact_snapshot_ids": ids,
+        "account_safe_facts_ready": payload["account_safe_facts_ready"],
     }
 
 
