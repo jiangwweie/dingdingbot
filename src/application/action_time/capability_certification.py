@@ -8,7 +8,7 @@ from hashlib import sha256
 import json
 from typing import Any, Literal, Mapping, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 import sqlalchemy as sa
 
 from src.application.readmodels.lifecycle_mutation_enablement_proof import (
@@ -225,9 +225,9 @@ class ActionTimeCapabilityCertificationPreparation(CapabilityModel):
 
 class ActionTimeFactDigestRowV1(CapabilityModel):
     fact_snapshot_id: str = Field(min_length=1)
-    strategy_group_id: str = Field(min_length=1)
-    symbol: str = Field(min_length=1)
-    side: str = Field(min_length=1)
+    strategy_group_id: str | None = Field(default=None, min_length=1)
+    symbol: str | None = Field(default=None, min_length=1)
+    side: str | None = Field(default=None, min_length=1)
     runtime_profile_id: str = Field(min_length=1)
     fact_surface: str = Field(min_length=1)
     source_kind: str = Field(min_length=1)
@@ -240,6 +240,16 @@ class ActionTimeFactDigestRowV1(CapabilityModel):
     blocker_class: str | None
     observed_at_ms: int
     valid_until_ms: int
+
+    @model_validator(mode="after")
+    def validate_lane_scope(self) -> "ActionTimeFactDigestRowV1":
+        scope = (self.strategy_group_id, self.symbol, self.side)
+        present = tuple(value is not None for value in scope)
+        if any(present) and not all(present):
+            raise ValueError("fact_digest_lane_identity_partial")
+        if self.fact_surface == "action_time_private" and not all(present):
+            raise ValueError("fact_digest_private_lane_identity_missing")
+        return self
 
 
 class ActionTimeFactSetDigestV1(CapabilityModel):

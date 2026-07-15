@@ -46,6 +46,7 @@ def _runner(
     live_ready: bool = False,
     generic_post_status: int = 405,
     ccxt_version: str = CERTIFIED_CCXT_VERSION,
+    manifest_v2: bool = False,
 ):
     module = _load_module()
     manifest = {
@@ -53,6 +54,12 @@ def _runner(
         "generated_at_utc": "2026-06-10T05:07:28Z",
         "local_git": {"head": EXPECTED_HEAD, "short_head": "0c350ca7"},
     }
+    if manifest_v2:
+        manifest = {
+            "schema": "brc.runtime_release_manifest.v2",
+            "target_sha": EXPECTED_HEAD,
+            "git_ref": "codex/release",
+        }
 
     def runner(command):
         remote = command[-1]
@@ -176,6 +183,27 @@ def test_postdeploy_verifier_passes_archive_release_with_readonly_api_checks():
     assert all(item["expected_status"] == 401 for item in runtime_write_checks)
     assert all(item["http_status"] == 401 for item in runtime_write_checks)
     assert all(value is False for value in report["safety_invariants"].values())
+
+
+def test_postdeploy_verifier_accepts_runtime_release_manifest_v2_target_sha():
+    module = _load_module()
+
+    report = module.build_postdeploy_report(
+        host="tokyo",
+        deploy_root="~/brc-deploy",
+        api_base="http://127.0.0.1:18080",
+        expected_current_head=EXPECTED_HEAD,
+        expected_migration_count=70,
+        expected_latest_migration=LATEST_MIGRATION,
+        connect_timeout_seconds=8,
+        runner=_runner(manifest_v2=True),
+    )
+
+    assert report["status"] == "postdeploy_acceptance_passed"
+    assert report["facts"]["release_identity"]["head"] == EXPECTED_HEAD
+    assert report["facts"]["release_identity"]["manifest"]["schema"] == (
+        "brc.runtime_release_manifest.v2"
+    )
 
 
 def test_postdeploy_http_check_retries_only_transport_failure_inside_one_ssh_call():

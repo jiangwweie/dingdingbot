@@ -82,15 +82,16 @@ def discover_canary_mutation_scope(
         "SELECT strategy_group_id,symbol,side FROM brc_pretrade_readiness_rows "
         "ORDER BY strategy_group_id,symbol,side LIMIT 22",
     )
-    facts = _ids(
-        _rows(
+    recent_facts = [
+        str(row["fact_snapshot_id"])
+        for row in _rows(
             conn,
             "SELECT fact_snapshot_id FROM brc_runtime_fact_snapshots "
             "ORDER BY created_at_ms DESC,fact_snapshot_id DESC LIMIT 128",
-        ),
-        "fact_snapshot_id",
-    )
-    facts.update(
+        )
+        if row.get("fact_snapshot_id") is not None
+    ]
+    lane_facts = {
         str(row[name])
         for row in lanes
         for name in (
@@ -98,20 +99,32 @@ def discover_canary_mutation_scope(
             "account_safe_fact_snapshot_id", "account_mode_fact_snapshot_id",
         )
         if row.get(name)
+    }
+    facts = _bounded_scope_ids(
+        required_ids=lane_facts,
+        recent_ids=recent_facts,
+        limit=128,
+        overflow_error="canary_scope_fact_limit_exceeded",
     )
-    if len(facts) > 128:
-        raise ValueError("canary_scope_fact_limit_exceeded")
-    signals = _ids(
-        _rows(
+    recent_signals = [
+        str(row["signal_event_id"])
+        for row in _rows(
             conn,
             "SELECT signal_event_id FROM brc_live_signal_events "
             "ORDER BY created_at_ms DESC,signal_event_id DESC LIMIT 22",
-        ),
-        "signal_event_id",
+        )
+        if row.get("signal_event_id") is not None
+    ]
+    signals = _bounded_scope_ids(
+        required_ids={
+            str(row["signal_event_id"])
+            for row in lanes
+            if row.get("signal_event_id")
+        },
+        recent_ids=recent_signals,
+        limit=22,
+        overflow_error="canary_scope_signal_limit_exceeded",
     )
-    signals.update(str(row["signal_event_id"]) for row in lanes if row.get("signal_event_id"))
-    if len(signals) > 22:
-        raise ValueError("canary_scope_signal_limit_exceeded")
     lane_ids = sorted(str(row["action_time_lane_input_id"]) for row in lanes)
     tickets = _rows_for_any(
         conn,
@@ -235,6 +248,25 @@ def _rows_for_any(
 
 def _ids(rows: list[dict[str, Any]], name: str) -> set[str]:
     return {str(row[name]) for row in rows if row.get(name) is not None}
+
+
+def _bounded_scope_ids(
+    *,
+    required_ids: set[str],
+    recent_ids: list[str],
+    limit: int,
+    overflow_error: str,
+) -> set[str]:
+    """Keep referenced rows first, then fill the bounded scope with recent rows."""
+
+    selected = {str(value) for value in required_ids}
+    if len(selected) > limit:
+        raise ValueError(overflow_error)
+    for value in recent_ids:
+        selected.add(str(value))
+        if len(selected) == limit:
+            break
+    return selected
 
 
 def _guard_logical_value_sizes(slice_id: str, rows: list[dict[str, Any]]) -> None:

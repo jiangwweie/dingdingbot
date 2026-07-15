@@ -4,6 +4,7 @@ import ast
 import hashlib
 import json
 from pathlib import Path
+import stat
 
 import pytest
 
@@ -377,6 +378,46 @@ def test_writer_fence_installs_all_interlocks_before_stopping_writers(tmp_path):
     assert result["fence_inode"] == 77
 
 
+def test_writer_fence_treats_not_yet_installed_canary_units_as_stopped(tmp_path):
+    release = tmp_path / "candidate"
+    (release / ".venv/bin").mkdir(parents=True)
+    (release / ".venv/bin/python").write_text("", encoding="utf-8")
+    (release / "scripts").mkdir()
+    (release / "scripts/set_production_writer_fence.py").write_text("", encoding="utf-8")
+    dropin = release / "deploy/systemd/production-writer-fence.conf"
+    dropin.parent.mkdir(parents=True)
+    dropin.write_text("[Unit]\nConditionPathExists=!/marker\n", encoding="utf-8")
+    missing = {
+        "brc-runtime-signal-watcher-canary.service",
+        "brc-owner-console-canary-readonly.service",
+    }
+
+    def runner(command, **kwargs):
+        if command[1] == "stop" and command[2] in missing:
+            return machine.ChildResult(returncode=5, stdout="", stderr="not found")
+        if command[1:4] == ["show", "--property=LoadState", "--value"]:
+            state = "not-found" if command[4] in missing else "loaded"
+            return machine.ChildResult(returncode=0, stdout=state + "\n", stderr="")
+        if "--engage" in command:
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"status":"fence_engaged","inode":77}',
+                stderr="",
+            )
+        return machine.ChildResult(returncode=0, stdout="inactive\n", stderr="")
+
+    result = machine.engage_production_writer_fence(
+        release_path=release,
+        transaction_id="a1b2c3d4",
+        deploy_nonce="nonce-a1b2c3d4",
+        target_sha="a" * 40,
+        runner=runner,
+    )
+
+    assert result["status"] == "production_writers_fenced"
+    assert sorted(result["units_not_installed"]) == sorted(missing)
+
+
 def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
     tmp_path
 ):
@@ -502,10 +543,85 @@ def test_five_readonly_canaries_never_start_production_writer(tmp_path):
     joined = "\n".join(" ".join(command) for command in commands)
     assert joined.count("systemctl start brc-runtime-signal-watcher-canary.service") == 5
     assert "systemctl start brc-owner-console-canary-readonly.service" in joined
+    assert "socket.create_connection" in joined
     assert "systemctl stop brc-owner-console-canary-readonly.service" in joined
     assert "systemctl start brc-owner-console-backend.service" not in joined
     assert "systemctl start brc-runtime-signal-watcher.service" not in joined
     assert result == {"status": "readonly_canary_complete", "successful_ticks": 5}
+
+
+def test_shared_readiness_helper_parent_is_traversable_but_not_listable_or_writable(tmp_path):
+    deploy_root = tmp_path / "deploy"
+    release = deploy_root / "releases/candidate"
+    release.mkdir(parents=True)
+    parent = deploy_root / "control-plane"
+    parent.mkdir(mode=0o700)
+    helper = parent / "check_runtime_postgres_ready.py"
+    helper.write_text("print('ready')\n", encoding="utf-8")
+    helper.chmod(0o755)
+
+    machine._ensure_shared_readiness_helper_access(
+        release_path=release,
+        require_root_owner=False,
+    )
+
+    assert stat.S_IMODE(parent.stat().st_mode) == 0o711
+
+
+def test_canary_runtime_environment_is_derived_from_bounded_pg_scope(tmp_path):
+    deploy_root = tmp_path / "deploy"
+    release = deploy_root / "releases/candidate"
+    release.mkdir(parents=True)
+    env_file = deploy_root / "env/live-readonly.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("PG_DATABASE_URL=postgresql://example.invalid/db\n")
+    runtime_ids = ["strategy-runtime-a", "strategy-runtime-b"]
+
+    def runner(command, **kwargs):
+        return machine.ChildResult(
+            returncode=0,
+            stdout=json.dumps({"runtime_instance_ids": runtime_ids}),
+            stderr="",
+        )
+
+    machine._prepare_canary_runtime_environment(
+        release_path=release,
+        env_path=env_file,
+        lock_handle=None,
+        canonical_lock_path=tmp_path / "lock",
+        require_root_owner=False,
+        runner=runner,
+    )
+
+    target = deploy_root / "env/runtime-signal-watcher-canary.env"
+    assert target.read_text() == (
+        "BRC_CANARY_RUNTIME_INSTANCE_IDS=strategy-runtime-a,strategy-runtime-b\n"
+    )
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+
+
+def test_persistent_runtime_config_is_copied_outside_immutable_release_once(tmp_path):
+    previous = tmp_path / "previous"
+    source = previous / "data/v3_dev.db"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"sqlite-config-v1")
+    target_dir = tmp_path / "var/lib/brc-runtime/config"
+
+    first = machine._provision_persistent_runtime_config(
+        previous_release_path=previous,
+        target_dir=target_dir,
+    )
+    source.write_bytes(b"sqlite-config-v2")
+    second = machine._provision_persistent_runtime_config(
+        previous_release_path=previous,
+        target_dir=target_dir,
+    )
+
+    target = target_dir / "v3_dev.db"
+    assert target.read_bytes() == b"sqlite-config-v1"
+    assert stat.S_IMODE(target_dir.stat().st_mode) == 0o750
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert first["status"] == second["status"] == "persistent_runtime_config_ready"
 
 
 def test_fact_refresh_returns_exact_ids_for_v2_certification(tmp_path):
@@ -857,3 +973,43 @@ def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
     assert second["status"] == "tokyo_runtime_deploy_applied"
     assert [entry["phase"] for entry in journal.entries] == list(machine.DEPLOY_PHASES)
     assert calls == ["stage"]
+
+
+def test_canary_sentinel_retries_legacy_fact_scope_overflow_with_bounded_wrapper(tmp_path):
+    release = tmp_path / "release"
+    release.mkdir()
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL=postgresql://example.invalid/db\n")
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            return machine.ChildResult(
+                returncode=1,
+                stdout="",
+                stderr="ValueError: canary_scope_fact_limit_exceeded",
+            )
+        return machine.ChildResult(
+            returncode=0,
+            stdout=json.dumps({
+                "status": "canary_mutation_sentinel_captured",
+                "digest": "sha256:" + "a" * 64,
+                "scope": {"schema": "brc.canary_mutation_sentinel_scope.v1"},
+            }),
+            stderr="",
+        )
+
+    result = machine.capture_candidate_mutation_sentinel(
+        release_path=release,
+        env_path=env_file,
+        target_sha="a" * 40,
+        runner=runner,
+        require_root_owner=False,
+    )
+
+    assert result["status"] == "canary_mutation_sentinel_captured"
+    assert len(calls) == 2
+    assert calls[0][1] == "scripts/capture_canary_mutation_sentinel.py"
+    assert calls[1][1] == "-c"
+    assert "BoundedReferencedSet" in calls[1][2]

@@ -7,6 +7,7 @@ import pytest
 from src.application.action_time import capability_certification as certification_module
 from scripts.seed_runtime_control_state_foundation import build_seed_rows
 from src.application.action_time.capability_certification import (
+    ActionTimeFactDigestRowV1,
     ActionTimeCapabilityIdentityError,
     build_action_time_capability_identities,
     current_action_time_capability_truth_by_lane,
@@ -38,6 +39,31 @@ def _fact_digest_rows():
             valid_until_ms=1_800_000_060_000,
         ),
     )
+
+
+def test_global_account_fact_digest_allows_absent_lane_identity() -> None:
+    row = ActionTimeFactDigestRowV1(
+        fact_snapshot_id="fact:global:account-safe:1",
+        strategy_group_id=None,
+        symbol=None,
+        side=None,
+        runtime_profile_id="owner-runtime-console-v1",
+        fact_surface="account_safe",
+        source_kind="live_account_readonly",
+        source_ref="runtime_account_safe_pg_scope_readonly",
+        computed=True,
+        satisfied=False,
+        freshness_state="stale",
+        failed_facts=["active_position_present"],
+        fact_values={"active_position_count": 1},
+        blocker_class="hard_safety_stop",
+        observed_at_ms=1_800_000_000_000,
+        valid_until_ms=1_800_000_060_000,
+    )
+
+    assert row.strategy_group_id is None
+    assert row.symbol is None
+    assert row.side is None
 
 
 def _bounded_certification_state() -> dict[str, object]:

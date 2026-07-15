@@ -203,3 +203,56 @@ def test_executor_resumes_exact_transaction_identity(tmp_path):
     assert len(calls) == 1
     assert "--transaction-id deadbeef" in calls[0]
     assert "--deploy-nonce resume-nonce" in calls[0]
+
+
+def test_executor_resume_skips_only_old_runtime_health_probe(tmp_path):
+    script = tmp_path / "scripts/tokyo_runtime_deploy_remote_state_machine.py"
+    script.parent.mkdir()
+    script.write_text("print('bootstrap')\n", encoding="utf-8")
+    calls = []
+
+    def runner(command: str) -> ShellResult:
+        calls.append(command)
+        return ShellResult(command, '{"status":"ok"}', "", 0)
+
+    plan = {
+        "repo_root": str(tmp_path),
+        "checks": {"blockers": []},
+        "inputs": {
+            "host": "tokyo", "target_commit": "a" * 40,
+            "expected_deployed_head": "b" * 40,
+        },
+        "release": {"head": "a" * 40},
+        "plan_phases": [
+            {
+                "phase": "1_remote_preflight_readonly",
+                "remote_mutation": False,
+                "commands": [
+                    "python3 scripts/probe_tokyo_runtime_governance_readonly.py --json",
+                    "ssh tokyo 'git ls-remote origin'",
+                    "ssh tokyo 'test -f runtime-order-capable.env'",
+                ],
+            },
+            {
+                "phase": "2_single_remote_deploy_transaction",
+                "remote_mutation": True,
+                "remote_state_machine": True,
+                "remote_mutation_authorization": OWNER_STANDING_AUTHORIZATION_REFERENCE,
+            },
+        ],
+    }
+
+    report = execute_git_deploy_plan(
+        plan,
+        apply=True,
+        confirmation_phrase=None,
+        runner=runner,
+        transaction_id="deadbeef",
+        deploy_nonce="resume-nonce",
+    )
+
+    assert report["status"] == "applied"
+    assert not any("probe_tokyo_runtime_governance_readonly.py" in call for call in calls)
+    assert any("git ls-remote" in call for call in calls)
+    assert any("runtime-order-capable.env" in call for call in calls)
+    assert any("--transaction-id deadbeef" in call for call in calls)

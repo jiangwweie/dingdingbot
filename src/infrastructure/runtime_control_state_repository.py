@@ -630,6 +630,13 @@ class PgBackedRuntimeControlStateRepository:
                 for row in candidates
             }
         )
+        runtime_lane_keys = sorted(
+            {
+                (strategy_group_id, symbol_variant, side)
+                for strategy_group_id, symbol, side in lane_keys
+                for symbol_variant in _runtime_symbol_variants(symbol)
+            }
+        )
 
         group_table = tables["strategy_groups"]
         groups = self._execute_capability_statement(
@@ -676,7 +683,7 @@ class PgBackedRuntimeControlStateRepository:
                         runtime_instance_table.c.strategy_family_id,
                         runtime_instance_table.c.symbol,
                         runtime_instance_table.c.side,
-                    ).in_(lane_keys),
+                    ).in_(runtime_lane_keys),
                 )
                 .order_by(*runtime_instance_table.primary_key.columns)
                 .limit(identity_limit + 1)
@@ -2378,24 +2385,16 @@ def _validate_capability_runtime_instances(
     for runtime in state["strategy_runtime_instances"]:
         lane = (
             str(runtime.get("strategy_family_id") or ""),
-            str(runtime.get("symbol") or ""),
+            _canonical_runtime_symbol(runtime.get("symbol")),
             str(runtime.get("side") or ""),
         )
         runtimes_by_lane.setdefault(lane, []).append(runtime)
 
-    event_by_id = {
-        str(row["event_spec_id"]): row
-        for row in state["strategy_side_event_specs"]
-    }
-    binding_by_candidate = {
-        str(row["candidate_scope_id"]): row
-        for row in state["candidate_scope_event_bindings"]
-    }
     for candidate in state["candidate_scope"]:
         candidate_id = str(candidate["candidate_scope_id"])
         lane = (
             str(candidate["strategy_group_id"]),
-            str(candidate["symbol"]),
+            _canonical_runtime_symbol(candidate["symbol"]),
             str(candidate["side"]),
         )
         runtime_rows = runtimes_by_lane.get(lane, [])
@@ -2403,14 +2402,31 @@ def _validate_capability_runtime_instances(
             raise RuntimeControlStateRepositoryError(
                 f"capability_certification_runtime_not_unique:{candidate_id}"
             )
-        binding = binding_by_candidate[candidate_id]
-        event = event_by_id[str(binding["event_spec_id"])]
-        if str(runtime_rows[0]["strategy_family_version_id"]) != str(
-            event["strategy_group_version_id"]
-        ):
+        if not str(runtime_rows[0].get("strategy_family_version_id") or "").strip():
             raise RuntimeControlStateRepositoryError(
-                f"capability_certification_runtime_version_mismatch:{candidate_id}"
+                f"capability_certification_runtime_evaluator_version_missing:{candidate_id}"
             )
+
+
+def _canonical_runtime_symbol(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    if not text:
+        return ""
+    contract = text.split(":", 1)[0]
+    return contract.replace("/", "")
+
+
+def _runtime_symbol_variants(value: Any) -> tuple[str, ...]:
+    text = str(value or "").strip().upper()
+    if not text:
+        return ()
+    variants = {text}
+    canonical = _canonical_runtime_symbol(text)
+    if "/" in text:
+        variants.add(canonical)
+    elif canonical.endswith("USDT") and len(canonical) > 4:
+        variants.add(f"{canonical[:-4]}/USDT:USDT")
+    return tuple(sorted(variants))
 
 
 def _tracks_runtime_lane_identity(row: dict[str, Any]) -> bool:

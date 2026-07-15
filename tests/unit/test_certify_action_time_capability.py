@@ -120,7 +120,7 @@ def _count(conn, table: str) -> int:
     return int(conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one())
 
 
-def _seed_strategy_runtime_instances(conn) -> None:
+def _seed_strategy_runtime_instances(conn, *, ccxt_symbols: bool = False) -> None:
     conn.execute(
         text(
             """
@@ -168,8 +168,16 @@ def _seed_strategy_runtime_instances(conn) -> None:
             {
                 "runtime_instance_id": "runtime:" + row["candidate_scope_id"],
                 "strategy_family_id": row["strategy_group_id"],
-                "strategy_family_version_id": row["strategy_group_version_id"],
-                "symbol": row["symbol"],
+                "strategy_family_version_id": (
+                    f"{row['strategy_group_id']}-v0"
+                    if ccxt_symbols
+                    else row["strategy_group_version_id"]
+                ),
+                "symbol": (
+                    f"{row['symbol'][:-4]}/USDT:USDT"
+                    if ccxt_symbols and str(row["symbol"]).endswith("USDT")
+                    else row["symbol"]
+                ),
                 "side": row["side"],
             },
         )
@@ -225,6 +233,28 @@ def test_capability_certification_state_uses_identity_driven_bounded_profile(
     assert all(" WHERE " in statement for statement in row_queries)
     assert all(" LIMIT " in statement for statement in row_queries)
     assert all(".*" not in statement for statement in row_queries)
+
+
+def test_capability_certification_conserves_ccxt_runtime_symbol_identity(
+    pg_control_connection,
+) -> None:
+    _seed_strategy_runtime_instances(pg_control_connection, ccxt_symbols=True)
+    record_runtime_release_activation(
+        pg_control_connection,
+        runtime_head=RUNTIME_HEAD,
+        release_name="ccxt-symbol-identity-test",
+        verification_ref="postdeploy:ccxt-symbol-identity",
+        now_ms=1_800_000_000_050,
+    )
+    pg_control_connection.commit()
+
+    state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=1_800_000_000_100,
+    ).read_action_time_capability_certification_state()
+
+    assert len(state["candidate_scope"]) == 22
+    assert len(state["strategy_runtime_instances"]) == 22
 
 
 def test_action_time_fact_digest_reader_requires_exact_bounded_id_set(

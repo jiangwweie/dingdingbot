@@ -299,6 +299,23 @@ def execute_git_deploy_plan(
                 )
             continue
         for command in phase.get("commands") or []:
+            if (
+                transaction_id is not None
+                and deploy_nonce is not None
+                and phase.get("phase") == "1_remote_preflight_readonly"
+                and "probe_tokyo_runtime_governance_readonly.py" in str(command)
+            ):
+                command_results.append(
+                    {
+                        "phase": phase.get("phase"),
+                        "command": "<resume-skip-old-runtime-health-probe>",
+                        "returncode": 0,
+                        "stdout_tail": "explicit_journaled_resume",
+                        "stderr_tail": "",
+                        "skipped": True,
+                    }
+                )
+                continue
             mutation_started = mutation_started or bool(phase.get("remote_mutation"))
             result = command_runner(str(command))
             command_results.append(

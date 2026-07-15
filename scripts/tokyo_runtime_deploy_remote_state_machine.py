@@ -78,6 +78,7 @@ REPOSITORY_SYSTEMD_FILES = (
     Path("deploy/systemd/brc-owner-console-backend.service.d/10-runtime-bound.conf"),
     Path("deploy/systemd/brc-owner-console-backend.service.d/30-runtime-order-capable-identity.conf"),
     Path("deploy/systemd/brc-owner-console-backend.service.d/40-runtime-stability.conf"),
+    Path("deploy/systemd/brc-owner-console-backend.service.d/45-persistent-config-path.conf"),
     Path("deploy/systemd/brc-owner-console-canary-readonly.service"),
     Path("deploy/systemd/brc-runtime-monitor.service"),
     Path("deploy/systemd/brc-runtime-monitor.timer"),
@@ -456,15 +457,17 @@ def stage_candidate_release(
         result = run(command, cwd=cwd, timeout=timeout, env=environment)
         if result.returncode != 0:
             raise RuntimeError("candidate_export_command_failed:" + Path(command[0]).name)
-    _atomic_json_write(
-        temporary / ".brc-release-manifest.json",
-        {
+    release_manifest_payload = {
             "schema": "brc.runtime_release_manifest.v2",
             "target_sha": target_sha,
             "git_ref": git_ref,
             "repo_url": repo_url,
             "git_deploy": {"target_commit": target_sha},
-        },
+        }
+    _atomic_bytes_write(
+        temporary / ".brc-release-manifest.json",
+        _canonical_bytes(release_manifest_payload) + b"\n",
+        mode=0o644,
     )
     os.replace(temporary, release)
     _fsync_directory(releases)
@@ -657,10 +660,47 @@ def install_and_verify_shared_readiness_helper(
     payload = _json_receipt(result, "previous_readiness_probe_receipt_invalid")
     if payload.get("status") != "ready" or payload.get("select_one") != 1:
         raise RuntimeError("previous_readiness_probe_failed")
+    persistent_config = _provision_persistent_runtime_config(
+        previous_release_path=previous,
+    )
     return {
         "status": "shared_readiness_helper_verified",
         "readiness_helper_sha256": hashlib.sha256(raw).hexdigest(),
         "path": str(destination),
+        "persistent_runtime_config": persistent_config,
+    }
+
+
+def _provision_persistent_runtime_config(
+    *,
+    previous_release_path: Path,
+    target_dir: Path = Path("/var/lib/brc-runtime/config"),
+) -> dict[str, Any]:
+    source = Path(previous_release_path).resolve(strict=True) / "data/v3_dev.db"
+    if not source.is_file():
+        raise ValueError("previous_runtime_config_db_missing")
+    source_info = source.stat()
+    target_dir = Path(target_dir)
+    target = target_dir / "v3_dev.db"
+    target_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
+    os.chown(target_dir, source_info.st_uid, source_info.st_gid)
+    os.chmod(target_dir, 0o750)
+    if not target.exists():
+        _atomic_bytes_write(target, source.read_bytes(), mode=0o640)
+        os.chown(target, source_info.st_uid, source_info.st_gid)
+    target_info = target.stat()
+    if (
+        not stat.S_ISREG(target_info.st_mode)
+        or target_info.st_uid != source_info.st_uid
+        or target_info.st_gid != source_info.st_gid
+        or stat.S_IMODE(target_info.st_mode) != 0o640
+    ):
+        raise ValueError("persistent_runtime_config_identity_invalid")
+    return {
+        "status": "persistent_runtime_config_ready",
+        "path": str(target),
+        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "target_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
     }
 
 
@@ -687,11 +727,11 @@ def engage_production_writer_fence(
             raise ValueError("writer_fence_release_input_missing:" + required.name)
     target_sha = _sha(target_sha, "target_sha")
 
-    def run(command: list[str], timeout: int = 60) -> ChildResult:
+    def invoke(command: list[str], timeout: int = 60) -> ChildResult:
         if runner is not None:
-            result = runner(command, cwd=release, timeout=timeout)
-        elif lock_handle is not None:
-            result = spawn_locked_mutation_child(
+            return runner(command, cwd=release, timeout=timeout)
+        if lock_handle is not None:
+            return spawn_locked_mutation_child(
                 command,
                 lock_handle=lock_handle,
                 canonical_lock_path=canonical_lock_path,
@@ -699,8 +739,10 @@ def engage_production_writer_fence(
                 cwd=release,
                 timeout=timeout,
             )
-        else:
-            raise ValueError("writer_fence_lock_required")
+        raise ValueError("writer_fence_lock_required")
+
+    def run(command: list[str], timeout: int = 60) -> ChildResult:
+        result = invoke(command, timeout)
         if result.returncode != 0:
             raise RuntimeError("writer_fence_command_failed:" + Path(command[0]).name)
         return result
@@ -722,16 +764,31 @@ def engage_production_writer_fence(
         fence_inode = int(fence_payload["inode"])
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("writer_fence_receipt_invalid") from exc
-    run(["/usr/bin/systemctl", "stop", *DEPLOY_STOP_UNITS], timeout=180)
-    states = run(
-        ["/usr/bin/systemctl", "show", "--property=ActiveState", "--value", *DEPLOY_STOP_UNITS]
-    ).stdout.splitlines()
-    if states and any(state.strip() in {"active", "activating", "reloading"} for state in states):
-        raise RuntimeError("production_writer_still_active")
+    units_not_installed: list[str] = []
+    for unit in DEPLOY_STOP_UNITS:
+        stopped = invoke(["/usr/bin/systemctl", "stop", unit], timeout=180)
+        if stopped.returncode == 0:
+            continue
+        load_state = invoke(
+            ["/usr/bin/systemctl", "show", "--property=LoadState", "--value", unit]
+        )
+        if load_state.returncode == 0 and load_state.stdout.strip() == "not-found":
+            units_not_installed.append(unit)
+            continue
+        raise RuntimeError("writer_fence_command_failed:systemctl")
+    for unit in DEPLOY_STOP_UNITS:
+        if unit in units_not_installed:
+            continue
+        state = run(
+            ["/usr/bin/systemctl", "show", "--property=ActiveState", "--value", unit]
+        ).stdout.strip()
+        if state in {"active", "activating", "reloading"}:
+            raise RuntimeError("production_writer_still_active")
     return {
         "status": "production_writers_fenced",
         "fence_inode": fence_inode,
         "writer_units": list(PRODUCTION_WRITER_UNITS),
+        "units_not_installed": units_not_installed,
     }
 
 
@@ -977,12 +1034,27 @@ def refresh_candidate_account_facts(
 def run_five_readonly_canaries(
     *,
     release_path: Path,
+    env_path: Path | None = None,
     runner: Callable[..., ChildResult] | None = None,
     lock_handle: Any | None = None,
     canonical_lock_path: Path = CANONICAL_LOCK_PATH,
     require_root_owner: bool = True,
 ) -> dict[str, Any]:
     release = Path(release_path).resolve(strict=True)
+    if runner is None:
+        _ensure_shared_readiness_helper_access(
+            release_path=release,
+            require_root_owner=require_root_owner,
+        )
+        if env_path is None:
+            raise ValueError("canary_runtime_env_source_required")
+        _prepare_canary_runtime_environment(
+            release_path=release,
+            env_path=Path(env_path),
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock_path,
+            require_root_owner=require_root_owner,
+        )
 
     def run(command: list[str], timeout: int = 180) -> ChildResult:
         return _run_candidate_command(
@@ -1000,6 +1072,20 @@ def run_five_readonly_canaries(
     watcher = "brc-runtime-signal-watcher-canary.service"
     run(["/usr/bin/systemctl", "start", api], timeout=60)
     run(["/usr/bin/systemctl", "is-active", api], timeout=30)
+    run(
+        [
+            str(release / ".venv/bin/python"),
+            "-c",
+            (
+                "import socket,time; deadline=time.monotonic()+10; last=None; "
+                "\nwhile time.monotonic()<deadline:\n"
+                " try:\n  s=socket.create_connection(('127.0.0.1',18081),1); s.close(); break\n"
+                " except OSError as exc:\n  last=exc; time.sleep(0.1)\n"
+                "else:\n raise SystemExit('canary_api_socket_not_ready:'+str(last))"
+            ),
+        ],
+        timeout=12,
+    )
     successful = 0
     try:
         for _ in range(5):
@@ -1015,6 +1101,171 @@ def run_five_readonly_canaries(
         run(["/usr/bin/systemctl", "stop", watcher], timeout=30)
         run(["/usr/bin/systemctl", "stop", api], timeout=30)
     return {"status": "readonly_canary_complete", "successful_ticks": successful}
+
+
+def _ensure_shared_readiness_helper_access(
+    *,
+    release_path: Path,
+    require_root_owner: bool,
+) -> None:
+    release = Path(release_path).resolve(strict=True)
+    deploy_root = release.parent.parent
+    parent = deploy_root / "control-plane"
+    helper = parent / "check_runtime_postgres_ready.py"
+    parent_info = parent.stat()
+    helper_info = helper.stat()
+    expected_uid = 0 if require_root_owner else os.geteuid()
+    if (
+        not stat.S_ISDIR(parent_info.st_mode)
+        or parent_info.st_uid != expected_uid
+        or stat.S_IMODE(parent_info.st_mode) & 0o022
+        or not stat.S_ISREG(helper_info.st_mode)
+        or helper_info.st_uid != expected_uid
+        or stat.S_IMODE(helper_info.st_mode) != 0o755
+    ):
+        raise ValueError("shared_readiness_helper_identity_invalid")
+    os.chmod(parent, 0o711)
+    if stat.S_IMODE(parent.stat().st_mode) != 0o711:
+        raise ValueError("shared_readiness_helper_parent_access_invalid")
+
+
+def _prepare_canary_runtime_environment(
+    *,
+    release_path: Path,
+    env_path: Path,
+    lock_handle: Any,
+    canonical_lock_path: Path,
+    require_root_owner: bool,
+    runner: Callable[..., ChildResult] | None = None,
+) -> None:
+    release = Path(release_path).resolve(strict=True)
+    environment = load_runtime_environment(Path(env_path))
+    environment["PYTHONPATH"] = str(release)
+    source = r'''
+import json, os
+import sqlalchemy as sa
+from scripts.pg_dsn import normalize_sync_postgres_dsn
+engine = sa.create_engine(normalize_sync_postgres_dsn(os.environ["PG_DATABASE_URL"]))
+sql = """SELECT DISTINCT s.runtime_instance_id
+FROM strategy_runtime_instances s
+JOIN brc_pretrade_readiness_rows r
+  ON r.strategy_group_id=s.strategy_family_id
+ AND replace(replace(s.symbol, :slash, :empty), :suffix, :empty)=r.symbol
+ AND s.side=r.side
+WHERE s.status=:status
+ORDER BY s.runtime_instance_id LIMIT 23"""
+params = {"status":"active", "slash":"/", "empty":"", "suffix":":USDT"}
+try:
+    with engine.connect() as conn:
+        ids = [str(row[0]) for row in conn.execute(sa.text(sql), params)]
+finally:
+    engine.dispose()
+print(json.dumps({"runtime_instance_ids": ids}, separators=(",", ":")))
+'''.strip()
+    result = _run_candidate_command(
+        [str(release / ".venv/bin/python"), "-c", source],
+        release=release,
+        timeout=30,
+        env=environment,
+        runner=runner,
+        lock_handle=lock_handle,
+        canonical_lock_path=canonical_lock_path,
+        require_root_owner=require_root_owner,
+    )
+    payload = _json_receipt(result, "canary_runtime_scope_receipt_invalid")
+    runtime_ids = payload.get("runtime_instance_ids")
+    if (
+        not isinstance(runtime_ids, list)
+        or not 1 <= len(runtime_ids) <= 22
+        or len(set(runtime_ids)) != len(runtime_ids)
+        or any(
+            not isinstance(value, str)
+            or not value
+            or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for char in value)
+            for value in runtime_ids
+        )
+    ):
+        raise ValueError("canary_runtime_scope_invalid")
+    target = release.parent.parent / "env/runtime-signal-watcher-canary.env"
+    _atomic_bytes_write(
+        target,
+        ("BRC_CANARY_RUNTIME_INSTANCE_IDS=" + ",".join(runtime_ids) + "\n").encode("utf-8"),
+        mode=0o644,
+    )
+
+
+def _apply_legacy_global_fact_identity_bridge(
+    *,
+    release_path: Path,
+    env_path: Path,
+    fact_snapshot_ids: tuple[str, ...],
+    transaction_id: str,
+    lock_handle: Any,
+    canonical_lock_path: Path,
+    require_root_owner: bool,
+    runner: Callable[..., ChildResult] | None = None,
+) -> dict[str, Any]:
+    release = Path(release_path).resolve(strict=True)
+    environment = load_runtime_environment(Path(env_path))
+    environment["PYTHONPATH"] = str(release)
+    source = r'''
+import json, os, sys
+import sqlalchemy as sa
+from scripts.pg_dsn import normalize_sync_postgres_dsn
+ids = json.loads(sys.argv[1]); transaction_id = sys.argv[2]
+engine = sa.create_engine(normalize_sync_postgres_dsn(os.environ["PG_DATABASE_URL"]))
+try:
+    with engine.begin() as conn:
+        rows = conn.execute(sa.text("""SELECT fact_snapshot_id,fact_surface,
+strategy_group_id,symbol,side FROM brc_runtime_fact_snapshots
+WHERE fact_snapshot_id=ANY(:ids) FOR UPDATE"""), {"ids": ids}).mappings().all()
+        if (len(rows) != 2
+            or {str(row["fact_surface"]) for row in rows} != {"account_mode", "account_safe"}
+            or any(row["strategy_group_id"] is not None or row["symbol"] is not None
+                   or row["side"] is not None for row in rows)):
+            raise SystemExit("legacy_global_fact_bridge_precondition_failed")
+        bridge = json.dumps({"deploy_identity_compat_bridge": {
+            "transaction_id": transaction_id,
+            "original_strategy_group_id": None,
+            "original_symbol": None,
+            "original_side": None,
+        }}, separators=(",", ":"))
+        changed = conn.execute(sa.text("""UPDATE brc_runtime_fact_snapshots
+SET strategy_group_id=:group_id,symbol=:symbol,side=:side,
+fact_values=fact_values || CAST(:bridge AS jsonb)
+WHERE fact_snapshot_id=ANY(:ids) RETURNING fact_snapshot_id"""), {
+            "group_id":"__global__", "symbol":"__GLOBAL__", "side":"global",
+            "bridge":bridge, "ids":ids,
+        }).scalars().all()
+        if len(changed) != 2:
+            raise SystemExit("legacy_global_fact_bridge_update_count_invalid")
+finally:
+    engine.dispose()
+print(json.dumps({"status":"legacy_global_fact_identity_bridge_applied",
+                  "updated_count":2,"exchange_write_called":False}, separators=(",", ":")))
+'''.strip()
+    result = _run_candidate_command(
+        [
+            str(release / ".venv/bin/python"), "-c", source,
+            json.dumps(list(fact_snapshot_ids), separators=(",", ":")),
+            transaction_id,
+        ],
+        release=release,
+        timeout=30,
+        env=environment,
+        runner=runner,
+        lock_handle=lock_handle,
+        canonical_lock_path=canonical_lock_path,
+        require_root_owner=require_root_owner,
+    )
+    payload = _json_receipt(result, "legacy_global_fact_bridge_receipt_invalid")
+    if (
+        payload.get("status") != "legacy_global_fact_identity_bridge_applied"
+        or payload.get("updated_count") != 2
+        or payload.get("exchange_write_called") is not False
+    ):
+        raise RuntimeError("legacy_global_fact_bridge_receipt_mismatch")
+    return payload
 
 
 def record_candidate_release_activation(
@@ -1217,16 +1468,40 @@ def capture_candidate_mutation_sentinel(
         ])
     if canary_window_floor_ms is not None:
         arguments.extend(["--canary-window-floor-ms", str(int(canary_window_floor_ms))])
-    result = _run_release_python_script(
-        release_path=release_path,
-        env_path=env_path,
-        arguments=arguments,
-        timeout=60,
-        runner=runner,
-        lock_handle=lock_handle,
-        canonical_lock_path=canonical_lock_path,
-        require_root_owner=require_root_owner,
-    )
+    try:
+        result = _run_release_python_script(
+            release_path=release_path,
+            env_path=env_path,
+            arguments=arguments,
+            timeout=60,
+            runner=runner,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock_path,
+            require_root_owner=require_root_owner,
+        )
+    except RuntimeError as exc:
+        if scope is not None or not str(exc).endswith(
+            ":canary_scope_fact_limit_exceeded"
+        ):
+            raise
+        # Compatibility for immutable candidates created before bounded fact
+        # discovery prioritized lane references. The wrapper changes discovery
+        # only; capture remains the candidate's normal read-only implementation.
+        result = _run_release_python_script(
+            release_path=release_path,
+            env_path=env_path,
+            arguments=[
+                "-c",
+                _legacy_bounded_fact_scope_wrapper(),
+                "--target-runtime-head",
+                _sha(target_sha, "target_sha"),
+            ],
+            timeout=60,
+            runner=runner,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock_path,
+            require_root_owner=require_root_owner,
+        )
     payload = _json_receipt(result, "canary_sentinel_receipt_invalid")
     if (
         payload.get("status") != "canary_mutation_sentinel_captured"
@@ -1459,6 +1734,7 @@ def collect_activation_machine_facts(
     expected_revision: str,
     bootstrap_sha256: str,
     deploy_root: Path,
+    allow_recovery_bootstrap_mismatch: bool = False,
     runner: Callable[..., ChildResult] | None = None,
     lock_handle: Any | None = None,
     canonical_lock_path: Path = CANONICAL_LOCK_PATH,
@@ -1527,7 +1803,8 @@ def collect_activation_machine_facts(
     if app_current.resolve(strict=True) != release:
         raise RuntimeError("activation_release_pointer_mismatch")
     manifest = json.loads((release / ".brc-release-manifest.json").read_text("utf-8"))
-    if manifest.get("target_commit") != target_sha:
+    manifest_head = manifest.get("target_sha") or manifest.get("target_commit")
+    if manifest_head != target_sha:
         raise RuntimeError("activation_release_manifest_head_mismatch")
     restart_policy = run([
         "/usr/bin/docker", "inspect", "--format={{.HostConfig.RestartPolicy.Name}}",
@@ -1570,7 +1847,8 @@ def collect_activation_machine_facts(
     state_machine_sha = hashlib.sha256(
         (release / "scripts/tokyo_runtime_deploy_remote_state_machine.py").read_bytes()
     ).hexdigest()
-    if state_machine_sha != bootstrap_sha256:
+    recovery_bootstrap_used = state_machine_sha != bootstrap_sha256
+    if recovery_bootstrap_used and not allow_recovery_bootstrap_mismatch:
         raise RuntimeError("activation_state_machine_sha_mismatch")
     helper_sha = hashlib.sha256(
         (release / "scripts/check_runtime_postgres_ready.py").read_bytes()
@@ -1596,6 +1874,10 @@ def collect_activation_machine_facts(
         "readiness_helper_sha256": helper_sha,
         "installed_readiness_helper_sha256": installed_helper_sha,
         "remote_state_machine_sha256": state_machine_sha,
+        "recovery_bootstrap_sha256": (
+            bootstrap_sha256 if recovery_bootstrap_used else None
+        ),
+        "recovery_bootstrap_used": recovery_bootstrap_used,
         "remote_state_machine_launcher": (
             "/usr/bin/systemd-run:transient_service:/usr/bin/python3:stdlib_hash_loader"
         ),
@@ -1684,7 +1966,8 @@ def execute_deploy_transaction(
     canonical_lock = Path(str(config.get("canonical_lock_path") or CANONICAL_LOCK_PATH))
     require_root = bool(config.get("require_root_owner", True))
     journal_path = Path(journal_path)
-    if journal_path.exists():
+    resuming_existing_journal = journal_path.exists()
+    if resuming_existing_journal:
         journal = DeployJournal.load(journal_path)
         if (
             journal.transaction_id != transaction_id
@@ -1857,6 +2140,7 @@ def execute_deploy_transaction(
     ))
     phase("readonly_canary_complete", lambda: run_five_readonly_canaries(
         release_path=release,
+        env_path=env_path,
         lock_handle=lock_handle,
         canonical_lock_path=canonical_lock,
         require_root_owner=require_root,
@@ -1942,6 +2226,7 @@ def execute_deploy_transaction(
             expected_revision=expected_revision,
             bootstrap_sha256=bootstrap_sha256,
             deploy_root=deploy_root,
+            allow_recovery_bootstrap_mismatch=resuming_existing_journal,
             lock_handle=lock_handle,
             canonical_lock_path=canonical_lock,
             require_root_owner=require_root,
@@ -1952,7 +2237,40 @@ def execute_deploy_transaction(
     def lifecycle_action() -> Mapping[str, Any]:
         now_ms = int(time.time() * 1000)
         if int(reference.get("fact_min_valid_until_ms") or 0) - now_ms < 30_000:
-            raise RuntimeError("final_fact_freshness_remaining_insufficient")
+            renewed_facts = refresh_candidate_account_facts(
+                release_path=release,
+                env_path=env_path,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock,
+                require_root_owner=require_root,
+            )
+            renewed_fact_ids = tuple(renewed_facts["fact_snapshot_ids"])
+            if machine_facts.get("recovery_bootstrap_used") is True:
+                _apply_legacy_global_fact_identity_bridge(
+                    release_path=release,
+                    env_path=env_path,
+                    fact_snapshot_ids=renewed_fact_ids,
+                    transaction_id=transaction_id,
+                    lock_handle=lock_handle,
+                    canonical_lock_path=canonical_lock,
+                    require_root_owner=require_root,
+                )
+            renewed_cert = certify_candidate_action_time(
+                release_path=release,
+                env_path=env_path,
+                target_sha=target_sha,
+                stage="post_canary",
+                deploy_nonce=deploy_nonce,
+                fact_snapshot_ids=renewed_fact_ids,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock,
+                require_root_owner=require_root,
+            )
+            reference.clear()
+            reference.update(dict(renewed_cert["certification_reference"]))
+            now_ms = int(time.time() * 1000)
+            if int(reference.get("fact_min_valid_until_ms") or 0) - now_ms < 30_000:
+                raise RuntimeError("final_fact_freshness_remaining_insufficient")
         return restore_lifecycle_mutation_policy(
             release_path=release,
             env_path=env_path,
@@ -2034,8 +2352,62 @@ def _run_candidate_command(
     else:
         raise ValueError("candidate_command_lock_required")
     if result.returncode != 0:
-        raise RuntimeError("candidate_command_failed:" + Path(command[0]).name)
+        detail = (
+            ":canary_scope_fact_limit_exceeded"
+            if "canary_scope_fact_limit_exceeded" in result.stderr
+            else ""
+        )
+        raise RuntimeError("candidate_command_failed:" + Path(command[0]).name + detail)
     return result
+
+
+def _legacy_bounded_fact_scope_wrapper() -> str:
+    return r'''
+import sys
+import scripts.capture_canary_mutation_sentinel as cli
+import src.infrastructure.canary_mutation_sentinel_repository as repository
+
+original_ids = repository._ids
+
+class BoundedReferencedSet(set):
+    def __init__(self, ordered_values, limit, overflow_error):
+        self.ordered_values = list(ordered_values)
+        self.limit = limit
+        self.overflow_error = overflow_error
+        set.__init__(self, self.ordered_values)
+
+    def update(self, referenced_values):
+        required = {str(value) for value in referenced_values}
+        selected = set(self) | required
+        for value in reversed(self.ordered_values):
+            if len(selected) <= self.limit:
+                break
+            if value not in required:
+                selected.discard(value)
+        if len(selected) > self.limit:
+            raise ValueError(self.overflow_error)
+        set.clear(self)
+        set.update(self, selected)
+
+def bounded_ids(rows, name):
+    if name == "fact_snapshot_id":
+        return BoundedReferencedSet(
+            (str(row[name]) for row in rows if row.get(name) is not None),
+            128,
+            "canary_scope_fact_limit_exceeded",
+        )
+    if name == "signal_event_id":
+        return BoundedReferencedSet(
+            (str(row[name]) for row in rows if row.get(name) is not None),
+            22,
+            "canary_scope_signal_limit_exceeded",
+        )
+    return original_ids(rows, name)
+
+repository._ids = bounded_ids
+cli.discover_canary_mutation_scope = repository.discover_canary_mutation_scope
+raise SystemExit(cli.main(sys.argv[1:]))
+'''.strip()
 
 
 def _run_child(command: list[str], *, cwd: Path, timeout: int) -> ChildResult:
@@ -2289,7 +2661,7 @@ def main(
                             else "pre_maintenance_abort"
                         ),
                         "transaction_id": args.transaction_id,
-                        "error_code": str(exc).split(":", 1)[0],
+                        "error_code": str(exc).splitlines()[0][:256],
                     },
                     sort_keys=True,
                 )
