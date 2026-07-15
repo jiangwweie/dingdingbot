@@ -23,7 +23,7 @@ def _args(tmp_path: Path, **overrides):
         "allow_non_postgres_for_test": False,
         "max_iterations": 1,
         "loop_interval_seconds": 0.0,
-        "cycle_timeout_seconds": 0.0,
+        "cycle_timeout_seconds": 120.0,
         "status_stale_after_seconds": 900.0,
         "one_hour_limit": 25,
         "four_hour_limit": 25,
@@ -955,3 +955,23 @@ def test_notification_dry_run_still_routes_owner_notification_to_server_monitor(
     assert second["notification"]["duplicate_suppressed"] is False
     assert second["notification"]["sent"] is False
     assert calls == []
+
+
+def test_global_deadline_stops_before_next_phase(tmp_path, monkeypatch):
+    clock = iter([0.0, 1.0, 121.0])
+    preview_calls: list[str] = []
+    monkeypatch.setattr(
+        runtime_signal_watcher_tick,
+        "build_preview_artifact",
+        lambda **kwargs: preview_calls.append("preview") or {},
+    )
+
+    artifact = runtime_signal_watcher_tick.build_watcher_tick_artifact(
+        _args(tmp_path, cycle_timeout_seconds=120.0),
+        supervisor_builder=_fake_supervisor("waiting_for_signal"),
+        monotonic=lambda: next(clock),
+    )
+
+    assert artifact["status"] == "watcher_global_deadline_exceeded"
+    assert artifact["phase"] == "after_supervisor"
+    assert preview_calls == []

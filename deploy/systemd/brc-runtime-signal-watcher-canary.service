@@ -1,0 +1,24 @@
+[Unit]
+Description=BRC candidate SHA API-only watcher canary
+Wants=network-online.target
+After=brc-owner-console-canary-readonly.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/brc-deploy/releases/__BRC_CANDIDATE_SHA__
+EnvironmentFile=/home/ubuntu/brc-deploy/env/runtime-signal-watcher-canary.env
+ExecStart=/usr/bin/time -f 'BRC_STAGE_MAX_RSS_KIB stage=canary_core value=%M' /usr/bin/timeout --foreground --signal=TERM --kill-after=3s 132s /home/ubuntu/brc-deploy/releases/__BRC_CANDIDATE_SHA__/.venv/bin/python scripts/runtime_signal_watcher_canary.py --deployment-canary --api-only --no-pg-materialization --no-fact-refresh --api-base http://127.0.0.1:18081 --timeout-seconds 120
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+MemoryAccounting=true
+MemoryHigh=384M
+MemoryMax=512M
+MemorySwapMax=0
+OOMPolicy=stop
+TimeoutStartSec=150s
+TimeoutStopSec=15s
+KillMode=control-group
+

@@ -2450,9 +2450,27 @@ def _build_monitor_artifact(
     runtime_artifacts: list[dict[str, Any]] = []
     runtime_effects: list[dict[str, Any]] = []
     summaries: list[dict[str, Any]] = []
+    monotonic = getattr(args, "monotonic", time.monotonic)
+    global_deadline = getattr(args, "global_deadline_monotonic", None)
     for runtime in selected:
         runtime_args = _monitor_args(args, runtime)
-        runtime_artifact = builder(runtime_args)
+        if global_deadline is not None:
+            remaining_seconds = float(global_deadline) - float(monotonic())
+            if remaining_seconds <= 0:
+                runtime_artifact = {
+                    "status": "blocked",
+                    "blockers": ["watcher_global_deadline_exceeded"],
+                    "warnings": [],
+                    "safety_invariants": _non_executing_runtime_observation_safety(),
+                }
+                runtime_args.timeout_seconds = 0.0
+            else:
+                runtime_args.timeout_seconds = min(
+                    float(runtime_args.timeout_seconds), remaining_seconds
+                )
+                runtime_artifact = builder(runtime_args)
+        else:
+            runtime_artifact = builder(runtime_args)
         runtime_artifact["runtime_instance_id"] = runtime_args.runtime_instance_id
         summaries.append(_summary(runtime, runtime_artifact))
         runtime_effects.append(

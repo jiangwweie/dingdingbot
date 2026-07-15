@@ -38,7 +38,7 @@ DEFAULT_DEPLOY_ROOT = "/home/ubuntu/brc-deploy"
 DEFAULT_SERVICE_NAME = "brc-owner-console-backend.service"
 DEFAULT_ENV_PATH = "/home/ubuntu/brc-deploy/env/live-readonly.env"
 DEFAULT_VENV_PYTHON = (
-    "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
+    "/home/ubuntu/brc-deploy/app/current/.venv/bin/python"
 )
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_GIT_REF = "program/live-safe-v1"
@@ -82,6 +82,19 @@ RUNTIME_SIGNAL_WATCHER_ACTION_TIME_DROPIN_REPO_PATH = (
 BACKEND_RUNTIME_IDENTITY_DROPIN_REPO_PATH = (
     "deploy/systemd/brc-owner-console-backend.service.d/"
     "30-runtime-order-capable-identity.conf"
+)
+BACKEND_RUNTIME_BOUND_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-owner-console-backend.service.d/10-runtime-bound.conf"
+)
+BACKEND_RUNTIME_STABILITY_DROPIN_REPO_PATH = (
+    "deploy/systemd/brc-owner-console-backend.service.d/40-runtime-stability.conf"
+)
+POSTGRES_READINESS_REPO_PATH = "scripts/check_runtime_postgres_ready.py"
+CANARY_API_SERVICE_REPO_PATH = (
+    "deploy/systemd/brc-owner-console-canary-readonly.service"
+)
+CANARY_WATCHER_SERVICE_REPO_PATH = (
+    "deploy/systemd/brc-runtime-signal-watcher-canary.service"
 )
 
 
@@ -461,6 +474,8 @@ def _plan_phases(
             remote_release_path=remote_release_path,
             deploy_root=deploy_root,
             service_name=service_name,
+            previous_release_path=previous_release_path,
+            env_path=env_path,
         )
     )
     backend_identity_process_check = (
@@ -915,8 +930,10 @@ def backend_runtime_identity_dropin_install_command(
     remote_release_path: str,
     deploy_root: str = DEFAULT_DEPLOY_ROOT,
     service_name: str = DEFAULT_SERVICE_NAME,
+    previous_release_path: str | None = None,
+    env_path: str = DEFAULT_ENV_PATH,
 ) -> str:
-    """Install the server-owned runtime identity source into the backend unit."""
+    """Atomically install readiness, backend bounds, and canary unit templates."""
 
     q = shlex.quote
     release_dropin_path = (
@@ -927,17 +944,66 @@ def backend_runtime_identity_dropin_install_command(
     target_dropin_path = (
         f"{target_dropin_dir}/30-runtime-order-capable-identity.conf"
     )
+    release_bound_dropin = (
+        f"{remote_release_path.rstrip('/')}/{BACKEND_RUNTIME_BOUND_DROPIN_REPO_PATH}"
+    )
+    release_stability_dropin = (
+        f"{remote_release_path.rstrip('/')}/{BACKEND_RUNTIME_STABILITY_DROPIN_REPO_PATH}"
+    )
+    target_bound_dropin = f"{target_dropin_dir}/10-runtime-bound.conf"
+    target_stability_dropin = f"{target_dropin_dir}/40-runtime-stability.conf"
+    readiness_source = (
+        f"{remote_release_path.rstrip('/')}/{POSTGRES_READINESS_REPO_PATH}"
+    )
+    control_plane_dir = f"{deploy_root.rstrip('/')}/control-plane"
+    readiness_target = f"{control_plane_dir}/check_runtime_postgres_ready.py"
+    readiness_tmp = f"{readiness_target}.tmp"
+    canary_api_source = (
+        f"{remote_release_path.rstrip('/')}/{CANARY_API_SERVICE_REPO_PATH}"
+    )
+    canary_watcher_source = (
+        f"{remote_release_path.rstrip('/')}/{CANARY_WATCHER_SERVICE_REPO_PATH}"
+    )
+    canary_api_target = "/etc/systemd/system/brc-owner-console-canary-readonly.service"
+    canary_watcher_target = "/etc/systemd/system/brc-runtime-signal-watcher-canary.service"
+    previous_python = (
+        f"{previous_release_path.rstrip('/')}/.venv/bin/python"
+        if previous_release_path
+        else f"{deploy_root.rstrip('/')}/app/current/.venv/bin/python"
+    )
+    candidate_python = f"{remote_release_path.rstrip('/')}/.venv/bin/python"
     runtime_identity_env_path = (
         f"{deploy_root.rstrip('/')}/env/runtime-order-capable.env"
     )
     return (
         "set -eu; "
         f"test -f {q(release_dropin_path)}; "
+        f"test -f {q(release_bound_dropin)}; "
+        f"test -f {q(release_stability_dropin)}; "
+        f"test -f {q(readiness_source)}; "
+        f"test -f {q(canary_api_source)}; "
+        f"test -f {q(canary_watcher_source)}; "
         f"test -f {q(runtime_identity_env_path)}; "
+        f"set -a; . {q(env_path)}; set +a; "
+        f"sudo -n mkdir -p {q(control_plane_dir)}; "
+        f"sudo -n cp {q(readiness_source)} {q(readiness_tmp)}; "
+        f"test $(sha256sum {q(readiness_source)} | awk '{{print $1}}') = "
+        f"$(sudo -n sha256sum {q(readiness_tmp)} | awk '{{print $1}}'); "
+        f"sudo -n chmod 0755 {q(readiness_tmp)}; "
+        f"sudo -n mv {q(readiness_tmp)} {q(readiness_target)}; "
+        f"{q(previous_python)} {q(readiness_target)} --require-database-url --timeout-seconds 8; "
+        f"{q(candidate_python)} {q(readiness_target)} --require-database-url --timeout-seconds 8; "
         f"sudo -n mkdir -p {q(target_dropin_dir)}; "
+        f"sudo -n cp {q(release_bound_dropin)} {q(target_bound_dropin)}; "
         f"sudo -n cp {q(release_dropin_path)} {q(target_dropin_path)}; "
-        f"sudo -n chmod 0644 {q(target_dropin_path)}; "
+        f"sudo -n cp {q(release_stability_dropin)} {q(target_stability_dropin)}; "
+        f"sudo -n sed {q('s|/home/ubuntu/brc-deploy/releases/__BRC_CANDIDATE_SHA__|' + remote_release_path.rstrip('/') + '|g')} {q(canary_api_source)} > /tmp/brc-owner-console-canary-readonly.service; "
+        f"sudo -n sed {q('s|/home/ubuntu/brc-deploy/releases/__BRC_CANDIDATE_SHA__|' + remote_release_path.rstrip('/') + '|g')} {q(canary_watcher_source)} > /tmp/brc-runtime-signal-watcher-canary.service; "
+        f"sudo -n mv /tmp/brc-owner-console-canary-readonly.service {q(canary_api_target)}; "
+        f"sudo -n mv /tmp/brc-runtime-signal-watcher-canary.service {q(canary_watcher_target)}; "
+        f"sudo -n chmod 0644 {q(target_bound_dropin)} {q(target_dropin_path)} {q(target_stability_dropin)} {q(canary_api_target)} {q(canary_watcher_target)}; "
         "sudo -n systemctl daemon-reload; "
+        f"systemctl show {q(service_name)} -p ExecStart | grep -F {q('/home/ubuntu/brc-deploy/app/current/.venv/bin/python -m src.main')} >/dev/null; "
         f"systemctl cat {q(service_name)} | "
         f"grep -F {q('EnvironmentFile=-' + runtime_identity_env_path)} >/dev/null"
     )

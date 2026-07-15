@@ -10,14 +10,11 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/brc-deploy/app/current
 EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-monitor.env
-ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/run_tokyo_runtime_server_monitor.py \
-  --require-database-url \
-  --systemd-unit brc-owner-console-backend.service \
-  --systemd-unit brc-runtime-signal-watcher.timer \
-  --systemd-unit brc-runtime-signal-watcher.service \
-  --systemd-unit brc-ticket-lifecycle-maintenance.timer \
-  --systemd-unit brc-ticket-lifecycle-maintenance.service
-
+ExecStartPre=/usr/bin/timeout --foreground --signal=TERM --kill-after=2s 8s /home/ubuntu/brc-deploy/app/current/.venv/bin/python /home/ubuntu/brc-deploy/control-plane/check_runtime_postgres_ready.py --require-database-url --timeout-seconds 8
+ExecStart=/usr/bin/timeout --foreground --signal=TERM --kill-after=5s 60s /home/ubuntu/brc-deploy/app/current/.venv/bin/python scripts/run_tokyo_runtime_server_monitor.py --require-database-url --systemd-unit brc-owner-console-backend.service --systemd-unit brc-runtime-signal-watcher.timer --systemd-unit brc-runtime-signal-watcher.service --systemd-unit brc-ticket-lifecycle-maintenance.timer --systemd-unit brc-ticket-lifecycle-maintenance.service
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+TimeoutStartSec=75s
+TimeoutStopSec=10s
+KillMode=control-group

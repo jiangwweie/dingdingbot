@@ -64,6 +64,14 @@ TICKET_LIFECYCLE_MAINTENANCE_TIMER_PATH = (
     / "systemd"
     / "brc-ticket-lifecycle-maintenance.timer"
 )
+BACKEND_BOUND_DROPIN_PATH = (
+    REPO_ROOT
+    / "deploy/systemd/brc-owner-console-backend.service.d/10-runtime-bound.conf"
+)
+BACKEND_STABILITY_DROPIN_PATH = (
+    REPO_ROOT
+    / "deploy/systemd/brc-owner-console-backend.service.d/40-runtime-stability.conf"
+)
 
 def test_signal_watcher_service_observes_action_time_ticket_readiness_without_runtime_pin():
     text = SERVICE_PATH.read_text(encoding="utf-8")
@@ -102,6 +110,74 @@ def test_signal_watcher_service_observes_action_time_ticket_readiness_without_ru
         assert f"--strategy-family-id {support_only_strategy_family_id}" not in text
     assert "--runtime-instance-id" not in text
     assert "build_runtime_signal_watcher_readiness_pack.py" not in text
+
+
+def test_runtime_units_use_tracked_venv_readiness_and_containment():
+    watcher = SERVICE_PATH.read_text(encoding="utf-8")
+    for required in (
+        "MemoryAccounting=true",
+        "MemoryHigh=384M",
+        "MemoryMax=512M",
+        "MemorySwapMax=0",
+        "OOMPolicy=stop",
+        "TimeoutStartSec=300s",
+        "TimeoutStopSec=20s",
+        "KillMode=control-group",
+        "StartLimitIntervalSec=15min",
+        "StartLimitBurst=3",
+        "--cycle-timeout-seconds 120",
+    ):
+        assert required in watcher
+    readiness = (
+        "/usr/bin/timeout --foreground --signal=TERM --kill-after=2s 8s "
+        "/home/ubuntu/brc-deploy/app/current/.venv/bin/python "
+        "/home/ubuntu/brc-deploy/control-plane/check_runtime_postgres_ready.py "
+        "--require-database-url --timeout-seconds 8"
+    )
+    for path in (
+        SERVICE_PATH,
+        RUNTIME_MONITOR_SERVICE_PATH,
+        TICKET_LIFECYCLE_MAINTENANCE_SERVICE_PATH,
+        BACKEND_STABILITY_DROPIN_PATH,
+    ):
+        assert readiness in path.read_text(encoding="utf-8")
+    for path in (REPO_ROOT / "deploy/systemd").rglob("*"):
+        if path.is_file():
+            assert "brc-bnb-prelive-20260601" not in path.read_text(
+                encoding="utf-8"
+            )
+
+
+def test_backend_runtime_is_bound_to_release_venv_and_bounded_restart():
+    bound = BACKEND_BOUND_DROPIN_PATH.read_text(encoding="utf-8")
+    stability = BACKEND_STABILITY_DROPIN_PATH.read_text(encoding="utf-8")
+    assert bound == (
+        "[Service]\nExecStart=\n"
+        "ExecStart=/home/ubuntu/brc-deploy/app/current/.venv/bin/python -m src.main\n"
+    )
+    assert "StartLimitIntervalSec=300" in stability
+    assert "StartLimitBurst=3" in stability
+    assert "RestartSec=15s" in stability
+    assert "docker start" not in stability
+
+
+def test_watcher_stage_slots_sum_to_290_seconds_and_are_timed():
+    files = [SERVICE_PATH, PRODUCT_STATE_DROPIN_PATH, ACTION_TIME_DROPIN_PATH, DROPIN_PATH]
+    text = "\n".join(path.read_text(encoding="utf-8") for path in files)
+    for stage in (
+        "postgres_ready",
+        "public_facts",
+        "account_facts",
+        "core_watcher",
+        "projection_summary",
+        "action_time_refresh",
+        "resume_dispatcher",
+    ):
+        assert f"BRC_STAGE_MAX_RSS_KIB stage={stage} value=%M" in text
+    assert "--preflight-timeout-seconds 30" in text
+    assert "systemd-run" not in text
+    assert "nohup" not in text
+    assert " &" not in text
 
 
 def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
@@ -179,11 +255,8 @@ def test_signal_watcher_product_state_dropin_refreshes_owner_console_readmodel()
     assert "--refresh-goal-status" not in text
     assert "--goal-status-output-json" not in text
     assert "owner-console-source-readiness" not in text
-    assert "FinalGate" in text
-    assert "Operation" in text
-    assert "exchange write" in text
-    assert "withdrawals" in text
-    assert "transfers" in text
+    assert "--execute-preflight" not in text
+    assert "--execute-operation-layer-submit" not in text
 
 
 def test_runtime_monitor_service_uses_pg_control_state_not_json_sources():
@@ -226,7 +299,7 @@ def test_ticket_lifecycle_maintenance_timer_is_bounded_and_report_free():
     assert "--report-dir" not in service_text
     assert "--output-json" not in service_text
     assert "ReadWritePaths=" not in service_text
-    assert "TimeoutStartSec=35s" in service_text
+    assert "TimeoutStartSec=45s" in service_text
     assert "--global-deadline-seconds 28" in service_text
     assert "CPUQuota=40%" in service_text
     assert "OnUnitActiveSec=30s" in timer_text

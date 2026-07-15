@@ -1,0 +1,29 @@
+[Unit]
+Description=BRC candidate SHA loopback-only readonly API canary
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/brc-deploy/releases/__BRC_CANDIDATE_SHA__
+EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
+ExecStartPre=/usr/bin/timeout --foreground --signal=TERM --kill-after=2s 8s /home/ubuntu/brc-deploy/releases/__BRC_CANDIDATE_SHA__/.venv/bin/python /home/ubuntu/brc-deploy/control-plane/check_runtime_postgres_ready.py --require-database-url --timeout-seconds 8
+ExecStart=/home/ubuntu/brc-deploy/releases/__BRC_CANDIDATE_SHA__/.venv/bin/python -m uvicorn src.interfaces.api_canary_readonly:app --host 127.0.0.1 --port 18081 --no-access-log
+Restart=on-failure
+RestartSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+MemoryAccounting=true
+MemoryHigh=256M
+MemoryMax=384M
+MemorySwapMax=0
+OOMPolicy=stop
+TimeoutStartSec=45s
+TimeoutStopSec=15s
+KillMode=control-group
+

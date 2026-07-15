@@ -2,6 +2,8 @@
 Description=BRC runtime signal watcher tick
 Wants=network-online.target
 After=network-online.target brc-owner-console-backend.service
+StartLimitIntervalSec=15min
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
@@ -9,33 +11,14 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/brc-deploy/app/current
 EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
-# Optional bounded-experiment overlay. When present, this can raise the runtime
-# ceiling from read-only to order-capable without changing credentials or scope.
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env
 Environment=BRC_STRATEGYGROUP_MAX_SYMBOLS=3
 Environment=BRC_STRATEGYGROUP_STALE_AFTER_SECONDS=180
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-signal-watcher.env
-ExecStartPre=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/fetch_binance_usdm_public_facts.py \
-  --require-database-url
-ExecStartPre=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/build_runtime_account_safe_facts.py \
-  --require-database-url \
-  --env-file /home/ubuntu/brc-deploy/env/live-readonly.env \
-  --allow-blocked-current-projection
-ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/runtime_signal_watcher_tick.py \
-  --env-file /home/ubuntu/brc-deploy/env/live-readonly.env \
-  --api-base http://127.0.0.1:18080 \
-  --source live_market \
-  --strategy-source live_market \
-  --max-iterations 1 \
-  --cycle-timeout-seconds 180 \
-  --status-stale-after-seconds 900 \
-  --require-database-url \
-  --strategy-family-id CPM-RO-001 \
-  --strategy-family-id MPG-001 \
-  --strategy-family-id MI-001 \
-  --strategy-family-id SOR-001 \
-  --strategy-family-id BRF2-001 \
-  --label tokyo-runtime-signal-watcher
+ExecStartPre=/usr/bin/time -f 'BRC_STAGE_MAX_RSS_KIB stage=postgres_ready value=%M' /usr/bin/timeout --foreground --signal=TERM --kill-after=2s 8s /home/ubuntu/brc-deploy/app/current/.venv/bin/python /home/ubuntu/brc-deploy/control-plane/check_runtime_postgres_ready.py --require-database-url --timeout-seconds 8
+ExecStartPre=/usr/bin/time -f 'BRC_STAGE_MAX_RSS_KIB stage=public_facts value=%M' /usr/bin/timeout --foreground --signal=TERM --kill-after=3s 27s /home/ubuntu/brc-deploy/app/current/.venv/bin/python scripts/fetch_binance_usdm_public_facts.py --require-database-url
+ExecStartPre=/usr/bin/time -f 'BRC_STAGE_MAX_RSS_KIB stage=account_facts value=%M' /usr/bin/timeout --foreground --signal=TERM --kill-after=3s 27s /home/ubuntu/brc-deploy/app/current/.venv/bin/python scripts/build_runtime_account_safe_facts.py --require-database-url --env-file /home/ubuntu/brc-deploy/env/live-readonly.env --allow-blocked-current-projection
+ExecStart=/usr/bin/time -f 'BRC_STAGE_MAX_RSS_KIB stage=core_watcher value=%M' /usr/bin/timeout --foreground --signal=TERM --kill-after=3s 122s /home/ubuntu/brc-deploy/app/current/.venv/bin/python scripts/runtime_signal_watcher_tick.py --env-file /home/ubuntu/brc-deploy/env/live-readonly.env --api-base http://127.0.0.1:18080 --source live_market --strategy-source live_market --max-iterations 1 --cycle-timeout-seconds 120 --status-stale-after-seconds 900 --require-database-url --strategy-family-id CPM-RO-001 --strategy-family-id MPG-001 --strategy-family-id MI-001 --strategy-family-id SOR-001 --strategy-family-id BRF2-001 --label tokyo-runtime-signal-watcher
 NoNewPrivileges=true
 PrivateTmp=true
 Nice=10
@@ -44,3 +27,11 @@ CPUQuota=60%
 IOAccounting=true
 IOSchedulingClass=best-effort
 IOSchedulingPriority=6
+MemoryAccounting=true
+MemoryHigh=384M
+MemoryMax=512M
+MemorySwapMax=0
+OOMPolicy=stop
+TimeoutStartSec=300s
+TimeoutStopSec=20s
+KillMode=control-group

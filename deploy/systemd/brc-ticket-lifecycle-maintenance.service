@@ -11,13 +11,8 @@ WorkingDirectory=/home/ubuntu/brc-deploy/app/current
 EnvironmentFile=/home/ubuntu/brc-deploy/env/live-readonly.env
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/runtime-order-capable.env
 EnvironmentFile=-/home/ubuntu/brc-deploy/env/ticket-lifecycle-maintenance.env
-ExecStart=/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python scripts/run_ticket_bound_lifecycle_maintenance_once.py \
-  --require-database-url \
-  --max-lifecycle-scopes 1 \
-  --max-actions-per-scope 16 \
-  --snapshot-timeout-seconds 8 \
-  --global-deadline-seconds 28
-
+ExecStartPre=/usr/bin/timeout --foreground --signal=TERM --kill-after=2s 8s /home/ubuntu/brc-deploy/app/current/.venv/bin/python /home/ubuntu/brc-deploy/control-plane/check_runtime_postgres_ready.py --require-database-url --timeout-seconds 8
+ExecStart=/usr/bin/timeout --foreground --signal=TERM --kill-after=2s 28s /home/ubuntu/brc-deploy/app/current/.venv/bin/python scripts/run_ticket_bound_lifecycle_maintenance_once.py --require-database-url --max-lifecycle-scopes 1 --max-actions-per-scope 16 --snapshot-timeout-seconds 8 --global-deadline-seconds 28
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -27,4 +22,6 @@ CPUQuota=40%
 IOAccounting=true
 IOSchedulingClass=best-effort
 IOSchedulingPriority=6
-TimeoutStartSec=35s
+TimeoutStartSec=45s
+TimeoutStopSec=10s
+KillMode=control-group

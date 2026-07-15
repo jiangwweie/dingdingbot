@@ -292,6 +292,45 @@ def _args(**overrides):
     return type("Args", (), values)()
 
 
+def test_multi_runtime_uses_only_global_deadline_remaining_budget():
+    items = [
+        {
+            "runtime_instance_id": f"runtime-{index}",
+            "strategy_family_id": "SG-1",
+            "strategy_family_version_id": "v1",
+            "symbol": "ETH/USDT:USDT",
+            "side": "long",
+            "carrier_id": "carrier",
+            "status": "active",
+        }
+        for index in range(2)
+    ]
+    seen_timeouts: list[float] = []
+    clock = iter([10.0, 95.0])
+
+    packet = runtime_active_observation_monitor._build_monitor_artifact(
+        _args(
+            max_runtimes=None,
+            timeout_seconds=60.0,
+            global_deadline_monotonic=100.0,
+            monotonic=staticmethod(lambda: next(clock)),
+        ),
+        client=_FakeClient(items),
+        runtime_artifact_builder=lambda args: (
+            seen_timeouts.append(args.timeout_seconds)
+            or {
+                "status": "waiting_for_signal",
+                "blockers": [],
+                "warnings": [],
+                "safety_invariants": {},
+            }
+        ),
+    )
+
+    assert packet["monitored_runtime_count"] == 2
+    assert seen_timeouts == [60.0, 5.0]
+
+
 @pytest.fixture(autouse=True)
 def _default_pg_candidate_scope(monkeypatch):
     def fake_pg_candidate_universe(*, database_url, allow_non_postgres_for_test):

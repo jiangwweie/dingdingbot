@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any, Callable
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -44,6 +45,32 @@ STOP_STATUSES = {
     "no_active_runtimes",
 }
 SupervisorBuilder = Callable[[argparse.Namespace], dict[str, Any]]
+
+
+def _deadline_exceeded_artifact(*, output_dir: Path, phase: str) -> dict[str, Any]:
+    return {
+        "scope": "runtime_signal_watcher_tick",
+        "status": "watcher_global_deadline_exceeded",
+        "output_dir": str(output_dir),
+        "phase": phase,
+        "blockers": ["watcher_global_deadline_exceeded"],
+        "warnings": [],
+        "notification": {
+            "required": False,
+            "attempted": False,
+            "sent": False,
+            "skipped_reason": "watcher_global_deadline_exceeded",
+        },
+        "safety_invariants": {
+            "watcher_tick_only": True,
+            "real_submit_requested": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+            "withdrawal_or_transfer_created": False,
+            "forbidden_effects": [],
+        },
+    }
 
 
 def _notification_required(
@@ -432,6 +459,8 @@ def _supervisor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Nam
         allow_standing_operation_layer_evidence_prep=False,
         include_artifacts=args.include_artifacts,
         skip_disabled_smoke_prerequisite_probe=True,
+        global_deadline_monotonic=getattr(args, "global_deadline_monotonic", None),
+        monotonic=getattr(args, "monotonic", time.monotonic),
     )
 
 
@@ -463,6 +492,8 @@ def _monitor_args(args: argparse.Namespace, output_dir: Path) -> argparse.Namesp
             "owner-authorized-runtime-signal-watcher-in-memory-observation"
         ),
         reason="runtime signal watcher in-memory active observation",
+        global_deadline_monotonic=getattr(args, "global_deadline_monotonic", None),
+        monotonic=getattr(args, "monotonic", time.monotonic),
     )
 
 
@@ -775,32 +806,59 @@ def build_watcher_tick_artifact(
     *,
     supervisor_builder: SupervisorBuilder | None = None,
     notifier: Callable[..., dict[str, Any]] | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     output_dir = Path(args.output_dir).expanduser()
     _ = notifier
 
+    global_timeout = max(float(args.cycle_timeout_seconds), 0.0)
+    deadline = monotonic() + global_timeout
+
+    def remaining(phase: str) -> float:
+        value = deadline - monotonic()
+        if value <= 0:
+            raise TimeoutError(phase)
+        return value
+
     supervisor_builder = supervisor_builder or _build_in_memory_supervisor_artifact
-    supervisor_artifact = supervisor_builder(_supervisor_args(args, output_dir))
+    try:
+        args.global_deadline_monotonic = deadline
+        args.monotonic = monotonic
+        supervisor_args = _supervisor_args(args, output_dir)
+        supervisor_args.cycle_timeout_seconds = min(
+            float(supervisor_args.cycle_timeout_seconds),
+            remaining("before_supervisor"),
+        )
+        supervisor_artifact = supervisor_builder(supervisor_args)
+        remaining("after_supervisor")
+    except TimeoutError as exc:
+        return _deadline_exceeded_artifact(output_dir=output_dir, phase=str(exc))
     status_artifact = (
         supervisor_artifact.get("status_artifact")
         if isinstance(supervisor_artifact.get("status_artifact"), dict)
         else _missing_status_artifact(supervisor_artifact=supervisor_artifact)
     )
 
-    operator_evidence = build_operator_evidence(
-        active_status_artifact=status_artifact,
-        strategy_preview_artifact=build_preview_artifact(
-            source_name=args.strategy_source,
-        ),
-    )
-
-    wakeup_evidence = build_wakeup_evidence(operator_evidence)
-    auto_resume = _post_signal_auto_resume_plan(
-        args=args,
-        status_artifact=status_artifact,
-        operator_evidence=operator_evidence,
-        wakeup_evidence=wakeup_evidence,
-    )
+    try:
+        remaining("before_strategy_preview")
+        preview_artifact = build_preview_artifact(source_name=args.strategy_source)
+        remaining("after_strategy_preview")
+        operator_evidence = build_operator_evidence(
+            active_status_artifact=status_artifact,
+            strategy_preview_artifact=preview_artifact,
+        )
+        remaining("after_operator_evidence")
+        wakeup_evidence = build_wakeup_evidence(operator_evidence)
+        remaining("after_wakeup_evidence")
+        auto_resume = _post_signal_auto_resume_plan(
+            args=args,
+            status_artifact=status_artifact,
+            operator_evidence=operator_evidence,
+            wakeup_evidence=wakeup_evidence,
+        )
+        remaining("after_auto_resume")
+    except TimeoutError as exc:
+        return _deadline_exceeded_artifact(output_dir=output_dir, phase=str(exc))
     status_safety = status_artifact.get("safety_invariants")
     if not isinstance(status_safety, dict):
         status_safety = {}
@@ -975,7 +1033,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--allow-non-postgres-for-test", action="store_true")
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--loop-interval-seconds", type=float, default=0.0)
-    parser.add_argument("--cycle-timeout-seconds", type=float, default=180.0)
+    parser.add_argument("--cycle-timeout-seconds", type=float, default=120.0)
     parser.add_argument("--status-stale-after-seconds", type=float, default=900.0)
     parser.add_argument("--one-hour-limit", type=int, default=25)
     parser.add_argument("--four-hour-limit", type=int, default=25)
