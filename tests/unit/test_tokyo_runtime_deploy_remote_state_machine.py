@@ -229,3 +229,164 @@ def test_candidate_staging_exports_exact_sha_and_writes_manifest_atomically(
     assert any(command[:2] == ("/usr/bin/git", "fetch") for command in commands)
     assert any(command[:2] == ("/usr/bin/git", "archive") for command in commands)
     assert any(command[:2] == ("/usr/bin/tar", "-xf") for command in commands)
+
+
+def test_previous_release_gets_compatible_venv_before_unit_mutation(tmp_path):
+    previous = tmp_path / "releases" / "old"
+    previous.mkdir(parents=True)
+    deployed_venv = tmp_path / "venvs" / "legacy"
+    (deployed_venv / "bin").mkdir(parents=True)
+    python = deployed_venv / "bin" / "python"
+    python.write_text("", encoding="utf-8")
+    commands = []
+
+    def runner(command, **kwargs):
+        commands.append((tuple(command), kwargs["cwd"]))
+        return machine.ChildResult(returncode=0, stdout="", stderr="")
+
+    result = machine.ensure_previous_release_venv_compatibility(
+        previous_release_path=previous,
+        deployed_venv_path=deployed_venv,
+        runner=runner,
+    )
+
+    assert result["status"] == "previous_release_venv_compatible"
+    assert (previous / ".venv").resolve() == deployed_venv.resolve()
+    assert commands == [
+        (
+            (str(previous / ".venv/bin/python"), "-c", "import src.main"),
+            previous,
+        )
+    ]
+
+
+def test_writer_fence_installs_all_interlocks_before_stopping_writers(tmp_path):
+    release = tmp_path / "candidate"
+    (release / ".venv/bin").mkdir(parents=True)
+    (release / ".venv/bin/python").write_text("", encoding="utf-8")
+    (release / "scripts").mkdir()
+    (release / "scripts/set_production_writer_fence.py").write_text("", encoding="utf-8")
+    dropin = release / "deploy/systemd/production-writer-fence.conf"
+    dropin.parent.mkdir(parents=True)
+    dropin.write_text("[Unit]\nConditionPathExists=!/marker\n", encoding="utf-8")
+    commands = []
+
+    def runner(command, **kwargs):
+        commands.append(tuple(command))
+        return machine.ChildResult(
+            returncode=0,
+            stdout='{"status":"fence_engaged","inode":77}',
+            stderr="",
+        )
+
+    result = machine.engage_production_writer_fence(
+        release_path=release,
+        transaction_id="a1b2c3d4",
+        deploy_nonce="nonce-a1b2c3d4",
+        target_sha="a" * 40,
+        runner=runner,
+    )
+
+    install_indexes = [
+        index for index, command in enumerate(commands) if command[0] == "/usr/bin/install"
+    ]
+    engage_index = next(
+        index for index, command in enumerate(commands) if "--engage" in command
+    )
+    stop_index = next(
+        index for index, command in enumerate(commands) if command[1] == "stop"
+    )
+    assert len(install_indexes) == len(machine.PRODUCTION_WRITER_UNITS)
+    assert max(install_indexes) < engage_index < stop_index
+    assert result["status"] == "production_writers_fenced"
+    assert result["fence_inode"] == 77
+
+
+def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
+    tmp_path
+):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+    commands = []
+
+    def runner(command, **kwargs):
+        commands.append((tuple(command), kwargs))
+        if "--status" in command:
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"enabled":true,"exchange_write_called":false}',
+                stderr="",
+            )
+        if command[-2:] == ["alembic", "current"]:
+            return machine.ChildResult(returncode=0, stdout="124 (head)\n", stderr="")
+        return machine.ChildResult(returncode=0, stdout='{"status":"ok"}', stderr="")
+
+    result = machine.run_fenced_schema_migration(
+        release_path=release,
+        env_path=env_file,
+        transaction_id="a1b2c3d4",
+        expected_revision="124",
+        runner=runner,
+    )
+
+    assert result == {
+        "status": "schema_migrated",
+        "revision": "124",
+        "lifecycle_capability_was_enabled": True,
+    }
+    assert all(command[0] == str(python) for command, _ in commands)
+    assert any(command[-3:] == ("-m", "alembic", "upgrade") or "upgrade" in command for command, _ in commands)
+    assert all(
+        item["env"]["DATABASE_URL"] == "postgresql://example.invalid/db"
+        for _, item in commands
+    )
+
+
+def test_candidate_units_install_while_fenced_then_pointer_switches_atomically(tmp_path):
+    release = tmp_path / "releases" / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    helper = release / "scripts/atomic_switch_release_pointer.py"
+    helper.parent.mkdir()
+    helper.write_text("", encoding="utf-8")
+    for relative in machine.REPOSITORY_SYSTEMD_FILES:
+        source = release / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("unit", encoding="utf-8")
+    commands = []
+
+    def runner(command, **kwargs):
+        commands.append(tuple(command))
+        if str(helper) in command:
+            return machine.ChildResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "status": "release_pointer_switched",
+                        "release_pointer": str(tmp_path / "app/current"),
+                        "target_runtime_head": "a" * 40,
+                    }
+                ),
+                stderr="",
+            )
+        return machine.ChildResult(returncode=0, stdout="", stderr="")
+
+    result = machine.install_candidate_units_and_switch_pointer(
+        release_path=release,
+        app_current=tmp_path / "app/current",
+        target_sha="a" * 40,
+        systemd_root=tmp_path / "systemd",
+        runner=runner,
+    )
+
+    pointer_index = next(
+        index for index, command in enumerate(commands) if str(helper) in command
+    )
+    assert all(command[0] == "/usr/bin/install" for command in commands[:pointer_index - 1])
+    assert commands[pointer_index - 1] == ("/usr/bin/systemctl", "daemon-reload")
+    assert result["status"] == "candidate_pointer_active"

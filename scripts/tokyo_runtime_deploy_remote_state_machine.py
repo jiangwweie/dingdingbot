@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import shlex
 import signal
 import stat
 import subprocess
@@ -26,13 +27,40 @@ STDLIB_IMPORT_ALLOWLIST = frozenset(
     {
         "__future__", "argparse", "ctypes", "fcntl", "hashlib", "json", "os",
         "pathlib", "platform", "stat", "sys", "tempfile", "time", "typing",
-        "uuid", "shutil", "signal", "subprocess",
+        "uuid", "shutil", "shlex", "signal", "subprocess",
     }
 )
 CANONICAL_LOCK_PATH = Path(
     "/var/lib/brc-deploy/deploy-state/tokyo-runtime-deploy.lock"
 )
 MAX_JOURNAL_ENTRIES = 48
+PRODUCTION_WRITER_UNITS = (
+    "brc-owner-console-backend.service",
+    "brc-runtime-signal-watcher.service",
+    "brc-runtime-signal-watcher.timer",
+    "brc-runtime-monitor.service",
+    "brc-runtime-monitor.timer",
+    "brc-ticket-lifecycle-maintenance.service",
+    "brc-ticket-lifecycle-maintenance.timer",
+    "brc-runtime-signal-watcher-canary.service",
+    "brc-owner-console-canary-readonly.service",
+)
+REPOSITORY_SYSTEMD_FILES = (
+    Path("deploy/systemd/brc-owner-console-backend.service.d/10-runtime-bound.conf"),
+    Path("deploy/systemd/brc-owner-console-backend.service.d/30-runtime-order-capable-identity.conf"),
+    Path("deploy/systemd/brc-owner-console-backend.service.d/40-runtime-stability.conf"),
+    Path("deploy/systemd/brc-owner-console-canary-readonly.service"),
+    Path("deploy/systemd/brc-runtime-monitor.service"),
+    Path("deploy/systemd/brc-runtime-monitor.timer"),
+    Path("deploy/systemd/brc-runtime-signal-watcher-canary.service"),
+    Path("deploy/systemd/brc-runtime-signal-watcher.service"),
+    Path("deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf"),
+    Path("deploy/systemd/brc-runtime-signal-watcher.service.d/85-action-time-refresh-if-needed.conf"),
+    Path("deploy/systemd/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf"),
+    Path("deploy/systemd/brc-runtime-signal-watcher.timer"),
+    Path("deploy/systemd/brc-ticket-lifecycle-maintenance.service"),
+    Path("deploy/systemd/brc-ticket-lifecycle-maintenance.timer"),
+)
 
 
 class ChildResult:
@@ -53,6 +81,7 @@ def spawn_locked_mutation_child(
     require_root_owner: bool = True,
     cwd: Path,
     timeout: int,
+    env: Mapping[str, str] | None = None,
 ) -> ChildResult:
     """Run one bounded mutation while retaining and revalidating the deploy lock."""
 
@@ -94,6 +123,7 @@ def spawn_locked_mutation_child(
         pass_fds=(lock_fd,),
         start_new_session=False,
         preexec_fn=child_guard,
+        env=dict(env) if env is not None else None,
     )
     return ChildResult(
         returncode=completed.returncode,
@@ -288,6 +318,7 @@ def stage_candidate_release(
             "target_sha": target_sha,
             "git_ref": git_ref,
             "repo_url": repo_url,
+            "git_deploy": {"target_commit": target_sha},
         },
     )
     os.replace(temporary, release)
@@ -394,6 +425,299 @@ def build_immutable_venv(
         "dependency_identity": identity,
         "venv_path": str(target),
         "release_venv": str(release_link),
+    }
+
+
+def ensure_previous_release_venv_compatibility(
+    *,
+    previous_release_path: Path,
+    deployed_venv_path: Path,
+    runner: Callable[..., ChildResult] | None = None,
+    lock_handle: Any | None = None,
+    canonical_lock_path: Path = CANONICAL_LOCK_PATH,
+    require_root_owner: bool = True,
+) -> dict[str, Any]:
+    """Bind the legacy release to its existing interpreter before unit changes."""
+
+    previous = Path(previous_release_path).resolve(strict=True)
+    deployed = Path(deployed_venv_path).resolve(strict=True)
+    if not (deployed / "bin/python").is_file():
+        raise ValueError("previous_release_deployed_venv_invalid")
+    link = previous / ".venv"
+    if os.path.lexists(link):
+        if not link.is_symlink() or link.resolve() != deployed:
+            raise ValueError("previous_release_venv_binding_mismatch")
+    else:
+        temporary = previous / f".venv.{uuid.uuid4().hex}.tmp"
+        os.symlink(str(deployed), temporary)
+        os.replace(temporary, link)
+        _fsync_directory(previous)
+    command = [str(link / "bin/python"), "-c", "import src.main"]
+    if runner is not None:
+        result = runner(command, cwd=previous, timeout=60)
+    elif lock_handle is not None:
+        result = spawn_locked_mutation_child(
+            command,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock_path,
+            require_root_owner=require_root_owner,
+            cwd=previous,
+            timeout=60,
+        )
+    else:
+        raise ValueError("previous_release_venv_lock_required")
+    if result.returncode != 0:
+        raise RuntimeError("previous_release_import_probe_failed")
+    return {
+        "status": "previous_release_venv_compatible",
+        "previous_release": str(previous),
+        "venv_path": str(deployed),
+    }
+
+
+def engage_production_writer_fence(
+    *,
+    release_path: Path,
+    transaction_id: str,
+    deploy_nonce: str,
+    target_sha: str,
+    runner: Callable[..., ChildResult] | None = None,
+    lock_handle: Any | None = None,
+    canonical_lock_path: Path = CANONICAL_LOCK_PATH,
+    require_root_owner: bool = True,
+    systemd_root: Path = Path("/etc/systemd/system"),
+) -> dict[str, Any]:
+    """Install boot-persistent interlocks, engage marker, then stop writers."""
+
+    release = Path(release_path).resolve(strict=True)
+    python = release / ".venv/bin/python"
+    helper = release / "scripts/set_production_writer_fence.py"
+    dropin = release / "deploy/systemd/production-writer-fence.conf"
+    for required in (python, helper, dropin):
+        if not required.is_file():
+            raise ValueError("writer_fence_release_input_missing:" + required.name)
+    target_sha = _sha(target_sha, "target_sha")
+
+    def run(command: list[str], timeout: int = 60) -> ChildResult:
+        if runner is not None:
+            result = runner(command, cwd=release, timeout=timeout)
+        elif lock_handle is not None:
+            result = spawn_locked_mutation_child(
+                command,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+                cwd=release,
+                timeout=timeout,
+            )
+        else:
+            raise ValueError("writer_fence_lock_required")
+        if result.returncode != 0:
+            raise RuntimeError("writer_fence_command_failed:" + Path(command[0]).name)
+        return result
+
+    for unit in PRODUCTION_WRITER_UNITS:
+        destination = Path(systemd_root) / f"{unit}.d/05-production-writer-fence.conf"
+        run(["/usr/bin/install", "-D", "-m", "0644", str(dropin), str(destination)])
+    run(["/usr/bin/systemctl", "daemon-reload"])
+    fence = run(
+        [
+            str(python), str(helper), "--engage",
+            "--deploy-transaction-id", _required(transaction_id, "transaction_id"),
+            "--deploy-nonce", _required(deploy_nonce, "deploy_nonce"),
+            "--target-runtime-head", target_sha,
+        ]
+    )
+    try:
+        fence_payload = json.loads(fence.stdout)
+        fence_inode = int(fence_payload["inode"])
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("writer_fence_receipt_invalid") from exc
+    run(["/usr/bin/systemctl", "stop", *PRODUCTION_WRITER_UNITS], timeout=180)
+    states = run(
+        ["/usr/bin/systemctl", "show", "--property=ActiveState", "--value", *PRODUCTION_WRITER_UNITS]
+    ).stdout.splitlines()
+    if states and any(state.strip() in {"active", "activating", "reloading"} for state in states):
+        raise RuntimeError("production_writer_still_active")
+    return {
+        "status": "production_writers_fenced",
+        "fence_inode": fence_inode,
+        "writer_units": list(PRODUCTION_WRITER_UNITS),
+    }
+
+
+def load_runtime_environment(path: Path) -> dict[str, str]:
+    path = Path(path)
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o002:
+        raise ValueError("runtime_env_file_unsafe")
+    environment = dict(os.environ)
+    for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            raise ValueError(f"runtime_env_line_invalid:{line_number}")
+        key, encoded = line.split("=", 1)
+        key = key.strip()
+        if not key or not key.replace("_", "A").isalnum() or key[0].isdigit():
+            raise ValueError(f"runtime_env_key_invalid:{line_number}")
+        values = shlex.split(encoded, posix=True)
+        if len(values) > 1:
+            raise ValueError(f"runtime_env_value_invalid:{line_number}")
+        environment[key] = values[0] if values else ""
+    return environment
+
+
+def run_fenced_schema_migration(
+    *,
+    release_path: Path,
+    env_path: Path,
+    transaction_id: str,
+    expected_revision: str,
+    runner: Callable[..., ChildResult] | None = None,
+    lock_handle: Any | None = None,
+    canonical_lock_path: Path = CANONICAL_LOCK_PATH,
+    require_root_owner: bool = True,
+) -> dict[str, Any]:
+    """Quiesce lifecycle mutation and run schema changes with candidate Python."""
+
+    release = Path(release_path).resolve(strict=True)
+    python = release / ".venv/bin/python"
+    if not python.is_file():
+        raise ValueError("candidate_python_missing")
+    if not str(expected_revision).isdigit():
+        raise ValueError("expected_revision_invalid")
+    environment = load_runtime_environment(Path(env_path))
+    environment["PYTHONPATH"] = str(release)
+
+    def run(arguments: list[str], timeout: int = 120) -> ChildResult:
+        command = [str(python), *arguments]
+        if runner is not None:
+            result = runner(command, cwd=release, timeout=timeout, env=environment)
+        elif lock_handle is not None:
+            result = spawn_locked_mutation_child(
+                command,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+                cwd=release,
+                timeout=timeout,
+                env=environment,
+            )
+        else:
+            raise ValueError("schema_migration_lock_required")
+        if result.returncode != 0:
+            raise RuntimeError("fenced_schema_command_failed:" + ":".join(arguments[:3]))
+        return result
+
+    status_result = run(
+        ["scripts/set_ticket_lifecycle_mutation_capability.py", "--status", "--require-database-url", "--json"]
+    )
+    try:
+        status_payload = json.loads(status_result.stdout)
+        was_enabled = bool(status_payload["enabled"])
+        if status_payload.get("exchange_write_called") is not False:
+            raise ValueError("lifecycle_status_exchange_side_effect")
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("lifecycle_capability_status_invalid") from exc
+    run(
+        [
+            "scripts/verify_ticket_lifecycle_phase_two_readiness.py",
+            "--require-database-url", "--deploy-quiescence", "--json",
+        ]
+    )
+    run(
+        [
+            "scripts/set_ticket_lifecycle_mutation_capability.py", "--disable",
+            "--require-database-url", "--certification-ref",
+            f"deploy-quiesce:{_required(transaction_id, 'transaction_id')}", "--json",
+        ]
+    )
+    run(["scripts/check_runtime_postgres_ready.py", "--require-database-url", "--json"])
+    run(["-m", "alembic", "heads"])
+    run(["-m", "alembic", "upgrade", "head"], timeout=300)
+    run(["scripts/seed_runtime_control_state_foundation.py", "--apply", "--json"], timeout=180)
+    run(["scripts/validate_runtime_control_state_repository.py", "--json"])
+    current = run(["-m", "alembic", "current"]).stdout
+    if str(expected_revision) not in current.split():
+        raise RuntimeError("schema_revision_mismatch")
+    return {
+        "status": "schema_migrated",
+        "revision": str(expected_revision),
+        "lifecycle_capability_was_enabled": was_enabled,
+    }
+
+
+def install_candidate_units_and_switch_pointer(
+    *,
+    release_path: Path,
+    app_current: Path,
+    target_sha: str,
+    systemd_root: Path = Path("/etc/systemd/system"),
+    runner: Callable[..., ChildResult] | None = None,
+    lock_handle: Any | None = None,
+    canonical_lock_path: Path = CANONICAL_LOCK_PATH,
+    require_root_owner: bool = True,
+) -> dict[str, Any]:
+    """Install candidate-owned unit definitions and atomically activate its pointer."""
+
+    release = Path(release_path).resolve(strict=True)
+    python = release / ".venv/bin/python"
+    helper = release / "scripts/atomic_switch_release_pointer.py"
+    if not python.is_file() or not helper.is_file():
+        raise ValueError("pointer_switch_release_input_missing")
+
+    def run(command: list[str], timeout: int = 60) -> ChildResult:
+        if runner is not None:
+            result = runner(command, cwd=release, timeout=timeout)
+        elif lock_handle is not None:
+            result = spawn_locked_mutation_child(
+                command,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+                cwd=release,
+                timeout=timeout,
+            )
+        else:
+            raise ValueError("pointer_switch_lock_required")
+        if result.returncode != 0:
+            raise RuntimeError("pointer_switch_command_failed:" + Path(command[0]).name)
+        return result
+
+    source_root = Path("deploy/systemd")
+    for relative in REPOSITORY_SYSTEMD_FILES:
+        source = release / relative
+        if not source.is_file():
+            raise ValueError("candidate_systemd_file_missing:" + str(relative))
+        destination = Path(systemd_root) / relative.relative_to(source_root)
+        run(["/usr/bin/install", "-D", "-m", "0644", str(source), str(destination)])
+    run(["/usr/bin/systemctl", "daemon-reload"])
+    pointer = run(
+        [
+            str(python), str(helper),
+            "--current", str(app_current),
+            "--target", str(release),
+            "--expected-sha", _sha(target_sha, "target_sha"),
+        ]
+    )
+    try:
+        payload = json.loads(pointer.stdout)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("pointer_switch_receipt_invalid") from exc
+    if (
+        payload.get("status") != "release_pointer_switched"
+        or payload.get("target_runtime_head") != target_sha
+        or payload.get("release_pointer") != str(app_current)
+    ):
+        raise RuntimeError("pointer_switch_receipt_mismatch")
+    return {
+        "status": "candidate_pointer_active",
+        "release_pointer": str(app_current),
+        "target_runtime_head": target_sha,
     }
 
 
