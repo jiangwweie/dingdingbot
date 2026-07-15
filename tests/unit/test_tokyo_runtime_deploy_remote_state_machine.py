@@ -512,7 +512,14 @@ def test_candidate_units_install_while_fenced_then_pointer_switches_atomically(t
     for relative in machine.REPOSITORY_SYSTEMD_FILES:
         source = release / relative
         source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_text("unit", encoding="utf-8")
+        source.write_text(
+            (
+                "[Service]\nEnvironment=BRC_RUNTIME_HEAD=__BRC_CANDIDATE_SHA__\n"
+                if relative.name == "50-runtime-release-identity.conf"
+                else "unit"
+            ),
+            encoding="utf-8",
+        )
     commands = []
 
     def runner(command, **kwargs):
@@ -547,6 +554,18 @@ def test_candidate_units_install_while_fenced_then_pointer_switches_atomically(t
         (tmp_path / "systemd" / relative.relative_to("deploy/systemd")).is_file()
         for relative in machine.REPOSITORY_SYSTEMD_FILES
     )
+    identity_dropins = [
+        relative
+        for relative in machine.REPOSITORY_SYSTEMD_FILES
+        if relative.name == "50-runtime-release-identity.conf"
+    ]
+    assert len(identity_dropins) == 4
+    for relative in identity_dropins:
+        rendered = (
+            tmp_path / "systemd" / relative.relative_to("deploy/systemd")
+        ).read_text(encoding="utf-8")
+        assert rendered == "[Service]\nEnvironment=BRC_RUNTIME_HEAD=" + "a" * 40 + "\n"
+        assert "__BRC_CANDIDATE_SHA__" not in rendered
     assert result["status"] == "candidate_pointer_active"
 
 

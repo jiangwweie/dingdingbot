@@ -86,16 +86,20 @@ REPOSITORY_SYSTEMD_FILES = (
     Path("deploy/systemd/brc-owner-console-backend.service.d/30-runtime-order-capable-identity.conf"),
     Path("deploy/systemd/brc-owner-console-backend.service.d/40-runtime-stability.conf"),
     Path("deploy/systemd/brc-owner-console-backend.service.d/45-persistent-config-path.conf"),
+    Path("deploy/systemd/brc-owner-console-backend.service.d/50-runtime-release-identity.conf"),
     Path("deploy/systemd/brc-owner-console-canary-readonly.service"),
     Path("deploy/systemd/brc-runtime-monitor.service"),
+    Path("deploy/systemd/brc-runtime-monitor.service.d/50-runtime-release-identity.conf"),
     Path("deploy/systemd/brc-runtime-monitor.timer"),
     Path("deploy/systemd/brc-runtime-signal-watcher-canary.service"),
     Path("deploy/systemd/brc-runtime-signal-watcher.service"),
+    Path("deploy/systemd/brc-runtime-signal-watcher.service.d/50-runtime-release-identity.conf"),
     Path("deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf"),
     Path("deploy/systemd/brc-runtime-signal-watcher.service.d/85-action-time-refresh-if-needed.conf"),
     Path("deploy/systemd/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf"),
     Path("deploy/systemd/brc-runtime-signal-watcher.timer"),
     Path("deploy/systemd/brc-ticket-lifecycle-maintenance.service"),
+    Path("deploy/systemd/brc-ticket-lifecycle-maintenance.service.d/50-runtime-release-identity.conf"),
     Path("deploy/systemd/brc-ticket-lifecycle-maintenance.timer"),
 )
 
@@ -742,6 +746,7 @@ def engage_production_writer_fence(
     """Install boot-persistent interlocks, engage marker, then stop writers."""
 
     release = Path(release_path).resolve(strict=True)
+    target_sha = _sha(target_sha, "target_sha")
     python = release / ".venv/bin/python"
     helper = release / "scripts/set_production_writer_fence.py"
     dropin = release / "deploy/systemd/production-writer-fence.conf"
@@ -974,7 +979,7 @@ def install_candidate_units_and_switch_pointer(
         rendered = source.read_bytes().replace(
             b"/home/ubuntu/brc-deploy/releases/__BRC_CANDIDATE_SHA__",
             str(release).encode("utf-8"),
-        )
+        ).replace(b"__BRC_CANDIDATE_SHA__", target_sha.encode("ascii"))
         if b"__BRC_CANDIDATE_SHA__" in rendered:
             raise ValueError("candidate_systemd_placeholder_unresolved")
         _atomic_bytes_write(destination, rendered, mode=0o644)
@@ -984,7 +989,7 @@ def install_candidate_units_and_switch_pointer(
             str(python), str(helper),
             "--current", str(app_current),
             "--target", str(release),
-            "--expected-sha", _sha(target_sha, "target_sha"),
+            "--expected-sha", target_sha,
         ]
     )
     try:
