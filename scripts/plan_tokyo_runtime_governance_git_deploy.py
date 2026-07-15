@@ -261,7 +261,7 @@ def build_git_deploy_plan(
         short_head=short_head,
     )
 
-    plan_phases = _plan_phases(
+    legacy_plan_phases = _plan_phases(
         host=host,
         repo_root=repo_root,
         repo_url=repo_url,
@@ -290,6 +290,30 @@ def build_git_deploy_plan(
         migration_gap_revision_count=migration_gap_revision_count,
         manifest_payload=manifest_payload,
     )
+    phase_by_name = {phase["phase"]: phase for phase in legacy_plan_phases}
+    switch_phase = phase_by_name["4_switch_start_and_smoke"]
+    plan_phases = [
+        phase_by_name["0_local_preflight"],
+        phase_by_name["1_remote_preflight_readonly"],
+        {
+            "phase": "2_single_remote_deploy_transaction",
+            "remote_mutation": True,
+            "remote_state_machine": True,
+            "remote_mutation_authorization": OWNER_STANDING_AUTHORIZATION_REFERENCE,
+            "requires_confirmation_phrase": CONFIRMATION_PHRASE,
+            "commands": [],
+            "stop_if": [
+                "verified bootstrap, canonical lock, journal, fence, migration, "
+                "canary, certification, or activation commit fails"
+            ],
+        },
+        {
+            "phase": "3_postdeploy_readonly_acceptance",
+            "remote_mutation": False,
+            "commands": list(switch_phase["commands"][1:]),
+            "stop_if": ["post-deploy readonly probe or verifier fails"],
+        },
+    ]
 
     return {
         "status": (

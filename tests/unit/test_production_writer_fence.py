@@ -19,6 +19,7 @@ def _receipt(marker_inode: int) -> dict:
         "deploy_nonce": "nonce-1",
         "target_runtime_head": "a" * 40,
         "fence_inode": marker_inode,
+        "lifecycle_policy_enabled": True,
         "lifecycle_proof_ref": "lifecycle-cert:v2:" + "b" * 64,
         "release_pointer": "/deploy/releases/new",
     }
@@ -85,3 +86,20 @@ def test_create_rejects_symlink_marker(tmp_path):
             deploy_nonce="nonce-1",
             target_runtime_head="a" * 40,
         )
+
+
+def test_remove_accepts_explicitly_disabled_lifecycle_without_proof(tmp_path):
+    marker = tmp_path / "production-writers.blocked"
+    create_fence(
+        marker,
+        deploy_transaction_id="tx-1",
+        deploy_nonce="nonce-1",
+        target_runtime_head="a" * 40,
+    )
+    receipt = _receipt(marker.stat().st_ino)
+    receipt["lifecycle_policy_enabled"] = False
+    receipt["lifecycle_proof_ref"] = None
+
+    result = remove_fence(marker, activation_commit=receipt)
+
+    assert result["status"] == "fence_removed"

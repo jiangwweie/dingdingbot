@@ -7,9 +7,11 @@ import argparse
 import hashlib
 import json
 import re
+import secrets
 import shlex
 import subprocess
 import sys
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -81,10 +83,13 @@ def build_remote_state_machine_invocation(
     loader = (
         "import hashlib,os,platform,sys;"
         "b=sys.stdin.buffer.read();e=sys.argv[1];"
-        "assert hashlib.sha256(b).hexdigest()==e,'bootstrap_sha256_mismatch';"
-        "assert platform.python_implementation()=='CPython' and "
-        "sys.version_info[:2]==(3,10),'bootstrap_python_abi_mismatch';"
-        "assert os.geteuid()==0,'bootstrap_root_required';"
+        "(_ for _ in ()).throw(RuntimeError('bootstrap_sha256_mismatch')) "
+        "if hashlib.sha256(b).hexdigest()!=e else None;"
+        "(_ for _ in ()).throw(RuntimeError('bootstrap_python_abi_mismatch')) "
+        "if not(platform.python_implementation()=='CPython' and "
+        "sys.version_info[:2]==(3,10)) else None;"
+        "(_ for _ in ()).throw(RuntimeError('bootstrap_root_required')) "
+        "if os.geteuid()!=0 else None;"
         "sys.argv=['tokyo_runtime_deploy_remote_state_machine.py']+sys.argv[2:];"
         "exec(compile(b,'tokyo_runtime_deploy_remote_state_machine.py','exec'),"
         "{'__name__':'__main__','__bootstrap_source__':b})"
@@ -150,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
         apply=args.apply,
         confirmation_phrase=args.confirmation_phrase,
         require_confirmation_phrase=args.require_confirmation_phrase,
+        transaction_id=args.transaction_id,
+        deploy_nonce=args.deploy_nonce,
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -164,6 +171,8 @@ def execute_git_deploy_plan(
     apply: bool,
     confirmation_phrase: str | None,
     require_confirmation_phrase: bool = False,
+    transaction_id: str | None = None,
+    deploy_nonce: str | None = None,
     runner: ShellRunner | None = None,
 ) -> dict[str, Any]:
     blockers = list(plan.get("checks", {}).get("blockers") or [])
@@ -206,6 +215,7 @@ def execute_git_deploy_plan(
     command_runner = runner or _run_shell
     command_results: list[dict[str, Any]] = []
     mutation_started = False
+    transaction_identity: dict[str, str] | None = None
     for phase in plan.get("plan_phases", []):
         if phase.get("remote_mutation") and not _remote_mutation_phase_authorized(
             phase,
@@ -224,6 +234,70 @@ def execute_git_deploy_plan(
                 confirmation_phrase_required=require_confirmation_phrase,
                 confirmation_phrase_matches=confirmation_phrase_matches,
             )
+        if phase.get("remote_state_machine"):
+            if transaction_identity is not None:
+                raise GitDeployExecutionError("multiple_remote_state_machine_phases")
+            if (transaction_id is None) != (deploy_nonce is None):
+                raise GitDeployExecutionError(
+                    "resume_transaction_id_and_deploy_nonce_required_together"
+                )
+            transaction_identity = {
+                "transaction_id": transaction_id or uuid.uuid4().hex,
+                "deploy_nonce": deploy_nonce or secrets.token_hex(32),
+            }
+            if not _LOWER_HEX_TRANSACTION_ID.fullmatch(
+                transaction_identity["transaction_id"]
+            ):
+                raise GitDeployExecutionError("deploy_transaction_id_invalid")
+            if not transaction_identity["deploy_nonce"] or any(
+                char.isspace() for char in transaction_identity["deploy_nonce"]
+            ):
+                raise GitDeployExecutionError("deploy_nonce_invalid")
+            print(
+                json.dumps(
+                    {
+                        "status": "deploy_transaction_resolved",
+                        **transaction_identity,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            invocation = build_remote_state_machine_invocation(
+                plan,
+                transaction_id=transaction_identity["transaction_id"],
+                deploy_nonce=transaction_identity["deploy_nonce"],
+            )
+            mutation_started = True
+            result = command_runner(invocation["command"])
+            command_results.append(
+                {
+                    "phase": phase.get("phase"),
+                    "command": result.command,
+                    "returncode": result.returncode,
+                    "stdout_tail": _tail(result.stdout),
+                    "stderr_tail": _tail(result.stderr),
+                    **transaction_identity,
+                    "bootstrap_sha256": invocation["bootstrap_sha256"],
+                }
+            )
+            if result.returncode != 0:
+                writers_left_disabled = '"status": "failed_contained"' in result.stdout
+                return _execution_report(
+                    plan=plan,
+                    status=(
+                        "failed_contained"
+                        if writers_left_disabled
+                        else "failed"
+                    ),
+                    apply=True,
+                    blockers=[f"command_failed:{phase.get('phase')}"],
+                    command_results=command_results,
+                    confirmation_phrase_required=require_confirmation_phrase,
+                    confirmation_phrase_matches=confirmation_phrase_matches,
+                    writers_left_disabled=writers_left_disabled,
+                )
+            continue
         for command in phase.get("commands") or []:
             mutation_started = mutation_started or bool(phase.get("remote_mutation"))
             result = command_runner(str(command))
@@ -312,7 +386,10 @@ def _execution_report(
     commands = [
         {"phase": phase.get("phase"), "command": command}
         for phase in plan.get("plan_phases", [])
-        for command in phase.get("commands") or []
+        for command in (
+            phase.get("commands")
+            or (["<single_remote_state_machine>"] if phase.get("remote_state_machine") else [])
+        )
     ]
     effects = _effects_from_command_results(
         apply=apply,
@@ -483,6 +560,7 @@ def _effects_from_command_results(
             apply
             and (
                 "2_owner_authorized_git_fetch_and_export" in successful_phases
+                or "2_single_remote_deploy_transaction" in successful_phases
                 or any("ln -sfn" in command for command in successful_commands)
             )
         ),
@@ -582,6 +660,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--expected-remote-migration-count", type=int, required=True)
     parser.add_argument("--expected-remote-latest-migration", required=True)
     parser.add_argument("--expected-latest-migration", default=DEFAULT_EXPECTED_LATEST_MIGRATION)
+    parser.add_argument(
+        "--transaction-id",
+        help="Resume the exact journaled deployment transaction; requires --deploy-nonce.",
+    )
+    parser.add_argument(
+        "--deploy-nonce",
+        help="Resume nonce printed by the first attempt; requires --transaction-id.",
+    )
     parser.add_argument(
         "--apply",
         action="store_true",

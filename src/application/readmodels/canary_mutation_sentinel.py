@@ -8,7 +8,7 @@ import json
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 @dataclass(frozen=True)
@@ -258,6 +258,39 @@ class CanaryMutationSentinelProjection(BaseModel):
         )
 
 
+class CanaryMutationSentinelScopeV1(BaseModel):
+    """Exact identifiers frozen before the first deployment canary."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    schema_id: str = "brc.canary_mutation_sentinel_scope.v1"
+    fact_snapshot_ids: tuple[str, ...] = Field(max_length=128)
+    signal_event_ids: tuple[str, ...] = Field(max_length=22)
+    lane_ids: tuple[str, ...] = Field(max_length=22)
+    lane_identity_keys: tuple[str, ...] = Field(max_length=22)
+    ticket_ids: tuple[str, ...] = Field(max_length=22)
+    protected_attempt_ids: tuple[str, ...] = Field(max_length=44)
+    lifecycle_ids: tuple[str, ...] = Field(max_length=22)
+    protection_set_ids: tuple[str, ...] = Field(max_length=22)
+    account_mode_ids: tuple[str, ...] = Field(max_length=22)
+    readiness_keys: tuple[tuple[str, str, str], ...] = Field(max_length=22)
+    snapshot_ids: tuple[str, ...] = Field(max_length=3)
+    projection_run_ids: tuple[str, ...] = Field(max_length=3)
+    release_activation_process_outcome_id: str = Field(min_length=1, max_length=220)
+
+    @model_validator(mode="after")
+    def validate_ordered_unique_scope(self) -> "CanaryMutationSentinelScopeV1":
+        for name in (
+            "fact_snapshot_ids", "signal_event_ids", "lane_ids",
+            "lane_identity_keys", "ticket_ids", "protected_attempt_ids",
+            "lifecycle_ids", "protection_set_ids", "account_mode_ids",
+            "readiness_keys", "snapshot_ids", "projection_run_ids",
+        ):
+            values = tuple(getattr(self, name))
+            if values != tuple(sorted(values)) or len(values) != len(set(values)):
+                raise ValueError(f"canary_scope_not_ordered_unique:{name}")
+        return self
+
+
 def _canonical_bytes(value: Any) -> bytes:
     return json.dumps(
         value,
@@ -267,4 +300,3 @@ def _canonical_bytes(value: Any) -> bytes:
         separators=(",", ":"),
         default=str,
     ).encode("utf-8")
-

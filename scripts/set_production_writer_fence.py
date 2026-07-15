@@ -87,10 +87,16 @@ def remove_fence(
     }
     if any(receipt.get(key) != value for key, value in required.items()):
         raise ValueError("activation_commit_fence_mismatch")
-    if not str(receipt.get("lifecycle_proof_ref") or "").startswith(
-        "lifecycle-cert:v2:"
-    ):
-        raise ValueError("activation_commit_lifecycle_proof_missing")
+    lifecycle_enabled = receipt.get("lifecycle_policy_enabled")
+    lifecycle_ref = receipt.get("lifecycle_proof_ref")
+    if lifecycle_enabled is True:
+        if not str(lifecycle_ref or "").startswith("lifecycle-cert:v2:"):
+            raise ValueError("activation_commit_lifecycle_proof_missing")
+    elif lifecycle_enabled is False:
+        if lifecycle_ref is not None:
+            raise ValueError("activation_commit_disabled_lifecycle_proof_present")
+    else:
+        raise ValueError("activation_commit_lifecycle_policy_missing")
     if not str(receipt.get("release_pointer") or "").strip():
         raise ValueError("activation_commit_release_pointer_missing")
     marker.unlink()

@@ -307,6 +307,7 @@ def test_runtime_account_safe_facts_projection_cadence_can_continue_when_blocked
 
 def test_runtime_account_safe_facts_cli_forwards_action_time_invocation_id(
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ):
     seen: dict[str, object] = {}
     monkeypatch.setattr(
@@ -342,6 +343,11 @@ def test_runtime_account_safe_facts_cli_forwards_action_time_invocation_id(
 
     assert exit_code == 0
     assert seen["action_time_invocation_id"] == "action_time_invocation:unit"
+    output = json.loads(capsys.readouterr().out)
+    assert output["pg_fact_snapshot_ids"] == [
+        "fact:account-mode",
+        "fact:account-safe",
+    ]
 
 
 def test_runtime_account_safe_facts_normalizes_asyncpg_dsn_for_sync_projector(

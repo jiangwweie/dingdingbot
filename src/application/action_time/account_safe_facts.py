@@ -110,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
                     "account_safe_facts_ready"
                 ],
                 "action_time_invocation_id": args.action_time_invocation_id,
+                "pg_fact_snapshot_ids": sorted(fact_snapshot_ids),
             },
             ensure_ascii=False,
             sort_keys=True,

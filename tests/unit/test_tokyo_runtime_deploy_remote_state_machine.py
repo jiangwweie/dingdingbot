@@ -8,6 +8,11 @@ from pathlib import Path
 import pytest
 
 from scripts import tokyo_runtime_deploy_remote_state_machine as machine
+from src.application.readmodels.lifecycle_mutation_enablement_proof import (
+    ActionTimeCertificationReferenceV2,
+    LaneSourceWatermarkV1,
+    LifecycleMutationEnablementProof,
+)
 
 
 def test_remote_state_machine_source_is_stdlib_only():
@@ -49,6 +54,46 @@ def test_deploy_lock_is_nonblocking_and_never_replaced(tmp_path):
     finally:
         if first is not None:
             first.close()
+
+
+def test_dirfd_lock_initializer_creates_durable_single_inode_and_rejects_symlink(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    first = machine._acquire_lock_beneath_root(
+        root=root,
+        directory_components=("brc-deploy", "deploy-state"),
+        lock_name="tokyo-runtime-deploy.lock",
+        expected_uid=machine.os.geteuid(),
+    )
+    lock_path = root / "brc-deploy/deploy-state/tokyo-runtime-deploy.lock"
+    inode = lock_path.stat().st_ino
+    second = machine._acquire_lock_beneath_root(
+        root=root,
+        directory_components=("brc-deploy", "deploy-state"),
+        lock_name="tokyo-runtime-deploy.lock",
+        expected_uid=machine.os.geteuid(),
+    )
+    try:
+        assert first is not None
+        assert second is None
+        assert lock_path.stat().st_ino == inode
+        assert lock_path.stat().st_mode & 0o777 == 0o600
+    finally:
+        if first is not None:
+            first.close()
+
+    unsafe_root = tmp_path / "unsafe"
+    unsafe_root.mkdir(mode=0o700)
+    target = tmp_path / "target"
+    target.mkdir(mode=0o700)
+    machine.os.symlink(target, unsafe_root / "brc-deploy")
+    with pytest.raises(OSError):
+        machine._acquire_lock_beneath_root(
+            root=unsafe_root,
+            directory_components=("brc-deploy", "deploy-state"),
+            lock_name="tokyo-runtime-deploy.lock",
+            expected_uid=machine.os.geteuid(),
+        )
 
 
 def test_journal_is_hash_chained_and_reloaded(tmp_path):
@@ -337,6 +382,18 @@ def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
                 stdout='{"enabled":true,"exchange_write_called":false}',
                 stderr="",
             )
+        if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "status": "canary_readonly_role_preflight_passed",
+                        "current_user": "pg_read_all_data",
+                        "exchange_write_called": False,
+                    }
+                ),
+                stderr="",
+            )
         if command[-2:] == ["alembic", "current"]:
             return machine.ChildResult(returncode=0, stdout="124 (head)\n", stderr="")
         return machine.ChildResult(returncode=0, stdout='{"status":"ok"}', stderr="")
@@ -355,6 +412,9 @@ def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
         "lifecycle_capability_was_enabled": True,
     }
     assert all(command[0] == str(python) for command, _ in commands)
+    role_index = next(index for index, (command, _) in enumerate(commands) if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command))
+    migration_index = next(index for index, (command, _) in enumerate(commands) if "upgrade" in command)
+    assert role_index < migration_index
     assert any(command[-3:] == ("-m", "alembic", "upgrade") or "upgrade" in command for command, _ in commands)
     assert all(
         item["env"]["DATABASE_URL"] == "postgresql://example.invalid/db"
@@ -403,6 +463,336 @@ def test_candidate_units_install_while_fenced_then_pointer_switches_atomically(t
     pointer_index = next(
         index for index, command in enumerate(commands) if str(helper) in command
     )
-    assert all(command[0] == "/usr/bin/install" for command in commands[:pointer_index - 1])
     assert commands[pointer_index - 1] == ("/usr/bin/systemctl", "daemon-reload")
+    assert all(
+        (tmp_path / "systemd" / relative.relative_to("deploy/systemd")).is_file()
+        for relative in machine.REPOSITORY_SYSTEMD_FILES
+    )
     assert result["status"] == "candidate_pointer_active"
+
+
+def test_five_readonly_canaries_never_start_production_writer(tmp_path):
+    release = tmp_path / "candidate"
+    release.mkdir()
+    commands = []
+
+    def runner(command, **kwargs):
+        commands.append(tuple(command))
+        return machine.ChildResult(returncode=0, stdout="success\n", stderr="")
+
+    result = machine.run_five_readonly_canaries(
+        release_path=release,
+        runner=runner,
+    )
+
+    joined = "\n".join(" ".join(command) for command in commands)
+    assert joined.count("systemctl start brc-runtime-signal-watcher-canary.service") == 5
+    assert "systemctl start brc-owner-console-canary-readonly.service" in joined
+    assert "systemctl stop brc-owner-console-canary-readonly.service" in joined
+    assert "systemctl start brc-owner-console-backend.service" not in joined
+    assert "systemctl start brc-runtime-signal-watcher.service" not in joined
+    assert result == {"status": "readonly_canary_complete", "successful_ticks": 5}
+
+
+def test_fact_refresh_returns_exact_ids_for_v2_certification(tmp_path):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+
+    def runner(command, **kwargs):
+        if any(str(item).endswith("build_runtime_account_safe_facts.py") for item in command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "status": "runtime_account_safe_facts_ready",
+                        "account_safe_facts_ready": True,
+                        "pg_fact_snapshot_ids": ["fact:2", "fact:1"],
+                    }
+                ),
+                stderr="",
+            )
+        return machine.ChildResult(returncode=0, stdout='{"status":"ok"}', stderr="")
+
+    result = machine.refresh_candidate_account_facts(
+        release_path=release,
+        env_path=env_file,
+        runner=runner,
+    )
+
+    assert result == {
+        "status": "candidate_account_facts_refreshed",
+        "fact_snapshot_ids": ("fact:1", "fact:2"),
+    }
+
+
+def test_candidate_certification_uses_typed_stage_nonce_and_exact_fact_ids(tmp_path):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+    commands = []
+
+    def runner(command, **kwargs):
+        commands.append(tuple(command))
+        return machine.ChildResult(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "status": "action_time_capability_certified",
+                    "certification_ref": "action-time-cert:v2:" + "a" * 64,
+                    "certification_reference": {"schema": "brc.action_time_certification_reference.v2"},
+                    "certified_lane_count": 22,
+                    "exchange_write_called": False,
+                }
+            ),
+            stderr="",
+        )
+
+    result = machine.certify_candidate_action_time(
+        release_path=release,
+        env_path=env_file,
+        target_sha="a" * 40,
+        stage="post_canary",
+        deploy_nonce="nonce-1",
+        fact_snapshot_ids=("fact:1", "fact:2"),
+        runner=runner,
+    )
+
+    command = commands[0]
+    assert "--stage" in command and "post_canary" in command
+    assert "--deploy-nonce" in command and "nonce-1" in command
+    assert command.count("--fact-snapshot-id") == 2
+    assert "--certification-ref" not in command
+    assert result["certification_ref"].startswith("action-time-cert:v2:")
+
+
+def test_lifecycle_policy_restore_persists_v2_proof_when_prestate_enabled(tmp_path):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+    commands = []
+    typed_reference = ActionTimeCertificationReferenceV2(
+        stage="post_canary",
+        target_runtime_head="a" * 40,
+        certification_input_digest="sha256:" + "1" * 64,
+        release_activation_outcome_id="process_outcome:release",
+        release_activation_source_watermark="release:1",
+        lane_source_watermarks=(
+            LaneSourceWatermarkV1(
+                lane_scope_key="lane:SOR-001:ETHUSDT:long",
+                lane_identity_key="identity:1",
+                source_watermark="watermark:1",
+                process_outcome_id="process_outcome:1",
+            ),
+        ),
+        fact_snapshot_ids=("fact:1",),
+        fact_set_digest="sha256:" + "2" * 64,
+        fact_min_valid_until_ms=1_900_000_000_000,
+        deploy_nonce="nonce-1",
+    )
+    reference = typed_reference.model_dump(mode="json")
+
+    def runner(command, **kwargs):
+        commands.append(tuple(command))
+        return machine.ChildResult(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "status": "ready",
+                    "enabled": True,
+                    "blockers": [],
+                    "capability": {"proof_schema": "brc.lifecycle_mutation_enablement_proof.v2"},
+                }
+            ),
+            stderr="",
+        )
+
+    result = machine.restore_lifecycle_mutation_policy(
+        release_path=release,
+        env_path=env_file,
+        target_sha="a" * 40,
+        was_enabled=True,
+        post_certification_ref=typed_reference.certification_ref(),
+        post_certification_reference=reference,
+        post_projection_slice_digests={"process_current": "sha256:" + "c" * 64},
+        runner=runner,
+    )
+
+    command = commands[0]
+    assert "--enable" in command
+    assert "--proof-json" in command
+    assert result["lifecycle_proof_ref"].startswith("lifecycle-cert:v2:")
+    assert result["proof"]["schema"] == "brc.lifecycle_mutation_enablement_proof.v2"
+    typed_proof = LifecycleMutationEnablementProof.model_validate(result["proof"])
+    assert result["lifecycle_proof_ref"] == typed_proof.lifecycle_certification_ref()
+
+
+def test_activation_apply_removes_fence_then_restores_watcher_timer_last(tmp_path):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+    commands = []
+
+    def runner(command, **kwargs):
+        commands.append(tuple(command))
+        if "set_production_writer_fence.py" in " ".join(command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"status":"fence_removed"}',
+                stderr="",
+            )
+        return machine.ChildResult(returncode=0, stdout="active\n", stderr="")
+
+    prepolicy = {
+        unit: {"active": unit in {
+            "brc-owner-console-backend.service",
+            "brc-runtime-monitor.timer",
+            "brc-ticket-lifecycle-maintenance.timer",
+            "brc-runtime-signal-watcher.timer",
+        }}
+        for unit in machine.PRODUCTION_WRITER_UNITS
+    }
+    result = machine.apply_committed_activation(
+        release_path=release,
+        env_path=env_file,
+        activation_commit={
+            "schema": "brc.runtime_activation_commit.v1",
+            "status": "runtime_activation_committed",
+        },
+        unit_prepolicy=prepolicy,
+        runner=runner,
+    )
+
+    starts = [command for command in commands if command[1:2] == ("start",)]
+    assert starts[-1][-1] == "brc-runtime-signal-watcher.timer"
+    assert commands[0][1].endswith("set_production_writer_fence.py")
+    assert result["status"] == "activation_applied"
+
+
+def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
+    tmp_path, monkeypatch
+):
+    deploy_root = tmp_path / "brc-deploy"
+    release = deploy_root / "releases/candidate"
+    previous = deploy_root / "releases/old"
+    previous.mkdir(parents=True)
+    legacy = deploy_root / "venvs/legacy"
+    (legacy / "bin").mkdir(parents=True)
+    (legacy / "bin/python").write_text("", encoding="utf-8")
+    env_file = deploy_root / "env/live-readonly.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("PG_DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+    lock_path = tmp_path / "deploy-state/tokyo-runtime-deploy.lock"
+    lock = machine.acquire_deploy_lock(lock_path, require_root_owner=False)
+    assert lock is not None
+    calls = []
+
+    def stage(**kwargs):
+        calls.append("stage")
+        release.mkdir(parents=True)
+        (release / "requirements-runtime.lock").write_text(
+            "ccxt==4.5.56 --hash=sha256:" + "a" * 64 + "\n",
+            encoding="utf-8",
+        )
+        return {"status": "candidate_release_staged"}
+
+    monkeypatch.setattr(machine, "stage_candidate_release", stage)
+    monkeypatch.setattr(machine, "build_immutable_venv", lambda **kwargs: {"status": "immutable_venv_ready"})
+    monkeypatch.setattr(machine, "ensure_previous_release_venv_compatibility", lambda **kwargs: {"status": "previous_release_venv_compatible"})
+    monkeypatch.setattr(machine, "install_and_verify_shared_readiness_helper", lambda **kwargs: {"status": "shared_readiness_helper_verified", "readiness_helper_sha256": "1" * 64})
+    monkeypatch.setattr(machine, "capture_production_unit_prepolicy", lambda **kwargs: {unit: {"active": False} for unit in machine.PRODUCTION_WRITER_UNITS})
+    monkeypatch.setattr(machine, "engage_production_writer_fence", lambda **kwargs: {"status": "production_writers_fenced", "fence_inode": 77})
+    monkeypatch.setattr(machine, "read_candidate_schema_revision", lambda **kwargs: "120")
+    monkeypatch.setattr(machine, "run_fenced_schema_migration", lambda **kwargs: {"status": "schema_migrated", "revision": "124", "lifecycle_capability_was_enabled": True})
+    monkeypatch.setattr(machine, "install_candidate_units_and_switch_pointer", lambda **kwargs: {"status": "candidate_pointer_active"})
+    monkeypatch.setattr(machine, "record_candidate_release_activation", lambda **kwargs: {"status": "runtime_release_activation_completed"})
+    monkeypatch.setattr(machine, "refresh_candidate_account_facts", lambda **kwargs: {"status": "candidate_account_facts_refreshed", "fact_snapshot_ids": ("fact:1",)})
+    typed_reference = ActionTimeCertificationReferenceV2(
+        stage="post_canary",
+        target_runtime_head="a" * 40,
+        certification_input_digest="sha256:" + "1" * 64,
+        release_activation_outcome_id="process:release",
+        release_activation_source_watermark="release:watermark",
+        lane_source_watermarks=(LaneSourceWatermarkV1(
+            lane_scope_key="lane:SOR-001:ETHUSDT:long",
+            lane_identity_key="identity:1",
+            source_watermark="watermark:1",
+            process_outcome_id="process:1",
+        ),),
+        fact_snapshot_ids=("fact:1",),
+        fact_set_digest="sha256:" + "2" * 64,
+        fact_min_valid_until_ms=int(machine.time.time() * 1000) + 120_000,
+        deploy_nonce="nonce-1",
+    )
+    monkeypatch.setattr(machine, "certify_candidate_action_time", lambda **kwargs: {
+        "status": "action_time_capability_certified",
+        "certification_ref": typed_reference.certification_ref(),
+        "certification_reference": typed_reference.model_dump(mode="json"),
+    })
+    monkeypatch.setattr(machine, "publish_candidate_current_projections", lambda **kwargs: {"status": "current_projections_published"})
+    sentinel_calls = {"count": 0}
+
+    def sentinel(**kwargs):
+        sentinel_calls["count"] += 1
+        final = sentinel_calls["count"] == 3
+        digest = "sha256:" + ("f" if final else "d") * 64
+        return {
+            "status": "canary_mutation_sentinel_captured",
+            "digest": digest,
+            "scope": {"schema_id": "scope"},
+            "canary_window_floor_ms": 1000,
+            "slice_digests": {"process_current": digest},
+            "slice_counts": {"process_current": 1},
+        }
+
+    monkeypatch.setattr(machine, "capture_candidate_mutation_sentinel", sentinel)
+    monkeypatch.setattr(machine, "run_five_readonly_canaries", lambda **kwargs: {"status": "readonly_canary_complete", "successful_ticks": 5})
+    monkeypatch.setattr(machine, "verify_candidate_phase_two_ready", lambda **kwargs: {"status": "phase_two_ready", "exchange_write_called": False})
+    monkeypatch.setattr(machine, "collect_activation_machine_facts", lambda **kwargs: {"status": "activation_machine_facts_verified"})
+    monkeypatch.setattr(machine, "restore_lifecycle_mutation_policy", lambda **kwargs: {"status": "lifecycle_policy_restored", "enabled": True, "lifecycle_proof_ref": "lifecycle-cert:v2:" + "e" * 64, "proof": {}})
+    monkeypatch.setattr(machine, "apply_committed_activation", lambda **kwargs: {"status": "activation_applied"})
+    config = {
+        "transaction_id": "a1b2c3d4",
+        "deploy_nonce": "nonce-1",
+        "old_sha": "b" * 40,
+        "target_sha": "a" * 40,
+        "deploy_root": str(deploy_root),
+        "repo_url": "https://example.invalid/repo.git",
+        "git_ref": "codex/release",
+        "release_name": "candidate",
+        "previous_release_path": str(previous),
+        "legacy_venv_path": str(legacy),
+        "env_path": str(env_file),
+        "expected_revision": "124",
+        "bootstrap_sha256": "c" * 64,
+        "canonical_lock_path": str(lock_path),
+        "require_root_owner": False,
+    }
+    journal_path = tmp_path / "deploy-state/journal.json"
+    try:
+        first = machine.execute_deploy_transaction(
+            config=config, lock_handle=lock, journal_path=journal_path
+        )
+        second = machine.execute_deploy_transaction(
+            config=config, lock_handle=lock, journal_path=journal_path
+        )
+    finally:
+        lock.close()
+
+    journal = machine.DeployJournal.load(journal_path)
+    assert first["status"] == "tokyo_runtime_deploy_applied"
+    assert second["status"] == "tokyo_runtime_deploy_applied"
+    assert [entry["phase"] for entry in journal.entries] == list(machine.DEPLOY_PHASES)
+    assert calls == ["stage"]
