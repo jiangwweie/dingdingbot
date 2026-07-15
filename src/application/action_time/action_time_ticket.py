@@ -595,7 +595,7 @@ def _build_ticket_bundle(
         event_spec_id=str(event_spec.get("event_spec_id") or ""),
         blockers=blockers,
     )
-    exchange_instrument_id = _ticket_exchange_instrument_id(
+    exchange_instrument_id = _require_ticket_exchange_instrument_identity(
         candidate=candidate,
         signal=signal,
         blockers=blockers,
@@ -1356,7 +1356,7 @@ def _current_execution_policy(
     return rows[0]
 
 
-def _ticket_exchange_instrument_id(
+def _require_ticket_exchange_instrument_identity(
     *,
     candidate: dict[str, Any],
     signal: dict[str, Any],

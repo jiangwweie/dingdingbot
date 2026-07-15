@@ -81,6 +81,7 @@ class _Gateway:
 def _scope() -> TicketBoundExchangeScope:
     return TicketBoundExchangeScope(
         ticket_id="ticket-1",
+        exposure_episode_id="episode-1",
         strategy_group_id="CPM-RO-001",
         runtime_profile_id="profile-1",
         runtime_scope_binding_id="scope-1",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from types import SimpleNamespace
 
 from src.application.action_time import account_capacity_materialization as subject
 from src.application.action_time.account_capacity_reservation import (
@@ -22,7 +23,12 @@ def test_snapshot_is_classified_projected_and_claimed_in_order(monkeypatch) -> N
     candidate = _candidate()
     monkeypatch.setattr(subject, "lock_account_budget_current", lambda _conn, **_kwargs: calls.append("lock") or True, raising=False)
     monkeypatch.setattr(subject, "classify_account_exchange_truth", lambda _conn, *, snapshot: calls.append("classify") or type("C", (), {"blockers": ()})())
-    monkeypatch.setattr(subject, "load_account_risk_policy_current", lambda _conn, **_kwargs: calls.append("policy") or object())
+    monkeypatch.setattr(
+        subject,
+        "load_account_risk_policy_current",
+        lambda _conn, **_kwargs: calls.append("policy")
+        or SimpleNamespace(max_concurrent_positions=2),
+    )
     monkeypatch.setattr(subject, "project_account_exposure_current", lambda _conn, **_kwargs: calls.append("exposure") or type("E", (), {"global_blockers": ()})())
     monkeypatch.setattr(subject, "project_account_budget_current", lambda _conn, **_kwargs: calls.append("budget") or type("B", (), {"projection_version": 7})())
     expected = AccountCapacityReservationResult(allowed=True, allocated_risk=Decimal("9"))

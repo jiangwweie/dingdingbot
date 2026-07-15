@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN
-status: READY_FOR_LOCAL_EXECUTION_PERFORMANCE_CONTRACT_CLOSED_NO_DEPLOY
+status: LOCAL_IMPLEMENTATION_COMPLETE_CERTIFIED_NO_DEPLOY
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md
 last_verified: 2026-07-15
@@ -30,6 +30,30 @@ without retaining full raw bodies. Ticket remains the sole business lifecycle ow
 
 **Tech Stack:** Python 3, Pydantic v2, `decimal.Decimal`, SQLAlchemy, Alembic,
 PostgreSQL, `ijson>=3.5.1,<4.0.0`, pytest.
+
+## Local Completion Evidence
+
+| Gate | Result | Evidence meaning |
+| --- | ---: | --- |
+| Focused account-risk regression | **105 passed** | Domain, policy, sizing, reservation, ownership, exposure, budget, FinalGate and Ticket sequence |
+| Action-Time full-chain impact | **84 passed in 180.91s** | All registered lanes plus lifecycle failure matrix |
+| PostgreSQL integration | **9 passed, 0 skipped in 7.34s** | Concurrent claim, exact lane identity, cross-asset claim/release, 100000-row migrations and hot path |
+| Asset-neutral full chain | **1 passed in 0.63s** | Candidate Scope through second different-instrument Claim, no gateway write |
+| Hot-path scale | **1 passed in 1.42s** | 100000 rows in each of three history families, bounded current result |
+| Authority and file I/O gates | **all exit 0** | Current docs valid, output scope valid, suspicious authority 0, frequent writes 0 |
+| Full suite, first run | **3110 passed / 86 failed / 7 skipped in 724.73s** | Exposed shared fresh-schema and episode fixture drift; not reported as green |
+| Post-fix residual | **1 independent RCI-P2 assertion** | No-signal projection conservation remains separately scoped; account-risk gates are green |
+
+The run additionally found and fixed three certification-infrastructure defects:
+
+1. fresh revision-086 test schemas could not persist the exact instrument now required by
+   current seed and repository validation;
+2. legacy simulation fixtures reached Exchange Command without an explicit
+   `exposure_episode_id`;
+3. revision 128 downgrade did not remove its composite FK/unique constraints before
+   revision 126 dropped episode columns.
+
+No deployment, production migration apply, policy activation or exchange write occurred.
 
 ## Global Constraints
 
@@ -1491,7 +1515,7 @@ git commit -m "fix: revalidate account capacity by current semantics"
 - A PostgreSQL scale test proves that terminal history changes neither hot-path result
   cardinality nor Python memory complexity.
 
-- [ ] **Step 1: Write the full-chain test before final cleanup**
+- [x] **Step 1: Write the full-chain test before final cleanup**
 
 The test must start from PG Candidate Scope + exact instrument + current rule/account/
 cluster snapshots, then exercise:
@@ -1517,7 +1541,7 @@ assert first_ticket.exposure_episode_id == first_claim.exposure_episode_id
 assert released_budget.claimed_position_slots == 0
 ```
 
-- [ ] **Step 2: Add negative production-shaped matrix**
+- [x] **Step 2: Add negative production-shaped matrix**
 
 Cover all six current Event Specs plus:
 
@@ -1555,7 +1579,7 @@ assert large.history_seq_scan_count == 0
 The 16 MiB assertion measures additional Python allocation caused by historical data;
 it is not an OS/process memory limit and does not cap legitimate active account facts.
 
-- [ ] **Step 3: Delete obsolete fallback code**
+- [x] **Step 3: Delete obsolete fallback code**
 
 Run:
 
@@ -1581,7 +1605,7 @@ rg -n 'read_control_state\(|SELECT \*|autoload_with=|def _rows\(' \
 Expected: no matches. Audit/forensics readers outside these production Budget files are
 not deleted by this task and remain outside Action-Time cadence.
 
-- [ ] **Step 4: Run focused unit regression**
+- [x] **Step 4: Run focused unit regression**
 
 ```bash
 python3 -m pytest -q \
@@ -1604,7 +1628,7 @@ python3 -m pytest -q \
   tests/unit/test_dual_position_account_risk_release_acceptance.py
 ```
 
-- [ ] **Step 5: Run PostgreSQL integration without skips**
+- [x] **Step 5: Run PostgreSQL integration without skips**
 
 ```bash
 test -n "$BRC_LOCAL_TEST_POSTGRES_DSN"
@@ -1623,7 +1647,7 @@ Expected: all selected tests pass and pytest reports zero skipped tests. The sca
 must report 100000 rows in each history family while the typed current result remains
 bounded by policy-limit-plus-one.
 
-- [ ] **Step 6: Run authority, output and performance gates**
+- [x] **Step 6: Run authority, output and performance gates**
 
 ```bash
 git diff --check
@@ -1642,7 +1666,7 @@ frequent_report_write=0
 performance_risk.status=clear
 ```
 
-- [ ] **Step 7: Measure Action-Time cadence**
+- [x] **Step 7: Measure Action-Time cadence**
 
 Use the existing refresh timing telemetry to assert:
 
@@ -1664,7 +1688,7 @@ capacity transaction subprocess calls = 0
 Action-Time refresh elapsed <= 30 seconds
 ```
 
-- [ ] **Step 8: Announce and run the full suite once**
+- [x] **Step 8: Announce and run the full suite once**
 
 After notifying the Owner that the approximately 11-minute gate is starting:
 
@@ -1675,13 +1699,13 @@ python3 -m pytest -q
 Expected: exit code 0. Any unrelated pre-existing failure is recorded separately;
 do not weaken or skip account-risk gates to make the suite green.
 
-- [ ] **Step 9: Update documents with observed evidence only**
+- [x] **Step 9: Update documents with observed evidence only**
 
 Change design/plan status to local implementation complete only after all required
 commands actually pass. Record exact commit, test counts, PostgreSQL non-skip proof,
 file-I/O audit and Action-Time timing. Do not claim deployed or live-enabled.
 
-- [ ] **Step 10: Commit checkpoint D2**
+- [x] **Step 10: Commit checkpoint D2**
 
 ```bash
 git add \

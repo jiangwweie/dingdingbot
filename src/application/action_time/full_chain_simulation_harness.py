@@ -174,6 +174,7 @@ def run_ticket_bound_pre_exchange_acceptance(
         payload=ticket,
         expected_status="action_time_ticket_created",
     )
+    ticket = bind_simulation_ticket_exposure_episode(conn, ticket)
     finalgate = _execute_acceptance_stage(
         stages,
         name="finalgate_preflight",
@@ -378,6 +379,7 @@ def run_ticket_bound_full_chain_simulation(
         payload=ticket_payload,
         expected_status="action_time_ticket_created",
     )
+    ticket_payload = bind_simulation_ticket_exposure_episode(conn, ticket_payload)
     finalgate_payload = finalgate_preflight.materialize_action_time_finalgate_preflight(
         conn,
         ticket_id=str(ticket_payload["ticket_id"]),
@@ -830,6 +832,7 @@ def _prepare_full_chain_submit_context(
         payload=ticket_payload,
         expected_status="action_time_ticket_created",
     )
+    ticket_payload = bind_simulation_ticket_exposure_episode(conn, ticket_payload)
     finalgate_payload = finalgate_preflight.materialize_action_time_finalgate_preflight(
         conn,
         ticket_id=str(ticket_payload["ticket_id"]),
@@ -1126,6 +1129,7 @@ def _insert_constructed_raw_input(
         strategy_group_id=str(row["strategy_group_id"]),
         strategy_group_version_id=str(row["strategy_group_version_id"]),
         symbol=str(row["symbol"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
         asset_class=str(row["asset_class"]),
         side=str(row["side"]),
         event_spec_id=str(row["event_spec_id"]),
@@ -1320,6 +1324,7 @@ def _candidate_runtime_row(
             SELECT c.candidate_scope_id,
                    c.strategy_group_id,
                    c.symbol,
+                   c.exchange_instrument_id,
                    c.asset_class,
                    c.side,
                    c.policy_current_id,
@@ -1362,6 +1367,46 @@ def _candidate_runtime_row(
             f"{strategy_group_id}:{symbol}:{side}"
         )
     return dict(row)
+
+
+def bind_simulation_ticket_exposure_episode(
+    conn: sa.engine.Connection,
+    ticket: dict[str, Any],
+) -> dict[str, Any]:
+    """Complete legacy constructed fixtures before any FinalGate transition."""
+
+    if str(ticket.get("exposure_episode_id") or "").strip():
+        return ticket
+    ticket_id = str(ticket["ticket_id"])
+    episode_id = f"exposure_episode:simulation:{ticket_id}"
+    conn.execute(
+        sa.text(
+            """
+            UPDATE brc_budget_reservations
+            SET exposure_episode_id = :exposure_episode_id
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {
+            "exposure_episode_id": episode_id,
+            "ticket_id": ticket_id,
+        },
+    )
+    updated = {**ticket, "exposure_episode_id": episode_id}
+    conn.execute(
+        sa.text(
+            """
+            UPDATE brc_action_time_tickets
+            SET exposure_episode_id = :exposure_episode_id
+            WHERE ticket_id = :ticket_id
+            """
+        ),
+        {
+            "exposure_episode_id": episode_id,
+            "ticket_id": ticket_id,
+        },
+    )
+    return updated
 
 
 def _insert_coverage(

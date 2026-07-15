@@ -57,6 +57,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    _drop_lineage_constraints(bind)
     for index_name in (
         "idx_brc_exchange_command_nonterminal_evidence",
         "idx_brc_account_exposure_current_hot_path",
@@ -78,6 +79,54 @@ def downgrade() -> None:
                 """
             )
         )
+
+
+def _drop_lineage_constraints(bind: sa.Connection) -> None:
+    tables = _tables(bind)
+    if "brc_action_time_tickets" in tables:
+        foreign_keys = {
+            item.get("name")
+            for item in sa.inspect(bind).get_foreign_keys("brc_action_time_tickets")
+        }
+        if "fk_brc_ticket_reservation_ticket_episode" in foreign_keys:
+            if bind.dialect.name == "sqlite":
+                with op.batch_alter_table("brc_action_time_tickets") as batch:
+                    batch.drop_constraint(
+                        "fk_brc_ticket_reservation_ticket_episode",
+                        type_="foreignkey",
+                    )
+            else:
+                op.drop_constraint(
+                    "fk_brc_ticket_reservation_ticket_episode",
+                    "brc_action_time_tickets",
+                    type_="foreignkey",
+                )
+    if "brc_budget_reservations" not in tables:
+        return
+    unique_constraints = {
+        item.get("name")
+        for item in sa.inspect(bind).get_unique_constraints(
+            "brc_budget_reservations"
+        )
+    }
+    if "uq_brc_budget_reservation_ticket_episode" in unique_constraints:
+        if bind.dialect.name == "sqlite":
+            with op.batch_alter_table("brc_budget_reservations") as batch:
+                batch.drop_constraint(
+                    "uq_brc_budget_reservation_ticket_episode",
+                    type_="unique",
+                )
+        else:
+            op.drop_constraint(
+                "uq_brc_budget_reservation_ticket_episode",
+                "brc_budget_reservations",
+                type_="unique",
+            )
+    if bind.dialect.name == "postgresql":
+        bind.execute(sa.text(
+            "ALTER TABLE brc_budget_reservations DROP CONSTRAINT IF EXISTS "
+            "ck_brc_budget_reservation_active_asset_neutral_identity"
+        ))
 
 
 def _assert_current_rows_are_complete(bind: sa.Connection) -> None:
@@ -346,6 +395,10 @@ def _add_postgresql_current_row_checks(bind: sa.Connection) -> None:
 
 def _tables(bind: sa.Connection) -> set[str]:
     return set(sa.inspect(bind).get_table_names())
+
+
+def _has_table(bind: sa.Connection, table_name: str) -> bool:
+    return table_name in _tables(bind)
 
 
 def _columns(bind: sa.Connection, table_name: str) -> set[str]:

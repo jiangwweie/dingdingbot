@@ -39,6 +39,9 @@ from src.infrastructure.runtime_control_state_repository import (
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
 )
+from src.application.action_time.full_chain_simulation_harness import (
+    bind_simulation_ticket_exposure_episode,
+)
 from tests.integration.runtime_causal_integrity_pg_support import (
     FakeExchangeLedgerGateway,
     claim_then_hold_process,
@@ -63,7 +66,7 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
 )
 
 
-def test_rci_harness_uses_postgresql_revision_125(
+def test_rci_harness_uses_postgresql_revision_127(
     postgres_certification_engine,
 ):
     assert postgres_certification_engine.dialect.name == "postgresql"
@@ -77,7 +80,7 @@ def test_rci_harness_uses_postgresql_revision_125(
             )
         ).scalar_one()
 
-    assert revision == "125"
+    assert revision == "127"
     assert invocation_table == "brc_action_time_invocations"
 
 
@@ -88,6 +91,7 @@ def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:
         now_ms=NOW_MS,
     )
     assert ticket["status"] == "action_time_ticket_created", ticket
+    ticket = bind_simulation_ticket_exposure_episode(conn, ticket)
     ticket_id = str(ticket["ticket_id"])
     preflight = finalgate.materialize_action_time_finalgate_preflight(
         conn,

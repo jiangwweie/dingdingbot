@@ -243,7 +243,7 @@ def materialize_next_action_time_finalgate_preflight(
         )
     tickets = [
         row
-        for row in _rows(control_state.get("action_time_tickets"))
+        for row in _control_state_rows(control_state.get("action_time_tickets"))
         if row.get("status") in ELIGIBLE_FINALGATE_TICKET_STATUSES
         and int(row.get("expires_at_ms") or 0) > now_ms
     ]
@@ -847,7 +847,7 @@ def _ticket_by_id(control_state: dict[str, Any], ticket_id: str) -> dict[str, An
     return next(
         (
             row
-            for row in _rows(control_state.get("action_time_tickets"))
+            for row in _control_state_rows(control_state.get("action_time_tickets"))
             if row.get("ticket_id") == ticket_id
         ),
         {},
@@ -857,7 +857,7 @@ def _ticket_by_id(control_state: dict[str, Any], ticket_id: str) -> dict[str, An
 def _latest_finalgate_pass_id(control_state: dict[str, Any], ticket_id: str) -> str | None:
     events = [
         row
-        for row in _rows(control_state.get("action_time_ticket_events"))
+        for row in _control_state_rows(control_state.get("action_time_ticket_events"))
         if row.get("ticket_id") == ticket_id and row.get("to_status") == "finalgate_ready"
     ]
     if not events:
@@ -880,7 +880,11 @@ def _row_by_id(
         blockers.append(missing_blocker)
         return {}
     row = next(
-        (item for item in _rows(control_state.get(table_key)) if item.get(id_key) == row_id),
+        (
+            item
+            for item in _control_state_rows(control_state.get(table_key))
+            if item.get(id_key) == row_id
+        ),
         {},
     )
     if not row:
@@ -970,7 +974,7 @@ def _result(
     }
 
 
-def _rows(value: Any) -> list[dict[str, Any]]:
+def _control_state_rows(value: Any) -> list[dict[str, Any]]:
     return [item for item in _list(value) if isinstance(item, dict)]
 
 

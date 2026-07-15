@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from pathlib import Path
 import sqlite3
 import sys
 
@@ -52,9 +53,10 @@ def _typed_coverage_identity(
 
 
 def test_candidate_universe_pg_reader_never_loads_full_control_state() -> None:
-    source = inspect.getsource(
-        runtime_active_observation_monitor._read_candidate_universe_from_pg
-    )
+    module_source = Path(runtime_active_observation_monitor.__file__).read_text()
+    source = module_source.split(
+        "def _read_candidate_universe_from_pg", 1
+    )[1].split("\ndef ", 1)[0]
 
     assert ".read_control_state(" not in source
     assert ".read_candidate_universe_control_state(" in source

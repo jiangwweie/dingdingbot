@@ -337,6 +337,10 @@ def upgrade() -> None:
             sa.Column("strategy_group_id", sa.String(128), nullable=False),
             sa.Column("symbol", sa.String(128), nullable=False),
             sa.Column("exchange_symbol", sa.String(128), nullable=True),
+            # Fresh schema installations must be able to seed the current
+            # exact-instrument contract before revision 126 is applied.  The
+            # expand migration remains idempotent for already-created DBs.
+            sa.Column("exchange_instrument_id", sa.String(192), nullable=True),
             sa.Column("asset_class", sa.String(64), nullable=False),
             sa.Column("side", sa.String(32), nullable=False),
             sa.Column("timeframe", sa.String(32), nullable=True),

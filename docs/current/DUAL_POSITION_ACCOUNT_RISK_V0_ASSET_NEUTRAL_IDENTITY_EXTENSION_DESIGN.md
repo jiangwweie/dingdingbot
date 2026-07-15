@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN
-status: REVIEWED_PERFORMANCE_CONTRACT_CLOSED_IMPLEMENTATION_PLAN_READY_NO_CODE
+status: LOCAL_IMPLEMENTATION_COMPLETE_CERTIFIED_NO_DEPLOY
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md
 extends:
   - docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
@@ -11,7 +11,7 @@ supersedes_in_part:
   - docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md#budget-reservation
 implementation_plan: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-15
-implementation_state: DESIGN_ONLY_NO_CODE_NO_MIGRATION_NO_DEPLOY
+implementation_state: LOCAL_CODE_MIGRATIONS_AND_TESTS_COMPLETE_NO_DEPLOY
 performance_review_input: 2026-07-15-production-oom-review
 ---
 
@@ -41,12 +41,32 @@ Candidate Scope
 最多 **2** 个仓位、组合 open risk **6%**、单主风险簇 open risk **4%**、
 initial margin **90%**、最大杠杆 **10x**、同一 instrument 不允许第二个新 Ticket。
 
-本设计只授权书面设计收敛。它不授权业务代码修改、migration apply、部署、
-生产政策激活、交易品种扩张或 exchange write。
+本设计现已完成本地代码、migration 与测试认证。**尚未执行部署、生产
+migration apply、生产政策激活、交易品种扩张或 exchange write**；生产运行状态
+保持不变。
 
-## 2. 已知客观事实
+### 1.1 2026-07-15 本地实施结果
 
-以下事实来自 2026-07-15 当前工作分支
+| 验收面 | 已观察结果 | 结论 |
+| --- | ---: | --- |
+| 账户风险聚焦单测 | **105/105 passed** | 2.5% 风险参数、双仓上限、自动缩量、Claim 与 FinalGate 语义保持一致 |
+| Action-Time 全链矩阵 | **84/84 passed，180.91 秒** | 五策略组、全部登记 Lane 与失败状态机完成 episode 身份升级 |
+| PostgreSQL 专项 | **9/9 passed，0 skipped** | 并发 Claim、Lane 身份、完整风险链、迁移与热路径规模均通过 |
+| 热路径历史规模 | **3 × 100000 行** | current 结果、SQL 数、materialized rows 不随历史增长；额外 Python 分配不超过 16 MiB |
+| Migration 可逆性 | **upgrade → downgrade → upgrade passed** | revision 128 会先撤销复合外键与唯一约束，再由 126 删除扩展列 |
+| 生产文件 I/O 审计 | **suspicious=0，frequent write=0** | 未新增 JSON/MD 运行时权威或周期写入 |
+| 部署与 exchange write | **0** | 本轮严格保持 local-only |
+
+首次全量套件运行结果为 **3110 passed / 86 failed / 7 skipped**。统一修复 fresh
+schema seed、共享 Ticket episode fixture、migration downgrade 后，账户风险相关失败族
+均已按上述聚焦、全链和 PostgreSQL 门禁复验通过。仍保留一个独立的
+`RCI-P2 no-signal projection` 语义断言失败，不将其误记为本设计已解决，也不以放宽
+账户风险门禁换取全量绿色。
+
+## 2. 实施前已知客观事实
+
+以下表格记录设计启动时的基线事实，已由本地实现结果取代，但保留用于说明修复
+来源。事实来自 2026-07-15 当前工作分支
 `codex/dual-position-account-risk-v0` 的跟踪代码与 migrations。
 
 | 事实对象 | 当前实现 | 直接风险 |

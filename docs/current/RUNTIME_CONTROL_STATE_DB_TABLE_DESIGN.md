@@ -2,7 +2,7 @@
 title: RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN
 status: CURRENT_DESIGN
 authority: docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
-last_verified: 2026-07-06
+last_verified: 2026-07-15
 ---
 
 # Runtime Control State DB Table Design
@@ -35,10 +35,14 @@ The table design is intentionally split into:
 
 ## Design Status
 
-This is a design document, not an applied migration.
+The asset-neutral override referenced above is **implemented and locally certified** by
+revisions **126–128** on `codex/dual-position-account-risk-v0`. The broader historical
+table catalog in this document remains design authority where it is not superseded.
+No production migration apply or deployment occurred in this task.
 
-Implementation should use Alembic migrations and SQLAlchemy ORM models under
-the existing PG model pattern in `src/infrastructure/pg_models.py`.
+Fresh schema seed now persists exact `exchange_instrument_id`; existing databases use
+the expand/backfill/enforce sequence. Production Action-Time continues to require PG
+identity directly and does not infer instrument identity from symbol or ID prefixes.
 
 ## Naming And Type Rules
 

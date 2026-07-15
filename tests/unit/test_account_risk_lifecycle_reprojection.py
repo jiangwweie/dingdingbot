@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from types import SimpleNamespace
 
 from src.application.action_time import account_risk_reprojection as subject
 from src.application.action_time import post_submit_reconciliation_tick as tick_subject
@@ -12,7 +13,11 @@ NOW_MS = 1_752_480_000_000
 
 def test_lifecycle_reprojection_projects_exposure_then_budget(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(subject, "load_account_risk_policy_current", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(
+        subject,
+        "load_account_risk_policy_current",
+        lambda *_args, **_kwargs: SimpleNamespace(max_concurrent_positions=2),
+    )
     monkeypatch.setattr(subject, "classify_account_exchange_truth", lambda *_args, **_kwargs: calls.append("classify") or type("C", (), {"blockers": ()})())
     monkeypatch.setattr(subject, "project_account_exposure_current", lambda *_args, **_kwargs: calls.append("exposure") or type("E", (), {"global_blockers": (), "semantic_event_count": 1})())
     monkeypatch.setattr(subject, "project_account_budget_current", lambda *_args, **_kwargs: calls.append("budget") or type("B", (), {"projection_version": 7, "first_blocker": None})())

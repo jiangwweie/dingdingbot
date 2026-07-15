@@ -28,6 +28,7 @@ from src.application.runtime_strategy_signal_evaluation_service import (
     RuntimeStrategySignalEvaluationStatus,
 )
 from src.application.action_time.full_chain_simulation_harness import (
+    bind_simulation_ticket_exposure_episode,
     FULL_CHAIN_FAILURE_SCENARIOS,
     FullChainSimulationInput,
     HistoricalActionTimeAcceptanceCase,
@@ -145,6 +146,25 @@ LANE_IDENTITY_MIGRATION_PATH = (
 ACTION_TIME_INVOCATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
+)
+ACCOUNT_RISK_POLICY_MIGRATION_PATH = (
+    REPO_ROOT / "migrations/versions/2026-07-14-121_create_account_risk_policy.py"
+)
+ACCOUNT_CAPACITY_SCOPE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-14-124_add_account_capacity_reservation_scope.py"
+)
+ACCOUNT_CLAIM_POLICY_EVENT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-14-125_add_account_capacity_claim_policy_event.py"
+)
+ASSET_NEUTRAL_EXPAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-15-126_expand_asset_neutral_account_risk_identity.py"
+)
+ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-15-127_backfill_asset_neutral_account_risk_identity.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
@@ -399,6 +419,15 @@ def _load_module(path: Path, name: str):
     return module
 
 
+def _upgrade_module(conn, module) -> None:
+    previous_op = module.op
+    module.op = Operations(MigrationContext.configure(conn))
+    try:
+        module.upgrade()
+    finally:
+        module.op = previous_op
+
+
 def _arm_submit_decision_env(monkeypatch) -> None:
     monkeypatch.setenv("TRADING_ENV", "live")
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
@@ -625,8 +654,24 @@ def pg_control_connection():
                 "migration_119_action_time_full_chain",
             ),
             (
+                ACCOUNT_RISK_POLICY_MIGRATION_PATH,
+                "migration_121_action_time_full_chain",
+            ),
+            (
                 ACCOUNT_RISK_CURRENT_MIGRATION_PATH,
                 "migration_122_action_time_full_chain",
+            ),
+            (
+                ACCOUNT_CAPACITY_SCOPE_MIGRATION_PATH,
+                "migration_124_action_time_full_chain",
+            ),
+            (
+                ACCOUNT_CLAIM_POLICY_EVENT_MIGRATION_PATH,
+                "migration_125_action_time_full_chain",
+            ),
+            (
+                ASSET_NEUTRAL_EXPAND_MIGRATION_PATH,
+                "migration_126_action_time_full_chain",
             ),
         ):
             extension = _load_module(path, module_name)
@@ -637,6 +682,11 @@ def pg_control_connection():
             finally:
                 extension.op = old_extension_op
         seed.seed_runtime_control_state_foundation(conn)
+        asset_neutral_backfill = _load_module(
+            ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH,
+            "migration_127_action_time_full_chain",
+        )
+        _upgrade_module(conn, asset_neutral_backfill)
         conn.execute(
             text(
                 """
@@ -1612,6 +1662,7 @@ def _run_raw_pg_input_to_runtime_safety(
     readiness_projection_payload = sequence_payload["projection"]
     lane_payload = sequence_payload["promotion"]
     ticket_payload = sequence_payload["ticket"]
+    ticket_payload = bind_simulation_ticket_exposure_episode(conn, ticket_payload)
     assert fact_payload["status"] == "action_time_fact_snapshots_materialized"
     assert fact_payload["materialized_count"] == 1
     assert fact_payload["blocked_count"] == 0
