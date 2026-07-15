@@ -28,7 +28,6 @@ def materialize_active_strategy_semantic_admissions(
     bindings = _rows(conn, "brc_candidate_scope_event_bindings")
     events = _rows(conn, "brc_strategy_side_event_specs")
     facts = _rows(conn, "brc_strategy_event_required_facts")
-    mappings = _rows(conn, "brc_symbol_instrument_mappings")
     instruments = _rows(conn, "brc_exchange_instruments")
     runtime_scopes = _rows(conn, "brc_runtime_scope_bindings")
     policies = _rows(conn, "brc_owner_policy_current")
@@ -61,22 +60,12 @@ def materialize_active_strategy_semantic_admissions(
                 candidate=candidate,
                 event=event,
                 facts=facts,
-                mappings=mappings,
                 instruments=instruments,
                 runtime_scopes=runtime_scopes,
                 policies=policies,
             )
-        mapping = next(
-            (
-                row
-                for row in mappings
-                if row.get("symbol") == candidate.get("symbol")
-                and row.get("status") == "active"
-            ),
-            {},
-        )
         exchange_instrument_id = str(
-            mapping.get("exchange_instrument_id") or "missing"
+            candidate.get("exchange_instrument_id") or "missing"
         )
         event_spec_id = str(event.get("event_spec_id") or "missing")
         event_spec_version = str(event.get("event_spec_version") or "missing")
@@ -124,7 +113,6 @@ def _conclusion(
     candidate: dict[str, Any],
     event: dict[str, Any],
     facts: list[dict[str, Any]],
-    mappings: list[dict[str, Any]],
     instruments: list[dict[str, Any]],
     runtime_scopes: list[dict[str, Any]],
     policies: list[dict[str, Any]],
@@ -150,26 +138,20 @@ def _conclusion(
     ]
     if not current_facts:
         return "facts_incomplete", "required_facts_missing"
-    mapping = next(
-        (
-            row
-            for row in mappings
-            if row.get("symbol") == candidate.get("symbol")
-            and row.get("status") == "active"
-        ),
-        {},
-    )
+    exchange_instrument_id = str(
+        candidate.get("exchange_instrument_id") or ""
+    ).strip()
     instrument = next(
         (
             row
             for row in instruments
             if row.get("exchange_instrument_id")
-            == mapping.get("exchange_instrument_id")
+            == exchange_instrument_id
         ),
         {},
     )
-    if not mapping or not instrument:
-        return "semantics_incomplete", "canonical_instrument_mapping_missing"
+    if not exchange_instrument_id or not instrument:
+        return "semantics_incomplete", "candidate_instrument_identity_missing"
     if instrument.get("status") != "active":
         return "safety_blocked", "exchange_instrument_not_active"
     runtime = next(

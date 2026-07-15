@@ -169,6 +169,44 @@ class PgBackedRuntimeControlStateRepository:
             read_profile="monitor_bounded_current",
         )
 
+    def read_candidate_universe_control_state(self) -> dict[str, Any]:
+        """Read only the four current tables required for watcher lane identity."""
+
+        logical_keys = (
+            "candidate_scope",
+            "candidate_scope_event_bindings",
+            "runtime_scope_bindings",
+            "strategy_side_event_specs",
+        )
+        inspector = sa.inspect(self.conn)
+        missing = [
+            CONTROL_STATE_TABLES[key]
+            for key in logical_keys
+            if not inspector.has_table(CONTROL_STATE_TABLES[key])
+        ]
+        if missing:
+            raise RuntimeControlStateRepositoryError(
+                "candidate universe tables missing: " + ", ".join(sorted(missing))
+            )
+        rows = {
+            key: self._read_rows(
+                CONTROL_STATE_TABLES[key],
+                monitor_bounded=True,
+                logical_key=key,
+            )
+            for key in logical_keys
+        }
+        self._validate_candidate_scope_event_bindings(rows)
+        return {
+            "schema": "brc.runtime_candidate_universe_state.v1",
+            "source_mode": self.source_mode,
+            "projection_target": self.projection_target,
+            "read_profile": "candidate_universe_current",
+            "read_now_ms": self.now_ms,
+            "table_counts": {key: len(value) for key, value in rows.items()},
+            **rows,
+        }
+
     def read_action_time_control_state(
         self,
         *,
@@ -740,6 +778,14 @@ class PgBackedRuntimeControlStateRepository:
             ).append(binding)
 
         for candidate_id, candidate in active_candidates.items():
+            if not str(candidate.get("exchange_instrument_id") or "").strip():
+                raise RuntimeControlStateRepositoryError(
+                    f"{candidate_id} has no exact exchange instrument identity"
+                )
+            if not str(candidate.get("timeframe") or "").strip():
+                raise RuntimeControlStateRepositoryError(
+                    f"{candidate_id} has no exact timeframe"
+                )
             bindings = active_binding_by_candidate.get(candidate_id) or []
             if not bindings:
                 raise RuntimeControlStateRepositoryError(
@@ -763,6 +809,12 @@ class PgBackedRuntimeControlStateRepository:
                 if binding.get("symbol") != candidate.get("symbol"):
                     raise RuntimeControlStateRepositoryError(
                         f"{binding.get('binding_id')} mismatches candidate symbol"
+                    )
+                if str(event.get("timeframe") or "") != str(
+                    candidate.get("timeframe") or ""
+                ):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{candidate_id} mismatches event timeframe"
                     )
                 event_id = str(event.get("event_id") or "")
                 candidate_event_id = str(_as_dict(candidate.get("metadata")).get("event_id") or "")

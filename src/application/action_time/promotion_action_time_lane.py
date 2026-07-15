@@ -742,7 +742,16 @@ def _account_capacity_candidate(
         return None, "account_capacity_sizing_decision_missing"
     if snapshot.account_id != bundle.account_id:
         return None, "account_capacity_snapshot_account_mismatch"
-    instrument_id = f"{snapshot.exchange_id}:{bundle.candidate['symbol']}"
+    instrument_id = str(
+        bundle.candidate.get("exchange_instrument_id") or ""
+    ).strip()
+    if not instrument_id:
+        return None, "candidate_scope_exchange_instrument_id_missing"
+    if (
+        bundle.lane_identity is not None
+        and bundle.lane_identity.exchange_instrument_id != instrument_id
+    ):
+        return None, "runtime_lane_identity_mismatch:account_capacity_instrument"
     policies = sa.Table("brc_account_risk_policy_current", sa.MetaData(), autoload_with=conn)
     policy_version = conn.execute(
         sa.select(policies.c.risk_policy_version)
@@ -1502,6 +1511,9 @@ def _signal_identity_matches_current_lane(
                 event_spec.get("strategy_group_version_id") or ""
             ),
             symbol=str(candidate.get("symbol") or ""),
+            exchange_instrument_id=str(
+                candidate.get("exchange_instrument_id") or ""
+            ),
             asset_class=str(candidate.get("asset_class") or ""),
             side=str(candidate.get("side") or ""),
             event_spec_id=str(event_spec.get("event_spec_id") or ""),

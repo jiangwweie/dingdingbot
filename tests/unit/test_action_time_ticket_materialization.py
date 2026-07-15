@@ -39,6 +39,10 @@ ACCOUNT_RISK_CURRENT_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-14-122_create_account_risk_current_projections.py"
 )
+ASSET_NEUTRAL_EXPAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-15-126_expand_asset_neutral_account_risk_identity.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -67,6 +71,10 @@ def pg_control_connection():
     dynamic_risk_migration = _load_module(
         DYNAMIC_RISK_MIGRATION_PATH,
         "migration_115_action_time_ticket",
+    )
+    asset_neutral_expand_migration = _load_module(
+        ASSET_NEUTRAL_EXPAND_MIGRATION_PATH,
+        "migration_126_action_time_ticket",
     )
     seed = _load_module(SEED_PATH, "seed_action_time_ticket")
     engine = create_engine(
@@ -111,7 +119,30 @@ def pg_control_connection():
             account_risk_current_migration.upgrade()
         finally:
             account_risk_current_migration.op = old_account_risk_current_op
+        old_expand_op = asset_neutral_expand_migration.op
+        asset_neutral_expand_migration.op = Operations(
+            MigrationContext.configure(conn)
+        )
+        try:
+            asset_neutral_expand_migration.upgrade()
+        finally:
+            asset_neutral_expand_migration.op = old_expand_op
         seed.seed_runtime_control_state_foundation(conn)
+        conn.execute(
+            text(
+                """
+                UPDATE brc_strategy_group_candidate_scope
+                SET exchange_instrument_id = (
+                  SELECT mapping.exchange_instrument_id
+                  FROM brc_symbol_instrument_mappings AS mapping
+                  WHERE mapping.symbol = brc_strategy_group_candidate_scope.symbol
+                    AND mapping.status = 'active'
+                  ORDER BY mapping.valid_from_ms DESC, mapping.mapping_id DESC
+                  LIMIT 1
+                )
+                """
+            )
+        )
     with engine.connect() as conn:
         yield conn
     engine.dispose()
@@ -772,6 +803,7 @@ def _insert_action_time_lane_graph(
             SELECT c.candidate_scope_id,
                    c.strategy_group_id,
                    c.symbol,
+                   c.exchange_instrument_id,
                    c.asset_class,
                    c.side,
                    c.policy_current_id,
@@ -832,9 +864,7 @@ def _insert_action_time_lane_graph(
             strategy_group_id=str(row["strategy_group_id"]),
             strategy_group_version_id=str(row["strategy_group_version_id"]),
             symbol=str(row["symbol"]),
-            exchange_instrument_id=(
-                f"instrument:test:{row['candidate_scope_id']}"
-            ),
+            exchange_instrument_id=str(row["exchange_instrument_id"]),
             asset_class=str(row["asset_class"]),
             side=str(row["side"]),
             event_spec_id=str(row["event_spec_id"]),
@@ -1083,7 +1113,8 @@ def _insert_action_time_lane_graph(
                 INSERT INTO brc_live_signal_events (
                   signal_event_id, candidate_scope_id, candidate_scope_event_binding_id,
                   runtime_scope_binding_id, runtime_instance_id, runtime_profile_id,
-                  policy_current_id, strategy_group_version_id, asset_class,
+                  policy_current_id, strategy_group_version_id,
+                  exchange_instrument_id, asset_class,
                   event_spec_id, event_spec_version, event_id, timeframe, time_authority,
                   lane_identity_key, source_watermark, strategy_group_id,
                   symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
@@ -1095,7 +1126,8 @@ def _insert_action_time_lane_graph(
                 ) VALUES (
                   :signal_event_id, :candidate_scope_id, :candidate_scope_event_binding_id,
                   :runtime_scope_binding_id, :runtime_instance_id, :runtime_profile_id,
-                  :policy_current_id, :strategy_group_version_id, :asset_class,
+                  :policy_current_id, :strategy_group_version_id,
+                  :exchange_instrument_id, :asset_class,
                   :event_spec_id, :event_spec_version, :event_id, :timeframe, :time_authority,
                   :lane_identity_key, :source_watermark, :strategy_group_id,
                   :symbol, :side, :detector_key, :signal_type,
@@ -1117,6 +1149,7 @@ def _insert_action_time_lane_graph(
                 "runtime_profile_id": lane_identity.runtime_profile_id,
                 "policy_current_id": lane_identity.policy_current_id,
                 "strategy_group_version_id": lane_identity.strategy_group_version_id,
+                "exchange_instrument_id": lane_identity.exchange_instrument_id,
                 "asset_class": lane_identity.asset_class,
                 "event_spec_version": lane_identity.event_spec_version,
                 "event_id": lane_identity.event_id,

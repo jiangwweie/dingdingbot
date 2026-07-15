@@ -401,10 +401,20 @@ def test_migration_126_expands_nullable_asset_neutral_identity_structure() -> No
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:
         _upgrade_to_125(conn)
+        if "brc_runtime_process_outcomes" not in sa.inspect(conn).get_table_names():
+            conn.execute(
+                sa.text(
+                    "CREATE TABLE brc_runtime_process_outcomes "
+                    "(process_outcome_id TEXT PRIMARY KEY)"
+                )
+            )
         _upgrade(conn, EXPAND, "migration_126_asset_neutral")
 
         tables = set(sa.inspect(conn).get_table_names())
         candidate_columns = _columns(conn, "brc_strategy_group_candidate_scope")
+        live_signal_columns = _columns(conn, "brc_live_signal_events")
+        process_outcome_columns = _columns(conn, "brc_runtime_process_outcomes")
+        coverage_columns = _columns(conn, "brc_watcher_runtime_coverage")
         instrument_columns = _columns(conn, "brc_exchange_instruments")
         reservation_columns = _columns(conn, "brc_budget_reservations")
         ticket_columns = _columns(conn, "brc_action_time_tickets")
@@ -417,6 +427,9 @@ def test_migration_126_expands_nullable_asset_neutral_identity_structure() -> No
         "brc_risk_cluster_membership_snapshots",
     } <= tables
     assert {"exchange_instrument_id"} <= candidate_columns
+    assert {"exchange_instrument_id"} <= live_signal_columns
+    assert {"exchange_instrument_id"} <= process_outcome_columns
+    assert {"exchange_instrument_id"} <= coverage_columns
     assert {
         "instrument_type",
         "settlement_asset",

@@ -121,7 +121,7 @@ def pg_control_connection():
             dynamic_risk_migration.upgrade()
         finally:
             dynamic_risk_migration.op = old_dynamic_risk_op
-        for revision in ("121", "122"):
+        for revision in ("121", "122", "124", "125", "126", "127"):
             migration_path = next(
                 REPO_ROOT.glob(f"migrations/versions/*-{revision}_*.py")
             )
@@ -181,6 +181,33 @@ def test_pg_backed_runtime_control_state_repository_reads_seeded_state(
         "squeeze_clear",
         "liquidity_clear",
     ]
+
+
+def test_candidate_universe_selector_reads_only_four_current_tables(
+    pg_control_connection,
+    monkeypatch,
+) -> None:
+    repository = PgBackedRuntimeControlStateRepository(pg_control_connection)
+    monkeypatch.setattr(
+        repository,
+        "read_control_state",
+        lambda: (_ for _ in ()).throw(AssertionError("full state read forbidden")),
+    )
+
+    state = repository.read_candidate_universe_control_state()
+
+    assert state["read_profile"] == "candidate_universe_current"
+    assert set(state["table_counts"]) == {
+        "candidate_scope",
+        "candidate_scope_event_bindings",
+        "runtime_scope_bindings",
+        "strategy_side_event_specs",
+    }
+    assert state["table_counts"]["candidate_scope"] == 22
+    assert all(
+        str(row.get("exchange_instrument_id") or "")
+        for row in state["candidate_scope"]
+    )
 
 
 def test_current_chain_helpers_reject_future_dated_rows() -> None:
@@ -404,6 +431,7 @@ def test_live_signal_writer_output_is_readable_by_repository(pg_control_connecti
                    c.policy_current_id,
                    c.strategy_group_id,
                    c.symbol,
+                   c.exchange_instrument_id,
                    c.asset_class,
                    c.side,
                    b.binding_id,
@@ -443,9 +471,7 @@ def test_live_signal_writer_output_is_readable_by_repository(pg_control_connecti
         strategy_group_id=str(lane_row["strategy_group_id"]),
         strategy_group_version_id=str(lane_row["strategy_group_version_id"]),
         symbol=str(lane_row["symbol"]),
-        exchange_instrument_id=(
-            f"instrument:test:{lane_row['candidate_scope_id']}"
-        ),
+        exchange_instrument_id=str(lane_row["exchange_instrument_id"]),
         asset_class=str(lane_row["asset_class"]),
         side=str(lane_row["side"]),
         event_spec_id=str(lane_row["event_spec_id"]),
@@ -1447,6 +1473,10 @@ def test_runtime_control_state_repository_validator_reports_seeded_state(
 
 def _seed_database_url(database_url: str) -> None:
     migration = _load_module(MIGRATION_PATH, "migration_086_repository_validator")
+    asset_neutral_expand = _load_module(
+        next(REPO_ROOT.glob("migrations/versions/*-126_*.py")),
+        "migration_126_repository_validator",
+    )
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_repository_validator")
     engine = create_engine(database_url)
     try:
@@ -1457,6 +1487,27 @@ def _seed_database_url(database_url: str) -> None:
                 migration.upgrade()
             finally:
                 migration.op = old_op
+            old_expand_op = asset_neutral_expand.op
+            asset_neutral_expand.op = Operations(MigrationContext.configure(conn))
+            try:
+                asset_neutral_expand.upgrade()
+            finally:
+                asset_neutral_expand.op = old_expand_op
             seed.seed_runtime_control_state_foundation(conn)
+            conn.execute(
+                text(
+                    """
+                    UPDATE brc_strategy_group_candidate_scope
+                    SET exchange_instrument_id = (
+                      SELECT mapping.exchange_instrument_id
+                      FROM brc_symbol_instrument_mappings AS mapping
+                      WHERE mapping.symbol = brc_strategy_group_candidate_scope.symbol
+                        AND mapping.status = 'active'
+                      ORDER BY mapping.valid_from_ms DESC, mapping.mapping_id DESC
+                      LIMIT 1
+                    )
+                    """
+                )
+            )
     finally:
         engine.dispose()

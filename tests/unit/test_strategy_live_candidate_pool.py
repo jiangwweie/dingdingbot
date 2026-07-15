@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import importlib.util
 import json
 import subprocess
@@ -23,6 +25,10 @@ VALIDATOR_PATH = REPO_ROOT / "scripts" / "validate_strategy_live_candidate_pool.
 MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
+)
+ASSET_NEUTRAL_EXPAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-15-126_expand_asset_neutral_account_risk_identity.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
@@ -48,6 +54,10 @@ def _validator():
 @pytest.fixture()
 def pg_control_connection():
     migration = _load_module(MIGRATION_PATH, "migration_086_candidate_pool")
+    asset_neutral_expand = _load_module(
+        ASSET_NEUTRAL_EXPAND_MIGRATION_PATH,
+        "migration_126_candidate_pool",
+    )
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_candidate_pool")
     engine = create_engine(
         "sqlite://",
@@ -61,7 +71,28 @@ def pg_control_connection():
             migration.upgrade()
         finally:
             migration.op = old_op
+        old_expand_op = asset_neutral_expand.op
+        asset_neutral_expand.op = Operations(MigrationContext.configure(conn))
+        try:
+            asset_neutral_expand.upgrade()
+        finally:
+            asset_neutral_expand.op = old_expand_op
         seed.seed_runtime_control_state_foundation(conn)
+        conn.execute(
+            text(
+                """
+                UPDATE brc_strategy_group_candidate_scope
+                SET exchange_instrument_id = (
+                  SELECT mapping.exchange_instrument_id
+                  FROM brc_symbol_instrument_mappings AS mapping
+                  WHERE mapping.symbol = brc_strategy_group_candidate_scope.symbol
+                    AND mapping.status = 'active'
+                  ORDER BY mapping.valid_from_ms DESC, mapping.mapping_id DESC
+                  LIMIT 1
+                )
+                """
+            )
+        )
     with engine.connect() as conn:
         yield conn
     engine.dispose()
@@ -69,6 +100,10 @@ def pg_control_connection():
 
 def _seed_runtime_control_db(db_path: Path) -> str:
     migration = _load_module(MIGRATION_PATH, "migration_086_candidate_pool_cli")
+    asset_neutral_expand = _load_module(
+        ASSET_NEUTRAL_EXPAND_MIGRATION_PATH,
+        "migration_126_candidate_pool_cli",
+    )
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_candidate_pool_cli")
     database_url = f"sqlite:///{db_path}"
     engine = create_engine(database_url)
@@ -79,7 +114,28 @@ def _seed_runtime_control_db(db_path: Path) -> str:
             migration.upgrade()
         finally:
             migration.op = old_op
+        old_expand_op = asset_neutral_expand.op
+        asset_neutral_expand.op = Operations(MigrationContext.configure(conn))
+        try:
+            asset_neutral_expand.upgrade()
+        finally:
+            asset_neutral_expand.op = old_expand_op
         seed.seed_runtime_control_state_foundation(conn)
+        conn.execute(
+            text(
+                """
+                UPDATE brc_strategy_group_candidate_scope
+                SET exchange_instrument_id = (
+                  SELECT mapping.exchange_instrument_id
+                  FROM brc_symbol_instrument_mappings AS mapping
+                  WHERE mapping.symbol = brc_strategy_group_candidate_scope.symbol
+                    AND mapping.status = 'active'
+                  ORDER BY mapping.valid_from_ms DESC, mapping.mapping_id DESC
+                  LIMIT 1
+                )
+                """
+            )
+        )
     engine.dispose()
     return database_url
 
@@ -734,7 +790,11 @@ def test_candidate_pool_pg_cli_normalizes_asyncpg_dsn(monkeypatch, capsys):
     monkeypatch.setattr(
         builder,
         "PgBackedRuntimeControlStateRepository",
-        lambda conn: type("Repo", (), {"read_control_state": lambda self: {}})(),
+        lambda conn: type(
+            "Repo",
+            (),
+            {"read_monitor_control_state": lambda self: {}},
+        )(),
     )
     monkeypatch.setattr(
         builder,
@@ -1002,21 +1062,7 @@ def test_candidate_pool_does_not_fallback_to_tradeability_policy_when_owner_auth
 
 
 def test_candidate_pool_pg_cli_round_trip(tmp_path: Path, capsys):
-    migration = _load_module(MIGRATION_PATH, "migration_086_candidate_pool_cli")
-    seed = _load_module(SEED_PATH, "seed_runtime_control_state_candidate_pool_cli")
-    database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
-    engine = create_engine(database_url)
-    try:
-        with engine.begin() as conn:
-            old_op = migration.op
-            migration.op = Operations(MigrationContext.configure(conn))
-            try:
-                migration.upgrade()
-            finally:
-                migration.op = old_op
-            seed.seed_runtime_control_state_foundation(conn)
-    finally:
-        engine.dispose()
+    database_url = _seed_runtime_control_db(tmp_path / "runtime.db")
 
     assert (
         _builder().main(
@@ -3119,3 +3165,10 @@ def test_candidate_pool_cli_rejects_legacy_file_inputs(
 
     assert result.returncode == 2
     assert "unrecognized arguments" in result.stderr
+
+
+def test_candidate_hot_path_never_calls_read_control_state() -> None:
+    source = inspect.getsource(_builder()._impl.main)
+
+    assert ".read_control_state(" not in source
+    assert ".read_monitor_control_state(" in source

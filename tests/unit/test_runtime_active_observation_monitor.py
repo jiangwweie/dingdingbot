@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import sqlite3
 import sys
@@ -50,6 +51,15 @@ def _typed_coverage_identity(
     }
 
 
+def test_candidate_universe_pg_reader_never_loads_full_control_state() -> None:
+    source = inspect.getsource(
+        runtime_active_observation_monitor._read_candidate_universe_from_pg
+    )
+
+    assert ".read_control_state(" not in source
+    assert ".read_candidate_universe_control_state(" in source
+
+
 def test_cpm_long_lane_rejects_nested_short_output_without_materialization() -> None:
     summary = {
         "runtime_instance_id": "strategy-runtime-cpm-sol-long",
@@ -72,6 +82,7 @@ def test_cpm_long_lane_rejects_nested_short_output_without_materialization() -> 
             "strategy_group_id": "CPM-RO-001",
             "strategy_group_version_id": "sgv:CPM-RO-001:v2",
             "symbol": "SOLUSDT",
+            "exchange_instrument_id": "instrument:opaque:sol-long",
             "asset_class": "crypto_perpetual",
             "side": "long",
             "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
@@ -242,6 +253,7 @@ def _legacy_writer_lane_identity(summary: dict) -> dict:
         "strategy_group_id": strategy_group_id,
         "strategy_group_version_id": group_version,
         "symbol": symbol,
+        "exchange_instrument_id": f"instrument:opaque:{symbol}:{side}",
         "asset_class": "crypto_perpetual",
         "side": side,
         "event_spec_id": event_spec_id,
@@ -371,6 +383,7 @@ def test_runtime_summary_copies_api_lane_identity_without_runtime_side_fallback(
         "strategy_group_id": "CPM-RO-001",
         "strategy_group_version_id": "sgv:CPM-RO-001:v2",
         "symbol": "SOLUSDT",
+        "exchange_instrument_id": "instrument:opaque:sol-long",
         "asset_class": "crypto_perpetual",
         "side": "long",
         "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
@@ -866,6 +879,7 @@ def test_active_monitor_resolves_typed_coverage_for_every_registered_lane():
                 "strategy_group_id": strategy_group_id,
                 "symbol": symbol,
                 "side": side,
+                "exchange_instrument_id": f"instrument:opaque:{symbol}:{side}",
                 "asset_class": "crypto_perpetual",
                 "policy_current_id": f"policy:{strategy_group_id}:{symbol}:{side}",
                 "status": "active",

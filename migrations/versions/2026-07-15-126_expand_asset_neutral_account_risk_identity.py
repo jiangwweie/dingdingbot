@@ -48,6 +48,21 @@ def upgrade() -> None:
         "exchange_instrument_id",
         sa.String(192),
     )
+    _add_column(
+        "brc_live_signal_events",
+        "exchange_instrument_id",
+        sa.String(192),
+    )
+    _add_column(
+        "brc_runtime_process_outcomes",
+        "exchange_instrument_id",
+        sa.String(192),
+    )
+    _add_column(
+        "brc_watcher_runtime_coverage",
+        "exchange_instrument_id",
+        sa.String(192),
+    )
 
     _add_column(
         "brc_risk_cluster_memberships",
@@ -165,6 +180,18 @@ def downgrade() -> None:
         ),
         (
             "brc_strategy_group_candidate_scope",
+            ("exchange_instrument_id",),
+        ),
+        (
+            "brc_live_signal_events",
+            ("exchange_instrument_id",),
+        ),
+        (
+            "brc_runtime_process_outcomes",
+            ("exchange_instrument_id",),
+        ),
+        (
+            "brc_watcher_runtime_coverage",
             ("exchange_instrument_id",),
         ),
         (

@@ -592,9 +592,9 @@ def _build_ticket_bundle(
         event_spec_id=str(event_spec.get("event_spec_id") or ""),
         blockers=blockers,
     )
-    exchange_instrument_id = _exchange_instrument_id(
-        control_state,
-        symbol=str(lane.get("symbol") or ""),
+    exchange_instrument_id = _ticket_exchange_instrument_id(
+        candidate=candidate,
+        signal=signal,
         blockers=blockers,
     )
 
@@ -1308,33 +1308,31 @@ def _current_execution_policy(
     return rows[0]
 
 
-def _exchange_instrument_id(
-    control_state: dict[str, Any],
+def _ticket_exchange_instrument_id(
     *,
-    symbol: str,
+    candidate: dict[str, Any],
+    signal: dict[str, Any],
     blockers: list[str],
 ) -> str:
-    mapping = next(
-        (
-            row
-            for row in _rows(control_state.get("symbol_instrument_mappings"))
-            if row.get("symbol") == symbol and row.get("status") == "active"
-        ),
-        {},
-    )
-    instrument_id = str(mapping.get("exchange_instrument_id") or "")
-    instrument = next(
-        (
-            row
-            for row in _rows(control_state.get("exchange_instruments"))
-            if row.get("exchange_instrument_id") == instrument_id
-            and row.get("status") == "active"
-        ),
-        {},
-    )
-    if not instrument_id or not instrument:
-        blockers.append("exchange_instrument_mapping_missing")
-    return instrument_id
+    candidate_instrument_id = str(
+        candidate.get("exchange_instrument_id") or ""
+    ).strip()
+    if not candidate_instrument_id:
+        blockers.append("candidate_scope_exchange_instrument_id_missing")
+        return ""
+    if "lane_identity_key" not in signal:
+        return candidate_instrument_id
+    try:
+        signal_identity = runtime_lane_identity_from_live_signal(signal)
+    except RuntimeLaneIdentityConservationError as exc:
+        blockers.append(exc.blocker)
+        return ""
+    if signal_identity.exchange_instrument_id != candidate_instrument_id:
+        blockers.append(
+            "runtime_lane_identity_mismatch:signal_to_ticket_exchange_instrument"
+        )
+        return ""
+    return signal_identity.exchange_instrument_id
 
 
 def _owner_policy_version(
