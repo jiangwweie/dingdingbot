@@ -175,3 +175,47 @@ def test_migration_125_rejects_invalid_decision_shape_and_downgrades():
         }
         assert "binding_source" not in projection_columns
         assert "adoption_event_id" not in projection_columns
+
+
+def test_migration_125_extends_command_source_and_blocks_unsafe_downgrade():
+    migration = _load_migration()
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    _base_schema(engine)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE brc_ticket_bound_exchange_commands ("
+            "exchange_command_id VARCHAR(192) PRIMARY KEY, "
+            "command_source VARCHAR(64) NOT NULL, "
+            "CONSTRAINT ck_brc_exchange_command_source CHECK ("
+            "command_source IN ('protected_submit','protection_recovery',"
+            "'runner_mutation','orphan_cleanup','exit_policy_runner',"
+            "'exit_policy_close')))"
+        )
+        previous_op = migration.op
+        migration.op = Operations(MigrationContext.configure(conn))
+        try:
+            migration.upgrade()
+            conn.execute(
+                sa.text(
+                    "INSERT INTO brc_ticket_bound_exchange_commands VALUES "
+                    "('reprice-1','exit_policy_tp1_reprice')"
+                )
+            )
+            with pytest.raises(RuntimeError, match="cannot_downgrade"):
+                migration.downgrade()
+            conn.execute(
+                sa.text(
+                    "DELETE FROM brc_ticket_bound_exchange_commands "
+                    "WHERE exchange_command_id='reprice-1'"
+                )
+            )
+            migration.downgrade()
+            with pytest.raises(sa.exc.IntegrityError):
+                conn.execute(
+                    sa.text(
+                        "INSERT INTO brc_ticket_bound_exchange_commands VALUES "
+                        "('reprice-2','exit_policy_tp1_reprice')"
+                    )
+                )
+        finally:
+            migration.op = previous_op

@@ -149,7 +149,8 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     command_source: str = Field(
         pattern=(
             "^(protected_submit|protection_recovery|runner_mutation|"
-            "orphan_cleanup|exit_policy_runner|exit_policy_close)$"
+            "orphan_cleanup|exit_policy_runner|exit_policy_close|"
+            "exit_policy_tp1_reprice)$"
         )
     )
     source_command_id: str = Field(min_length=1, max_length=192)

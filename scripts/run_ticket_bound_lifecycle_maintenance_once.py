@@ -58,6 +58,7 @@ LIFECYCLE_MUTATION_COMMAND_SOURCES = (
     "orphan_cleanup",
     "exit_policy_runner",
     "exit_policy_close",
+    "exit_policy_tp1_reprice",
 )
 
 

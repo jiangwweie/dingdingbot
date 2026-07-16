@@ -133,6 +133,14 @@ def maintain_ticket_exit_policy_in_transaction(
             blocker="tp1_completion_truth_contradictory",
             now_ms=now_ms,
         )
+    reprice = _advance_tp1_reprice(
+        conn,
+        loaded=loaded,
+        completion=completion,
+        now_ms=now_ms,
+    )
+    if reprice is not None:
+        return reprice
     if completion == "unfilled":
         return _record_decision(
             conn,
@@ -664,6 +672,235 @@ def _advance_pending_runner_replacement(
     return _result("runner_replacement_completed", ticket_id)
 
 
+def _advance_tp1_reprice(
+    conn: sa.engine.Connection,
+    *,
+    loaded: dict[str, Any],
+    completion: str,
+    now_ms: int,
+) -> dict[str, Any] | None:
+    projection = loaded["projection"]
+    ticket_id = str(projection["ticket_id"])
+    existing_commands = _rows_by_value(
+        conn,
+        COMMAND_TABLE,
+        "ticket_id",
+        ticket_id,
+    )
+    reprice_commands = [
+        row
+        for row in existing_commands
+        if str(row.get("command_source") or "")
+        == "exit_policy_tp1_reprice"
+    ]
+    if (
+        str(projection.get("state") or "")
+        != "blocked_tp1_reprice_required"
+        and not reprice_commands
+    ):
+        return None
+    tp1_candidates = [
+        row
+        for row in loaded["orders"]
+        if str(row.get("role") or "") == "TP1"
+        and str(row.get("status") or "")
+        not in {"replaced", "failed"}
+    ]
+    if not tp1_candidates:
+        return _block_projection(
+            conn,
+            projection=projection,
+            ticket_id=ticket_id,
+            blocker="tp1_reprice_order_missing",
+            now_ms=now_ms,
+        )
+    old = min(
+        tp1_candidates,
+        key=lambda row: int(row.get("generation") or 1),
+    )
+    execution: TicketExitExecutionSnapshot = loaded["execution"]
+    source_id = _stable_id(
+        "exit-policy-tp1-reprice",
+        ticket_id,
+        str(loaded["policy"].payload_hash),
+        str(execution.resolved_tp1_price),
+        str(execution.resolved_tp1_target_qty),
+    )
+    cancel = _command_by_source_kind(
+        conn,
+        source_command_id=source_id,
+        command_kind="cancel_order",
+    )
+    if not cancel:
+        cancel = _materialize_policy_command(
+            conn,
+            loaded=loaded,
+            command_source="exit_policy_tp1_reprice",
+            source_command_id=source_id,
+            command_kind="cancel_order",
+            order_role="TP1",
+            order_type="cancel",
+            amount=_required_decimal(old.get("qty"), "tp1_reprice_old_qty"),
+            stop_price=None,
+            target_exchange_order_id=str(old.get("exchange_order_id") or ""),
+            local_order_id=f"{source_id}:cancel-old-tp1",
+            parent_order_id=str(old["exit_protection_order_id"]),
+            generation=int(old.get("generation") or 1),
+            now_ms=now_ms,
+        )
+        _update_order(
+            conn,
+            order_id=str(old["exit_protection_order_id"]),
+            values={"status": "cancel_pending", "updated_at_ms": now_ms},
+        )
+        return _result(
+            "tp1_reprice_cancel_prepared",
+            ticket_id,
+            command_id=str(cancel["exchange_command_id"]),
+        )
+    cancel_state = str(cancel.get("command_state") or "")
+    if cancel_state in PENDING_COMMAND_STATES:
+        return _result("tp1_reprice_cancel_pending", ticket_id)
+    if cancel_state == "outcome_unknown":
+        return _result(
+            "tp1_reprice_cancel_outcome_unknown",
+            ticket_id,
+            blockers=["exchange_command_outcome_unknown"],
+        )
+    if cancel_state in TERMINAL_FAILURE_STATES:
+        return _block_projection(
+            conn,
+            projection=projection,
+            ticket_id=ticket_id,
+            blocker=f"tp1_reprice_cancel_{cancel_state}",
+            now_ms=now_ms,
+        )
+    if cancel_state not in CONFIRMED_COMMAND_STATES:
+        return _block_projection(
+            conn,
+            projection=projection,
+            ticket_id=ticket_id,
+            blocker="tp1_reprice_cancel_confirmation_invalid",
+            now_ms=now_ms,
+        )
+    if completion != "unfilled":
+        _update_projection(
+            conn,
+            ticket_id=ticket_id,
+            values={
+                "state": "execution_bound",
+                "first_blocker": None,
+                "updated_at_ms": now_ms,
+            },
+        )
+        return _result("tp1_reprice_superseded_by_fill", ticket_id)
+
+    _update_order(
+        conn,
+        order_id=str(old["exit_protection_order_id"]),
+        values={"status": "cancelled", "updated_at_ms": now_ms},
+    )
+    place = _command_by_source_kind(
+        conn,
+        source_command_id=source_id,
+        command_kind="place_order",
+    )
+    if not place:
+        remaining_qty = _required_decimal(
+            projection.get("remaining_position_qty"),
+            "tp1_reprice_remaining_qty",
+        )
+        if remaining_qty < execution.resolved_tp1_target_qty:
+            return _block_projection(
+                conn,
+                projection=projection,
+                ticket_id=ticket_id,
+                blocker="tp1_reprice_quantity_exceeds_remaining_position",
+                now_ms=now_ms,
+            )
+        place = _materialize_policy_command(
+            conn,
+            loaded=loaded,
+            command_source="exit_policy_tp1_reprice",
+            source_command_id=source_id,
+            command_kind="place_order",
+            order_role="TP1",
+            order_type="limit",
+            amount=execution.resolved_tp1_target_qty,
+            stop_price=None,
+            target_exchange_order_id=None,
+            local_order_id=f"{source_id}:tp1",
+            parent_order_id=str(old["exit_protection_order_id"]),
+            generation=int(old.get("generation") or 1) + 1,
+            now_ms=now_ms,
+            price=execution.resolved_tp1_price,
+            execution_style="limit_gtc",
+            time_in_force="GTC",
+        )
+        return _result(
+            "tp1_reprice_place_prepared",
+            ticket_id,
+            command_id=str(place["exchange_command_id"]),
+        )
+    place_state = str(place.get("command_state") or "")
+    if place_state in PENDING_COMMAND_STATES:
+        return _result("tp1_reprice_place_pending", ticket_id)
+    if place_state == "outcome_unknown":
+        return _result(
+            "tp1_reprice_place_outcome_unknown",
+            ticket_id,
+            blockers=["exchange_command_outcome_unknown"],
+        )
+    if place_state in TERMINAL_FAILURE_STATES:
+        return _block_projection(
+            conn,
+            projection=projection,
+            ticket_id=ticket_id,
+            blocker=f"tp1_reprice_place_{place_state}",
+            now_ms=now_ms,
+        )
+    if place_state not in CONFIRMED_COMMAND_STATES or not str(
+        place.get("exchange_order_id") or ""
+    ):
+        return _block_projection(
+            conn,
+            projection=projection,
+            ticket_id=ticket_id,
+            blocker="tp1_reprice_place_confirmation_invalid",
+            now_ms=now_ms,
+        )
+    new_order = _ensure_tp1_reprice_order(
+        conn,
+        place=place,
+        old=old,
+        now_ms=now_ms,
+    )
+    _update_order(
+        conn,
+        order_id=str(old["exit_protection_order_id"]),
+        values={"status": "replaced", "updated_at_ms": now_ms},
+    )
+    protection_sets = _table(conn, "brc_ticket_bound_exit_protection_sets")
+    conn.execute(
+        protection_sets.update()
+        .where(
+            protection_sets.c.exit_protection_set_id
+            == str(old["exit_protection_set_id"])
+        )
+        .values(tp1_order_id=new_order["exit_protection_order_id"], updated_at_ms=now_ms)
+    )
+    _update_projection(
+        conn,
+        ticket_id=ticket_id,
+        values={
+            "state": "execution_bound",
+            "first_blocker": None,
+            "updated_at_ms": now_ms,
+        },
+    )
+    return _result("tp1_reprice_completed", ticket_id)
+
+
 def _prepare_runner_replacement(
     conn: sa.engine.Connection,
     *,
@@ -847,6 +1084,10 @@ def _materialize_policy_command(
     parent_order_id: str,
     generation: int,
     now_ms: int,
+    price: Decimal | None = None,
+    execution_style: str | None = None,
+    time_in_force: str | None = None,
+    post_only: bool = False,
 ) -> dict[str, Any]:
     scope: TicketBoundExchangeScope = loaded["scope"]
     attempt = loaded["attempt"]
@@ -875,6 +1116,7 @@ def _materialize_policy_command(
         "position_bucket": scope.position_bucket,
         "gateway_side": gateway_side,
         "amount": str(amount),
+        "price": str(price) if price is not None else None,
         "stop_price": str(stop_price) if stop_price is not None else None,
         "target_exchange_order_id": target_exchange_order_id,
         "policy_hash": loaded["policy"].payload_hash,
@@ -908,8 +1150,12 @@ def _materialize_policy_command(
         command_generation=generation,
         request_fingerprint=fingerprint,
         order_type=order_type,
+        execution_style=execution_style,
+        time_in_force=time_in_force,
+        post_only=post_only,
+        market_fallback_allowed=False,
         amount=amount,
-        price=None,
+        price=price,
         stop_price=stop_price,
         reduce_only=True,
         reduce_intent="reduce_position",
@@ -939,6 +1185,51 @@ def _materialize_policy_command(
         if str(existing.get("request_fingerprint") or "") != fingerprint:
             raise ValueError("exit_policy_command_fingerprint_mismatch")
         return dict(existing)
+    conn.execute(table.insert().values(**row))
+    return row
+
+
+def _ensure_tp1_reprice_order(
+    conn: sa.engine.Connection,
+    *,
+    place: dict[str, Any],
+    old: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    table = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    existing = conn.execute(
+        sa.select(table).where(table.c.local_order_id == place["local_order_id"])
+    ).mappings().first()
+    if existing:
+        if (
+            str(existing.get("exchange_order_id") or "")
+            != str(place.get("exchange_order_id") or "")
+            or int(existing.get("generation") or 0)
+            != int(place.get("command_generation") or 0)
+        ):
+            raise ValueError("tp1_reprice_order_identity_contradiction")
+        return dict(existing)
+    row = {
+        "exit_protection_order_id": _stable_id(
+            "ticket-exit-protection-order", str(place["exchange_command_id"])
+        ),
+        "exit_protection_set_id": str(old["exit_protection_set_id"]),
+        "ticket_id": str(old["ticket_id"]),
+        "role": "TP1",
+        "local_order_id": str(place["local_order_id"]),
+        "exchange_order_id": str(place["exchange_order_id"]),
+        "status": "submitted",
+        "order_type": "LIMIT",
+        "side": str(place["gateway_side"]),
+        "qty": _required_decimal(place["amount"], "tp1_reprice_amount"),
+        "price": _required_decimal(place["price"], "tp1_reprice_price"),
+        "trigger_price": None,
+        "reduce_only": True,
+        "replaces_exit_protection_order_id": str(old["exit_protection_order_id"]),
+        "generation": int(place["command_generation"]),
+        "created_at_ms": now_ms,
+        "updated_at_ms": now_ms,
+    }
     conn.execute(table.insert().values(**row))
     return row
 

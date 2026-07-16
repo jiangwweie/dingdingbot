@@ -246,6 +246,24 @@ def apply_failed_lifecycle_exchange_source(
             "record_status": record.get("status"),
             "blockers": list(record.get("blockers") or blockers),
         }
+    if command_source == "exit_policy_tp1_reprice":
+        projection = _table(conn, "brc_ticket_exit_policy_current")
+        ticket_id = str(terminal[0].get("ticket_id") or "")
+        conn.execute(
+            projection.update()
+            .where(projection.c.ticket_id == ticket_id)
+            .values(
+                state="blocked_tp1_reprice_failed",
+                first_blocker=blockers[0] if blockers else "tp1_reprice_failed",
+                updated_at_ms=now_ms,
+            )
+        )
+        return {
+            "status": "tp1_reprice_failure_applied",
+            "command_source": command_source,
+            "source_command_id": source_command_id,
+            "blockers": blockers,
+        }
     source_table, id_column = {
         "protection_recovery": (
             "brc_ticket_bound_protection_recovery_commands",

@@ -23,14 +23,28 @@ depends_on: Union[str, Sequence[str], None] = None
 ADOPTION_TABLE = "brc_ticket_exit_policy_adoption_events"
 CURRENT_TABLE = "brc_ticket_exit_policy_current"
 CURRENT_BINDING_CHECK = "ck_brc_ticket_exit_policy_binding_source"
+COMMAND_TABLE = "brc_ticket_bound_exchange_commands"
+COMMAND_SOURCE_CHECK = "ck_brc_exchange_command_source"
+PREVIOUS_COMMAND_SOURCES = (
+    "protected_submit",
+    "protection_recovery",
+    "runner_mutation",
+    "orphan_cleanup",
+    "exit_policy_runner",
+    "exit_policy_close",
+)
+COMMAND_SOURCES = PREVIOUS_COMMAND_SOURCES + ("exit_policy_tp1_reprice",)
 
 
 def upgrade() -> None:
     _create_adoption_table()
     _extend_current_projection()
+    _replace_command_source_constraint(COMMAND_SOURCES)
 
 
 def downgrade() -> None:
+    _assert_no_tp1_reprice_commands()
+    _replace_command_source_constraint(PREVIOUS_COMMAND_SOURCES)
     _contract_current_projection()
     if _has_table(ADOPTION_TABLE):
         op.drop_table(ADOPTION_TABLE)
@@ -179,6 +193,45 @@ def _contract_current_projection() -> None:
             op.drop_column(CURRENT_TABLE, "adoption_event_id")
         if _has_column(CURRENT_TABLE, "binding_source"):
             op.drop_column(CURRENT_TABLE, "binding_source")
+
+
+def _assert_no_tp1_reprice_commands() -> None:
+    if not _has_table(COMMAND_TABLE):
+        return
+    table = sa.Table(COMMAND_TABLE, sa.MetaData(), autoload_with=op.get_bind())
+    count = op.get_bind().execute(
+        sa.select(sa.func.count())
+        .select_from(table)
+        .where(table.c.command_source == "exit_policy_tp1_reprice")
+    ).scalar_one()
+    if count:
+        raise RuntimeError("cannot_downgrade_active_tp1_reprice_commands")
+
+
+def _replace_command_source_constraint(sources: tuple[str, ...]) -> None:
+    if not _has_table(COMMAND_TABLE) or not _has_column(
+        COMMAND_TABLE, "command_source"
+    ):
+        return
+    condition = "command_source IN (" + ", ".join(repr(item) for item in sources) + ")"
+    existing = COMMAND_SOURCE_CHECK in _check_constraint_names(COMMAND_TABLE)
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table(COMMAND_TABLE, recreate="always") as batch_op:
+            if existing:
+                batch_op.drop_constraint(COMMAND_SOURCE_CHECK, type_="check")
+            batch_op.create_check_constraint(COMMAND_SOURCE_CHECK, condition)
+    else:
+        if existing:
+            op.drop_constraint(
+                COMMAND_SOURCE_CHECK,
+                COMMAND_TABLE,
+                type_="check",
+            )
+        op.create_check_constraint(
+            COMMAND_SOURCE_CHECK,
+            COMMAND_TABLE,
+            condition,
+        )
 
 
 def _has_table(table_name: str) -> bool:
