@@ -10,6 +10,7 @@ import sqlalchemy as sa
 
 from src.application.action_time.ticket_exit_policy_binding import (
     initialize_ticket_exit_policy_projection,
+    resolve_effective_ticket_exit_policy_binding,
 )
 from src.domain.ticket_exit_policy import (
     TicketExitExecutionSnapshot,
@@ -167,21 +168,24 @@ def bind_ticket_exit_execution_snapshot(
     if ticket_row is None:
         raise TicketExitExecutionBindingError("action_time_ticket_missing")
     ticket = dict(ticket_row)
-    if str(ticket.get("exit_policy_id") or "") == "legacy_unbound":
-        raise TicketExitExecutionBindingError("legacy_exit_policy_has_no_execution_binding")
-    payload = _mapping(ticket.get("exit_policy_snapshot"))
     try:
-        policy = TicketExitPolicySnapshot.model_validate(payload)
+        binding = resolve_effective_ticket_exit_policy_binding(
+            conn,
+            ticket_id=str(ticket_id),
+            now_ms=now_ms,
+        )
+        if binding.snapshot is None:
+            raise TicketExitExecutionBindingError(
+                "legacy_exit_policy_has_no_execution_binding"
+            )
+        policy = binding.snapshot
     except Exception as exc:
+        if isinstance(exc, TicketExitExecutionBindingError):
+            raise
         raise TicketExitExecutionBindingError(
             f"ticket_exit_policy_snapshot_invalid:{type(exc).__name__}"
         ) from exc
-    if (
-        str(ticket.get("exit_policy_id") or "") != policy.exit_policy_id
-        or str(ticket.get("exit_policy_version") or "")
-        != policy.exit_policy_version
-        or str(ticket.get("exit_policy_hash") or "") != policy.payload_hash
-    ):
+    if binding.exit_policy_hash != policy.payload_hash:
         raise TicketExitExecutionBindingError("ticket_exit_policy_identity_contradiction")
 
     snapshot = build_ticket_exit_execution_snapshot(

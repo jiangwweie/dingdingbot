@@ -59,6 +59,13 @@ class TicketExitPolicyAdoptionEligibilitySnapshot(BaseModel):
     pg_position_qty: Decimal = Field(ge=0)
     exchange_position_qty: Decimal = Field(ge=0)
     entry_avg_fill_price: Decimal = Field(gt=0)
+    minimum_price_tick: Decimal = Field(gt=0)
+    quantity_step: Decimal = Field(gt=0)
+    entry_fee_amount: Decimal = Field(ge=0)
+    entry_fee_asset: str = Field(min_length=1, max_length=32)
+    quote_asset: str = Field(min_length=1, max_length=32)
+    fee_asset_quote_conversion_rate: Decimal | None = Field(default=None, gt=0)
+    certified_exit_taker_fee_rate: Decimal = Field(ge=0, lt=1)
 
     exit_protection_set_id: str = Field(min_length=1, max_length=192)
     protection_state: str = Field(min_length=1, max_length=64)
@@ -161,6 +168,11 @@ def evaluate_ticket_exit_policy_adoption_snapshot(
         blockers.append("adoption_position_not_active")
     if snapshot.pg_position_qty != snapshot.exchange_position_qty:
         blockers.append("adoption_position_quantity_mismatch")
+    if (
+        snapshot.entry_fee_asset.upper() != snapshot.quote_asset.upper()
+        and snapshot.fee_asset_quote_conversion_rate is None
+    ):
+        blockers.append("adoption_entry_fee_conversion_missing")
     if snapshot.protection_state != "complete_reconciled":
         blockers.append("adoption_protection_not_reconciled")
 

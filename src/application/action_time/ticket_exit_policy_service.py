@@ -43,6 +43,9 @@ from src.domain.ticket_exit_policy import (
     calculate_runner_break_even_floor,
     evaluate_exit_policy,
 )
+from src.application.action_time.ticket_exit_policy_binding import (
+    resolve_effective_ticket_exit_policy_binding,
+)
 
 
 CAPABILITY_ID = "ticket_exit_policy_v1"
@@ -335,15 +338,18 @@ def _load_state(
             "projection": projection,
             "blockers": ["ticket_exit_policy_state_missing"],
         }
-    if str(ticket.get("exit_policy_id") or "") == "legacy_unbound":
-        return {
-            "projection": projection,
-            "blockers": ["legacy_ticket_exit_policy_unbound"],
-        }
     try:
-        policy = TicketExitPolicySnapshot.model_validate(
-            _mapping(ticket.get("exit_policy_snapshot"))
+        binding = resolve_effective_ticket_exit_policy_binding(
+            conn,
+            ticket_id=ticket_id,
+            now_ms=now_ms,
         )
+        if binding.snapshot is None:
+            return {
+                "projection": projection,
+                "blockers": ["legacy_ticket_exit_policy_unbound"],
+            }
+        policy = binding.snapshot
         execution = TicketExitExecutionSnapshot.model_validate(
             _mapping(projection.get("exit_execution_snapshot"))
         )
@@ -353,8 +359,7 @@ def _load_state(
             "blockers": [f"ticket_exit_policy_snapshot_invalid:{type(exc).__name__}"],
         }
     if (
-        str(ticket.get("exit_policy_hash") or "") != policy.payload_hash
-        or str(projection.get("exit_policy_hash") or "") != policy.payload_hash
+        str(projection.get("exit_policy_hash") or "") != policy.payload_hash
         or str(projection.get("exit_execution_hash") or "") != execution.payload_hash
         or execution.ticket_id != ticket_id
         or execution.exit_policy_id != policy.exit_policy_id

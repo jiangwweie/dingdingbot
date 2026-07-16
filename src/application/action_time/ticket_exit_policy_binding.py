@@ -13,6 +13,10 @@ from src.domain.ticket_exit_policy import (
     TicketExitPolicySnapshot,
     canonical_payload_hash,
 )
+from src.domain.ticket_exit_policy_adoption import (
+    TicketExitPolicyAdoptionEligibilitySnapshot,
+    canonical_eligibility_hash,
+)
 
 
 CAPABILITY_ID = "ticket_exit_policy_v1"
@@ -30,12 +34,13 @@ class TicketExitPolicyBindingError(ValueError):
 class TicketExitPolicyBinding(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
 
-    binding_kind: Literal["versioned", "legacy_unbound"]
+    binding_kind: Literal["versioned", "adopted_versioned", "legacy_unbound"]
     exit_policy_id: str
     exit_policy_version: str
     exit_policy_snapshot: dict[str, Any]
     exit_policy_hash: str
     snapshot: TicketExitPolicySnapshot | None
+    adoption_event_id: str | None = None
 
 
 def legacy_unbound_ticket_exit_policy_binding() -> TicketExitPolicyBinding:
@@ -201,6 +206,143 @@ def initialize_ticket_exit_policy_projection(
             raise TicketExitPolicyBindingError("ticket_exit_policy_projection_contradiction")
         return
     conn.execute(table.insert().values(**values))
+
+
+def resolve_effective_ticket_exit_policy_binding(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    now_ms: int,
+) -> TicketExitPolicyBinding:
+    """Resolve immutable Ticket policy first, then one accepted adoption."""
+
+    del now_ms
+    tickets = _table(conn, "brc_action_time_tickets")
+    ticket_row = conn.execute(
+        sa.select(tickets).where(tickets.c.ticket_id == str(ticket_id or ""))
+    ).mappings().first()
+    if ticket_row is None:
+        raise TicketExitPolicyBindingError("action_time_ticket_missing")
+    ticket = dict(ticket_row)
+    if str(ticket.get("exit_policy_id") or "") != "legacy_unbound":
+        return _binding_from_ticket_snapshot(ticket)
+    if not sa.inspect(conn).has_table("brc_ticket_exit_policy_adoption_events"):
+        return legacy_unbound_ticket_exit_policy_binding()
+    events = _table(conn, "brc_ticket_exit_policy_adoption_events")
+    accepted = list(
+        conn.execute(
+            sa.select(events).where(
+                events.c.ticket_id == ticket_id,
+                events.c.decision == "accepted",
+            )
+        ).mappings()
+    )
+    if not accepted:
+        return legacy_unbound_ticket_exit_policy_binding()
+    if len(accepted) != 1:
+        raise TicketExitPolicyBindingError("multiple_accepted_policy_adoptions")
+    adoption = dict(accepted[0])
+    try:
+        eligibility = TicketExitPolicyAdoptionEligibilitySnapshot.model_validate(
+            _mapping(adoption.get("eligibility_snapshot"))
+        )
+    except Exception as exc:
+        raise TicketExitPolicyBindingError(
+            f"policy_adoption_eligibility_invalid:{type(exc).__name__}"
+        ) from exc
+    if (
+        canonical_eligibility_hash(eligibility)
+        != str(adoption.get("eligibility_hash") or "")
+        or eligibility.ticket_id != ticket_id
+        or eligibility.to_exit_policy_id
+        != str(adoption.get("to_exit_policy_id") or "")
+        or eligibility.to_exit_policy_version
+        != str(adoption.get("to_exit_policy_version") or "")
+        or eligibility.to_exit_policy_hash
+        != str(adoption.get("to_exit_policy_hash") or "")
+        or eligibility.owner_authorization_ref
+        != str(adoption.get("owner_authorization_ref") or "")
+        or eligibility.runtime_head != str(adoption.get("runtime_head") or "")
+    ):
+        raise TicketExitPolicyBindingError(
+            "policy_adoption_eligibility_contradiction"
+        )
+    revoked = conn.execute(
+        sa.select(events.c.adoption_event_id).where(
+            events.c.ticket_id == ticket_id,
+            events.c.decision == "revoked",
+            events.c.supersedes_adoption_event_id
+            == adoption["adoption_event_id"],
+        )
+    ).first()
+    if revoked:
+        raise TicketExitPolicyBindingError("ticket_exit_policy_adoption_revoked")
+    if str(adoption.get("from_exit_policy_hash") or "") != str(
+        ticket.get("exit_policy_hash") or ""
+    ):
+        raise TicketExitPolicyBindingError("policy_adoption_legacy_hash_mismatch")
+    policies = _table(conn, "brc_strategy_exit_policies")
+    policy_row = conn.execute(
+        sa.select(policies).where(
+            policies.c.exit_policy_id == adoption["to_exit_policy_id"],
+            policies.c.exit_policy_version == adoption["to_exit_policy_version"],
+            policies.c.payload_hash == adoption["to_exit_policy_hash"],
+            policies.c.status == "current",
+        )
+    ).mappings().first()
+    if policy_row is None:
+        raise TicketExitPolicyBindingError("adopted_exit_policy_missing")
+    payload = _mapping(policy_row.get("policy_payload"))
+    try:
+        snapshot = TicketExitPolicySnapshot.model_validate(payload)
+    except Exception as exc:
+        raise TicketExitPolicyBindingError(
+            f"adopted_exit_policy_payload_invalid:{type(exc).__name__}"
+        ) from exc
+    if snapshot.payload_hash != str(adoption.get("to_exit_policy_hash") or ""):
+        raise TicketExitPolicyBindingError("adopted_exit_policy_hash_mismatch")
+    identity_pairs = (
+        (snapshot.strategy_group_id, ticket.get("strategy_group_id")),
+        (snapshot.strategy_version, ticket.get("strategy_group_version_id")),
+        (snapshot.event_spec_id, ticket.get("event_spec_id")),
+        (snapshot.side, ticket.get("side")),
+    )
+    if any(str(left) != str(right) for left, right in identity_pairs):
+        raise TicketExitPolicyBindingError("adopted_exit_policy_identity_mismatch")
+    return TicketExitPolicyBinding(
+        binding_kind="adopted_versioned",
+        exit_policy_id=snapshot.exit_policy_id,
+        exit_policy_version=snapshot.exit_policy_version,
+        exit_policy_snapshot=snapshot.model_dump(mode="json"),
+        exit_policy_hash=snapshot.payload_hash,
+        snapshot=snapshot,
+        adoption_event_id=str(adoption["adoption_event_id"]),
+    )
+
+
+def _binding_from_ticket_snapshot(ticket: dict[str, Any]) -> TicketExitPolicyBinding:
+    payload = _mapping(ticket.get("exit_policy_snapshot"))
+    try:
+        snapshot = TicketExitPolicySnapshot.model_validate(payload)
+    except Exception as exc:
+        raise TicketExitPolicyBindingError(
+            f"ticket_exit_policy_payload_invalid:{type(exc).__name__}"
+        ) from exc
+    if (
+        snapshot.exit_policy_id != str(ticket.get("exit_policy_id") or "")
+        or snapshot.exit_policy_version
+        != str(ticket.get("exit_policy_version") or "")
+        or snapshot.payload_hash != str(ticket.get("exit_policy_hash") or "")
+    ):
+        raise TicketExitPolicyBindingError("ticket_exit_policy_identity_contradiction")
+    return TicketExitPolicyBinding(
+        binding_kind="versioned",
+        exit_policy_id=snapshot.exit_policy_id,
+        exit_policy_version=snapshot.exit_policy_version,
+        exit_policy_snapshot=snapshot.model_dump(mode="json"),
+        exit_policy_hash=snapshot.payload_hash,
+        snapshot=snapshot,
+    )
 
 
 def _capability_enabled(conn: sa.engine.Connection) -> bool:
