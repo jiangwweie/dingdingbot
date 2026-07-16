@@ -88,6 +88,33 @@ def _runner(
             return module.CommandResult("success\n0\n", "", 0)
         if "cmp -s /etc/systemd/system/brc-ticket-lifecycle-maintenance.service" in remote:
             return module.CommandResult("match\n", "", 0)
+        if "lifecycle-timeout-contract-match" in remote:
+            return module.CommandResult("lifecycle-timeout-contract-match\n", "", 0)
+        if "adoption-schema-contract-match" in remote:
+            return module.CommandResult("adoption-schema-contract-match\n", "", 0)
+        if "journalctl -u brc-ticket-lifecycle-maintenance.service" in remote:
+            return module.CommandResult(
+                json.dumps(
+                    {
+                        "schema": "brc.ticket_bound_lifecycle_production_worker.v2",
+                        "status": "scheduler_complete",
+                        "durable_mutation_enabled": False,
+                        "exchange_write_called": False,
+                        "global_deadline_seconds": 28.0,
+                        "performance": {
+                            "stage_durations_ms": {"exchange_snapshot": 1200},
+                            "total_duration_ms": 2100,
+                            "exchange_request_count": 8,
+                            "pg_transaction_count": 3,
+                            "peak_rss_kib": 123456,
+                            "deadline_remaining_seconds": 25.9,
+                        },
+                    }
+                )
+                + "\n",
+                "",
+                0,
+            )
         if "import ccxt" in remote:
             return module.CommandResult(ccxt_version + "\n", "", 0)
         if "/api/health" in remote:
@@ -240,10 +267,91 @@ def test_postdeploy_http_check_retries_only_transport_failure_inside_one_ssh_cal
 def test_postdeploy_verifier_defaults_track_current_stage_migration_head():
     module = _load_module()
 
-    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 123
+    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 125
     assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-07-15-123_activate_sor_long_exit_policy_canary.py"
+        "2026-07-16-125_add_active_ticket_exit_policy_adoption.py"
     )
+
+
+def test_postdeploy_verifier_certifies_adoption_timeout_and_performance_contracts():
+    module = _load_module()
+
+    report = module.build_postdeploy_report(
+        host="tokyo",
+        deploy_root="~/brc-deploy",
+        api_base="http://127.0.0.1:18080",
+        expected_current_head=EXPECTED_HEAD,
+        expected_migration_count=70,
+        expected_latest_migration=LATEST_MIGRATION,
+        connect_timeout_seconds=8,
+        runner=_runner(),
+    )
+
+    assert report["facts"]["lifecycle_timeout_contract"] == (
+        "lifecycle-timeout-contract-match"
+    )
+    assert report["facts"]["adoption_schema_contract"] == (
+        "adoption-schema-contract-match"
+    )
+    assert report["facts"]["lifecycle_last_payload"]["performance"][
+        "peak_rss_kib"
+    ] == 123456
+    assert report["checks"]["postdeploy_acceptance_passed"] is True
+
+
+def test_postdeploy_verifier_blocks_lifecycle_resource_budget_breach():
+    module = _load_module()
+    blockers = []
+
+    module._evaluate_lifecycle_payload(
+        {
+            "schema": "brc.ticket_bound_lifecycle_production_worker.v2",
+            "durable_mutation_enabled": False,
+            "exchange_write_called": False,
+            "global_deadline_seconds": 28,
+            "performance": {
+                "stage_durations_ms": {"exchange_snapshot": 25_000},
+                "total_duration_ms": 25_000,
+                "exchange_request_count": 8,
+                "pg_transaction_count": 3,
+                "peak_rss_kib": 262_145,
+                "deadline_remaining_seconds": 1,
+            },
+        },
+        expected_lifecycle_mutation_state="disabled",
+        blockers=blockers,
+    )
+
+    assert blockers == [
+        "postdeploy_lifecycle_total_duration_budget_exceeded",
+        "postdeploy_lifecycle_peak_rss_budget_exceeded",
+    ]
+
+
+def test_postdeploy_verifier_allows_audited_write_fact_when_mutation_enabled():
+    module = _load_module()
+    blockers = []
+
+    module._evaluate_lifecycle_payload(
+        {
+            "schema": "brc.ticket_bound_lifecycle_production_worker.v2",
+            "durable_mutation_enabled": True,
+            "exchange_write_called": True,
+            "global_deadline_seconds": 28,
+            "performance": {
+                "stage_durations_ms": {"exchange_snapshot": 1200},
+                "total_duration_ms": 2100,
+                "exchange_request_count": 9,
+                "pg_transaction_count": 4,
+                "peak_rss_kib": 123456,
+                "deadline_remaining_seconds": 25.9,
+            },
+        },
+        expected_lifecycle_mutation_state="enabled",
+        blockers=blockers,
+    )
+
+    assert blockers == []
 
 
 def test_postdeploy_verifier_blocks_live_ready_true_and_unblocked_generic_post():

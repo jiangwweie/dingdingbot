@@ -23,15 +23,18 @@ from typing import Any, Callable
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 123
+DEFAULT_EXPECTED_MIGRATION_COUNT = 125
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-15-123_activate_sor_long_exit_policy_canary.py"
+    "2026-07-16-125_add_active_ticket_exit_policy_adoption.py"
 )
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
 DEFAULT_VENV_PYTHON = (
     "/home/ubuntu/brc-deploy/app/current/.venv/bin/python"
 )
 CERTIFIED_CCXT_VERSION = "4.5.56"
+EXPECTED_LIFECYCLE_GLOBAL_DEADLINE_SECONDS = 28.0
+MAX_LIFECYCLE_TOTAL_DURATION_MS = 24_000
+MAX_LIFECYCLE_PEAK_RSS_KIB = 262_144
 
 
 class PostDeployVerifyError(RuntimeError):
@@ -59,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_latest_migration=args.expected_latest_migration,
         connect_timeout_seconds=args.connect_timeout_seconds,
         venv_python=args.venv_python,
+        expected_lifecycle_mutation_state=args.expected_lifecycle_mutation_state,
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -77,6 +81,7 @@ def build_postdeploy_report(
     expected_latest_migration: str,
     connect_timeout_seconds: int,
     venv_python: str = DEFAULT_VENV_PYTHON,
+    expected_lifecycle_mutation_state: str = "disabled",
     runner: Runner | None = None,
 ) -> dict[str, Any]:
     command_runner = runner or _run
@@ -156,6 +161,50 @@ def build_postdeploy_report(
             connect_timeout_seconds=connect_timeout_seconds,
             runner=command_runner,
         ),
+        "lifecycle_timeout_contract": _ssh_text(
+            host,
+            (
+                "unit="
+                f"{quoted_current_path}/deploy/systemd/"
+                "brc-ticket-lifecycle-maintenance.service; "
+                "grep -Fq -- '--global-deadline-seconds 28' \"$unit\" "
+                "&& grep -Fq -- '/usr/bin/timeout --foreground --signal=TERM "
+                "--kill-after=2s 36s' \"$unit\" "
+                "&& grep -Fq -- 'TimeoutStartSec=45s' \"$unit\" "
+                "&& echo lifecycle-timeout-contract-match"
+            ),
+            connect_timeout_seconds=connect_timeout_seconds,
+            runner=command_runner,
+        ),
+        "adoption_schema_contract": _ssh_text(
+            host,
+            (
+                "migration="
+                f"{quoted_current_path}/migrations/versions/"
+                "2026-07-16-125_add_active_ticket_exit_policy_adoption.py; "
+                "grep -Fq 'brc_ticket_exit_policy_adoption_events' \"$migration\" "
+                "&& grep -Fq 'binding_source' \"$migration\" "
+                "&& grep -Fq 'adoption_event_id' \"$migration\" "
+                "&& grep -Fq 'exit_policy_tp1_reprice' \"$migration\" "
+                "&& echo adoption-schema-contract-match"
+            ),
+            connect_timeout_seconds=connect_timeout_seconds,
+            runner=command_runner,
+        ),
+        "lifecycle_last_payload": _json_object_or_empty(
+            _ssh_text(
+                host,
+                (
+                    "journalctl -u brc-ticket-lifecycle-maintenance.service "
+                    "--since '-10 minutes' --no-pager -o cat "
+                    "| awk '/\"schema\": "
+                    "\"brc.ticket_bound_lifecycle_production_worker.v2\"/ "
+                    "{line=$0} END {print line}'"
+                ),
+                connect_timeout_seconds=connect_timeout_seconds,
+                runner=command_runner,
+            )
+        ),
         "ccxt_version": _ssh_text(
             host,
             (
@@ -180,6 +229,7 @@ def build_postdeploy_report(
         expected_current_head=expected_current_head,
         expected_migration_count=expected_migration_count,
         expected_latest_migration=expected_latest_migration,
+        expected_lifecycle_mutation_state=expected_lifecycle_mutation_state,
     )
     report = {
         "status": "postdeploy_acceptance_passed" if not checks["blockers"] else "blocked",
@@ -193,6 +243,7 @@ def build_postdeploy_report(
             "expected_migration_count": expected_migration_count,
             "expected_latest_migration": expected_latest_migration,
             "venv_python": runtime_venv_python,
+            "expected_lifecycle_mutation_state": expected_lifecycle_mutation_state,
         },
         "facts": facts,
         "checks": checks,
@@ -219,6 +270,7 @@ def evaluate_postdeploy_checks(
     expected_current_head: str,
     expected_migration_count: int,
     expected_latest_migration: str,
+    expected_lifecycle_mutation_state: str = "disabled",
 ) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -252,6 +304,21 @@ def evaluate_postdeploy_checks(
         blockers.append("postdeploy_lifecycle_service_last_run_failed")
     if str(facts.get("lifecycle_units_match_release") or "").strip() != "match":
         blockers.append("postdeploy_lifecycle_units_release_mismatch")
+    if (
+        str(facts.get("lifecycle_timeout_contract") or "").strip()
+        != "lifecycle-timeout-contract-match"
+    ):
+        blockers.append("postdeploy_lifecycle_timeout_contract_mismatch")
+    if (
+        str(facts.get("adoption_schema_contract") or "").strip()
+        != "adoption-schema-contract-match"
+    ):
+        blockers.append("postdeploy_adoption_schema_contract_mismatch")
+    _evaluate_lifecycle_payload(
+        facts.get("lifecycle_last_payload"),
+        expected_lifecycle_mutation_state=expected_lifecycle_mutation_state,
+        blockers=blockers,
+    )
     if str(facts.get("ccxt_version") or "").strip() != CERTIFIED_CCXT_VERSION:
         blockers.append("postdeploy_ccxt_version_mismatch")
 
@@ -669,6 +736,73 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_object_or_empty(value: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _evaluate_lifecycle_payload(
+    payload: Any,
+    *,
+    expected_lifecycle_mutation_state: str,
+    blockers: list[str],
+) -> None:
+    if not isinstance(payload, dict) or not payload:
+        blockers.append("postdeploy_lifecycle_performance_payload_missing")
+        return
+    if payload.get("schema") != "brc.ticket_bound_lifecycle_production_worker.v2":
+        blockers.append("postdeploy_lifecycle_payload_schema_mismatch")
+    expected_mutation = {
+        "disabled": False,
+        "enabled": True,
+    }.get(expected_lifecycle_mutation_state)
+    exchange_write_called = payload.get("exchange_write_called")
+    if not isinstance(exchange_write_called, bool):
+        blockers.append("postdeploy_lifecycle_exchange_write_fact_invalid")
+    elif expected_mutation is False and exchange_write_called:
+        blockers.append("postdeploy_lifecycle_readonly_invariant_failed")
+    if expected_mutation is not None and payload.get("durable_mutation_enabled") is not expected_mutation:
+        blockers.append("postdeploy_lifecycle_mutation_state_mismatch")
+    deadline = _float_or_none(payload.get("global_deadline_seconds"))
+    if deadline != EXPECTED_LIFECYCLE_GLOBAL_DEADLINE_SECONDS:
+        blockers.append("postdeploy_lifecycle_global_deadline_mismatch")
+
+    performance = payload.get("performance")
+    if not isinstance(performance, dict):
+        blockers.append("postdeploy_lifecycle_performance_payload_missing")
+        return
+    stage_durations = performance.get("stage_durations_ms")
+    if not isinstance(stage_durations, dict) or not stage_durations:
+        blockers.append("postdeploy_lifecycle_stage_durations_missing")
+    total_duration = _float_or_none(performance.get("total_duration_ms"))
+    if total_duration is None or total_duration < 0:
+        blockers.append("postdeploy_lifecycle_total_duration_invalid")
+    elif total_duration > MAX_LIFECYCLE_TOTAL_DURATION_MS:
+        blockers.append("postdeploy_lifecycle_total_duration_budget_exceeded")
+    for field in ("exchange_request_count", "pg_transaction_count"):
+        value = _int_or_none(performance.get(field))
+        if value is None or value < 0:
+            blockers.append(f"postdeploy_lifecycle_{field}_invalid")
+    peak_rss = _int_or_none(performance.get("peak_rss_kib"))
+    if peak_rss is None or peak_rss < 0:
+        blockers.append("postdeploy_lifecycle_peak_rss_invalid")
+    elif peak_rss > MAX_LIFECYCLE_PEAK_RSS_KIB:
+        blockers.append("postdeploy_lifecycle_peak_rss_budget_exceeded")
+    deadline_remaining = _float_or_none(performance.get("deadline_remaining_seconds"))
+    if deadline_remaining is None or deadline_remaining < 0:
+        blockers.append("postdeploy_lifecycle_deadline_remaining_invalid")
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Verify Tokyo runtime-governance deployment read-only."
@@ -692,6 +826,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=DEFAULT_EXPECTED_LATEST_MIGRATION,
     )
     parser.add_argument("--venv-python", default=DEFAULT_VENV_PYTHON)
+    parser.add_argument(
+        "--expected-lifecycle-mutation-state",
+        choices=("disabled", "enabled", "any"),
+        default="disabled",
+    )
     parser.add_argument("--connect-timeout-seconds", type=int, default=8)
     return parser.parse_args(argv)
 
