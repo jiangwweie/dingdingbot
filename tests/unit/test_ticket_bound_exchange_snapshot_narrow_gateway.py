@@ -1,5 +1,7 @@
+import inspect
 from types import SimpleNamespace
 
+from scripts import preview_ticket_exit_policy_adoption
 from src.application.action_time.exchange_snapshot_provider import (
     fetch_resolved_ticket_bound_exchange_snapshot,
 )
@@ -157,6 +159,15 @@ async def test_runtime_binding_uses_readonly_lifecycle_initialization(monkeypatc
         "initialize_lifecycle_readonly",
         "check_api_key_permissions",
     ]
+
+
+def test_adoption_preview_uses_lightweight_gateway_binding():
+    source = inspect.getsource(
+        preview_ticket_exit_policy_adoption.build_fresh_adoption_eligibility
+    )
+
+    assert "src.infrastructure.runtime_exchange_gateway_binding" in source
+    assert "src.interfaces" not in source
 
 
 async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():

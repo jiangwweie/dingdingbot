@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 from scripts import run_ticket_bound_lifecycle_maintenance_once as lifecycle_cli
@@ -38,3 +39,10 @@ def test_systemd_timeout_hierarchy_leaves_structured_failure_margin():
     assert "/usr/bin/timeout --foreground --signal=TERM --kill-after=2s 36s" in unit
     assert "TimeoutStartSec=45s" in unit
     assert "/usr/bin/time -f" not in unit
+
+
+def test_lifecycle_runner_uses_lightweight_gateway_binding():
+    source = inspect.getsource(lifecycle_cli._runtime_exchange_gateway_binding)
+
+    assert "src.infrastructure.runtime_exchange_gateway_binding" in source
+    assert "src.interfaces" not in source

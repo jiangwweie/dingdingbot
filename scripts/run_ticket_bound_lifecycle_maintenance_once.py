@@ -335,13 +335,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 async def _runtime_exchange_gateway_binding() -> dict[str, Any]:
-    from src.interfaces import api as api_module
-    from src.interfaces.api_trading_console import (
-        _runtime_exchange_submit_gateway_binding,
+    from src.infrastructure.runtime_exchange_gateway_binding import (
+        bind_runtime_exchange_submit_gateway,
     )
 
-    return await _runtime_exchange_submit_gateway_binding(
-        api_module,
+    return await bind_runtime_exchange_submit_gateway(
+        sys.modules[__name__],
         lifecycle_readonly=True,
     )
 

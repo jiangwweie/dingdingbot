@@ -46,9 +46,8 @@ async def build_fresh_adoption_eligibility(
 ) -> tuple[Any, Any]:
     """Fetch exchange truth outside PG transaction, then evaluate exact facts."""
 
-    from src.interfaces import api as api_module
-    from src.interfaces.api_trading_console import (
-        _runtime_exchange_submit_gateway_binding,
+    from src.infrastructure.runtime_exchange_gateway_binding import (
+        bind_runtime_exchange_submit_gateway,
     )
 
     with engine.begin() as conn:
@@ -78,8 +77,8 @@ async def build_fresh_adoption_eligibility(
         )
         snapshot_identity = str(set_row["exit_protection_set_id"])
 
-    binding = await _runtime_exchange_submit_gateway_binding(
-        api_module,
+    binding = await bind_runtime_exchange_submit_gateway(
+        sys.modules[__name__],
         lifecycle_readonly=True,
     )
     gateway = binding.get("gateway")
