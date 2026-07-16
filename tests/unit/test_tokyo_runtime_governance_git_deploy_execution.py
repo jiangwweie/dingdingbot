@@ -93,6 +93,7 @@ def test_remote_state_machine_invocation_is_one_bounded_transient_service(tmp_pa
     assert "KillMode=control-group" in command
     assert "RuntimeMaxSec=60min" in command
     assert "/usr/bin/python3 -c" in command
+    assert "--expected-revision 124" in command
     assert str(script) in command
     assert command.rstrip().endswith("< " + str(script))
     assert invocation["transaction_id"] == "a1b2c3d4"

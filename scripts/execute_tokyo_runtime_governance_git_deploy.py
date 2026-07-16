@@ -80,6 +80,9 @@ def build_remote_state_machine_invocation(
     host = str(inputs.get("host") or DEFAULT_HOST)
     target_sha = str(inputs.get("target_commit") or release.get("head") or "")
     old_sha = str(inputs.get("expected_deployed_head") or "")
+    expected_revision = _migration_revision(
+        str(inputs.get("expected_latest_migration") or "")
+    )
     loader = (
         "import hashlib,os,platform,sys;"
         "b=sys.stdin.buffer.read();e=sys.argv[1];"
@@ -116,6 +119,8 @@ def build_remote_state_machine_invocation(
         "--env-path", str(inputs.get("env_path") or DEFAULT_ENV_PATH),
         "--expected-latest-migration", str(inputs.get("expected_latest_migration") or ""),
     ]
+    if expected_revision:
+        remote_argv.extend(("--expected-revision", expected_revision))
     command = (
         f"ssh {shlex.quote(host)} {shlex.quote(shlex.join(remote_argv))} "
         f"< {shlex.quote(str(source))}"
@@ -126,6 +131,12 @@ def build_remote_state_machine_invocation(
         "deploy_nonce": deploy_nonce,
         "bootstrap_sha256": bootstrap_sha256,
     }
+
+
+def _migration_revision(filename: str) -> str | None:
+    prefix = Path(filename).name.split("_", 1)[0]
+    revision = prefix.rsplit("-", 1)[-1]
+    return revision if revision.isdigit() else None
 
 
 def main(argv: list[str] | None = None) -> int:
