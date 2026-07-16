@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import resource
 import sys
 import time
-from typing import Any
+from typing import Any, Iterator
 
 import sqlalchemy as sa
 
@@ -59,6 +61,57 @@ LIFECYCLE_MUTATION_COMMAND_SOURCES = (
 )
 
 
+class LifecycleStageTelemetry:
+    """Bounded in-process performance facts for one lifecycle invocation."""
+
+    def __init__(self) -> None:
+        self.started_at = time.monotonic()
+        self._stage_started_at: dict[str, float] = {}
+        self.stage_durations_ms: dict[str, int] = {}
+        self.exchange_request_count = 0
+        self.pg_transaction_count = 0
+
+    def start_stage(self, stage: str) -> None:
+        if stage in self._stage_started_at:
+            raise ValueError(f"lifecycle_stage_already_started:{stage}")
+        self._stage_started_at[stage] = time.monotonic()
+
+    def finish_stage(self, stage: str) -> None:
+        started_at = self._stage_started_at.pop(stage, None)
+        if started_at is None:
+            raise ValueError(f"lifecycle_stage_not_started:{stage}")
+        elapsed_ms = int(round((time.monotonic() - started_at) * 1000))
+        self.stage_durations_ms[stage] = (
+            self.stage_durations_ms.get(stage, 0) + max(0, elapsed_ms)
+        )
+
+    @contextmanager
+    def stage(self, stage: str) -> Iterator[None]:
+        self.start_stage(stage)
+        try:
+            yield
+        finally:
+            self.finish_stage(stage)
+
+    def snapshot(self, *, deadline_at: float) -> dict[str, Any]:
+        now = time.monotonic()
+        return {
+            "stage_durations_ms": dict(sorted(self.stage_durations_ms.items())),
+            "total_duration_ms": max(
+                0, int(round((now - self.started_at) * 1000))
+            ),
+            "exchange_request_count": int(self.exchange_request_count),
+            "pg_transaction_count": int(self.pg_transaction_count),
+            "peak_rss_kib": _peak_rss_kib(),
+            "deadline_remaining_seconds": round(max(0.0, deadline_at - now), 3),
+        }
+
+
+def _peak_rss_kib() -> int:
+    value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    return value // 1024 if sys.platform == "darwin" else value
+
+
 async def _amain(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     database_url = normalize_sync_postgres_dsn(args.database_url or "")
@@ -72,38 +125,45 @@ async def _amain(argv: list[str] | None = None) -> int:
         print("ERROR: lifecycle maintenance scheduler requires PostgreSQL DSN", file=sys.stderr)
         return 2
 
+    telemetry = LifecycleStageTelemetry()
     engine = sa.create_engine(database_url)
     gateway = None
     worker_payload: dict[str, Any] = {}
-    deadline_at = time.monotonic() + float(args.global_deadline_seconds)
+    deadline_at = telemetry.started_at + float(args.global_deadline_seconds)
     try:
-        with engine.begin() as conn:
-            initial_first_tick_scopes = [
-                {**scope, "scheduler_scope_kind": "first_post_submit"}
-                for scope in select_ticket_bound_first_reconciliation_tick_scopes(
+        with telemetry.stage("initial_pg_scope_selection"):
+            with engine.begin() as conn:
+                telemetry.pg_transaction_count += 1
+                initial_first_tick_scopes = [
+                    {**scope, "scheduler_scope_kind": "first_post_submit"}
+                    for scope in select_ticket_bound_first_reconciliation_tick_scopes(
+                        conn,
+                        max_scopes=1,
+                    )
+                ]
+                initial_scopes = select_ticket_bound_lifecycle_maintenance_scopes(
                     conn,
-                    max_scopes=1,
+                    max_lifecycle_scopes=1,
                 )
-            ]
-            initial_scopes = select_ticket_bound_lifecycle_maintenance_scopes(
-                conn,
-                max_lifecycle_scopes=1,
-            )
-            command_pending = _prepared_or_unknown_command_exists(conn)
-            capability = lifecycle_mutation_capability_decision(conn)
+                command_pending = _prepared_or_unknown_command_exists(conn)
+                capability = lifecycle_mutation_capability_decision(conn)
         requires_gateway = bool(
             command_pending or initial_first_tick_scopes or initial_scopes
         )
         gateway_binding: dict[str, Any] = {}
         if requires_gateway:
-            gateway_binding = await _await_before_deadline(
-                _runtime_exchange_gateway_binding(),
-                deadline_at=deadline_at,
-                stage="gateway_binding",
-            )
+            with telemetry.stage("gateway_binding"):
+                gateway_binding = await _await_before_deadline(
+                    _runtime_exchange_gateway_binding(),
+                    deadline_at=deadline_at,
+                    stage="gateway_binding",
+                )
             gateway = gateway_binding.get("gateway")
             if gateway is None:
-                payload = _blocked_gateway_payload(gateway_binding)
+                payload = {
+                    **_blocked_gateway_payload(gateway_binding),
+                    "performance": telemetry.snapshot(deadline_at=deadline_at),
+                }
                 print(
                     json.dumps(
                         payload,
@@ -127,17 +187,19 @@ async def _amain(argv: list[str] | None = None) -> int:
             "blockers": [],
         }
         if command_pending and gateway is not None:
-            reconciliation_payload = (
-                await _await_before_deadline(
-                    run_one_unknown_exchange_command_reconciliation(
-                        engine,
-                        gateway=gateway,
-                        now_ms=int(time.time() * 1000),
-                    ),
-                    deadline_at=deadline_at,
-                    stage="unknown_command_reconciliation",
+            with telemetry.stage("unknown_command_reconciliation"):
+                telemetry.exchange_request_count += 1
+                reconciliation_payload = (
+                    await _await_before_deadline(
+                        run_one_unknown_exchange_command_reconciliation(
+                            engine,
+                            gateway=gateway,
+                            now_ms=int(time.time() * 1000),
+                        ),
+                        deadline_at=deadline_at,
+                        stage="unknown_command_reconciliation",
+                    )
                 )
-            )
         if (
             command_pending
             and durable_mutation_enabled
@@ -148,68 +210,76 @@ async def _amain(argv: list[str] | None = None) -> int:
                 0.1,
                 _remaining_seconds(deadline_at, "durable_exchange_command") - 1.0,
             )
-            worker_payload = await run_one_ticket_bound_exchange_command(
-                engine,
-                gateway=gateway,
-                worker_id=f"ticket-lifecycle:{os.getpid()}",
-                lease_ms=args.command_lease_ms,
-                command_sources=LIFECYCLE_MUTATION_COMMAND_SOURCES,
-                dispatch_timeout_seconds=dispatch_timeout,
-            )
+            with telemetry.stage("durable_exchange_command"):
+                telemetry.exchange_request_count += 1
+                worker_payload = await run_one_ticket_bound_exchange_command(
+                    engine,
+                    gateway=gateway,
+                    worker_id=f"ticket-lifecycle:{os.getpid()}",
+                    lease_ms=args.command_lease_ms,
+                    command_sources=LIFECYCLE_MUTATION_COMMAND_SOURCES,
+                    dispatch_timeout_seconds=dispatch_timeout,
+                )
             _remaining_seconds(deadline_at, "durable_exchange_command_result")
 
-        with engine.begin() as conn:
-            first_tick_scopes = [
-                {**scope, "scheduler_scope_kind": "first_post_submit"}
-                for scope in select_ticket_bound_first_reconciliation_tick_scopes(
+        with telemetry.stage("snapshot_scope_selection"):
+            with engine.begin() as conn:
+                telemetry.pg_transaction_count += 1
+                first_tick_scopes = [
+                    {**scope, "scheduler_scope_kind": "first_post_submit"}
+                    for scope in select_ticket_bound_first_reconciliation_tick_scopes(
+                        conn,
+                        max_scopes=1,
+                    )
+                ]
+                scopes = select_ticket_bound_lifecycle_maintenance_scopes(
                     conn,
-                    max_scopes=1,
+                    max_lifecycle_scopes=1,
                 )
-            ]
-            scopes = select_ticket_bound_lifecycle_maintenance_scopes(
-                conn,
-                max_lifecycle_scopes=1,
-            )
-            prepared_scopes = _prepare_snapshot_scopes(
-                conn,
-                first_tick_scopes=first_tick_scopes,
-                scopes=scopes,
-            )
+                prepared_scopes = _prepare_snapshot_scopes(
+                    conn,
+                    first_tick_scopes=first_tick_scopes,
+                    scopes=scopes,
+                )
 
         provided_snapshots: dict[str, dict[str, Any]] = {}
         for prepared in prepared_scopes:
-            provided_snapshots[prepared["snapshot_identity"]] = await _await_before_deadline(
-                fetch_resolved_ticket_bound_exchange_snapshot(
-                    scope=prepared["scope"],
-                    snapshot_identity=prepared["snapshot_identity"],
-                    gateway=gateway,
-                    timeout_seconds=min(
-                        args.snapshot_timeout_seconds,
-                        _remaining_seconds(deadline_at, "exchange_snapshot"),
+            with telemetry.stage("exchange_snapshot"):
+                telemetry.exchange_request_count += 1
+                provided_snapshots[prepared["snapshot_identity"]] = await _await_before_deadline(
+                    fetch_resolved_ticket_bound_exchange_snapshot(
+                        scope=prepared["scope"],
+                        snapshot_identity=prepared["snapshot_identity"],
+                        gateway=gateway,
+                        timeout_seconds=min(
+                            args.snapshot_timeout_seconds,
+                            _remaining_seconds(deadline_at, "exchange_snapshot"),
+                        ),
+                        recent_fill_limit=50,
+                        conditional_parent_order_ids=prepared[
+                            "conditional_parent_order_ids"
+                        ],
+                        now_ms=prepared["now_ms"],
+                        authority_boundary=prepared["authority_boundary"],
                     ),
-                    recent_fill_limit=50,
-                    conditional_parent_order_ids=prepared[
-                        "conditional_parent_order_ids"
-                    ],
-                    now_ms=prepared["now_ms"],
-                    authority_boundary=prepared["authority_boundary"],
-                ),
-                deadline_at=deadline_at,
-                stage="exchange_snapshot",
-            )
+                    deadline_at=deadline_at,
+                    stage="exchange_snapshot",
+                )
 
         _remaining_seconds(deadline_at, "pg_lifecycle_projection")
-        with engine.begin() as conn:
-            maintenance_payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
-                conn,
-                gateway=None,
-                allow_exchange_mutation=False,
-                fetch_exchange_snapshot=False,
-                max_lifecycle_scopes=1,
-                max_actions_per_scope=args.max_actions_per_scope,
-                snapshot_timeout_seconds=args.snapshot_timeout_seconds,
-                provided_exchange_snapshots=provided_snapshots,
-            )
+        with telemetry.stage("pg_lifecycle_projection"):
+            with engine.begin() as conn:
+                telemetry.pg_transaction_count += 1
+                maintenance_payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
+                    conn,
+                    gateway=None,
+                    allow_exchange_mutation=False,
+                    fetch_exchange_snapshot=False,
+                    max_lifecycle_scopes=1,
+                    max_actions_per_scope=args.max_actions_per_scope,
+                    snapshot_timeout_seconds=args.snapshot_timeout_seconds,
+                    provided_exchange_snapshots=provided_snapshots,
+                )
         payload = {
             **maintenance_payload,
             "schema": "brc.ticket_bound_lifecycle_production_worker.v2",
@@ -226,6 +296,7 @@ async def _amain(argv: list[str] | None = None) -> int:
             "max_mutation_commands_per_invocation": 1,
             "global_deadline_seconds": float(args.global_deadline_seconds),
             "deadline_remaining_seconds": max(0.0, deadline_at - time.monotonic()),
+            "performance": telemetry.snapshot(deadline_at=deadline_at),
         }
     except TimeoutError as exc:
         payload = {
@@ -236,6 +307,7 @@ async def _amain(argv: list[str] | None = None) -> int:
             "exchange_write_called": worker_payload.get("exchange_write_called") is True,
             "network_inside_pg_transaction": False,
             "global_deadline_seconds": float(args.global_deadline_seconds),
+            "performance": telemetry.snapshot(deadline_at=deadline_at),
         }
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return 1
