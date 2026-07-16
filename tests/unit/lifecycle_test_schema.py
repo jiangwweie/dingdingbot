@@ -94,3 +94,29 @@ def apply_enabled_lifecycle_command_schema(
         proof=proof,
     )
     assert enabled["status"] == "ready"
+
+
+def apply_active_ticket_exit_policy_adoption_schema(
+    conn,
+    *,
+    repo_root: Path,
+    module_prefix: str,
+) -> None:
+    """Install revision 125 on a fixture that already includes revision 122."""
+
+    path = (
+        repo_root
+        / "migrations/versions/2026-07-16-125_add_active_ticket_exit_policy_adoption.py"
+    )
+    name = f"{module_prefix}_{path.stem.replace('-', '_')}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    old_op = module.op
+    module.op = Operations(MigrationContext.configure(conn))
+    try:
+        module.upgrade()
+    finally:
+        module.op = old_op
