@@ -21,6 +21,7 @@ from src.application.action_time.action_time_invocation import (
 PRETRADE_PUBLIC_FACT_SURFACE = "pretrade_public"
 PUBLIC_FACT_VALID_FOR_MS = 300_000
 ACCOUNT_SAFE_FACT_VALID_FOR_MS = 60_000
+ACCOUNT_MODE_FACT_VALID_FOR_MS = 300_000
 ACCOUNT_MODE_SOURCE_SUFFIX = "/fapi/v1/positionSide/dual"
 ACCOUNT_MODE_MAX_FUTURE_SKEW_MS = 5_000
 
@@ -230,7 +231,7 @@ def write_account_safe_fact_snapshots(
     observed_mode_expired = (
         mode_observed_at_ms is not None
         and generated_at_ms
-        > mode_observed_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS
+        > mode_observed_at_ms + ACCOUNT_MODE_FACT_VALID_FOR_MS
     )
     mode_freshness_state = (
         "fresh"
@@ -280,7 +281,7 @@ def write_account_safe_fact_snapshots(
             "freshness_state": mode_freshness_state,
             "observed_at_ms": mode_observed_at_ms or generated_at_ms,
             "valid_until_ms": (
-                mode_observed_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS
+                mode_observed_at_ms + ACCOUNT_MODE_FACT_VALID_FOR_MS
                 if mode_observed_at_ms is not None
                 else generated_at_ms
             ),
@@ -379,7 +380,7 @@ def write_account_safe_fact_snapshots(
             source_ref=source_ref,
             observed_at_ms=mode_observed_at_ms or generated_at_ms,
             valid_until_ms=(
-                mode_observed_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS
+                mode_observed_at_ms + ACCOUNT_MODE_FACT_VALID_FOR_MS
                 if mode_observed_at_ms is not None
                 else generated_at_ms
             ),
@@ -627,7 +628,7 @@ def _account_mode_is_safe(
         and str(values.get("exchange_id") or "").strip() != ""
         and observed_at_ms is not None
         and observed_at_ms <= generated_at_ms + ACCOUNT_MODE_MAX_FUTURE_SKEW_MS
-        and generated_at_ms <= observed_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS
+        and generated_at_ms <= observed_at_ms + ACCOUNT_MODE_FACT_VALID_FOR_MS
         and source.endswith(ACCOUNT_MODE_SOURCE_SUFFIX)
     )
 

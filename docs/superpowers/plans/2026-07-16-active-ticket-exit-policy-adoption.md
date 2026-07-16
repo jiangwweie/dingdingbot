@@ -157,6 +157,13 @@
 - [ ] **Step 5: Deploy exact head** with normal crash-safe Tokyo deploy while accepting the protected AVAX lifecycle.
 - [ ] **Step 6: Observe 240 natural ticks** and require zero timeout/OOM/exchange write before Unit C.
 
+**Production-shape closure added during Step 6:** the deployed preview exposed
+null PG tick/step fields and an account-mode TTL shorter than watcher cadence.
+Close these with one exact-symbol public `exchangeInfo` read, a shared typed
+Ticket instrument-rule resolver consumed by adoption/fill/runner paths, and a
+60-second account-safe versus 300-second account-mode validity split. Restart
+the 240-tick Unit A/B observation window on the resulting exact head.
+
 ### Task 7: Unit C Exact AVAX Adoption And Mutation Activation
 
 **Files:**

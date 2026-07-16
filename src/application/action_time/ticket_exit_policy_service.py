@@ -46,6 +46,10 @@ from src.domain.ticket_exit_policy import (
 from src.application.action_time.ticket_exit_policy_binding import (
     resolve_effective_ticket_exit_policy_binding,
 )
+from src.application.action_time.ticket_instrument_rule import (
+    TicketInstrumentRuleError,
+    resolve_ticket_instrument_rule,
+)
 
 
 CAPABILITY_ID = "ticket_exit_policy_v1"
@@ -64,6 +68,7 @@ def maintain_ticket_exit_policy_in_transaction(
     conn: sa.engine.Connection,
     *,
     ticket_id: str,
+    exchange_snapshot: dict[str, Any] | None = None,
     now_ms: int,
 ) -> dict[str, Any]:
     """Evaluate already-persisted facts and prepare at most one next command."""
@@ -86,7 +91,12 @@ def maintain_ticket_exit_policy_in_transaction(
     ):
         return _result("position_terminal", normalized_ticket_id)
 
-    loaded = _load_state(conn, ticket_id=normalized_ticket_id, now_ms=now_ms)
+    loaded = _load_state(
+        conn,
+        ticket_id=normalized_ticket_id,
+        exchange_snapshot=exchange_snapshot,
+        now_ms=now_ms,
+    )
     if loaded.get("blockers"):
         return _block_projection(
             conn,
@@ -99,7 +109,7 @@ def maintain_ticket_exit_policy_in_transaction(
     policy = loaded["policy"]
     execution = loaded["execution"]
     active = loaded["active_order"]
-    instrument = loaded["instrument"]
+    instrument_rule = loaded["instrument_rule"]
     scope = loaded["scope"]
 
     close_pending = _existing_close_state(conn, projection=projection)
@@ -181,8 +191,8 @@ def maintain_ticket_exit_policy_in_transaction(
             now_ms=now_ms,
         )
 
-    price_tick = _required_decimal(instrument.get("price_tick"), "minimum_price_tick")
-    quantity_step = _required_decimal(instrument.get("quantity_step"), "quantity_step")
+    price_tick = instrument_rule.price_tick
+    quantity_step = instrument_rule.quantity_step
     tolerance = Decimal(policy.tp_completion_tolerance_qty_steps) * quantity_step
     if abs(remaining_qty - execution.runner_target_qty) > tolerance:
         return _block_projection(
@@ -323,6 +333,7 @@ def _load_state(
     conn: sa.engine.Connection,
     *,
     ticket_id: str,
+    exchange_snapshot: dict[str, Any] | None,
     now_ms: int,
 ) -> dict[str, Any]:
     required_tables = (
@@ -434,6 +445,16 @@ def _load_state(
             "projection": projection,
             "blockers": ["ticket_exit_policy_lifecycle_identity_incomplete"],
         }
+    try:
+        instrument_rule = resolve_ticket_instrument_rule(
+            instrument=instrument,
+            exchange_snapshot=exchange_snapshot,
+        )
+    except TicketInstrumentRuleError as exc:
+        return {
+            "projection": projection,
+            "blockers": [f"ticket_instrument_rule_{exc}"],
+        }
     active_generation = int(active.get("generation") or 1)
     active_stop = _required_decimal(active.get("trigger_price"), "active_runner_stop")
     if (
@@ -471,6 +492,7 @@ def _load_state(
         "orders": orders,
         "active_order": active,
         "instrument": instrument,
+        "instrument_rule": instrument_rule,
         "lifecycle": lifecycle,
         "attempt": attempt,
         "blockers": [],
@@ -914,7 +936,7 @@ def _prepare_runner_replacement(
     projection = loaded["projection"]
     active = loaded["active_order"]
     scope: TicketBoundExchangeScope = loaded["scope"]
-    tick = _required_decimal(loaded["instrument"].get("price_tick"), "minimum_price_tick")
+    tick = loaded["instrument_rule"].price_tick
     if proposed_stop <= 0 or proposed_stop % tick != 0:
         return _block_projection(
             conn,
@@ -1326,9 +1348,7 @@ def _load_latest_exit_market_fact(
         references=_mapping(values.get("references")),
         explicit_invalidation_hits=explicit_hits,
         entry_time_ms=_entry_fill_time_ms(conn, loaded["lifecycle"]),
-        minimum_price_tick=_required_decimal(
-            loaded["instrument"].get("price_tick"), "minimum_price_tick"
-        ),
+        minimum_price_tick=loaded["instrument_rule"].price_tick,
     )
     return market_fact, None
 

@@ -44,7 +44,14 @@ class _NarrowSnapshotGateway:
                 "maker_commission_rate": "0.0002",
                 "taker_commission_rate": "0.0005",
             },
-            "exchange_request_count": 6,
+            "market_rule": {
+                "exchange_market_id": "ETHUSDT",
+                "price_tick": "0.1",
+                "quantity_step": "0.001",
+                "min_notional": "5",
+                "source": "binance_usdm_public_exchange_info",
+            },
+            "exchange_request_count": 7,
         }
 
     async def fetch_all_open_orders(self, _symbol: str):
@@ -73,7 +80,7 @@ async def test_snapshot_prefers_one_narrow_ticket_lifecycle_gateway_boundary():
     )
 
     assert payload["status"] == "snapshot_ready"
-    assert payload["exchange_request_count"] == 6
+    assert payload["exchange_request_count"] == 7
     assert gateway.calls == [
         {
             "exchange_symbol": "ETH/USDT:USDT",
@@ -88,6 +95,7 @@ async def test_snapshot_prefers_one_narrow_ticket_lifecycle_gateway_boundary():
     assert payload["snapshot"]["commission_rate"]["taker_commission_rate"] == (
         "0.0005"
     )
+    assert payload["snapshot"]["market_rule"]["price_tick"] == "0.1"
 
 
 class _LifecycleReadonlyGateway:
@@ -238,6 +246,22 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
                 "takerCommissionRate": "0.0005",
             }
 
+        async def fapiPublicGetExchangeInfo(self, params):
+            self.calls.append(("exchange_info", params))
+            return {
+                "symbols": [
+                    {
+                        "symbol": "ETHUSDT",
+                        "status": "TRADING",
+                        "filters": [
+                            {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
+                            {"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                            {"filterType": "MIN_NOTIONAL", "notional": "5"},
+                        ],
+                    }
+                ]
+            }
+
         async def fapiPrivateGetIncome(self, params):
             self.calls.append(("funding", params))
             return []
@@ -267,7 +291,7 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
         conditional_parent_order_ids=["12"],
     )
 
-    assert snapshot["exchange_request_count"] == 8
+    assert snapshot["exchange_request_count"] == 9
     assert snapshot["positions"][0]["symbol"] == "ETH/USDT:USDT"
     assert snapshot["positions"][0]["size"] == "2"
     assert snapshot["open_orders"][0]["id"] == "11"
@@ -281,6 +305,13 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
         "maker_commission_rate": "0.0002",
         "taker_commission_rate": "0.0005",
     }
+    assert snapshot["market_rule"] == {
+        "exchange_market_id": "ETHUSDT",
+        "price_tick": "0.1",
+        "quantity_step": "0.001",
+        "min_notional": "5",
+        "source": "binance_usdm_public_exchange_info",
+    }
     assert {name for name, _params in raw.calls} == {
         "position",
         "orders",
@@ -288,6 +319,7 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
         "trades",
         "account",
         "commission_rate",
+        "exchange_info",
         "funding",
         "lineage",
     }

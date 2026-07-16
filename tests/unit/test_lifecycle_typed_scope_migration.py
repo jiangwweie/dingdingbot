@@ -136,6 +136,7 @@ def test_migration_113_creates_account_mode_current_and_source_domain_holds(
             assert mode["dual_side_position"] in {True, 1}
             assert mode["position_mode_safe"] in {True, 1}
             assert mode["fact_snapshot_id"] in ids
+            assert mode["valid_until_ms"] - mode["observed_at_ms"] == 300_000
 
             values = {
                 "strategy_group_id": "SOR-001",

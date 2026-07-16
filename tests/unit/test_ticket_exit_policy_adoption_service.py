@@ -120,8 +120,8 @@ def adoption_conn():
         sa.Column("exchange_instrument_id", sa.String(192), primary_key=True),
         sa.Column("exchange_id", sa.String(64), nullable=False),
         sa.Column("exchange_symbol", sa.String(128), nullable=False),
-        sa.Column("price_tick", sa.Numeric(36, 18), nullable=False),
-        sa.Column("quantity_step", sa.Numeric(36, 18), nullable=False),
+        sa.Column("price_tick", sa.Numeric(36, 18), nullable=True),
+        sa.Column("quantity_step", sa.Numeric(36, 18), nullable=True),
     )
     sa.Table(
         "brc_ticket_exit_policy_current",
@@ -291,7 +291,7 @@ def _seed(conn) -> None:
     conn.execute(sa.text("INSERT INTO brc_ticket_bound_order_lifecycle_runs VALUES ('lifecycle:avax',:ticket,'position_protected',65,6.658784615384615385,'protection:avax')"), {"ticket": TICKET_ID})
     conn.execute(sa.text("INSERT INTO brc_ticket_bound_exit_protection_sets VALUES ('protection:avax',:ticket,'entry:avax',65,6.658784615384615385,'reconciled','sl-local','tp1-local',1,1)"), {"ticket": TICKET_ID})
     conn.execute(sa.text("INSERT INTO brc_ticket_bound_exit_protection_orders VALUES ('sl-local','protection:avax',:ticket,'SL','4000001769200556','open','STOP_MARKET','sell',65,NULL,6.449,1,1), ('tp1-local','protection:avax',:ticket,'TP1','39583407650','open','LIMIT','sell',32,6.875,NULL,1,1)"), {"ticket": TICKET_ID})
-    conn.execute(sa.text("INSERT INTO brc_exchange_instruments VALUES ('binance_usdm:AVAX/USDT:USDT','binance_usdm','AVAX/USDT:USDT',0.001,1)"))
+    conn.execute(sa.text("INSERT INTO brc_exchange_instruments VALUES ('binance_usdm:AVAX/USDT:USDT','binance_usdm','AVAX/USDT:USDT',NULL,NULL)"))
 
 
 def _exchange_snapshot():
@@ -302,6 +302,15 @@ def _exchange_snapshot():
         "exchange_symbol": "AVAX/USDT:USDT",
         "position_mode": "one_way",
         "position_side": None,
+        "market_rule": {
+            "exchange_instrument_id": "binance_usdm:AVAX/USDT:USDT",
+            "exchange_id": "binance_usdm",
+            "exchange_market_id": "AVAXUSDT",
+            "price_tick": "0.001",
+            "quantity_step": "1",
+            "min_notional": "5",
+            "source": "binance_usdm_public_exchange_info",
+        },
         "position": {"qty": "65", "entry_price": "6.658784615384615385", "position_flat": False, "truth_state": "active"},
         "open_orders": [
             {"exchange_order_id": "4000001769200556", "side": "sell", "position_side": "BOTH", "reduce_only": True, "qty": "65", "price": "", "trigger_price": "6.449", "status": "open"},

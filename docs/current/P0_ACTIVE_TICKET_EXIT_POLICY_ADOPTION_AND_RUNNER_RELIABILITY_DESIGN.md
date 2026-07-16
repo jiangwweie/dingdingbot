@@ -475,13 +475,34 @@ operation that accepts a resolved `TicketBoundExchangeScope` and performs only:
 - bounded recent-fill query only when the known order watermarks require it.
 
 The Binance adapter may use raw signed futures endpoints internally so it does
-not load all venue markets on every tick. It must still validate quantity,
-price tick, order type, reduce-only side, and instrument identity against the
-PG `InstrumentRuleSnapshot`. Missing or stale instrument rules fail closed;
-they do not fall back to a report file or unchecked symbol string.
+not load all venue markets on every tick. The production-shape preview proved
+that the current AVAX `brc_exchange_instruments` row has null `price_tick` and
+`quantity_step`, so the narrow adapter also performs one exact-symbol public
+`exchangeInfo` read and emits a typed `TicketInstrumentRuleSnapshot`. Adoption,
+fill projection, and runner maintenance consume that caller-provided snapshot;
+non-null PG instrument columns remain a compatibility fallback. Missing,
+non-positive, or identity-mismatched rules fail closed. They do not fall back
+to a report file, an unchecked symbol string, or venue-wide `load_markets()`.
 
 This is an adapter optimization under the existing exchange gateway boundary,
 not a Binance-specific domain model.
+
+### 9.3.1 Account-Mode Freshness Split
+
+Production also proved that the account-mode projection was valid for 60
+seconds while its producer runs every 180 seconds. Split the facts by change
+rate and authority:
+
+| Fact | Validity | Consumer authority |
+| --- | ---: | --- |
+| Account-safe balance/order/position facts | 60 seconds | action-time entry safety and current availability |
+| Account position mode | 300 seconds | stable venue configuration for existing Ticket reconciliation |
+| Watcher producer cadence | 180 seconds | refreshes both projections from signed read-only venue truth |
+
+The longer account-mode validity cannot grant entry authority by itself. New
+entry still requires the independently fresh 60-second account-safe fact, while
+existing protected-position reconciliation no longer loses two thirds of its
+30-second ticks to a producer/consumer cadence mismatch.
 
 ### 9.4 Split Cadence Without Feature Loss
 
@@ -762,7 +783,7 @@ the protection boundary.
 
 | Dimension | Target impact |
 | --- | --- |
-| Exchange reads | bounded to exact active Ticket/instrument; no all-symbol market load per tick |
+| Exchange reads | bounded to exact active Ticket/instrument, including one exact-symbol public rule read; no all-symbol market load per tick |
 | Exchange writes | zero until one existing durable command is eligible and capability proof is valid |
 | PG reads | indexed due selector plus exact Ticket/protection rows |
 | PG writes | adoption is one-time append; projection is current-state update; unchanged ticks add no business event |

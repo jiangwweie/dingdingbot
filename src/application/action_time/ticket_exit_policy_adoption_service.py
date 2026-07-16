@@ -19,6 +19,10 @@ from src.domain.ticket_exit_policy_adoption import (
     canonical_eligibility_hash,
     evaluate_ticket_exit_policy_adoption_snapshot,
 )
+from src.application.action_time.ticket_instrument_rule import (
+    TicketInstrumentRuleError,
+    resolve_ticket_instrument_rule,
+)
 
 
 UNSAFE_COMMAND_STATES = {"prepared", "dispatching", "outcome_unknown"}
@@ -108,10 +112,15 @@ def evaluate_ticket_exit_policy_adoption_eligibility(
     )
     if not instrument:
         raise TicketExitPolicyAdoptionError("adoption_exchange_instrument_missing")
-    price_tick = _required_decimal(instrument.get("price_tick"), "price_tick")
-    quantity_step = _required_decimal(
-        instrument.get("quantity_step"), "quantity_step"
-    )
+    try:
+        instrument_rule = resolve_ticket_instrument_rule(
+            instrument=instrument,
+            exchange_snapshot=exchange_snapshot,
+        )
+    except TicketInstrumentRuleError as exc:
+        raise TicketExitPolicyAdoptionError(f"adoption_{exc}") from exc
+    price_tick = instrument_rule.price_tick
+    quantity_step = instrument_rule.quantity_step
 
     live_orders = {
         str(item.get("exchange_order_id") or ""): item

@@ -13,6 +13,13 @@ from src.application.action_time.lifecycle_safety_core import (
     LifecycleDecision,
     reduce_lifecycle_decision,
 )
+from src.application.action_time.ticket_exit_policy_binding import (
+    resolve_effective_ticket_exit_policy_binding,
+)
+from src.application.action_time.ticket_instrument_rule import (
+    TicketInstrumentRuleError,
+    resolve_ticket_instrument_rule,
+)
 
 
 FINAL_EXIT_ROLES = {"SL", "RUNNER_SL"}
@@ -293,8 +300,24 @@ def _project_versioned_tp1_fills(
     tolerance = _tp1_completion_tolerance(
         conn,
         ticket_id=ticket_id,
-        current=dict(current),
+        exchange_snapshot=exchange_snapshot,
+        now_ms=now_ms,
     )
+    if tolerance is None:
+        blocker = "tp1_completion_tolerance_rule_missing"
+        conn.execute(
+            projections.update()
+            .where(projections.c.ticket_id == ticket_id)
+            .values(first_blocker=blocker, updated_at_ms=now_ms)
+        )
+        return {
+            "status": "blocked",
+            "projected_roles": [],
+            "projected_count": 0,
+            "projected_fills": [],
+            "first_blocker": blocker,
+            "blockers": [blocker],
+        }
     if cumulative > target + tolerance:
         completion = "contradictory"
         blocker = "tp1_cumulative_fill_exceeds_frozen_target"
@@ -358,14 +381,24 @@ def _tp1_completion_tolerance(
     conn: sa.engine.Connection,
     *,
     ticket_id: str,
-    current: dict[str, Any],
-) -> Decimal:
+    exchange_snapshot: dict[str, Any],
+    now_ms: int,
+) -> Decimal | None:
     tickets = _table(conn, "brc_action_time_tickets")
     ticket = conn.execute(
         sa.select(tickets).where(tickets.c.ticket_id == ticket_id)
     ).mappings().one()
-    policy = _mapping(ticket.get("exit_policy_snapshot"))
-    steps = int(policy.get("tp_completion_tolerance_qty_steps") or 0)
+    try:
+        binding = resolve_effective_ticket_exit_policy_binding(
+            conn,
+            ticket_id=ticket_id,
+            now_ms=now_ms,
+        )
+    except Exception:
+        return None
+    if binding.snapshot is None:
+        return None
+    steps = int(binding.snapshot.tp_completion_tolerance_qty_steps)
     instruments = _table(conn, "brc_exchange_instruments")
     instrument = conn.execute(
         sa.select(instruments).where(
@@ -373,10 +406,14 @@ def _tp1_completion_tolerance(
             == ticket["exchange_instrument_id"]
         )
     ).mappings().one()
-    quantity_step = _normalized_decimal(instrument.get("quantity_step"))
-    if quantity_step is None or quantity_step <= 0:
-        return Decimal("0")
-    return Decimal(steps) * quantity_step
+    try:
+        rule = resolve_ticket_instrument_rule(
+            instrument=dict(instrument),
+            exchange_snapshot=exchange_snapshot,
+        )
+    except TicketInstrumentRuleError:
+        return None
+    return Decimal(steps) * rule.quantity_step
 
 
 def _recorded_tp1_trade(

@@ -1142,6 +1142,7 @@ class ExchangeGateway:
             "trades": "fapiPrivateGetUserTrades",
             "account": "fapiPrivateV3GetAccount",
             "commission_rate": "fapiPrivateGetCommissionRate",
+            "exchange_info": "fapiPublicGetExchangeInfo",
         }
         for capability, method_name in required_methods.items():
             if not callable(getattr(rest, method_name, None)):
@@ -1201,6 +1202,7 @@ class ExchangeGateway:
             raw_trades,
             raw_account,
             raw_commission_rate,
+            raw_exchange_info,
             funding_result,
             conditional_result,
         ) = await asyncio.gather(
@@ -1212,6 +1214,7 @@ class ExchangeGateway:
             ),
             rest.fapiPrivateV3GetAccount(),
             rest.fapiPrivateGetCommissionRate({"symbol": market_id}),
+            rest.fapiPublicGetExchangeInfo({"symbol": market_id}),
             _optional_funding(),
             _optional_lineage(),
         )
@@ -1220,7 +1223,7 @@ class ExchangeGateway:
             for rows in (raw_positions, raw_orders, raw_algo_orders, raw_trades)
         ) or not isinstance(raw_account, dict) or not isinstance(
             raw_commission_rate, dict
-        ):
+        ) or not isinstance(raw_exchange_info, dict):
             raise RuntimeError("ticket_lifecycle_raw_snapshot_shape_invalid")
         if str(raw_commission_rate.get("symbol") or "") != market_id:
             raise RuntimeError("ticket_lifecycle_commission_symbol_mismatch")
@@ -1267,6 +1270,10 @@ class ExchangeGateway:
                 raw_commission_rate.get("takerCommissionRate") or ""
             ),
         }
+        market_rule = self._ticket_lifecycle_market_rule(
+            raw_exchange_info,
+            market_id=market_id,
+        )
         return {
             "open_orders": open_orders,
             "recent_fills": recent_fills,
@@ -1275,9 +1282,50 @@ class ExchangeGateway:
             "conditional_result": conditional_result,
             "account_exposure_result": account_exposure,
             "commission_rate": commission_rate,
+            "market_rule": market_rule,
             "exchange_request_count": (
-                6 + int(funding_requested) + len(parent_ids)
+                7 + int(funding_requested) + len(parent_ids)
             ),
+        }
+
+    @staticmethod
+    def _ticket_lifecycle_market_rule(
+        payload: Dict[str, Any],
+        *,
+        market_id: str,
+    ) -> Dict[str, Any]:
+        symbols = [
+            row
+            for row in payload.get("symbols", [])
+            if isinstance(row, dict) and str(row.get("symbol") or "") == market_id
+        ]
+        if len(symbols) != 1:
+            raise RuntimeError("ticket_lifecycle_market_rule_symbol_not_unique")
+        filters = {
+            str(row.get("filterType") or ""): row
+            for row in symbols[0].get("filters", [])
+            if isinstance(row, dict)
+        }
+        price_tick = str(filters.get("PRICE_FILTER", {}).get("tickSize") or "")
+        quantity_step = str(filters.get("LOT_SIZE", {}).get("stepSize") or "")
+        min_notional = str(
+            filters.get("MIN_NOTIONAL", {}).get("notional")
+            or filters.get("NOTIONAL", {}).get("minNotional")
+            or ""
+        )
+        try:
+            if Decimal(price_tick) <= 0 or Decimal(quantity_step) <= 0:
+                raise ValueError
+            if min_notional and Decimal(min_notional) <= 0:
+                raise ValueError
+        except (ArithmeticError, ValueError) as exc:
+            raise RuntimeError("ticket_lifecycle_market_rule_invalid") from exc
+        return {
+            "exchange_market_id": market_id,
+            "price_tick": price_tick,
+            "quantity_step": quantity_step,
+            "min_notional": min_notional or None,
+            "source": "binance_usdm_public_exchange_info",
         }
 
     @staticmethod

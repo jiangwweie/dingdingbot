@@ -268,6 +268,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
                 narrow_result.get("account_exposure_result") or {}
             )
             commission_rate = dict(narrow_result.get("commission_rate") or {})
+            market_rule = dict(narrow_result.get("market_rule") or {})
             exchange_request_count = int(
                 narrow_result.get("exchange_request_count") or 0
             )
@@ -322,6 +323,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
                 + int(should_fetch_account_exposure)
             )
             commission_rate = {}
+            market_rule = {}
     except TimeoutError:
         blockers = ["exchange_snapshot_fetch_timeout"]
         return {
@@ -393,6 +395,13 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
             now_ms=now_ms,
         ),
         "commission_rate": commission_rate,
+        "market_rule": {
+            **market_rule,
+            "exchange_instrument_id": scope.exchange_instrument_id,
+            "exchange_id": scope.exchange_id,
+        }
+        if market_rule
+        else {},
         "position": position,
         "fetched_at_ms": now_ms,
         "authority_boundary": authority_boundary,

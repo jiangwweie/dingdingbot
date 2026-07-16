@@ -106,6 +106,33 @@ def test_versioned_tp1_partial_and_complete_fill_watermarks_are_restart_safe(
     pg_control_connection,
 ):
     ticket_id = _versioned_exit_fixture(pg_control_connection)
+    instrument_id = pg_control_connection.execute(
+        text(
+            "SELECT exchange_instrument_id FROM brc_action_time_tickets "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).scalar_one()
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_exchange_instruments SET price_tick = NULL, "
+            "quantity_step = NULL WHERE exchange_instrument_id = :instrument_id"
+        ),
+        {"instrument_id": instrument_id},
+    )
+    market_rule_snapshot = {
+        "exchange_instrument_id": instrument_id,
+        "exchange_id": "binance_usdm",
+        "market_rule": {
+            "exchange_instrument_id": instrument_id,
+            "exchange_id": "binance_usdm",
+            "exchange_market_id": "ETHUSDT",
+            "price_tick": "1",
+            "quantity_step": "0.001",
+            "min_notional": "5",
+            "source": "binance_usdm_public_exchange_info",
+        },
+    }
     tp1 = pg_control_connection.execute(
         text(
             "SELECT * FROM brc_ticket_bound_exit_protection_orders "
@@ -122,6 +149,7 @@ def test_versioned_tp1_partial_and_complete_fill_watermarks_are_restart_safe(
         "timestamp_ms": NOW_MS + 7_000,
     }
     partial_snapshot = {
+        **market_rule_snapshot,
         "recent_fills": [first_fill],
         "position": {"qty": "0.008", "position_flat": False},
     }
@@ -164,18 +192,19 @@ def test_versioned_tp1_partial_and_complete_fill_watermarks_are_restart_safe(
         pg_control_connection,
         ticket_id=ticket_id,
         exchange_snapshot={
+            **market_rule_snapshot,
             "recent_fills": [
                 first_fill,
                 {
                     "exchange_trade_id": "trade-tp1-2",
                     "exchange_order_id": tp1["exchange_order_id"],
-                    "qty": "0.003",
+                    "qty": "0.002",
                     "price": str(tp1["price"]),
                     "fee": {"cost": "0.0015", "currency": "USDT"},
                     "timestamp_ms": NOW_MS + 8_000,
                 },
             ],
-            "position": {"qty": "0.005", "position_flat": False},
+            "position": {"qty": "0.006", "position_flat": False},
         },
         now_ms=NOW_MS + 8_000,
     )
@@ -189,6 +218,6 @@ def test_versioned_tp1_partial_and_complete_fill_watermarks_are_restart_safe(
     ).mappings().one()
 
     assert complete["status"] == "fills_projected"
-    assert Decimal(str(current["tp1_cumulative_filled_qty"])) == Decimal("0.005")
+    assert Decimal(str(current["tp1_cumulative_filled_qty"])) == Decimal("0.004")
     assert current["tp1_completion_state"] == "complete"
-    assert Decimal(str(current["remaining_position_qty"])) == Decimal("0.005")
+    assert Decimal(str(current["remaining_position_qty"])) == Decimal("0.006")

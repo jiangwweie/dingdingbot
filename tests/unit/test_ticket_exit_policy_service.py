@@ -119,7 +119,31 @@ def test_complete_tp1_prepares_immediate_cost_adjusted_floor(
     snapshot = TicketExitExecutionSnapshot.model_validate(
         _mapping(projection["exit_execution_snapshot"])
     )
-    instrument = _instrument(pg_control_connection, ticket_id)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_exchange_instruments SET price_tick = NULL, "
+            "quantity_step = NULL WHERE exchange_instrument_id = ("
+            "SELECT exchange_instrument_id FROM brc_action_time_tickets "
+            "WHERE ticket_id = :ticket_id)"
+        ),
+        {"ticket_id": ticket_id},
+    )
+    exchange_snapshot = {
+        "exchange_instrument_id": _instrument(
+            pg_control_connection, ticket_id
+        )["exchange_instrument_id"],
+        "market_rule": {
+            "exchange_instrument_id": _instrument(
+                pg_control_connection, ticket_id
+            )["exchange_instrument_id"],
+            "exchange_id": "binance_usdm",
+            "exchange_market_id": "ETHUSDT",
+            "price_tick": "1",
+            "quantity_step": "0.001",
+            "min_notional": "5",
+            "source": "binance_usdm_public_exchange_info",
+        },
+    }
     expected = calculate_runner_break_even_floor(
         side=side,
         entry_avg_fill_price=snapshot.entry_avg_fill_price,
@@ -127,7 +151,7 @@ def test_complete_tp1_prepares_immediate_cost_adjusted_floor(
         allocated_entry_fee_quote=snapshot.entry_fee_quote,
         certified_exit_taker_fee_rate=snapshot.certified_exit_taker_fee_rate,
         slippage_buffer_quote=snapshot.slippage_buffer_quote,
-        minimum_price_tick=Decimal(str(instrument["price_tick"])),
+        minimum_price_tick=Decimal("1"),
     )
     pg_control_connection.execute(
         text(
@@ -142,6 +166,7 @@ def test_complete_tp1_prepares_immediate_cost_adjusted_floor(
     result = maintain_ticket_exit_policy_in_transaction(
         pg_control_connection,
         ticket_id=ticket_id,
+        exchange_snapshot=exchange_snapshot,
         now_ms=NOW_MS + 20_000,
     )
 

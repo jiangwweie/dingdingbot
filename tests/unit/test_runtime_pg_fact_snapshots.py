@@ -179,7 +179,8 @@ def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
                     """
                     SELECT fact_snapshot_id, strategy_group_id, symbol, side,
                            runtime_profile_id, fact_surface, satisfied,
-                           freshness_state, fact_values
+                           freshness_state, fact_values, observed_at_ms,
+                           valid_until_ms
                     FROM brc_runtime_fact_snapshots
                     WHERE fact_surface IN ('account_safe', 'account_mode')
                     ORDER BY fact_surface
@@ -198,6 +199,11 @@ def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
     assert all(row["runtime_profile_id"] == "owner-runtime-console-v1" for row in rows)
     assert all(row["satisfied"] in {True, 1} for row in rows)
     assert all(row["freshness_state"] == "fresh" for row in rows)
+    ttl_by_surface = {
+        row["fact_surface"]: row["valid_until_ms"] - row["observed_at_ms"]
+        for row in rows
+    }
+    assert ttl_by_surface == {"account_mode": 300_000, "account_safe": 60_000}
     assert export["source_mode"] == "db_backed"
     assert export["checks"]["account_safe_facts_ready"] is True
     assert export["checks"]["account_mode_snapshot_ready"] is True
@@ -229,7 +235,7 @@ def test_stale_account_mode_cannot_leave_account_safe_snapshot_satisfied():
     helper = _load_file_module(HELPER_PATH, "runtime_pg_stale_account_mode_test")
     engine = _seed_engine()
     artifact = {
-        "generated_at_utc": "2026-07-05T00:02:00+00:00",
+        "generated_at_utc": "2026-07-05T00:06:00+00:00",
         "status": "runtime_account_safe_facts_ready",
         "source_status": "ready",
         "checks": {
