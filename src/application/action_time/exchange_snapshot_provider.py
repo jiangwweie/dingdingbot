@@ -267,6 +267,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
             account_exposure_result = dict(
                 narrow_result.get("account_exposure_result") or {}
             )
+            commission_rate = dict(narrow_result.get("commission_rate") or {})
             exchange_request_count = int(
                 narrow_result.get("exchange_request_count") or 0
             )
@@ -320,6 +321,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
                 + int(should_fetch_conditional_lineage)
                 + int(should_fetch_account_exposure)
             )
+            commission_rate = {}
     except TimeoutError:
         blockers = ["exchange_snapshot_fetch_timeout"]
         return {
@@ -390,6 +392,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
             ),
             now_ms=now_ms,
         ),
+        "commission_rate": commission_rate,
         "position": position,
         "fetched_at_ms": now_ms,
         "authority_boundary": authority_boundary,

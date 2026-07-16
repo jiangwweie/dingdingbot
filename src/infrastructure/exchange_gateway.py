@@ -1141,6 +1141,7 @@ class ExchangeGateway:
             "algo_orders": "fapiPrivateGetOpenAlgoOrders",
             "trades": "fapiPrivateGetUserTrades",
             "account": "fapiPrivateV3GetAccount",
+            "commission_rate": "fapiPrivateGetCommissionRate",
         }
         for capability, method_name in required_methods.items():
             if not callable(getattr(rest, method_name, None)):
@@ -1199,6 +1200,7 @@ class ExchangeGateway:
             raw_algo_orders,
             raw_trades,
             raw_account,
+            raw_commission_rate,
             funding_result,
             conditional_result,
         ) = await asyncio.gather(
@@ -1209,14 +1211,19 @@ class ExchangeGateway:
                 {"symbol": market_id, "limit": fill_limit}
             ),
             rest.fapiPrivateV3GetAccount(),
+            rest.fapiPrivateGetCommissionRate({"symbol": market_id}),
             _optional_funding(),
             _optional_lineage(),
         )
         if not all(
             isinstance(rows, list)
             for rows in (raw_positions, raw_orders, raw_algo_orders, raw_trades)
-        ) or not isinstance(raw_account, dict):
+        ) or not isinstance(raw_account, dict) or not isinstance(
+            raw_commission_rate, dict
+        ):
             raise RuntimeError("ticket_lifecycle_raw_snapshot_shape_invalid")
+        if str(raw_commission_rate.get("symbol") or "") != market_id:
+            raise RuntimeError("ticket_lifecycle_commission_symbol_mismatch")
 
         positions = [
             self._ticket_lifecycle_position_row(
@@ -1251,6 +1258,15 @@ class ExchangeGateway:
             if isinstance(row, dict)
         ]
         account_exposure = self._ticket_lifecycle_account_exposure(raw_account)
+        commission_rate = {
+            "symbol": market_id,
+            "maker_commission_rate": str(
+                raw_commission_rate.get("makerCommissionRate") or ""
+            ),
+            "taker_commission_rate": str(
+                raw_commission_rate.get("takerCommissionRate") or ""
+            ),
+        }
         return {
             "open_orders": open_orders,
             "recent_fills": recent_fills,
@@ -1258,8 +1274,9 @@ class ExchangeGateway:
             "funding_result": funding_result,
             "conditional_result": conditional_result,
             "account_exposure_result": account_exposure,
+            "commission_rate": commission_rate,
             "exchange_request_count": (
-                5 + int(funding_requested) + len(parent_ids)
+                6 + int(funding_requested) + len(parent_ids)
             ),
         }
 

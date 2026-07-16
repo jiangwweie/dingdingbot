@@ -39,7 +39,12 @@ class _NarrowSnapshotGateway:
                 "observed_at_ms": 2_000,
                 "blockers": [],
             },
-            "exchange_request_count": 5,
+            "commission_rate": {
+                "symbol": "ETHUSDT",
+                "maker_commission_rate": "0.0002",
+                "taker_commission_rate": "0.0005",
+            },
+            "exchange_request_count": 6,
         }
 
     async def fetch_all_open_orders(self, _symbol: str):
@@ -68,7 +73,7 @@ async def test_snapshot_prefers_one_narrow_ticket_lifecycle_gateway_boundary():
     )
 
     assert payload["status"] == "snapshot_ready"
-    assert payload["exchange_request_count"] == 5
+    assert payload["exchange_request_count"] == 6
     assert gateway.calls == [
         {
             "exchange_symbol": "ETH/USDT:USDT",
@@ -80,6 +85,9 @@ async def test_snapshot_prefers_one_narrow_ticket_lifecycle_gateway_boundary():
         }
     ]
     assert payload["snapshot"]["exchange_write_called"] is False
+    assert payload["snapshot"]["commission_rate"]["taker_commission_rate"] == (
+        "0.0005"
+    )
 
 
 class _LifecycleReadonlyGateway:
@@ -222,6 +230,14 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
                 "positions": [{"symbol": "ETHUSDT", "notional": "210"}],
             }
 
+        async def fapiPrivateGetCommissionRate(self, params):
+            self.calls.append(("commission_rate", params))
+            return {
+                "symbol": "ETHUSDT",
+                "makerCommissionRate": "0.0002",
+                "takerCommissionRate": "0.0005",
+            }
+
         async def fapiPrivateGetIncome(self, params):
             self.calls.append(("funding", params))
             return []
@@ -251,7 +267,7 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
         conditional_parent_order_ids=["12"],
     )
 
-    assert snapshot["exchange_request_count"] == 7
+    assert snapshot["exchange_request_count"] == 8
     assert snapshot["positions"][0]["symbol"] == "ETH/USDT:USDT"
     assert snapshot["positions"][0]["size"] == "2"
     assert snapshot["open_orders"][0]["id"] == "11"
@@ -260,12 +276,18 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
     assert snapshot["account_exposure_result"][
         "effective_account_exposure_leverage"
     ] == "2.1"
+    assert snapshot["commission_rate"] == {
+        "symbol": "ETHUSDT",
+        "maker_commission_rate": "0.0002",
+        "taker_commission_rate": "0.0005",
+    }
     assert {name for name, _params in raw.calls} == {
         "position",
         "orders",
         "algo_orders",
         "trades",
         "account",
+        "commission_rate",
         "funding",
         "lineage",
     }
