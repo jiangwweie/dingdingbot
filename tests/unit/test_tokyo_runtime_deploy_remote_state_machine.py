@@ -1131,3 +1131,46 @@ def test_canary_sentinel_retries_legacy_scope_overflow_with_bounded_wrapper(
     assert calls[0][1] == "scripts/capture_canary_mutation_sentinel.py"
     assert calls[1][1] == "-c"
     assert "BoundedReferencedSet" in calls[1][2]
+
+
+def test_canary_sentinel_retries_schema_125_with_in_memory_contract_wrapper(tmp_path):
+    release = tmp_path / "release"
+    release.mkdir()
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL=postgresql://example.invalid/db\n")
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            return machine.ChildResult(
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "ValueError: canary_sentinel_storage_schema_mismatch:"
+                    "brc_ticket_exit_policy_current"
+                ),
+            )
+        return machine.ChildResult(
+            returncode=0,
+            stdout=json.dumps({
+                "status": "canary_mutation_sentinel_captured",
+                "digest": "sha256:" + "a" * 64,
+                "scope": {"schema": "brc.canary_mutation_sentinel_scope.v1"},
+            }),
+            stderr="",
+        )
+
+    result = machine.capture_candidate_mutation_sentinel(
+        release_path=release,
+        env_path=env_file,
+        target_sha="a" * 40,
+        runner=runner,
+        require_root_owner=False,
+    )
+
+    assert result["status"] == "canary_mutation_sentinel_captured"
+    assert len(calls) == 2
+    assert calls[1][1] == "-c"
+    assert "binding_source" in calls[1][2]
+    assert "adoption_event_id" in calls[1][2]

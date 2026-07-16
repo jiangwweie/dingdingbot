@@ -1509,29 +1509,48 @@ def capture_candidate_mutation_sentinel(
         )
     except RuntimeError as exc:
         error = str(exc)
-        if scope is not None or not error.endswith((
+        if error.endswith(
+            ":canary_sentinel_storage_schema_mismatch:"
+            "brc_ticket_exit_policy_current"
+        ):
+            result = _run_release_python_script(
+                release_path=release_path,
+                env_path=env_path,
+                arguments=[
+                    "-c",
+                    _schema125_canary_sentinel_wrapper(),
+                    *arguments[1:],
+                ],
+                timeout=60,
+                runner=runner,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+            )
+        elif scope is not None or not error.endswith((
             ":canary_scope_fact_limit_exceeded",
             ":canary_scope_signal_limit_exceeded",
         )):
             raise
-        # Compatibility for immutable candidates created before bounded fact
-        # discovery prioritized lane references. The wrapper changes discovery
-        # only; capture remains the candidate's normal read-only implementation.
-        result = _run_release_python_script(
-            release_path=release_path,
-            env_path=env_path,
-            arguments=[
-                "-c",
-                _legacy_bounded_fact_scope_wrapper(),
-                "--target-runtime-head",
-                _sha(target_sha, "target_sha"),
-            ],
-            timeout=60,
-            runner=runner,
-            lock_handle=lock_handle,
-            canonical_lock_path=canonical_lock_path,
-            require_root_owner=require_root_owner,
-        )
+        else:
+            # Compatibility for immutable candidates created before bounded fact
+            # discovery prioritized lane references. The wrapper changes discovery
+            # only; capture remains the candidate's normal read-only implementation.
+            result = _run_release_python_script(
+                release_path=release_path,
+                env_path=env_path,
+                arguments=[
+                    "-c",
+                    _legacy_bounded_fact_scope_wrapper(),
+                    "--target-runtime-head",
+                    _sha(target_sha, "target_sha"),
+                ],
+                timeout=60,
+                runner=runner,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+            )
     payload = _json_receipt(result, "canary_sentinel_receipt_invalid")
     if (
         payload.get("status") != "canary_mutation_sentinel_captured"
@@ -2468,6 +2487,14 @@ def _run_candidate_command(
             or ("signal_event_ids" in result.stderr and "too_long" in result.stderr)
         ):
             detail = ":canary_scope_signal_limit_exceeded"
+        elif (
+            "canary_sentinel_storage_schema_mismatch:"
+            "brc_ticket_exit_policy_current" in result.stderr
+        ):
+            detail = (
+                ":canary_sentinel_storage_schema_mismatch:"
+                "brc_ticket_exit_policy_current"
+            )
         raise RuntimeError("candidate_command_failed:" + Path(command[0]).name + detail)
     return result
 
@@ -2528,6 +2555,38 @@ def bounded_ids(rows, name):
 repository._ids = bounded_ids
 repository._bounded_scope_ids = bounded_scope_ids
 cli.discover_canary_mutation_scope = repository.discover_canary_mutation_scope
+raise SystemExit(cli.main(sys.argv[1:]))
+'''.strip()
+
+
+def _schema125_canary_sentinel_wrapper() -> str:
+    """Adapt an immutable schema-124 sentinel to migration 125 in memory."""
+
+    return r'''
+import sys
+from types import MappingProxyType
+import scripts.capture_canary_mutation_sentinel as cli
+import src.application.readmodels.canary_mutation_sentinel as model
+import src.infrastructure.canary_mutation_sentinel_queries as queries
+
+columns = tuple(model.CANARY_EXIT_POLICY_CURRENT_COLUMNS_V1)
+if "binding_source" not in columns:
+    pivot = columns.index("exit_policy_hash") + 1
+    columns = columns[:pivot] + ("binding_source", "adoption_event_id") + columns[pivot:]
+
+specs = tuple(
+    model.CanarySentinelSpec(
+        slice_id=spec.slice_id,
+        relation=spec.relation,
+        row_limit=spec.row_limit,
+        columns=columns if spec.slice_id == "exit_policy" else spec.columns,
+    )
+    for spec in model.CANARY_SENTINEL_SPECS_V1
+)
+model.CANARY_EXIT_POLICY_CURRENT_COLUMNS_V1 = columns
+model.CANARY_SENTINEL_SPECS_V1 = specs
+model._SPEC_BY_ID = MappingProxyType({spec.slice_id: spec for spec in specs})
+queries.CANARY_SENTINEL_SPECS_V1 = specs
 raise SystemExit(cli.main(sys.argv[1:]))
 '''.strip()
 
