@@ -315,11 +315,24 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             )
         )
         blockers.extend(_result_blockers(maintenance))
-        exit_policy = maintain_ticket_exit_policy_in_transaction(
-            conn,
-            ticket_id=str(scope.get("ticket_id") or ""),
-            exchange_snapshot=exchange_snapshot,
-            now_ms=now_ms + index + 105,
+        exit_policy = (
+            {
+                "status": "closed_fact_repair_only",
+                "blockers": [],
+                "exchange_read_called": False,
+                "exchange_write_called": False,
+                "authority_boundary": (
+                    "closed lifecycle fact repair; exit policy is terminally "
+                    "inapplicable and is not evaluated"
+                ),
+            }
+            if closed_fact_repair
+            else maintain_ticket_exit_policy_in_transaction(
+                conn,
+                ticket_id=str(scope.get("ticket_id") or ""),
+                exchange_snapshot=exchange_snapshot,
+                now_ms=now_ms + index + 105,
+            )
         )
         blockers.extend(_result_blockers(exit_policy))
         exchange_read_called = (

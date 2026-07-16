@@ -196,6 +196,14 @@ async def test_scheduler_repairs_closed_outcome_from_exact_tracked_fill(
     pg_control_connection,
 ):
     ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_runtime_capabilities_current SET status = 'enabled', "
+            "certification_ref = 'unit:enabled', updated_at_ms = :now_ms "
+            "WHERE capability_id = 'ticket_exit_policy_v1'"
+        ),
+        {"now_ms": NOW_MS},
+    )
     entry_event = pg_control_connection.execute(
         text(
             "SELECT lifecycle_event_id, event_payload FROM "
@@ -289,6 +297,9 @@ async def test_scheduler_repairs_closed_outcome_from_exact_tracked_fill(
         "lifecycle_closed"
     ), payload["runs"][0]["scope"]
     assert payload["runs"][0]["maintenance"]["status"] == (
+        "closed_fact_repair_only"
+    ), payload
+    assert payload["runs"][0]["exit_policy"]["status"] == (
         "closed_fact_repair_only"
     ), payload
     outcome = pg_control_connection.execute(
