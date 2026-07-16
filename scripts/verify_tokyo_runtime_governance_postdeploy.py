@@ -140,7 +140,7 @@ def build_postdeploy_report(
         ),
         "lifecycle_timer_active": _ssh_text(
             host,
-            "systemctl is-active brc-ticket-lifecycle-maintenance.timer",
+            "systemctl is-active brc-ticket-lifecycle-maintenance.timer || true",
             connect_timeout_seconds=connect_timeout_seconds,
             runner=command_runner,
         ),
@@ -203,6 +203,7 @@ def build_postdeploy_report(
                 ),
                 connect_timeout_seconds=connect_timeout_seconds,
                 runner=command_runner,
+                allow_empty=True,
             )
         ),
         "ccxt_version": _ssh_text(
@@ -297,7 +298,11 @@ def evaluate_postdeploy_checks(
         blockers.append("postdeploy_latest_migration_mismatch")
     if str(facts.get("lifecycle_timer_enabled") or "").strip() != "enabled":
         blockers.append("postdeploy_lifecycle_timer_not_enabled")
-    if str(facts.get("lifecycle_timer_active") or "").strip() != "active":
+    lifecycle_mutation_enabled = expected_lifecycle_mutation_state == "enabled"
+    if (
+        lifecycle_mutation_enabled
+        and str(facts.get("lifecycle_timer_active") or "").strip() != "active"
+    ):
         blockers.append("postdeploy_lifecycle_timer_not_active")
     lifecycle_result = str(facts.get("lifecycle_service_result") or "").splitlines()
     if lifecycle_result != ["success", "0"]:
@@ -314,11 +319,13 @@ def evaluate_postdeploy_checks(
         != "adoption-schema-contract-match"
     ):
         blockers.append("postdeploy_adoption_schema_contract_mismatch")
-    _evaluate_lifecycle_payload(
-        facts.get("lifecycle_last_payload"),
-        expected_lifecycle_mutation_state=expected_lifecycle_mutation_state,
-        blockers=blockers,
-    )
+    lifecycle_payload = facts.get("lifecycle_last_payload")
+    if lifecycle_payload or lifecycle_mutation_enabled:
+        _evaluate_lifecycle_payload(
+            lifecycle_payload,
+            expected_lifecycle_mutation_state=expected_lifecycle_mutation_state,
+            blockers=blockers,
+        )
     if str(facts.get("ccxt_version") or "").strip() != CERTIFIED_CCXT_VERSION:
         blockers.append("postdeploy_ccxt_version_mismatch")
 

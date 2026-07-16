@@ -82,7 +82,10 @@ def _runner(
             return module.CommandResult(LATEST_MIGRATION + "\n", "", 0)
         if remote == "set -eu; systemctl is-enabled brc-ticket-lifecycle-maintenance.timer":
             return module.CommandResult("enabled\n", "", 0)
-        if remote == "set -eu; systemctl is-active brc-ticket-lifecycle-maintenance.timer":
+        if remote in {
+            "set -eu; systemctl is-active brc-ticket-lifecycle-maintenance.timer",
+            "set -eu; systemctl is-active brc-ticket-lifecycle-maintenance.timer || true",
+        }:
             return module.CommandResult("active\n", "", 0)
         if "systemctl show brc-ticket-lifecycle-maintenance.service" in remote:
             return module.CommandResult("success\n0\n", "", 0)
@@ -297,6 +300,68 @@ def test_postdeploy_verifier_certifies_adoption_timeout_and_performance_contract
         "peak_rss_kib"
     ] == 123456
     assert report["checks"]["postdeploy_acceptance_passed"] is True
+
+
+def test_postdeploy_verifier_accepts_quiesced_lifecycle_when_mutation_is_disabled():
+    module = _load_module()
+    commands = []
+    base_runner = _runner()
+
+    def runner(command):
+        commands.append(command)
+        remote = command[-1]
+        if "systemctl is-active brc-ticket-lifecycle-maintenance.timer" in remote:
+            return module.CommandResult("inactive\n", "", 0)
+        if "journalctl -u brc-ticket-lifecycle-maintenance.service" in remote:
+            return module.CommandResult("", "", 0)
+        return base_runner(command)
+
+    report = module.build_postdeploy_report(
+        host="tokyo",
+        deploy_root="~/brc-deploy",
+        api_base="http://127.0.0.1:18080",
+        expected_current_head=EXPECTED_HEAD,
+        expected_migration_count=70,
+        expected_latest_migration=LATEST_MIGRATION,
+        connect_timeout_seconds=8,
+        expected_lifecycle_mutation_state="disabled",
+        runner=runner,
+    )
+
+    assert report["status"] == "postdeploy_acceptance_passed"
+    assert report["checks"]["blockers"] == []
+    lifecycle_timer_command = next(
+        command[-1]
+        for command in commands
+        if "systemctl is-active brc-ticket-lifecycle-maintenance.timer" in command[-1]
+    )
+    assert "|| true" in lifecycle_timer_command
+
+
+def test_postdeploy_verifier_blocks_quiesced_lifecycle_when_mutation_is_enabled():
+    module = _load_module()
+    base_runner = _runner()
+
+    def runner(command):
+        remote = command[-1]
+        if "systemctl is-active brc-ticket-lifecycle-maintenance.timer" in remote:
+            return module.CommandResult("inactive\n", "", 0)
+        return base_runner(command)
+
+    report = module.build_postdeploy_report(
+        host="tokyo",
+        deploy_root="~/brc-deploy",
+        api_base="http://127.0.0.1:18080",
+        expected_current_head=EXPECTED_HEAD,
+        expected_migration_count=70,
+        expected_latest_migration=LATEST_MIGRATION,
+        connect_timeout_seconds=8,
+        expected_lifecycle_mutation_state="enabled",
+        runner=runner,
+    )
+
+    assert report["status"] == "blocked"
+    assert "postdeploy_lifecycle_timer_not_active" in report["checks"]["blockers"]
 
 
 def test_postdeploy_verifier_blocks_lifecycle_resource_budget_breach():
