@@ -198,6 +198,11 @@ def materialize_ticket_bound_reconciliation_tick(
         for order in submit_result.get("submitted_orders", [])
         if isinstance(order, dict)
     ]
+    submitted_orders = _current_exit_protection_orders(
+        conn,
+        protected_submit_attempt_id=attempt_id,
+        submitted_orders=submitted_orders,
+    )
     open_orders = [
         dict(order)
         for order in snapshot.get("open_orders", [])
@@ -647,6 +652,80 @@ def _order_by_role(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
         if str(order.get("order_role") or "").upper() == role:
             return dict(order)
     return {}
+
+
+def _current_exit_protection_orders(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+    submitted_orders: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Prefer the current PG protection lineage over historical submit rows.
+
+    Exit-policy reprices and recovery attempts append history to the protected
+    submit result.  The exit-protection projection is the current authority for
+    active SL/TP1 exchange IDs, so scheduled reconciliation must use it when
+    it exists.
+    """
+
+    inspector = sa.inspect(conn)
+    required_tables = {
+        "brc_ticket_bound_exit_protection_sets",
+        "brc_ticket_bound_exit_protection_orders",
+    }
+    if not all(inspector.has_table(table) for table in required_tables):
+        return submitted_orders
+
+    protection_sets = _table(conn, "brc_ticket_bound_exit_protection_sets")
+    protection_orders = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    protection_set = conn.execute(
+        sa.select(protection_sets.c.exit_protection_set_id)
+        .where(
+            protection_sets.c.protected_submit_attempt_id
+            == str(protected_submit_attempt_id)
+        )
+        .order_by(protection_sets.c.updated_at_ms.desc())
+        .limit(1)
+    ).mappings().first()
+    if not protection_set:
+        return submitted_orders
+
+    rows = conn.execute(
+        sa.select(protection_orders)
+        .where(
+            protection_orders.c.exit_protection_set_id
+            == str(protection_set["exit_protection_set_id"])
+        )
+        .where(protection_orders.c.role.in_(("SL", "TP1")))
+        .where(protection_orders.c.status != "replaced")
+        .order_by(
+            protection_orders.c.role.asc(),
+            protection_orders.c.generation.desc(),
+            protection_orders.c.updated_at_ms.desc(),
+        )
+    ).mappings()
+    current_by_role: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        role = str(row.get("role") or "").upper()
+        if role in current_by_role or not str(row.get("exchange_order_id") or "").strip():
+            continue
+        current_by_role[role] = {
+            "order_role": role,
+            "exchange_order_id": str(row["exchange_order_id"]),
+            "status": str(row.get("status") or ""),
+            "amount": row.get("qty"),
+            "price": row.get("price"),
+            "trigger_price": row.get("trigger_price"),
+            "reduce_only": row.get("reduce_only"),
+        }
+    if not current_by_role:
+        return submitted_orders
+    historical = [
+        order
+        for order in submitted_orders
+        if str(order.get("order_role") or "").upper() not in current_by_role
+    ]
+    return [*historical, *current_by_role.values()]
 
 
 def _exchange_order_by_id(

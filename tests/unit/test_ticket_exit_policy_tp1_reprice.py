@@ -16,6 +16,9 @@ from src.application.action_time.exchange_command_worker import (
 from src.application.action_time.lifecycle_maintenance_service import (
     run_ticket_bound_lifecycle_maintenance,
 )
+from src.application.action_time.post_submit_reconciliation_tick import (
+    materialize_ticket_bound_reconciliation_tick,
+)
 from src.domain.ticket_exit_policy import TicketExitExecutionSnapshot
 from tests.unit.lifecycle_test_schema import (
     apply_active_ticket_exit_policy_adoption_schema,
@@ -294,6 +297,107 @@ async def test_completed_reprice_is_idempotent_and_does_not_prepare_recovery(
         ("replaced", Decimal(str(old_tp1["price"]))),
         ("submitted", expected_price),
     ]
+
+
+def test_scheduled_tick_uses_current_exit_protection_tp1_after_reprice(
+    pg_control_connection,
+):
+    ticket_id, old_tp1, _expected_price = _reprice_fixture(pg_control_connection)
+    maintain_ticket_exit_policy_in_transaction(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+    cancel = _reprice_commands(pg_control_connection, ticket_id)[0]
+    _set_command_state(
+        pg_control_connection,
+        cancel["exchange_command_id"],
+        state="confirmed_submitted",
+        exchange_order_id=old_tp1["exchange_order_id"],
+    )
+    maintain_ticket_exit_policy_in_transaction(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_100,
+    )
+    place = next(
+        item
+        for item in _reprice_commands(pg_control_connection, ticket_id)
+        if item["command_kind"] == "place_order"
+    )
+    _set_command_state(
+        pg_control_connection,
+        place["exchange_command_id"],
+        state="confirmed_submitted",
+        exchange_order_id="repriced-tp1",
+    )
+    maintain_ticket_exit_policy_in_transaction(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_200,
+    )
+    attempt_id = str(
+        pg_control_connection.execute(
+            text(
+                "SELECT protected_submit_attempt_id FROM "
+                "brc_ticket_bound_exit_protection_sets WHERE ticket_id=:ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).scalar_one()
+    )
+    protection_set_id = str(
+        pg_control_connection.execute(
+            text(
+                "SELECT exit_protection_set_id FROM "
+                "brc_ticket_bound_exit_protection_sets WHERE ticket_id=:ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).scalar_one()
+    )
+    raw_submit_result = pg_control_connection.execute(
+        text(
+            "SELECT submit_result FROM brc_ticket_bound_protected_submit_attempts "
+            "WHERE protected_submit_attempt_id=:attempt_id"
+        ),
+        {"attempt_id": attempt_id},
+    ).scalar_one()
+    submit_result = _mapping(raw_submit_result)
+    current_tp1 = next(
+        order
+        for order in submit_result["submitted_orders"]
+        if order["order_role"] == "TP1"
+    )
+    submit_result["submitted_orders"].append(
+        {
+            **current_tp1,
+            "exchange_order_id": "stale-recovery-tp1",
+            "client_order_id": "stale-recovery-tp1",
+            "price": "9999",
+        }
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_protected_submit_attempts "
+            "SET submit_result=:submit_result "
+            "WHERE protected_submit_attempt_id=:attempt_id"
+        ),
+        {
+            "attempt_id": attempt_id,
+            "submit_result": json.dumps(submit_result, sort_keys=True),
+        },
+    )
+
+    payload = materialize_ticket_bound_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=attempt_id,
+        tick_kind="scheduled",
+        exchange_snapshot=_snapshot(pg_control_connection, protection_set_id),
+        now_ms=NOW_MS + 20_300,
+    )
+
+    assert payload["status"] == "matched"
+    assert payload["tick"]["sl_state"] == "open"
+    assert payload["tick"]["tp1_state"] == "open"
 
 def _reprice_fixture(conn):
     ticket_id = _versioned_exit_fixture(conn)
