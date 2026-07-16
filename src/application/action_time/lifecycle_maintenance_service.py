@@ -124,6 +124,7 @@ async def run_ticket_bound_lifecycle_maintenance(
         } and not _exit_policy_tp1_reprice_in_progress(
             conn,
             ticket_id=str(result.get("ticket_id") or ticket_id),
+            now_ms=now_ms,
         ):
             recovery = prepare_ticket_bound_protection_recovery_command(
                 conn,
@@ -166,6 +167,7 @@ async def run_ticket_bound_lifecycle_maintenance(
                 and not _exit_policy_tp1_reprice_in_progress(
                     conn,
                     ticket_id=str(reconciled.get("ticket_id") or ticket_id),
+                    now_ms=now_ms,
                 )
             ):
                 recovery = prepare_ticket_bound_protection_recovery_command(
@@ -306,6 +308,7 @@ def _exit_policy_tp1_reprice_in_progress(
     conn: sa.engine.Connection,
     *,
     ticket_id: str,
+    now_ms: int,
 ) -> bool:
     """Defer generic TP1 recovery while the policy owns an exact replacement.
 
@@ -327,8 +330,6 @@ def _exit_policy_tp1_reprice_in_progress(
             projection_table.c.ticket_id == normalized_ticket_id
         )
     ).mappings().first()
-    if str((projection or {}).get("state") or "") != "blocked_tp1_reprice_required":
-        return False
     if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
         return False
     commands = _table(conn, "brc_ticket_bound_exchange_commands")
@@ -349,7 +350,55 @@ def _exit_policy_tp1_reprice_in_progress(
         )
         .limit(1)
     ).first()
-    return active_command is not None
+    if (
+        str((projection or {}).get("state") or "")
+        == "blocked_tp1_reprice_required"
+        and active_command is not None
+    ):
+        return True
+
+    # A confirmed replacement may take a short bounded interval to appear in
+    # the venue's open-order read view.  During that propagation interval the
+    # exact replacement row and its durable command remain stronger evidence
+    # than one negative snapshot; generic recovery must not submit a second TP1.
+    confirmed_place = conn.execute(
+        sa.select(
+            commands.c.exchange_order_id,
+            commands.c.updated_at_ms,
+        )
+        .where(commands.c.ticket_id == normalized_ticket_id)
+        .where(commands.c.command_source == "exit_policy_tp1_reprice")
+        .where(commands.c.command_kind == "place_order")
+        .where(
+            commands.c.command_state.in_(
+                ("confirmed_submitted", "reconciled_submitted")
+            )
+        )
+        .order_by(commands.c.updated_at_ms.desc())
+        .limit(1)
+    ).mappings().first()
+    if not confirmed_place or not str(confirmed_place.get("exchange_order_id") or ""):
+        return False
+    propagation_grace_ms = 120_000
+    if now_ms - int(confirmed_place.get("updated_at_ms") or 0) > propagation_grace_ms:
+        return False
+    orders = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    projected_replacement = conn.execute(
+        sa.select(orders.c.exit_protection_order_id)
+        .where(orders.c.ticket_id == normalized_ticket_id)
+        .where(orders.c.role == "TP1")
+        .where(
+            orders.c.status.in_(
+                ("planned", "submitted", "open", "partially_filled")
+            )
+        )
+        .where(
+            orders.c.exchange_order_id
+            == str(confirmed_place.get("exchange_order_id") or "")
+        )
+        .limit(1)
+    ).first()
+    return projected_replacement is not None
 
 
 def _scoped_attempt_ids(

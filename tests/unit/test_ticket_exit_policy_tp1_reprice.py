@@ -298,6 +298,44 @@ async def test_completed_reprice_is_idempotent_and_does_not_prepare_recovery(
         ("submitted", expected_price),
     ]
 
+    propagation_window_snapshot = _snapshot(
+        pg_control_connection,
+        protection_set_id,
+    )
+    propagation_window_snapshot["open_orders"] = [
+        item
+        for item in propagation_window_snapshot["open_orders"]
+        if str(item.get("exchange_order_id") or "") != "repriced-tp1"
+    ]
+    propagation_window_maintenance = await run_ticket_bound_lifecycle_maintenance(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot=propagation_window_snapshot,
+        now_ms=NOW_MS + 20_250,
+    )
+    assert all(
+        action["action_type"] != "protection_recovery_prepared"
+        for action in propagation_window_maintenance["actions"]
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands SET updated_at_ms=0 "
+            "WHERE ticket_id=:ticket_id AND command_source='exit_policy_tp1_reprice' "
+            "AND command_kind='place_order'"
+        ),
+        {"ticket_id": ticket_id},
+    )
+    expired_window_maintenance = await run_ticket_bound_lifecycle_maintenance(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot=propagation_window_snapshot,
+        now_ms=NOW_MS + 20_300,
+    )
+    assert any(
+        action["action_type"] == "protection_recovery_prepared"
+        for action in expired_window_maintenance["actions"]
+    )
+
 
 def test_scheduled_tick_uses_current_exit_protection_tp1_after_reprice(
     pg_control_connection,
