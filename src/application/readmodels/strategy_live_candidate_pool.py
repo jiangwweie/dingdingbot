@@ -179,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         with engine.connect() as conn:
             repository = PgBackedRuntimeControlStateRepository(conn)
             artifact = build_strategy_live_candidate_pool_from_control_state(
-                repository.read_control_state(),
+                repository.read_monitor_control_state(),
             )
     finally:
         engine.dispose()
@@ -274,6 +274,17 @@ def _candidate_pool_inputs_from_control_state(
     candidate_rows = _active_candidate_scope_rows(control_state)
     if not candidate_rows:
         raise ValueError("PG control state has no active candidate scope rows")
+    invalid_candidate_ids = [
+        str(row.get("candidate_scope_id") or "missing")
+        for row in candidate_rows
+        if not str(row.get("exchange_instrument_id") or "").strip()
+        or not str(row.get("timeframe") or "").strip()
+    ]
+    if invalid_candidate_ids:
+        raise ValueError(
+            "PG control state has schema-invalid exact candidate identity: "
+            + ", ".join(sorted(invalid_candidate_ids))
+        )
     missing_strategy_groups = set(WIP_LANES) - {
         str(row.get("strategy_group_id") or "") for row in candidate_rows
     }

@@ -41,3 +41,20 @@ def test_budget_settlement_is_consumed_only_and_idempotent(pg_control_connection
         ),
         {"ticket_id": ids["ticket_id"]},
     ).scalar_one() == "released"
+    event = pg_control_connection.execute(
+        text(
+            """
+            SELECT from_status, to_status, reason, evidence_ref
+            FROM brc_budget_reservation_events
+            WHERE budget_reservation_id = :budget_reservation_id
+              AND to_status = 'released'
+            """
+        ),
+        {"budget_reservation_id": first["budget_reservation_id"]},
+    ).mappings().one()
+    assert dict(event) == {
+        "from_status": "consumed",
+        "to_status": "released",
+        "reason": "lifecycle_closed:settlement-1",
+        "evidence_ref": "settlement-1",
+    }

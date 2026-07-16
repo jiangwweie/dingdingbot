@@ -28,6 +28,9 @@ from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # 
 from src.application.readmodels.owner_projection import (  # noqa: E402
     ticket_bound_lifecycle_owner_feedback,
 )
+from src.application.readmodels.account_risk_owner_state import (  # noqa: E402
+    account_risk_owner_state_from_budget,
+)
 
 
 SCHEMA = "brc.ops.tokyo_runtime_ops_health_once.v1"
@@ -912,6 +915,7 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
             {"since_ms": since_ms},
         ).mappings()
     )
+    account_budget_current = _read_account_budget_current_rows(conn)
     return {
         "now_ms": now_ms,
         "since_ms": since_ms,
@@ -960,6 +964,7 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
         "monitor": dict(monitor or {}),
         "unadvanced_fresh_signals": [dict(row) for row in unadvanced_fresh_signals],
         "recent_duplicate_lanes": [dict(row) for row in recent_duplicate_lanes],
+        "account_budget_current": account_budget_current,
     }
 
 
@@ -1021,6 +1026,29 @@ def _read_active_domain_holds(
             WHERE status = 'active'
             ORDER BY updated_at_ms DESC
             LIMIT 20
+            """
+        )
+    ).mappings()
+    return [dict(row) for row in rows]
+
+
+def _read_account_budget_current_rows(
+    conn: sa.engine.Connection,
+) -> list[dict[str, Any]]:
+    """Read optional account capacity projection without making it a deploy gate."""
+
+    if not sa.inspect(conn).has_table("brc_account_budget_current"):
+        return []
+    rows = conn.execute(
+        sa.text(
+            """
+            SELECT account_id, runtime_profile_id, risk_policy_version,
+                   claimed_position_slots, max_concurrent_positions,
+                   reconciliation_state, new_entry_allowed, first_blocker,
+                   valid_until_ms, projection_version, updated_at_ms
+            FROM brc_account_budget_current
+            ORDER BY updated_at_ms DESC
+            LIMIT 10
             """
         )
     ).mappings()
@@ -1112,6 +1140,14 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         if lifecycle_attention_rows
         else None
     )
+    account_risk_owner_states = [
+        {
+            "account_id": row.get("account_id"),
+            "runtime_profile_id": row.get("runtime_profile_id"),
+            **account_risk_owner_state_from_budget(dict(row)).model_dump(),
+        }
+        for row in snapshot.get("account_budget_current") or []
+    ]
     return {
         "schema": "brc.ops.l2_l7_chain_health_summary.v1",
         "status": status,
@@ -1170,6 +1206,7 @@ def summarize_l2_l7_chain_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             }
         ),
         "lifecycle_owner_feedback": lifecycle_owner_feedback,
+        "account_risk_owner_states": account_risk_owner_states,
         "exchange_command_critical_count": len(
             snapshot.get("exchange_command_critical_rows") or []
         ),

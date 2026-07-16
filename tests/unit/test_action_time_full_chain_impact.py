@@ -28,6 +28,7 @@ from src.application.runtime_strategy_signal_evaluation_service import (
     RuntimeStrategySignalEvaluationStatus,
 )
 from src.application.action_time.full_chain_simulation_harness import (
+    bind_simulation_ticket_exposure_episode,
     FULL_CHAIN_FAILURE_SCENARIOS,
     FullChainSimulationInput,
     HistoricalActionTimeAcceptanceCase,
@@ -142,6 +143,10 @@ DYNAMIC_RISK_POLICY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
 )
+ACCOUNT_RISK_CURRENT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-127_create_account_risk_current_projections.py"
+)
 LANE_IDENTITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
@@ -161,6 +166,25 @@ EXIT_EXECUTION_SAFETY_MIGRATION_PATH = (
 TICKET_EXIT_POLICY_CORE_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-14-122_add_ticket_exit_policy_core.py"
+)
+ACCOUNT_RISK_POLICY_MIGRATION_PATH = (
+    REPO_ROOT / "migrations/versions/2026-07-17-126_create_account_risk_policy.py"
+)
+ACCOUNT_CAPACITY_SCOPE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-129_add_account_capacity_reservation_scope.py"
+)
+ACCOUNT_CLAIM_POLICY_EVENT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-130_add_account_capacity_claim_policy_event.py"
+)
+ASSET_NEUTRAL_EXPAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-131_expand_asset_neutral_account_risk_identity.py"
+)
+ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-132_backfill_asset_neutral_account_risk_identity.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
@@ -427,6 +451,15 @@ def _load_module(path: Path, name: str):
     return module
 
 
+def _upgrade_module(conn, module) -> None:
+    previous_op = module.op
+    module.op = Operations(MigrationContext.configure(conn))
+    try:
+        module.upgrade()
+    finally:
+        module.op = previous_op
+
+
 def _arm_submit_decision_env(monkeypatch) -> None:
     monkeypatch.setenv("TRADING_ENV", "live")
     monkeypatch.setenv("EXCHANGE_TESTNET", "false")
@@ -664,6 +697,26 @@ def pg_control_connection():
                 TICKET_EXIT_POLICY_CORE_MIGRATION_PATH,
                 "migration_122_action_time_full_chain",
             ),
+            (
+                ACCOUNT_RISK_POLICY_MIGRATION_PATH,
+                "migration_126_action_time_full_chain",
+            ),
+            (
+                ACCOUNT_RISK_CURRENT_MIGRATION_PATH,
+                "migration_127_action_time_full_chain",
+            ),
+            (
+                ACCOUNT_CAPACITY_SCOPE_MIGRATION_PATH,
+                "migration_129_action_time_full_chain",
+            ),
+            (
+                ACCOUNT_CLAIM_POLICY_EVENT_MIGRATION_PATH,
+                "migration_130_action_time_full_chain",
+            ),
+            (
+                ASSET_NEUTRAL_EXPAND_MIGRATION_PATH,
+                "migration_131_action_time_full_chain",
+            ),
         ):
             extension = _load_module(path, module_name)
             old_extension_op = extension.op
@@ -673,6 +726,11 @@ def pg_control_connection():
             finally:
                 extension.op = old_extension_op
         seed.seed_runtime_control_state_foundation(conn)
+        asset_neutral_backfill = _load_module(
+            ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH,
+            "migration_132_action_time_full_chain",
+        )
+        _upgrade_module(conn, asset_neutral_backfill)
         # SQLite cannot ALTER an existing table to add migration 124's check
         # constraint. The unit fixture mirrors its two storage columns; the
         # PostgreSQL integration suite executes the real migration.
@@ -1701,6 +1759,7 @@ def _run_raw_pg_input_to_runtime_safety(
     readiness_projection_payload = sequence_payload["projection"]
     lane_payload = sequence_payload["promotion"]
     ticket_payload = sequence_payload["ticket"]
+    ticket_payload = bind_simulation_ticket_exposure_episode(conn, ticket_payload)
     assert fact_payload["status"] == "action_time_fact_snapshots_materialized"
     assert fact_payload["materialized_count"] == 1
     assert fact_payload["blocked_count"] == 0
@@ -1943,6 +2002,7 @@ def _runtime_lane_identity_for_registered_scope(
             SELECT c.candidate_scope_id,
                    c.strategy_group_id,
                    c.symbol,
+                   c.exchange_instrument_id,
                    c.asset_class,
                    c.side,
                    c.policy_current_id,
@@ -1992,6 +2052,7 @@ def _runtime_lane_identity_for_registered_scope(
         strategy_group_id=str(row["strategy_group_id"]),
         strategy_group_version_id=str(row["strategy_group_version_id"]),
         symbol=str(row["symbol"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
         asset_class=str(row["asset_class"]),
         side=str(row["side"]),
         event_spec_id=str(row["event_spec_id"]),

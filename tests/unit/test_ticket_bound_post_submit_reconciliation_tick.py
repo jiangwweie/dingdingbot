@@ -178,6 +178,29 @@ def test_scheduled_tick_uses_latest_tp1_reprice_exchange_order(
     assert payload["tick"]["tp1_state"] == "open"
 
 
+def test_first_tick_blocks_mismatched_exposure_episode_lineage(pg_control_connection):
+    prepared = _submitted_real_attempt(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET exposure_episode_id = 'exposure_episode:wrong' "
+            "WHERE ticket_id = :ticket_id AND order_role = 'SL'"
+        ),
+        {"ticket_id": prepared["ticket_id"]},
+    )
+
+    payload = materialize_ticket_bound_first_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        exchange_snapshot=_attempt_snapshot(prepared),
+        now_ms=NOW_MS + 6000,
+    )
+
+    assert payload["status"] == "blocked"
+    assert payload["blockers"] == ["post_submit_exposure_episode_mismatch"]
+    assert _count(pg_control_connection, "brc_ticket_bound_reconciliation_ticks") == 0
+
+
 def test_first_tick_freezes_scope_for_unknown_exchange_only_order(pg_control_connection):
     prepared = _submitted_real_attempt(pg_control_connection)
     snapshot = _attempt_snapshot(prepared)

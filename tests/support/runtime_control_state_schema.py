@@ -8,6 +8,7 @@ import sys
 
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
+import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
 
@@ -51,10 +52,33 @@ MIGRATIONS = {
     / "migrations/versions/2026-07-14-121_add_exit_execution_safety.py",
     "122": REPO_ROOT
     / "migrations/versions/2026-07-14-122_add_ticket_exit_policy_core.py",
+    "123": REPO_ROOT
+    / "migrations/versions/2026-07-15-123_activate_sor_long_exit_policy_canary.py",
+    "124": REPO_ROOT
+    / "migrations/versions/2026-07-15-124_persist_lifecycle_mutation_enablement_proof.py",
+    "125": REPO_ROOT
+    / "migrations/versions/2026-07-16-125_add_active_ticket_exit_policy_adoption.py",
+    "126": REPO_ROOT
+    / "migrations/versions/2026-07-17-126_create_account_risk_policy.py",
+    "127": REPO_ROOT
+    / "migrations/versions/2026-07-17-127_create_account_risk_current_projections.py",
+    "128": REPO_ROOT
+    / "migrations/versions/2026-07-17-128_repair_terminal_budget_reservations.py",
+    "129": REPO_ROOT
+    / "migrations/versions/2026-07-17-129_add_account_capacity_reservation_scope.py",
+    "130": REPO_ROOT
+    / "migrations/versions/2026-07-17-130_add_account_capacity_claim_policy_event.py",
+    "131": REPO_ROOT
+    / "migrations/versions/2026-07-17-131_expand_asset_neutral_account_risk_identity.py",
+    "132": REPO_ROOT
+    / "migrations/versions/2026-07-17-132_backfill_asset_neutral_account_risk_identity.py",
+    "133": REPO_ROOT
+    / "migrations/versions/2026-07-17-133_enforce_asset_neutral_account_risk_identity.py",
 }
 REVISION_ORDER = (
     "086", "103", "104", "105", "106", "107", "108", "109", "110", "111",
-    "112", "113", "114", "115", "116", "117", "118", "121", "122",
+    "112", "113", "114", "115", "116", "117", "118", "121", "122", "123", "124", "125",
+    "126", "127", "128", "129", "130", "131", "132", "133",
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
@@ -130,6 +154,18 @@ def seed_runtime_control_state(
     migration_baseline_revision: str | None = None,
 ) -> None:
     """Seed deterministic StrategyGroup runtime-control rows for tests."""
+
+    candidate_columns = {
+        str(column["name"])
+        for column in sa.inspect(conn).get_columns(
+            "brc_strategy_group_candidate_scope"
+        )
+    }
+    if "exchange_instrument_id" not in candidate_columns:
+        conn.exec_driver_sql(
+            "ALTER TABLE brc_strategy_group_candidate_scope "
+            "ADD COLUMN exchange_instrument_id VARCHAR(192)"
+        )
 
     seed = _load_module(
         SEED_PATH,

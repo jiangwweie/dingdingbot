@@ -334,6 +334,7 @@ def _cpm_long_lane_identity(*, timeframe: str = "1h") -> RuntimeLaneIdentity:
         strategy_group_id="CPM-RO-001",
         strategy_group_version_id="sgv:CPM-RO-001:v2",
         symbol="ETHUSDT",
+        exchange_instrument_id="instrument:binance-usdm:ETHUSDT",
         asset_class="crypto_perpetual",
         side="long",
         event_spec_id="event_spec:CPM-RO-001:CPM-LONG:v2",

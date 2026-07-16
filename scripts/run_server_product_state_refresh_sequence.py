@@ -39,6 +39,10 @@ from src.application.action_time.action_time_invocation import (  # noqa: E402
     load_action_time_invocation,
     start_action_time_invocation,
 )
+from src.application.action_time.budget_reservation_transition import (  # noqa: E402
+    reclaim_terminal_presubmit_reservations,
+    transition_budget_reservation,
+)
 from src.application.runtime_process_outcome import (  # noqa: E402
     classify_process_outcome,
     materialize_runtime_process_outcome,
@@ -1069,23 +1073,37 @@ def _expire_stale_action_time_objects(
         )
         counts["expired_action_time_tickets"] = int(result.rowcount or 0)
 
-    if inspector.has_table("brc_budget_reservations"):
+    counts["expired_budget_reservations"] += reclaim_terminal_presubmit_reservations(
+        conn,
+        now_ms=now_ms,
+        evidence_ref_prefix="server_product_state_refresh",
+    )
+
+    if (
+        inspector.has_table("brc_budget_reservations")
+        and inspector.has_table("brc_budget_reservation_events")
+    ):
         budget_reservations = sa.Table(
             "brc_budget_reservations",
             metadata,
             autoload_with=conn,
         )
-        result = conn.execute(
-            budget_reservations.update()
+        active_rows = conn.execute(
+            sa.select(budget_reservations.c.budget_reservation_id)
             .where(budget_reservations.c.status == "active")
             .where(budget_reservations.c.expires_at_ms.is_not(None))
             .where(budget_reservations.c.expires_at_ms <= now_ms)
-            .values(
-                status="expired",
-                release_reason="action_time_object_expired",
+        ).mappings()
+        for row in active_rows:
+            result = transition_budget_reservation(
+                conn,
+                budget_reservation_id=str(row["budget_reservation_id"]),
+                to_status="expired",
+                reason="action_time_object_expired",
+                evidence_ref="server_product_state_refresh:reservation_expired",
+                now_ms=now_ms,
             )
-        )
-        counts["expired_budget_reservations"] = int(result.rowcount or 0)
+            counts["expired_budget_reservations"] += int(result.transitioned)
 
     return counts
 

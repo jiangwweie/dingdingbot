@@ -441,6 +441,9 @@ def build_seed_rows(
                     "strategy_group_id": seed.strategy_group_id,
                     "symbol": symbol,
                     "exchange_symbol": _exchange_symbol(symbol),
+                    "exchange_instrument_id": (
+                        f"binance_usdm:{_exchange_symbol(symbol)}"
+                    ),
                     "asset_class": "crypto_usdm_perp",
                     "side": seed.side,
                     "timeframe": seed.timeframe,

@@ -384,6 +384,9 @@ def _runtime_lane_static_identity_by_key(
                 event_spec.get("strategy_group_version_id") or ""
             ),
             "symbol": symbol,
+            "exchange_instrument_id": str(
+                candidate.get("exchange_instrument_id") or ""
+            ),
             "asset_class": str(candidate.get("asset_class") or ""),
             "side": side,
             "event_spec_id": str(event_spec.get("event_spec_id") or ""),
@@ -1316,6 +1319,7 @@ def _write_live_signal_candidate(
         "runtime_profile_id": lane_identity.runtime_profile_id,
         "policy_current_id": lane_identity.policy_current_id,
         "strategy_group_version_id": lane_identity.strategy_group_version_id,
+        "exchange_instrument_id": lane_identity.exchange_instrument_id,
         "asset_class": lane_identity.asset_class,
         "event_spec_id": lane_identity.event_spec_id,
         "event_spec_version": lane_identity.event_spec_version,

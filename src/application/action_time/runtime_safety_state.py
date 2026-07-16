@@ -37,6 +37,9 @@ from src.application.action_time.capital_safety_guard import (  # noqa: E402
 from src.application.action_time.budget_stop_risk import (  # noqa: E402
     budget_stop_risk_blockers,
 )
+from src.application.action_time.finalgate_preflight import (  # noqa: E402
+    account_capacity_current_blockers,
+)
 from src.application.action_time.lifecycle_mutation_capability import (  # noqa: E402
     lifecycle_mutation_capability_decision,
 )
@@ -125,6 +128,7 @@ def materialize_ticket_bound_runtime_safety_state(
         handoff.get("ticket_id"),
     )
     snapshot = _snapshot_row(
+        conn,
         control_state,
         ticket=ticket,
         handoff=handoff,
@@ -255,6 +259,7 @@ def _select_handoff(
 
 
 def _snapshot_row(
+    conn: sa.Connection,
     control_state: dict[str, Any],
     *,
     ticket: dict[str, Any],
@@ -342,6 +347,12 @@ def _snapshot_row(
         blockers.append(f"budget_reservation_status_not_consumed:{budget.get('status') or 'missing'}")
     if budget:
         blockers.extend(budget_stop_risk_blockers(budget))
+    capacity_blockers, active_capacity_policy = account_capacity_current_blockers(
+        conn,
+        budget=budget,
+        now_ms=now_ms,
+    )
+    blockers.extend(capacity_blockers)
     if protection and int(protection.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("protection_ref_expired")
 
@@ -349,6 +360,14 @@ def _snapshot_row(
         facts=facts,
         now_ms=now_ms,
     )
+    if active_capacity_policy and not capacity_blockers:
+        fact_blockers, facts_fresh, active_position_conflict = (
+            _relax_legacy_account_position_fact_gate(
+                facts=facts,
+                blockers=fact_blockers,
+                now_ms=now_ms,
+            )
+        )
     blockers.extend(fact_blockers)
     trusted_fact_refs = _trusted_fact_refs(
         ticket=ticket,
@@ -643,6 +662,48 @@ def _fact_blockers(
         active_position_conflict = True
         blockers.append("active_position_or_open_order_conflict")
     return blockers, facts_fresh and not blockers, active_position_conflict
+
+
+_CAPACITY_REPLACED_RUNTIME_FACT_BLOCKERS = {
+    "account_safe_fact_snapshot_id_not_satisfied",
+    "account_safe_fact_snapshot_id_not_fresh",
+    "account_safe_fact_not_true",
+    "open_orders_not_clear",
+    "active_position_or_open_order_conflict",
+}
+
+
+def _relax_legacy_account_position_fact_gate(
+    *,
+    facts: dict[str, dict[str, Any]],
+    blockers: list[str],
+    now_ms: int,
+) -> tuple[list[str], bool, bool]:
+    """Use the active account-budget claim, never a flat-account assumption."""
+
+    account_safe = facts.get("account_safe_fact_snapshot_id", {})
+    values = _as_dict(account_safe.get("fact_values"))
+    if values.get("account_capacity_base_safe") is not True:
+        return [*blockers, "account_capacity_base_fact_not_safe"], False, True
+    remaining = [
+        blocker
+        for blocker in blockers
+        if blocker not in _CAPACITY_REPLACED_RUNTIME_FACT_BLOCKERS
+    ]
+    facts_fresh = all(
+        bool(fact)
+        and fact.get("computed") is True
+        and int(fact.get("valid_until_ms") or 0) > now_ms
+        and (
+            key == "account_safe_fact_snapshot_id"
+            or (
+                fact.get("satisfied") is True
+                and fact.get("freshness_state") == "fresh"
+            )
+        )
+        for key, fact in facts.items()
+    )
+    return remaining, facts_fresh and not remaining, False
 
 
 def _scope_blockers(

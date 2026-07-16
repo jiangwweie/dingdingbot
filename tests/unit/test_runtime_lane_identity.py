@@ -4,6 +4,7 @@ import importlib
 import importlib.util
 
 import pytest
+from pydantic import ValidationError
 
 
 def _payload() -> dict[str, str]:
@@ -17,6 +18,7 @@ def _payload() -> dict[str, str]:
         "strategy_group_id": "CPM-RO-001",
         "strategy_group_version_id": "sgv:CPM-RO-001:v2",
         "symbol": "SOLUSDT",
+        "exchange_instrument_id": "instrument-opaque-sol-1",
         "asset_class": "crypto_perpetual",
         "side": "long",
         "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
@@ -43,3 +45,16 @@ def test_runtime_lane_identity_is_immutable_complete_and_serializable() -> None:
         module.RuntimeLaneIdentity.model_validate({**_payload(), "event_id": ""})
     with pytest.raises(ValueError):
         module.RuntimeLaneIdentity.model_validate({**_payload(), "unexpected": "value"})
+
+
+def test_runtime_lane_identity_requires_exact_exchange_instrument_id() -> None:
+    module = importlib.import_module("src.domain.runtime_lane_identity")
+
+    with pytest.raises(ValidationError):
+        module.RuntimeLaneIdentity.model_validate(
+            {
+                key: value
+                for key, value in _payload().items()
+                if key != "exchange_instrument_id"
+            }
+        )

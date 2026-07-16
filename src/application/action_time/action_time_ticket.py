@@ -36,6 +36,10 @@ if str(REPO_ROOT) not in sys.path:
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
+from src.application.action_time.budget_reservation_transition import (  # noqa: E402
+    reclaim_terminal_presubmit_reservations,
+    transition_budget_reservation,
+)
 from src.application.action_time.pricing_sizing import (  # noqa: E402
     pricing_reference_from_action_time_fact_values,
     sizing_risk_decision_from_budget,
@@ -210,7 +214,10 @@ def materialize_action_time_ticket(
     except TicketMaterializationBlocked as exc:
         return _blocked(exc.blockers, now_ms=now_ms, lane=lane)
 
-    _insert_ticket_bundle(conn, bundle)
+    try:
+        _insert_ticket_bundle(conn, bundle)
+    except TicketMaterializationBlocked as exc:
+        return _blocked(exc.blockers, now_ms=now_ms, lane=lane)
     return _result(
         "action_time_ticket_created",
         now_ms=now_ms,
@@ -328,6 +335,11 @@ def _expire_stale_active_tickets(
                 "created_at_ms": now_ms,
             },
         )
+    reclaim_terminal_presubmit_reservations(
+        conn,
+        now_ms=now_ms,
+        evidence_ref_prefix="materialize_action_time_ticket",
+    )
     return len(expired_rows)
 
 
@@ -592,9 +604,9 @@ def _build_ticket_bundle(
         event_spec_id=str(event_spec.get("event_spec_id") or ""),
         blockers=blockers,
     )
-    exchange_instrument_id = _exchange_instrument_id(
-        control_state,
-        symbol=str(lane.get("symbol") or ""),
+    exchange_instrument_id = _require_ticket_exchange_instrument_identity(
+        candidate=candidate,
+        signal=signal,
         blockers=blockers,
     )
     exit_policy_binding = None
@@ -685,7 +697,7 @@ def _build_ticket_bundle(
         int(budget["expires_at_ms"]),
         int(protection["expires_at_ms"]),
     )
-    ticket_id = _stable_id(
+    ticket_id = str(budget.get("ticket_id") or "") or _stable_id(
         "ticket",
         lane_id,
         str(signal["signal_event_id"]),
@@ -718,6 +730,10 @@ def _build_ticket_bundle(
         "strategy_group_version_id": event_spec["strategy_group_version_id"],
         "symbol": lane["symbol"],
         "exchange_instrument_id": exchange_instrument_id,
+        "exposure_episode_id": budget.get("exposure_episode_id"),
+        "asset_class": budget.get("asset_class"),
+        "instrument_type": budget.get("instrument_type"),
+        "capacity_claim_hash": budget.get("capacity_claim_hash"),
         "side": lane["side"],
         "event_id": event_spec["event_id"],
         "event_time_ms": signal["event_time_ms"],
@@ -1169,20 +1185,72 @@ def _insert_ticket_bundle(
         ),
         {"lane_id": ticket["action_time_lane_input_id"]},
     )
-    conn.execute(
-        text(
-            """
-            UPDATE brc_budget_reservations
-            SET ticket_id = :ticket_id,
-                status = 'consumed'
-            WHERE budget_reservation_id = :budget_reservation_id
-            """
-        ),
-        {
-            "ticket_id": ticket["ticket_id"],
-            "budget_reservation_id": ticket["budget_reservation_id"],
-        },
+    reservations = sa.Table(
+        "brc_budget_reservations",
+        sa.MetaData(),
+        autoload_with=conn,
     )
+    lineage_columns = {"exposure_episode_id", "capacity_claim_hash"}
+    sealed_lineage = False
+    if lineage_columns <= set(reservations.c.keys()):
+        reservation = conn.execute(
+            sa.select(
+                reservations.c.ticket_id,
+                reservations.c.exposure_episode_id,
+                reservations.c.capacity_claim_hash,
+            )
+            .where(
+                reservations.c.budget_reservation_id
+                == ticket["budget_reservation_id"]
+            )
+            .where(reservations.c.status == "active")
+            .with_for_update()
+        ).mappings().one_or_none()
+        if reservation is None:
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_not_active_for_ticket"]
+            )
+        sealed_lineage = bool(str(reservation["capacity_claim_hash"] or ""))
+        if sealed_lineage and str(reservation["ticket_id"] or "") != str(ticket["ticket_id"]):
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_ticket_lineage_mismatch"]
+            )
+        if sealed_lineage and str(reservation["exposure_episode_id"] or "") != str(
+            ticket.get("exposure_episode_id") or ""
+        ):
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_episode_lineage_mismatch"]
+            )
+        if sealed_lineage and str(reservation["capacity_claim_hash"] or "") != str(
+            ticket.get("capacity_claim_hash") or ""
+        ):
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_claim_hash_mismatch"]
+            )
+    if not sealed_lineage:
+        bound = conn.execute(
+            reservations.update()
+            .where(
+                reservations.c.budget_reservation_id
+                == ticket["budget_reservation_id"]
+            )
+            .where(reservations.c.status == "active")
+            .values(ticket_id=ticket["ticket_id"])
+        )
+        if int(bound.rowcount or 0) != 1:
+            raise TicketMaterializationBlocked(
+                ["budget_reservation_not_active_for_ticket"]
+            )
+    transition = transition_budget_reservation(
+        conn,
+        budget_reservation_id=str(ticket["budget_reservation_id"]),
+        to_status="consumed",
+        reason="action_time_ticket_bound",
+        evidence_ref=str(ticket["ticket_id"]),
+        now_ms=int(ticket["created_at_ms"]),
+    )
+    if transition.first_blocker:
+        raise TicketMaterializationBlocked([transition.first_blocker])
 
 
 def _matching_event_binding(
@@ -1325,33 +1393,31 @@ def _current_execution_policy(
     return rows[0]
 
 
-def _exchange_instrument_id(
-    control_state: dict[str, Any],
+def _require_ticket_exchange_instrument_identity(
     *,
-    symbol: str,
+    candidate: dict[str, Any],
+    signal: dict[str, Any],
     blockers: list[str],
 ) -> str:
-    mapping = next(
-        (
-            row
-            for row in _rows(control_state.get("symbol_instrument_mappings"))
-            if row.get("symbol") == symbol and row.get("status") == "active"
-        ),
-        {},
-    )
-    instrument_id = str(mapping.get("exchange_instrument_id") or "")
-    instrument = next(
-        (
-            row
-            for row in _rows(control_state.get("exchange_instruments"))
-            if row.get("exchange_instrument_id") == instrument_id
-            and row.get("status") == "active"
-        ),
-        {},
-    )
-    if not instrument_id or not instrument:
-        blockers.append("exchange_instrument_mapping_missing")
-    return instrument_id
+    candidate_instrument_id = str(
+        candidate.get("exchange_instrument_id") or ""
+    ).strip()
+    if not candidate_instrument_id:
+        blockers.append("candidate_scope_exchange_instrument_id_missing")
+        return ""
+    if "lane_identity_key" not in signal:
+        return candidate_instrument_id
+    try:
+        signal_identity = runtime_lane_identity_from_live_signal(signal)
+    except RuntimeLaneIdentityConservationError as exc:
+        blockers.append(exc.blocker)
+        return ""
+    if signal_identity.exchange_instrument_id != candidate_instrument_id:
+        blockers.append(
+            "runtime_lane_identity_mismatch:signal_to_ticket_exchange_instrument"
+        )
+        return ""
+    return signal_identity.exchange_instrument_id
 
 
 def _owner_policy_version(

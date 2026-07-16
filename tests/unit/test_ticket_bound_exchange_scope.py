@@ -162,10 +162,8 @@ def test_scope_preserves_existing_ticket_identity_when_mapping_is_retired(
     assert result.status == "resolved"
     assert result.scope is not None
     assert result.scope.exchange_symbol == "ETH/USDT:USDT"
-    assert result.scope.current_entry_eligible is False
-    assert result.scope.current_entry_blockers == [
-        "ticket_exchange_instrument_mapping_not_current"
-    ]
+    assert result.scope.current_entry_eligible is True
+    assert result.scope.current_entry_blockers == []
 
 
 def test_scope_blocks_when_account_fact_belongs_to_another_account(

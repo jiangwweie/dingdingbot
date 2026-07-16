@@ -87,6 +87,7 @@ def _registered_rows(conn: sa.engine.Connection) -> list[dict]:
                 SELECT c.candidate_scope_id,
                        c.strategy_group_id,
                        c.symbol,
+                       c.exchange_instrument_id,
                        c.side,
                        c.asset_class,
                        b.binding_id,
@@ -313,6 +314,10 @@ def test_all_22_lanes_resolve_and_evaluate_without_runtime_persistence(
 
     assert len(resolutions) == 22
     assert len({resolution.identity.identity_key for resolution in resolutions}) == 22
+    assert all(
+        resolution.identity.exchange_instrument_id
+        for resolution in resolutions
+    )
     assert {
         (
             resolution.identity.strategy_group_id,

@@ -114,6 +114,29 @@ EXIT_POLICY_CORE_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-14-122_add_ticket_exit_policy_core.py"
 )
+ACCOUNT_RISK_CURRENT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-127_create_account_risk_current_projections.py"
+)
+ACCOUNT_RISK_POLICY_MIGRATION_PATH = (
+    REPO_ROOT / "migrations/versions/2026-07-17-126_create_account_risk_policy.py"
+)
+ACCOUNT_CAPACITY_SCOPE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-129_add_account_capacity_reservation_scope.py"
+)
+ACCOUNT_CLAIM_POLICY_EVENT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-130_add_account_capacity_claim_policy_event.py"
+)
+ASSET_NEUTRAL_EXPAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-131_expand_asset_neutral_account_risk_identity.py"
+)
+ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-132_backfill_asset_neutral_account_risk_identity.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -125,6 +148,15 @@ def _load_module(path: Path, name: str):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _upgrade_module(conn, module) -> None:
+    old_op = module.op
+    module.op = Operations(MigrationContext.configure(conn))
+    try:
+        module.upgrade()
+    finally:
+        module.op = old_op
 
 
 @pytest.fixture()
@@ -409,6 +441,37 @@ def pg_control_connection():
             exit_policy_core_migration.upgrade()
         finally:
             exit_policy_core_migration.op = old_exit_policy_core_op
+        account_risk_policy_migration = _load_module(
+            ACCOUNT_RISK_POLICY_MIGRATION_PATH,
+            "migration_126_runtime_safety",
+        )
+        account_risk_current_migration = _load_module(
+            ACCOUNT_RISK_CURRENT_MIGRATION_PATH,
+            "migration_127_runtime_safety",
+        )
+        account_capacity_scope_migration = _load_module(
+            ACCOUNT_CAPACITY_SCOPE_MIGRATION_PATH,
+            "migration_129_runtime_safety",
+        )
+        account_claim_policy_event_migration = _load_module(
+            ACCOUNT_CLAIM_POLICY_EVENT_MIGRATION_PATH,
+            "migration_130_runtime_safety",
+        )
+        asset_neutral_expand_migration = _load_module(
+            ASSET_NEUTRAL_EXPAND_MIGRATION_PATH,
+            "migration_131_runtime_safety",
+        )
+        asset_neutral_backfill_migration = _load_module(
+            ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH,
+            "migration_132_runtime_safety",
+        )
+        _upgrade_module(conn, account_risk_policy_migration)
+        _upgrade_module(conn, account_risk_current_migration)
+        _upgrade_module(conn, account_capacity_scope_migration)
+        _upgrade_module(conn, account_claim_policy_event_migration)
+        _upgrade_module(conn, asset_neutral_expand_migration)
+        seed.seed_runtime_control_state_foundation(conn)
+        _upgrade_module(conn, asset_neutral_backfill_migration)
         conn.execute(
             text(
                 "ALTER TABLE brc_runtime_capabilities_current "

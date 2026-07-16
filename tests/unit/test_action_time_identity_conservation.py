@@ -26,6 +26,7 @@ def _identity(*, side: str = "long") -> RuntimeLaneIdentity:
         strategy_group_id="CPM-RO-001",
         strategy_group_version_id="sgv:CPM-RO-001:v2",
         symbol="ETHUSDT",
+        exchange_instrument_id="instrument:binance-usdm:ETHUSDT",
         asset_class="crypto_perpetual",
         side=side,
         event_spec_id="event-spec:CPM-RO-001:CPM-LONG:v2",

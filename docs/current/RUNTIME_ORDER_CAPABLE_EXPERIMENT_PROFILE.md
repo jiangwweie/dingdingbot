@@ -2,12 +2,36 @@
 title: RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE
 status: CURRENT_PROFILE
 authority: docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
-last_verified: 2026-07-09
+last_verified: 2026-07-14
 ---
 
 # Runtime Order-Capable Experiment Profile
 
-Last updated: 2026-06-20
+Last updated: 2026-07-14
+
+## Account Risk Policy Transition
+
+**已部署事实与 Owner 目标必须分开表达。** 当前发布版本仍使用 **3% 单 Ticket planned
+Stop risk、单仓位 flat gate、90% margin utilization、10x leverage ceiling**。Owner 在
+2026-07-14 已批准的下一目标是：
+
+```text
+planned_stop_risk_fraction = 0.025
+max_concurrent_positions = 2
+max_new_action_time_lanes = 1
+max_portfolio_open_risk_fraction = 0.06
+max_cluster_open_risk_fraction = 0.04
+max_portfolio_initial_margin_fraction = 0.90
+max_leverage = 10
+```
+
+目标设计和执行计划分别位于：
+
+- `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md`
+- `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md`
+
+该目标只有在代码、migration、完整账户影子投影和 rollback 认证通过后，才通过
+版本化 Account Risk Policy event 激活。文档批准本身不改变生产 sizing 或双仓位权限。
 
 ## Purpose
 
@@ -103,6 +127,10 @@ This profile does not authorize:
 - missing protection execution.
 - duplicate submit risk.
 - conflicting active position or open-order execution.
+
+V0 激活后，本条收敛为“未知、未归属、同 instrument 冲突、保护不完整或账户容量超限
+的 position/open order execution”；一个已归属、受保护、对账一致的不同 instrument
+仓位本身不再阻断第二个合规 Ticket。
 
 ## Required Runtime Proof
 

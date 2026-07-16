@@ -26,8 +26,10 @@ def _create_schema(conn: sa.engine.Connection) -> None:
               candidate_scope_id TEXT PRIMARY KEY,
               strategy_group_id TEXT NOT NULL,
               symbol TEXT NOT NULL,
+              exchange_instrument_id TEXT NOT NULL,
               asset_class TEXT NOT NULL,
               side TEXT NOT NULL,
+              timeframe TEXT NOT NULL,
               policy_current_id TEXT,
               status TEXT NOT NULL
             )
@@ -114,7 +116,8 @@ def _seed(conn: sa.engine.Connection) -> None:
             """
             INSERT INTO brc_strategy_group_candidate_scope VALUES (
               'scope:CPM-RO-001:SOLUSDT:long', 'CPM-RO-001', 'SOLUSDT',
-              'crypto_perpetual', 'long', 'policy:CPM-RO-001:SOLUSDT:long', 'active'
+              'opaque-instrument-sol-perp', 'crypto', 'long', '1h',
+              'policy:CPM-RO-001:SOLUSDT:long', 'active'
             )
             """
         )
@@ -204,7 +207,8 @@ def test_resolve_exact_active_runtime_lane_identity(pg_connection) -> None:
         "strategy_group_id": "CPM-RO-001",
         "strategy_group_version_id": "sgv:CPM-RO-001:v2",
         "symbol": "SOLUSDT",
-        "asset_class": "crypto_perpetual",
+        "exchange_instrument_id": "opaque-instrument-sol-perp",
+        "asset_class": "crypto",
         "side": "long",
         "event_spec_id": "event_spec:CPM-RO-001:CPM-LONG:v2",
         "event_spec_version": "v2",
@@ -306,3 +310,25 @@ def test_monitor_revalidation_rejects_identity_changed_after_evaluation(
         )
         == "runtime_lane_identity_mismatch"
     )
+
+
+def test_same_symbol_two_instruments_do_not_cross_candidate_scope(
+    pg_connection,
+) -> None:
+    pg_connection.execute(
+        sa.text(
+            """
+            INSERT INTO brc_strategy_group_candidate_scope VALUES (
+              'scope:CPM-RO-001:SOLUSDT:long:quarterly', 'CPM-RO-001',
+              'SOLUSDT', 'opaque-instrument-sol-quarterly', 'crypto', 'long',
+              '1h', 'policy:CPM-RO-001:SOLUSDT:long', 'active'
+            )
+            """
+        )
+    )
+    module = _service_module()
+
+    with pytest.raises(module.RuntimeLaneIdentityResolutionError) as error:
+        _resolve(pg_connection)
+
+    assert error.value.blocker == "candidate_scope_ambiguous"

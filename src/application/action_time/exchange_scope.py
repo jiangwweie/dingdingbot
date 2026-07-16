@@ -33,6 +33,7 @@ class TicketBoundExchangeScope(BaseModel):
     account_id: str
     canonical_symbol: str
     exchange_instrument_id: str
+    exposure_episode_id: str
     exchange_instrument_status: str
     exchange_id: str
     exchange_symbol: str
@@ -107,13 +108,19 @@ def resolve_ticket_bound_exchange_scope(
     instrument_id = str(ticket.get("exchange_instrument_id") or "").strip()
     if not canonical_symbol or not instrument_id:
         return _blocked("ticket_exchange_instrument_identity_incomplete")
-    if not _historical_instrument_mapping_exists(
+    candidate_scope = _row_by_id(
         conn,
-        symbol=canonical_symbol,
-        exchange_instrument_id=instrument_id,
-        ticket_created_at_ms=int(ticket.get("created_at_ms") or 0),
-    ):
-        return _blocked("ticket_exchange_instrument_mapping_lineage_missing")
+        "brc_strategy_group_candidate_scope",
+        "candidate_scope_id",
+        str(ticket.get("candidate_scope_id") or ""),
+    )
+    if not candidate_scope:
+        return _blocked("ticket_exchange_scope_candidate_missing")
+    for key in ("strategy_group_id", "symbol", "side"):
+        if str(candidate_scope.get(key) or "") != str(ticket.get(key) or ""):
+            return _blocked(f"ticket_exchange_scope_candidate_{key}_mismatch")
+    if str(candidate_scope.get("exchange_instrument_id") or "") != instrument_id:
+        return _blocked("ticket_exchange_scope_candidate_instrument_mismatch")
 
     instrument = _row_by_id(
         conn,
@@ -145,6 +152,12 @@ def resolve_ticket_bound_exchange_scope(
     budget_ticket_id = str(budget.get("ticket_id") or "").strip()
     if budget_ticket_id and budget_ticket_id != normalized_ticket_id:
         return _blocked("ticket_exchange_scope_budget_ticket_id_mismatch")
+    ticket_episode_id = str(ticket.get("exposure_episode_id") or "").strip()
+    budget_episode_id = str(budget.get("exposure_episode_id") or "").strip()
+    if not ticket_episode_id or not budget_episode_id:
+        return _blocked("ticket_exchange_scope_exposure_episode_missing")
+    if ticket_episode_id != budget_episode_id:
+        return _blocked("ticket_exchange_scope_exposure_episode_mismatch")
 
     frozen_fact_id = str(ticket.get("account_mode_snapshot_id") or "").strip()
     frozen_fact = _row_by_id(
@@ -185,6 +198,7 @@ def resolve_ticket_bound_exchange_scope(
         conn,
         ticket=ticket,
         runtime_scope=runtime_scope,
+        candidate_scope=candidate_scope,
         instrument=instrument,
         now_ms=now_ms,
     )
@@ -197,6 +211,7 @@ def resolve_ticket_bound_exchange_scope(
         account_id=account_id,
         canonical_symbol=canonical_symbol,
         exchange_instrument_id=instrument_id,
+        exposure_episode_id=ticket_episode_id,
         exchange_instrument_status=str(instrument.get("status") or ""),
         exchange_id=exchange_id,
         exchange_symbol=exchange_symbol,
@@ -238,31 +253,12 @@ def validate_gateway_identity_for_scope(
     return blockers
 
 
-def _historical_instrument_mapping_exists(
-    conn: sa.engine.Connection,
-    *,
-    symbol: str,
-    exchange_instrument_id: str,
-    ticket_created_at_ms: int,
-) -> bool:
-    table = _table(conn, "brc_symbol_instrument_mappings")
-    query = sa.select(table).where(
-        table.c.symbol == symbol,
-        table.c.exchange_instrument_id == exchange_instrument_id,
-        table.c.valid_from_ms <= ticket_created_at_ms,
-        sa.or_(
-            table.c.valid_until_ms.is_(None),
-            table.c.valid_until_ms > ticket_created_at_ms,
-        ),
-    )
-    return conn.execute(query).mappings().first() is not None
-
-
 def _current_entry_blockers(
     conn: sa.engine.Connection,
     *,
     ticket: dict[str, Any],
     runtime_scope: dict[str, Any],
+    candidate_scope: dict[str, Any],
     instrument: dict[str, Any],
     now_ms: int,
 ) -> list[str]:
@@ -276,42 +272,9 @@ def _current_entry_blockers(
         blockers.append("ticket_exchange_scope_runtime_binding_not_current")
     if str(instrument.get("status") or "") != "active":
         blockers.append("ticket_exchange_instrument_not_active")
-
-    mapping = _current_instrument_mapping(
-        conn,
-        symbol=str(ticket.get("symbol") or ""),
-        now_ms=now_ms,
-    )
-    if not mapping:
-        blockers.append("ticket_exchange_instrument_mapping_not_current")
-    elif str(mapping.get("exchange_instrument_id") or "") != str(
-        ticket.get("exchange_instrument_id") or ""
-    ):
-        blockers.append("ticket_exchange_instrument_mapping_changed")
+    if str(candidate_scope.get("status") or "") != "active":
+        blockers.append("ticket_exchange_scope_candidate_not_active")
     return _dedupe(blockers)
-
-
-def _current_instrument_mapping(
-    conn: sa.engine.Connection,
-    *,
-    symbol: str,
-    now_ms: int,
-) -> dict[str, Any]:
-    table = _table(conn, "brc_symbol_instrument_mappings")
-    rows = conn.execute(
-        sa.select(table).where(
-            table.c.symbol == symbol,
-            table.c.status == "active",
-            table.c.valid_from_ms <= now_ms,
-            sa.or_(
-                table.c.valid_until_ms.is_(None),
-                table.c.valid_until_ms > now_ms,
-            ),
-        )
-    ).mappings().all()
-    if len(rows) != 1:
-        return {}
-    return dict(rows[0])
 
 
 def _latest_current_account_mode_fact(

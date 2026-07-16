@@ -81,6 +81,11 @@ class RuntimeLaneIdentityService:
         freshness_window_ms = _positive_int(event_spec.get("freshness_window_ms"))
         if freshness_window_ms <= 0:
             raise RuntimeLaneIdentityResolutionError("event_spec_freshness_window_missing")
+        if _required(candidate, "timeframe") != timeframe:
+            raise RuntimeLaneIdentityResolutionError(
+                "runtime_lane_identity_mismatch",
+                details={"boundary": "candidate_scope_timeframe"},
+            )
 
         runtime_scope = self._runtime_scope(
             conn,
@@ -122,6 +127,10 @@ class RuntimeLaneIdentityService:
                 strategy_group_id=_required(candidate, "strategy_group_id"),
                 strategy_group_version_id=_required(event_spec, "strategy_group_version_id"),
                 symbol=_normalized_symbol(_required(candidate, "symbol")),
+                exchange_instrument_id=_required(
+                    candidate,
+                    "exchange_instrument_id",
+                ),
                 asset_class=_required(candidate, "asset_class"),
                 side=_required(candidate, "side"),
                 event_spec_id=_required(event_spec, "event_spec_id"),
@@ -177,13 +186,16 @@ class RuntimeLaneIdentityService:
         rows = _rows(
             conn,
             """
-            SELECT candidate_scope_id, strategy_group_id, symbol, asset_class, side,
+            SELECT candidate_scope_id, strategy_group_id, symbol,
+                   exchange_instrument_id, asset_class, side, timeframe,
                    policy_current_id
             FROM brc_strategy_group_candidate_scope
             WHERE strategy_group_id = :strategy_group_id
               AND symbol = :symbol
               AND side = :side
               AND status = 'active'
+            ORDER BY candidate_scope_id
+            LIMIT 2
             """,
             {
                 "strategy_group_id": strategy_group_id,
@@ -202,6 +214,8 @@ class RuntimeLaneIdentityService:
             FROM brc_strategy_group_candidate_scope
             WHERE strategy_group_id = :strategy_group_id
               AND status = 'active'
+            ORDER BY candidate_scope_id
+            LIMIT 1
             """,
             {"strategy_group_id": strategy_group_id},
         )

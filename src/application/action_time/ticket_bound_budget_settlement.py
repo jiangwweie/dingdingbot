@@ -6,6 +6,10 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.budget_reservation_transition import (
+    transition_budget_reservation,
+)
+
 
 def settle_ticket_bound_budget(
     conn: sa.engine.Connection,
@@ -35,20 +39,22 @@ def settle_ticket_bound_budget(
         }
     if status != "consumed":
         return _blocked(f"ticket_budget_reservation_not_consumed:{status or 'missing'}")
-    conn.execute(
-        table.update()
-        .where(table.c.budget_reservation_id == row["budget_reservation_id"])
-        .values(
-            status="released",
-            release_reason=f"lifecycle_closed:{settlement_evidence_id}",
-        )
+    transition = transition_budget_reservation(
+        conn,
+        budget_reservation_id=str(row["budget_reservation_id"]),
+        to_status="released",
+        reason=f"lifecycle_closed:{settlement_evidence_id}",
+        evidence_ref=settlement_evidence_id,
+        now_ms=now_ms,
     )
+    if transition.first_blocker:
+        return _blocked(transition.first_blocker)
     return {
         "status": "released",
         "budget_reservation_id": row["budget_reservation_id"],
         "settlement_evidence_id": settlement_evidence_id,
         "settled_at_ms": now_ms,
-        "runtime_budget_mutated": True,
+        "runtime_budget_mutated": transition.transitioned,
         "blockers": [],
     }
 

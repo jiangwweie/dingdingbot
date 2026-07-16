@@ -28,6 +28,7 @@ from src.domain.owner_capital_baseline_snapshot import (
     OwnerCapitalBaselineSnapshotSource,
 )
 from src.interfaces.operator_auth import create_password_hash
+from tests.support.runtime_control_state_schema import seed_runtime_control_state
 
 
 BNB = "BNB/USDT:USDT"
@@ -276,7 +277,7 @@ def _configure_pg_runtime_control_state(
             migration.upgrade()
         finally:
             migration.op = old_op
-        seed.seed_runtime_control_state_foundation(conn)
+        seed_runtime_control_state(conn)
         if watcher_covered:
             conn.execute(
                 text(

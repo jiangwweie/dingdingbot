@@ -37,10 +37,12 @@ COMPARATIVE_SNAPSHOT_KEYS = (
 
 @dataclass(frozen=True)
 class RuntimeEventInputContract:
+    candidate_scope_id: str
     event_spec_id: str
     event_id: str
     strategy_group_id: str
     symbol: str
+    exchange_instrument_id: str
     side: str
     primary_timeframe: str
 
@@ -256,8 +258,10 @@ async def load_runtime_event_input_contract(
             SELECT
               e.event_spec_id,
               e.event_id,
+              c.candidate_scope_id,
               c.strategy_group_id,
               c.symbol,
+              c.exchange_instrument_id,
               c.side,
               e.timeframe
             FROM brc_strategy_group_candidate_scope AS c
@@ -272,6 +276,7 @@ async def load_runtime_event_input_contract(
               AND c.side = :side
               AND c.status = 'active'
             ORDER BY b.created_at_ms DESC, e.event_spec_id ASC
+            LIMIT 2
             """
         ),
         {
@@ -291,11 +296,20 @@ async def load_runtime_event_input_contract(
     timeframe = str(row.get("timeframe") or "").strip()
     if not timeframe:
         raise RuntimeError("runtime_event_input_contract_timeframe_missing")
+    exchange_instrument_id = str(
+        row.get("exchange_instrument_id") or ""
+    ).strip()
+    if not exchange_instrument_id:
+        raise RuntimeError(
+            "runtime_event_input_contract_exchange_instrument_id_missing"
+        )
     return RuntimeEventInputContract(
+        candidate_scope_id=str(row["candidate_scope_id"]),
         event_spec_id=str(row["event_spec_id"]),
         event_id=str(row["event_id"]),
         strategy_group_id=str(row["strategy_group_id"]),
         symbol=_normalized_symbol(row["symbol"]),
+        exchange_instrument_id=exchange_instrument_id,
         side=str(row["side"]),
         primary_timeframe=timeframe,
     )

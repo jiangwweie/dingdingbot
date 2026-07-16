@@ -1210,6 +1210,7 @@ def _materialize_policy_command(
         strategy_group_id=scope.strategy_group_id,
         runtime_profile_id=scope.runtime_profile_id,
         exchange_instrument_id=scope.exchange_instrument_id,
+        exposure_episode_id=scope.exposure_episode_id,
         exchange_id=scope.exchange_id,
         gateway_symbol=scope.exchange_symbol,
         symbol=scope.canonical_symbol,

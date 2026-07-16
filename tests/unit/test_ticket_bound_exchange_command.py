@@ -118,6 +118,7 @@ def _tp1_command(**overrides):
         "strategy_group_id": "SOR-001",
         "runtime_profile_id": "profile-1",
         "exchange_instrument_id": "binance_usdm:ETH/USDT:USDT",
+        "exposure_episode_id": "exposure-episode-1",
         "exchange_id": "binance_usdm",
         "gateway_symbol": "ETH/USDT:USDT",
         "symbol": "ETHUSDT",

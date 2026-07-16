@@ -37,6 +37,28 @@ from src.application.readmodels.daily_live_enablement_table import WIP_LANES  # 
 from src.application.action_time.capital_safety_guard import (  # noqa: E402
     current_scope_blockers,
 )
+from src.application.action_time.account_capacity_reservation import (  # noqa: E402
+    AccountCapacityCandidate,
+    AccountCapacityReservationResult,
+    apply_account_capacity_to_sizing,
+)
+from src.application.action_time.account_capacity_claim import (  # noqa: E402
+    AccountCapacityClaimConflict,
+    insert_or_get_account_capacity_claim,
+)
+from src.application.action_time.account_capacity_materialization import (  # noqa: E402
+    materialize_account_capacity_from_snapshot,
+)
+from src.application.action_time.account_risk_policy import (  # noqa: E402
+    load_account_risk_policy_current,
+)
+from src.application.action_time.instrument_risk_facts import (  # noqa: E402
+    InstrumentRiskFactsError,
+    load_instrument_risk_facts,
+)
+from src.application.action_time.action_time_ticket import (  # noqa: E402
+    materialize_action_time_ticket,
+)
 from src.application.action_time.identity_conservation import (  # noqa: E402
     RuntimeLaneIdentityConservationError,
     RuntimeLaneLineage,
@@ -58,6 +80,7 @@ from src.domain.execution_sizing import (  # noqa: E402
     ExecutionSizingPolicy,
     decide_execution_sizing,
 )
+from src.domain.account_capacity_claim import AccountCapacityClaimPayload  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -74,6 +97,9 @@ from src.application.strategy_semantic_admission import (  # noqa: E402
 from src.domain.runtime_lane_identity import (  # noqa: E402
     RuntimeLaneIdentity,
     RuntimeLaneIdentityMismatch,
+)
+from src.infrastructure.binance_usdm_account_risk_snapshot import (  # noqa: E402
+    FullAccountRiskSnapshot,
 )
 
 
@@ -142,7 +168,42 @@ class CandidateBundle:
 
     @property
     def budget_reservation_id(self) -> str:
+        if self.action_time_invocation_id:
+            return _stable_id(
+                "budget",
+                self.account_id,
+                str(self.runtime_scope["runtime_profile_id"]),
+                self.action_time_invocation_id,
+            )
         return _stable_id("budget", self.action_time_lane_input_id)
+
+    @property
+    def ticket_id(self) -> str:
+        if self.action_time_invocation_id:
+            return _stable_id(
+                "ticket",
+                self.account_id,
+                str(self.runtime_scope["runtime_profile_id"]),
+                self.action_time_invocation_id,
+            )
+        return _stable_id(
+            "ticket",
+            self.action_time_lane_input_id,
+            str(self.signal["signal_event_id"]),
+            str(self.signal["observed_at_ms"]),
+        )
+
+    @property
+    def exposure_episode_id(self) -> str:
+        invocation_id = self.action_time_invocation_id or str(
+            self.signal["signal_event_id"]
+        )
+        return _stable_id(
+            "exposure_episode",
+            self.account_id,
+            str(self.runtime_scope["runtime_profile_id"]),
+            invocation_id,
+        )
 
     @property
     def protection_ref_id(self) -> str:
@@ -359,6 +420,8 @@ def materialize_action_time_invocation_promotion_action_time_lane(
     conn: sa.engine.Connection,
     *,
     evidence: ActionTimeInvocationEvidence,
+    account_capacity: AccountCapacityReservationResult | None = None,
+    account_snapshot: FullAccountRiskSnapshot | None = None,
 ) -> dict[str, Any]:
     """Promote exactly one invocation; never reselect from Candidate Pool.
 
@@ -420,6 +483,66 @@ def materialize_action_time_invocation_promotion_action_time_lane(
 
     bundle = _invocation_candidate_bundle(control_state, evidence=evidence)
     bundle = _apply_allocation_capital_scope([bundle], now_ms=now_ms)[0]
+    if account_snapshot is not None and account_capacity is None:
+        bundle, capacity_gate_blocker = _prepare_active_capacity_bundle(
+            conn,
+            bundle=bundle,
+            snapshot=account_snapshot,
+        )
+        if capacity_gate_blocker:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=[capacity_gate_blocker],
+                next_action="repair_account_capacity_base_safety",
+            )
+        candidate, candidate_blocker = _account_capacity_candidate(
+            conn, bundle=bundle, snapshot=account_snapshot, now_ms=now_ms
+        )
+        if candidate_blocker:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked", evidence=evidence,
+                blockers=[candidate_blocker],
+                next_action="repair_account_capacity_candidate",
+            )
+        account_capacity = materialize_account_capacity_from_snapshot(
+            conn, snapshot=account_snapshot,
+            runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+            candidate=candidate, now_ms=now_ms,
+        )
+    if account_capacity is not None:
+        if not account_capacity.allowed:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=[
+                    account_capacity.first_blocker
+                    or "account_capacity_not_allowed"
+                ],
+                next_action="preserve_account_capacity_blocker",
+            )
+        if bundle.sizing_risk_decision is None:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=["account_capacity_sizing_decision_missing"],
+                next_action="repair_action_time_sizing_before_capacity_claim",
+            )
+        try:
+            bundle = replace(
+                bundle,
+                sizing_risk_decision=apply_account_capacity_to_sizing(
+                    bundle.sizing_risk_decision,
+                    account_capacity,
+                ),
+            )
+        except ValueError as exc:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=[f"account_capacity_sizing_conflict:{exc}"],
+                next_action="repair_account_capacity_projection",
+            )
     if bundle.blockers:
         return _invocation_promotion_result(
             "action_time_invocation_promotion_blocked",
@@ -462,7 +585,11 @@ def materialize_action_time_invocation_promotion_action_time_lane(
             blockers=terminal_blockers,
             next_action="wait_for_next_fresh_signal_observation",
         )
-    budget = _budget_row(bundle, now_ms=now_ms)
+    budget = _budget_row(
+        bundle,
+        now_ms=now_ms,
+        account_capacity=account_capacity,
+    )
     protection = _protection_row(bundle)
     _upsert_row(
         conn,
@@ -476,8 +603,41 @@ def materialize_action_time_invocation_promotion_action_time_lane(
         "action_time_lane_input_id",
         lane,
     )
-    _upsert_row(conn, "brc_budget_reservations", "budget_reservation_id", budget)
+    if account_capacity is None:
+        _upsert_row(conn, "brc_budget_reservations", "budget_reservation_id", budget)
+    else:
+        try:
+            insert_or_get_account_capacity_claim(
+                conn,
+                payload=_capacity_claim_payload(
+                    bundle,
+                    account_capacity=account_capacity,
+                    now_ms=now_ms,
+                ),
+            )
+        except AccountCapacityClaimConflict as exc:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=[str(exc)],
+                next_action="reconcile_account_capacity_claim_conflict",
+            )
     _upsert_row(conn, "brc_protection_references", "protection_ref_id", protection)
+    if account_capacity is not None:
+        ticket_result = materialize_action_time_ticket(conn, now_ms=now_ms)
+        if ticket_result.get("status") not in {
+            "action_time_ticket_created",
+            "action_time_ticket_already_exists",
+        }:
+            return _invocation_promotion_result(
+                "action_time_invocation_promotion_blocked",
+                evidence=evidence,
+                blockers=list(ticket_result.get("blockers") or ()) or [
+                    "atomic_account_capacity_ticket_materialization_failed:"
+                    + str(ticket_result.get("status") or "missing")
+                ],
+                next_action="repair_atomic_account_capacity_ticket_materialization",
+            )
     return _invocation_promotion_result(
         "promotion_action_time_lane_created",
         evidence=evidence,
@@ -648,6 +808,109 @@ def _invocation_candidate_bundle(
         lane_identity=lane_identity,
         source_lineage=source_lineage,
         action_time_invocation_id=invocation.action_time_invocation_id,
+    )
+
+
+def _account_capacity_candidate(
+    conn: sa.Connection,
+    *,
+    bundle: CandidateBundle,
+    snapshot: FullAccountRiskSnapshot,
+    now_ms: int,
+) -> tuple[AccountCapacityCandidate | None, str | None]:
+    decision = bundle.sizing_risk_decision
+    if decision is None:
+        return None, "account_capacity_sizing_decision_missing"
+    if snapshot.account_id != bundle.account_id:
+        return None, "account_capacity_snapshot_account_mismatch"
+    instrument_id = str(
+        bundle.candidate.get("exchange_instrument_id") or ""
+    ).strip()
+    if not instrument_id:
+        return None, "candidate_scope_exchange_instrument_id_missing"
+    if (
+        bundle.lane_identity is not None
+        and bundle.lane_identity.exchange_instrument_id != instrument_id
+    ):
+        return None, "runtime_lane_identity_mismatch:account_capacity_instrument"
+    policies = sa.Table("brc_account_risk_policy_current", sa.MetaData(), autoload_with=conn)
+    policy_version = conn.execute(
+        sa.select(policies.c.risk_policy_version)
+        .where(policies.c.account_id == bundle.account_id)
+        .where(policies.c.runtime_profile_id == bundle.runtime_scope["runtime_profile_id"])
+    ).scalar_one_or_none()
+    if not policy_version:
+        return None, "account_risk_policy_missing_or_changed"
+    try:
+        instrument_facts = load_instrument_risk_facts(
+            conn,
+            exchange_instrument_id=instrument_id,
+            risk_policy_version=str(policy_version),
+            planned_notional=(
+                decision.intended_qty * decision.entry_reference_price
+            ),
+            now_ms=now_ms,
+        )
+    except InstrumentRiskFactsError as exc:
+        return None, str(exc)
+    return AccountCapacityCandidate(
+        account_id=bundle.account_id,
+        runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+        instrument_facts=instrument_facts,
+        per_unit_stop_risk=abs(
+            decision.entry_reference_price - decision.protective_stop_price
+        ),
+        entry_reference_price=decision.entry_reference_price,
+    ), None
+
+
+_CAPACITY_REPLACED_LEGACY_BLOCKERS = {
+    "account_safe_fact_not_satisfied",
+    "account_safe_fact_not_fresh",
+    "account_safe_fact_not_true",
+    "open_orders_not_clear",
+    "active_position_or_open_order_conflict",
+}
+
+
+def _prepare_active_capacity_bundle(
+    conn: sa.Connection,
+    *,
+    bundle: CandidateBundle,
+    snapshot: FullAccountRiskSnapshot,
+) -> tuple[CandidateBundle, str | None]:
+    """Replace only the legacy flat-position gate for an active capacity policy.
+
+    The replacement is deliberately narrow.  The existing account fact must
+    still prove all non-position safety checks, and the caller must provide a
+    fresh, full-account snapshot which the capacity materializer will classify
+    inside the same PG transaction.  No other candidate blocker is relaxed.
+    """
+
+    policy = load_account_risk_policy_current(
+        conn,
+        account_id=bundle.account_id,
+        runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+    )
+    if policy is None:
+        return bundle, "account_risk_policy_missing_or_changed"
+    if policy.activation_state != "active":
+        return bundle, "account_risk_policy_not_active"
+    if snapshot.account_id != bundle.account_id:
+        return bundle, "account_capacity_snapshot_account_mismatch"
+    account_values = _as_dict(bundle.account_safe_fact.get("fact_values"))
+    if account_values.get("account_capacity_base_safe") is not True:
+        return bundle, "account_capacity_base_fact_not_safe"
+    return (
+        replace(
+            bundle,
+            blockers=tuple(
+                blocker
+                for blocker in bundle.blockers
+                if blocker not in _CAPACITY_REPLACED_LEGACY_BLOCKERS
+            ),
+        ),
+        None,
     )
 
 
@@ -1312,6 +1575,9 @@ def _signal_identity_matches_current_lane(
                 event_spec.get("strategy_group_version_id") or ""
             ),
             symbol=str(candidate.get("symbol") or ""),
+            exchange_instrument_id=str(
+                candidate.get("exchange_instrument_id") or ""
+            ),
             asset_class=str(candidate.get("asset_class") or ""),
             side=str(candidate.get("side") or ""),
             event_spec_id=str(event_spec.get("event_spec_id") or ""),
@@ -1883,7 +2149,91 @@ def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
     return row
 
 
-def _budget_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
+def _capacity_claim_payload(
+    bundle: CandidateBundle,
+    *,
+    account_capacity: AccountCapacityReservationResult,
+    now_ms: int,
+) -> AccountCapacityClaimPayload:
+    decision = bundle.sizing_risk_decision
+    facts = account_capacity.instrument_facts
+    if decision is None or facts is None or account_capacity.selected_leverage is None:
+        raise ValueError("complete account capacity facts are required for claim")
+    if not all(
+        (
+            bundle.action_time_invocation_id,
+            account_capacity.account_source_fact_snapshot_id,
+            account_capacity.account_fact_schema_version,
+            account_capacity.account_risk_policy_version,
+            account_capacity.account_risk_policy_event_id,
+            account_capacity.claimed_projection_version is not None,
+        )
+    ):
+        raise ValueError("account capacity claim lineage is incomplete")
+    target_notional = account_capacity.intended_qty * decision.entry_reference_price
+    planned_stop_risk = (
+        abs(decision.entry_reference_price - decision.protective_stop_price)
+        * account_capacity.intended_qty
+    )
+    return AccountCapacityClaimPayload(
+        capacity_claim_schema_version="v1",
+        reservation_id=bundle.budget_reservation_id,
+        ticket_id=bundle.ticket_id,
+        exposure_episode_id=bundle.exposure_episode_id,
+        action_time_invocation_id=str(bundle.action_time_invocation_id),
+        action_time_lane_input_id=bundle.action_time_lane_input_id,
+        promotion_candidate_id=bundle.promotion_candidate_id,
+        signal_event_id=str(bundle.signal["signal_event_id"]),
+        event_spec_id=str(bundle.event_spec["event_spec_id"]),
+        account_id=bundle.account_id,
+        runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+        strategy_group_id=str(bundle.candidate["strategy_group_id"]),
+        symbol=str(bundle.candidate["symbol"]),
+        side=str(bundle.candidate["side"]),
+        instrument=facts.identity,
+        rule_snapshot=facts.rule_snapshot,
+        cluster_snapshot=facts.cluster_snapshot,
+        pricing_source_fact_snapshot_id=str(
+            bundle.action_time_fact["fact_snapshot_id"]
+        ),
+        account_source_fact_snapshot_id=str(
+            account_capacity.account_source_fact_snapshot_id
+        ),
+        account_fact_schema_version=str(account_capacity.account_fact_schema_version),
+        account_risk_policy_version=str(
+            account_capacity.account_risk_policy_version
+        ),
+        account_risk_policy_event_id=str(
+            account_capacity.account_risk_policy_event_id
+        ),
+        owner_policy_version=bundle.owner_policy_version,
+        claimed_budget_projection_version=int(
+            account_capacity.claimed_projection_version
+        ),
+        entry_reference_price=decision.entry_reference_price,
+        stop_price=decision.protective_stop_price,
+        intended_qty=account_capacity.intended_qty,
+        target_notional=target_notional,
+        allowed_risk_budget=account_capacity.allocated_risk,
+        planned_stop_risk=planned_stop_risk,
+        reserved_margin=account_capacity.reserved_margin,
+        selected_leverage=account_capacity.selected_leverage,
+        reserved_at_ms=now_ms,
+        expires_at_ms=min(
+            int(bundle.signal["expires_at_ms"]),
+            int(bundle.action_time_fact["valid_until_ms"]),
+            facts.rule_snapshot.valid_until_ms,
+            decision.valid_until_ms,
+        ),
+    )
+
+
+def _budget_row(
+    bundle: CandidateBundle,
+    *,
+    now_ms: int,
+    account_capacity: AccountCapacityReservationResult | None = None,
+) -> dict[str, Any]:
     decision = bundle.sizing_risk_decision
     if decision is None:
         raise ValueError("selected promotion has no sizing/risk decision")
@@ -1914,6 +2264,39 @@ def _budget_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
         "intended_qty": decision.intended_qty,
         "risk_at_stop": decision.planned_stop_risk,
         "risk_reservation_basis": decision.risk_reservation_basis,
+        "exchange_instrument_id": (
+            account_capacity.exchange_instrument_id
+            if account_capacity is not None
+            else None
+        ),
+        "account_risk_policy_version": (
+            account_capacity.account_risk_policy_version
+            if account_capacity is not None
+            else None
+        ),
+        "account_risk_policy_event_id": (
+            account_capacity.account_risk_policy_event_id
+            if account_capacity is not None
+            else None
+        ),
+        "allowed_risk_budget": (
+            account_capacity.allocated_risk
+            if account_capacity is not None
+            else None
+        ),
+        "margin_accounting_state": (
+            "reserved_unreflected" if account_capacity is not None else None
+        ),
+        "risk_cluster_id": (
+            account_capacity.risk_cluster_id
+            if account_capacity is not None
+            else None
+        ),
+        "account_capacity_projection_version": (
+            account_capacity.claimed_projection_version
+            if account_capacity is not None
+            else None
+        ),
         "reserved_at_ms": now_ms,
         "expires_at_ms": min(
             int(bundle.signal["expires_at_ms"]),

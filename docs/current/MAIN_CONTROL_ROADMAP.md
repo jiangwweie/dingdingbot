@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-07-13
+last_verified: 2026-07-14
 ---
 
 # Main Control Roadmap
@@ -54,8 +54,9 @@ design documents and acceptance proof.
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
 | 3 | **P0 Runtime Causal Integrity And Adversarial Certification** | **completed and deployed; 12 PostgreSQL/process scenarios passed and four demonstrated defects were repaired** | `docs/current/P0_RUNTIME_CAUSAL_INTEGRITY_AND_ADVERSARIAL_CERTIFICATION_DESIGN.md` |
 | 4 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
-| 5 | **Capital Allocation V1** | P2 after reliable real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
-| 6 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
+| 5 | **Dual-Position Hard-Cap Account Risk Model V0** | **local remediation implemented; asset-neutral identity extension reviewed and implementation plan ready; no deploy** | `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md` |
+| 6 | **Capital Allocation V1** | P2 after V0 dual-position and additional real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
+| 7 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
 P0-RT, P0-PC, Operation Layer capability, lifecycle safety core, first tick,
 runner, recovery, Live Outcome, continuous reconciliation, and P0-LC are
@@ -71,23 +72,23 @@ validated market wait while Owner-facing product integration continues.
 
 | Area | Current fact |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs the accepted P0 failure-conservation release; 22 lanes are current and no post-fix natural eligible event has yet completed real exchange lifecycle calibration |
-| **Active delivery branch** | `codex/p0-runtime-causal-integrity-certification` is isolated from the dirty primary workspace and starts from deployed Action-Time invocation head `ce4b90c7` |
+| **Live Candidate Baseline** | Tokyo runs release `2001644581cccc968ba695d3ff129960db6a7e84`; real exchange trades have occurred and the current ETHUSDT Ticket is protected and reconciled |
+| **Active delivery branch** | `codex/dual-position-account-risk-v0` is isolated at `.worktrees/dual-position-account-risk-v0` from release head `2001644581cccc968ba695d3ff129960db6a7e84`; local implementation is complete and remains not deployed/not activated |
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` and its release manifest are the exact deployed-head authority |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
-| **PG migration** | Tokyo is at migration `119` (`2026-07-13-119_action_time_invocation_consistency.py`) |
+| **PG migration** | Tokyo is at migration `120` (`2026-07-13-120_reconcile_terminal_predispatch_commands.py`) |
 | **P0-LC deployment acceptance** | Postdeploy verification passes; backend HTTP checks, schema count, lifecycle units, and no-active lifecycle service are accepted without exchange write |
-| **Backend / watcher / monitor / lifecycle** | Backend, watcher timer, monitor timer, and lifecycle timer are active; latest lifecycle service result is success with zero active lifecycle scopes |
+| **Backend / watcher / monitor / lifecycle** | Backend, watcher timer, monitor timer, and lifecycle timer are active; the current ETHUSDT LONG lifecycle is position-protected and reconciliation-matched |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
 | **Post-submit first tick** | Deployed release includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, retry limit, scope freeze writes, and stop-risk reservation rechecks |
 | **P0 capital-safety closure** | `381aed34` deploys current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, Live Outcome Ledger projection, and protective stop-risk direction validation |
 | **Current runtime coverage** | Five StrategyGroups, 22 candidate scopes, and six current v2 Event Specs have current watcher coverage and execution-eligibility declarations |
 | **Typed Ticket boundary** | Side-aware price, normalized quantity, positive stop risk, one reservation, atomic fact-to-Ticket transaction, and six-Event-Spec production-shaped certification are deployed |
-| **Current tradeability** | One exact-head `runtime_release_activation` and 22 matching capability certifications exist; all 22 readiness rows are `market_wait_validated`, Goal Status is `waiting_for_signal`, and no fresh signal, open lane, active Ticket, or exchange command exists |
+| **Current tradeability** | Five StrategyGroups retain the deployed Ticket/lifecycle capability; one healthy active position currently causes the legacy account flat gate to block every second Ticket, which is the next account-capacity engineering bottleneck |
 | **Opportunity calibration** | All 22 scopes produced historical signals with zero invalid observations; Replay was stdout-only and created no PG/file/runtime/exchange authority |
 | **Lifecycle production capability** | Typed exchange truth, fill projection, durable short-transaction commands, continuous reconciliation, settlement, finalization, terminal Outcome, account-mode bootstrap, and migration-shaped ops health are deployed |
 | **Trade feedback core** | P1-TFC uses one typed lifecycle decision across production callers, rehearsal, and Owner feedback; it is deployed rather than active WIP |
-| **Dynamic execution risk** | New entry sizing uses fresh wallet/available balance, 3% planned Stop risk, 90% margin utilization, lowest sufficient leverage, and a 10x Owner ceiling |
+| **Dynamic execution risk** | Deployed sizing uses fresh wallet/available balance, **3%** planned Stop risk, 90% margin utilization, lowest sufficient leverage, and a 10x Owner ceiling; the Owner-approved V0 target is **2.5%** per Ticket and is not active before implementation/shadow acceptance |
 | **Historical Action-Time acceptance** | Five 2026-07-12 CPM Tickets and the separate ETH sizing-control signal reach protected-submit preparation plus durable ENTRY/SL/TP1 commands inside their original validity windows in isolated fixed-clock tests; all stop before exchange write |
 | **Signal identity and notification truth** | Deployed `8b6cd166` conserves anonymous readiness as a lane-scoped PG process failure, removes direct watcher Feishu, and makes the Tokyo server monitor the sole typed Owner notification path; production acceptance captured `CPM-RO-001 + SOLUSDT + short` and sent one Chinese no-order card with repeated delivery suppressed by PG dedupe |
 | **Runtime causal integrity certification** | All 12 bounded PostgreSQL/process scenarios pass; contradictory repeat fill truth hard-stops, newer success clears older current blockers, and terminal pre-dispatch attempts cannot leave reclaimable or misleading command truth |
@@ -110,6 +111,7 @@ then resumes this order.
 | 5 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
 | 6 | **Runtime causal integrity certification** | P0 complete | Twelve bounded real-PostgreSQL/process scenarios pass; six demonstrated implementation defects are repaired without authority expansion; migration 120 conserves historical pre-dispatch failure truth and notification correlation preserves production identity |
 | 7 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
+| 8 | **Dual-Position Hard-Cap Account Risk Model V0** | P1 local implementation complete; no deploy | Full-account exchange truth, ownership, Exposure/Budget Current, reservation conservation and atomic capacity arbitration require separately authorized shadow certification before 2.5%/two-position activation |
 
 ## Why This Was Not Detected Before Production Signals
 
@@ -171,7 +173,8 @@ platform.
 | **R1B Live Lifecycle Calibration** | Measure real visibility latency, partial fills, fees, funding, slippage, protection/runner acceptance, and exchange-specific behavior | R1A closed and a natural opportunity occurs | Every real ticket reaches structured closure or one exact hard blocker; measured venue behavior feeds policy review |
 | **R1C Trade Feedback Core Consolidation** | Unify post-Ticket phase, protection, reconciliation, control, recovery, and Owner feedback while R1B waits | R1A deployed | Production callers and Replay/Rehearsal use one reducer; no schema or trading-authority expansion; full regression passes |
 | **R1D Opportunity Feedback Calibration** | Measure version-pinned opportunity supply, near misses, replay/live parity, and complete nullable real-ticket economics | R1C deployed | Six Event Specs have one typed calibration path and real Outcomes can include funding and exit slippage without authority expansion |
-| **R2 Capital Allocation V1** | Allocate loss-capable capital across StrategyGroup sleeves, symbols, sides, clusters, open risk, and pending reservations | Reliable per-ticket stop risk and live outcomes exist | Simultaneous candidates receive deterministic PG-backed allocation without changing per-ticket safety semantics |
+| **R1E Dual-Position Account Risk V0** | Allow at most two different-instrument positions under 2.5% per Ticket, 6% portfolio, 4% cluster, 90% margin and one-new-Lane boundaries | Single-Ticket lifecycle and real exchange truth are accepted | A protected first position no longer hides a valid second opportunity; ownership, capacity and release remain PG-backed and rollback-safe |
+| **R2 Capital Allocation V1** | Allocate loss-capable capital across StrategyGroup sleeves, symbols, sides, clusters, open risk, and pending reservations | R1E dual-position V0 and additional real outcomes exist | Simultaneous candidates receive deterministic PG-backed allocation without changing per-ticket safety semantics |
 | **R3 Multi-Asset Execution Kernel** | Add asset-neutral Instrument, Venue, TradingCalendar, MarketDataSource, ExecutionPolicy, ProtectionPolicy, and SettlementPolicy boundaries | Crypto lifecycle is stable | A new supported contract class reuses the core chain through adapters instead of copying it |
 | **R4 Strategy Portfolio And Regime Routing** | Allocate observation and risk by regime, correlation, strategy role, and future option value | Multi-strategy live outcomes exist | `current_active`, `future_option`, `support_filter`, `conditional_trigger`, and `parked` roles affect budget without widening runtime authority silently |
 | **R5 Autonomous Experiment Governance** | Produce versioned promote/downshift/park/kill and policy-change recommendations from outcomes | Versioned outcomes and regime evidence are mature | Recommendations are machine-generated but only PG Owner policy events can change authority |
