@@ -239,6 +239,41 @@ class ExchangeGateway:
                 "F-004"
             )
 
+    async def initialize_lifecycle_readonly(self) -> None:
+        """Verify the lifecycle read path without loading the market catalog.
+
+        The ticket lifecycle worker already receives an immutable PG-bound
+        Binance market id. Loading every CCXT market on each short-lived
+        maintenance invocation adds no reconciliation truth and materially
+        increases latency and memory. This initializer performs one public,
+        read-only venue-time request and leaves market loading disabled.
+        """
+
+        if self.exchange_name.lower() != "binance":
+            raise FatalStartupError(
+                "Lifecycle read-only initialization is only certified for Binance",
+                "F-004",
+            )
+        server_time_fetch = getattr(self.rest_exchange, "fapiPublicGetTime", None)
+        if not callable(server_time_fetch):
+            raise FatalStartupError(
+                "Binance lifecycle server-time endpoint is unavailable",
+                "F-004",
+            )
+        try:
+            payload = await server_time_fetch()
+            if not isinstance(payload, dict) or not payload.get("serverTime"):
+                raise RuntimeError("binance_server_time_response_invalid")
+            logger.info(
+                "Exchange %s lifecycle read path initialized without market load",
+                self.exchange_name,
+            )
+        except Exception as e:
+            raise FatalStartupError(
+                f"Failed to initialize lifecycle exchange read path: {e}",
+                "F-004",
+            )
+
     async def check_api_key_permissions(self) -> None:
         """Check API key permission policy.
 
@@ -1067,6 +1102,294 @@ class ExchangeGateway:
                 }
             )
         return rows
+
+    async def fetch_ticket_lifecycle_snapshot(
+        self,
+        *,
+        exchange_symbol: str,
+        exchange_market_id: str,
+        recent_fill_limit: int,
+        funding_start_time_ms: Optional[int],
+        funding_end_time_ms: Optional[int],
+        conditional_parent_order_ids: List[str],
+    ) -> Dict[str, Any]:
+        """Read one Ticket's Binance lifecycle truth without ``load_markets``.
+
+        The method is intentionally narrow and read-only. It consumes the
+        immutable venue market id resolved from PG, calls only signed Binance
+        GET endpoints, and returns the existing lifecycle snapshot shapes.
+        """
+
+        if self.exchange_name.lower() != "binance":
+            raise NotImplementedError(
+                "ticket_lifecycle_snapshot_only_certified_for_binance"
+            )
+        market_id = str(exchange_market_id or "").strip().upper()
+        if not market_id or not market_id.isalnum():
+            raise ValueError("ticket_lifecycle_exchange_market_id_invalid")
+        normalized_exchange_symbol = str(exchange_symbol or "").strip()
+        if not normalized_exchange_symbol:
+            raise ValueError("ticket_lifecycle_exchange_symbol_required")
+        fill_limit = int(recent_fill_limit)
+        if fill_limit <= 0 or fill_limit > 1000:
+            raise ValueError("ticket_lifecycle_recent_fill_limit_invalid")
+
+        rest = self.rest_exchange
+        required_methods = {
+            "positions": "fapiPrivateV3GetPositionRisk",
+            "orders": "fapiPrivateGetOpenOrders",
+            "algo_orders": "fapiPrivateGetOpenAlgoOrders",
+            "trades": "fapiPrivateGetUserTrades",
+            "account": "fapiPrivateV3GetAccount",
+        }
+        for capability, method_name in required_methods.items():
+            if not callable(getattr(rest, method_name, None)):
+                raise RuntimeError(
+                    f"ticket_lifecycle_raw_{capability}_endpoint_missing"
+                )
+
+        funding_requested = (
+            funding_start_time_ms is not None
+            and funding_end_time_ms is not None
+            and int(funding_end_time_ms) >= int(funding_start_time_ms)
+        )
+        parent_ids = list(
+            dict.fromkeys(
+                str(value).strip()
+                for value in conditional_parent_order_ids
+                if str(value or "").strip()
+            )
+        )
+
+        async def _optional_funding() -> Dict[str, Any]:
+            if not funding_requested:
+                return {"rows": [], "error": None}
+            raw_fetch = getattr(rest, "fapiPrivateGetIncome", None)
+            if not callable(raw_fetch):
+                return {"rows": [], "error": "funding_endpoint_missing"}
+            try:
+                rows = await raw_fetch(
+                    {
+                        "symbol": market_id,
+                        "incomeType": "FUNDING_FEE",
+                        "startTime": int(funding_start_time_ms or 0),
+                        "endTime": int(funding_end_time_ms or 0),
+                        "limit": 1000,
+                    }
+                )
+                return {"rows": list(rows or []), "error": None}
+            except Exception as exc:
+                return {"rows": [], "error": type(exc).__name__}
+
+        async def _optional_lineage() -> Dict[str, Any]:
+            if not parent_ids:
+                return {"rows": [], "error": None}
+            try:
+                rows = await self.fetch_conditional_order_lineage(
+                    normalized_exchange_symbol,
+                    parent_ids,
+                )
+                return {"rows": list(rows or []), "error": None}
+            except Exception as exc:
+                return {"rows": [], "error": type(exc).__name__}
+
+        (
+            raw_positions,
+            raw_orders,
+            raw_algo_orders,
+            raw_trades,
+            raw_account,
+            funding_result,
+            conditional_result,
+        ) = await asyncio.gather(
+            rest.fapiPrivateV3GetPositionRisk({"symbol": market_id}),
+            rest.fapiPrivateGetOpenOrders({"symbol": market_id}),
+            rest.fapiPrivateGetOpenAlgoOrders({"symbol": market_id}),
+            rest.fapiPrivateGetUserTrades(
+                {"symbol": market_id, "limit": fill_limit}
+            ),
+            rest.fapiPrivateV3GetAccount(),
+            _optional_funding(),
+            _optional_lineage(),
+        )
+        if not all(
+            isinstance(rows, list)
+            for rows in (raw_positions, raw_orders, raw_algo_orders, raw_trades)
+        ) or not isinstance(raw_account, dict):
+            raise RuntimeError("ticket_lifecycle_raw_snapshot_shape_invalid")
+
+        positions = [
+            self._ticket_lifecycle_position_row(
+                row,
+                exchange_symbol=normalized_exchange_symbol,
+            )
+            for row in raw_positions
+            if isinstance(row, dict) and str(row.get("symbol") or "") == market_id
+        ]
+        open_orders = [
+            self._ticket_lifecycle_regular_order_row(
+                row,
+                exchange_symbol=normalized_exchange_symbol,
+            )
+            for row in raw_orders
+            if isinstance(row, dict)
+        ]
+        open_orders.extend(
+            self._ticket_lifecycle_algo_order_row(
+                row,
+                exchange_symbol=normalized_exchange_symbol,
+            )
+            for row in raw_algo_orders
+            if isinstance(row, dict)
+        )
+        recent_fills = [
+            self._ticket_lifecycle_trade_row(
+                row,
+                exchange_symbol=normalized_exchange_symbol,
+            )
+            for row in raw_trades
+            if isinstance(row, dict)
+        ]
+        account_exposure = self._ticket_lifecycle_account_exposure(raw_account)
+        return {
+            "open_orders": open_orders,
+            "recent_fills": recent_fills,
+            "positions": positions,
+            "funding_result": funding_result,
+            "conditional_result": conditional_result,
+            "account_exposure_result": account_exposure,
+            "exchange_request_count": (
+                5 + int(funding_requested) + len(parent_ids)
+            ),
+        }
+
+    @staticmethod
+    def _ticket_lifecycle_position_row(
+        raw: Dict[str, Any],
+        *,
+        exchange_symbol: str,
+    ) -> Dict[str, Any]:
+        position_amount = Decimal(str(raw.get("positionAmt") or "0"))
+        position_side = str(raw.get("positionSide") or "").upper()
+        if position_side == "LONG":
+            side = "long"
+        elif position_side == "SHORT":
+            side = "short"
+        else:
+            side = "short" if position_amount < 0 else "long"
+        return {
+            "symbol": exchange_symbol,
+            "size": str(abs(position_amount)),
+            "side": side,
+            "position_side": position_side,
+            "entry_price": str(raw.get("entryPrice") or ""),
+            "mark_price": str(raw.get("markPrice") or ""),
+            "unrealized_pnl": str(raw.get("unRealizedProfit") or ""),
+            "liquidation_price": str(raw.get("liquidationPrice") or ""),
+            "info": dict(raw),
+        }
+
+    @staticmethod
+    def _ticket_lifecycle_regular_order_row(
+        raw: Dict[str, Any],
+        *,
+        exchange_symbol: str,
+    ) -> Dict[str, Any]:
+        return {
+            "id": str(raw.get("orderId") or ""),
+            "clientOrderId": str(raw.get("clientOrderId") or ""),
+            "symbol": exchange_symbol,
+            "side": str(raw.get("side") or "").lower(),
+            "positionSide": str(raw.get("positionSide") or "").upper(),
+            "amount": str(raw.get("origQty") or ""),
+            "price": str(raw.get("price") or ""),
+            "stopPrice": str(raw.get("stopPrice") or ""),
+            "status": str(raw.get("status") or "").lower(),
+            "reduceOnly": bool(raw.get("reduceOnly")),
+            "closePosition": bool(raw.get("closePosition")),
+            "info": dict(raw),
+        }
+
+    @staticmethod
+    def _ticket_lifecycle_algo_order_row(
+        raw: Dict[str, Any],
+        *,
+        exchange_symbol: str,
+    ) -> Dict[str, Any]:
+        return {
+            "id": str(raw.get("algoId") or ""),
+            "clientOrderId": str(raw.get("clientAlgoId") or ""),
+            "symbol": exchange_symbol,
+            "side": str(raw.get("side") or "").lower(),
+            "positionSide": str(raw.get("positionSide") or "").upper(),
+            "amount": str(raw.get("quantity") or ""),
+            "price": "",
+            "triggerPrice": str(raw.get("triggerPrice") or ""),
+            "status": str(raw.get("algoStatus") or "").lower(),
+            "reduceOnly": bool(raw.get("reduceOnly")),
+            "closePosition": bool(raw.get("closePosition")),
+            "info": dict(raw),
+        }
+
+    @staticmethod
+    def _ticket_lifecycle_trade_row(
+        raw: Dict[str, Any],
+        *,
+        exchange_symbol: str,
+    ) -> Dict[str, Any]:
+        return {
+            "id": str(raw.get("id") or ""),
+            "order": str(raw.get("orderId") or ""),
+            "symbol": exchange_symbol,
+            "side": str(raw.get("side") or "").lower(),
+            "positionSide": str(raw.get("positionSide") or "").upper(),
+            "amount": str(raw.get("qty") or ""),
+            "price": str(raw.get("price") or ""),
+            "commission": raw.get("commission"),
+            "commissionAsset": raw.get("commissionAsset"),
+            "timestamp": raw.get("time"),
+            "maker": raw.get("maker"),
+            "realizedPnl": raw.get("realizedPnl"),
+            "info": dict(raw),
+        }
+
+    def _ticket_lifecycle_account_exposure(
+        self,
+        raw_account: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        margin_balance = self._optional_nonnegative_decimal(
+            raw_account.get("totalMarginBalance")
+        )
+        gross_notional = Decimal("0")
+        raw_positions = raw_account.get("positions")
+        if not isinstance(raw_positions, list):
+            raise RuntimeError("ticket_lifecycle_account_positions_missing")
+        for raw in raw_positions:
+            if not isinstance(raw, dict):
+                raise RuntimeError("ticket_lifecycle_account_position_invalid")
+            notional = self._optional_nonnegative_decimal_abs(raw.get("notional"))
+            if notional is not None:
+                gross_notional += notional
+        blockers: List[str] = []
+        effective = None
+        if margin_balance is None or margin_balance <= 0:
+            blockers.append("account_margin_balance_missing_or_zero")
+        else:
+            effective = gross_notional / margin_balance
+        return {
+            "status": "ready" if not blockers else "partial",
+            "account_id": str(getattr(self, "runtime_account_id", "") or ""),
+            "exchange_id": str(getattr(self, "runtime_exchange_id", "") or ""),
+            "account_margin_balance": (
+                str(margin_balance) if margin_balance is not None else None
+            ),
+            "gross_open_position_notional": str(gross_notional),
+            "effective_account_exposure_leverage": (
+                str(effective) if effective is not None else None
+            ),
+            "observed_at_ms": int(time.time() * 1000),
+            "blockers": blockers,
+        }
 
     async def fetch_account_exposure_snapshot(self) -> Dict[str, Any]:
         """Return signed cross-margin exposure facts without mutating account state."""

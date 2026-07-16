@@ -6949,6 +6949,7 @@ async def _runtime_exchange_submit_gateway_binding(
     api_module: Any,
     *,
     gateway_factory: Any = None,
+    lifecycle_readonly: bool = False,
 ) -> dict[str, Any]:
     """Return the independent runtime-submit gateway only when explicitly enabled.
 
@@ -6991,7 +6992,17 @@ async def _runtime_exchange_submit_gateway_binding(
         testnet=False,
     )
     try:
-        await gateway.initialize()
+        if lifecycle_readonly:
+            lifecycle_initialize = getattr(
+                gateway, "initialize_lifecycle_readonly", None
+            )
+            if not callable(lifecycle_initialize):
+                raise RuntimeError(
+                    "runtime_gateway_missing_initialize_lifecycle_readonly"
+                )
+            await lifecycle_initialize()
+        else:
+            await gateway.initialize()
         permission_check = getattr(gateway, "check_api_key_permissions", None)
         if callable(permission_check):
             await permission_check()

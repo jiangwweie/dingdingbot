@@ -173,6 +173,7 @@ async def _amain(argv: list[str] | None = None) -> int:
                     )
                 )
                 return 1
+            telemetry.exchange_request_count += 2
 
         worker_payload: dict[str, Any] = {
             "status": "durable_mutation_disabled",
@@ -245,8 +246,7 @@ async def _amain(argv: list[str] | None = None) -> int:
         provided_snapshots: dict[str, dict[str, Any]] = {}
         for prepared in prepared_scopes:
             with telemetry.stage("exchange_snapshot"):
-                telemetry.exchange_request_count += 1
-                provided_snapshots[prepared["snapshot_identity"]] = await _await_before_deadline(
+                snapshot_payload = await _await_before_deadline(
                     fetch_resolved_ticket_bound_exchange_snapshot(
                         scope=prepared["scope"],
                         snapshot_identity=prepared["snapshot_identity"],
@@ -264,6 +264,10 @@ async def _amain(argv: list[str] | None = None) -> int:
                     ),
                     deadline_at=deadline_at,
                     stage="exchange_snapshot",
+                )
+                provided_snapshots[prepared["snapshot_identity"]] = snapshot_payload
+                telemetry.exchange_request_count += int(
+                    snapshot_payload.get("exchange_request_count") or 1
                 )
 
         _remaining_seconds(deadline_at, "pg_lifecycle_projection")
@@ -335,7 +339,10 @@ async def _runtime_exchange_gateway_binding() -> dict[str, Any]:
         _runtime_exchange_submit_gateway_binding,
     )
 
-    return await _runtime_exchange_submit_gateway_binding(api_module)
+    return await _runtime_exchange_submit_gateway_binding(
+        api_module,
+        lifecycle_readonly=True,
+    )
 
 
 def _blocked_gateway_payload(gateway_binding: dict[str, Any]) -> dict[str, Any]:

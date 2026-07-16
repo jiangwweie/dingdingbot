@@ -210,60 +210,116 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
             "snapshot": {},
             "exchange_read_called": False,
         }
+    exchange_request_count = 0
     try:
+        narrow_fetch = getattr(gateway, "fetch_ticket_lifecycle_snapshot", None)
         funding_fetch = getattr(gateway, "fetch_funding_income", None)
         should_fetch_funding = (
-            callable(funding_fetch)
+            (callable(narrow_fetch) or callable(funding_fetch))
             and funding_start_time_ms is not None
             and funding_end_time_ms is not None
             and funding_end_time_ms >= funding_start_time_ms
         )
         conditional_fetch = getattr(gateway, "fetch_conditional_order_lineage", None)
         should_fetch_conditional_lineage = bool(
-            callable(conditional_fetch) and conditional_parent_order_ids
+            (callable(narrow_fetch) or callable(conditional_fetch))
+            and conditional_parent_order_ids
         )
         account_exposure_fetch = getattr(
             gateway, "fetch_account_exposure_snapshot", None
         )
-        should_fetch_account_exposure = callable(account_exposure_fetch)
-        (
-            open_orders,
-            recent_fills,
-            positions,
-            funding_result,
-            conditional_result,
-            account_exposure_result,
-        ) = await asyncio.wait_for(
-            asyncio.gather(
-                gateway.fetch_all_open_orders(scope.exchange_symbol),
-                gateway.fetch_my_trades(
-                    scope.exchange_symbol,
-                    limit=recent_fill_limit,
-                ),
-                gateway.fetch_position_rows(scope.exchange_symbol),
-                _fetch_optional_funding_income(
-                    funding_fetch=funding_fetch,
-                    symbol=scope.exchange_symbol,
-                    start_time_ms=int(funding_start_time_ms or 0),
-                    end_time_ms=int(funding_end_time_ms or 0),
-                )
-                if should_fetch_funding
-                else asyncio.sleep(0, result={"rows": [], "error": None}),
-                _fetch_optional_conditional_order_lineage(
-                    conditional_fetch=conditional_fetch,
-                    symbol=scope.exchange_symbol,
-                    parent_exchange_order_ids=list(
+        should_fetch_account_exposure = callable(narrow_fetch) or callable(
+            account_exposure_fetch
+        )
+        if callable(narrow_fetch):
+            narrow_result = await asyncio.wait_for(
+                narrow_fetch(
+                    exchange_symbol=scope.exchange_symbol,
+                    exchange_market_id=scope.canonical_symbol,
+                    recent_fill_limit=recent_fill_limit,
+                    funding_start_time_ms=(
+                        int(funding_start_time_ms)
+                        if should_fetch_funding
+                        else None
+                    ),
+                    funding_end_time_ms=(
+                        int(funding_end_time_ms) if should_fetch_funding else None
+                    ),
+                    conditional_parent_order_ids=list(
                         conditional_parent_order_ids or []
                     ),
-                )
-                if should_fetch_conditional_lineage
-                else asyncio.sleep(0, result={"rows": [], "error": None}),
-                account_exposure_fetch()
-                if should_fetch_account_exposure
-                else asyncio.sleep(0, result={}),
-            ),
-            timeout=timeout_seconds,
-        )
+                ),
+                timeout=timeout_seconds,
+            )
+            if not isinstance(narrow_result, dict):
+                raise RuntimeError("ticket_lifecycle_snapshot_root_not_object")
+            open_orders = list(narrow_result.get("open_orders") or [])
+            recent_fills = list(narrow_result.get("recent_fills") or [])
+            positions = list(narrow_result.get("positions") or [])
+            funding_result = dict(
+                narrow_result.get("funding_result")
+                or {"rows": [], "error": None}
+            )
+            conditional_result = dict(
+                narrow_result.get("conditional_result")
+                or {"rows": [], "error": None}
+            )
+            account_exposure_result = dict(
+                narrow_result.get("account_exposure_result") or {}
+            )
+            exchange_request_count = int(
+                narrow_result.get("exchange_request_count") or 0
+            )
+            should_fetch_funding = funding_start_time_ms is not None
+            should_fetch_conditional_lineage = bool(
+                conditional_parent_order_ids
+            )
+            should_fetch_account_exposure = True
+        else:
+            (
+                open_orders,
+                recent_fills,
+                positions,
+                funding_result,
+                conditional_result,
+                account_exposure_result,
+            ) = await asyncio.wait_for(
+                asyncio.gather(
+                    gateway.fetch_all_open_orders(scope.exchange_symbol),
+                    gateway.fetch_my_trades(
+                        scope.exchange_symbol,
+                        limit=recent_fill_limit,
+                    ),
+                    gateway.fetch_position_rows(scope.exchange_symbol),
+                    _fetch_optional_funding_income(
+                        funding_fetch=funding_fetch,
+                        symbol=scope.exchange_symbol,
+                        start_time_ms=int(funding_start_time_ms or 0),
+                        end_time_ms=int(funding_end_time_ms or 0),
+                    )
+                    if should_fetch_funding
+                    else asyncio.sleep(0, result={"rows": [], "error": None}),
+                    _fetch_optional_conditional_order_lineage(
+                        conditional_fetch=conditional_fetch,
+                        symbol=scope.exchange_symbol,
+                        parent_exchange_order_ids=list(
+                            conditional_parent_order_ids or []
+                        ),
+                    )
+                    if should_fetch_conditional_lineage
+                    else asyncio.sleep(0, result={"rows": [], "error": None}),
+                    account_exposure_fetch()
+                    if should_fetch_account_exposure
+                    else asyncio.sleep(0, result={}),
+                ),
+                timeout=timeout_seconds,
+            )
+            exchange_request_count = (
+                3
+                + int(should_fetch_funding)
+                + int(should_fetch_conditional_lineage)
+                + int(should_fetch_account_exposure)
+            )
     except TimeoutError:
         blockers = ["exchange_snapshot_fetch_timeout"]
         return {
@@ -272,6 +328,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
             "blockers": blockers,
             "snapshot": {},
             "exchange_read_called": True,
+            "exchange_request_count": exchange_request_count,
         }
     except Exception as exc:
         blockers = [f"exchange_snapshot_fetch_failed:{type(exc).__name__}"]
@@ -281,6 +338,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
             "blockers": blockers,
             "snapshot": {},
             "exchange_read_called": True,
+            "exchange_request_count": exchange_request_count,
         }
     position, position_blockers = _normalize_position(scope, positions or [])
     funding_income = list(funding_result.get("rows") or [])
@@ -342,6 +400,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         "blockers": position_blockers,
         "snapshot": snapshot,
         "exchange_read_called": True,
+        "exchange_request_count": exchange_request_count,
     }
 
 
@@ -443,6 +502,8 @@ def load_ticket_conditional_parent_order_ids(
 def _gateway_method_blockers(gateway: Any) -> list[str]:
     if gateway is None:
         return ["exchange_snapshot_gateway_required"]
+    if callable(getattr(gateway, "fetch_ticket_lifecycle_snapshot", None)):
+        return []
     blockers: list[str] = []
     for name in (
         "fetch_all_open_orders",
