@@ -369,3 +369,43 @@ def test_restart_recovery_fails_closed_when_entry_fee_truth_is_missing(
         ),
         {"ticket_id": ticket_id},
     ).scalar_one() is None
+
+
+def test_restart_recovery_rechecks_tp1_when_execution_snapshot_already_exists(
+    pg_control_connection,
+):
+    ticket_id = _versioned_exit_fixture(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exit_protection_orders SET price = 99999 "
+            "WHERE ticket_id = :ticket_id AND role = 'TP1'"
+        ),
+        {"ticket_id": ticket_id},
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_exit_policy_current SET state = 'execution_bound', "
+            "first_blocker = NULL WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    )
+
+    result = recover_ticket_exit_execution_snapshot_from_exchange_truth(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot=_restart_recovery_snapshot(
+            pg_control_connection, ticket_id
+        ),
+        now_ms=NOW_MS + 20_000,
+    )
+
+    assert result["status"] == "execution_binding_idempotent"
+    assert result["tp1_reprice_required"] is True
+    state = pg_control_connection.execute(
+        text(
+            "SELECT state FROM brc_ticket_exit_policy_current "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).scalar_one()
+    assert state == "blocked_tp1_reprice_required"

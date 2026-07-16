@@ -95,12 +95,39 @@ def recover_ticket_exit_execution_snapshot_from_exchange_truth(
                 raise TicketExitExecutionBindingError(
                     "ticket_exit_execution_projection_contradiction"
                 )
+            tp1_reprice_required = False
+            snapshot = dict(exchange_snapshot or {})
+            if snapshot:
+                base["exchange_read_called"] = (
+                    snapshot.get("exchange_read_called") is True
+                )
+                _require_snapshot_identity(ticket=ticket, snapshot=snapshot)
+                instrument = _required_row(
+                    conn,
+                    "brc_exchange_instruments",
+                    "exchange_instrument_id",
+                    str(ticket.get("exchange_instrument_id") or ""),
+                    "exchange_instrument_missing",
+                )
+                rule = resolve_ticket_instrument_rule(
+                    instrument=instrument,
+                    exchange_snapshot=snapshot,
+                )
+                tp1_reprice_required = _mark_tp1_reprice_if_required(
+                    conn,
+                    ticket_id=normalized_ticket_id,
+                    execution=validated,
+                    minimum_price_tick=rule.price_tick,
+                    quantity_step=rule.quantity_step,
+                    now_ms=int(now_ms),
+                )
             return {
                 **base,
                 "status": "execution_binding_idempotent",
                 "first_blocker": None,
                 "blockers": [],
                 "exit_execution_hash": existing_hash,
+                "tp1_reprice_required": tp1_reprice_required,
             }
 
         snapshot = dict(exchange_snapshot or {})
