@@ -187,12 +187,22 @@ def recover_ticket_exit_execution_snapshot_from_exchange_truth(
             certified_exit_taker_fee_rate=taker_rate,
             now_ms=int(now_ms),
         )
+        execution = TicketExitExecutionSnapshot.model_validate(result["snapshot"])
+        tp1_reprice_required = _mark_tp1_reprice_if_required(
+            conn,
+            ticket_id=normalized_ticket_id,
+            execution=execution,
+            minimum_price_tick=rule.price_tick,
+            quantity_step=rule.quantity_step,
+            now_ms=int(now_ms),
+        )
         return {
             **base,
             **result,
             "first_blocker": None,
             "blockers": [],
             "pg_projection_mutated": result.get("status") == "execution_bound",
+            "tp1_reprice_required": tp1_reprice_required,
             "exchange_write_called": False,
         }
     except Exception as exc:
@@ -500,6 +510,59 @@ def _initial_stop_order(
     if row is None:
         raise TicketExitExecutionBindingError("initial_stop_order_missing")
     return dict(row)
+
+
+def _mark_tp1_reprice_if_required(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    execution: TicketExitExecutionSnapshot,
+    minimum_price_tick: Decimal,
+    quantity_step: Decimal,
+    now_ms: int,
+) -> bool:
+    orders = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    rows = list(
+        conn.execute(
+            sa.select(orders)
+            .where(orders.c.ticket_id == ticket_id)
+            .where(orders.c.role == "TP1")
+            .where(
+                orders.c.status.in_(
+                    ("planned", "submitted", "open", "partially_filled")
+                )
+            )
+            .order_by(orders.c.generation.desc(), orders.c.updated_at_ms.desc())
+        ).mappings()
+    )
+    if not rows:
+        return False
+    highest_generation = int(rows[0].get("generation") or 1)
+    current = [
+        row for row in rows if int(row.get("generation") or 1) == highest_generation
+    ]
+    if len(current) != 1:
+        raise TicketExitExecutionBindingError("active_tp1_order_ambiguous")
+    active = current[0]
+    current_price = _required_decimal(active.get("price"), "active_tp1_price_missing")
+    current_qty = _required_decimal(active.get("qty"), "active_tp1_qty_missing")
+    mismatch = (
+        abs(current_price - execution.resolved_tp1_price) > minimum_price_tick
+        or abs(current_qty - execution.resolved_tp1_target_qty) > quantity_step
+    )
+    if not mismatch:
+        return False
+    projection = _table(conn, "brc_ticket_exit_policy_current")
+    conn.execute(
+        projection.update()
+        .where(projection.c.ticket_id == ticket_id)
+        .values(
+            state="blocked_tp1_reprice_required",
+            first_blocker="tp1_reprice_required",
+            updated_at_ms=int(now_ms),
+        )
+    )
+    return True
 
 
 def _required_decimal(

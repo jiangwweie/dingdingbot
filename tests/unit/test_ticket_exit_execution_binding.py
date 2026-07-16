@@ -294,6 +294,13 @@ def test_restart_recovery_binds_missing_execution_snapshot_idempotently(
         ),
         {"ticket_id": ticket_id},
     )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exit_protection_orders SET price = 99999 "
+            "WHERE ticket_id = :ticket_id AND role = 'TP1'"
+        ),
+        {"ticket_id": ticket_id},
+    )
     snapshot = _restart_recovery_snapshot(pg_control_connection, ticket_id)
 
     first = recover_ticket_exit_execution_snapshot_from_exchange_truth(
@@ -325,7 +332,8 @@ def test_restart_recovery_binds_missing_execution_snapshot_idempotently(
         ).mappings().one()
     )
     assert projection["remaining_position_qty"] is not None
-    assert projection["state"] == "execution_bound"
+    assert projection["state"] == "blocked_tp1_reprice_required"
+    assert projection["first_blocker"] == "tp1_reprice_required"
 
 
 def test_restart_recovery_fails_closed_when_entry_fee_truth_is_missing(
