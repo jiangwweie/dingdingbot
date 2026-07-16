@@ -25,6 +25,7 @@ from src.application.action_time.exchange_snapshot_provider import (
 from src.application.action_time.post_submit_reconciliation_tick import (
     _entry_execution_truth,
     materialize_ticket_bound_first_reconciliation_tick,
+    materialize_ticket_bound_reconciliation_tick,
     select_ticket_bound_first_reconciliation_tick_scopes,
 )
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
@@ -113,6 +114,68 @@ def test_first_tick_marks_tp1_missing_as_recovery_required(pg_control_connection
     assert row["status"] == "recovery_required"
     assert row["tp1_state"] == "missing"
     assert row["sl_state"] == "open"
+
+
+def test_scheduled_tick_uses_latest_tp1_reprice_exchange_order(
+    pg_control_connection,
+):
+    prepared = _submitted_real_attempt(pg_control_connection)
+    attempt_id = prepared["protected_submit_attempt_id"]
+    raw = pg_control_connection.execute(
+        text(
+            "SELECT submit_result FROM brc_ticket_bound_protected_submit_attempts "
+            "WHERE protected_submit_attempt_id = :attempt_id"
+        ),
+        {"attempt_id": attempt_id},
+    ).scalar_one()
+    submit_result = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    original_tp1 = next(
+        order
+        for order in submit_result["submitted_orders"]
+        if order["order_role"] == "TP1"
+    )
+    repriced_tp1 = {
+        **original_tp1,
+        "exchange_order_id": "exchange-tp1-repriced",
+        "client_order_id": "client-tp1-repriced",
+        "price": "2010",
+    }
+    submit_result["submitted_orders"].append(repriced_tp1)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_protected_submit_attempts "
+            "SET submit_result = :submit_result "
+            "WHERE protected_submit_attempt_id = :attempt_id"
+        ),
+        {
+            "attempt_id": attempt_id,
+            "submit_result": json.dumps(submit_result, sort_keys=True),
+        },
+    )
+    snapshot = _attempt_snapshot(prepared, omit_roles={"TP1"})
+    snapshot["open_orders"].append(
+        {
+            "exchange_order_id": "exchange-tp1-repriced",
+            "side": "sell",
+            "reduce_only": True,
+            "qty": repriced_tp1["amount"],
+            "price": "2010",
+            "status": "open",
+        }
+    )
+
+    payload = materialize_ticket_bound_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=attempt_id,
+        tick_kind="scheduled",
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 6000,
+    )
+
+    assert payload["status"] == "matched"
+    assert payload["first_blocker"] is None
+    assert payload["tick"]["sl_state"] == "open"
+    assert payload["tick"]["tp1_state"] == "open"
 
 
 def test_first_tick_freezes_scope_for_unknown_exchange_only_order(pg_control_connection):

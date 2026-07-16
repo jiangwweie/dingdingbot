@@ -639,7 +639,11 @@ def _pending_tick_due(tick: dict[str, Any], *, now_ms: int) -> bool:
 
 
 def _order_by_role(orders: list[dict[str, Any]], role: str) -> dict[str, Any]:
-    for order in orders:
+    # Protection replacements are appended to the durable submit result.  A
+    # scheduled reconciliation must compare the exchange snapshot with the
+    # newest role lineage, not the original order that a later policy action
+    # has already replaced.
+    for order in reversed(orders):
         if str(order.get("order_role") or "").upper() == role:
             return dict(order)
     return {}
