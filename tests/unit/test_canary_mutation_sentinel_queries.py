@@ -81,8 +81,12 @@ def test_storage_contract_names_only_explicitly_excluded_volatile_columns():
     assert {"started_at_ms", "finished_at_ms"} <= expected["brc_projection_runs"]
 
 
-def test_storage_contract_matches_schema_124_fixture(pg_control_connection):
+def test_storage_contract_matches_schema_125_fixture(pg_control_connection):
     inspector = sa.inspect(pg_control_connection)
     for relation, expected in expected_storage_columns().items():
         actual = {str(column["name"]) for column in inspector.get_columns(relation)}
         assert actual == set(expected), relation
+
+    assert {"binding_source", "adoption_event_id"} <= set(
+        expected_storage_columns()["brc_ticket_exit_policy_current"]
+    )

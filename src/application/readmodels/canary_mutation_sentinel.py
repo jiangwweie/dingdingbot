@@ -137,7 +137,8 @@ CANARY_PROTECTION_ORDER_COLUMNS_V1 = (
 )
 CANARY_EXIT_POLICY_CURRENT_COLUMNS_V1 = (
     "ticket_id", "exit_protection_set_id", "exit_policy_id",
-    "exit_policy_version", "exit_policy_hash", "exit_execution_snapshot",
+    "exit_policy_version", "exit_policy_hash", "binding_source",
+    "adoption_event_id", "exit_execution_snapshot",
     "exit_execution_hash", "actual_r_per_unit", "resolved_tp1_price",
     "resolved_tp1_target_qty", "tp1_cumulative_filled_qty",
     "tp1_completion_state", "remaining_position_qty", "state",

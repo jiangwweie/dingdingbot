@@ -139,7 +139,7 @@ def _columns(columns: tuple[str, ...], relation_alias: str | None = None) -> str
 
 
 def expected_storage_columns() -> dict[str, frozenset[str]]:
-    """Return the reviewed schema-124 storage shape per sentinel relation."""
+    """Return the reviewed schema-125 storage shape per sentinel relation."""
 
     expected: dict[str, frozenset[str]] = {}
     for spec in CANARY_SENTINEL_SPECS_V1:

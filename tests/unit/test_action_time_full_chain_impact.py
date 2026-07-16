@@ -684,6 +684,16 @@ def pg_control_connection():
             "ALTER TABLE brc_runtime_capabilities_current "
             "ADD COLUMN proof_payload JSON"
         )
+        # The sentinel fixture mirrors migration 125's policy-binding columns;
+        # the migration-specific suite owns its constraints and adoption table.
+        conn.exec_driver_sql(
+            "ALTER TABLE brc_ticket_exit_policy_current "
+            "ADD COLUMN binding_source VARCHAR(32) NOT NULL DEFAULT 'ticket'"
+        )
+        conn.exec_driver_sql(
+            "ALTER TABLE brc_ticket_exit_policy_current "
+            "ADD COLUMN adoption_event_id VARCHAR(192)"
+        )
         action_time_reference = ActionTimeCertificationReferenceV2(
             stage="post_canary",
             target_runtime_head="a" * 40,
