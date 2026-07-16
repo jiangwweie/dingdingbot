@@ -121,7 +121,10 @@ async def run_ticket_bound_lifecycle_maintenance(
             "protection_missing",
             "protection_degraded",
             "protection_submit_failed",
-        }:
+        } and not _exit_policy_tp1_reprice_in_progress(
+            conn,
+            ticket_id=str(result.get("ticket_id") or ticket_id),
+        ):
             recovery = prepare_ticket_bound_protection_recovery_command(
                 conn,
                 protected_submit_attempt_id=attempt_id,
@@ -160,6 +163,10 @@ async def run_ticket_bound_lifecycle_maintenance(
                 str(reconciled.get("status") or "")
                 in {"protection_missing", "protection_degraded", "protection_submit_failed"}
                 and len(actions) < max_actions
+                and not _exit_policy_tp1_reprice_in_progress(
+                    conn,
+                    ticket_id=str(reconciled.get("ticket_id") or ticket_id),
+                )
             ):
                 recovery = prepare_ticket_bound_protection_recovery_command(
                     conn,
@@ -293,6 +300,56 @@ def _materialize_durable_commands(
         "blockers": [],
         "exchange_write_called": False,
     }
+
+
+def _exit_policy_tp1_reprice_in_progress(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+) -> bool:
+    """Defer generic TP1 recovery while the policy owns an exact replacement.
+
+    Between cancellation of the old TP1 and durable placement of the exact new
+    limit order, reconciliation legitimately sees no TP1.  A generic recovery
+    in that interval races the policy and can create a duplicate exit order.
+    The policy projection is the durable ownership marker for that short-lived
+    transition; rejected or completed reprices do not remain deferred.
+    """
+
+    normalized_ticket_id = str(ticket_id or "").strip()
+    if not normalized_ticket_id or not sa.inspect(conn).has_table(
+        "brc_ticket_exit_policy_current"
+    ):
+        return False
+    projection_table = _table(conn, "brc_ticket_exit_policy_current")
+    projection = conn.execute(
+        sa.select(projection_table.c.state).where(
+            projection_table.c.ticket_id == normalized_ticket_id
+        )
+    ).mappings().first()
+    if str((projection or {}).get("state") or "") != "blocked_tp1_reprice_required":
+        return False
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
+        return False
+    commands = _table(conn, "brc_ticket_bound_exchange_commands")
+    active_command = conn.execute(
+        sa.select(commands.c.exchange_command_id)
+        .where(commands.c.ticket_id == normalized_ticket_id)
+        .where(commands.c.command_source == "exit_policy_tp1_reprice")
+        .where(
+            commands.c.command_state.in_(
+                (
+                    "prepared",
+                    "dispatching",
+                    "outcome_unknown",
+                    "confirmed_submitted",
+                    "reconciled_submitted",
+                )
+            )
+        )
+        .limit(1)
+    ).first()
+    return active_command is not None
 
 
 def _scoped_attempt_ids(

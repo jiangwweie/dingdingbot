@@ -721,6 +721,25 @@ def _advance_tp1_reprice(
         and not reprice_commands
     ):
         return None
+    execution: TicketExitExecutionSnapshot = loaded["execution"]
+    source_id = _stable_id(
+        "exit-policy-tp1-reprice",
+        ticket_id,
+        str(loaded["policy"].payload_hash),
+        str(execution.resolved_tp1_price),
+        str(execution.resolved_tp1_target_qty),
+    )
+    completed_reprice = _confirmed_repriced_tp1_order(
+        loaded=loaded,
+        reprice_commands=reprice_commands,
+        source_id=source_id,
+    )
+    if completed_reprice is not None:
+        return _result(
+            "tp1_reprice_already_completed",
+            ticket_id,
+            exchange_order_id=str(completed_reprice["exchange_order_id"]),
+        )
     tp1_candidates = [
         row
         for row in loaded["orders"]
@@ -739,14 +758,6 @@ def _advance_tp1_reprice(
     old = min(
         tp1_candidates,
         key=lambda row: int(row.get("generation") or 1),
-    )
-    execution: TicketExitExecutionSnapshot = loaded["execution"]
-    source_id = _stable_id(
-        "exit-policy-tp1-reprice",
-        ticket_id,
-        str(loaded["policy"].payload_hash),
-        str(execution.resolved_tp1_price),
-        str(execution.resolved_tp1_target_qty),
     )
     cancel = _command_by_source_kind(
         conn,
@@ -921,6 +932,45 @@ def _advance_tp1_reprice(
         },
     )
     return _result("tp1_reprice_completed", ticket_id)
+
+
+def _confirmed_repriced_tp1_order(
+    *,
+    loaded: dict[str, Any],
+    reprice_commands: list[dict[str, Any]],
+    source_id: str,
+) -> dict[str, Any] | None:
+    """Return the live target TP1 when an earlier reprice is already complete.
+
+    Reprice commands are durable audit history, so their presence alone cannot
+    keep re-entering the cancel/place sequence on every lifecycle tick.  The
+    reprice is terminal only when the current projected TP1 exactly matches the
+    frozen execution snapshot and its placing command has an authoritative
+    exchange outcome.
+    """
+
+    confirmed_places = [
+        command
+        for command in reprice_commands
+        if str(command.get("source_command_id") or "") == source_id
+        and str(command.get("command_kind") or "") == "place_order"
+        and str(command.get("command_state") or "") in CONFIRMED_COMMAND_STATES
+        and str(command.get("exchange_order_id") or "")
+    ]
+    if not confirmed_places:
+        return None
+    for order in loaded["orders"]:
+        for place in confirmed_places:
+            if (
+                str(order.get("role") or "") == "TP1"
+                and str(order.get("status") or "") == "submitted"
+                and str(order.get("local_order_id") or "")
+                == str(place.get("local_order_id") or "")
+                and str(order.get("exchange_order_id") or "")
+                == str(place.get("exchange_order_id") or "")
+            ):
+                return order
+    return None
 
 
 def _prepare_runner_replacement(
@@ -1631,6 +1681,7 @@ def _result(
     *,
     blockers: list[str] | None = None,
     command_id: str | None = None,
+    exchange_order_id: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema": "brc.ticket_exit_policy_maintenance.v1",
@@ -1642,4 +1693,6 @@ def _result(
     }
     if command_id:
         payload["exchange_command_id"] = command_id
+    if exchange_order_id:
+        payload["exchange_order_id"] = exchange_order_id
     return payload

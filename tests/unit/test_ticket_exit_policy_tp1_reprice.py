@@ -13,6 +13,9 @@ from src.application.action_time.ticket_exit_policy_service import (
 from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
 )
+from src.application.action_time.lifecycle_maintenance_service import (
+    run_ticket_bound_lifecycle_maintenance,
+)
 from src.domain.ticket_exit_policy import TicketExitExecutionSnapshot
 from tests.unit.lifecycle_test_schema import (
     apply_active_ticket_exit_policy_adoption_schema,
@@ -22,6 +25,7 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
 from tests.unit.test_ticket_bound_exchange_command_worker import _WorkerGateway
+from tests.unit.test_ticket_bound_protection_reconciler import _snapshot
 from tests.unit.test_ticket_exit_policy_service import (
     _projection,
     _set_command_state,
@@ -186,6 +190,110 @@ async def test_existing_worker_dispatches_cancel_then_exact_reduce_only_limit(
     assert gateway.calls[1]["reduce_only"] is True
     assert gateway.calls[1]["price"].quantize(Decimal("0.001")) == expected_price
 
+
+@pytest.mark.asyncio
+async def test_completed_reprice_is_idempotent_and_does_not_prepare_recovery(
+    pg_control_connection,
+):
+    ticket_id, old_tp1, expected_price = _reprice_fixture(pg_control_connection)
+    maintain_ticket_exit_policy_in_transaction(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+    cancel = _reprice_commands(pg_control_connection, ticket_id)[0]
+    _set_command_state(
+        pg_control_connection,
+        cancel["exchange_command_id"],
+        state="confirmed_submitted",
+        exchange_order_id=cancel["target_exchange_order_id"],
+    )
+    protection_set_id = str(
+        pg_control_connection.execute(
+            text(
+                "SELECT exit_protection_set_id FROM "
+                "brc_ticket_bound_exit_protection_sets WHERE ticket_id=:ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).scalar_one()
+    )
+    cancellation_window_snapshot = _snapshot(
+        pg_control_connection,
+        protection_set_id,
+    )
+    cancellation_window_snapshot["open_orders"] = [
+        item
+        for item in cancellation_window_snapshot["open_orders"]
+        if str(item.get("exchange_order_id") or "")
+        != str(cancel["target_exchange_order_id"])
+    ]
+    maintenance = await run_ticket_bound_lifecycle_maintenance(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot=cancellation_window_snapshot,
+        now_ms=NOW_MS + 20_050,
+    )
+    assert all(
+        action["action_type"] != "protection_recovery_prepared"
+        for action in maintenance["actions"]
+    )
+    assert not list(
+        pg_control_connection.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_protection_recovery_commands "
+                "WHERE protected_submit_attempt_id=(SELECT protected_submit_attempt_id "
+                "FROM brc_ticket_bound_exit_protection_sets WHERE ticket_id=:ticket_id)"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings()
+    )
+    maintain_ticket_exit_policy_in_transaction(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_100,
+    )
+    place = next(
+        item
+        for item in _reprice_commands(pg_control_connection, ticket_id)
+        if item["command_kind"] == "place_order"
+    )
+    _set_command_state(
+        pg_control_connection,
+        place["exchange_command_id"],
+        state="confirmed_submitted",
+        exchange_order_id="repriced-tp1",
+    )
+    completed = maintain_ticket_exit_policy_in_transaction(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_200,
+    )
+    repeated = maintain_ticket_exit_policy_in_transaction(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_300,
+    )
+
+    assert completed["status"] == "tp1_reprice_completed"
+    assert repeated["status"] == "tp1_reprice_already_completed"
+    assert repeated["ticket_id"] == ticket_id
+    assert repeated["blockers"] == []
+    assert repeated["exchange_write_called"] is False
+    assert repeated["exchange_order_id"] == "repriced-tp1"
+    orders = list(
+        pg_control_connection.execute(
+            text(
+                "SELECT status, price, exchange_order_id FROM "
+                "brc_ticket_bound_exit_protection_orders "
+                "WHERE ticket_id=:ticket_id AND role='TP1' ORDER BY generation"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings()
+    )
+    assert [(item["status"], Decimal(str(item["price"]))) for item in orders] == [
+        ("replaced", Decimal(str(old_tp1["price"]))),
+        ("submitted", expected_price),
+    ]
 
 def _reprice_fixture(conn):
     ticket_id = _versioned_exit_fixture(conn)
