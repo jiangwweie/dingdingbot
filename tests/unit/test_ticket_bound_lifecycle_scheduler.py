@@ -36,6 +36,10 @@ from tests.unit.test_ticket_bound_runner_protection_adjuster import (
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
+from tests.unit.test_ticket_exit_execution_binding import (
+    _restart_recovery_snapshot,
+)
+from tests.unit.test_ticket_exit_policy_service import _versioned_exit_fixture
 
 
 def test_runner_protected_is_maintainable_and_snapshot_eligible():
@@ -94,6 +98,94 @@ async def test_scheduler_selects_healthy_runner_without_exchange_write(
     )
     assert "place_order" not in gateway.events
     assert "cancel_order" not in gateway.events
+
+
+@pytest.mark.asyncio
+async def test_scheduler_recovers_missing_execution_truth_before_exit_policy(
+    pg_control_connection,
+):
+    ticket_id = _versioned_exit_fixture(pg_control_connection)
+    protection_set = dict(
+        pg_control_connection.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_exit_protection_sets "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings().one()
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_exit_policy_current SET "
+            "exit_execution_snapshot = NULL, exit_execution_hash = NULL, "
+            "actual_r_per_unit = NULL, resolved_tp1_price = NULL, "
+            "resolved_tp1_target_qty = NULL, remaining_position_qty = NULL, "
+            "state = 'bound' WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    )
+    snapshot = _restart_recovery_snapshot(pg_control_connection, ticket_id)
+    orders = list(
+        pg_control_connection.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_exit_protection_orders "
+                "WHERE ticket_id = :ticket_id AND status IN ('submitted', 'open')"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings()
+    )
+    snapshot["open_orders"] = [
+        {
+            "exchange_order_id": row["exchange_order_id"],
+            "side": row["side"],
+            "reduce_only": bool(row["reduce_only"]),
+            "qty": str(row["qty"]),
+            "price": str(row["price"] or ""),
+            "trigger_price": str(row["trigger_price"] or ""),
+            "status": "open",
+        }
+        for row in orders
+    ]
+    snapshot["position"] = {
+        "qty": str(protection_set["entry_filled_qty"]),
+        "position_flat": False,
+        "complete": True,
+    }
+
+    payload = await run_ticket_bound_lifecycle_maintenance_scheduler(
+        pg_control_connection,
+        gateway=None,
+        allow_exchange_mutation=False,
+        fetch_exchange_snapshot=False,
+        provided_exchange_snapshots={
+            key: {
+                "status": "snapshot_ready",
+                "snapshot": snapshot,
+                "exchange_read_called": True,
+                "exchange_write_called": False,
+            }
+            for key in (
+                str(protection_set["exit_protection_set_id"]),
+                str(protection_set["protected_submit_attempt_id"]),
+            )
+        },
+        now_ms=NOW_MS + 30_000,
+    )
+
+    assert payload["runs"][0]["execution_binding"]["status"] == "execution_bound", (
+        payload["runs"][0]["execution_binding"]
+    )
+    assert payload["runs"][0]["execution_binding"]["exchange_write_called"] is False
+    assert payload["runs"][0]["exit_policy"]["status"] != (
+        "ticket_exit_policy_snapshot_invalid:ValidationError"
+    )
+    assert pg_control_connection.execute(
+        text(
+            "SELECT exit_execution_hash FROM brc_ticket_exit_policy_current "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).scalar_one()
 
 
 @pytest.mark.asyncio
@@ -202,7 +294,7 @@ async def test_scheduler_fetches_snapshot_and_prepares_durable_runner_commands(
         for run in payload["runs"]
         for action in run["actions"]
     ]
-    assert payload["status"] == "scheduler_complete"
+    assert payload["status"] == "scheduler_complete", payload["blockers"]
     assert payload["exchange_read_called"] is True
     assert payload["exchange_write_called"] is False
     assert (

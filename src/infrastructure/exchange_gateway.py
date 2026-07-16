@@ -1301,9 +1301,10 @@ class ExchangeGateway:
         ]
         if len(symbols) != 1:
             raise RuntimeError("ticket_lifecycle_market_rule_symbol_not_unique")
+        market = symbols[0]
         filters = {
             str(row.get("filterType") or ""): row
-            for row in symbols[0].get("filters", [])
+            for row in market.get("filters", [])
             if isinstance(row, dict)
         }
         price_tick = str(filters.get("PRICE_FILTER", {}).get("tickSize") or "")
@@ -1322,6 +1323,8 @@ class ExchangeGateway:
             raise RuntimeError("ticket_lifecycle_market_rule_invalid") from exc
         return {
             "exchange_market_id": market_id,
+            "quote_asset": str(market.get("quoteAsset") or "") or None,
+            "settle_asset": str(market.get("marginAsset") or "") or None,
             "price_tick": price_tick,
             "quantity_step": quantity_step,
             "min_notional": min_notional or None,

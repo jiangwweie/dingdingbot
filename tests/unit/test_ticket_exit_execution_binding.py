@@ -10,6 +10,7 @@ from src.application.action_time.ticket_exit_execution_binding import (
     TicketExitExecutionBindingError,
     bind_ticket_exit_execution_snapshot,
     build_ticket_exit_execution_snapshot,
+    recover_ticket_exit_execution_snapshot_from_exchange_truth,
 )
 from src.domain.ticket_exit_policy import TicketExitPolicySnapshot
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
@@ -17,6 +18,7 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
 )
 from tests.unit.test_ticket_exit_policy_binding import _policy_payload
+from tests.unit.test_ticket_exit_policy_service import _versioned_exit_fixture
 
 
 def _policy(*, side: str = "long") -> TicketExitPolicySnapshot:
@@ -210,3 +212,152 @@ def test_pg_execution_binding_is_immutable_and_idempotent(pg_control_connection)
             pg_control_connection,
             **{**values, "entry_avg_fill_price": Decimal("101")},
         )
+
+
+def _restart_recovery_snapshot(conn, ticket_id: str) -> dict:
+    lifecycle = dict(
+        conn.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_order_lifecycle_runs "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings().one()
+    )
+    ticket = dict(
+        conn.execute(
+            text(
+                "SELECT * FROM brc_action_time_tickets WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings().one()
+    )
+    instrument = dict(
+        conn.execute(
+            text(
+                "SELECT * FROM brc_exchange_instruments "
+                "WHERE exchange_instrument_id = :instrument_id"
+            ),
+            {"instrument_id": ticket["exchange_instrument_id"]},
+        ).mappings().one()
+    )
+    qty = Decimal(str(lifecycle["entry_filled_qty"]))
+    avg_price = Decimal(str(lifecycle["entry_avg_price"]))
+    return {
+        "snapshot_id": "snapshot:restart-recovery",
+        "account_id": "owner-subaccount-runtime-v0",
+        "symbol": ticket["symbol"],
+        "exchange_instrument_id": ticket["exchange_instrument_id"],
+        "exchange_id": instrument["exchange_id"],
+        "recent_fills": [
+            {
+                "exchange_trade_id": "entry-trade-1",
+                "exchange_order_id": lifecycle["entry_exchange_order_id"],
+                "side": "buy",
+                "qty": str(qty),
+                "price": str(avg_price),
+                "fee": {"cost": "0.04", "currency": "USDT"},
+            }
+        ],
+        "commission_rate": {
+            "symbol": ticket["symbol"],
+            "maker_commission_rate": "0.0002",
+            "taker_commission_rate": "0.0005",
+        },
+        "market_rule": {
+            "exchange_instrument_id": ticket["exchange_instrument_id"],
+            "exchange_id": instrument["exchange_id"],
+            "exchange_market_id": ticket["symbol"],
+            "price_tick": "1",
+            "quantity_step": "0.001",
+            "min_notional": "5",
+            "quote_asset": "USDT",
+            "settle_asset": "USDT",
+            "source": "binance_usdm_public_exchange_info",
+        },
+        "exchange_read_called": True,
+        "exchange_write_called": False,
+    }
+
+
+def test_restart_recovery_binds_missing_execution_snapshot_idempotently(
+    pg_control_connection,
+):
+    ticket_id = _versioned_exit_fixture(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_exit_policy_current SET "
+            "exit_execution_snapshot = NULL, exit_execution_hash = NULL, "
+            "actual_r_per_unit = NULL, resolved_tp1_price = NULL, "
+            "resolved_tp1_target_qty = NULL, remaining_position_qty = NULL, "
+            "state = 'bound' WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    )
+    snapshot = _restart_recovery_snapshot(pg_control_connection, ticket_id)
+
+    first = recover_ticket_exit_execution_snapshot_from_exchange_truth(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 20_000,
+    )
+    second = recover_ticket_exit_execution_snapshot_from_exchange_truth(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 20_001,
+    )
+
+    assert first["status"] == "execution_bound"
+    assert first["pg_projection_mutated"] is True
+    assert first["exchange_write_called"] is False
+    assert second["status"] == "execution_binding_idempotent"
+    assert second["pg_projection_mutated"] is False
+    assert second["exit_execution_hash"] == first["exit_execution_hash"]
+    projection = dict(
+        pg_control_connection.execute(
+            text(
+                "SELECT * FROM brc_ticket_exit_policy_current "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings().one()
+    )
+    assert projection["remaining_position_qty"] is not None
+    assert projection["state"] == "execution_bound"
+
+
+def test_restart_recovery_fails_closed_when_entry_fee_truth_is_missing(
+    pg_control_connection,
+):
+    ticket_id = _versioned_exit_fixture(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_exit_policy_current SET "
+            "exit_execution_snapshot = NULL, exit_execution_hash = NULL, "
+            "state = 'bound' WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    )
+    snapshot = _restart_recovery_snapshot(pg_control_connection, ticket_id)
+    snapshot["recent_fills"][0]["fee"] = None
+
+    result = recover_ticket_exit_execution_snapshot_from_exchange_truth(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 20_000,
+    )
+
+    assert result["status"] == "execution_recovery_blocked"
+    assert result["first_blocker"] == "entry_fee_amount_missing"
+    assert result["pg_projection_mutated"] is False
+    assert result["exchange_write_called"] is False
+    assert pg_control_connection.execute(
+        text(
+            "SELECT exit_execution_hash FROM brc_ticket_exit_policy_current "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    ).scalar_one() is None

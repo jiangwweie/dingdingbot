@@ -29,6 +29,9 @@ from src.application.action_time.ticket_bound_lifecycle_finalizer import (
 from src.application.action_time.ticket_exit_policy_service import (
     maintain_ticket_exit_policy_in_transaction,
 )
+from src.application.action_time.ticket_exit_execution_binding import (
+    recover_ticket_exit_execution_snapshot_from_exchange_truth,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -182,6 +185,13 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             now_ms=now_ms + index + 100,
         )
         blockers.extend(_result_blockers(maintenance))
+        execution_binding = recover_ticket_exit_execution_snapshot_from_exchange_truth(
+            conn,
+            ticket_id=str(scope.get("ticket_id") or ""),
+            exchange_snapshot=exchange_snapshot,
+            now_ms=now_ms + index + 102,
+        )
+        blockers.extend(_result_blockers(execution_binding))
         exit_policy = maintain_ticket_exit_policy_in_transaction(
             conn,
             ticket_id=str(scope.get("ticket_id") or ""),
@@ -209,6 +219,7 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
                 "first_tick": _summary(tick),
                 "fill_projection": _summary(fill_projection),
                 "maintenance": _summary(maintenance),
+                "execution_binding": _summary(execution_binding),
                 "exit_policy": _summary(exit_policy),
                 "finalization": _summary(finalization),
                 "actions": list(maintenance.get("actions") or []),
@@ -315,6 +326,22 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             )
         )
         blockers.extend(_result_blockers(maintenance))
+        execution_binding = (
+            {
+                "status": "closed_fact_repair_only",
+                "blockers": [],
+                "exchange_read_called": False,
+                "exchange_write_called": False,
+            }
+            if closed_fact_repair
+            else recover_ticket_exit_execution_snapshot_from_exchange_truth(
+                conn,
+                ticket_id=str(scope.get("ticket_id") or ""),
+                exchange_snapshot=exchange_snapshot,
+                now_ms=now_ms + index + 102,
+            )
+        )
+        blockers.extend(_result_blockers(execution_binding))
         exit_policy = (
             {
                 "status": "closed_fact_repair_only",
@@ -386,6 +413,7 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
                 "scheduled_tick": _summary(scheduled_tick),
                 "fill_projection": _summary(fill_projection),
                 "maintenance": _summary(maintenance),
+                "execution_binding": _summary(execution_binding),
                 "exit_policy": _summary(exit_policy),
                 "post_recovery_snapshot": _summary(post_recovery_snapshot_payload),
                 "recovery_check_tick": _summary(recovery_check_tick),

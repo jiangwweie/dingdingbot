@@ -264,6 +264,8 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
                     {
                         "symbol": "ETHUSDT",
                         "status": "TRADING",
+                        "quoteAsset": "USDT",
+                        "marginAsset": "USDT",
                         "filters": [
                             {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
                             {"filterType": "LOT_SIZE", "stepSize": "0.001"},
@@ -318,6 +320,8 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
     }
     assert snapshot["market_rule"] == {
         "exchange_market_id": "ETHUSDT",
+        "quote_asset": "USDT",
+        "settle_asset": "USDT",
         "price_tick": "0.1",
         "quantity_step": "0.001",
         "min_notional": "5",

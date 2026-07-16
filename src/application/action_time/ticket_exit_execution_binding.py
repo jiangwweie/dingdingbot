@@ -12,6 +12,10 @@ from src.application.action_time.ticket_exit_policy_binding import (
     initialize_ticket_exit_policy_projection,
     resolve_effective_ticket_exit_policy_binding,
 )
+from src.application.action_time.ticket_instrument_rule import (
+    TicketInstrumentRuleError,
+    resolve_ticket_instrument_rule,
+)
 from src.domain.ticket_exit_policy import (
     TicketExitExecutionSnapshot,
     TicketExitPolicySnapshot,
@@ -20,6 +24,185 @@ from src.domain.ticket_exit_policy import (
 
 class TicketExitExecutionBindingError(ValueError):
     """Raised when immutable fill-derived exit truth cannot be proved."""
+
+
+def recover_ticket_exit_execution_snapshot_from_exchange_truth(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    exchange_snapshot: dict[str, Any] | None,
+    now_ms: int,
+) -> dict[str, Any]:
+    """Recover missing runner truth from durable Ticket state and exchange reads.
+
+    This is a restart/deploy recovery boundary.  It may update only the current
+    PG exit-policy projection and never calls an exchange gateway.
+    """
+
+    normalized_ticket_id = str(ticket_id or "").strip()
+    base = {
+        "ticket_id": normalized_ticket_id or None,
+        "exchange_read_called": False,
+        "exchange_write_called": False,
+        "pg_projection_mutated": False,
+    }
+    if not normalized_ticket_id:
+        return _recovery_blocked(base, "ticket_id_required")
+    try:
+        ticket = _required_row(
+            conn,
+            "brc_action_time_tickets",
+            "ticket_id",
+            normalized_ticket_id,
+            "action_time_ticket_missing",
+        )
+        if not _mapping(ticket.get("exit_policy_snapshot")) or not str(
+            ticket.get("exit_policy_hash") or ""
+        ).strip():
+            return {
+                **base,
+                "status": "execution_recovery_not_applicable",
+                "first_blocker": None,
+                "blockers": [],
+            }
+        capability = _optional_row(
+            conn,
+            "brc_runtime_capabilities_current",
+            "capability_id",
+            "ticket_exit_policy_v1",
+        )
+        if str((capability or {}).get("status") or "") != "enabled":
+            return {
+                **base,
+                "status": "execution_recovery_capability_disabled",
+                "first_blocker": None,
+                "blockers": [],
+            }
+
+        projection = _optional_row(
+            conn,
+            "brc_ticket_exit_policy_current",
+            "ticket_id",
+            normalized_ticket_id,
+        )
+        existing_hash = str((projection or {}).get("exit_execution_hash") or "")
+        existing_snapshot = _mapping(
+            (projection or {}).get("exit_execution_snapshot")
+        )
+        if existing_hash:
+            validated = TicketExitExecutionSnapshot.model_validate(existing_snapshot)
+            if validated.payload_hash != existing_hash:
+                raise TicketExitExecutionBindingError(
+                    "ticket_exit_execution_projection_contradiction"
+                )
+            return {
+                **base,
+                "status": "execution_binding_idempotent",
+                "first_blocker": None,
+                "blockers": [],
+                "exit_execution_hash": existing_hash,
+            }
+
+        snapshot = dict(exchange_snapshot or {})
+        if not snapshot:
+            raise TicketExitExecutionBindingError("exchange_snapshot_missing")
+        base["exchange_read_called"] = snapshot.get("exchange_read_called") is True
+        _require_snapshot_identity(ticket=ticket, snapshot=snapshot)
+
+        lifecycle = _required_row(
+            conn,
+            "brc_ticket_bound_order_lifecycle_runs",
+            "ticket_id",
+            normalized_ticket_id,
+            "ticket_order_lifecycle_missing",
+        )
+        if lifecycle.get("entry_fill_confirmed") not in {True, 1}:
+            raise TicketExitExecutionBindingError("entry_fill_not_confirmed")
+        entry_order_id = str(lifecycle.get("entry_exchange_order_id") or "").strip()
+        if not entry_order_id:
+            raise TicketExitExecutionBindingError("entry_exchange_order_id_missing")
+
+        instrument = _required_row(
+            conn,
+            "brc_exchange_instruments",
+            "exchange_instrument_id",
+            str(ticket.get("exchange_instrument_id") or ""),
+            "exchange_instrument_missing",
+        )
+        rule = resolve_ticket_instrument_rule(
+            instrument=instrument,
+            exchange_snapshot=snapshot,
+        )
+        entry_execution = _aggregate_entry_fills(
+            snapshot.get("recent_fills"),
+            entry_exchange_order_id=entry_order_id,
+        )
+        durable_qty = _required_decimal(
+            lifecycle.get("entry_filled_qty"), "entry_filled_qty_missing"
+        )
+        durable_avg = _required_decimal(
+            lifecycle.get("entry_avg_price"), "entry_avg_price_missing"
+        )
+        if entry_execution["qty"] != durable_qty:
+            raise TicketExitExecutionBindingError(
+                "entry_fill_quantity_contradicts_lifecycle"
+            )
+        if abs(entry_execution["avg_price"] - durable_avg) > rule.price_tick:
+            raise TicketExitExecutionBindingError(
+                "entry_fill_average_contradicts_lifecycle"
+            )
+
+        stop_order = _initial_stop_order(conn, normalized_ticket_id)
+        initial_stop_price = _required_decimal(
+            stop_order.get("trigger_price"), "initial_stop_price_missing"
+        )
+        commission_rate = _mapping(snapshot.get("commission_rate"))
+        if str(commission_rate.get("symbol") or "") != str(ticket.get("symbol") or ""):
+            raise TicketExitExecutionBindingError("commission_rate_symbol_mismatch")
+        taker_rate = _required_decimal(
+            commission_rate.get("taker_commission_rate"),
+            "certified_exit_taker_fee_rate_missing",
+            allow_zero=True,
+        )
+        market_rule = _mapping(snapshot.get("market_rule"))
+        quote_asset = str(market_rule.get("quote_asset") or "").strip().upper()
+        if not quote_asset:
+            raise TicketExitExecutionBindingError("quote_asset_identity_missing")
+
+        result = bind_ticket_exit_execution_snapshot(
+            conn,
+            ticket_id=normalized_ticket_id,
+            side=str(ticket.get("side") or ""),
+            entry_avg_fill_price=entry_execution["avg_price"],
+            entry_filled_qty=entry_execution["qty"],
+            initial_stop_price=initial_stop_price,
+            minimum_price_tick=rule.price_tick,
+            quantity_step=rule.quantity_step,
+            entry_fee_amount=entry_execution["fee_amount"],
+            entry_fee_asset=entry_execution["fee_asset"],
+            quote_asset=quote_asset,
+            fee_asset_quote_conversion_rate=(
+                _optional_decimal(snapshot.get("fee_asset_quote_conversion_rate"))
+            ),
+            certified_exit_taker_fee_rate=taker_rate,
+            now_ms=int(now_ms),
+        )
+        return {
+            **base,
+            **result,
+            "first_blocker": None,
+            "blockers": [],
+            "pg_projection_mutated": result.get("status") == "execution_bound",
+            "exchange_write_called": False,
+        }
+    except Exception as exc:
+        if isinstance(exc, TicketExitExecutionBindingError):
+            blocker = str(exc)
+        elif isinstance(exc, TicketInstrumentRuleError):
+            blocker = f"ticket_instrument_rule_invalid:{exc}"
+        else:
+            blocker = f"ticket_exit_execution_recovery_invalid:{type(exc).__name__}"
+        return _recovery_blocked(base, blocker)
 
 
 def build_ticket_exit_execution_snapshot(
@@ -239,6 +422,144 @@ def bind_ticket_exit_execution_snapshot(
         "ticket_id": str(ticket_id),
         "exit_execution_hash": snapshot.payload_hash,
         "snapshot": snapshot.model_dump(mode="json"),
+    }
+
+
+def _require_snapshot_identity(
+    *, ticket: dict[str, Any], snapshot: dict[str, Any]
+) -> None:
+    expected = {
+        "symbol": str(ticket.get("symbol") or ""),
+        "exchange_instrument_id": str(ticket.get("exchange_instrument_id") or ""),
+    }
+    for key, value in expected.items():
+        if not value or str(snapshot.get(key) or "") != value:
+            raise TicketExitExecutionBindingError(f"exchange_snapshot_{key}_mismatch")
+    if snapshot.get("exchange_write_called") is True:
+        raise TicketExitExecutionBindingError("exchange_snapshot_write_boundary_invalid")
+
+
+def _aggregate_entry_fills(
+    value: Any,
+    *,
+    entry_exchange_order_id: str,
+) -> dict[str, Any]:
+    fills = [
+        dict(item)
+        for item in (value or [])
+        if isinstance(item, dict)
+        and str(item.get("exchange_order_id") or "") == entry_exchange_order_id
+    ]
+    if not fills:
+        raise TicketExitExecutionBindingError("entry_exchange_fills_missing")
+    total_qty = Decimal("0")
+    total_notional = Decimal("0")
+    total_fee = Decimal("0")
+    fee_asset = ""
+    for fill in fills:
+        qty = _required_decimal(fill.get("qty"), "entry_fill_qty_invalid")
+        price = _required_decimal(fill.get("price"), "entry_fill_price_invalid")
+        fee = _mapping(fill.get("fee"))
+        fee_amount = _required_decimal(
+            fee.get("cost"), "entry_fee_amount_missing", allow_zero=True
+        )
+        current_fee_asset = str(fee.get("currency") or "").strip().upper()
+        if not current_fee_asset:
+            raise TicketExitExecutionBindingError("entry_fee_asset_identity_missing")
+        if fee_asset and current_fee_asset != fee_asset:
+            raise TicketExitExecutionBindingError("entry_fee_asset_not_unique")
+        fee_asset = current_fee_asset
+        total_qty += qty
+        total_notional += qty * price
+        total_fee += fee_amount
+    if total_qty <= 0:
+        raise TicketExitExecutionBindingError("entry_filled_qty_missing")
+    return {
+        "qty": total_qty,
+        "avg_price": total_notional / total_qty,
+        "fee_amount": total_fee,
+        "fee_asset": fee_asset,
+    }
+
+
+def _initial_stop_order(
+    conn: sa.engine.Connection, ticket_id: str
+) -> dict[str, Any]:
+    orders = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    order_by = []
+    if "generation" in orders.c:
+        order_by.append(orders.c.generation.asc())
+    order_by.append(orders.c.created_at_ms.asc())
+    row = conn.execute(
+        sa.select(orders)
+        .where(orders.c.ticket_id == ticket_id)
+        .where(orders.c.role == "SL")
+        .order_by(*order_by)
+        .limit(1)
+    ).mappings().first()
+    if row is None:
+        raise TicketExitExecutionBindingError("initial_stop_order_missing")
+    return dict(row)
+
+
+def _required_decimal(
+    value: Any,
+    blocker: str,
+    *,
+    allow_zero: bool = False,
+) -> Decimal:
+    try:
+        result = Decimal(str(value))
+    except Exception as exc:
+        raise TicketExitExecutionBindingError(blocker) from exc
+    if not result.is_finite() or result < 0 or (result == 0 and not allow_zero):
+        raise TicketExitExecutionBindingError(blocker)
+    return result
+
+
+def _optional_decimal(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    return _required_decimal(value, "fee_asset_quote_conversion_invalid")
+
+
+def _required_row(
+    conn: sa.engine.Connection,
+    table_name: str,
+    id_column: str,
+    id_value: str,
+    blocker: str,
+) -> dict[str, Any]:
+    row = _optional_row(conn, table_name, id_column, id_value)
+    if row is None:
+        raise TicketExitExecutionBindingError(blocker)
+    return row
+
+
+def _optional_row(
+    conn: sa.engine.Connection,
+    table_name: str,
+    id_column: str,
+    id_value: str,
+) -> dict[str, Any] | None:
+    if not sa.inspect(conn).has_table(table_name):
+        return None
+    table = _table(conn, table_name)
+    row = conn.execute(
+        sa.select(table).where(table.c[id_column] == id_value)
+    ).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def _recovery_blocked(base: dict[str, Any], blocker: str) -> dict[str, Any]:
+    normalized = str(blocker or "ticket_exit_execution_recovery_unknown")
+    return {
+        **base,
+        "status": "execution_recovery_blocked",
+        "first_blocker": normalized,
+        "blockers": [normalized],
+        "exchange_write_called": False,
+        "pg_projection_mutated": False,
     }
 
 
