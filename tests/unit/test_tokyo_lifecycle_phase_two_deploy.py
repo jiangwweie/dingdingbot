@@ -127,6 +127,7 @@ def test_full_phase_builder_passes_runtime_venv_to_postdeploy_verifier(
     postdeploy_command = phase["commands"][2]
 
     assert f"--venv-python {venv_python}" in postdeploy_command
+    assert "--expected-lifecycle-mutation-state any" in postdeploy_command
 
 
 def test_remote_preflight_requires_explicit_runtime_gateway_identity(tmp_path):

@@ -2449,6 +2449,9 @@ def execute_deploy_transaction(
         "status": "tokyo_runtime_deploy_applied",
         "transaction_id": transaction_id,
         "target_runtime_head": target_sha,
+        "lifecycle_policy_enabled": bool(
+            activation_commit["lifecycle_policy_enabled"]
+        ),
         "terminal": terminal,
     }
 

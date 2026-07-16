@@ -642,7 +642,8 @@ def _plan_phases(
                     f"--expected-current-head {q(target_commit)} "
                     f"--expected-migration-count {target_migration_count} "
                     f"--expected-latest-migration {q(expected_latest_migration)} "
-                    f"--venv-python {q(venv_python)}"
+                    f"--venv-python {q(venv_python)} "
+                    "--expected-lifecycle-mutation-state any"
                 ),
             ],
             "stop_if": [

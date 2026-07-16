@@ -227,6 +227,7 @@ def execute_git_deploy_plan(
     command_results: list[dict[str, Any]] = []
     mutation_started = False
     transaction_identity: dict[str, str] | None = None
+    resolved_lifecycle_mutation_state: str | None = None
     for phase in plan.get("plan_phases", []):
         if phase.get("remote_mutation") and not _remote_mutation_phase_authorized(
             phase,
@@ -308,6 +309,9 @@ def execute_git_deploy_plan(
                     confirmation_phrase_matches=confirmation_phrase_matches,
                     writers_left_disabled=writers_left_disabled,
                 )
+            resolved_lifecycle_mutation_state = (
+                _remote_lifecycle_mutation_state(result.stdout)
+            )
             continue
         for command in phase.get("commands") or []:
             if (
@@ -327,6 +331,15 @@ def execute_git_deploy_plan(
                     }
                 )
                 continue
+            if (
+                resolved_lifecycle_mutation_state is not None
+                and "verify_tokyo_runtime_governance_postdeploy.py" in str(command)
+            ):
+                command = str(command).replace(
+                    "--expected-lifecycle-mutation-state any",
+                    "--expected-lifecycle-mutation-state "
+                    + resolved_lifecycle_mutation_state,
+                )
             mutation_started = mutation_started or bool(phase.get("remote_mutation"))
             result = command_runner(str(command))
             command_results.append(
@@ -379,6 +392,22 @@ def execute_git_deploy_plan(
         confirmation_phrase_required=require_confirmation_phrase,
         confirmation_phrase_matches=confirmation_phrase_matches,
     )
+
+
+def _remote_lifecycle_mutation_state(stdout: str) -> str | None:
+    """Read the terminal capability state emitted by the remote state machine."""
+
+    for line in reversed(str(stdout or "").splitlines()):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        enabled = payload.get("lifecycle_policy_enabled")
+        if isinstance(enabled, bool):
+            return "enabled" if enabled else "disabled"
+    return None
 
 
 def _remote_mutation_phase_authorized(

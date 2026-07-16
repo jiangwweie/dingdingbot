@@ -206,6 +206,65 @@ def test_executor_resumes_exact_transaction_identity(tmp_path):
     assert "--deploy-nonce resume-nonce" in calls[0]
 
 
+def test_executor_binds_postdeploy_lifecycle_expectation_from_remote_activation(
+    tmp_path,
+):
+    script = tmp_path / "scripts/tokyo_runtime_deploy_remote_state_machine.py"
+    script.parent.mkdir()
+    script.write_text("print('bootstrap')\n", encoding="utf-8")
+    calls: list[str] = []
+
+    def runner(command: str) -> ShellResult:
+        calls.append(command)
+        if "systemd-run" in command:
+            return ShellResult(
+                command,
+                '{"status":"tokyo_runtime_deploy_applied",'
+                '"lifecycle_policy_enabled":true}',
+                "",
+                0,
+            )
+        return ShellResult(command, '{"status":"postdeploy_acceptance_passed"}', "", 0)
+
+    plan = {
+        "repo_root": str(tmp_path),
+        "checks": {"blockers": []},
+        "inputs": {
+            "host": "tokyo",
+            "target_commit": "a" * 40,
+            "expected_deployed_head": "b" * 40,
+        },
+        "release": {"head": "a" * 40},
+        "plan_phases": [
+            {
+                "phase": "2_single_remote_deploy_transaction",
+                "remote_mutation": True,
+                "remote_state_machine": True,
+                "remote_mutation_authorization": OWNER_STANDING_AUTHORIZATION_REFERENCE,
+            },
+            {
+                "phase": "3_postdeploy_readonly_acceptance",
+                "remote_mutation": False,
+                "commands": [
+                    "python3 scripts/verify_tokyo_runtime_governance_postdeploy.py "
+                    "--expected-lifecycle-mutation-state any"
+                ],
+            },
+        ],
+    }
+
+    report = execute_git_deploy_plan(
+        plan,
+        apply=True,
+        confirmation_phrase=None,
+        runner=runner,
+    )
+
+    assert report["status"] == "applied"
+    assert "--expected-lifecycle-mutation-state enabled" in calls[1]
+    assert "--expected-lifecycle-mutation-state any" not in calls[1]
+
+
 def test_executor_resume_skips_only_old_runtime_health_probe(tmp_path):
     script = tmp_path / "scripts/tokyo_runtime_deploy_remote_state_machine.py"
     script.parent.mkdir()

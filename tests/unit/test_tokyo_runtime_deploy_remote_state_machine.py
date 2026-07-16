@@ -1079,6 +1079,8 @@ def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
     journal = machine.DeployJournal.load(journal_path)
     assert first["status"] == "tokyo_runtime_deploy_applied"
     assert second["status"] == "tokyo_runtime_deploy_applied"
+    assert first["lifecycle_policy_enabled"] is True
+    assert second["lifecycle_policy_enabled"] is True
     assert [entry["phase"] for entry in journal.entries] == list(machine.DEPLOY_PHASES)
     assert calls == ["stage"]
 
