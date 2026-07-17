@@ -753,6 +753,7 @@ def _trusted_fact_refs(
     return {
         "ticket_id": ticket.get("ticket_id"),
         "ticket_hash": ticket.get("ticket_hash"),
+        "ticket_hash_schema_version": ticket.get("ticket_hash_schema_version"),
         "finalgate_pass_id": finalgate_pass_id or handoff.get("finalgate_pass_id"),
         "operation_layer_handoff_id": handoff.get("operation_layer_handoff_id"),
         "operation_submit_command_id": handoff.get("operation_submit_command_id"),

@@ -381,6 +381,7 @@ def test_runtime_safety_submit_authority_requires_v2_capacity_fact_pair() -> Non
     refs = {
         "ticket_id": "ticket-1",
         "ticket_hash": "hash-1",
+        "ticket_hash_schema_version": "action_time_ticket_hash.v2",
         "finalgate_pass_id": "pass-1",
         "operation_layer_handoff_id": "handoff-1",
         "operation_submit_command_id": "command-1",

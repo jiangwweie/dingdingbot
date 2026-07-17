@@ -2832,6 +2832,7 @@ def runtime_safety_submit_authorized(row: dict[str, Any]) -> bool:
     required_ref_keys = (
         "ticket_id",
         "ticket_hash",
+        "ticket_hash_schema_version",
         "finalgate_pass_id",
         "operation_layer_handoff_id",
         "operation_submit_command_id",
@@ -2857,6 +2858,7 @@ def runtime_safety_submit_authorized(row: dict[str, Any]) -> bool:
         and row.get("facts_fresh") is True
         and row.get("trusted_fact_refs_complete") is True
         and trusted_refs_concrete
+        and trusted_refs.get("ticket_hash_schema_version") == "action_time_ticket_hash.v2"
         and blockers_clear
         and row.get("execution_eligible") is True
         and row.get("signal_grade")
