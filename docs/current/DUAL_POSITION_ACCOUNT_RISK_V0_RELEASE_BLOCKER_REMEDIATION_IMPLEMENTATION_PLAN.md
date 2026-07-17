@@ -1271,7 +1271,7 @@ is authorized.
    - `tests/unit/test_account_exposure_current.py`;
    - `tests/unit/test_account_capacity_reservation.py`;
    - `tests/unit/test_account_capacity_finalgate_guard.py`;
-   - new `tests/unit/test_instrument_risk_calculation_migration.py`.
+   - `tests/integration/test_instrument_risk_calculation_postgres.py`.
 2. Run focused RED:
 
    ```bash
@@ -1284,7 +1284,7 @@ is authorized.
      tests/unit/test_account_exposure_current.py \
      tests/unit/test_account_capacity_reservation.py \
      tests/unit/test_account_capacity_finalgate_guard.py \
-     tests/unit/test_instrument_risk_calculation_migration.py
+     tests/integration/test_instrument_risk_calculation_postgres.py
    ```
 
 3. Required compatibility and migration tests include:
@@ -1631,7 +1631,7 @@ Run in this exact order and stop at the first failure:
      tests/unit/test_account_risk_policy_migration.py \
      tests/unit/test_asset_neutral_account_risk_migrations.py \
      tests/unit/test_ticket_exit_policy_adoption_migration.py \
-     tests/unit/test_instrument_risk_calculation_migration.py \
+     tests/integration/test_instrument_risk_calculation_postgres.py \
      tests/integration/test_asset_neutral_account_risk_migration_scale.py
 
    python3 -m pytest -q -ra -p tests.fail_on_skip_plugin \
