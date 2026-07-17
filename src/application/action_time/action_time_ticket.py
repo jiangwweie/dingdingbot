@@ -811,7 +811,13 @@ def _build_ticket_bundle(
             raise TicketMaterializationBlocked([exc.blocker]) from exc
         except RuntimeLaneIdentityMismatch as exc:
             raise TicketMaterializationBlocked([str(exc)]) from exc
-    ticket["ticket_hash_schema_version"] = TICKET_HASH_SCHEMA_V2
+    ticket_table = sa.Table(
+        "brc_action_time_tickets",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    if "ticket_hash_schema_version" in ticket_table.c:
+        ticket["ticket_hash_schema_version"] = TICKET_HASH_SCHEMA_V2
     ticket["ticket_hash"] = compute_action_time_ticket_hash(ticket)
     ticket_event = {
         "ticket_event_id": _stable_id("ticket_event", ticket_id, "created"),
