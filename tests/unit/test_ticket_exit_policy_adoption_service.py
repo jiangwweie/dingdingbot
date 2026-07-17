@@ -15,6 +15,7 @@ from src.application.action_time.ticket_exit_policy_adoption_service import (
     TicketExitPolicyAdoptionError,
     apply_ticket_exit_policy_adoption,
     evaluate_ticket_exit_policy_adoption_eligibility,
+    revoke_ticket_exit_policy_adoption,
 )
 from src.application.action_time.ticket_exit_policy_binding import (
     resolve_effective_ticket_exit_policy_binding,
@@ -146,6 +147,7 @@ def adoption_conn():
     metadata.create_all(engine)
     with engine.begin() as conn:
         _apply_migration_125(conn)
+        _apply_migration_135(conn)
         _seed(conn)
         yield conn
     engine.dispose()
@@ -251,9 +253,94 @@ def test_apply_rejects_stale_digest_and_blocked_snapshot_writes_nothing(adoption
     ).scalar_one() == 0
 
 
+def test_accept_revoke_accept_serializes_one_effective_adoption(adoption_conn):
+    eligibility_a = evaluate_ticket_exit_policy_adoption_eligibility(
+        adoption_conn,
+        ticket_id=TICKET_ID,
+        exchange_snapshot=_exchange_snapshot(),
+        owner_authorization_ref="owner:approved",
+        runtime_head="c" * 40,
+        now_ms=NOW_MS,
+    )
+    accepted_a = apply_ticket_exit_policy_adoption(
+        adoption_conn,
+        eligibility=eligibility_a,
+        expected_eligibility_hash=eligibility_a.eligibility_hash,
+        now_ms=NOW_MS + 1,
+    )
+    revoked = revoke_ticket_exit_policy_adoption(
+        adoption_conn,
+        ticket_id=TICKET_ID,
+        adoption_event_id=accepted_a["adoption_event_id"],
+        expected_adoption_projection_version=1,
+        now_ms=NOW_MS + 2,
+    )
+    current = adoption_conn.execute(
+        sa.text("SELECT * FROM brc_ticket_exit_policy_current WHERE ticket_id=:id"),
+        {"id": TICKET_ID},
+    ).mappings().one()
+    assert revoked["status"] == "adoption_revoked"
+    assert current["adoption_state"] == "revoked"
+    assert current["mutation_allowed"] in {False, 0}
+    assert current["adoption_projection_version"] == 2
+    revoked_binding = resolve_effective_ticket_exit_policy_binding(
+        adoption_conn,
+        ticket_id=TICKET_ID,
+        now_ms=NOW_MS + 2,
+    )
+    assert revoked_binding.adoption_event_id == accepted_a["adoption_event_id"]
+    assert revoked_binding.mutation_allowed is False
+
+    eligibility_b = evaluate_ticket_exit_policy_adoption_eligibility(
+        adoption_conn,
+        ticket_id=TICKET_ID,
+        exchange_snapshot=_exchange_snapshot(),
+        owner_authorization_ref="owner:approved",
+        runtime_head="c" * 40,
+        now_ms=NOW_MS + 3,
+    )
+    accepted_b = apply_ticket_exit_policy_adoption(
+        adoption_conn,
+        eligibility=eligibility_b,
+        expected_eligibility_hash=eligibility_b.eligibility_hash,
+        now_ms=NOW_MS + 4,
+    )
+
+    rebound = adoption_conn.execute(
+        sa.text("SELECT * FROM brc_ticket_exit_policy_current WHERE ticket_id=:id"),
+        {"id": TICKET_ID},
+    ).mappings().one()
+    assert accepted_b["adoption_event_id"] != accepted_a["adoption_event_id"]
+    assert rebound["adoption_event_id"] == accepted_b["adoption_event_id"]
+    assert rebound["adoption_state"] == "accepted"
+    assert rebound["mutation_allowed"] in {True, 1}
+    assert rebound["adoption_projection_version"] == 3
+    assert adoption_conn.execute(
+        sa.text(
+            "SELECT count(*) FROM brc_ticket_exit_policy_adoption_events "
+            "WHERE ticket_id=:id AND decision='accepted'"
+        ),
+        {"id": TICKET_ID},
+    ).scalar_one() == 2
+
+
 def _apply_migration_125(conn) -> None:
     path = ROOT / "migrations/versions/2026-07-16-125_add_active_ticket_exit_policy_adoption.py"
     spec = importlib.util.spec_from_file_location("adoption_service_migration_125", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    old_op = module.op
+    module.op = Operations(MigrationContext.configure(conn))
+    try:
+        module.upgrade()
+    finally:
+        module.op = old_op
+
+
+def _apply_migration_135(conn) -> None:
+    path = ROOT / "migrations/versions/2026-07-17-135_repair_exit_policy_adoption_effective_uniqueness.py"
+    spec = importlib.util.spec_from_file_location("adoption_service_migration_135", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

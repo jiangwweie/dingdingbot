@@ -13,11 +13,26 @@ MIGRATION_PATH = (
     Path(__file__).resolve().parents[2]
     / "migrations/versions/2026-07-16-125_add_active_ticket_exit_policy_adoption.py"
 )
+MIGRATION_135_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "migrations/versions/2026-07-17-135_repair_exit_policy_adoption_effective_uniqueness.py"
+)
 
 
 def _load_migration():
     spec = importlib.util.spec_from_file_location(
         "migration_125_active_ticket_exit_policy_adoption", MIGRATION_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_migration_135():
+    spec = importlib.util.spec_from_file_location(
+        "migration_135_exit_policy_adoption_effective_uniqueness",
+        MIGRATION_135_PATH,
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -219,3 +234,117 @@ def test_migration_125_extends_command_source_and_blocks_unsafe_downgrade():
                 )
         finally:
             migration.op = previous_op
+
+
+def test_migration_135_replaces_lifetime_acceptance_with_current_adoption_state():
+    migration_125 = _load_migration()
+    migration_135 = _load_migration_135()
+    assert migration_135.revision == "135"
+    assert migration_135.down_revision == "134"
+
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    _base_schema(engine)
+    with engine.begin() as conn:
+        context = Operations(MigrationContext.configure(conn))
+        previous_125 = migration_125.op
+        previous_135 = migration_135.op
+        migration_125.op = context
+        migration_135.op = context
+        try:
+            migration_125.upgrade()
+            events = sa.Table(
+                "brc_ticket_exit_policy_adoption_events", sa.MetaData(), autoload_with=conn
+            )
+            current = sa.Table(
+                "brc_ticket_exit_policy_current", sa.MetaData(), autoload_with=conn
+            )
+            conn.execute(events.insert().values(**_event()))
+            conn.execute(
+                current.insert().values(
+                    ticket_id="ticket:one",
+                    exit_policy_id="policy:one",
+                    exit_policy_version="v1",
+                    exit_policy_hash="b" * 64,
+                    updated_at_ms=1,
+                    binding_source="adoption_event",
+                    adoption_event_id="adoption:one",
+                )
+            )
+
+            migration_135.upgrade()
+            current = sa.Table(
+                "brc_ticket_exit_policy_current", sa.MetaData(), autoload_with=conn
+            )
+            row = conn.execute(sa.select(current)).mappings().one()
+            assert row["adoption_state"] == "accepted"
+            assert row["mutation_allowed"] is True
+            assert row["adoption_projection_version"] == 1
+
+            conn.execute(
+                events.insert().values(
+                    **_event(
+                        adoption_event_id="revoke:one",
+                        decision="revoked",
+                        supersedes_adoption_event_id="adoption:one",
+                        eligibility_hash="e" * 64,
+                    )
+                )
+            )
+            conn.execute(
+                events.insert().values(
+                    **_event(
+                        adoption_event_id="adoption:two",
+                        eligibility_hash="f" * 64,
+                    )
+                )
+            )
+            with pytest.raises(RuntimeError, match="multiple_accepted"):
+                migration_135.downgrade()
+        finally:
+            migration_125.op = previous_125
+            migration_135.op = previous_135
+
+
+def test_migration_135_round_trips_legacy_compatible_history():
+    migration_125 = _load_migration()
+    migration_135 = _load_migration_135()
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    _base_schema(engine)
+    with engine.begin() as conn:
+        context = Operations(MigrationContext.configure(conn))
+        previous_125 = migration_125.op
+        previous_135 = migration_135.op
+        migration_125.op = context
+        migration_135.op = context
+        try:
+            migration_125.upgrade()
+            migration_135.upgrade()
+            migration_135.downgrade()
+            events = sa.Table(
+                "brc_ticket_exit_policy_adoption_events", sa.MetaData(), autoload_with=conn
+            )
+            conn.execute(events.insert().values(**_event()))
+            with pytest.raises(sa.exc.IntegrityError):
+                conn.execute(
+                    events.insert().values(
+                        **_event(
+                            adoption_event_id="adoption:two",
+                            eligibility_hash="f" * 64,
+                        )
+                    )
+                )
+            migration_135.upgrade()
+            current_columns = {
+                item["name"]
+                for item in sa.inspect(conn).get_columns(
+                    "brc_ticket_exit_policy_current"
+                )
+            }
+            assert {
+                "adoption_state",
+                "mutation_allowed",
+                "adoption_projection_version",
+            } <= current_columns
+        finally:
+            migration_125.op = previous_125
+            migration_135.op = previous_135

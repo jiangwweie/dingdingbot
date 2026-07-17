@@ -105,6 +105,12 @@ def maintain_ticket_exit_policy_in_transaction(
             blocker=str(loaded["blockers"][0]),
             now_ms=now_ms,
         )
+    if loaded.get("mutation_allowed") is False:
+        return _result(
+            "exit_policy_adoption_revoked",
+            normalized_ticket_id,
+            blockers=["ticket_exit_policy_adoption_revoked"],
+        )
     projection = loaded["projection"]
     policy = loaded["policy"]
     execution = loaded["execution"]
@@ -495,6 +501,7 @@ def _load_state(
         "instrument_rule": instrument_rule,
         "lifecycle": lifecycle,
         "attempt": attempt,
+        "mutation_allowed": binding.mutation_allowed,
         "blockers": [],
     }
 

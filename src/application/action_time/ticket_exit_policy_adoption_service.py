@@ -293,27 +293,34 @@ def apply_ticket_exit_policy_adoption(
         raise TicketExitPolicyAdoptionError("adoption_eligibility_hash_mismatch")
     snapshot = eligibility.snapshot
     events = _table(conn, "brc_ticket_exit_policy_adoption_events")
+    projection = _table(conn, "brc_ticket_exit_policy_current")
     event_id = _adoption_event_id(snapshot.ticket_id, actual_hash)
+    ticket = _lock_ticket(conn, ticket_id=snapshot.ticket_id)
+    if not ticket or (
+        str(ticket.get("exit_policy_hash") or "")
+        != snapshot.ticket_exit_policy_hash
+    ):
+        raise TicketExitPolicyAdoptionError("adoption_ticket_cas_changed")
     existing_events = list(
         conn.execute(
             sa.select(events).where(events.c.ticket_id == snapshot.ticket_id)
         ).mappings()
     )
-    if existing_events:
-        if len(existing_events) == 1 and (
-            str(existing_events[0].get("adoption_event_id") or "") == event_id
-            and str(existing_events[0].get("eligibility_hash") or "") == actual_hash
-            and str(existing_events[0].get("decision") or "") == "accepted"
+    effective = _effective_accepted_events(existing_events)
+    if effective:
+        active = effective[0]
+        if (
+            str(active.get("adoption_event_id") or "") == event_id
+            and str(active.get("eligibility_hash") or "") == actual_hash
         ):
-            projection = _table(conn, "brc_ticket_exit_policy_current")
             projected = conn.execute(
                 sa.select(projection).where(
                     projection.c.ticket_id == snapshot.ticket_id,
                     projection.c.adoption_event_id == event_id,
                     projection.c.exit_policy_hash == snapshot.to_exit_policy_hash,
                 )
-            ).first()
-            if projected is None:
+            ).mappings().first()
+            if projected is None or not _projection_mutation_allowed(dict(projected)):
                 raise TicketExitPolicyAdoptionError(
                     "adoption_idempotent_projection_missing"
                 )
@@ -323,16 +330,7 @@ def apply_ticket_exit_policy_adoption(
                 "adoption_event_id": event_id,
                 "exchange_write_called": False,
             }
-        raise TicketExitPolicyAdoptionError("adoption_conflicting_existing_event")
-
-    ticket = _one_by_id(
-        conn, "brc_action_time_tickets", "ticket_id", snapshot.ticket_id
-    )
-    if not ticket or (
-        str(ticket.get("exit_policy_hash") or "")
-        != snapshot.ticket_exit_policy_hash
-    ):
-        raise TicketExitPolicyAdoptionError("adoption_ticket_cas_changed")
+        raise TicketExitPolicyAdoptionError("adoption_effective_acceptance_exists")
     policies = _table(conn, "brc_strategy_exit_policies")
     policy_row = conn.execute(
         sa.select(policies).where(
@@ -391,12 +389,9 @@ def apply_ticket_exit_policy_adoption(
             created_at_ms=int(now_ms),
         )
     )
-    projection = _table(conn, "brc_ticket_exit_policy_current")
     existing_projection = conn.execute(
         sa.select(projection).where(projection.c.ticket_id == snapshot.ticket_id)
     ).mappings().first()
-    if existing_projection is not None:
-        raise TicketExitPolicyAdoptionError("adoption_projection_already_exists")
     protection_orders = _table(conn, "brc_ticket_bound_exit_protection_orders")
     active_sl = conn.execute(
         sa.select(protection_orders).where(
@@ -423,6 +418,13 @@ def apply_ticket_exit_policy_adoption(
         "first_blocker": first_blocker,
         "binding_source": "adoption_event",
         "adoption_event_id": event_id,
+        "adoption_state": "accepted",
+        "mutation_allowed": True,
+        "adoption_projection_version": (
+            _projection_version(existing_projection) + 1
+            if existing_projection is not None
+            else 1
+        ),
         "updated_at_ms": int(now_ms),
     }
     if active_sl is not None:
@@ -440,7 +442,28 @@ def apply_ticket_exit_policy_adoption(
         for key, value in projection_values.items()
         if key in projection.c
     }
-    conn.execute(projection.insert().values(**supported_values))
+    if existing_projection is None:
+        conn.execute(projection.insert().values(**supported_values))
+    else:
+        expected_event_id = str(existing_projection.get("adoption_event_id") or "")
+        expected_version = _projection_version(existing_projection)
+        if not expected_event_id or not _projection_is_revoked(dict(existing_projection)):
+            raise TicketExitPolicyAdoptionError("adoption_projection_replace_not_revoked")
+        predicate = [
+            projection.c.ticket_id == snapshot.ticket_id,
+            projection.c.adoption_event_id == expected_event_id,
+        ]
+        if "adoption_state" in projection.c:
+            predicate.append(projection.c.adoption_state == "revoked")
+        if "adoption_projection_version" in projection.c:
+            predicate.append(
+                projection.c.adoption_projection_version == expected_version
+            )
+        result = conn.execute(
+            projection.update().where(*predicate).values(**supported_values)
+        )
+        if result.rowcount != 1:
+            raise TicketExitPolicyAdoptionError("adoption_projection_cas_changed")
     return {
         "status": "adoption_applied",
         "ticket_id": snapshot.ticket_id,
@@ -449,6 +472,93 @@ def apply_ticket_exit_policy_adoption(
         "exit_execution_hash": execution.payload_hash,
         "state": projection_state,
         "first_blocker": first_blocker,
+        "exchange_write_called": False,
+    }
+
+
+def revoke_ticket_exit_policy_adoption(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    adoption_event_id: str,
+    expected_adoption_projection_version: int,
+    now_ms: int,
+) -> dict[str, Any]:
+    """Append one revoke event and CAS the adoption-owned current fields."""
+
+    normalized_ticket_id = str(ticket_id or "").strip()
+    normalized_event_id = str(adoption_event_id or "").strip()
+    if (
+        not normalized_ticket_id
+        or not normalized_event_id
+        or int(expected_adoption_projection_version) < 1
+        or int(now_ms) <= 0
+    ):
+        raise TicketExitPolicyAdoptionError("adoption_revoke_input_invalid")
+    _lock_ticket(conn, ticket_id=normalized_ticket_id)
+    events = _table(conn, "brc_ticket_exit_policy_adoption_events")
+    projection = _table(conn, "brc_ticket_exit_policy_current")
+    accepted = conn.execute(
+        sa.select(events).where(
+            events.c.ticket_id == normalized_ticket_id,
+            events.c.adoption_event_id == normalized_event_id,
+            events.c.decision == "accepted",
+        )
+    ).mappings().first()
+    if accepted is None:
+        raise TicketExitPolicyAdoptionError("adoption_revoke_target_invalid")
+    already_revoked = conn.execute(
+        sa.select(events.c.adoption_event_id).where(
+            events.c.ticket_id == normalized_ticket_id,
+            events.c.decision == "revoked",
+            events.c.supersedes_adoption_event_id == normalized_event_id,
+        )
+    ).first()
+    if already_revoked is not None:
+        raise TicketExitPolicyAdoptionError("adoption_revoke_already_effective")
+    revoke_id = _revoke_event_id(normalized_ticket_id, normalized_event_id, int(now_ms))
+    event_values = dict(accepted)
+    event_values.update(
+        {
+            "adoption_event_id": revoke_id,
+            "decision": "revoked",
+            "supersedes_adoption_event_id": normalized_event_id,
+            "created_at_ms": int(now_ms),
+        }
+    )
+    current = conn.execute(
+        sa.select(projection).where(projection.c.ticket_id == normalized_ticket_id)
+    ).mappings().first()
+    if current is None:
+        raise TicketExitPolicyAdoptionError("adoption_revoke_projection_missing")
+    predicate = [
+        projection.c.ticket_id == normalized_ticket_id,
+        projection.c.adoption_event_id == normalized_event_id,
+    ]
+    if "adoption_state" in projection.c:
+        predicate.append(projection.c.adoption_state == "accepted")
+    if "adoption_projection_version" in projection.c:
+        predicate.append(
+            projection.c.adoption_projection_version
+            == int(expected_adoption_projection_version)
+        )
+    values = {
+        "adoption_state": "revoked",
+        "mutation_allowed": False,
+        "adoption_projection_version": int(expected_adoption_projection_version) + 1,
+        "updated_at_ms": int(now_ms),
+    }
+    values = {key: value for key, value in values.items() if key in projection.c}
+    result = conn.execute(projection.update().where(*predicate).values(**values))
+    if result.rowcount != 1:
+        raise TicketExitPolicyAdoptionError("adoption_revoke_cas_changed")
+    conn.execute(events.insert().values(**event_values))
+    return {
+        "status": "adoption_revoked",
+        "ticket_id": normalized_ticket_id,
+        "adoption_event_id": normalized_event_id,
+        "revoke_event_id": revoke_id,
+        "adoption_projection_version": int(expected_adoption_projection_version) + 1,
         "exchange_write_called": False,
     }
 
@@ -504,6 +614,62 @@ def _required_decimal(value: Any, field: str) -> Decimal:
 def _adoption_event_id(ticket_id: str, eligibility_hash: str) -> str:
     digest = sha256(f"{ticket_id}|{eligibility_hash}".encode("utf-8")).hexdigest()
     return f"adoption:{digest}"
+
+
+def _revoke_event_id(ticket_id: str, adoption_event_id: str, now_ms: int) -> str:
+    digest = sha256(
+        f"revoke|{ticket_id}|{adoption_event_id}|{now_ms}".encode("utf-8")
+    ).hexdigest()
+    return f"revoke:{digest}"
+
+
+def _lock_ticket(conn: sa.engine.Connection, *, ticket_id: str) -> dict[str, Any]:
+    tickets = _table(conn, "brc_action_time_tickets")
+    row = conn.execute(
+        sa.select(tickets)
+        .where(tickets.c.ticket_id == ticket_id)
+        .with_for_update()
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _effective_accepted_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    revoked_ids = {
+        str(row.get("supersedes_adoption_event_id") or "")
+        for row in events
+        if str(row.get("decision") or "") == "revoked"
+    }
+    accepted = [
+        dict(row)
+        for row in events
+        if str(row.get("decision") or "") == "accepted"
+        and str(row.get("adoption_event_id") or "") not in revoked_ids
+    ]
+    if len(accepted) > 1:
+        raise TicketExitPolicyAdoptionError("adoption_effective_acceptance_ambiguous")
+    return accepted
+
+
+def _projection_version(row: Any) -> int:
+    if not isinstance(row, dict):
+        row = dict(row or {})
+    try:
+        value = int(row.get("adoption_projection_version") or 1)
+    except (TypeError, ValueError):
+        return 1
+    return value if value >= 1 else 1
+
+
+def _projection_is_revoked(row: dict[str, Any]) -> bool:
+    return str(row.get("adoption_state") or "") == "revoked" and (
+        row.get("mutation_allowed") in {False, 0}
+    )
+
+
+def _projection_mutation_allowed(row: dict[str, Any]) -> bool:
+    if "mutation_allowed" not in row:
+        return True
+    return row.get("mutation_allowed") in {True, 1}
 
 
 def _require_tables(conn: sa.engine.Connection) -> None:

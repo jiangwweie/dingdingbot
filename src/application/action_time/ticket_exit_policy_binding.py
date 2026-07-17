@@ -41,6 +41,7 @@ class TicketExitPolicyBinding(BaseModel):
     exit_policy_hash: str
     snapshot: TicketExitPolicySnapshot | None
     adoption_event_id: str | None = None
+    mutation_allowed: bool = True
 
 
 def legacy_unbound_ticket_exit_policy_binding() -> TicketExitPolicyBinding:
@@ -237,11 +238,41 @@ def resolve_effective_ticket_exit_policy_binding(
             )
         ).mappings()
     )
-    if not accepted:
+    projection = _current_adoption_projection(conn, ticket_id=ticket_id)
+    mutation_allowed = True
+    if projection:
+        event_id = str(projection.get("adoption_event_id") or "").strip()
+        state = str(projection.get("adoption_state") or "").strip()
+        if event_id and state in {"accepted", "revoked"}:
+            matched = [
+                dict(row)
+                for row in accepted
+                if str(row.get("adoption_event_id") or "") == event_id
+            ]
+            if len(matched) != 1:
+                raise TicketExitPolicyBindingError(
+                    "current_adoption_event_identity_invalid"
+                )
+            adoption = matched[0]
+            mutation_allowed = state != "revoked" and projection.get(
+                "mutation_allowed"
+            ) in {True, 1}
+        elif state:
+            raise TicketExitPolicyBindingError("current_adoption_state_invalid")
+        else:
+            adoption = _one_effective_accepted_adoption(
+                conn=conn,
+                events=events,
+                ticket_id=ticket_id,
+            )
+    else:
+        adoption = _one_effective_accepted_adoption(
+            conn=conn,
+            events=events,
+            ticket_id=ticket_id,
+        )
+    if adoption is None:
         return legacy_unbound_ticket_exit_policy_binding()
-    if len(accepted) != 1:
-        raise TicketExitPolicyBindingError("multiple_accepted_policy_adoptions")
-    adoption = dict(accepted[0])
     try:
         eligibility = TicketExitPolicyAdoptionEligibilitySnapshot.model_validate(
             _mapping(adoption.get("eligibility_snapshot"))
@@ -275,7 +306,7 @@ def resolve_effective_ticket_exit_policy_binding(
             == adoption["adoption_event_id"],
         )
     ).first()
-    if revoked:
+    if revoked and mutation_allowed:
         raise TicketExitPolicyBindingError("ticket_exit_policy_adoption_revoked")
     if str(adoption.get("from_exit_policy_hash") or "") != str(
         ticket.get("exit_policy_hash") or ""
@@ -317,7 +348,56 @@ def resolve_effective_ticket_exit_policy_binding(
         exit_policy_hash=snapshot.payload_hash,
         snapshot=snapshot,
         adoption_event_id=str(adoption["adoption_event_id"]),
+        mutation_allowed=mutation_allowed,
     )
+
+
+def _current_adoption_projection(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+) -> dict[str, Any]:
+    if not sa.inspect(conn).has_table("brc_ticket_exit_policy_current"):
+        return {}
+    projection = _table(conn, "brc_ticket_exit_policy_current")
+    columns = set(projection.c.keys())
+    required = {"adoption_event_id", "adoption_state", "mutation_allowed"}
+    if not required <= columns:
+        return {}
+    row = conn.execute(
+        sa.select(projection).where(projection.c.ticket_id == ticket_id)
+    ).mappings().first()
+    return dict(row) if row else {}
+
+
+def _one_effective_accepted_adoption(
+    *,
+    conn: sa.engine.Connection,
+    events: sa.Table,
+    ticket_id: str,
+) -> dict[str, Any] | None:
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            sa.select(events).where(events.c.ticket_id == ticket_id)
+        ).mappings()
+    ]
+    revoked = {
+        str(row.get("supersedes_adoption_event_id") or "")
+        for row in rows
+        if str(row.get("decision") or "") == "revoked"
+    }
+    accepted = [
+        row
+        for row in rows
+        if str(row.get("decision") or "") == "accepted"
+        and str(row.get("adoption_event_id") or "") not in revoked
+    ]
+    if not accepted:
+        return None
+    if len(accepted) != 1:
+        raise TicketExitPolicyBindingError("multiple_effective_policy_adoptions")
+    return accepted[0]
 
 
 def _binding_from_ticket_snapshot(ticket: dict[str, Any]) -> TicketExitPolicyBinding:
