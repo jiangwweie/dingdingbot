@@ -14,7 +14,9 @@ from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
 )
 
 
-def test_budget_settlement_is_consumed_only_and_idempotent(pg_control_connection):
+def test_budget_settlement_rejects_settlement_id_without_terminal_release_proof(
+    pg_control_connection,
+):
     ids = _create_ready_protected_submit(pg_control_connection)
 
     first = settle_ticket_bound_budget(
@@ -23,38 +25,26 @@ def test_budget_settlement_is_consumed_only_and_idempotent(pg_control_connection
         settlement_evidence_id="settlement-1",
         now_ms=NOW_MS + 1_000,
     )
-    second = settle_ticket_bound_budget(
-        pg_control_connection,
-        ticket_id=ids["ticket_id"],
-        settlement_evidence_id="settlement-1",
-        now_ms=NOW_MS + 2_000,
-    )
-
-    assert first["status"] == "released"
-    assert first["runtime_budget_mutated"] is True
-    assert second["status"] == "released"
-    assert second["runtime_budget_mutated"] is False
+    assert first == {
+        "status": "blocked",
+        "first_blocker": "ticket_budget_terminal_lifecycle_not_matched",
+        "blockers": ["ticket_budget_terminal_lifecycle_not_matched"],
+        "runtime_budget_mutated": False,
+    }
     assert pg_control_connection.execute(
         text(
             "SELECT status FROM brc_budget_reservations "
             "WHERE ticket_id = :ticket_id"
         ),
         {"ticket_id": ids["ticket_id"]},
-    ).scalar_one() == "released"
-    event = pg_control_connection.execute(
+    ).scalar_one() == "consumed"
+    assert pg_control_connection.execute(
         text(
-            """
-            SELECT from_status, to_status, reason, evidence_ref
-            FROM brc_budget_reservation_events
-            WHERE budget_reservation_id = :budget_reservation_id
-              AND to_status = 'released'
-            """
+            "SELECT count(*) FROM brc_budget_reservation_events "
+            "WHERE budget_reservation_id = ("
+            "SELECT budget_reservation_id FROM brc_budget_reservations "
+            "WHERE ticket_id = :ticket_id"
+            ") AND to_status = 'released'"
         ),
-        {"budget_reservation_id": first["budget_reservation_id"]},
-    ).mappings().one()
-    assert dict(event) == {
-        "from_status": "consumed",
-        "to_status": "released",
-        "reason": "lifecycle_closed:settlement-1",
-        "evidence_ref": "settlement-1",
-    }
+        {"ticket_id": ids["ticket_id"]},
+    ).scalar_one() == 0
