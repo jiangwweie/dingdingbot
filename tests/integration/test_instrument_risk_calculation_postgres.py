@@ -6,6 +6,7 @@ from decimal import Decimal
 import importlib.util
 import os
 from pathlib import Path
+from uuid import uuid4
 
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -17,7 +18,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_postgres_migration_136_keeps_v1_opaque_and_switches_one_current_v2() -> None:
     dsn = os.environ["BRC_LOCAL_TEST_POSTGRES_DSN"]
-    schema = os.environ["BRC_LOCAL_TEST_POSTGRES_SCHEMA"]
+    schema = f"brc_instrument_risk_{uuid4().hex[:12]}"
+    admin = sa.create_engine(dsn)
+    with admin.begin() as conn:
+        conn.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
     engine = sa.create_engine(dsn, connect_args={"options": f"-c search_path={schema}"})
     _create_schema(engine)
     try:
@@ -83,6 +87,9 @@ def test_postgres_migration_136_keeps_v1_opaque_and_switches_one_current_v2() ->
                 migration.op = previous_op
     finally:
         engine.dispose()
+        with admin.begin() as conn:
+            conn.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        admin.dispose()
 
 
 def _create_schema(engine: sa.Engine) -> None:
@@ -137,4 +144,3 @@ def _migration():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-

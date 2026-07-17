@@ -32,8 +32,9 @@ from src.domain.account_risk import AccountRiskPolicy
 from src.domain.action_time_invocation import ActionTimeInvocation
 from src.domain.instrument_risk_identity import (
     InstrumentRiskIdentity,
-    InstrumentRuleSnapshotRef,
+    InstrumentRuleSnapshotRefV2,
     RiskClusterMembershipSnapshotRef,
+    instrument_rule_snapshot_v2_semantic_hash,
 )
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 from src.infrastructure.binance_usdm_account_risk_snapshot import FullAccountRiskSnapshot
@@ -284,9 +285,9 @@ def _capacity_candidate(
                 margin_asset="USDT",
                 instrument_identity_schema_version="v1",
             ),
-            rule_snapshot=InstrumentRuleSnapshotRef(
+            rule_snapshot=InstrumentRuleSnapshotRefV2(
                 instrument_rule_snapshot_id=rule_id,
-                rule_schema_version="v1",
+                rule_schema_version="v2",
                 price_tick=Decimal("0.01"),
                 quantity_step=Decimal("0.001"),
                 min_qty=Decimal("0.001"),
@@ -295,6 +296,20 @@ def _capacity_candidate(
                 exchange_max_leverage_for_claim_notional=20,
                 source_fact_snapshot_id="rule-source-1",
                 valid_until_ms=NOW_MS + 60_000,
+                risk_calculation_kind="linear_quote_settled",
+                semantic_hash=instrument_rule_snapshot_v2_semantic_hash({
+                    "instrument_rule_snapshot_id": rule_id,
+                    "rule_schema_version": "v2",
+                    "price_tick": Decimal("0.01"),
+                    "quantity_step": Decimal("0.001"),
+                    "min_qty": Decimal("0.001"),
+                    "min_notional": Decimal("5"),
+                    "contract_multiplier": Decimal("1"),
+                    "exchange_max_leverage_for_claim_notional": 20,
+                    "source_fact_snapshot_id": "rule-source-1",
+                    "valid_until_ms": NOW_MS + 60_000,
+                    "risk_calculation_kind": "linear_quote_settled",
+                }),
             ),
             cluster_snapshot=RiskClusterMembershipSnapshotRef(
                 cluster_membership_snapshot_id=membership_id,
@@ -383,6 +398,8 @@ def _extend_schema(conn: sa.Connection) -> None:
         "ALTER TABLE brc_instrument_rule_snapshots ADD COLUMN exchange_instrument_id TEXT",
         "ALTER TABLE brc_instrument_rule_snapshots ADD COLUMN rule_schema_version TEXT",
         "ALTER TABLE brc_instrument_rule_snapshots ADD COLUMN status TEXT",
+        "ALTER TABLE brc_instrument_rule_snapshots ADD COLUMN risk_calculation_kind TEXT",
+        "ALTER TABLE brc_instrument_rule_snapshots ADD COLUMN semantic_hash TEXT",
         "ALTER TABLE brc_risk_cluster_membership_snapshots ADD COLUMN risk_policy_version TEXT",
         "ALTER TABLE brc_risk_cluster_membership_snapshots ADD COLUMN primary_risk_cluster_id TEXT",
         "ALTER TABLE brc_risk_cluster_membership_snapshots ADD COLUMN status TEXT",
@@ -442,6 +459,16 @@ def _extend_schema(conn: sa.Connection) -> None:
 
 
 def _seed_current_authority(conn: sa.Connection) -> None:
+    rule_hash = instrument_rule_snapshot_v2_semantic_hash({
+        "instrument_rule_snapshot_id": "rule-1", "rule_schema_version": "v2",
+        "price_tick": Decimal(".01"), "quantity_step": Decimal(".001"),
+        "min_qty": Decimal(".001"), "min_notional": Decimal("5"),
+        "contract_multiplier": Decimal("1"),
+        "exchange_max_leverage_for_claim_notional": 20,
+        "source_fact_snapshot_id": "rule-source-1",
+        "valid_until_ms": NOW_MS + 60_000,
+        "risk_calculation_kind": "linear_quote_settled",
+    })
     conn.execute(sa.text("""
       UPDATE brc_exchange_instruments SET asset_class='crypto',
         instrument_type='perpetual', settlement_asset='USDT', margin_asset='USDT',
@@ -449,9 +476,10 @@ def _seed_current_authority(conn: sa.Connection) -> None:
     """))
     conn.execute(sa.text("""
       UPDATE brc_instrument_rule_snapshots SET exchange_instrument_id='instrument-1',
-        rule_schema_version='v1', status='current', valid_until_ms=:valid_until_ms
+        rule_schema_version='v2', risk_calculation_kind='linear_quote_settled',
+        semantic_hash=:semantic_hash, status='current', valid_until_ms=:valid_until_ms
       WHERE instrument_rule_snapshot_id='rule-1'
-    """), {"valid_until_ms": NOW_MS + 60_000})
+    """), {"valid_until_ms": NOW_MS + 60_000, "semantic_hash": rule_hash})
     conn.execute(sa.text("""
       UPDATE brc_risk_cluster_membership_snapshots
       SET risk_policy_version='risk-policy-v1', primary_risk_cluster_id='crypto-beta',
