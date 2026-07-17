@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from decimal import Decimal
 from io import BytesIO
+import json
 from typing import Any
 
 import pytest
@@ -148,3 +150,194 @@ async def test_malformed_stream_never_publishes_partial_account_snapshot() -> No
     assert snapshot.positions == ()
     assert snapshot.regular_open_orders == ()
     assert snapshot.algo_open_orders == ()
+
+
+@pytest.mark.asyncio
+async def test_zero_position_with_zero_entry_price_is_filtered_before_validation() -> None:
+    provider = BinanceUsdmAccountRiskSnapshotProvider(
+        account_id="subaccount-1",
+        exchange_id="binance_usdm",
+        signed_get=FakeSignedGet(
+            _account_payloads(
+                positions=[
+                    {"symbol": "BTCUSDT", "positionAmt": "0", "entryPrice": "0"},
+                    {"symbol": "ETHUSDT", "positionAmt": "1", "entryPrice": "100"},
+                ]
+            )
+        ),
+        now_ms=lambda: 1_752_480_000_000,
+    )
+
+    snapshot = await provider.fetch(timeout_seconds=2)
+
+    assert snapshot.snapshot_ready is True
+    assert [(row.exchange_symbol, row.position_qty) for row in snapshot.positions] == [
+        ("ETHUSDT", Decimal("1")),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_algo_order_preserves_client_algo_id() -> None:
+    provider = BinanceUsdmAccountRiskSnapshotProvider(
+        account_id="subaccount-1",
+        exchange_id="binance_usdm",
+        signed_get=FakeSignedGet(
+            _account_payloads(
+                algo_orders=[
+                    {
+                        "symbol": "ETHUSDT",
+                        "orderId": "order-1",
+                        "algoId": "algo-1",
+                        "clientAlgoId": "client-algo-1",
+                        "origQty": "2",
+                        "executedQty": "0",
+                    }
+                ]
+            )
+        ),
+        now_ms=lambda: 1_752_480_000_000,
+    )
+
+    snapshot = await provider.fetch(timeout_seconds=2)
+
+    assert snapshot.snapshot_ready is True
+    assert snapshot.algo_open_orders[0].exchange_order_id == "order-1"
+    assert snapshot.algo_open_orders[0].algo_id == "algo-1"
+    assert snapshot.algo_open_orders[0].client_algo_id == "client-algo-1"
+
+
+@pytest.mark.asyncio
+async def test_partial_fill_preserves_orig_executed_and_remaining_qty() -> None:
+    provider = BinanceUsdmAccountRiskSnapshotProvider(
+        account_id="subaccount-1",
+        exchange_id="binance_usdm",
+        signed_get=FakeSignedGet(
+            _account_payloads(
+                regular_orders=[
+                    {
+                        "symbol": "ETHUSDT",
+                        "orderId": "order-1",
+                        "origQty": "1.25",
+                        "executedQty": "0.25",
+                    }
+                ]
+            )
+        ),
+        now_ms=lambda: 1_752_480_000_000,
+    )
+
+    snapshot = await provider.fetch(timeout_seconds=2)
+
+    assert snapshot.snapshot_ready is True
+    order = snapshot.regular_open_orders[0]
+    assert order.original_qty == Decimal("1.25")
+    assert order.executed_qty == Decimal("0.25")
+    assert order.remaining_qty == Decimal("1.00")
+    assert order.quantity == Decimal("1.00")
+
+
+@pytest.mark.asyncio
+async def test_streaming_and_non_streaming_normalized_snapshots_are_identical() -> None:
+    payloads = _account_payloads(
+        positions=[
+            {"symbol": "BTCUSDT", "positionAmt": "0", "entryPrice": "0"},
+            {"symbol": "ETHUSDT", "positionAmt": "1", "entryPrice": "100"},
+        ],
+        regular_orders=[
+            {
+                "symbol": "ETHUSDT",
+                "orderId": "order-1",
+                "clientOrderId": "client-order-1",
+                "origQty": "2",
+                "executedQty": "0.5",
+            }
+        ],
+        algo_orders=[
+            {
+                "symbol": "ETHUSDT",
+                "orderId": "order-2",
+                "algoId": "algo-2",
+                "clientAlgoId": "client-algo-2",
+                "origQty": "1",
+                "executedQty": "0",
+            }
+        ],
+    )
+    non_streaming = BinanceUsdmAccountRiskSnapshotProvider(
+        account_id="subaccount-1",
+        exchange_id="binance_usdm",
+        signed_get=FakeSignedGet(payloads),
+        now_ms=lambda: 1_752_480_000_000,
+    )
+
+    def opener(request, *, timeout):
+        del timeout
+        path = next(path for path in payloads if path in request.full_url)
+        return BytesIO(json.dumps(payloads[path]).encode())
+
+    reader = BinanceUsdmStreamingSignedReader(
+        base_url="https://example.invalid",
+        api_key="test-key",
+        api_secret="test-secret",
+        timeout_seconds=2,
+        opener=opener,
+        now_ms=lambda: 1_752_480_000_000,
+    )
+
+    async def streaming_signed_get(path: str) -> object:
+        return await asyncio.to_thread(reader.get, path)
+
+    streaming = BinanceUsdmAccountRiskSnapshotProvider(
+        account_id="subaccount-1",
+        exchange_id="binance_usdm",
+        signed_get=streaming_signed_get,
+        now_ms=lambda: 1_752_480_000_000,
+    )
+
+    assert await streaming.fetch(timeout_seconds=2) == await non_streaming.fetch(timeout_seconds=2)
+
+
+@pytest.mark.asyncio
+async def test_negative_remaining_quantity_fails_closed() -> None:
+    provider = BinanceUsdmAccountRiskSnapshotProvider(
+        account_id="subaccount-1",
+        exchange_id="binance_usdm",
+        signed_get=FakeSignedGet(
+            _account_payloads(
+                regular_orders=[
+                    {
+                        "symbol": "ETHUSDT",
+                        "orderId": "order-1",
+                        "origQty": "1",
+                        "executedQty": "1.1",
+                    }
+                ]
+            )
+        ),
+        now_ms=lambda: 1_752_480_000_000,
+    )
+
+    snapshot = await provider.fetch(timeout_seconds=2)
+
+    assert snapshot.snapshot_ready is False
+    assert snapshot.failure_code == "account_risk_snapshot_fetch_failed"
+
+
+def _account_payloads(
+    *,
+    positions: list[dict[str, object]] | None = None,
+    regular_orders: list[dict[str, object]] | None = None,
+    algo_orders: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "/fapi/v2/account": {
+            "canTrade": True,
+            "totalWalletBalance": "600",
+            "availableBalance": "500",
+            "totalInitialMargin": "100",
+        },
+        "/fapi/v2/positionRisk": positions or [],
+        "/fapi/v1/openOrders": regular_orders or [],
+        "/fapi/v1/openAlgoOrders": algo_orders or [],
+        "/fapi/v1/positionSide/dual": {"dualSidePosition": False},
+    }

@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 from src.infrastructure.binance_usdm_account_risk_snapshot import (
     ExchangeOpenOrderRow,
     ExchangePositionRow,
+    normalize_open_order_quantities,
 )
 from src.infrastructure.streaming_http_json import (
     DEFAULT_CHUNK_BYTES,
@@ -99,7 +100,7 @@ class BinanceUsdmStreamingSignedReader:
             rows: list[ExchangePositionRow] = []
             for item in iter_json_array_items(response, chunk_bytes=self._chunk_bytes):
                 row = _position_row(item)
-                if row.position_qty != 0:
+                if row is not None:
                     rows.append(row)
             return tuple(rows)
         if path in {"/fapi/v1/openOrders", "/fapi/v1/openAlgoOrders"}:
@@ -133,28 +134,35 @@ def _top_level_scalars(
     return values
 
 
-def _position_row(value: object) -> ExchangePositionRow:
+def _position_row(value: object) -> ExchangePositionRow | None:
     if not isinstance(value, dict):
         raise ValueError("position row is malformed")
+    exchange_symbol = _required_text(value.get("symbol"), "position_symbol")
+    position_qty = _required_decimal(value.get("positionAmt"), "position_qty")
+    position_side = str(value.get("positionSide") or "BOTH").upper()
+    if position_qty == 0:
+        return None
     return ExchangePositionRow(
-        exchange_symbol=_required_text(value.get("symbol"), "position_symbol"),
-        position_qty=_required_decimal(value.get("positionAmt"), "position_qty"),
+        exchange_symbol=exchange_symbol,
+        position_qty=position_qty,
         entry_price=_required_positive_decimal(
             value.get("entryPrice"),
             "position_entry_price",
         ),
-        position_side=str(value.get("positionSide") or "BOTH").upper(),
+        position_side=position_side,
     )
 
 
 def _order_row(value: object, *, algo: bool) -> ExchangeOpenOrderRow:
     if not isinstance(value, dict):
         raise ValueError("open order row is malformed")
+    original_qty, executed_qty, remaining_qty = normalize_open_order_quantities(value)
     return ExchangeOpenOrderRow(
         exchange_symbol=_required_text(value.get("symbol"), "order_symbol"),
         exchange_order_id=str(value.get("orderId") or ""),
         algo_id=str(value.get("algoId") or "") if algo else "",
         client_order_id=str(value.get("clientOrderId") or ""),
+        client_algo_id=str(value.get("clientAlgoId") or "") if algo else "",
         side=str(value.get("side") or "").upper(),
         position_side=str(value.get("positionSide") or "BOTH").upper(),
         reduce_only=(
@@ -168,7 +176,10 @@ def _order_row(value: object, *, algo: bool) -> ExchangeOpenOrderRow:
             else None
         ),
         order_type=str(value.get("type") or value.get("algoType") or ""),
-        quantity=_optional_decimal(value.get("origQty") or value.get("quantity")),
+        original_qty=original_qty,
+        executed_qty=executed_qty,
+        remaining_qty=remaining_qty,
+        quantity=remaining_qty,
         price=_optional_decimal(value.get("price")),
         trigger_price=_optional_decimal(
             value.get("stopPrice") or value.get("triggerPrice")

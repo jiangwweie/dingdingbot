@@ -31,11 +31,15 @@ class ExchangeOpenOrderRow(BaseModel):
     exchange_order_id: str = ""
     algo_id: str = ""
     client_order_id: str = ""
+    client_algo_id: str = ""
     side: str = ""
     position_side: str = "BOTH"
     reduce_only: bool | None = None
     close_position: bool | None = None
     order_type: str = ""
+    original_qty: Decimal | None = None
+    executed_qty: Decimal | None = None
+    remaining_qty: Decimal | None = None
     quantity: Decimal | None = None
     price: Decimal | None = None
     trigger_price: Decimal | None = None
@@ -262,22 +266,58 @@ def _order_row(row: Any, *, algo: bool) -> ExchangeOpenOrderRow:
     symbol = str(row.get("symbol") or "").strip()
     if not symbol:
         raise ValueError("open order symbol is missing")
-    quantity = _decimal(row.get("origQty") or row.get("quantity"))
+    original_qty, executed_qty, remaining_qty = normalize_open_order_quantities(row)
     price = _decimal(row.get("price"))
     return ExchangeOpenOrderRow(
         exchange_symbol=symbol,
         exchange_order_id=str(row.get("orderId") or ""),
         algo_id=str(row.get("algoId") or "") if algo else "",
         client_order_id=str(row.get("clientOrderId") or ""),
+        client_algo_id=str(row.get("clientAlgoId") or "") if algo else "",
         side=str(row.get("side") or "").upper(),
         position_side=str(row.get("positionSide") or "BOTH").upper(),
         reduce_only=(row.get("reduceOnly") if isinstance(row.get("reduceOnly"), bool) else None),
         close_position=(row.get("closePosition") if isinstance(row.get("closePosition"), bool) else None),
         order_type=str(row.get("type") or row.get("algoType") or ""),
-        quantity=quantity,
+        original_qty=original_qty,
+        executed_qty=executed_qty,
+        remaining_qty=remaining_qty,
+        quantity=remaining_qty,
         price=price,
         trigger_price=_decimal(row.get("stopPrice") or row.get("triggerPrice")),
     )
+
+
+def normalize_open_order_quantities(
+    row: dict[str, Any],
+) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+    """Normalize the open-order quantity triple without hiding overfills."""
+
+    original_value = row.get("origQty")
+    if original_value in {None, ""}:
+        original_value = row.get("quantity")
+    original_qty = _nonnegative_decimal(original_value)
+    if original_value not in {None, ""} and original_qty is None:
+        raise ValueError("order original quantity is malformed")
+
+    executed_value = row.get("executedQty")
+    if executed_value in {None, ""}:
+        executed_qty = Decimal("0") if original_qty is not None else None
+    else:
+        executed_qty = _nonnegative_decimal(executed_value)
+        if executed_qty is None:
+            raise ValueError("order executed quantity is malformed")
+
+    if original_qty is None:
+        if executed_qty is not None:
+            raise ValueError("order executed quantity has no original quantity")
+        return None, None, None
+
+    assert executed_qty is not None
+    raw_remaining = original_qty - executed_qty
+    if raw_remaining < 0:
+        raise ValueError("order remaining quantity is negative")
+    return original_qty, executed_qty, max(raw_remaining, Decimal("0"))
 
 
 def _decimal(value: Any) -> Decimal | None:
