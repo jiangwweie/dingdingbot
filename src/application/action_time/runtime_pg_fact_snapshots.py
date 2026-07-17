@@ -202,6 +202,28 @@ def write_account_safe_fact_snapshots(
     facts = _json_dict(artifact.get("facts"))
     account_mode = _json_dict(artifact.get("account_mode"))
     declared_safe_ready = checks.get("account_safe_facts_ready") is True
+    capacity_values = _json_dict(facts.get("account_capacity_base"))
+    capacity_source_snapshot_id = str(
+        capacity_values.get("account_capacity_source_snapshot_id")
+        or facts.get("account_capacity_source_snapshot_id")
+        or f"account-risk-observation:{generated_at_ms}"
+    )
+    capacity_values = {
+        **capacity_values,
+        "schema_version": "account_capacity_base.v1",
+        "account_id": account_mode.get("account_id"),
+        "exchange_id": account_mode.get("exchange_id"),
+        "runtime_profile_id": account_mode.get("runtime_profile_id"),
+        "account_capacity_source_snapshot_id": capacity_source_snapshot_id,
+    }
+    capacity_observed_at_ms = _positive_int_or_none(
+        capacity_values.get("observed_at_ms")
+    ) or generated_at_ms
+    capacity_valid_until_ms = _positive_int_or_none(
+        capacity_values.get("valid_until_ms")
+    )
+    if capacity_valid_until_ms is None or capacity_valid_until_ms <= capacity_observed_at_ms:
+        capacity_valid_until_ms = capacity_observed_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS
     account_safe_values = {
         **checks,
         **facts,
@@ -214,6 +236,7 @@ def write_account_safe_fact_snapshots(
             checks.get("action_time_available_balance") is True
         ),
         "source_status": artifact.get("source_status"),
+        "account_capacity_source_snapshot_id": capacity_source_snapshot_id,
         "source_role": "readonly_account_action_time_facts",
     }
     mode_observed_at_ms = _iso_to_ms(str(account_mode.get("observed_at") or ""))
@@ -223,6 +246,7 @@ def write_account_safe_fact_snapshots(
         observed_at_ms=mode_observed_at_ms,
     )
     safe_ready = declared_safe_ready and mode_ready
+    capacity_ready = checks.get("account_capacity_base_ready") is True and mode_ready
     blocker_class = None if safe_ready else "hard_safety_stop"
     failed_facts = _account_safe_failed_facts(artifact)
     if not mode_ready and "account_mode_ready" not in failed_facts:
@@ -269,8 +293,8 @@ def write_account_safe_fact_snapshots(
             "satisfied": safe_ready,
             "blocker": blocker_class,
             "freshness_state": "fresh" if safe_ready else "stale",
-            "observed_at_ms": generated_at_ms,
-            "valid_until_ms": generated_at_ms + ACCOUNT_SAFE_FACT_VALID_FOR_MS,
+            "observed_at_ms": capacity_observed_at_ms,
+            "valid_until_ms": capacity_valid_until_ms,
         },
         {
             "fact_surface": "account_mode",
@@ -285,6 +309,20 @@ def write_account_safe_fact_snapshots(
                 if mode_observed_at_ms is not None
                 else generated_at_ms
             ),
+        },
+        {
+            "fact_surface": "account_capacity_base",
+            "fact_values": capacity_values,
+            "failed": (
+                []
+                if capacity_ready
+                else ["account_capacity_base_not_ready"]
+            ),
+            "satisfied": capacity_ready,
+            "blocker": None if capacity_ready else "hard_safety_stop",
+            "freshness_state": "fresh" if capacity_ready else "stale",
+            "observed_at_ms": capacity_observed_at_ms,
+            "valid_until_ms": capacity_valid_until_ms,
         },
     ]
     inserted: list[str] = []
@@ -683,3 +721,7 @@ def _json_list(value: Any) -> list[Any]:
 
 def _is_true(value: Any) -> bool:
     return value is True or value == 1
+
+
+def _positive_int_or_none(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import json
@@ -24,6 +25,13 @@ from src.application.action_time.runtime_pg_fact_snapshots import (  # noqa: E40
 from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     is_sync_postgres_dsn,
     normalize_sync_postgres_dsn,
+)
+from src.infrastructure.binance_usdm_account_risk_snapshot import (  # noqa: E402
+    BinanceUsdmAccountRiskSnapshotProvider,
+    FullAccountRiskSnapshot,
+)
+from src.infrastructure.binance_usdm_streaming_signed_reader import (  # noqa: E402
+    BinanceUsdmStreamingSignedReader,
 )
 from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
     ACCOUNT_MODE_SOURCE,
@@ -234,6 +242,13 @@ def collect_account_safe_live_facts_from_scope(
         position=position,
         open_orders=open_orders,
     )
+    account_risk_snapshot = _fetch_account_risk_snapshot(
+        account_id=str(scope.get("account_id") or ""),
+        exchange_id=str(scope.get("exchange_id") or ""),
+        env_file=env_file,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+    )
     return {
         "scope": "strategy_group_live_facts_input",
         "status": (
@@ -257,6 +272,11 @@ def collect_account_safe_live_facts_from_scope(
         "protection": protection,
         "budget": budget,
         "next_attempt_gate": next_attempt_gate,
+        "account_risk_snapshot": (
+            account_risk_snapshot.model_dump(mode="json")
+            if account_risk_snapshot is not None
+            else {}
+        ),
         "collector_errors": errors,
         "safety_invariants": {
             "signed_get_only": True,
@@ -270,6 +290,50 @@ def collect_account_safe_live_facts_from_scope(
             "secrets_printed": False,
         },
     }
+
+
+def _fetch_account_risk_snapshot(
+    *,
+    account_id: str,
+    exchange_id: str,
+    env_file: Path | None,
+    base_url: str,
+    timeout_seconds: float,
+) -> FullAccountRiskSnapshot | None:
+    """Fetch one complete, all-account capacity snapshot outside PG scope reads."""
+
+    if not account_id or exchange_id != "binance_usdm":
+        return None
+    api_key = _env_value(
+        ("EXCHANGE_API_KEY", "BINANCE_API_KEY", "binance_exchange_key"),
+        env_file=env_file,
+    )
+    api_secret = _env_value(
+        ("EXCHANGE_API_SECRET", "BINANCE_SECRET_KEY", "binance_exchange_secret"),
+        env_file=env_file,
+    )
+    reader = (
+        BinanceUsdmStreamingSignedReader(
+            base_url=base_url,
+            api_key=api_key,
+            api_secret=api_secret,
+            timeout_seconds=timeout_seconds,
+        )
+        if api_key and api_secret
+        else None
+    )
+
+    async def signed_get(path: str) -> Any:
+        if reader is None:
+            raise RuntimeError("exchange_api_key_or_secret_missing")
+        return await asyncio.to_thread(reader.get, path)
+
+    provider = BinanceUsdmAccountRiskSnapshotProvider(
+        account_id=account_id,
+        exchange_id=exchange_id,
+        signed_get=signed_get,
+    )
+    return asyncio.run(provider.fetch(timeout_seconds=timeout_seconds))
 
 
 def _pg_account_safe_scope_summary(conn: sa.engine.Connection) -> dict[str, Any]:
@@ -414,6 +478,7 @@ def build_runtime_account_safe_facts(
     protection = _as_dict(live_facts.get("protection"))
     source_safety = _as_dict(live_facts.get("safety_invariants"))
     leverage_brackets = _as_dict(live_facts.get("leverage_brackets"))
+    account_risk_snapshot = _as_dict(live_facts.get("account_risk_snapshot"))
     account_mode = _normalized_account_mode_fact(
         _as_dict(live_facts.get("account_mode")),
         generated_at_utc=effective_generated_at_utc,
@@ -470,6 +535,11 @@ def build_runtime_account_safe_facts(
         and checks["source_exchange_write_called"] is False
         and checks["source_order_created"] is False
     )
+    account_capacity_base = _account_capacity_base_fact(
+        snapshot=account_risk_snapshot,
+        account_mode=account_mode,
+        generated_at_utc=effective_generated_at_utc,
+    )
     ready = (
         all(
             value is True
@@ -509,6 +579,7 @@ def build_runtime_account_safe_facts(
             "account_safe_facts_ready": ready,
             "account_safe": ready,
             "account_capacity_base_safe": account_capacity_base_safe,
+            "account_capacity_base_ready": account_capacity_base["ready"],
             "private_action_time_facts_ready": ready,
             "active_position_or_open_order_clear": (
                 checks["active_position_clear"] and checks["open_orders_clear"]
@@ -542,6 +613,10 @@ def build_runtime_account_safe_facts(
             "exchange_rules_ready": checks["exchange_rules_ready"],
             "protection_template_ready": checks["protection_template_ready"],
             "account_capacity_base_safe": account_capacity_base_safe,
+            "account_capacity_base": account_capacity_base["values"],
+            "account_capacity_source_snapshot_id": account_capacity_base["values"].get(
+                "account_capacity_source_snapshot_id"
+            ),
         },
         "source_status": live_facts.get("status"),
         "safety_invariants": {
@@ -555,6 +630,79 @@ def build_runtime_account_safe_facts(
             "credential_mutation_created": False,
         },
     }
+
+
+def _account_capacity_base_fact(
+    *,
+    snapshot: dict[str, Any],
+    account_mode: dict[str, Any],
+    generated_at_utc: str,
+) -> dict[str, Any]:
+    """Derive the non-flat capacity fact from one full account snapshot only."""
+
+    generated_at_ms = _iso_to_ms(generated_at_utc)
+    observed_at_ms = _integer_or_none(snapshot.get("observed_at_ms"))
+    valid_until_ms = _integer_or_none(snapshot.get("valid_until_ms"))
+    account_id = str(snapshot.get("account_id") or "").strip()
+    exchange_id = str(snapshot.get("exchange_id") or "").strip()
+    runtime_profile_id = str(account_mode.get("runtime_profile_id") or "").strip()
+    source_snapshot_id = str(snapshot.get("source_snapshot_id") or "").strip()
+    position_mode = snapshot.get("position_mode")
+    snapshot_fresh = (
+        generated_at_ms is not None
+        and observed_at_ms is not None
+        and valid_until_ms is not None
+        and observed_at_ms <= generated_at_ms + ACCOUNT_MODE_MAX_FUTURE_SKEW_MS
+        and valid_until_ms > observed_at_ms
+        and generated_at_ms <= valid_until_ms
+        and source_snapshot_id != ""
+    )
+    identity_exact = (
+        account_id != ""
+        and account_id == str(account_mode.get("account_id") or "").strip()
+        and exchange_id != ""
+        and exchange_id == str(account_mode.get("exchange_id") or "").strip()
+        and runtime_profile_id != ""
+        and account_mode.get("position_mode_safe") is True
+        and account_mode.get("account_mode") == position_mode
+    )
+    ready = (
+        snapshot.get("snapshot_ready") is True
+        and snapshot_fresh
+        and identity_exact
+        and snapshot.get("can_trade") is True
+        and position_mode in {"one_way", "hedge"}
+    )
+    values = {
+        "schema_version": "account_capacity_base.v1",
+        "account_id": account_id or None,
+        "exchange_id": exchange_id or None,
+        "runtime_profile_id": runtime_profile_id or None,
+        "account_capacity_source_snapshot_id": source_snapshot_id or None,
+        "snapshot_complete": snapshot.get("snapshot_ready") is True,
+        "can_trade": snapshot.get("can_trade") is True,
+        "position_mode": position_mode if position_mode in {"one_way", "hedge"} else None,
+        "total_wallet_balance": snapshot.get("total_wallet_balance"),
+        "available_balance": snapshot.get("available_balance"),
+        "exchange_total_initial_margin": snapshot.get("exchange_total_initial_margin"),
+        "observed_at_ms": observed_at_ms,
+        "valid_until_ms": valid_until_ms,
+        "regular_open_order_count": len(snapshot.get("regular_open_orders") or []),
+        "algo_open_order_count": len(snapshot.get("algo_open_orders") or []),
+        "position_count": len(snapshot.get("positions") or []),
+    }
+    return {"ready": ready, "values": values}
+
+
+def _integer_or_none(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _iso_to_ms(value: str) -> int | None:
+    try:
+        return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return None
 
 
 def _as_dict(value: Any) -> dict[str, Any]:

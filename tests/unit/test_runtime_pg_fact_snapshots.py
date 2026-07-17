@@ -182,7 +182,8 @@ def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
                            freshness_state, fact_values, observed_at_ms,
                            valid_until_ms
                     FROM brc_runtime_fact_snapshots
-                    WHERE fact_surface IN ('account_safe', 'account_mode')
+                    WHERE fact_surface IN
+                      ('account_safe', 'account_capacity_base', 'account_mode')
                     ORDER BY fact_surface
                     """
                 )
@@ -191,19 +192,33 @@ def test_account_safe_fact_snapshots_are_global_and_exportable_from_pg():
     finally:
         engine.dispose()
 
-    assert len(ids) == 2
-    assert {row["fact_surface"] for row in rows} == {"account_safe", "account_mode"}
+    assert len(ids) == 3
+    assert {row["fact_surface"] for row in rows} == {
+        "account_safe", "account_capacity_base", "account_mode"
+    }
     assert all(row["strategy_group_id"] is None for row in rows)
     assert all(row["symbol"] is None for row in rows)
     assert all(row["side"] is None for row in rows)
     assert all(row["runtime_profile_id"] == "owner-runtime-console-v1" for row in rows)
-    assert all(row["satisfied"] in {True, 1} for row in rows)
-    assert all(row["freshness_state"] == "fresh" for row in rows)
+    assert all(
+        row["satisfied"] in {True, 1}
+        for row in rows
+        if row["fact_surface"] != "account_capacity_base"
+    )
+    assert all(
+        row["freshness_state"] == "fresh"
+        for row in rows
+        if row["fact_surface"] != "account_capacity_base"
+    )
     ttl_by_surface = {
         row["fact_surface"]: row["valid_until_ms"] - row["observed_at_ms"]
         for row in rows
     }
-    assert ttl_by_surface == {"account_mode": 300_000, "account_safe": 60_000}
+    assert ttl_by_surface == {
+        "account_capacity_base": 60_000,
+        "account_mode": 300_000,
+        "account_safe": 60_000,
+    }
     assert export["source_mode"] == "db_backed"
     assert export["checks"]["account_safe_facts_ready"] is True
     assert export["checks"]["account_mode_snapshot_ready"] is True
@@ -299,3 +314,83 @@ def test_stale_account_mode_cannot_leave_account_safe_snapshot_satisfied():
     assert mode_values["account_mode"] is None
     assert mode_values["dual_side_position"] is None
     assert mode_values["position_mode_safe"] is False
+
+
+def test_capacity_base_fact_is_independent_from_legacy_flat_account_safe_fact():
+    helper = _load_file_module(HELPER_PATH, "runtime_pg_capacity_base_fact_test")
+    engine = _seed_engine()
+    artifact = {
+        "generated_at_utc": "2026-07-17T00:00:00+00:00",
+        "status": "runtime_account_safe_facts_blocked",
+        "source_status": "ready",
+        "checks": {
+            "account_safe_facts_ready": False,
+            "account_safe": False,
+            "account_capacity_base_ready": True,
+            "account_trade_permission": True,
+            "source_signed_get_only": True,
+            "source_exchange_write_called": False,
+            "source_order_created": False,
+        },
+        "facts": {
+            "total_wallet_balance": "600",
+            "available_balance": "500",
+            "account_capacity_source_snapshot_id": "account-risk-snapshot-1",
+            "account_capacity_base": {
+                "observed_at_ms": 1784246400000,
+                "valid_until_ms": 1784246460000,
+            },
+        },
+        "account_mode": {
+            "status": "fresh",
+            "account_id": "owner-subaccount-runtime-v0",
+            "exchange_id": "binance_usdm",
+            "runtime_profile_id": "owner-runtime-console-v1",
+            "account_mode": "hedge",
+            "dual_side_position": True,
+            "position_mode_safe": True,
+            "observed_at": "2026-07-17T00:00:00+00:00",
+            "source": "binance_usdm_signed_get:/fapi/v1/positionSide/dual",
+        },
+        "blockers": ["active_position_clear"],
+    }
+    try:
+        with engine.begin() as conn:
+            helper.write_account_safe_fact_snapshots(
+                conn,
+                artifact=artifact,
+                source_ref="unit:capacity-base",
+                source_kind="unit_test",
+            )
+            rows = {
+                row["fact_surface"]: row
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT fact_surface, satisfied, fact_values, observed_at_ms,
+                               valid_until_ms
+                        FROM brc_runtime_fact_snapshots
+                        WHERE fact_surface IN
+                          ('account_safe', 'account_capacity_base', 'account_mode')
+                        """
+                    )
+                ).mappings()
+            }
+    finally:
+        engine.dispose()
+
+    assert rows["account_safe"]["satisfied"] in {False, 0}
+    assert rows["account_capacity_base"]["satisfied"] in {True, 1}
+    capacity_values = rows["account_capacity_base"]["fact_values"]
+    safe_values = rows["account_safe"]["fact_values"]
+    if isinstance(capacity_values, str):
+        capacity_values = json.loads(capacity_values)
+    if isinstance(safe_values, str):
+        safe_values = json.loads(safe_values)
+    assert capacity_values["schema_version"] == "account_capacity_base.v1"
+    assert capacity_values["account_capacity_source_snapshot_id"] == "account-risk-snapshot-1"
+    assert safe_values["account_capacity_source_snapshot_id"] == "account-risk-snapshot-1"
+    assert rows["account_capacity_base"]["observed_at_ms"] == 1784246400000
+    assert rows["account_capacity_base"]["valid_until_ms"] == 1784246460000
+    assert rows["account_safe"]["observed_at_ms"] == 1784246400000
+    assert rows["account_safe"]["valid_until_ms"] == 1784246460000

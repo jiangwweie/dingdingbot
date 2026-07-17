@@ -57,6 +57,7 @@ def test_runtime_account_safe_facts_ready_from_live_facts():
     assert artifact["status"] == "runtime_account_safe_facts_ready"
     assert artifact["checks"]["account_safe_facts_ready"] is True
     assert artifact["checks"]["account_capacity_base_safe"] is True
+    assert artifact["checks"]["account_capacity_base_ready"] is False
     assert artifact["checks"]["private_action_time_facts_ready"] is True
     assert artifact["checks"]["active_position_or_open_order_clear"] is True
     assert artifact["checks"]["action_time_available_balance"] is True
@@ -84,8 +85,100 @@ def test_runtime_account_safe_facts_blocks_open_position():
     assert artifact["status"] == "runtime_account_safe_facts_blocked"
     assert artifact["checks"]["account_safe_facts_ready"] is False
     assert artifact["checks"]["account_capacity_base_safe"] is True
+    assert artifact["checks"]["account_capacity_base_ready"] is False
     assert artifact["facts"]["account_capacity_base_safe"] is True
     assert "active_position_clear" in artifact["blockers"]
+
+
+def test_runtime_account_capacity_base_uses_complete_full_account_snapshot_not_flat_state():
+    live_facts = _live_facts()
+    live_facts["active_position"] = {"status": "active_position_present"}
+    live_facts["account_mode"]["account_mode"] = "hedge"
+    live_facts["account_mode"]["dual_side_position"] = True
+    live_facts["account_mode"]["observed_at"] = "2025-07-18T00:00:00+00:00"
+    live_facts["account_risk_snapshot"] = {
+        "snapshot_ready": True,
+        "account_id": "owner-subaccount-runtime-v0",
+        "exchange_id": "binance_usdm",
+        "total_wallet_balance": "123.45",
+        "available_balance": "100.00",
+        "exchange_total_initial_margin": "20.00",
+        "can_trade": True,
+        "position_mode": "hedge",
+        "positions": [{"exchange_symbol": "BTCUSDT"}],
+        "regular_open_orders": [],
+        "algo_open_orders": [],
+        "source_snapshot_id": "account-risk-snapshot-1",
+        "observed_at_ms": 1752796800000,
+        "valid_until_ms": 1752796860000,
+    }
+
+    artifact = module.build_runtime_account_safe_facts(
+        live_facts=live_facts,
+        generated_at_utc="2025-07-18T00:00:00+00:00",
+    )
+
+    assert artifact["checks"]["account_safe_facts_ready"] is False
+    assert artifact["checks"]["account_capacity_base_ready"] is True
+    assert artifact["facts"]["account_capacity_base"] == {
+        "schema_version": "account_capacity_base.v1",
+        "account_id": "owner-subaccount-runtime-v0",
+        "exchange_id": "binance_usdm",
+        "runtime_profile_id": "owner-runtime-console-v1",
+        "account_capacity_source_snapshot_id": "account-risk-snapshot-1",
+        "snapshot_complete": True,
+        "can_trade": True,
+        "position_mode": "hedge",
+        "total_wallet_balance": "123.45",
+        "available_balance": "100.00",
+        "exchange_total_initial_margin": "20.00",
+        "observed_at_ms": 1752796800000,
+        "valid_until_ms": 1752796860000,
+        "regular_open_order_count": 0,
+        "algo_open_order_count": 0,
+        "position_count": 1,
+    }
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_snapshot_complete"),
+    [
+        ({"account_id": "wrong-account"}, True),
+        ({"valid_until_ms": 1752796799999}, True),
+        ({"snapshot_ready": False}, False),
+    ],
+)
+def test_runtime_account_capacity_base_fails_closed_for_inexact_or_incomplete_snapshot(
+    change: dict,
+    expected_snapshot_complete: bool,
+):
+    live_facts = _live_facts()
+    snapshot = {
+        "snapshot_ready": True,
+        "account_id": "owner-subaccount-runtime-v0",
+        "exchange_id": "binance_usdm",
+        "can_trade": True,
+        "position_mode": "one_way",
+        "source_snapshot_id": "account-risk-snapshot-1",
+        "observed_at_ms": 1752796800000,
+        "valid_until_ms": 1752796860000,
+        "positions": [],
+        "regular_open_orders": [],
+        "algo_open_orders": [],
+    }
+    snapshot.update(change)
+    live_facts["account_risk_snapshot"] = snapshot
+
+    artifact = module.build_runtime_account_safe_facts(
+        live_facts=live_facts,
+        generated_at_utc="2025-07-18T00:00:00+00:00",
+    )
+
+    assert artifact["checks"]["account_capacity_base_ready"] is False
+    assert (
+        artifact["facts"]["account_capacity_base"]["snapshot_complete"]
+        is expected_snapshot_complete
+    )
 
 
 @pytest.mark.parametrize(
@@ -237,11 +330,24 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
             ORDER BY fact_surface
             """
         ).fetchall()
-    assert {row[0] for row in rows} == {"account_safe", "account_mode"}
+    assert {row[0] for row in rows} == {
+        "account_safe", "account_capacity_base", "account_mode"
+    }
     assert all(row[1] is None and row[2] is None and row[3] is None for row in rows)
     assert all(row[4] == "owner-runtime-console-v1" for row in rows)
-    assert all(row[5] == 1 for row in rows)
-    assert all(row[6] == "fresh" for row in rows)
+    assert all(
+        row[5] == 1
+        for row in rows
+        if row[0] != "account_capacity_base"
+    )
+    assert all(
+        row[6] == "fresh"
+        for row in rows
+        if row[0] != "account_capacity_base"
+    )
+    capacity_base_row = next(row for row in rows if row[0] == "account_capacity_base")
+    assert capacity_base_row[5] == 0
+    assert capacity_base_row[6] == "stale"
     account_mode_row = next(row for row in rows if row[0] == "account_mode")
     account_mode_values = json.loads(account_mode_row[7])
     account_safe_row = next(row for row in rows if row[0] == "account_safe")

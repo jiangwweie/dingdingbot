@@ -263,7 +263,7 @@ def test_new_account_facts_bind_to_invocation_at_their_actual_observation_time(
     rows = invocation_pg_control_connection.execute(
         text(
             """
-            SELECT fact_snapshot_id, observed_at_ms, created_at_ms,
+            SELECT fact_snapshot_id, fact_surface, observed_at_ms, created_at_ms,
                    action_time_invocation_id
             FROM brc_runtime_fact_snapshots
             WHERE fact_snapshot_id IN :fact_snapshot_ids
@@ -279,13 +279,28 @@ def test_new_account_facts_bind_to_invocation_at_their_actual_observation_time(
         action_time_invocation_id=invocation.action_time_invocation_id,
     )
 
-    assert len(rows) == 2
+    assert len(rows) == 3
     assert {row["observed_at_ms"] for row in rows} == {observed_at_ms}
     assert {row["created_at_ms"] for row in rows} == {observed_at_ms}
-    assert {row["action_time_invocation_id"] for row in rows} == {
+    assert {
+        row["action_time_invocation_id"]
+        for row in rows
+        if row["fact_surface"] != "account_capacity_base"
+    } == {
         invocation.action_time_invocation_id
     }
-    assert set(fact_snapshot_ids) == {
+    capacity_base_ids = {
+        row["fact_snapshot_id"]
+        for row in rows
+        if row["fact_surface"] == "account_capacity_base"
+    }
+    assert len(capacity_base_ids) == 1
+    assert all(
+        row["action_time_invocation_id"] is None
+        for row in rows
+        if row["fact_surface"] == "account_capacity_base"
+    )
+    assert set(fact_snapshot_ids) - capacity_base_ids == {
         bound.account_safe_fact_snapshot_id,
         bound.account_mode_fact_snapshot_id,
     }
