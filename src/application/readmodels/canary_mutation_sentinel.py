@@ -28,7 +28,8 @@ CANARY_FACT_COLUMNS_V1 = (
 )
 CANARY_SIGNAL_COLUMNS_V1 = (
     "signal_event_id", "candidate_scope_id", "event_spec_id",
-    "strategy_group_id", "symbol", "side", "detector_key", "signal_type",
+    "strategy_group_id", "symbol", "exchange_instrument_id", "side",
+    "detector_key", "signal_type",
     "source_kind", "status", "freshness_state", "confidence",
     "fact_snapshot_id", "reason_codes", "signal_payload", "event_time_ms",
     "trigger_candle_close_time_ms", "observed_at_ms", "expires_at_ms",
@@ -46,7 +47,8 @@ CANARY_PROCESS_OUTCOME_COLUMNS_V1 = (
     "projector_owner", "updated_at_ms", "scope_kind", "candidate_scope_id",
     "candidate_scope_event_binding_id", "runtime_scope_binding_id",
     "runtime_instance_id", "runtime_profile_id", "policy_current_id",
-    "strategy_group_id", "strategy_group_version_id", "symbol", "asset_class",
+    "strategy_group_id", "strategy_group_version_id", "symbol",
+    "exchange_instrument_id", "asset_class",
     "side", "event_spec_id", "event_spec_version", "event_id", "timeframe",
     "time_authority", "lane_identity_key", "legacy_evidence",
     "action_time_invocation_id",
@@ -80,6 +82,8 @@ CANARY_TICKET_COLUMNS_V1 = (
     "planned_stop_risk", "lane_identity_key", "source_watermark",
     "action_time_invocation_id", "exit_policy_id", "exit_policy_version",
     "exit_policy_snapshot", "exit_policy_hash",
+    "exposure_episode_id", "asset_class", "instrument_type",
+    "capacity_claim_hash",
 )
 CANARY_PROTECTED_ATTEMPT_COLUMNS_V1 = (
     "protected_submit_attempt_id", "ticket_id", "finalgate_pass_id",
@@ -111,6 +115,7 @@ CANARY_EXCHANGE_COMMAND_COLUMNS_V1 = (
     "claim_started_at_ms", "claim_expires_at_ms", "execution_attempt_count",
     "last_reconciled_at_ms", "exchange_result", "desired_leverage",
     "execution_style", "time_in_force", "post_only", "market_fallback_allowed",
+    "exposure_episode_id",
 )
 CANARY_LIFECYCLE_COLUMNS_V1 = (
     "lifecycle_run_id", "ticket_id", "protected_submit_attempt_id",

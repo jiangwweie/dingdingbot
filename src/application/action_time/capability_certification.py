@@ -57,6 +57,7 @@ CAPABILITY_DIGEST_TABLE_COLUMNS: dict[str, tuple[str, ...]] = {
         "candidate_scope_id",
         "strategy_group_id",
         "symbol",
+        "exchange_instrument_id",
         "asset_class",
         "side",
         "policy_current_id",
@@ -853,6 +854,10 @@ def build_action_time_capability_identities(
                 strategy_group_id=group_id,
                 strategy_group_version_id=group_version_id,
                 symbol=symbol,
+                exchange_instrument_id=_required(
+                    candidate,
+                    "exchange_instrument_id",
+                ),
                 asset_class=_required(candidate, "asset_class"),
                 side=side,
                 event_spec_id=event_spec_id,

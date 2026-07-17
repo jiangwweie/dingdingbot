@@ -119,6 +119,59 @@ def test_live_outcome_ledger_ignores_disabled_smoke(pg_control_connection):
     )
 
 
+def test_live_outcome_blocks_mismatched_exposure_episode_lineage(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    result = submit.record_ticket_bound_protected_submit_result(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        submit_result={
+            "status": "exchange_submit_orders_submitted",
+            "ticket_id": ids["ticket_id"],
+            "operation_submit_command_id": ids["operation_submit_command_id"],
+            "strategy_group_id": "SOR-001",
+            "symbol": "ETHUSDT",
+            "side": "long",
+            "exchange_write_called": True,
+            "order_created": True,
+            "order_lifecycle_called": True,
+            "withdrawal_or_transfer_created": False,
+            "live_profile_changed": False,
+            "order_sizing_changed": False,
+            "submitted_orders": _submitted_orders(prepared),
+        },
+        now_ms=NOW_MS + 5000,
+    )
+    assert result["status"] == "submitted"
+    exit_protection.materialize_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        now_ms=NOW_MS + 5500,
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET exposure_episode_id = 'exposure_episode:wrong' "
+            "WHERE ticket_id = :ticket_id AND order_role = 'TP1'"
+        ),
+        {"ticket_id": ids["ticket_id"]},
+    )
+
+    payload = materialize_live_outcome_ledger(
+        pg_control_connection,
+        ticket_id=ids["ticket_id"],
+        now_ms=NOW_MS + 6000,
+    )
+
+    assert payload["status"] == "blocked_invalid_exposure_episode_lineage"
+    assert payload["blockers"] == ["live_outcome_exposure_episode_mismatch"]
+    assert pg_control_connection.execute(
+        text("SELECT count(*) FROM brc_live_outcome_ledger")
+    ).scalar_one() == 0
+
+
 def test_live_outcome_projects_actual_exit_fill_fees_pnl_and_r_multiple(
     pg_control_connection,
 ):

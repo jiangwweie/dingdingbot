@@ -87,6 +87,7 @@ def _bounded_certification_state() -> dict[str, object]:
             "candidate_scope_id",
             "strategy_group_id",
             "symbol",
+            "exchange_instrument_id",
             "asset_class",
             "side",
             "policy_current_id",

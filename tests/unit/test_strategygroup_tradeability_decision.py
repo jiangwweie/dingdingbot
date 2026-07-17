@@ -17,6 +17,7 @@ from src.application.action_time.capability_certification import (
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
 )
+from tests.support.runtime_control_state_schema import seed_runtime_control_state
 
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[2]
@@ -67,7 +68,7 @@ def _create_seeded_runtime_control_db(path: Path) -> str:
                 migration.upgrade()
             finally:
                 migration.op = old_op
-            seed.seed_runtime_control_state_foundation(conn)
+            seed_runtime_control_state(conn)
     finally:
         engine.dispose()
     return database_url

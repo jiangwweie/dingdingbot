@@ -15,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
 )
+from tests.support.runtime_control_state_schema import seed_runtime_control_state
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -61,7 +62,7 @@ def pg_control_connection():
             migration.upgrade()
         finally:
             migration.op = old_op
-        seed.seed_runtime_control_state_foundation(conn)
+        seed_runtime_control_state(conn)
     with engine.connect() as conn:
         yield conn
     engine.dispose()
@@ -79,7 +80,7 @@ def _seed_runtime_control_db(db_path: Path) -> str:
             migration.upgrade()
         finally:
             migration.op = old_op
-        seed.seed_runtime_control_state_foundation(conn)
+        seed_runtime_control_state(conn)
     engine.dispose()
     return database_url
 

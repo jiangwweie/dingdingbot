@@ -5,6 +5,7 @@ import os
 from decimal import Decimal
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import text
 
 from scripts import materialize_ticket_bound_protected_submit_attempt as submit
@@ -876,6 +877,51 @@ def test_protected_submit_result_preserves_unknown_outcome_for_reconciliation(
 
 def _create_ready_protected_submit(conn) -> dict[str, str]:
     ids = _create_handoff_ready(conn)
+    exposure_episode_id = f"exposure_episode:test:{ids['ticket_id']}"
+    inspector = sa.inspect(conn)
+    ticket_columns = {
+        column["name"]
+        for column in inspector.get_columns("brc_action_time_tickets")
+    }
+    if "exposure_episode_id" not in ticket_columns:
+        conn.execute(
+            text("ALTER TABLE brc_action_time_tickets ADD COLUMN exposure_episode_id TEXT")
+        )
+    reservation_columns = {
+        column["name"]
+        for column in sa.inspect(conn).get_columns("brc_budget_reservations")
+    }
+    if "exposure_episode_id" not in reservation_columns:
+        conn.execute(
+            text("ALTER TABLE brc_budget_reservations ADD COLUMN exposure_episode_id TEXT")
+        )
+    command_columns = {
+        column["name"]
+        for column in sa.inspect(conn).get_columns(
+            "brc_ticket_bound_exchange_commands"
+        )
+    }
+    if "exposure_episode_id" not in command_columns:
+        conn.execute(
+            text(
+                "ALTER TABLE brc_ticket_bound_exchange_commands "
+                "ADD COLUMN exposure_episode_id TEXT"
+            )
+        )
+    conn.execute(
+        text(
+            "UPDATE brc_action_time_tickets SET exposure_episode_id = :episode_id "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"episode_id": exposure_episode_id, "ticket_id": ids["ticket_id"]},
+    )
+    conn.execute(
+        text(
+            "UPDATE brc_budget_reservations SET exposure_episode_id = :episode_id "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"episode_id": exposure_episode_id, "ticket_id": ids["ticket_id"]},
+    )
     safety_payload = safety.materialize_ticket_bound_runtime_safety_state(
         conn,
         ticket_id=ids["ticket_id"],

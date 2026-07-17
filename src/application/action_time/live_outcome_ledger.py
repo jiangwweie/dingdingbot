@@ -102,6 +102,21 @@ def materialize_live_outcome_ledger(
             next_action="materialize_ticket_bound_order_lifecycle",
         )
 
+    exposure_episode_id = str(ticket.get("exposure_episode_id") or "").strip()
+    episode_blockers = _live_outcome_episode_blockers(
+        conn,
+        ticket_id=ticket_id,
+        expected_episode_id=exposure_episode_id,
+    )
+    if episode_blockers:
+        return _result(
+            "blocked_invalid_exposure_episode_lineage",
+            now_ms=now_ms,
+            outcome={},
+            blockers=episode_blockers,
+            next_action="repair_live_outcome_exposure_episode_lineage",
+        )
+
     lifecycle_status = str(lifecycle.get("status") or "")
     attempt_status = str(attempt.get("status") or "")
     if lifecycle_status == "lifecycle_closed":
@@ -319,6 +334,7 @@ def materialize_live_outcome_ledger(
     outcome = {
         "live_outcome_id": _stable_id("live_outcome", ticket_id),
         "ticket_id": ticket_id,
+        "exposure_episode_id": exposure_episode_id,
         "protected_submit_attempt_id": str(attempt["protected_submit_attempt_id"]),
         "lifecycle_run_id": lifecycle.get("lifecycle_run_id"),
         "exit_protection_set_id": protection_set.get("exit_protection_set_id"),
@@ -418,6 +434,32 @@ def materialize_live_outcome_ledger(
         blockers=[],
         next_action="use_live_outcome_for_governance_review_only",
     )
+
+
+def _live_outcome_episode_blockers(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    expected_episode_id: str,
+) -> list[str]:
+    if not expected_episode_id:
+        return ["live_outcome_exposure_episode_missing"]
+    rows = conn.execute(
+        sa.text(
+            """
+            SELECT exposure_episode_id
+            FROM brc_ticket_bound_exchange_commands
+            WHERE ticket_id = :ticket_id
+            ORDER BY operation_submit_command_id, exchange_command_id
+            """
+        ),
+        {"ticket_id": ticket_id},
+    ).scalars().all()
+    if not rows:
+        return ["live_outcome_exchange_command_lineage_missing"]
+    if any(str(row or "").strip() != expected_episode_id for row in rows):
+        return ["live_outcome_exposure_episode_mismatch"]
+    return []
 
 
 def _latest_real_attempt(conn: sa.engine.Connection, ticket_id: str) -> dict[str, Any]:

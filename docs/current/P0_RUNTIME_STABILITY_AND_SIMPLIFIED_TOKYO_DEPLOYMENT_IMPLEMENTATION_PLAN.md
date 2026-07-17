@@ -1,3 +1,10 @@
+---
+title: P0_RUNTIME_STABILITY_AND_SIMPLIFIED_TOKYO_DEPLOYMENT_IMPLEMENTATION_PLAN
+status: CURRENT_IMPLEMENTATION_PLAN
+authority: docs/current/P0_RUNTIME_STABILITY_AND_SIMPLIFIED_TOKYO_DEPLOYMENT_IMPLEMENTATION_PLAN.md
+last_verified: 2026-07-17
+---
+
 # P0 Runtime Stability And Simplified Tokyo Deployment Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

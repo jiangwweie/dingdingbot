@@ -166,9 +166,7 @@ def test_brc_admission_api_routes_are_registered_without_trading_surface():
     from src.interfaces.api import app
 
     routes = {
-        getattr(route, "path", "")
-        for route in app.routes
-        if getattr(route, "path", "").startswith("/api/brc")
+        path for path in app.openapi()["paths"] if path.startswith("/api/brc")
     }
 
     assert "/api/brc/strategy-families" in routes

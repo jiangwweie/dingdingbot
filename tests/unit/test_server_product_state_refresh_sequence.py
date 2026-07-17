@@ -741,7 +741,7 @@ def test_expire_stale_action_time_objects_closes_pg_current_rows():
                 "expired_promotion_candidates": 1,
                 "expired_action_time_lane_inputs": 1,
                 "expired_action_time_tickets": 1,
-                "expired_budget_reservations": 0,
+                "expired_budget_reservations": 1,
             }
             assert counts == {
                 "fresh_live_signal_events": 0,
@@ -768,6 +768,19 @@ def test_expire_stale_action_time_objects_closes_pg_current_rows():
             assert conn.execute(
                 sa.text("SELECT status FROM brc_action_time_tickets")
             ).scalar_one() == "expired"
+            assert conn.execute(
+                sa.text("SELECT status FROM brc_budget_reservations")
+            ).scalar_one() == "released"
+            assert conn.execute(
+                sa.text(
+                    "SELECT from_status, to_status, reason "
+                    "FROM brc_budget_reservation_events"
+                )
+            ).one() == (
+                "consumed",
+                "released",
+                "terminal_presubmit_ticket_capacity_reclaimed",
+            )
     finally:
         engine.dispose()
 
@@ -809,10 +822,10 @@ def test_action_time_trigger_counts_include_unattempted_handoff_ready():
             conn.execute(
                 sa.text(
                     """
-                    INSERT INTO brc_ticket_bound_protected_submit_attempts VALUES (
-                        'protected-submit-1',
-                        'operation-submit-1'
-                    )
+                    INSERT INTO brc_ticket_bound_protected_submit_attempts (
+                        protected_submit_attempt_id,
+                        operation_submit_command_id
+                    ) VALUES ('protected-submit-1', 'operation-submit-1')
                     """
                 )
             )
@@ -1599,7 +1612,59 @@ def _action_time_trigger_engine():
                 """
                 CREATE TABLE brc_ticket_bound_protected_submit_attempts (
                     protected_submit_attempt_id TEXT PRIMARY KEY,
+                    ticket_id TEXT,
                     operation_submit_command_id TEXT
+                    , exchange_write_called BOOLEAN
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_ticket_bound_exchange_commands (
+                    ticket_id TEXT,
+                    command_state TEXT,
+                    dispatch_started_at_ms INTEGER,
+                    exchange_order_id TEXT
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_account_exposure_current (
+                    owner_ticket_id TEXT,
+                    position_slot_claimed BOOLEAN
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_budget_reservations (
+                    budget_reservation_id TEXT PRIMARY KEY,
+                    ticket_id TEXT,
+                    status TEXT,
+                    release_reason TEXT,
+                    expires_at_ms INTEGER
+                )
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
+                CREATE TABLE brc_budget_reservation_events (
+                    budget_reservation_event_id TEXT PRIMARY KEY,
+                    budget_reservation_id TEXT,
+                    from_status TEXT,
+                    to_status TEXT,
+                    reason TEXT,
+                    evidence_ref TEXT,
+                    created_at_ms INTEGER
                 )
                 """
             )
@@ -1707,6 +1772,16 @@ def _insert_stale_open_action_time_trigger_rows(
                 NULL
             )
             """
+        ),
+        {"expires_at_ms": expires_at_ms},
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_budget_reservations VALUES (
+                'stale-open-budget', 'stale-open-ticket', 'consumed', NULL, :expires_at_ms
+            )
+            """,
         ),
         {"expires_at_ms": expires_at_ms},
     )

@@ -2,10 +2,23 @@
 title: RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN
 status: CURRENT_DESIGN
 authority: docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
-last_verified: 2026-07-06
+last_verified: 2026-07-17
+integration_state: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
+production_state: UNCHANGED
+policy_activation: NOT_PERFORMED
+exchange_write: 0
+migration_head: 133_LOCAL_ONLY
 ---
 
 # Runtime Control State DB Table Design
+
+> **Current asset-neutral override:** `brc_strategy_group_candidate_scope`、
+> Symbol/Instrument Authority 和 `brc_budget_reservations` 中涉及 exact instrument、
+> InstrumentRuleSnapshot、AccountCapacityClaim、ExposureEpisode 与 risk-cluster membership
+> 的目标结构，以
+> `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md`
+> 为当前权威。本文其余 PG/current、Ticket、FinalGate、Operation Layer 和 file-authority
+> 约束继续有效。
 
 ## Purpose
 
@@ -27,10 +40,15 @@ The table design is intentionally split into:
 
 ## Design Status
 
-This is a design document, not an applied migration.
+The asset-neutral override referenced above is **implemented and locally merge-certified** by
+revisions **126–133** on `codex/integrate-ffc73899-dual-position-risk-v0`. The broader historical
+table catalog in this document remains design authority where it is not superseded. The local
+integration has one Alembic head at revision `133`. No production migration apply, policy
+activation, deployment, or exchange write occurred in this task.
 
-Implementation should use Alembic migrations and SQLAlchemy ORM models under
-the existing PG model pattern in `src/infrastructure/pg_models.py`.
+Fresh schema seed now persists exact `exchange_instrument_id`; existing databases use
+the expand/backfill/enforce sequence. Production Action-Time continues to require PG
+identity directly and does not infer instrument identity from symbol or ID prefixes.
 
 ## Naming And Type Rules
 

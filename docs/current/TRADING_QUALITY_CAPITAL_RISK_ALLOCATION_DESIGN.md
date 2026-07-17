@@ -2,7 +2,7 @@
 title: TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN
 status: CURRENT_DESIGN
 authority: docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md
-last_verified: 2026-07-08
+last_verified: 2026-07-14
 ---
 
 # Trading Quality Capital Risk Allocation Design
@@ -73,6 +73,22 @@ Reference sources:
   control, and right-sizing positions under leverage.
 
 ## Design Position
+
+### Current V0 Override
+
+**Owner 已于 2026-07-14 批准先实施 Dual-Position Hard-Cap Account Risk Model V0。**
+其当前权威设计为：
+
+- `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md`
+- `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md`
+
+V0 使用 **2.5% 单 Ticket planned Stop risk、6% 组合、4% 静态风险簇、90% initial
+margin、10x leverage、最多两个不同 instrument 仓位和一个新 Action-Time Lane**。
+fee、slippage、funding 不进入开仓 reserve，而在成交后由 Live Outcome 计算。
+
+本文件后续的 StrategyGroup sleeve、动态 quality multiplier、drawdown、volatility、
+相关性和开仓前成本 reserve 仅属于后续 Advanced Capital Risk Allocation，不得反向
+扩大 V0 范围或阻塞 V0 的交易反馈目标。
 
 ### Execution Split
 

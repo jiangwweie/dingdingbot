@@ -282,6 +282,7 @@ def test_runtime_lane_process_outcome_uses_typed_identity_and_source_watermark()
         strategy_group_id="CPM-RO-001",
         strategy_group_version_id="sgv:CPM-RO-001:v2",
         symbol="SOLUSDT",
+        exchange_instrument_id="instrument:binance-usdm:SOLUSDT",
         asset_class="crypto_perpetual",
         side="long",
         event_spec_id="event_spec:CPM-RO-001:CPM-LONG:v2",

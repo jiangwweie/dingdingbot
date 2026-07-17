@@ -11,6 +11,7 @@ from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
+from tests.support.runtime_control_state_schema import seed_runtime_control_state
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -48,7 +49,7 @@ def _seeded_engine():
             migration.upgrade()
         finally:
             migration.op = old_op
-        seed.seed_runtime_control_state_foundation(conn)
+        seed_runtime_control_state(conn)
     return engine
 
 

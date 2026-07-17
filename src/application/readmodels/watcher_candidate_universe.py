@@ -20,6 +20,7 @@ class WatcherCandidateScopeRow(_FrozenProjectionModel):
     candidate_scope_id: str = Field(min_length=1)
     strategy_group_id: str = Field(min_length=1)
     symbol: str = Field(min_length=1)
+    exchange_instrument_id: str = Field(min_length=1)
     asset_class: str = Field(min_length=1)
     side: Literal["long", "short"]
     policy_current_id: str = Field(min_length=1)

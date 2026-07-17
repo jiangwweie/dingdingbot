@@ -56,6 +56,7 @@ def test_runtime_account_safe_facts_ready_from_live_facts():
 
     assert artifact["status"] == "runtime_account_safe_facts_ready"
     assert artifact["checks"]["account_safe_facts_ready"] is True
+    assert artifact["checks"]["account_capacity_base_safe"] is True
     assert artifact["checks"]["private_action_time_facts_ready"] is True
     assert artifact["checks"]["active_position_or_open_order_clear"] is True
     assert artifact["checks"]["action_time_available_balance"] is True
@@ -82,6 +83,8 @@ def test_runtime_account_safe_facts_blocks_open_position():
 
     assert artifact["status"] == "runtime_account_safe_facts_blocked"
     assert artifact["checks"]["account_safe_facts_ready"] is False
+    assert artifact["checks"]["account_capacity_base_safe"] is True
+    assert artifact["facts"]["account_capacity_base_safe"] is True
     assert "active_position_clear" in artifact["blockers"]
 
 
@@ -279,8 +282,13 @@ def test_runtime_account_safe_facts_projection_cadence_can_continue_when_blocked
     }
     monkeypatch.setattr(
         module._impl,
-        "collect_account_safe_live_facts_from_pg_scope",
+        "collect_account_safe_live_facts_from_scope",
         lambda *args, **kwargs: {"status": "partial"},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "_pg_account_safe_scope_summary",
+        lambda conn: {"symbols": [], "identity_errors": []},
     )
     monkeypatch.setattr(
         module._impl,
@@ -312,8 +320,13 @@ def test_runtime_account_safe_facts_cli_forwards_action_time_invocation_id(
     seen: dict[str, object] = {}
     monkeypatch.setattr(
         module._impl,
-        "collect_account_safe_live_facts_from_pg_scope",
+        "collect_account_safe_live_facts_from_scope",
         lambda *args, **kwargs: {"status": "ready"},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "_pg_account_safe_scope_summary",
+        lambda conn: {"symbols": [], "identity_errors": []},
     )
     monkeypatch.setattr(
         module._impl,
@@ -357,8 +370,13 @@ def test_runtime_account_safe_facts_cli_persists_unbound_business_block(
     seen: dict[str, object] = {}
     monkeypatch.setattr(
         module._impl,
-        "collect_account_safe_live_facts_from_pg_scope",
+        "collect_account_safe_live_facts_from_scope",
         lambda *args, **kwargs: {"status": "partial"},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "_pg_account_safe_scope_summary",
+        lambda conn: {"symbols": [], "identity_errors": []},
     )
     monkeypatch.setattr(
         module._impl,
@@ -410,8 +428,13 @@ def test_runtime_account_safe_facts_normalizes_asyncpg_dsn_for_sync_projector(
     monkeypatch.setattr(module._impl.sa, "create_engine", fake_create_engine)
     monkeypatch.setattr(
         module._impl,
-        "collect_account_safe_live_facts_from_pg_scope",
+        "collect_account_safe_live_facts_from_scope",
         lambda *args, **kwargs: {"status": "ready"},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "_pg_account_safe_scope_summary",
+        lambda conn: {"symbols": [], "identity_errors": []},
     )
     monkeypatch.setattr(
         module._impl,

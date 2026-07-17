@@ -23,6 +23,7 @@ def test_real_submit_prepare_commits_entry_sl_tp1_commands(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
+    _bind_exposure_episode(pg_control_connection)
 
     prepared = _prepare_real_submit(pg_control_connection, ids)
     commands = _exchange_command_rows(pg_control_connection)
@@ -40,6 +41,7 @@ def test_real_submit_prepare_commits_entry_sl_tp1_commands(
         row["exchange_instrument_id"] == "binance_usdm:ETH/USDT:USDT"
         for row in commands
     )
+    assert {row["exposure_episode_id"] for row in commands} == {"episode-test-1"}
     assert all(row["gateway_symbol"] == "ETH/USDT:USDT" for row in commands)
     tp1 = next(row for row in commands if row["order_role"] == "TP1")
     assert tp1["order_type"] == "limit"
@@ -54,6 +56,7 @@ def test_repeated_materialization_reuses_identity_and_rejects_request_mutation(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
+    _bind_exposure_episode(pg_control_connection)
     prepared = _prepare_real_submit(pg_control_connection, ids)
     first = _exchange_command_rows(pg_control_connection)
 
@@ -77,6 +80,25 @@ def test_repeated_materialization_reuses_identity_and_rejects_request_mutation(
         )
 
 
+def test_exchange_command_conserves_exposure_episode_id_and_rejects_mismatch(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _bind_exposure_episode(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_budget_reservations "
+            "SET exposure_episode_id = 'episode-wrong'"
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="ticket_exchange_scope_exposure_episode_mismatch",
+    ):
+        _prepare_real_submit(pg_control_connection, ids)
+
+
 def _exchange_command_rows(conn) -> list[dict]:
     return [
         dict(row)
@@ -88,3 +110,18 @@ def _exchange_command_rows(conn) -> list[dict]:
             )
         ).mappings()
     ]
+
+
+def _bind_exposure_episode(conn) -> None:
+    conn.execute(
+        text(
+            "UPDATE brc_action_time_tickets "
+            "SET exposure_episode_id = 'episode-test-1'"
+        )
+    )
+    conn.execute(
+        text(
+            "UPDATE brc_budget_reservations "
+            "SET exposure_episode_id = 'episode-test-1'"
+        )
+    )

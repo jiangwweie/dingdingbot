@@ -101,10 +101,12 @@ def _event_contract_row(
     timeframe: str = "15m",
 ):
     return {
+        "candidate_scope_id": "candidate-scope:SOR-001:BTCUSDT:short",
         "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v2",
         "event_id": "SOR-SHORT",
         "strategy_group_id": strategy_group_id,
         "symbol": symbol,
+        "exchange_instrument_id": "instrument:opaque:btc-short",
         "side": side,
         "timeframe": timeframe,
     }
@@ -393,10 +395,12 @@ def test_signal_input_artifact_observe_only_for_btpc_non_entry_snapshot(monkeypa
 
     async def fake_event_contract(*, runtime):
         return runtime_strategy_signal_input.RuntimeEventInputContract(
+            candidate_scope_id="candidate-scope:BTPC-001:AVAXUSDT:short",
             event_spec_id="event_spec:BTPC-001:BTPC-SHORT:v1",
             event_id="BTPC-SHORT",
             strategy_group_id="BTPC-001",
             symbol="AVAXUSDT",
+            exchange_instrument_id="instrument:opaque:avax-short",
             side="short",
             primary_timeframe="1h",
         )
@@ -460,10 +464,12 @@ def test_signal_input_artifact_fetches_pg_owned_sor_15m_primary_window(monkeypat
     async def fake_event_contract(*, runtime):
         assert runtime.strategy_family_id == "SOR-001"
         return runtime_strategy_signal_input.RuntimeEventInputContract(
+            candidate_scope_id="candidate-scope:SOR-001:BTCUSDT:short",
             event_spec_id="event_spec:SOR-001:SOR-SHORT:v2",
             event_id="SOR-SHORT",
             strategy_group_id="SOR-001",
             symbol="BTCUSDT",
+            exchange_instrument_id="instrument:opaque:btc-short",
             side="short",
             primary_timeframe="15m",
         )

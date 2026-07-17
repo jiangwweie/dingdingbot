@@ -27,6 +27,7 @@ def _identity(*, timeframe: str = "15m") -> RuntimeLaneIdentity:
         strategy_group_id="SOR-001",
         strategy_group_version_id="sgv:SOR-001:v2",
         symbol="ETHUSDT",
+        exchange_instrument_id="instrument:binance-usdm:ETHUSDT",
         asset_class="crypto_perpetual",
         side="long",
         event_spec_id="event_spec:SOR-001:SOR-LONG:v2",

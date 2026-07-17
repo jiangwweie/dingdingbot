@@ -87,6 +87,33 @@ ACTION_TIME_INVOCATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
 )
+TERMINAL_PREDISPATCH_RECONCILIATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-13-120_reconcile_terminal_predispatch_commands.py"
+)
+ACCOUNT_RISK_CURRENT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-127_create_account_risk_current_projections.py"
+)
+ACCOUNT_RISK_POLICY_MIGRATION_PATH = (
+    REPO_ROOT / "migrations/versions/2026-07-17-126_create_account_risk_policy.py"
+)
+ACCOUNT_CAPACITY_SCOPE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-129_add_account_capacity_reservation_scope.py"
+)
+ACCOUNT_CLAIM_POLICY_EVENT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-130_add_account_capacity_claim_policy_event.py"
+)
+ASSET_NEUTRAL_EXPAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-131_expand_asset_neutral_account_risk_identity.py"
+)
+ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-132_backfill_asset_neutral_account_risk_identity.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
 
@@ -130,6 +157,15 @@ def _load_module(path: Path, name: str):
     return module
 
 
+def _upgrade_module(conn, module) -> None:
+    old_op = module.op
+    module.op = Operations(MigrationContext.configure(conn))
+    try:
+        module.upgrade()
+    finally:
+        module.op = old_op
+
+
 @pytest.fixture()
 def pg_control_connection():
     migration = _load_module(MIGRATION_PATH, "migration_086_pg_promotion_lane")
@@ -168,6 +204,34 @@ def pg_control_connection():
     action_time_invocation_migration = _load_module(
         ACTION_TIME_INVOCATION_MIGRATION_PATH,
         "migration_119_pg_promotion_lane",
+    )
+    terminal_predispatch_reconciliation_migration = _load_module(
+        TERMINAL_PREDISPATCH_RECONCILIATION_MIGRATION_PATH,
+        "migration_120_pg_promotion_lane",
+    )
+    account_risk_current_migration = _load_module(
+        ACCOUNT_RISK_CURRENT_MIGRATION_PATH,
+        "migration_122_pg_promotion_lane",
+    )
+    account_risk_policy_migration = _load_module(
+        ACCOUNT_RISK_POLICY_MIGRATION_PATH,
+        "migration_121_pg_promotion_lane",
+    )
+    account_capacity_scope_migration = _load_module(
+        ACCOUNT_CAPACITY_SCOPE_MIGRATION_PATH,
+        "migration_124_pg_promotion_lane",
+    )
+    account_claim_policy_event_migration = _load_module(
+        ACCOUNT_CLAIM_POLICY_EVENT_MIGRATION_PATH,
+        "migration_125_pg_promotion_lane",
+    )
+    asset_neutral_expand_migration = _load_module(
+        ASSET_NEUTRAL_EXPAND_MIGRATION_PATH,
+        "migration_126_pg_promotion_lane",
+    )
+    asset_neutral_backfill_migration = _load_module(
+        ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH,
+        "migration_127_pg_promotion_lane",
     )
     seed = _load_module(SEED_PATH, "seed_pg_promotion_lane")
     engine = create_engine(
@@ -244,9 +308,27 @@ def pg_control_connection():
             action_time_invocation_migration.upgrade()
         finally:
             action_time_invocation_migration.op = old_action_time_invocation_op
+        old_terminal_predispatch_reconciliation_op = (
+            terminal_predispatch_reconciliation_migration.op
+        )
+        terminal_predispatch_reconciliation_migration.op = Operations(
+            MigrationContext.configure(conn)
+        )
+        try:
+            terminal_predispatch_reconciliation_migration.upgrade()
+        finally:
+            terminal_predispatch_reconciliation_migration.op = (
+                old_terminal_predispatch_reconciliation_op
+            )
         install_runtime_control_state_revision(conn, revision="121")
         install_runtime_control_state_revision(conn, revision="122")
+        _upgrade_module(conn, account_risk_policy_migration)
+        _upgrade_module(conn, account_risk_current_migration)
+        _upgrade_module(conn, account_capacity_scope_migration)
+        _upgrade_module(conn, account_claim_policy_event_migration)
+        _upgrade_module(conn, asset_neutral_expand_migration)
         seed.seed_runtime_control_state_foundation(conn)
+        _upgrade_module(conn, asset_neutral_backfill_migration)
         conn.exec_driver_sql(
             "ALTER TABLE brc_runtime_capabilities_current "
             "ADD COLUMN proof_schema VARCHAR(128)"
@@ -1670,6 +1752,7 @@ def test_writer_repository_to_protected_submit_disabled_smoke_end_to_end(
         strategy_group_id=str(lane_row["strategy_group_id"]),
         strategy_group_version_id=str(lane_row["strategy_group_version_id"]),
         symbol=str(lane_row["symbol"]),
+        exchange_instrument_id=str(lane_row["exchange_instrument_id"]),
         asset_class=str(lane_row["asset_class"]),
         side=str(lane_row["side"]),
         event_spec_id=str(lane_row["event_spec_id"]),
@@ -2822,6 +2905,7 @@ def _candidate_runtime_row(conn, strategy_group_id: str, symbol: str, side: str)
             SELECT c.candidate_scope_id,
                    c.strategy_group_id,
                    c.symbol,
+                   c.exchange_instrument_id,
                    c.side,
                    c.asset_class,
                    c.policy_current_id,
@@ -2870,6 +2954,7 @@ def _insert_coverage(conn, row, *, expires_at_ms: int) -> None:
         strategy_group_id=str(row["strategy_group_id"]),
         strategy_group_version_id=str(row["strategy_group_version_id"]),
         symbol=str(row["symbol"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
         asset_class=str(row["asset_class"]),
         side=str(row["side"]),
         event_spec_id=str(row["event_spec_id"]),
@@ -2885,7 +2970,8 @@ def _insert_coverage(conn, row, *, expires_at_ms: int) -> None:
               runtime_coverage_id, strategy_group_id, symbol, side, detector_key,
               candidate_scope_id, candidate_scope_event_binding_id,
               runtime_scope_binding_id, runtime_instance_id, runtime_profile_id,
-              policy_current_id, strategy_group_version_id, asset_class,
+              policy_current_id, strategy_group_version_id,
+              exchange_instrument_id, asset_class,
               event_spec_id, event_spec_version, event_id, timeframe,
               time_authority, lane_identity_key, source_watermark,
               coverage_state, liveness_state, last_tick_at_ms, valid_until_ms,
@@ -2894,7 +2980,8 @@ def _insert_coverage(conn, row, *, expires_at_ms: int) -> None:
               :runtime_coverage_id, :strategy_group_id, :symbol, :side, :detector_key,
               :candidate_scope_id, :candidate_scope_event_binding_id,
               :runtime_scope_binding_id, :runtime_instance_id, :runtime_profile_id,
-              :policy_current_id, :strategy_group_version_id, :asset_class,
+              :policy_current_id, :strategy_group_version_id,
+              :exchange_instrument_id, :asset_class,
               :event_spec_id, :event_spec_version, :event_id, :timeframe,
               :time_authority, :lane_identity_key, :source_watermark,
               'covered', 'healthy', :last_tick_at_ms, :valid_until_ms, true,
@@ -2972,6 +3059,7 @@ def _insert_signal(
         strategy_group_id=str(row["strategy_group_id"]),
         strategy_group_version_id=str(row["strategy_group_version_id"]),
         symbol=str(row["symbol"]),
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
         asset_class=str(row["asset_class"]),
         side=str(row["side"]),
         event_spec_id=str(row["event_spec_id"]),
@@ -2987,7 +3075,8 @@ def _insert_signal(
             INSERT INTO brc_live_signal_events (
               signal_event_id, candidate_scope_id, candidate_scope_event_binding_id,
               runtime_scope_binding_id, runtime_instance_id, runtime_profile_id,
-              policy_current_id, strategy_group_version_id, asset_class,
+              policy_current_id, strategy_group_version_id,
+              exchange_instrument_id, asset_class,
               event_spec_id, event_spec_version, event_id, timeframe, time_authority,
               lane_identity_key, source_watermark, strategy_group_id,
               symbol, side, detector_key, signal_type, source_kind, status, freshness_state,
@@ -2999,7 +3088,8 @@ def _insert_signal(
             ) VALUES (
               :signal_event_id, :candidate_scope_id, :candidate_scope_event_binding_id,
               :runtime_scope_binding_id, :runtime_instance_id, :runtime_profile_id,
-              :policy_current_id, :strategy_group_version_id, :asset_class,
+              :policy_current_id, :strategy_group_version_id,
+              :exchange_instrument_id, :asset_class,
               :event_spec_id, :event_spec_version, :event_id, :timeframe, :time_authority,
               :lane_identity_key, :source_watermark, :strategy_group_id,
               :symbol, :side, :detector_key, :signal_type,
@@ -3020,6 +3110,7 @@ def _insert_signal(
             "runtime_profile_id": identity.runtime_profile_id,
             "policy_current_id": identity.policy_current_id,
             "strategy_group_version_id": identity.strategy_group_version_id,
+            "exchange_instrument_id": identity.exchange_instrument_id,
             "asset_class": identity.asset_class,
             "event_spec_id": row["event_spec_id"],
             "event_spec_version": identity.event_spec_version,

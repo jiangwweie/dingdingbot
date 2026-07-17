@@ -127,6 +127,20 @@ def pg_control_connection():
             dynamic_risk_migration.op = old_dynamic_risk_op
         install_runtime_control_state_revision(conn, revision="121")
         install_runtime_control_state_revision(conn, revision="122")
+        for revision in ("126", "127", "129", "130", "131", "132"):
+            migration_path = next(
+                REPO_ROOT.glob(f"migrations/versions/*-{revision}_*.py")
+            )
+            account_risk_migration = _load_module(
+                migration_path,
+                f"migration_{revision}_repository",
+            )
+            old_account_risk_op = account_risk_migration.op
+            account_risk_migration.op = Operations(MigrationContext.configure(conn))
+            try:
+                account_risk_migration.upgrade()
+            finally:
+                account_risk_migration.op = old_account_risk_op
     with engine.connect() as conn:
         yield conn
     engine.dispose()
@@ -205,6 +219,7 @@ def test_watcher_candidate_universe_uses_four_explicit_bounded_queries(
     assert len(projection.candidate_scope_event_bindings) == 22
     assert len(projection.runtime_scope_bindings) == 22
     assert len(projection.strategy_side_event_specs) == 6
+    assert all(row.exchange_instrument_id for row in projection.candidate_scope)
 
     row_queries = [
         statement
@@ -426,6 +441,7 @@ def test_repository_rejects_typed_live_signal_with_altered_identity_key(
         strategy_group_id="SOR-001",
         strategy_group_version_id="sgv:SOR-001:v2",
         symbol="ETHUSDT",
+        exchange_instrument_id="instrument:binance-usdm:ETHUSDT",
         asset_class="crypto_perpetual",
         side="long",
         event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
@@ -509,6 +525,7 @@ def test_live_signal_writer_output_is_readable_by_repository(pg_control_connecti
                    c.policy_current_id,
                    c.strategy_group_id,
                    c.symbol,
+                   c.exchange_instrument_id,
                    c.asset_class,
                    c.side,
                    b.binding_id,
@@ -548,6 +565,7 @@ def test_live_signal_writer_output_is_readable_by_repository(pg_control_connecti
         strategy_group_id=str(lane_row["strategy_group_id"]),
         strategy_group_version_id=str(lane_row["strategy_group_version_id"]),
         symbol=str(lane_row["symbol"]),
+        exchange_instrument_id=str(lane_row["exchange_instrument_id"]),
         asset_class=str(lane_row["asset_class"]),
         side=str(lane_row["side"]),
         event_spec_id=str(lane_row["event_spec_id"]),
@@ -850,6 +868,19 @@ def test_repository_action_time_read_profile_reuses_bounded_current_truth(
     assert state["read_profile"] == "action_time_hot_path_current"
     assert state["table_counts"]["watcher_runtime_coverage"] == 0
     assert state["table_counts"]["runtime_fact_snapshots"] == 0
+
+
+def test_repository_action_time_read_exposes_account_risk_current_projections(
+    pg_control_connection,
+):
+    state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS,
+    ).read_action_time_control_state()
+
+    assert state["table_counts"]["account_risk_policy_current"] == 0
+    assert state["table_counts"]["account_exposure_current"] == 0
+    assert state["table_counts"]["account_budget_current"] == 0
 
 
 def test_repository_monitor_read_profile_retains_protected_submit_lineage(
@@ -1536,6 +1567,10 @@ def test_runtime_control_state_repository_validator_reports_seeded_state(
 
 def _seed_database_url(database_url: str) -> None:
     migration = _load_module(MIGRATION_PATH, "migration_086_repository_validator")
+    asset_neutral_expand = _load_module(
+        next(REPO_ROOT.glob("migrations/versions/*-131_*.py")),
+        "migration_131_repository_validator",
+    )
     seed = _load_module(SEED_PATH, "seed_runtime_control_state_repository_validator")
     engine = create_engine(database_url)
     try:
@@ -1546,6 +1581,27 @@ def _seed_database_url(database_url: str) -> None:
                 migration.upgrade()
             finally:
                 migration.op = old_op
+            old_expand_op = asset_neutral_expand.op
+            asset_neutral_expand.op = Operations(MigrationContext.configure(conn))
+            try:
+                asset_neutral_expand.upgrade()
+            finally:
+                asset_neutral_expand.op = old_expand_op
             seed.seed_runtime_control_state_foundation(conn)
+            conn.execute(
+                text(
+                    """
+                    UPDATE brc_strategy_group_candidate_scope
+                    SET exchange_instrument_id = (
+                      SELECT mapping.exchange_instrument_id
+                      FROM brc_symbol_instrument_mappings AS mapping
+                      WHERE mapping.symbol = brc_strategy_group_candidate_scope.symbol
+                        AND mapping.status = 'active'
+                      ORDER BY mapping.valid_from_ms DESC, mapping.mapping_id DESC
+                      LIMIT 1
+                    )
+                    """
+                )
+            )
     finally:
         engine.dispose()

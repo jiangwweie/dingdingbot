@@ -18,6 +18,7 @@ from scripts.bootstrap_strategygroup_runtime_pilot import (
     _runtime_symbol,
     build_artifact,
 )
+from tests.support.runtime_control_state_schema import seed_runtime_control_state
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_PATH = (
@@ -49,7 +50,7 @@ def _seed_runtime_control_state_db(tmp_path: Path) -> str:
             migration.upgrade()
         finally:
             migration.op = old_op
-        seed.seed_runtime_control_state_foundation(conn)
+        seed_runtime_control_state(conn)
     engine.dispose()
     return database_url
 

@@ -22,6 +22,7 @@ from tests.unit.test_ticket_bound_protected_submit_attempt import (
 from tests.unit.lifecycle_test_schema import apply_enabled_lifecycle_command_schema
 from tests.support.runtime_control_state_schema import (
     install_runtime_control_state_revision,
+    seed_runtime_control_state,
 )
 
 
@@ -94,7 +95,7 @@ def pg_control_connection():
                 risk_reservation_migration.op = old_risk_op
         finally:
             migration.op = old_op
-        seed.seed_runtime_control_state_foundation(conn)
+        seed_runtime_control_state(conn)
         apply_enabled_lifecycle_command_schema(
             conn,
             repo_root=REPO_ROOT,
@@ -1038,7 +1039,7 @@ def test_goal_status_pg_cli_round_trip(
                 migration.upgrade()
             finally:
                 migration.op = old_op
-            seed.seed_runtime_control_state_foundation(conn)
+            seed_runtime_control_state(conn)
     finally:
         engine.dispose()
 

@@ -82,28 +82,30 @@ def main(argv: list[str] | None = None) -> int:
 
     engine = sa.create_engine(database_url)
     try:
+        # Read PG identity first, then release its transaction before any signed GET.
+        with engine.connect() as conn:
+            scope = _pg_account_safe_scope_summary(conn)
+            conn.rollback()
+        live_facts = collect_account_safe_live_facts_from_scope(
+            scope,
+            env_file=Path(args.env_file).expanduser() if args.env_file else None,
+            base_url=args.base_url,
+            timeout_seconds=args.timeout_seconds,
+        )
+        artifact = build_runtime_account_safe_facts(live_facts=live_facts)
+        account_safe_ready = artifact["checks"]["account_safe_facts_ready"] is True
+        business_blocker = None
+        fact_binding_invocation_id = args.action_time_invocation_id
+        if args.action_time_invocation_id and not account_safe_ready:
+            business_blocker = str(
+                (artifact.get("blockers") or [
+                    "action_time_account_safe_facts_not_satisfied"
+                ])[0]
+            )
+            # Persist the fail-closed facts, but never bind an unsatisfied
+            # fact set into the action-time invocation.
+            fact_binding_invocation_id = None
         with engine.begin() as conn:
-            live_facts = collect_account_safe_live_facts_from_pg_scope(
-                conn,
-                env_file=Path(args.env_file).expanduser() if args.env_file else None,
-                base_url=args.base_url,
-                timeout_seconds=args.timeout_seconds,
-            )
-            artifact = build_runtime_account_safe_facts(live_facts=live_facts)
-            account_safe_ready = (
-                artifact["checks"]["account_safe_facts_ready"] is True
-            )
-            business_blocker = None
-            fact_binding_invocation_id = args.action_time_invocation_id
-            if args.action_time_invocation_id and not account_safe_ready:
-                business_blocker = str(
-                    (artifact.get("blockers") or [
-                        "action_time_account_safe_facts_not_satisfied"
-                    ])[0]
-                )
-                # Persist the fail-closed facts, but never bind an unsatisfied
-                # fact set into the action-time invocation.
-                fact_binding_invocation_id = None
             fact_snapshot_ids = write_account_safe_fact_snapshots(
                 conn,
                 artifact=artifact,
@@ -161,6 +163,25 @@ def collect_account_safe_live_facts_from_pg_scope(
     urlopen: UrlOpen | None = None,
 ) -> dict[str, Any]:
     scope = _pg_account_safe_scope_summary(conn)
+    return collect_account_safe_live_facts_from_scope(
+        scope,
+        env_file=env_file,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        urlopen=urlopen,
+    )
+
+
+def collect_account_safe_live_facts_from_scope(
+    scope: dict[str, Any],
+    *,
+    env_file: Path | None,
+    base_url: str = DEFAULT_BASE_URL,
+    timeout_seconds: float = 12,
+    urlopen: UrlOpen | None = None,
+) -> dict[str, Any]:
+    """Collect exchange facts after the short PG scope read has completed."""
+
     symbols = list(scope["symbols"])
     api_key = _env_value(
         ("EXCHANGE_API_KEY", "BINANCE_API_KEY", "binance_exchange_key"),
@@ -429,6 +450,26 @@ def build_runtime_account_safe_facts(
         is True,
         "source_order_created": source_safety.get("order_created") is True,
     }
+    # The legacy action-time surface intentionally remains flat-only.  The
+    # account-capacity path needs a narrower fact: all non-position account
+    # safety checks are healthy, while exact position/order ownership will be
+    # reclassified from the full account snapshot inside its PG transaction.
+    account_capacity_base_safe = (
+        all(
+            value is True
+            for key, value in checks.items()
+            if key
+            not in {
+                "active_position_clear",
+                "open_orders_clear",
+                "next_attempt_gate_ready",
+                "source_exchange_write_called",
+                "source_order_created",
+            }
+        )
+        and checks["source_exchange_write_called"] is False
+        and checks["source_order_created"] is False
+    )
     ready = (
         all(
             value is True
@@ -467,6 +508,7 @@ def build_runtime_account_safe_facts(
             **checks,
             "account_safe_facts_ready": ready,
             "account_safe": ready,
+            "account_capacity_base_safe": account_capacity_base_safe,
             "private_action_time_facts_ready": ready,
             "active_position_or_open_order_clear": (
                 checks["active_position_clear"] and checks["open_orders_clear"]
@@ -499,6 +541,7 @@ def build_runtime_account_safe_facts(
             ),
             "exchange_rules_ready": checks["exchange_rules_ready"],
             "protection_template_ready": checks["protection_template_ready"],
+            "account_capacity_base_safe": account_capacity_base_safe,
         },
         "source_status": live_facts.get("status"),
         "safety_invariants": {

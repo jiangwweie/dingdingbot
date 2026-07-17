@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 
 from sqlalchemy import text
@@ -17,6 +18,19 @@ from src.application.action_time.runtime_pg_fact_snapshots import (
 from src.application.readmodels import strategy_live_candidate_pool as candidate_pool
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
+)
+from src.application.action_time import promotion_action_time_lane as promotion_subject
+from src.application.action_time.account_capacity_reservation import (
+    AccountCapacityReservationResult,
+)
+from src.application.action_time.instrument_risk_facts import InstrumentRiskFacts
+from src.domain.instrument_risk_identity import (
+    InstrumentRiskIdentity,
+    InstrumentRuleSnapshotRef,
+    RiskClusterMembershipSnapshotRef,
+)
+from src.infrastructure.binance_usdm_account_risk_snapshot import (
+    FullAccountRiskSnapshot,
 )
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
@@ -100,6 +114,87 @@ def test_sequence_cli_keeps_watcher_healthy_for_persisted_business_blocker(
         ]
     ) == 0
     assert seen["action_time_invocation_id"] == "action_time_invocation:unit"
+
+
+def test_sequence_cli_prefetches_full_account_snapshot_only_for_active_policy(
+    monkeypatch,
+):
+    seen: dict[str, object] = {}
+
+    class FakeTransaction:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def rollback(self):
+            return None
+
+    class FakeEngine:
+        def connect(self):
+            return FakeTransaction()
+
+        def begin(self):
+            return FakeTransaction()
+
+        def dispose(self):
+            return None
+
+    snapshot = FullAccountRiskSnapshot(
+        snapshot_ready=True,
+        account_id="account-1",
+        exchange_id="binance_usdm",
+        total_wallet_balance=Decimal("600"),
+        available_balance=Decimal("500"),
+        exchange_total_initial_margin=Decimal("100"),
+        can_trade=True,
+        position_mode="one_way",
+        source_snapshot_id="snapshot-1",
+        observed_at_ms=NOW_MS,
+        valid_until_ms=NOW_MS + 60_000,
+    )
+    monkeypatch.setattr(sequence_script.sa, "create_engine", lambda _dsn: FakeEngine())
+    monkeypatch.setattr(
+        sequence_script,
+        "_active_account_risk_scope",
+        lambda _conn, **_kwargs: sequence_script._ActiveAccountRiskScope(
+            account_id="account-1",
+            runtime_profile_id="profile-1",
+            exchange_id="binance_usdm",
+        ),
+    )
+    monkeypatch.setattr(
+        sequence_script,
+        "_fetch_account_risk_snapshot",
+        lambda **kwargs: seen.update({"scope": kwargs["scope"]}) or snapshot,
+    )
+    monkeypatch.setattr(
+        sequence_script,
+        "materialize_action_time_ticket_sequence",
+        lambda _conn, **kwargs: (
+            seen.update(kwargs)
+            or {
+                "status": "action_time_ticket_sequence_rolled_back",
+                "process_outcome": {
+                    "process_state": "business_blocked",
+                    "business_state": "temporarily_unavailable",
+                    "first_blocker": "unit_blocker",
+                },
+            }
+        ),
+    )
+
+    assert sequence_script.main(
+        [
+            "--database-url",
+            "postgresql+psycopg://unit",
+            "--action-time-invocation-id",
+            "action_time_invocation:unit",
+        ]
+    ) == 0
+    assert seen["prefetched_account_snapshot"] == snapshot
+    assert seen["scope"].account_id == "account-1"
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
     _candidate_runtime_row,
@@ -129,6 +224,7 @@ def _bind_fresh_invocation_account_facts(
                 "account_safe_facts_ready": True,
                 "account_safe": True,
                 "account_trade_permission": True,
+                "account_capacity_base_safe": True,
                 "open_orders_clear": True,
                 "active_position_or_open_order_clear": True,
                 "action_time_available_balance": True,
@@ -139,6 +235,7 @@ def _bind_fresh_invocation_account_facts(
             "facts": {
                 "total_wallet_balance": "100",
                 "available_balance": "100",
+                "account_capacity_base_safe": True,
                 "exchange_max_leverage_by_symbol": {"ETHUSDT": 100},
             },
             "account_mode": {
@@ -155,6 +252,94 @@ def _bind_fresh_invocation_account_facts(
         },
         source_ref="unit:invocation-bound-account-facts",
         action_time_invocation_id=action_time_invocation_id,
+    )
+
+
+def _install_allowed_atomic_capacity(
+    conn,
+    *,
+    exchange_instrument_id: str,
+) -> AccountCapacityReservationResult:
+    conn.execute(text("""
+      UPDATE brc_exchange_instruments
+      SET instrument_type = 'perpetual', settlement_asset = 'USDT',
+          margin_asset = 'USDT', instrument_identity_schema_version = 'v1'
+      WHERE exchange_instrument_id = :exchange_instrument_id
+    """), {"exchange_instrument_id": exchange_instrument_id})
+    conn.execute(text("""
+      INSERT INTO brc_instrument_rule_snapshots (
+        instrument_rule_snapshot_id, exchange_instrument_id, rule_schema_version,
+        price_tick, quantity_step, min_qty, min_notional, contract_multiplier,
+        exchange_max_leverage_for_claim_notional, source_fact_snapshot_id,
+        valid_until_ms, semantic_hash, status, created_at_ms
+      ) VALUES (
+        'rule-eth-v1', :exchange_instrument_id, 'v1', .01, .001, .001, 5, 1,
+        100, 'rule-source-eth', :valid_until_ms, 'rule-hash-eth', 'current', :now_ms
+      )
+    """), {
+        "exchange_instrument_id": exchange_instrument_id,
+        "valid_until_ms": NOW_MS + 600_000,
+        "now_ms": NOW_MS,
+    })
+    conn.execute(text("""
+      INSERT INTO brc_risk_cluster_membership_snapshots (
+        cluster_membership_snapshot_id, risk_policy_version,
+        primary_risk_cluster_id, semantic_hash, status, created_at_ms
+      ) VALUES (
+        'cluster-eth-v1', 'risk-policy-v1', 'crypto_usd_beta',
+        'cluster-hash-eth', 'current', :now_ms
+      )
+    """), {"now_ms": NOW_MS})
+    instrument_row = conn.execute(text("""
+      SELECT exchange_id, exchange_symbol, asset_class
+      FROM brc_exchange_instruments
+      WHERE exchange_instrument_id = :exchange_instrument_id
+    """), {"exchange_instrument_id": exchange_instrument_id}).mappings().one()
+    facts = InstrumentRiskFacts(
+        identity=InstrumentRiskIdentity(
+            exchange_instrument_id=exchange_instrument_id,
+            exchange_id=str(instrument_row["exchange_id"]),
+            exchange_symbol=str(instrument_row["exchange_symbol"]),
+            asset_class=str(instrument_row["asset_class"]),
+            instrument_type="perpetual",
+            settlement_asset="USDT",
+            margin_asset="USDT",
+            instrument_identity_schema_version="v1",
+        ),
+        rule_snapshot=InstrumentRuleSnapshotRef(
+            instrument_rule_snapshot_id="rule-eth-v1",
+            rule_schema_version="v1",
+            price_tick=Decimal(".01"),
+            quantity_step=Decimal(".001"),
+            min_qty=Decimal(".001"),
+            min_notional=Decimal("5"),
+            contract_multiplier=Decimal("1"),
+            exchange_max_leverage_for_claim_notional=100,
+            source_fact_snapshot_id="rule-source-eth",
+            valid_until_ms=NOW_MS + 600_000,
+        ),
+        cluster_snapshot=RiskClusterMembershipSnapshotRef(
+            cluster_membership_snapshot_id="cluster-eth-v1",
+            primary_risk_cluster_id="crypto_usd_beta",
+            semantic_hash="cluster-hash-eth",
+        ),
+    )
+    return AccountCapacityReservationResult(
+        allowed=True,
+        allocated_risk=Decimal(".6"),
+        intended_qty=Decimal(".003"),
+        selected_leverage=10,
+        reserved_margin=Decimal(".6"),
+        claimed_projection_version=2,
+        account_risk_policy_version="risk-policy-v1",
+        account_risk_policy_event_id="risk-policy-event-1",
+        risk_cluster_id="crypto_usd_beta",
+        exchange_instrument_id=exchange_instrument_id,
+        instrument_rule_snapshot_id="rule-eth-v1",
+        cluster_membership_snapshot_id="cluster-eth-v1",
+        instrument_facts=facts,
+        account_source_fact_snapshot_id="account-snapshot-1",
+        account_fact_schema_version="brc.account-risk-snapshot.v1",
     )
 
 
@@ -263,7 +448,9 @@ def test_invocation_sequence_uses_exact_post_opening_facts_and_ignores_other_sig
         completion_clock_ms=lambda: NOW_MS + 2,
     )
 
-    assert report["status"] == "action_time_ticket_sequence_committed", report
+    assert report["status"] == "action_time_ticket_sequence_committed", report[
+        "blockers"
+    ]
     assert report["projection"] == {}
     assert report["ticket"]["ticket_id"]
     assert invocation_pg_control_connection.execute(
@@ -309,6 +496,199 @@ def test_invocation_sequence_uses_exact_post_opening_facts_and_ignores_other_sig
         "policy_current_id": invocation.lane_identity.policy_current_id,
         "time_authority": invocation.lane_identity.time_authority,
     }
+
+
+def test_invocation_sequence_rolls_back_before_lane_when_prefetched_capacity_blocks(
+    invocation_pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection, "SOR-001", "ETHUSDT", "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+    _bind_fresh_invocation_account_facts(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=NOW_MS + 1,
+    )
+
+    report = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 1,
+        completion_clock_ms=lambda: NOW_MS + 2,
+        prefetched_account_capacity=AccountCapacityReservationResult(
+            allowed=False,
+            first_blocker="account_budget_current_stale",
+        ),
+    )
+
+    assert report["status"] == "action_time_ticket_sequence_rolled_back"
+    assert report["blockers"] == ["account_budget_current_stale"]
+    assert _count(invocation_pg_control_connection, "brc_promotion_candidates") == 0
+    assert _count(invocation_pg_control_connection, "brc_budget_reservations") == 0
+    assert _count(invocation_pg_control_connection, "brc_action_time_lane_inputs") == 0
+    assert _count(invocation_pg_control_connection, "brc_action_time_tickets") == 0
+
+
+def test_invocation_sequence_commits_one_sealed_claim_ticket_and_episode(
+    invocation_pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+    _bind_fresh_invocation_account_facts(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=NOW_MS + 1,
+    )
+    capacity = _install_allowed_atomic_capacity(
+        invocation_pg_control_connection,
+        exchange_instrument_id=invocation.lane_identity.exchange_instrument_id,
+    )
+
+    report = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 1,
+        completion_clock_ms=lambda: NOW_MS + 2,
+        prefetched_account_capacity=capacity,
+    )
+
+    assert report["status"] == "action_time_ticket_sequence_committed", report[
+        "blockers"
+    ]
+    claim = invocation_pg_control_connection.execute(text("""
+      SELECT budget_reservation_id, ticket_id, exposure_episode_id,
+             action_time_invocation_id, capacity_claim_hash
+      FROM brc_budget_reservations
+    """)).mappings().one()
+    ticket = invocation_pg_control_connection.execute(text("""
+      SELECT ticket_id, budget_reservation_id, exposure_episode_id,
+             action_time_invocation_id, capacity_claim_hash
+      FROM brc_action_time_tickets
+    """)).mappings().one()
+    assert claim["ticket_id"] == ticket["ticket_id"]
+    assert claim["budget_reservation_id"] == ticket["budget_reservation_id"]
+    assert claim["exposure_episode_id"] == ticket["exposure_episode_id"]
+    assert claim["action_time_invocation_id"] == ticket["action_time_invocation_id"]
+    assert claim["capacity_claim_hash"] == ticket["capacity_claim_hash"]
+    assert claim["capacity_claim_hash"]
+
+
+def test_ticket_insert_failure_rolls_back_claim_and_lineage(
+    invocation_pg_control_connection,
+    monkeypatch,
+):
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+    _bind_fresh_invocation_account_facts(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=NOW_MS + 1,
+    )
+    capacity = _install_allowed_atomic_capacity(
+        invocation_pg_control_connection,
+        exchange_instrument_id=invocation.lane_identity.exchange_instrument_id,
+    )
+    monkeypatch.setattr(
+        promotion_subject,
+        "materialize_action_time_ticket",
+        lambda *_args, **_kwargs: {
+            "status": "action_time_ticket_materialization_blocked",
+            "blockers": ["forced_ticket_composite_lineage_failure"],
+        },
+    )
+
+    report = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 1,
+        completion_clock_ms=lambda: NOW_MS + 2,
+        prefetched_account_capacity=capacity,
+    )
+
+    assert report["status"] == "action_time_ticket_sequence_rolled_back"
+    assert report["blockers"] == ["forced_ticket_composite_lineage_failure"]
+    assert _count(invocation_pg_control_connection, "brc_budget_reservations") == 0
+    assert _count(invocation_pg_control_connection, "brc_action_time_tickets") == 0
+    assert _count(invocation_pg_control_connection, "brc_action_time_lane_inputs") == 0
+
+
+def test_repeated_sealed_invocation_reuses_single_claim_and_ticket(
+    invocation_pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+    _bind_fresh_invocation_account_facts(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=NOW_MS + 1,
+    )
+    capacity = _install_allowed_atomic_capacity(
+        invocation_pg_control_connection,
+        exchange_instrument_id=invocation.lane_identity.exchange_instrument_id,
+    )
+
+    first = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 1,
+        completion_clock_ms=lambda: NOW_MS + 2,
+        prefetched_account_capacity=capacity,
+    )
+    repeated = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 3,
+        completion_clock_ms=lambda: NOW_MS + 4,
+        prefetched_account_capacity=capacity,
+    )
+
+    assert first["status"] == "action_time_ticket_sequence_committed"
+    assert repeated["status"] == "action_time_ticket_sequence_committed"
+    assert _count(invocation_pg_control_connection, "brc_budget_reservations") == 1
+    assert _count(invocation_pg_control_connection, "brc_action_time_tickets") == 1
+    assert _count(invocation_pg_control_connection, "brc_action_time_lane_inputs") == 1
+    sealed = invocation_pg_control_connection.execute(text("""
+      SELECT action_time_invocation_id, capacity_claim_hash
+      FROM brc_budget_reservations
+    """)).mappings().one()
+    assert sealed["action_time_invocation_id"] == invocation.action_time_invocation_id
+    assert sealed["capacity_claim_hash"]
 
 
 def test_repeated_invocation_after_ticket_exists_is_terminal_noop(
@@ -998,6 +1378,7 @@ def test_distinct_same_lane_signal_keeps_blocker_until_new_sequence_succeeds(
               signal_event_id, candidate_scope_id, candidate_scope_event_binding_id,
               runtime_scope_binding_id, runtime_instance_id, runtime_profile_id,
               policy_current_id, strategy_group_version_id, asset_class,
+              exchange_instrument_id,
               event_spec_id, event_spec_version, event_id, timeframe, time_authority,
               lane_identity_key, source_watermark,
               strategy_group_id, symbol, side, detector_key, signal_type,
@@ -1012,6 +1393,7 @@ def test_distinct_same_lane_signal_keeps_blocker_until_new_sequence_succeeds(
               :new_signal_id, candidate_scope_id, candidate_scope_event_binding_id,
               runtime_scope_binding_id, runtime_instance_id, runtime_profile_id,
               policy_current_id, strategy_group_version_id, asset_class,
+              exchange_instrument_id,
               event_spec_id, event_spec_version, event_id, timeframe, time_authority,
               lane_identity_key, :source_watermark,
               strategy_group_id, symbol, side, detector_key, signal_type,

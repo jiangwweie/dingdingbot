@@ -225,6 +225,7 @@ def materialize_runtime_process_outcome(
             "strategy_group_id": lane_identity.strategy_group_id,
             "strategy_group_version_id": lane_identity.strategy_group_version_id,
             "symbol": lane_identity.symbol,
+            "exchange_instrument_id": lane_identity.exchange_instrument_id,
             "asset_class": lane_identity.asset_class,
             "side": lane_identity.side,
             "event_spec_id": lane_identity.event_spec_id,

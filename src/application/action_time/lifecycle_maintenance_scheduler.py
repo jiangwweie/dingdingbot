@@ -8,6 +8,10 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.infrastructure.binance_usdm_account_risk_snapshot import (
+    FullAccountRiskSnapshot,
+)
+
 from src.application.action_time.exchange_snapshot_provider import (
     fetch_ticket_bound_attempt_exchange_snapshot,
     fetch_ticket_bound_exchange_snapshot,
@@ -83,6 +87,7 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
     max_actions_per_scope: int = 16,
     snapshot_timeout_seconds: float = 8.0,
     provided_exchange_snapshots: dict[str, dict[str, Any]] | None = None,
+    provided_account_risk_snapshots: dict[str, FullAccountRiskSnapshot] | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     now_ms = int(now_ms or time.time() * 1000)
@@ -123,6 +128,7 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
     exchange_read_called = False
     exchange_write_called = False
     provided_exchange_snapshots = provided_exchange_snapshots or {}
+    provided_account_risk_snapshots = provided_account_risk_snapshots or {}
     for index, scope in enumerate(first_tick_scopes):
         snapshot_payload: dict[str, Any] = {}
         exchange_snapshot: dict[str, Any] | None = None
@@ -161,6 +167,9 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             conn,
             protected_submit_attempt_id=str(scope["protected_submit_attempt_id"]),
             exchange_snapshot=exchange_snapshot,
+            account_risk_snapshot=provided_account_risk_snapshots.get(
+                str(scope.get("ticket_id") or "")
+            ),
             now_ms=now_ms + index + 25,
         )
         blockers.extend(_result_blockers(tick))
@@ -292,6 +301,9 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
                 protected_submit_attempt_id=str(scope["protected_submit_attempt_id"]),
                 tick_kind="scheduled",
                 exchange_snapshot=exchange_snapshot,
+                account_risk_snapshot=provided_account_risk_snapshots.get(
+                    str(scope.get("ticket_id") or "")
+                ),
                 now_ms=now_ms + index + 50,
             )
             blockers.extend(_result_blockers(scheduled_tick))
@@ -395,6 +407,9 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
                     protected_submit_attempt_id=str(scope["protected_submit_attempt_id"]),
                     tick_kind="recovery_check",
                     exchange_snapshot=dict(post_recovery_snapshot_payload.get("snapshot") or {}),
+                    account_risk_snapshot=provided_account_risk_snapshots.get(
+                        str(scope.get("ticket_id") or "")
+                    ),
                     now_ms=now_ms + index + 150,
                 )
                 blockers.extend(_result_blockers(recovery_check_tick))

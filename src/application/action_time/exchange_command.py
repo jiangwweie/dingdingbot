@@ -100,6 +100,7 @@ def materialize_ticket_bound_exchange_commands(
                 **order,
                 "exchange_id": scope.exchange_id,
                 "exchange_instrument_id": scope.exchange_instrument_id,
+                "exposure_episode_id": scope.exposure_episode_id,
                 "gateway_symbol": scope.exchange_symbol,
                 "position_mode": scope.position_mode,
                 "position_side": scope.position_side,
@@ -124,6 +125,7 @@ def materialize_ticket_bound_exchange_commands(
             exchange_instrument_id=str(
                 scope.exchange_instrument_id
             ),
+            exposure_episode_id=scope.exposure_episode_id,
             exchange_id=scope.exchange_id,
             gateway_symbol=scope.exchange_symbol,
             symbol=str(attempt.get("symbol") or ""),
@@ -191,6 +193,7 @@ def materialize_ticket_bound_exchange_commands(
                 "strategy_group_id",
                 "runtime_profile_id",
                 "exchange_instrument_id",
+                "exposure_episode_id",
                 "exchange_id",
                 "gateway_symbol",
                 "symbol",
@@ -582,6 +585,7 @@ def command_request_fingerprint(order: dict[str, Any]) -> str:
         "exchange_instrument_id": str(
             order.get("exchange_instrument_id") or ""
         ),
+        "exposure_episode_id": str(order.get("exposure_episode_id") or ""),
         "gateway_symbol": str(order.get("gateway_symbol") or ""),
         "position_mode": str(order.get("position_mode") or ""),
         "position_side": str(order.get("position_side") or ""),

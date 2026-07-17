@@ -81,6 +81,9 @@ CONTROL_STATE_TABLES: dict[str, str] = {
     "runtime_process_outcomes": "brc_runtime_process_outcomes",
     "strategy_semantic_admissions": "brc_strategy_semantic_admissions",
     "allocation_decisions": "brc_allocation_decisions",
+    "account_risk_policy_current": "brc_account_risk_policy_current",
+    "account_exposure_current": "brc_account_exposure_current",
+    "account_budget_current": "brc_account_budget_current",
 }
 
 OPTIONAL_CONTROL_STATE_TABLES = {
@@ -91,6 +94,13 @@ OPTIONAL_CONTROL_STATE_TABLES = {
     "ticket_bound_exchange_commands",
     "ticket_bound_scope_freezes",
     "live_outcome_ledger",
+    # Account-risk current projections were introduced after the initial
+    # runtime-control foundation. They remain optional during rolling schema
+    # adoption, but are exposed by every Action-Time read once migration 122
+    # is present.
+    "account_risk_policy_current",
+    "account_exposure_current",
+    "account_budget_current",
 }
 
 REQUIRED_PRODUCTION_PROJECTIONS = {
@@ -121,13 +131,14 @@ WATCHER_CANDIDATE_PROFILE: dict[str, tuple[str, str, tuple[str, ...]]] = {
         "brc_strategy_group_candidate_scope",
         "active",
         (
-        "candidate_scope_id",
-        "strategy_group_id",
-        "symbol",
-        "asset_class",
-        "side",
-        "policy_current_id",
-        "status",
+            "candidate_scope_id",
+            "strategy_group_id",
+            "symbol",
+            "exchange_instrument_id",
+            "asset_class",
+            "side",
+            "policy_current_id",
+            "status",
         ),
     ),
     "candidate_scope_event_bindings": (
@@ -223,6 +234,7 @@ CAPABILITY_CERTIFICATION_COLUMNS: dict[str, tuple[str, ...]] = {
         "candidate_scope_id",
         "strategy_group_id",
         "symbol",
+        "exchange_instrument_id",
         "asset_class",
         "side",
         "policy_current_id",
@@ -1620,6 +1632,14 @@ class PgBackedRuntimeControlStateRepository:
             ).append(binding)
 
         for candidate_id, candidate in active_candidates.items():
+            if not str(candidate.get("exchange_instrument_id") or "").strip():
+                raise RuntimeControlStateRepositoryError(
+                    f"{candidate_id} has no exact exchange instrument identity"
+                )
+            if not str(candidate.get("timeframe") or "").strip():
+                raise RuntimeControlStateRepositoryError(
+                    f"{candidate_id} has no exact timeframe"
+                )
             bindings = active_binding_by_candidate.get(candidate_id) or []
             if not bindings:
                 raise RuntimeControlStateRepositoryError(
@@ -1643,6 +1663,12 @@ class PgBackedRuntimeControlStateRepository:
                 if binding.get("symbol") != candidate.get("symbol"):
                     raise RuntimeControlStateRepositoryError(
                         f"{binding.get('binding_id')} mismatches candidate symbol"
+                    )
+                if str(event.get("timeframe") or "") != str(
+                    candidate.get("timeframe") or ""
+                ):
+                    raise RuntimeControlStateRepositoryError(
+                        f"{candidate_id} mismatches event timeframe"
                     )
                 event_id = str(event.get("event_id") or "")
                 candidate_event_id = str(_as_dict(candidate.get("metadata")).get("event_id") or "")

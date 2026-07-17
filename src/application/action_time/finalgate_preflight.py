@@ -16,11 +16,13 @@ withdrawals, transfers, live profile mutation, or order sizing mutation.
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import sys
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import sqlalchemy as sa
@@ -43,6 +45,21 @@ from src.application.action_time.budget_stop_risk import (  # noqa: E402
 )
 from src.application.action_time.action_time_ticket import (  # noqa: E402
     compute_action_time_ticket_hash,
+)
+from src.application.action_time.account_capacity_claim import (  # noqa: E402
+    AccountCapacityClaimConflict,
+    load_account_capacity_claim_by_invocation,
+)
+from src.application.action_time.instrument_risk_facts import (  # noqa: E402
+    InstrumentRiskFactsError,
+    load_instrument_risk_facts,
+)
+from src.domain.account_capacity_claim import (  # noqa: E402
+    capacity_claim_hash,
+    revalidate_capacity_totals,
+)
+from src.infrastructure.account_capacity_hot_path_repository import (  # noqa: E402
+    load_live_exposure_rows,
 )
 
 
@@ -129,7 +146,12 @@ def materialize_action_time_finalgate_preflight(
             finalgate_pass_id=None,
         )
 
-    blockers = _finalgate_blockers(control_state, ticket=ticket, now_ms=now_ms)
+    blockers = _finalgate_blockers(
+        conn,
+        control_state,
+        ticket=ticket,
+        now_ms=now_ms,
+    )
     if blockers:
         if ticket.get("status") == "created":
             _transition_ticket(
@@ -222,7 +244,7 @@ def materialize_next_action_time_finalgate_preflight(
         )
     tickets = [
         row
-        for row in _rows(control_state.get("action_time_tickets"))
+        for row in _control_state_rows(control_state.get("action_time_tickets"))
         if row.get("status") in ELIGIBLE_FINALGATE_TICKET_STATUSES
         and int(row.get("expires_at_ms") or 0) > now_ms
     ]
@@ -302,6 +324,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _finalgate_blockers(
+    conn: sa.Connection,
     control_state: dict[str, Any],
     *,
     ticket: dict[str, Any],
@@ -479,6 +502,21 @@ def _finalgate_blockers(
         blockers.append(f"budget_reservation_status_not_usable:{budget.get('status')}")
     if budget:
         blockers.extend(budget_stop_risk_blockers(budget))
+    capacity_blockers, active_capacity_policy = account_capacity_current_blockers(
+        conn,
+        budget=budget,
+        now_ms=now_ms,
+    )
+    blockers.extend(capacity_blockers)
+    if active_capacity_policy and not capacity_blockers:
+        if account_values.get("account_capacity_base_safe") is not True:
+            blockers.append("account_capacity_base_fact_not_safe")
+        else:
+            blockers = [
+                blocker
+                for blocker in blockers
+                if blocker not in _CAPACITY_REPLACED_LEGACY_BLOCKERS
+            ]
     if protection and int(protection.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("protection_ref_expired")
     if execution_policy and execution_policy.get("status") != "current":
@@ -492,6 +530,253 @@ def _finalgate_blockers(
     ) != str(ticket.get("event_spec_version_id") or ""):
         blockers.append("event_spec_version_mismatch")
     return _dedupe(blockers)
+
+
+_CAPACITY_REPLACED_LEGACY_BLOCKERS = {
+    "account_safe_fact_not_satisfied",
+    "account_safe_fact_not_fresh",
+    "account_safe_fact_not_true",
+    "open_orders_not_clear",
+    "active_position_or_open_order_conflict",
+}
+
+
+def account_capacity_current_blockers(
+    conn: sa.Connection,
+    *,
+    budget: dict[str, Any],
+    now_ms: int,
+) -> tuple[list[str], bool]:
+    """Revalidate one immutable, already-counted claim by current semantics."""
+
+    policy_version = str(budget.get("account_risk_policy_version") or "").strip()
+    policy_event_id = str(budget.get("account_risk_policy_event_id") or "").strip()
+    invocation_id = str(budget.get("action_time_invocation_id") or "").strip()
+    ticket_id = str(budget.get("ticket_id") or "").strip()
+    if not policy_version or budget.get("account_capacity_projection_version") is None:
+        return [], False
+    if not policy_event_id:
+        return ["account_risk_policy_event_missing"], True
+    if not invocation_id or not ticket_id:
+        return ["account_capacity_claim_lineage_missing"], True
+
+    try:
+        claim = load_account_capacity_claim_by_invocation(
+            conn,
+            action_time_invocation_id=invocation_id,
+        )
+    except (AccountCapacityClaimConflict, TypeError, ValueError):
+        return ["account_capacity_claim_invalid"], True
+    if claim is None or claim.payload.ticket_id != ticket_id:
+        return ["account_capacity_claim_missing"], True
+    if (
+        claim.capacity_claim_hash != capacity_claim_hash(claim.payload)
+        or claim.capacity_claim_hash
+        != str(budget.get("capacity_claim_hash") or "").strip()
+    ):
+        return ["account_capacity_claim_hash_mismatch"], True
+
+    claim_count = int(
+        conn.execute(
+            sa.text(
+                """
+                SELECT count(*)
+                FROM brc_budget_reservations
+                WHERE account_id = :account_id
+                  AND runtime_profile_id = :runtime_profile_id
+                  AND ticket_id = :ticket_id
+                  AND status IN ('active', 'consumed')
+                """
+            ),
+            {
+                "account_id": claim.payload.account_id,
+                "runtime_profile_id": claim.payload.runtime_profile_id,
+                "ticket_id": ticket_id,
+            },
+        ).scalar_one()
+    )
+    if claim_count == 0:
+        return ["account_capacity_claim_not_counted"], True
+    if claim_count != 1:
+        return ["account_capacity_claim_count_mismatch"], True
+
+    policy = conn.execute(
+        sa.text(
+            """
+            SELECT risk_policy_version, activation_state, source_event_id,
+                   max_concurrent_positions,
+                   max_portfolio_open_risk_fraction,
+                   max_cluster_open_risk_fraction,
+                   max_portfolio_initial_margin_fraction
+            FROM brc_account_risk_policy_current
+            WHERE account_id = :account_id
+              AND runtime_profile_id = :runtime_profile_id
+            ORDER BY risk_policy_version
+            LIMIT 2
+            """
+        ),
+        {
+            "account_id": claim.payload.account_id,
+            "runtime_profile_id": claim.payload.runtime_profile_id,
+        },
+    ).mappings().one_or_none()
+    if policy is None or str(policy.get("risk_policy_version") or "") != policy_version:
+        return ["account_risk_policy_missing_or_changed"], True
+    if str(policy.get("source_event_id") or "") != policy_event_id:
+        return ["account_risk_policy_event_changed"], True
+    if str(policy.get("activation_state") or "") != "active":
+        return ["account_risk_policy_not_active"], True
+
+    projection = conn.execute(
+        sa.text(
+            """
+            SELECT total_wallet_balance, available_balance,
+                   portfolio_held_risk, unreflected_pending_margin,
+                   exchange_total_initial_margin,
+                   claimed_position_slots, valid_until_ms,
+                   reconciliation_state, first_blocker
+            FROM brc_account_budget_current
+            WHERE account_id = :account_id
+              AND runtime_profile_id = :runtime_profile_id
+              AND risk_policy_version = :risk_policy_version
+            ORDER BY account_budget_current_id
+            LIMIT 2
+            """
+        ),
+        {
+            "account_id": claim.payload.account_id,
+            "runtime_profile_id": claim.payload.runtime_profile_id,
+            "risk_policy_version": policy_version,
+        },
+    ).mappings().one_or_none()
+    if projection is None:
+        return ["account_budget_current_missing"], True
+    if int(projection.get("valid_until_ms") or 0) <= now_ms:
+        return ["account_budget_current_stale"], True
+
+    max_positions = int(policy["max_concurrent_positions"])
+    exposure_rows = load_live_exposure_rows(
+        conn,
+        account_id=claim.payload.account_id,
+        max_concurrent_positions=max_positions,
+    )
+    if exposure_rows.overflow:
+        return ["account_exposure_current_overflow"], True
+    exposure_blockers = sorted(
+        {str(row.first_blocker) for row in exposure_rows.rows if row.first_blocker}
+    )
+    if exposure_blockers:
+        return exposure_blockers, True
+    own_slot_count = sum(
+        1
+        for row in exposure_rows.rows
+        if row.owner_ticket_id == ticket_id and row.position_slot_claimed
+    )
+    if own_slot_count == 0:
+        return ["account_capacity_claim_slot_not_counted"], True
+    if own_slot_count != 1:
+        return ["account_capacity_claim_slot_count_mismatch"], True
+
+    try:
+        current_facts = load_instrument_risk_facts(
+            conn,
+            exchange_instrument_id=claim.payload.instrument.exchange_instrument_id,
+            risk_policy_version=policy_version,
+            planned_notional=claim.payload.target_notional,
+            now_ms=now_ms,
+        )
+    except InstrumentRiskFactsError as exc:
+        return [str(exc)], True
+    if current_facts.identity != claim.payload.instrument:
+        return ["account_capacity_claim_instrument_identity_changed"], True
+    if (
+        current_facts.cluster_snapshot.primary_risk_cluster_id
+        != claim.payload.cluster_snapshot.primary_risk_cluster_id
+    ):
+        return ["account_capacity_primary_cluster_changed"], True
+    rule_blockers = _current_rule_legality_blockers(
+        claim=claim.payload,
+        current_rule=current_facts.rule_snapshot,
+    )
+    if rule_blockers:
+        return rule_blockers, True
+
+    cluster_held_risk = _decimal(
+        conn.execute(
+            sa.text(
+                """
+                SELECT COALESCE(sum(held_risk), 0)
+                FROM brc_account_exposure_current
+                WHERE account_id = :account_id
+                  AND primary_risk_cluster_id = :primary_risk_cluster_id
+                  AND exposure_state NOT IN ('flat', 'closed')
+                """
+            ),
+            {
+                "account_id": claim.payload.account_id,
+                "primary_risk_cluster_id": (
+                    current_facts.cluster_snapshot.primary_risk_cluster_id
+                ),
+            },
+        ).scalar_one()
+    )
+    wallet = _decimal(projection["total_wallet_balance"])
+    blockers = revalidate_capacity_totals(
+        current_portfolio_held_risk=_decimal(projection["portfolio_held_risk"]),
+        current_primary_cluster_held_risk=cluster_held_risk,
+        current_pending_margin=_decimal(projection["unreflected_pending_margin"]),
+        current_claimed_position_slots=int(projection["claimed_position_slots"]),
+        available_balance=_decimal(projection["available_balance"]),
+        claim_risk=claim.payload.planned_stop_risk,
+        claim_margin=claim.payload.reserved_margin,
+        portfolio_limit=(
+            wallet * _decimal(policy["max_portfolio_open_risk_fraction"])
+        ),
+        cluster_limit=(
+            wallet * _decimal(policy["max_cluster_open_risk_fraction"])
+        ),
+        margin_limit=max(
+            Decimal("0"),
+            wallet * _decimal(policy["max_portfolio_initial_margin_fraction"])
+            - _decimal(projection["exchange_total_initial_margin"]),
+        ),
+        max_concurrent_positions=max_positions,
+    )
+    return list(blockers), True
+
+
+def _current_rule_legality_blockers(*, claim: Any, current_rule: Any) -> list[str]:
+    quantities = (claim.intended_qty,)
+    prices = (claim.entry_reference_price, claim.stop_price)
+    if any(quantity % current_rule.quantity_step != 0 for quantity in quantities):
+        return ["account_capacity_claim_quantity_rule_invalid"]
+    if claim.intended_qty < current_rule.min_qty:
+        return ["account_capacity_claim_quantity_rule_invalid"]
+    if any(price % current_rule.price_tick != 0 for price in prices):
+        return ["account_capacity_claim_price_rule_invalid"]
+    notional = (
+        claim.intended_qty
+        * claim.entry_reference_price
+        * current_rule.contract_multiplier
+    )
+    if notional < current_rule.min_notional:
+        return ["account_capacity_claim_min_notional_invalid"]
+    if (
+        claim.selected_leverage
+        > current_rule.exchange_max_leverage_for_claim_notional
+    ):
+        return ["account_capacity_claim_leverage_rule_invalid"]
+    return []
+
+
+def _decimal(value: object) -> Decimal:
+    try:
+        result = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("account_capacity_decimal_invalid") from exc
+    if not result.is_finite():
+        raise ValueError("account_capacity_decimal_invalid")
+    return result
 
 
 def _ticket_hash_blockers(ticket: dict[str, Any]) -> list[str]:
@@ -513,7 +798,10 @@ def _transition_ticket(
     finalgate_pass_id: str | None,
     blockers: list[str],
 ) -> None:
-    event_id = f"ticket_event:{ticket['ticket_id']}:{from_status}:{to_status}:{now_ms}"
+    event_identity = (
+        f"{ticket['ticket_id']}|{from_status}|{to_status}|{now_ms}"
+    )
+    event_id = f"ticket_event:{sha256(event_identity.encode('utf-8')).hexdigest()}"
     payload = {
         "finalgate_pass_id": finalgate_pass_id,
         "blockers": blockers,
@@ -563,7 +851,7 @@ def _ticket_by_id(control_state: dict[str, Any], ticket_id: str) -> dict[str, An
     return next(
         (
             row
-            for row in _rows(control_state.get("action_time_tickets"))
+            for row in _control_state_rows(control_state.get("action_time_tickets"))
             if row.get("ticket_id") == ticket_id
         ),
         {},
@@ -573,7 +861,7 @@ def _ticket_by_id(control_state: dict[str, Any], ticket_id: str) -> dict[str, An
 def _latest_finalgate_pass_id(control_state: dict[str, Any], ticket_id: str) -> str | None:
     events = [
         row
-        for row in _rows(control_state.get("action_time_ticket_events"))
+        for row in _control_state_rows(control_state.get("action_time_ticket_events"))
         if row.get("ticket_id") == ticket_id and row.get("to_status") == "finalgate_ready"
     ]
     if not events:
@@ -596,7 +884,11 @@ def _row_by_id(
         blockers.append(missing_blocker)
         return {}
     row = next(
-        (item for item in _rows(control_state.get(table_key)) if item.get(id_key) == row_id),
+        (
+            item
+            for item in _control_state_rows(control_state.get(table_key))
+            if item.get(id_key) == row_id
+        ),
         {},
     )
     if not row:
@@ -686,7 +978,7 @@ def _result(
     }
 
 
-def _rows(value: Any) -> list[dict[str, Any]]:
+def _control_state_rows(value: Any) -> list[dict[str, Any]]:
     return [item for item in _list(value) if isinstance(item, dict)]
 
 
