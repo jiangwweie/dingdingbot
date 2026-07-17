@@ -368,6 +368,42 @@ def dependency_identity(lock_path: Path) -> str:
     return hashlib.sha256(raw).hexdigest() + "-cp310-linux_x86_64"
 
 
+def canonical_release_tree_digest(root: Path) -> str:
+    """Digest the candidate source tree, excluding deploy-owned metadata only.
+
+    The record format is deliberately independent of filesystem traversal order:
+    ``mode NUL utf8-posix-path NUL sha256(content) LF``.  A candidate source
+    cannot contain symlinks or non-regular entries, because neither is a safe
+    input to the runtime import boundary.
+    """
+
+    root = Path(root).resolve(strict=True)
+    records: list[bytes] = []
+    seen: set[str] = set()
+    ignored = {".brc-release-manifest.json", ".venv"}
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if relative in ignored or relative.startswith(".venv/"):
+            continue
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError("candidate_release_tree_symlink_forbidden")
+        if path.is_dir():
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("candidate_release_tree_entry_invalid")
+        if not relative or relative.startswith("/") or "//" in relative or relative in seen:
+            raise ValueError("candidate_release_tree_path_invalid")
+        seen.add(relative)
+        content_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        mode = format(stat.S_IMODE(info.st_mode), "04o")
+        records.append(
+            mode.encode("ascii") + b"\0" + relative.encode("utf-8")
+            + b"\0" + content_hash.encode("ascii") + b"\n"
+        )
+    return hashlib.sha256(b"".join(records)).hexdigest()
+
+
 def stage_candidate_release(
     *,
     deploy_root: Path,
@@ -401,6 +437,8 @@ def stage_candidate_release(
         payload = json.loads(manifest.read_text(encoding="utf-8"))
         if payload.get("target_sha") != target_sha:
             raise ValueError("candidate_release_identity_mismatch")
+        if payload.get("source_tree_digest") != canonical_release_tree_digest(release):
+            raise ValueError("candidate_release_tree_digest_mismatch")
         return {"status": "candidate_release_staged", "release_path": str(release)}
 
     source_root.mkdir(parents=True, exist_ok=True, mode=0o755)
@@ -468,12 +506,14 @@ def stage_candidate_release(
         result = run(command, cwd=cwd, timeout=timeout, env=environment)
         if result.returncode != 0:
             raise RuntimeError("candidate_export_command_failed:" + Path(command[0]).name)
+    source_tree_digest = canonical_release_tree_digest(temporary)
     release_manifest_payload = {
             "schema": "brc.runtime_release_manifest.v2",
             "target_sha": target_sha,
             "git_ref": git_ref,
             "repo_url": repo_url,
             "git_deploy": {"target_commit": target_sha},
+            "source_tree_digest": source_tree_digest,
         }
     _atomic_bytes_write(
         temporary / ".brc-release-manifest.json",
@@ -502,6 +542,11 @@ def build_immutable_venv(
     release_path = Path(release_path).resolve(strict=True)
     lock_path = Path(lock_path).resolve(strict=True)
     identity = dependency_identity(lock_path)
+    manifest = release_path / ".brc-release-manifest.json"
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+    expected_source_tree_digest = str(manifest_payload.get("source_tree_digest") or "")
+    if not expected_source_tree_digest or expected_source_tree_digest != canonical_release_tree_digest(release_path):
+        raise ValueError("candidate_release_tree_digest_mismatch")
     target = Path(venv_root) / identity
     complete = target / ".complete"
     if target.exists() and not complete.is_file():
@@ -566,6 +611,9 @@ def build_immutable_venv(
                 "python_abi_platform": "cp310-linux_x86_64",
             },
         )
+        if canonical_release_tree_digest(release_path) != expected_source_tree_digest:
+            complete.unlink(missing_ok=True)
+            raise RuntimeError("candidate_release_tree_digest_mismatch")
     release_link = release_path / ".venv"
     if os.path.lexists(release_link):
         if not release_link.is_symlink() or release_link.resolve() != target.resolve():

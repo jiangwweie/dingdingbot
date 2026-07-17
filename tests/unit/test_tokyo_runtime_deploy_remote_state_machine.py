@@ -140,12 +140,39 @@ def test_dependency_identity_binds_lock_and_abi(tmp_path):
     assert machine.dependency_identity(lock) == expected
 
 
+def test_canonical_release_tree_digest_binds_path_mode_and_content(tmp_path):
+    release = tmp_path / "release"
+    release.mkdir()
+    source = release / "src.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    source.chmod(0o644)
+    original = machine.canonical_release_tree_digest(release)
+    source.chmod(0o755)
+    assert machine.canonical_release_tree_digest(release) != original
+    source.chmod(0o644)
+    source.write_text("value = 2\n", encoding="utf-8")
+    assert machine.canonical_release_tree_digest(release) != original
+    source.unlink()
+    source.write_text("value = 1\n", encoding="utf-8")
+    source.chmod(0o644)
+    (release / "extra.py").write_text("extra\n", encoding="utf-8")
+    assert machine.canonical_release_tree_digest(release) != original
+    (release / "extra.py").unlink()
+    (release / "link").symlink_to(source)
+    with pytest.raises(ValueError, match="symlink_forbidden"):
+        machine.canonical_release_tree_digest(release)
+
+
 def test_incomplete_immutable_venv_is_rebuilt_with_hashed_lock(tmp_path):
     release = tmp_path / "release"
     release.mkdir()
     (release / "src").mkdir()
     lock = release / "requirements-runtime.lock"
     lock.write_text("ccxt==4.5.56 --hash=sha256:" + "a" * 64 + "\n", encoding="utf-8")
+    (release / ".brc-release-manifest.json").write_text(
+        json.dumps({"source_tree_digest": machine.canonical_release_tree_digest(release)}),
+        encoding="utf-8",
+    )
     root = tmp_path / "venvs"
     target = root / machine.dependency_identity(lock)
     target.mkdir(parents=True)
