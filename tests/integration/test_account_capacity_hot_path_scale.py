@@ -177,6 +177,10 @@ def _create_schema(conn: sa.Connection) -> None:
         """CREATE TABLE brc_exchange_instruments (
           exchange_instrument_id TEXT PRIMARY KEY, exchange_symbol TEXT NOT NULL
         )""",
+        """CREATE TABLE brc_instrument_rule_snapshots (
+          instrument_rule_snapshot_id TEXT PRIMARY KEY,
+          contract_multiplier NUMERIC NOT NULL
+        )""",
         """CREATE TABLE brc_account_exposure_current (
           account_exposure_current_id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
           owner_ticket_id TEXT, exposure_state TEXT NOT NULL,
@@ -195,7 +199,8 @@ def _create_schema(conn: sa.Connection) -> None:
           account_source_fact_snapshot_id TEXT NOT NULL,
           account_fact_schema_version TEXT NOT NULL, status TEXT NOT NULL,
           risk_at_stop NUMERIC NOT NULL, reserved_margin NUMERIC NOT NULL,
-          margin_accounting_state TEXT NOT NULL
+          margin_accounting_state TEXT NOT NULL,
+          instrument_rule_snapshot_id TEXT NOT NULL
         )""",
         """CREATE TABLE brc_action_time_tickets (
           ticket_id TEXT PRIMARY KEY, status TEXT NOT NULL
@@ -222,6 +227,7 @@ def _create_schema(conn: sa.Connection) -> None:
 
 def _seed_current(conn: sa.Connection) -> None:
     conn.execute(sa.text("INSERT INTO brc_exchange_instruments VALUES ('instrument-1','SOLUSDT')"))
+    conn.execute(sa.text("INSERT INTO brc_instrument_rule_snapshots VALUES ('rule-current', 1)"))
     conn.execute(sa.text("""INSERT INTO brc_account_exposure_current VALUES
       ('exposure-current','account-1','ticket-current','open_protected',4,4,0,
        'matched',true,NULL)"""))
@@ -229,7 +235,7 @@ def _seed_current(conn: sa.Connection) -> None:
       ('reservation-current','ticket-current','account-1','profile-1','instrument-1',
        'episode-current','SOLUSDT','crypto','perpetual','crypto-beta',
        'membership-current','account-fact-current','v1','consumed',4,12,
-       'consumed_by_ticket')"""))
+       'consumed_by_ticket','rule-current')"""))
     conn.execute(sa.text("INSERT INTO brc_action_time_tickets VALUES ('ticket-current','open_protected')"))
     conn.execute(sa.text("""INSERT INTO brc_ticket_bound_exchange_commands VALUES
       ('command-current','account-1','ticket-current','instrument-1','order-1',
@@ -242,7 +248,7 @@ def _seed_terminal_history(conn: sa.Connection) -> None:
       SELECT 'released-' || n, NULL, 'account-1', 'profile-1', 'instrument-1',
              'episode-' || n, 'SOLUSDT', 'crypto', 'perpetual', 'crypto-beta',
              'membership-' || n, 'account-fact-' || n, 'v1', 'released', 0, 0,
-             'released'
+             'released', 'rule-current'
       FROM generate_series(1,100000) AS n
     """))
     conn.execute(sa.text("""
