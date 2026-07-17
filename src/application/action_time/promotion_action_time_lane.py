@@ -48,6 +48,7 @@ from src.application.action_time.account_capacity_claim import (  # noqa: E402
 )
 from src.application.action_time.account_capacity_materialization import (  # noqa: E402
     materialize_account_capacity_from_snapshot,
+    refresh_account_capacity_post_claim,
 )
 from src.application.action_time.account_risk_policy import (  # noqa: E402
     load_account_risk_policy_current,
@@ -623,6 +624,21 @@ def materialize_action_time_invocation_promotion_action_time_lane(
                 blockers=[str(exc)],
                 next_action="reconcile_account_capacity_claim_conflict",
             )
+        if account_snapshot is not None:
+            post_claim_blocker = refresh_account_capacity_post_claim(
+                conn,
+                snapshot=account_snapshot,
+                runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+                account_capacity=account_capacity,
+                now_ms=now_ms,
+            )
+            if post_claim_blocker:
+                return _invocation_promotion_result(
+                    "action_time_invocation_promotion_blocked",
+                    evidence=evidence,
+                    blockers=[post_claim_blocker],
+                    next_action="repair_account_capacity_post_claim_projection",
+                )
     _upsert_row(conn, "brc_protection_references", "protection_ref_id", protection)
     if account_capacity is not None:
         ticket_result = materialize_action_time_ticket(conn, now_ms=now_ms)

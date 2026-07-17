@@ -85,6 +85,72 @@ def _blocked(blocker: str) -> AccountCapacityReservationResult:
     return AccountCapacityReservationResult(allowed=False, first_blocker=blocker)
 
 
+def refresh_account_capacity_post_claim(
+    conn: sa.Connection,
+    *,
+    snapshot: FullAccountRiskSnapshot,
+    runtime_profile_id: str,
+    account_capacity: AccountCapacityReservationResult,
+    now_ms: int,
+) -> str | None:
+    """Persist the Claim as reservation-only current state before Ticket creation.
+
+    The caller has already inserted the immutable active Claim in the same
+    Action-Time transaction.  Keeping the predicted Claim projection version
+    while replacing its stale pre-Claim values gives Ticket and FinalGate one
+    exact post-Claim Budget lineage.
+    """
+
+    if not account_capacity.allowed:
+        return account_capacity.first_blocker or "account_capacity_not_allowed"
+    if account_capacity.claimed_projection_version is None:
+        return "account_capacity_claim_projection_version_missing"
+    policy_projection = lock_account_risk_policy_current(
+        conn,
+        account_id=snapshot.account_id,
+        runtime_profile_id=runtime_profile_id,
+    )
+    if policy_projection is None:
+        return "account_risk_policy_missing_or_changed"
+    if (
+        account_capacity.account_risk_policy_version
+        != policy_projection.policy.risk_policy_version
+        or account_capacity.account_risk_policy_event_id
+        != policy_projection.source_event_id
+    ):
+        return "account_risk_policy_changed_after_claim"
+    classification = classify_account_exchange_truth(conn, snapshot=snapshot)
+    if classification.blockers:
+        return classification.blockers[0]
+    exposure = project_account_exposure_current(
+        conn,
+        snapshot=snapshot,
+        classification=classification,
+        runtime_profile_id=runtime_profile_id,
+        max_concurrent_positions=policy_projection.policy.max_concurrent_positions,
+        now_ms=now_ms,
+    )
+    if exposure.global_blockers:
+        return exposure.global_blockers[0]
+    budget = project_account_budget_current(
+        conn,
+        snapshot=snapshot,
+        runtime_profile_id=runtime_profile_id,
+        policy=policy_projection.policy,
+        now_ms=now_ms,
+        projection_version_override=account_capacity.claimed_projection_version,
+    )
+    if not lock_account_budget_current(
+        conn,
+        account_id=snapshot.account_id,
+        runtime_profile_id=runtime_profile_id,
+    ):
+        return "account_budget_current_missing"
+    if budget.projection_version != account_capacity.claimed_projection_version:
+        return "account_capacity_post_claim_projection_version_mismatch"
+    return None
+
+
 def lock_account_budget_current(
     conn: sa.Connection,
     *,

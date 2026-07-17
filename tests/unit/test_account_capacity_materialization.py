@@ -66,6 +66,62 @@ def test_snapshot_without_trade_permission_is_blocked_before_classification(monk
     assert result.first_blocker == "account_trade_permission_not_true"
 
 
+def test_post_claim_refresh_projects_reservation_only_budget_at_claim_version(monkeypatch) -> None:
+    calls: list[str] = []
+    capacity = AccountCapacityReservationResult(
+        allowed=True,
+        claimed_projection_version=8,
+        account_risk_policy_version="risk-policy-v1",
+        account_risk_policy_event_id="policy-event-1",
+    )
+    policy = SimpleNamespace(
+        max_concurrent_positions=2,
+        risk_policy_version="risk-policy-v1",
+    )
+    monkeypatch.setattr(
+        subject,
+        "lock_account_risk_policy_current",
+        lambda _conn, **_kwargs: calls.append("policy")
+        or SimpleNamespace(policy=policy, source_event_id="policy-event-1"),
+    )
+    monkeypatch.setattr(
+        subject,
+        "classify_account_exchange_truth",
+        lambda _conn, **_kwargs: calls.append("classify")
+        or type("C", (), {"blockers": ()})(),
+    )
+    monkeypatch.setattr(
+        subject,
+        "project_account_exposure_current",
+        lambda _conn, **_kwargs: calls.append("exposure")
+        or type("E", (), {"global_blockers": ()})(),
+    )
+    monkeypatch.setattr(
+        subject,
+        "project_account_budget_current",
+        lambda _conn, **kwargs: calls.append(
+            f"budget:{kwargs['projection_version_override']}"
+        )
+        or type("B", (), {"projection_version": 8})(),
+    )
+    monkeypatch.setattr(
+        subject,
+        "lock_account_budget_current",
+        lambda _conn, **_kwargs: calls.append("budget-lock") or True,
+    )
+
+    blocker = subject.refresh_account_capacity_post_claim(
+        object(),
+        snapshot=_snapshot(),
+        runtime_profile_id="profile-1",
+        account_capacity=capacity,
+        now_ms=1_752_480_000_000,
+    )
+
+    assert blocker is None
+    assert calls == ["policy", "classify", "exposure", "budget:8", "budget-lock"]
+
+
 def _snapshot() -> FullAccountRiskSnapshot:
     return FullAccountRiskSnapshot(snapshot_ready=True, account_id="account-1", exchange_id="binance_usdm", total_wallet_balance=Decimal("600"), available_balance=Decimal("500"), exchange_total_initial_margin=Decimal("100"), can_trade=True, position_mode="one_way", source_snapshot_id="snapshot-1", observed_at_ms=1_752_480_000_000, valid_until_ms=1_752_480_060_000)
 

@@ -45,6 +45,7 @@ def project_account_budget_current(
     runtime_profile_id: str,
     policy: AccountRiskPolicy,
     now_ms: int,
+    projection_version_override: int | None = None,
 ) -> AccountBudgetCurrent:
     if not snapshot.snapshot_ready or not snapshot.total_wallet_balance or snapshot.available_balance is None or snapshot.exchange_total_initial_margin is None:
         raise ValueError("fresh complete account snapshot is required")
@@ -160,6 +161,8 @@ def project_account_budget_current(
         "new_entry_allowed": not ordered_blockers,
         "first_blocker": ordered_blockers[0] if ordered_blockers else None,
     }
+    if projection_version_override is not None and projection_version_override <= 0:
+        raise ValueError("projection_version_override must be positive")
     result = AccountBudgetCurrent(
         account_id=snapshot.account_id, runtime_profile_id=runtime_profile_id,
         risk_policy_version=policy.risk_policy_version, open_directional_risk=open_risk,
@@ -168,7 +171,11 @@ def project_account_budget_current(
         portfolio_held_risk=held, claimed_position_slots=slots + pending,
         pending_ticket_claims=pending, new_entry_allowed=not ordered_blockers,
         first_blocker=ordered_blockers[0] if ordered_blockers else None,
-        projection_version=_projection_version(existing, semantic_values),
+        projection_version=(
+            projection_version_override
+            if projection_version_override is not None
+            else _projection_version(existing, semantic_values)
+        ),
     )
     _persist(conn, result, snapshot, policy, margin_limit, limit, now_ms, existing)
     return result

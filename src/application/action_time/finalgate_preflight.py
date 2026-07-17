@@ -635,7 +635,7 @@ def account_capacity_current_blockers(
     projection = conn.execute(
         sa.text(
             """
-            SELECT total_wallet_balance, available_balance,
+            SELECT projection_version, total_wallet_balance, available_balance,
                    portfolio_held_risk, unreflected_pending_margin,
                    exchange_total_initial_margin,
                    claimed_position_slots, valid_until_ms,
@@ -656,6 +656,10 @@ def account_capacity_current_blockers(
     ).mappings().one_or_none()
     if projection is None:
         return ["account_budget_current_missing"], True
+    if int(projection.get("projection_version") or 0) != int(
+        budget.get("account_capacity_projection_version") or 0
+    ):
+        return ["account_capacity_post_claim_projection_version_mismatch"], True
     if int(projection.get("valid_until_ms") or 0) <= now_ms:
         return ["account_budget_current_stale"], True
 

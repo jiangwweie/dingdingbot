@@ -24,7 +24,7 @@ def test_new_snapshot_id_with_same_semantic_capacity_passes() -> None:
     conn.execute(
         sa.text(
             "UPDATE brc_account_budget_current "
-            "SET projection_version = 99, source_snapshot_id = 'account-fact-2'"
+            "SET source_snapshot_id = 'account-fact-2'"
         )
     )
 
@@ -34,6 +34,22 @@ def test_new_snapshot_id_with_same_semantic_capacity_passes() -> None:
 
     assert active is True
     assert blockers == []
+
+
+def test_post_claim_projection_version_mismatch_blocks() -> None:
+    conn, budget = _active_connection()
+    conn.execute(
+        sa.text(
+            "UPDATE brc_account_budget_current SET projection_version = 8"
+        )
+    )
+
+    blockers, active = subject.account_capacity_current_blockers(
+        conn, budget=budget, now_ms=NOW_MS
+    )
+
+    assert active is True
+    assert blockers == ["account_capacity_post_claim_projection_version_mismatch"]
 
 
 def test_claim_hash_mismatch_blocks() -> None:
