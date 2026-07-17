@@ -129,6 +129,9 @@ def test_asset_neutral_claim_release_and_second_instrument_chain(
         evidence_ref="ticket:ticket-atomic-1",
         now_ms=NOW_MS + 1,
         reservation_updates={"margin_accounting_state": "consumed_by_ticket"},
+        expected_ticket_id=first_claim.payload.ticket_id,
+        expected_exposure_episode_id=first_claim.payload.exposure_episode_id,
+        expected_capacity_claim_hash=first_claim.capacity_claim_hash,
     )
     released = transition_budget_reservation(
         conn,
