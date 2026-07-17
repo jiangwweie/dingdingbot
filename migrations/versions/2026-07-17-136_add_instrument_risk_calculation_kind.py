@@ -72,15 +72,41 @@ def _require_upgrade_shape(bind: sa.Connection) -> None:
 
 def _add_columns_and_check(bind: sa.Connection) -> None:
     columns = _columns(bind, RULE_TABLE)
-    if "risk_calculation_kind" not in columns:
+    constraints = {str(item.get("name") or "") for item in sa.inspect(bind).get_check_constraints(RULE_TABLE)}
+    missing_kind = "risk_calculation_kind" not in columns
+    missing_supersedes = "supersedes_instrument_rule_snapshot_id" not in columns
+    missing_check = KIND_CHECK not in constraints
+    if bind.dialect.name == "sqlite":
+        if not (missing_kind or missing_supersedes or missing_check):
+            return
+        with op.batch_alter_table(RULE_TABLE, recreate="always") as batch:
+            if missing_kind:
+                batch.add_column(
+                    sa.Column("risk_calculation_kind", sa.String(64), nullable=True)
+                )
+            if missing_supersedes:
+                batch.add_column(
+                    sa.Column(
+                        "supersedes_instrument_rule_snapshot_id",
+                        sa.String(192),
+                        nullable=True,
+                    )
+                )
+            if missing_check:
+                batch.create_check_constraint(
+                    KIND_CHECK,
+                    "risk_calculation_kind IS NULL OR "
+                    "risk_calculation_kind = 'linear_quote_settled'",
+                )
+        return
+    if missing_kind:
         op.add_column(RULE_TABLE, sa.Column("risk_calculation_kind", sa.String(64), nullable=True))
-    if "supersedes_instrument_rule_snapshot_id" not in columns:
+    if missing_supersedes:
         op.add_column(
             RULE_TABLE,
             sa.Column("supersedes_instrument_rule_snapshot_id", sa.String(192), nullable=True),
         )
-    constraints = {str(item.get("name") or "") for item in sa.inspect(bind).get_check_constraints(RULE_TABLE)}
-    if KIND_CHECK not in constraints:
+    if missing_check:
         op.create_check_constraint(
             KIND_CHECK,
             RULE_TABLE,
@@ -312,10 +338,27 @@ def _assert_downgrade_postconditions(bind: sa.Connection, clones: tuple[dict[str
 
 def _drop_columns_and_check(bind: sa.Connection) -> None:
     constraints = {str(item.get("name") or "") for item in sa.inspect(bind).get_check_constraints(RULE_TABLE)}
+    columns = _columns(bind, RULE_TABLE)
+    if bind.dialect.name == "sqlite":
+        if KIND_CHECK not in constraints and not ({
+            "supersedes_instrument_rule_snapshot_id",
+            "risk_calculation_kind",
+        } & columns):
+            return
+        with op.batch_alter_table(RULE_TABLE, recreate="always") as batch:
+            if KIND_CHECK in constraints:
+                batch.drop_constraint(KIND_CHECK, type_="check")
+            for name in (
+                "supersedes_instrument_rule_snapshot_id",
+                "risk_calculation_kind",
+            ):
+                if name in columns:
+                    batch.drop_column(name)
+        return
     if KIND_CHECK in constraints:
         op.drop_constraint(KIND_CHECK, RULE_TABLE, type_="check")
     for name in ("supersedes_instrument_rule_snapshot_id", "risk_calculation_kind"):
-        if name in _columns(bind, RULE_TABLE):
+        if name in columns:
             op.drop_column(RULE_TABLE, name)
 
 

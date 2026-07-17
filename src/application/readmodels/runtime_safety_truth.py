@@ -230,11 +230,15 @@ def _evaluate_truth(
             "protection_ref_id",
             "public_fact_snapshot_id",
             "action_time_fact_snapshot_id",
-            "account_safe_fact_snapshot_id",
             "account_mode_snapshot_id",
         ):
             if str(ticket.get(key) or "") != str(trusted_refs.get(key) or ""):
                 reasons.append(f"ticket_{key}_reference_mismatch")
+        _append_ticket_account_fact_reference_mismatch(
+            reasons,
+            ticket=ticket,
+            trusted_refs=trusted_refs,
+        )
 
     for label, row in (
         ("lane", lane),
@@ -252,6 +256,46 @@ def _evaluate_truth(
         lineage_verified=not reasons,
         failure_reasons=tuple(_dedupe(reasons)),
     )
+
+
+def _append_ticket_account_fact_reference_mismatch(
+    reasons: list[str],
+    *,
+    ticket: dict[str, Any],
+    trusted_refs: dict[str, Any],
+) -> None:
+    """Conserve the active account-fact surface through runtime safety.
+
+    Capacity-policy tickets are V2 and must bind the capacity base fact.  The
+    legacy account-safe surface remains valid only for a legacy ticket; a
+    consumer must never silently compare a V2 capacity ticket against an
+    absent legacy field.
+    """
+
+    legacy_fact_id = str(ticket.get("account_safe_fact_snapshot_id") or "")
+    capacity_fact_id = str(
+        ticket.get("account_capacity_base_fact_snapshot_id") or ""
+    )
+    if bool(legacy_fact_id) == bool(capacity_fact_id):
+        reasons.append("ticket_account_fact_pair_invalid")
+        return
+    if capacity_fact_id:
+        if str(trusted_refs.get("account_capacity_fact_surface") or "") != (
+            "account_capacity_base"
+        ):
+            reasons.append("ticket_account_capacity_fact_surface_mismatch")
+        if str(trusted_refs.get("account_capacity_fact_snapshot_id") or "") != (
+            capacity_fact_id
+        ):
+            reasons.append("ticket_account_capacity_base_fact_snapshot_id_reference_mismatch")
+        return
+    if str(trusted_refs.get("account_capacity_fact_surface") or "") not in {
+        "",
+        "account_safe",
+    }:
+        reasons.append("ticket_account_capacity_fact_surface_mismatch")
+    if str(trusted_refs.get("account_safe_fact_snapshot_id") or "") != legacy_fact_id:
+        reasons.append("ticket_account_safe_fact_snapshot_id_reference_mismatch")
 
 
 def _append_scope_mismatches(

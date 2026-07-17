@@ -125,7 +125,8 @@ def test_migration_113_creates_account_mode_current_and_source_domain_holds(
                 },
                 source_ref="unit:account-mode",
             )
-            assert len(ids) == 2
+            assert len(ids) == 3
+            assert any(":account_capacity_base:" in fact_id for fact_id in ids)
             mode = conn.execute(
                 text(
                     "SELECT * FROM brc_exchange_account_modes_current "

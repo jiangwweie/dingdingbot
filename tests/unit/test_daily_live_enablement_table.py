@@ -297,6 +297,20 @@ def test_daily_table_builds_from_pg_control_state_seed(pg_control_connection):
 def test_daily_table_pg_runtime_safety_projection_uses_snapshot_id(
     pg_control_connection,
 ):
+    # The common control-state fixture intentionally models the original
+    # runtime foundation.  This assertion exercises the V2 capacity-fact
+    # consumer shape introduced by migration 134.
+    for column_definition in (
+        "trusted_fact_refs_schema_version TEXT",
+        "account_capacity_fact_surface TEXT",
+        "account_capacity_fact_snapshot_id TEXT",
+    ):
+        pg_control_connection.execute(
+            text(
+                "ALTER TABLE brc_runtime_safety_state_snapshots "
+                f"ADD COLUMN {column_definition}"
+            )
+        )
     pg_control_connection.execute(
         text(
             """
@@ -305,13 +319,17 @@ def test_daily_table_pg_runtime_safety_projection_uses_snapshot_id(
               strategy_group_id, symbol, side, runtime_profile_id, safety_state,
               submit_allowed, finalgate_ready, operation_layer_ready,
               protection_ready, active_position_conflict, facts_fresh,
-              trusted_fact_refs_complete, blockers, trusted_fact_refs,
+              trusted_fact_refs_complete, trusted_fact_refs_schema_version,
+              account_capacity_fact_surface, account_capacity_fact_snapshot_id,
+              blockers, trusted_fact_refs,
               observed_at_ms, valid_until_ms, created_at_ms, authority_boundary
             ) VALUES (
               'runtime_safety:unit', 'lane:unit', 'SOR-001', 'ETHUSDT',
               'long', 'runtime-profile:SOR-001:ETHUSDT:long:v1',
               'live_submit_ready', true, true, true, true, false, true, true,
-              '[]', '{}', 1770001000000, 1770001600000, 1770001000000,
+              'runtime_safety_trusted_refs.v2', 'account_capacity_base',
+              'fact:account-capacity:unit', '[]', '{}',
+              1770001000000, 1770001600000, 1770001000000,
               'unit no exchange write'
             )
             """
@@ -339,8 +357,10 @@ def test_daily_table_pg_runtime_safety_projection_uses_snapshot_id(
                 "protection_ref_id": "protection:unit",
                 "public_fact_snapshot_id": "fact:public:unit",
                 "action_time_fact_snapshot_id": "fact:action-time:unit",
-                "account_safe_fact_snapshot_id": "fact:account-safe:unit",
+                "account_capacity_fact_surface": "account_capacity_base",
+                "account_capacity_fact_snapshot_id": "fact:account-capacity:unit",
                 "account_mode_snapshot_id": "fact:account-mode:unit",
+                "ticket_hash_schema_version": "action_time_ticket_hash.v2",
             },
         }
     )
@@ -397,7 +417,7 @@ def test_daily_table_pg_runtime_safety_projection_uses_snapshot_id(
             "protection_ref_id": "protection:unit",
             "public_fact_snapshot_id": "fact:public:unit",
             "action_time_fact_snapshot_id": "fact:action-time:unit",
-            "account_safe_fact_snapshot_id": "fact:account-safe:unit",
+            "account_capacity_base_fact_snapshot_id": "fact:account-capacity:unit",
             "account_mode_snapshot_id": "fact:account-mode:unit",
         }
     )
@@ -428,6 +448,18 @@ def test_daily_table_pg_runtime_safety_projection_uses_snapshot_id(
     assert runtime_safety["status"] == "live_submit_ready"
     assert runtime_safety["runtime_safety_state"]["live_submit_ready"] is True
     assert runtime_safety["runtime_safety_state"]["snapshot_id"] == "runtime_safety:unit"
+
+    control_state["runtime_safety_state"][0]["trusted_fact_refs"][
+        "account_capacity_fact_snapshot_id"
+    ] = "fact:account-capacity:mismatched"
+    rejected_runtime_safety = _builder()._pg_runtime_safety_projection(control_state)
+
+    assert rejected_runtime_safety["status"] == "runtime_safety_state_ready"
+    assert rejected_runtime_safety["runtime_safety_state"]["live_submit_ready"] is False
+    assert (
+        "ticket_account_capacity_base_fact_snapshot_id_reference_mismatch"
+        in rejected_runtime_safety["runtime_safety_state"]["live_submit_ready_false_reason"]
+    )
 
 
 def test_daily_table_pg_runtime_safety_projection_ignores_expired_snapshot() -> None:
