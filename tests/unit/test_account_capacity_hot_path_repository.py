@@ -133,11 +133,14 @@ def _connection() -> tuple[sa.Connection, list[str]]:
       symbol TEXT, asset_class TEXT, instrument_type TEXT,
       primary_risk_cluster_id TEXT, cluster_membership_snapshot_id TEXT,
       account_source_fact_snapshot_id TEXT, account_fact_schema_version TEXT)"""))
+    conn.execute(sa.text("ALTER TABLE brc_budget_reservations ADD COLUMN instrument_rule_snapshot_id TEXT"))
     conn.execute(sa.text("""CREATE TABLE brc_exchange_instruments (
       exchange_instrument_id TEXT PRIMARY KEY, exchange_symbol TEXT)"""))
     conn.execute(sa.text(
         "INSERT INTO brc_exchange_instruments VALUES ('instrument-1','SOLUSDT')"
     ))
+    conn.execute(sa.text("CREATE TABLE brc_instrument_rule_snapshots (instrument_rule_snapshot_id TEXT PRIMARY KEY, contract_multiplier NUMERIC NOT NULL)"))
+    conn.execute(sa.text("INSERT INTO brc_instrument_rule_snapshots VALUES ('rule-1', 1)"))
     conn.execute(sa.text("""CREATE TABLE brc_account_exposure_current (
       account_exposure_current_id TEXT PRIMARY KEY, account_id TEXT,
       owner_ticket_id TEXT, exposure_state TEXT, actual_directional_risk NUMERIC,
@@ -160,7 +163,7 @@ def _insert_claim(conn: sa.Connection, *, index: int, status: str) -> None:
           (:id,:ticket,'instrument-1',:episode,:status,1,1,
            'reserved_unreflected','account-1','profile-1','SOLUSDT',
            'crypto','perpetual','crypto-beta','membership-1',
-           'account-fact-1','v1')
+           'account-fact-1','v1','rule-1')
         """),
         {
             "id": f"claim-{index:03d}",

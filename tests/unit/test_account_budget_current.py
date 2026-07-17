@@ -33,16 +33,16 @@ def test_consumed_reservation_is_claim_ceiling_not_additive_to_open_exposure() -
               risk_at_stop, reserved_margin, margin_accounting_state,
               symbol, asset_class, instrument_type, primary_risk_cluster_id,
               cluster_membership_snapshot_id, account_source_fact_snapshot_id,
-              account_fact_schema_version
+              account_fact_schema_version, instrument_rule_snapshot_id
             ) VALUES
               ('budget-1', 'account-1', 'profile-1', 'ticket-1',
                'instrument-1', 'episode-1', 'consumed', '15', '30',
                'exchange_reflected', 'SOLUSDT', 'crypto', 'perpetual',
-               'crypto-beta', 'membership-1', 'account-fact-1', 'v1'),
+               'crypto-beta', 'membership-1', 'account-fact-1', 'v1', 'rule-1'),
               ('budget-2', 'account-1', 'profile-1', 'ticket-2',
                'instrument-2', 'episode-2', 'active', '9', '18',
                'reserved_unreflected', 'SOLUSDT', 'crypto', 'perpetual',
-               'crypto-beta', 'membership-1', 'account-fact-1', 'v1')
+               'crypto-beta', 'membership-1', 'account-fact-1', 'v1', 'rule-2')
             """
         )
     )
@@ -98,12 +98,12 @@ def test_active_unreflected_claim_margin_reduces_account_margin_capacity() -> No
               risk_at_stop, reserved_margin, margin_accounting_state,
               symbol, asset_class, instrument_type, primary_risk_cluster_id,
               cluster_membership_snapshot_id, account_source_fact_snapshot_id,
-              account_fact_schema_version
+              account_fact_schema_version, instrument_rule_snapshot_id
             ) VALUES
               ('budget-1', 'account-1', 'profile-1', 'ticket-1',
                'instrument-1', 'episode-1', 'active', '9', '100',
                'reserved_unreflected', 'SOLUSDT', 'crypto', 'perpetual',
-               'crypto-beta', 'membership-1', 'account-fact-1', 'v1')
+               'crypto-beta', 'membership-1', 'account-fact-1', 'v1', 'rule-1')
             """
         )
     )
@@ -188,7 +188,7 @@ def _connection() -> sa.Connection:
                 instrument_type TEXT, primary_risk_cluster_id TEXT,
                 cluster_membership_snapshot_id TEXT,
                 account_source_fact_snapshot_id TEXT,
-                account_fact_schema_version TEXT
+                account_fact_schema_version TEXT, instrument_rule_snapshot_id TEXT
             )
             """
         )
@@ -199,6 +199,8 @@ def _connection() -> sa.Connection:
             "exchange_instrument_id TEXT PRIMARY KEY, exchange_symbol TEXT)"
         )
     )
+    conn.execute(sa.text("CREATE TABLE brc_instrument_rule_snapshots (instrument_rule_snapshot_id TEXT PRIMARY KEY, contract_multiplier NUMERIC NOT NULL)"))
+    conn.execute(sa.text("INSERT INTO brc_instrument_rule_snapshots VALUES ('rule-1', 1), ('rule-2', 1)"))
     conn.execute(
         sa.text(
             "INSERT INTO brc_exchange_instruments VALUES "

@@ -11,8 +11,9 @@ from src.application.action_time.account_capacity_reservation import (
 from src.application.action_time.instrument_risk_facts import InstrumentRiskFacts
 from src.domain.instrument_risk_identity import (
     InstrumentRiskIdentity,
-    InstrumentRuleSnapshotRef,
+    InstrumentRuleSnapshotRefV2,
     RiskClusterMembershipSnapshotRef,
+    instrument_rule_snapshot_v2_semantic_hash,
 )
 from src.infrastructure.binance_usdm_account_risk_snapshot import FullAccountRiskSnapshot
 
@@ -141,9 +142,9 @@ def _candidate() -> AccountCapacityCandidate:
                 margin_asset="USDT",
                 instrument_identity_schema_version="v1",
             ),
-            rule_snapshot=InstrumentRuleSnapshotRef(
+            rule_snapshot=InstrumentRuleSnapshotRefV2(
                 instrument_rule_snapshot_id="rule-sol",
-                rule_schema_version="v1",
+                rule_schema_version="v2",
                 price_tick=Decimal(".01"),
                 quantity_step=Decimal(".01"),
                 min_qty=Decimal(".01"),
@@ -152,6 +153,8 @@ def _candidate() -> AccountCapacityCandidate:
                 exchange_max_leverage_for_claim_notional=20,
                 source_fact_snapshot_id="source-sol",
                 valid_until_ms=1_752_480_060_000,
+                risk_calculation_kind="linear_quote_settled",
+                semantic_hash=instrument_rule_snapshot_v2_semantic_hash({"instrument_rule_snapshot_id": "rule-sol", "rule_schema_version": "v2", "price_tick": Decimal(".01"), "quantity_step": Decimal(".01"), "min_qty": Decimal(".01"), "min_notional": Decimal("5"), "contract_multiplier": Decimal("1"), "exchange_max_leverage_for_claim_notional": 20, "source_fact_snapshot_id": "source-sol", "valid_until_ms": 1_752_480_060_000, "risk_calculation_kind": "linear_quote_settled"}),
             ),
             cluster_snapshot=RiskClusterMembershipSnapshotRef(
                 cluster_membership_snapshot_id="membership-sol",
