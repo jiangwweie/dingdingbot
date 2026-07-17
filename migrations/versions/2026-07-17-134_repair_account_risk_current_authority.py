@@ -40,6 +40,20 @@ def upgrade() -> None:
         "account_capacity_base_fact_snapshot_id",
         sa.String(256),
     )
+    _add_column_if_missing(
+        bind,
+        "brc_action_time_tickets",
+        "ticket_hash_schema_version",
+        sa.String(64),
+    )
+    if sa.inspect(bind).has_table("brc_action_time_tickets"):
+        bind.execute(
+            sa.text(
+                "UPDATE brc_action_time_tickets "
+                "SET ticket_hash_schema_version = 'action_time_ticket_hash.v1' "
+                "WHERE ticket_hash_schema_version IS NULL"
+            )
+        )
     for column_name, column_type in (
         ("trusted_fact_refs_schema_version", sa.String(64)),
         ("account_capacity_fact_surface", sa.String(64)),

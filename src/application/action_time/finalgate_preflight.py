@@ -787,7 +787,11 @@ def _decimal(value: object) -> Decimal:
 def _ticket_hash_blockers(ticket: dict[str, Any]) -> list[str]:
     if not ticket.get("ticket_hash"):
         return ["ticket_hash_missing"]
-    if compute_action_time_ticket_hash(ticket) != ticket.get("ticket_hash"):
+    try:
+        computed_hash = compute_action_time_ticket_hash(ticket)
+    except ValueError:
+        return ["ticket_hash_schema_unknown"]
+    if computed_hash != ticket.get("ticket_hash"):
         return ["ticket_hash_mismatch"]
     return []
 

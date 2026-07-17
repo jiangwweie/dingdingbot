@@ -75,6 +75,9 @@ ACTIVE_TICKET_STATUSES = {"created", "preflight_pending", "finalgate_ready"}
 AUTHORITY_BOUNDARY = (
     "action_time_ticket_identity_only; no_finalgate_no_operation_layer_no_exchange_write"
 )
+TICKET_HASH_SCHEMA_V1 = "action_time_ticket_hash.v1"
+TICKET_HASH_SCHEMA_V2 = "action_time_ticket_hash.v2"
+
 TICKET_IDENTITY_HASH_FIELDS = (
     "ticket_id",
     "action_time_invocation_id",
@@ -123,6 +126,12 @@ TICKET_IDENTITY_HASH_FIELDS = (
     "authority_source_ref",
     "lane_identity_key",
     "source_watermark",
+)
+TICKET_IDENTITY_HASH_FIELDS_V2 = (
+    *TICKET_IDENTITY_HASH_FIELDS,
+    "account_capacity_base_fact_snapshot_id",
+    "exposure_episode_id",
+    "capacity_claim_hash",
 )
 DECIMAL_HASH_FIELDS = {
     "target_notional",
@@ -802,6 +811,7 @@ def _build_ticket_bundle(
             raise TicketMaterializationBlocked([exc.blocker]) from exc
         except RuntimeLaneIdentityMismatch as exc:
             raise TicketMaterializationBlocked([str(exc)]) from exc
+    ticket["ticket_hash_schema_version"] = TICKET_HASH_SCHEMA_V2
     ticket["ticket_hash"] = compute_action_time_ticket_hash(ticket)
     ticket_event = {
         "ticket_event_id": _stable_id("ticket_event", ticket_id, "created"),
@@ -1545,10 +1555,19 @@ def _decimal(value: Any) -> Decimal:
 
 
 def compute_action_time_ticket_hash(ticket: dict[str, Any]) -> str:
+    schema_version = str(
+        ticket.get("ticket_hash_schema_version") or TICKET_HASH_SCHEMA_V1
+    )
+    if schema_version == TICKET_HASH_SCHEMA_V1:
+        fields = TICKET_IDENTITY_HASH_FIELDS
+    elif schema_version == TICKET_HASH_SCHEMA_V2:
+        fields = TICKET_IDENTITY_HASH_FIELDS_V2
+    else:
+        raise ValueError("action_time_ticket_hash_schema_unknown")
     return _hash_payload(
         {
             field: _canonical_ticket_hash_value(field, ticket.get(field))
-            for field in TICKET_IDENTITY_HASH_FIELDS
+            for field in fields
         }
     )
 
