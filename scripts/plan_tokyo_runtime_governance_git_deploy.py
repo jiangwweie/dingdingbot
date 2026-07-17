@@ -1163,7 +1163,6 @@ def ticket_lifecycle_quiesce_and_migrate_command(
         f"{capability_disable}; "
         f"test ! -f requirements.txt || {q(venv_python)} -m pip install "
         "--disable-pip-version-check -r requirements.txt; "
-        f"PYTHONPATH=$PWD {q(venv_python)} -m compileall -q src; "
         f"PYTHONPATH=$PWD {q(venv_python)} -m alembic heads; "
         f"PYTHONPATH=$PWD {q(venv_python)} -m alembic upgrade head; "
         f"PYTHONPATH=$PWD {q(venv_python)} "
