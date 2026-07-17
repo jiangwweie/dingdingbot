@@ -7,6 +7,9 @@ Create Date: 2026-07-17
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+import hashlib
+import json
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -17,6 +20,36 @@ revision: str = "134"
 down_revision: Union[str, None] = "133"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+
+# This is deliberately duplicated from the pre-134 Ticket contract rather
+# than imported from application code.  Migration validation must remain tied
+# to the historical V1 canonical tuple even after future runtime code changes.
+_FROZEN_TICKET_HASH_V1_FIELDS = (
+    "ticket_id", "action_time_invocation_id", "action_time_lane_input_id",
+    "promotion_candidate_id", "signal_event_id", "event_spec_id",
+    "event_spec_version_id", "candidate_scope_id", "runtime_scope_binding_id",
+    "strategy_group_id", "strategy_group_version_id", "symbol",
+    "exchange_instrument_id", "side", "event_id", "event_time_ms",
+    "trigger_candle_close_time_ms", "runtime_profile_id",
+    "public_fact_snapshot_id", "action_time_fact_snapshot_id",
+    "account_safe_fact_snapshot_id", "account_mode_snapshot_id",
+    "budget_reservation_id", "protection_ref_id", "execution_policy_id",
+    "execution_policy_version", "owner_policy_version", "sizing_policy_version",
+    "protection_policy_version", "exit_policy_id", "exit_policy_version",
+    "exit_policy_hash", "target_notional", "leverage", "effective_notional",
+    "selected_leverage", "planned_stop_risk_budget", "planned_stop_risk",
+    "expires_at_ms", "authority_boundary", "created_under_versions_hash",
+    "signal_grade", "required_execution_mode", "execution_eligible",
+    "authority_source_ref", "lane_identity_key", "source_watermark",
+)
+_FROZEN_TICKET_DECIMAL_FIELDS = {
+    "target_notional", "leverage", "effective_notional",
+    "planned_stop_risk_budget", "planned_stop_risk",
+}
+_FROZEN_TICKET_INTEGER_FIELDS = {
+    "event_time_ms", "trigger_candle_close_time_ms", "expires_at_ms",
+}
 
 
 def upgrade() -> None:
@@ -47,6 +80,7 @@ def upgrade() -> None:
         sa.String(64),
     )
     if sa.inspect(bind).has_table("brc_action_time_tickets"):
+        _assert_historical_ticket_hashes_are_v1_valid(bind)
         bind.execute(
             sa.text(
                 "UPDATE brc_action_time_tickets "
@@ -141,6 +175,72 @@ def _assert_no_v2_history(bind: sa.Connection) -> None:
         ).scalar_one()
         if int(count or 0):
             raise RuntimeError("capacity_fact_history_not_legacy_compatible")
+
+
+def _assert_historical_ticket_hashes_are_v1_valid(bind: sa.Connection) -> None:
+    """Fail before any V1 label is written when a historical hash is corrupt.
+
+    The scan is deliberately keyset-batched to avoid materializing Ticket
+    history in application memory.  It performs no update; therefore an
+    invalid later batch cannot leave a partially labelled history behind.
+    """
+
+    tickets = sa.Table("brc_action_time_tickets", sa.MetaData(), autoload_with=bind)
+    columns = set(tickets.c.keys())
+    if not {"ticket_id", "ticket_hash"} <= columns:
+        return
+    last_ticket_id = ""
+    while True:
+        rows = bind.execute(
+            sa.select(tickets)
+            .where(tickets.c.ticket_id > last_ticket_id)
+            .order_by(tickets.c.ticket_id)
+            .limit(500)
+        ).mappings().all()
+        if not rows:
+            return
+        for row in rows:
+            expected = _frozen_ticket_hash_v1(row)
+            if str(row.get("ticket_hash") or "") != expected:
+                raise RuntimeError("ticket_hash_v1_preflight_invalid")
+        last_ticket_id = str(rows[-1]["ticket_id"])
+
+
+def _frozen_ticket_hash_v1(row: sa.RowMapping) -> str:
+    payload = {
+        field: _frozen_ticket_hash_value(field, row.get(field))
+        for field in _FROZEN_TICKET_HASH_V1_FIELDS
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _frozen_ticket_hash_value(field: str, value: object) -> object:
+    if field in _FROZEN_TICKET_DECIMAL_FIELDS:
+        return _frozen_decimal_string(value)
+    if field in _FROZEN_TICKET_INTEGER_FIELDS:
+        try:
+            return int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return value
+    return value
+
+
+def _frozen_decimal_string(value: object) -> str:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+    if decimal_value == 0:
+        return "0"
+    canonical = decimal_value.quantize(Decimal("0.000000000001"))
+    return format(canonical.normalize(), "f")
 
 
 def _add_column_if_missing(

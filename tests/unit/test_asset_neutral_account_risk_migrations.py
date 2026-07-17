@@ -9,6 +9,10 @@ import pytest
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 
+from src.application.action_time.action_time_ticket import (
+    compute_action_time_ticket_hash,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 FOUNDATION = ROOT / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
@@ -135,6 +139,65 @@ def test_migration_134_downgrade_aborts_before_ddl_when_v2_history_exists() -> N
         assert "account_capacity_fact_snapshot_id" in _columns(
             conn, "brc_runtime_safety_state_snapshots"
         )
+
+
+def test_migration_134_keeps_verified_v1_ticket_hash_byte_identical() -> None:
+    engine = sa.create_engine("sqlite://")
+    legacy_ticket = {"ticket_id": "legacy-ticket-1"}
+    legacy_hash = compute_action_time_ticket_hash(legacy_ticket)
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "CREATE TABLE brc_action_time_tickets "
+                "(ticket_id TEXT PRIMARY KEY, ticket_hash TEXT NOT NULL)"
+            )
+        )
+        conn.execute(
+            sa.text(
+                "INSERT INTO brc_action_time_tickets VALUES "
+                "('legacy-ticket-1', :ticket_hash)"
+            ),
+            {"ticket_hash": legacy_hash},
+        )
+
+        _upgrade(conn, CAPACITY_FACT_AUTHORITY, "migration_134_v1_hash_valid")
+
+        row = conn.execute(
+            sa.text(
+                "SELECT ticket_hash, ticket_hash_schema_version "
+                "FROM brc_action_time_tickets"
+            )
+        ).mappings().one()
+    assert row == {
+        "ticket_hash": legacy_hash,
+        "ticket_hash_schema_version": "action_time_ticket_hash.v1",
+    }
+
+
+def test_migration_134_aborts_before_labelling_invalid_v1_ticket_hash() -> None:
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "CREATE TABLE brc_action_time_tickets "
+                "(ticket_id TEXT PRIMARY KEY, ticket_hash TEXT NOT NULL)"
+            )
+        )
+        conn.execute(
+            sa.text(
+                "INSERT INTO brc_action_time_tickets VALUES "
+                "('legacy-ticket-corrupt', 'not-a-v1-hash')"
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="ticket_hash_v1_preflight_invalid"):
+            _upgrade(conn, CAPACITY_FACT_AUTHORITY, "migration_134_v1_hash_invalid")
+
+        assert conn.execute(
+            sa.text(
+                "SELECT ticket_hash_schema_version FROM brc_action_time_tickets"
+            )
+        ).scalar_one_or_none() is None
 
 
 def _create_terminal_capacity_repair_tables(conn: sa.Connection) -> None:
