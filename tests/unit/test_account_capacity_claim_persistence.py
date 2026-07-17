@@ -95,6 +95,52 @@ def test_transition_cannot_mutate_claim_payload() -> None:
     assert row["status"] == "active"
 
 
+@pytest.mark.parametrize(
+    ("expected_ticket_id", "expected_exposure_episode_id", "expected_capacity_claim_hash"),
+    [
+        ("ticket-wrong", "episode-1", "unchanged"),
+        ("ticket-1", "episode-wrong", "unchanged"),
+        ("ticket-1", "episode-1", "wrong-claim-hash"),
+    ],
+)
+def test_consumed_transition_requires_exact_immutable_claim_lineage(
+    expected_ticket_id: str,
+    expected_exposure_episode_id: str,
+    expected_capacity_claim_hash: str,
+) -> None:
+    conn = _connection()
+    claim = insert_or_get_account_capacity_claim(conn, payload=_payload())
+    expected_hash = (
+        claim.capacity_claim_hash
+        if expected_capacity_claim_hash == "unchanged"
+        else expected_capacity_claim_hash
+    )
+
+    result = transition_budget_reservation(
+        conn,
+        budget_reservation_id="reservation-1",
+        to_status="consumed",
+        reason="ticket_bound",
+        evidence_ref="ticket-1",
+        now_ms=1100,
+        expected_ticket_id=expected_ticket_id,
+        expected_exposure_episode_id=expected_exposure_episode_id,
+        expected_capacity_claim_hash=expected_hash,
+    )
+
+    assert result.transitioned is False
+    assert result.first_blocker == "budget_reservation_consumed_lineage_mismatch"
+    assert conn.execute(
+        sa.text(
+            "SELECT status, capacity_claim_hash FROM brc_budget_reservations "
+            "WHERE budget_reservation_id = 'reservation-1'"
+        )
+    ).mappings().one() == {
+        "status": "active",
+        "capacity_claim_hash": claim.capacity_claim_hash,
+    }
+
+
 def _payload() -> AccountCapacityClaimPayload:
     return AccountCapacityClaimPayload(
         capacity_claim_schema_version="v1",

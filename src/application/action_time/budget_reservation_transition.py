@@ -54,6 +54,9 @@ def transition_budget_reservation(
     evidence_ref: str,
     now_ms: int,
     reservation_updates: dict[str, object] | None = None,
+    expected_ticket_id: str | None = None,
+    expected_exposure_episode_id: str | None = None,
+    expected_capacity_claim_hash: str | None = None,
 ) -> BudgetReservationTransitionResult:
     """Lock, validate, transition, and audit one reservation exactly once."""
 
@@ -95,6 +98,33 @@ def transition_budget_reservation(
             transitioned=False,
             first_blocker="budget_reservation_immutable_payload_update_rejected",
         )
+    lineage_columns = {
+        "ticket_id",
+        "exposure_episode_id",
+        "capacity_claim_hash",
+    }
+    sealed_capacity_claim = (
+        lineage_columns <= set(reservations.c.keys())
+        and bool(str(row.get("capacity_claim_hash") or ""))
+    )
+    if to_status == "consumed" and sealed_capacity_claim:
+        expected = (
+            str(expected_ticket_id or ""),
+            str(expected_exposure_episode_id or ""),
+            str(expected_capacity_claim_hash or ""),
+        )
+        actual = (
+            str(row.get("ticket_id") or ""),
+            str(row.get("exposure_episode_id") or ""),
+            str(row.get("capacity_claim_hash") or ""),
+        )
+        if not all(expected) or expected != actual:
+            return BudgetReservationTransitionResult(
+                budget_reservation_id=budget_reservation_id,
+                status=from_status,
+                transitioned=False,
+                first_blocker="budget_reservation_consumed_lineage_mismatch",
+            )
     claim_columns = {"action_time_invocation_id", "capacity_claim_hash"}
     if claim_columns <= set(reservations.c.keys()):
         invocation_id = str(row.get("action_time_invocation_id") or "")

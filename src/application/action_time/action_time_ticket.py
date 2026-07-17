@@ -1275,6 +1275,9 @@ def _insert_ticket_bundle(
         reason="action_time_ticket_bound",
         evidence_ref=str(ticket["ticket_id"]),
         now_ms=int(ticket["created_at_ms"]),
+        expected_ticket_id=str(ticket["ticket_id"]),
+        expected_exposure_episode_id=str(ticket.get("exposure_episode_id") or ""),
+        expected_capacity_claim_hash=str(ticket.get("capacity_claim_hash") or ""),
     )
     if transition.first_blocker:
         raise TicketMaterializationBlocked([transition.first_blocker])
