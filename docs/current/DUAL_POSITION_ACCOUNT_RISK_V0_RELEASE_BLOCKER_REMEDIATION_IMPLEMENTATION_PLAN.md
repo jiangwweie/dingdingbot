@@ -598,7 +598,7 @@ changes refresh Budget Current even when Ticket enum is unchanged.
    - `tests/unit/test_canary_mutation_sentinel.py`;
    - `tests/unit/test_canary_mutation_sentinel_queries.py`;
    - `tests/unit/test_canary_mutation_sentinel_repository.py`;
-   - new `tests/unit/test_runtime_safety_truth.py`;
+   - `tests/unit/test_ticket_bound_runtime_safety_state_materialization.py`.
    - `tests/unit/test_strategy_group_live_facts_readiness_artifact.py`;
    - `tests/unit/test_strategy_live_candidate_pool.py`;
    - `tests/unit/test_action_time_full_chain_impact.py`;
@@ -660,7 +660,7 @@ changes refresh Budget Current even when Ticket enum is unchanged.
      tests/unit/test_canary_mutation_sentinel.py \
      tests/unit/test_canary_mutation_sentinel_queries.py \
      tests/unit/test_canary_mutation_sentinel_repository.py \
-     tests/unit/test_runtime_safety_truth.py \
+     tests/unit/test_ticket_bound_runtime_safety_state_materialization.py \
      tests/unit/test_strategy_group_live_facts_readiness_artifact.py \
      tests/unit/test_strategy_live_candidate_pool.py \
      tests/unit/test_action_time_full_chain_impact.py \
@@ -1664,7 +1664,6 @@ Run in this exact order and stop at the first failure:
      tests/unit/test_canary_mutation_sentinel.py \
      tests/unit/test_canary_mutation_sentinel_queries.py \
      tests/unit/test_canary_mutation_sentinel_repository.py \
-     tests/unit/test_runtime_safety_truth.py \
      tests/unit/test_strategy_group_live_facts_readiness_artifact.py \
      tests/unit/test_strategy_live_candidate_pool.py \
      tests/unit/test_action_time_full_chain_impact.py \
