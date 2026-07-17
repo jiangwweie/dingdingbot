@@ -146,6 +146,7 @@ class CandidateBundle:
     owner_policy_version: str
     account_id: str
     blockers: tuple[str, ...]
+    account_fact_surface: str = "account_safe"
     sizing_risk_decision: ExecutionSizingDecision | None = None
     lane_identity: RuntimeLaneIdentity | None = None
     source_lineage: RuntimeLaneLineage | None = None
@@ -703,7 +704,7 @@ def _invocation_candidate_bundle(
     )
     account_safe_fact = _fact_by_id(
         control_state,
-        evidence.account_safe_fact_snapshot_id,
+        evidence.account_capacity_fact_snapshot_id,
     )
     account_mode_fact = _fact_by_id(
         control_state,
@@ -751,7 +752,7 @@ def _invocation_candidate_bundle(
         )
     for fact, surface in (
         (action_time_fact, "action_time"),
-        (account_safe_fact, "account_safe"),
+        (account_safe_fact, evidence.account_capacity_fact_surface),
         (account_mode_fact, "account_mode"),
     ):
         if fact and str(fact.get("action_time_invocation_id") or "") != (
@@ -805,6 +806,7 @@ def _invocation_candidate_bundle(
         owner_policy_version=owner_policy_version,
         account_id=_account_id(control_state, candidate),
         blockers=tuple(_dedupe(direct_blockers)),
+        account_fact_surface=evidence.account_capacity_fact_surface,
         lane_identity=lane_identity,
         source_lineage=source_lineage,
         action_time_invocation_id=invocation.action_time_invocation_id,
@@ -2135,17 +2137,20 @@ def _lane_row(bundle: CandidateBundle, *, now_ms: int) -> dict[str, Any]:
     if bundle.source_lineage is not None:
         row.update(bundle.source_lineage.model_dump(mode="json"))
     if bundle.action_time_invocation_id is not None:
-        row.update(
-            {
-                "action_time_invocation_id": bundle.action_time_invocation_id,
-                "account_safe_fact_snapshot_id": str(
-                    bundle.account_safe_fact["fact_snapshot_id"]
-                ),
-                "account_mode_fact_snapshot_id": str(
-                    bundle.account_mode_fact["fact_snapshot_id"]
-                ),
-            }
-        )
+        row.update({
+            "action_time_invocation_id": bundle.action_time_invocation_id,
+            "account_mode_fact_snapshot_id": str(
+                bundle.account_mode_fact["fact_snapshot_id"]
+            ),
+        })
+        if bundle.account_fact_surface == "account_capacity_base":
+            row["account_capacity_base_fact_snapshot_id"] = str(
+                bundle.account_safe_fact["fact_snapshot_id"]
+            )
+        else:
+            row["account_safe_fact_snapshot_id"] = str(
+                bundle.account_safe_fact["fact_snapshot_id"]
+            )
     return row
 
 

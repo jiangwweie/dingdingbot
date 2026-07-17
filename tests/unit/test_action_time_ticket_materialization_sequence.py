@@ -20,6 +20,7 @@ from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
 )
 from src.application.action_time import promotion_action_time_lane as promotion_subject
+from src.application.action_time import action_time_ticket as ticket_subject
 from src.application.action_time.account_capacity_reservation import (
     AccountCapacityReservationResult,
 )
@@ -35,6 +36,23 @@ from src.infrastructure.binance_usdm_account_risk_snapshot import (
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
 )
+
+
+def test_invocation_lane_selects_only_the_bound_capacity_fact_pair() -> None:
+    blockers: list[str] = []
+    surface, key = ticket_subject._lane_account_fact_pair(
+        {
+            "action_time_invocation_id": "invocation-1",
+            "account_capacity_base_fact_snapshot_id": "capacity-fact-1",
+        },
+        blockers=blockers,
+    )
+
+    assert (surface, key) == (
+        "account_capacity_base",
+        "account_capacity_base_fact_snapshot_id",
+    )
+    assert blockers == []
 
 
 def test_sequence_cli_requires_database_url_and_postgres_dsn(

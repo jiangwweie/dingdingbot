@@ -570,13 +570,17 @@ def _build_ticket_bundle(
         blockers,
         "action_time_fact_snapshot_missing",
     )
+    account_fact_surface, account_fact_id_key = _lane_account_fact_pair(
+        lane,
+        blockers=blockers,
+    )
     account_safe_fact = _lane_bound_or_latest_fact(
         control_state,
-        fact_surface="account_safe",
-        lane_fact_id_key="account_safe_fact_snapshot_id",
+        fact_surface=account_fact_surface,
+        lane_fact_id_key=account_fact_id_key,
         lane=lane,
         blockers=blockers,
-        missing_blocker="account_safe_fact_snapshot_missing",
+        missing_blocker=f"{account_fact_surface}_fact_snapshot_missing",
     )
     account_mode_fact = _lane_bound_or_latest_fact(
         control_state,
@@ -741,7 +745,6 @@ def _build_ticket_bundle(
         "runtime_profile_id": lane["runtime_profile_id"],
         "public_fact_snapshot_id": public_fact["fact_snapshot_id"],
         "action_time_fact_snapshot_id": action_time_fact["fact_snapshot_id"],
-        "account_safe_fact_snapshot_id": account_safe_fact["fact_snapshot_id"],
         "account_mode_snapshot_id": account_mode_fact["fact_snapshot_id"],
         "budget_reservation_id": budget["budget_reservation_id"],
         "protection_ref_id": protection["protection_ref_id"],
@@ -779,6 +782,14 @@ def _build_ticket_bundle(
         "execution_eligible": signal["execution_eligible"],
         "authority_source_ref": signal["authority_source_ref"],
     }
+    if account_fact_surface == "account_capacity_base":
+        ticket["account_capacity_base_fact_snapshot_id"] = account_safe_fact[
+            "fact_snapshot_id"
+        ]
+    else:
+        ticket["account_safe_fact_snapshot_id"] = account_safe_fact[
+            "fact_snapshot_id"
+        ]
     if source_lineage is not None:
         ticket.update(source_lineage.model_dump(mode="json"))
         try:
@@ -1291,6 +1302,29 @@ def _latest_fact(
         blockers.append(missing_blocker)
         return {}
     return sorted(rows, key=lambda row: int(row.get("observed_at_ms") or 0))[-1]
+
+
+def _lane_account_fact_pair(
+    lane: dict[str, Any],
+    *,
+    blockers: list[str],
+) -> tuple[str, str]:
+    legacy_fact_id = str(lane.get("account_safe_fact_snapshot_id") or "").strip()
+    capacity_fact_id = str(
+        lane.get("account_capacity_base_fact_snapshot_id") or ""
+    ).strip()
+    if legacy_fact_id and capacity_fact_id:
+        blockers.append("action_time_lane_account_fact_pair_invalid")
+        return "account_safe", "account_safe_fact_snapshot_id"
+    if not legacy_fact_id and not capacity_fact_id:
+        if str(lane.get("action_time_invocation_id") or "").strip():
+            blockers.append("action_time_lane_account_fact_pair_invalid")
+        return "account_safe", "account_safe_fact_snapshot_id"
+    return (
+        ("account_capacity_base", "account_capacity_base_fact_snapshot_id")
+        if capacity_fact_id
+        else ("account_safe", "account_safe_fact_snapshot_id")
+    )
 
 
 def _lane_bound_or_latest_fact(
