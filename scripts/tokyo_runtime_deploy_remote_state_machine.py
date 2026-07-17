@@ -538,14 +538,10 @@ def build_immutable_venv(
             (
                 [
                     str(target / "bin/python"), "-c",
-                    "import alembic,ccxt,fastapi,psycopg,sqlalchemy; "
+                    "import alembic,ccxt,ijson,psycopg,sqlalchemy; "
                     "assert ccxt.__version__ == '4.5.56'",
                 ],
                 60,
-            ),
-            (
-                [str(target / "bin/python"), "-m", "compileall", "-q", "src"],
-                120,
             ),
         )
         for command, timeout in commands:
@@ -2081,7 +2077,7 @@ def execute_deploy_transaction(
         or deploy_root / "venvs/brc-bnb-prelive-20260601"
     ))
     expected_revision = _required(
-        str(config.get("expected_revision") or "124"), "expected_revision"
+        str(config.get("expected_revision") or ""), "expected_revision"
     )
     bootstrap_sha256 = _required(
         str(config.get("bootstrap_sha256") or ""), "bootstrap_sha256"
@@ -2783,7 +2779,7 @@ def main(
     parser.add_argument("--env-path")
     parser.add_argument("--expected-latest-migration")
     parser.add_argument("--legacy-venv-path")
-    parser.add_argument("--expected-revision", default="124")
+    parser.add_argument("--expected-revision", required=True)
     args = parser.parse_args(argv)
     source = bootstrap_source
     if source is None:

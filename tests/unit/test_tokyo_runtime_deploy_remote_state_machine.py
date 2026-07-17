@@ -194,6 +194,8 @@ def test_bootstrap_source_can_be_supplied_in_memory_without_remote_file(tmp_path
             "b" * 40,
             "--target-sha",
             "a" * 40,
+            "--expected-revision",
+            "136",
         ],
         bootstrap_source=source,
         bootstrap_euid=0,
