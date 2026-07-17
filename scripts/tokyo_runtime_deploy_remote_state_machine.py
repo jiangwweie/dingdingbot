@@ -2403,10 +2403,15 @@ def execute_deploy_transaction(
             require_root_owner=require_root,
         ),
     )
-    reference = dict(post_cert["certification_reference"])
+    cert_pair = {
+        "ref": str(post_cert["certification_ref"]),
+        "payload": dict(post_cert["certification_reference"]),
+        "generation": 1,
+    }
 
     def lifecycle_action() -> Mapping[str, Any]:
         now_ms = int(time.time() * 1000)
+        reference = dict(cert_pair["payload"])
         if int(reference.get("fact_min_valid_until_ms") or 0) - now_ms < 30_000:
             renewed_facts = refresh_candidate_account_facts(
                 release_path=release,
@@ -2437,8 +2442,12 @@ def execute_deploy_transaction(
                 canonical_lock_path=canonical_lock,
                 require_root_owner=require_root,
             )
-            reference.clear()
-            reference.update(dict(renewed_cert["certification_reference"]))
+            cert_pair.update({
+                "ref": str(renewed_cert["certification_ref"]),
+                "payload": dict(renewed_cert["certification_reference"]),
+                "generation": int(cert_pair["generation"]) + 1,
+            })
+            reference = dict(cert_pair["payload"])
             now_ms = int(time.time() * 1000)
             if int(reference.get("fact_min_valid_until_ms") or 0) - now_ms < 30_000:
                 raise RuntimeError("final_fact_freshness_remaining_insufficient")
@@ -2447,7 +2456,7 @@ def execute_deploy_transaction(
             env_path=env_path,
             target_sha=target_sha,
             was_enabled=bool(migrated["lifecycle_capability_was_enabled"]),
-            post_certification_ref=str(post_cert["certification_ref"]),
+            post_certification_ref=str(cert_pair["ref"]),
             post_certification_reference=reference,
             post_projection_slice_digests=post_projection["sentinel"]["slice_digests"],
             lock_handle=lock_handle,
@@ -2471,7 +2480,8 @@ def execute_deploy_transaction(
         "dependency_identity": dependency_identity(release / "requirements-runtime.lock"),
         "pre_canary_sentinel_digest": pre_sentinel["digest"],
         "post_projection_sentinel_digest": post_projection["sentinel"]["digest"],
-        "action_time_certification_ref": post_cert["certification_ref"],
+        "action_time_certification_ref": cert_pair["ref"],
+        "certification_generation": cert_pair["generation"],
         "activation_machine_facts": machine_facts,
         "zero_deployment_exchange_side_effect": True,
     })
