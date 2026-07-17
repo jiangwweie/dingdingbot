@@ -1288,6 +1288,262 @@ class ExchangeGateway:
             ),
         }
 
+    async def fetch_order_trades_exact(
+        self,
+        exchange_market_id: str,
+        exchange_order_id: str,
+        entry_order_created_at_ms: int,
+        entry_order_terminal_at_ms: Optional[int] = None,
+        first_durable_trade_id: Optional[int] = None,
+        *,
+        page_limit: int = 1000,
+        max_pages: int = 20,
+        timeout_seconds: float = 8,
+    ) -> Dict[str, Any]:
+        """Read bounded Binance USD-M trade history for one immutable order.
+
+        Binance USD-M does not support ``orderId`` on ``/fapi/v1/userTrades``.
+        The order id therefore remains a local equality filter only.  This
+        method is deliberately read-only and returns a typed result instead of
+        making an incomplete history look like a contradictory fill.
+        """
+
+        market_id = str(exchange_market_id or "").strip().upper()
+        order_id = str(exchange_order_id or "").strip()
+        try:
+            created_at_ms = int(entry_order_created_at_ms)
+            terminal_at_ms = int(
+                entry_order_terminal_at_ms
+                if entry_order_terminal_at_ms is not None
+                else time.time() * 1000
+            )
+            first_trade_id = (
+                int(first_durable_trade_id)
+                if first_durable_trade_id is not None
+                else None
+            )
+            limit = int(page_limit)
+            page_cap = int(max_pages)
+            total_timeout = float(timeout_seconds)
+        except (TypeError, ValueError, OverflowError):
+            return self._exact_trade_history_result(
+                status="identity_invalid",
+                state="TIME_WINDOW",
+                trades=[],
+                pages=0,
+                reason="entry_fill_history_identity_invalid",
+            )
+        if (
+            self.exchange_name.lower() != "binance"
+            or not market_id.isalnum()
+            or not order_id
+            or created_at_ms <= 0
+            or terminal_at_ms < created_at_ms
+            or (first_trade_id is not None and first_trade_id < 0)
+            or limit <= 0
+            or limit > 1000
+            or page_cap <= 0
+            or page_cap > 20
+            or total_timeout <= 0
+            or total_timeout > 8
+        ):
+            return self._exact_trade_history_result(
+                status="identity_invalid",
+                state="TIME_WINDOW",
+                trades=[],
+                pages=0,
+                reason="entry_fill_history_identity_invalid",
+            )
+        raw_fetch = getattr(self.rest_exchange, "fapiPrivateGetUserTrades", None)
+        if not callable(raw_fetch):
+            return self._exact_trade_history_result(
+                status="incomplete",
+                state="TIME_WINDOW",
+                trades=[],
+                pages=0,
+                reason="entry_fill_history_incomplete",
+            )
+
+        window_ms = 7 * 24 * 60 * 60 * 1000
+        state = (
+            "FROM_ID_WITH_WINDOW_END_GUARD"
+            if first_trade_id is not None
+            else "TIME_WINDOW"
+        )
+        window_start_ms = created_at_ms
+        window_end_ms = min(terminal_at_ms, created_at_ms + window_ms - 1)
+        cursor = first_trade_id
+        pages = 0
+        matched: list[Dict[str, Any]] = []
+        seen_trade_ids: set[int] = set()
+        last_observed_trade_id: Optional[int] = None
+        deadline = time.monotonic() + total_timeout
+
+        while True:
+            if pages >= page_cap:
+                return self._exact_trade_history_result(
+                    status="incomplete",
+                    state=state,
+                    trades=matched,
+                    pages=pages,
+                    reason="entry_fill_history_incomplete",
+                )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return self._exact_trade_history_result(
+                    status="timeout",
+                    state=state,
+                    trades=matched,
+                    pages=pages,
+                    reason="entry_fill_history_incomplete",
+                )
+            params: Dict[str, Any] = {"symbol": market_id, "limit": limit}
+            if state == "TIME_WINDOW":
+                params.update({"startTime": window_start_ms, "endTime": window_end_ms})
+            else:
+                if cursor is None:
+                    return self._exact_trade_history_result(
+                        status="incomplete",
+                        state=state,
+                        trades=matched,
+                        pages=pages,
+                        reason="entry_fill_history_incomplete",
+                    )
+                params["fromId"] = cursor
+            try:
+                rows = await asyncio.wait_for(raw_fetch(params), timeout=remaining)
+            except TimeoutError:
+                return self._exact_trade_history_result(
+                    status="timeout",
+                    state=state,
+                    trades=matched,
+                    pages=pages,
+                    reason="entry_fill_history_incomplete",
+                )
+            except Exception:
+                return self._exact_trade_history_result(
+                    status="incomplete",
+                    state=state,
+                    trades=matched,
+                    pages=pages,
+                    reason="entry_fill_history_incomplete",
+                )
+            pages += 1
+            if not isinstance(rows, list) or not rows:
+                return self._exact_trade_history_result(
+                    status="incomplete",
+                    state=state,
+                    trades=matched,
+                    pages=pages,
+                    reason="entry_fill_history_incomplete",
+                )
+
+            last_trade_id: Optional[int] = None
+            crossed_window_end = False
+            for raw in rows:
+                if not isinstance(raw, dict):
+                    return self._exact_trade_history_result(
+                        status="incomplete",
+                        state=state,
+                        trades=matched,
+                        pages=pages,
+                        reason="entry_fill_history_incomplete",
+                    )
+                try:
+                    trade_id = int(raw.get("id"))
+                    trade_time_ms = int(raw.get("time"))
+                except (TypeError, ValueError, OverflowError):
+                    return self._exact_trade_history_result(
+                        status="incomplete",
+                        state=state,
+                        trades=matched,
+                        pages=pages,
+                        reason="entry_fill_history_incomplete",
+                    )
+                if str(raw.get("symbol") or "").strip().upper() != market_id:
+                    return self._exact_trade_history_result(
+                        status="identity_invalid",
+                        state=state,
+                        trades=matched,
+                        pages=pages,
+                        reason="entry_fill_history_identity_invalid",
+                    )
+                if (
+                    last_observed_trade_id is not None
+                    and trade_id < last_observed_trade_id
+                    and trade_id not in seen_trade_ids
+                ):
+                    return self._exact_trade_history_result(
+                        status="incomplete",
+                        state=state,
+                        trades=matched,
+                        pages=pages,
+                        reason="entry_fill_history_incomplete",
+                    )
+                if state == "FROM_ID_WITH_WINDOW_END_GUARD" and trade_time_ms > window_end_ms:
+                    crossed_window_end = True
+                    break
+                if trade_id in seen_trade_ids:
+                    continue
+                seen_trade_ids.add(trade_id)
+                last_observed_trade_id = trade_id
+                last_trade_id = trade_id
+                if str(raw.get("orderId") or "") == order_id:
+                    matched.append(dict(raw))
+
+            full_page = len(rows) >= limit
+            if state == "TIME_WINDOW" and full_page and last_trade_id is not None:
+                cursor = last_trade_id + 1
+                state = "FROM_ID_WITH_WINDOW_END_GUARD"
+                continue
+            if (
+                state == "FROM_ID_WITH_WINDOW_END_GUARD"
+                and full_page
+                and not crossed_window_end
+                and last_trade_id is not None
+            ):
+                cursor = last_trade_id + 1
+                continue
+            if window_end_ms >= terminal_at_ms:
+                if not matched:
+                    return self._exact_trade_history_result(
+                        status="incomplete",
+                        state=state,
+                        trades=matched,
+                        pages=pages,
+                        reason="entry_fill_history_incomplete",
+                    )
+                return self._exact_trade_history_result(
+                    status="complete",
+                    state=state,
+                    trades=matched,
+                    pages=pages,
+                    reason=None,
+                )
+            window_start_ms = window_end_ms + 1
+            window_end_ms = min(terminal_at_ms, window_start_ms + window_ms - 1)
+            state = "TIME_WINDOW"
+            cursor = None
+
+    @staticmethod
+    def _exact_trade_history_result(
+        *,
+        status: str,
+        state: str,
+        trades: List[Dict[str, Any]],
+        pages: int,
+        reason: Optional[str],
+    ) -> Dict[str, Any]:
+        return {
+            "status": status,
+            "state": state,
+            "trades": trades,
+            "page_count": pages,
+            "first_blocker": reason,
+            "exchange_read_called": pages > 0,
+            "exchange_write_called": False,
+        }
+
     @staticmethod
     def _ticket_lifecycle_market_rule(
         payload: Dict[str, Any],

@@ -324,6 +324,43 @@ def test_tp1_completion_floor_is_immediate_and_monotonic_for_long_and_short():
     assert no_improvement.kind is ExitDecisionKind.NOOP
 
 
+@pytest.mark.parametrize(
+    ("side", "current_stop", "floor", "candidate", "expected"),
+    [
+        ("long", "100.0", "100.1", "100.3", "100.3"),
+        ("short", "100.0", "99.9", "99.7", "99.7"),
+    ],
+)
+def test_tp1_floor_does_not_hide_newer_structural_trailing_candidate(
+    side,
+    current_stop,
+    floor,
+    candidate,
+    expected,
+):
+    fact = ExitMarketFact(
+        watermark_ms=1_720_000_000_123,
+        is_final_closed_candle=True,
+        close_price=Decimal("101"),
+        holding_bars=10,
+        structural_stop_candidate=Decimal(candidate),
+    )
+
+    decision = evaluate_exit_policy(
+        _evaluation(
+            side=side,
+            current_stop=current_stop,
+            tp1_completion_state="complete",
+            immediate_floor=floor,
+            market_fact=fact,
+        )
+    )
+
+    assert decision.kind is ExitDecisionKind.MOVE_RUNNER_STOP
+    assert decision.reason_code == "structural_atr_runner_improvement"
+    assert decision.proposed_stop == Decimal(expected)
+
+
 def test_structural_and_reference_trails_only_move_on_closed_improving_fact():
     fact = ExitMarketFact(
         watermark_ms=1_720_000_000_000,

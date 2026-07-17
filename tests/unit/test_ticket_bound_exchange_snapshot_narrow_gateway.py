@@ -338,3 +338,156 @@ async def test_binance_narrow_snapshot_uses_raw_ticket_scoped_reads_only():
         "funding",
         "lineage",
     }
+
+
+async def test_exact_entry_trade_recovery_uses_raw_market_id_from_id_and_local_order_filter():
+    class _RawBinance:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def fapiPrivateGetUserTrades(self, params):
+            self.calls.append(dict(params))
+            if params.get("fromId") == 100:
+                return [
+                    {
+                        "id": 100,
+                        "orderId": 999,
+                        "symbol": "ETHUSDT",
+                        "qty": "1",
+                        "price": "99",
+                        "commission": "0.01",
+                        "commissionAsset": "USDT",
+                        "time": 1_000,
+                    },
+                    {
+                        "id": 101,
+                        "orderId": 42,
+                        "symbol": "ETHUSDT",
+                        "qty": "1",
+                        "price": "100",
+                        "commission": "0.01",
+                        "commissionAsset": "USDT",
+                        "time": 1_001,
+                    },
+                ]
+            return [
+                {
+                    "id": 102,
+                    "orderId": 42,
+                    "symbol": "ETHUSDT",
+                    "qty": "2",
+                    "price": "101",
+                    "commission": "0.02",
+                    "commissionAsset": "USDT",
+                    "time": 1_002,
+                }
+            ]
+
+    raw = _RawBinance()
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    gateway.rest_exchange = raw
+
+    result = await gateway.fetch_order_trades_exact(
+        exchange_market_id="ETHUSDT",
+        exchange_order_id="42",
+        entry_order_created_at_ms=1_000,
+        entry_order_terminal_at_ms=1_002,
+        first_durable_trade_id=100,
+        page_limit=2,
+        max_pages=2,
+        timeout_seconds=1,
+    )
+
+    assert result["status"] == "complete"
+    assert result["state"] == "FROM_ID_WITH_WINDOW_END_GUARD"
+    assert [row["id"] for row in result["trades"]] == [101, 102]
+    assert raw.calls == [
+        {"symbol": "ETHUSDT", "fromId": 100, "limit": 2},
+        {"symbol": "ETHUSDT", "fromId": 102, "limit": 2},
+    ]
+    assert all("orderId" not in params for params in raw.calls)
+
+
+async def test_exact_entry_trade_recovery_advances_nonfull_time_windows_and_fails_closed_on_cursor_regression():
+    window_ms = 7 * 24 * 60 * 60 * 1000
+
+    class _WindowedRawBinance:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def fapiPrivateGetUserTrades(self, params):
+            self.calls.append(dict(params))
+            if params["startTime"] == 1:
+                return [
+                    {
+                        "id": 1,
+                        "orderId": 9,
+                        "symbol": "ETHUSDT",
+                        "qty": "1",
+                        "price": "100",
+                        "commission": "0.01",
+                        "commissionAsset": "USDT",
+                        "time": 1,
+                    }
+                ]
+            return [
+                {
+                    "id": 2,
+                    "orderId": 42,
+                    "symbol": "ETHUSDT",
+                    "qty": "2",
+                    "price": "101",
+                    "commission": "0.02",
+                    "commissionAsset": "USDT",
+                    "time": window_ms + 2,
+                }
+            ]
+
+    gateway = ExchangeGateway.__new__(ExchangeGateway)
+    gateway.exchange_name = "binance"
+    raw = _WindowedRawBinance()
+    gateway.rest_exchange = raw
+    complete = await gateway.fetch_order_trades_exact(
+        exchange_market_id="ETHUSDT",
+        exchange_order_id="42",
+        entry_order_created_at_ms=1,
+        entry_order_terminal_at_ms=window_ms + 2,
+        page_limit=2,
+        max_pages=2,
+        timeout_seconds=1,
+    )
+
+    assert complete["status"] == "complete"
+    assert complete["state"] == "TIME_WINDOW"
+    assert [row["id"] for row in complete["trades"]] == [2]
+    assert raw.calls == [
+        {"symbol": "ETHUSDT", "limit": 2, "startTime": 1, "endTime": window_ms},
+        {
+            "symbol": "ETHUSDT",
+            "limit": 2,
+            "startTime": window_ms + 1,
+            "endTime": window_ms + 2,
+        },
+    ]
+
+    class _NonMonotonicRawBinance:
+        async def fapiPrivateGetUserTrades(self, _params):
+            return [
+                {"id": 2, "orderId": 42, "symbol": "ETHUSDT", "time": 1},
+                {"id": 1, "orderId": 42, "symbol": "ETHUSDT", "time": 1},
+            ]
+
+    gateway.rest_exchange = _NonMonotonicRawBinance()
+    incomplete = await gateway.fetch_order_trades_exact(
+        exchange_market_id="ETHUSDT",
+        exchange_order_id="42",
+        entry_order_created_at_ms=1,
+        entry_order_terminal_at_ms=1,
+        page_limit=2,
+        max_pages=2,
+        timeout_seconds=1,
+    )
+
+    assert incomplete["status"] == "incomplete"
+    assert incomplete["first_blocker"] == "entry_fill_history_incomplete"

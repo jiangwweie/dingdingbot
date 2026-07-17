@@ -274,6 +274,70 @@ async def test_exchange_snapshot_provider_normalizes_readonly_gateway_facts(
 
 
 @pytest.mark.asyncio
+async def test_snapshot_recovers_incomplete_entry_history_with_bounded_exact_reader(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    lifecycle = dict(
+        pg_control_connection.execute(
+            text("SELECT * FROM brc_ticket_bound_order_lifecycle_runs LIMIT 1")
+        ).mappings().one()
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_exit_policy_current SET "
+            "exit_execution_hash = NULL, exit_execution_snapshot = NULL "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": lifecycle["ticket_id"]},
+    )
+
+    class _ExactRecoveryGateway(_SchedulerGateway):
+        async def fetch_order_trades_exact(self, **kwargs):
+            self.exact_request = dict(kwargs)
+            return {
+                "status": "complete",
+                "state": "TIME_WINDOW",
+                "page_count": 1,
+                "first_blocker": None,
+                "trades": [
+                    {
+                        "id": 987,
+                        "orderId": kwargs["exchange_order_id"],
+                        "symbol": kwargs["exchange_market_id"],
+                        "side": "BUY",
+                        "qty": str(lifecycle["entry_filled_qty"]),
+                        "price": str(lifecycle["entry_avg_price"]),
+                        "commission": "0.04",
+                        "commissionAsset": "USDT",
+                        "time": kwargs["entry_order_terminal_at_ms"],
+                    }
+                ],
+                "exchange_read_called": True,
+                "exchange_write_called": False,
+            }
+
+    gateway = _ExactRecoveryGateway()
+    payload = await fetch_ticket_bound_exchange_snapshot(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        gateway=gateway,
+        now_ms=NOW_MS + 10_000,
+    )
+
+    assert payload["snapshot"]["entry_fill_history"] == {
+        "status": "complete",
+        "first_blocker": None,
+    }
+    assert gateway.exact_request["exchange_market_id"] == "ETHUSDT"
+    assert gateway.exact_request["exchange_order_id"] == lifecycle[
+        "entry_exchange_order_id"
+    ]
+    assert payload["snapshot"]["recent_fills"][-1]["exchange_trade_id"] == "987"
+    assert payload["exchange_write_called"] is False
+
+
+@pytest.mark.asyncio
 async def test_scheduler_fetches_snapshot_and_prepares_durable_runner_commands(
     pg_control_connection,
 ):

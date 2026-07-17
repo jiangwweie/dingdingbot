@@ -160,6 +160,12 @@ def recover_ticket_exit_execution_snapshot_from_exchange_truth(
             instrument=instrument,
             exchange_snapshot=snapshot,
         )
+        entry_fill_history = _mapping(snapshot.get("entry_fill_history"))
+        if entry_fill_history and entry_fill_history.get("status") != "complete":
+            # A bounded exact-history reader exhausted its evidence.  This is
+            # deliberately distinct from a complete history contradicting the
+            # durable lifecycle record.
+            raise TicketExitExecutionBindingError("entry_fill_history_incomplete")
         entry_execution = _aggregate_entry_fills(
             snapshot.get("recent_fills"),
             entry_exchange_order_id=entry_order_id,

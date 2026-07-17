@@ -74,6 +74,10 @@ async def fetch_ticket_bound_exchange_snapshot(
             protection_set=protection_set,
         )
     scope = scope_resolution.scope
+    entry_fill_recovery = _load_entry_fill_recovery_request(
+        conn,
+        ticket_id=str(protection_set.get("ticket_id") or ""),
+    )
     funding_start_time_ms = _ticket_entry_fill_time_ms(
         conn,
         str(protection_set.get("ticket_id") or ""),
@@ -91,6 +95,7 @@ async def fetch_ticket_bound_exchange_snapshot(
             conn,
             ticket_id=str(protection_set.get("ticket_id") or ""),
         ),
+        entry_fill_recovery=entry_fill_recovery,
         authority_boundary=AUTHORITY_BOUNDARY,
     )
     return {
@@ -150,6 +155,10 @@ async def fetch_ticket_bound_attempt_exchange_snapshot(
             attempt=attempt,
         )
     scope = scope_resolution.scope
+    entry_fill_recovery = _load_entry_fill_recovery_request(
+        conn,
+        ticket_id=str(attempt.get("ticket_id") or ""),
+    )
     funding_start_time_ms = _ticket_entry_fill_time_ms(
         conn,
         str(attempt.get("ticket_id") or ""),
@@ -167,6 +176,7 @@ async def fetch_ticket_bound_attempt_exchange_snapshot(
             conn,
             ticket_id=str(attempt.get("ticket_id") or ""),
         ),
+        entry_fill_recovery=entry_fill_recovery,
         authority_boundary=ATTEMPT_AUTHORITY_BOUNDARY,
     )
     return {
@@ -196,6 +206,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
     funding_start_time_ms: int | None = None,
     funding_end_time_ms: int | None = None,
     conditional_parent_order_ids: list[str] | None = None,
+    entry_fill_recovery: dict[str, Any] | None = None,
     authority_boundary: str = AUTHORITY_BOUNDARY,
 ) -> dict[str, Any]:
     """Perform exchange reads without any PG connection or transaction."""
@@ -351,6 +362,86 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         list(conditional_result.get("rows") or [])
     )
     normalized_fills = [_normalize_fill(fill) for fill in recent_fills or []]
+    entry_fill_history: dict[str, Any] | None = None
+    if entry_fill_recovery and not _entry_fill_truth_complete(
+        normalized_fills,
+        recovery=entry_fill_recovery,
+    ):
+        exact_fetch = getattr(gateway, "fetch_order_trades_exact", None)
+        if not callable(exact_fetch):
+            entry_fill_history = {
+                "status": "incomplete",
+                "first_blocker": "entry_fill_history_incomplete",
+            }
+        else:
+            try:
+                exact_result = await asyncio.wait_for(
+                    exact_fetch(
+                        exchange_market_id=scope.canonical_symbol,
+                        exchange_order_id=entry_fill_recovery["exchange_order_id"],
+                        entry_order_created_at_ms=entry_fill_recovery[
+                            "entry_order_created_at_ms"
+                        ],
+                        entry_order_terminal_at_ms=entry_fill_recovery[
+                            "entry_order_terminal_at_ms"
+                        ],
+                        first_durable_trade_id=entry_fill_recovery.get(
+                            "first_durable_trade_id"
+                        ),
+                        page_limit=1000,
+                        max_pages=20,
+                        timeout_seconds=8,
+                    ),
+                    timeout=min(float(timeout_seconds), 8.0),
+                )
+            except TimeoutError:
+                exact_result = {
+                    "status": "timeout",
+                    "first_blocker": "entry_fill_history_incomplete",
+                    "trades": [],
+                    "page_count": 0,
+                }
+            if not isinstance(exact_result, dict):
+                exact_result = {
+                    "status": "incomplete",
+                    "first_blocker": "entry_fill_history_incomplete",
+                    "trades": [],
+                    "page_count": 0,
+                }
+            exchange_request_count += int(exact_result.get("page_count") or 0)
+            if exact_result.get("status") == "complete":
+                normalized_fills = _merge_unique_fills(
+                    normalized_fills,
+                    [_normalize_fill(fill) for fill in exact_result.get("trades", [])],
+                )
+                entry_fill_history = {
+                    "status": (
+                        "complete"
+                        if _entry_fill_truth_complete(
+                            normalized_fills,
+                            recovery=entry_fill_recovery,
+                        )
+                        else "incomplete"
+                    ),
+                    "first_blocker": (
+                        None
+                        if _entry_fill_truth_complete(
+                            normalized_fills,
+                            recovery=entry_fill_recovery,
+                        )
+                        else "entry_fill_history_incomplete"
+                    ),
+                }
+            else:
+                entry_fill_history = {
+                    "status": str(exact_result.get("status") or "incomplete"),
+                    "first_blocker": str(
+                        exact_result.get("first_blocker")
+                        or "entry_fill_history_incomplete"
+                    ),
+                }
+    elif entry_fill_recovery:
+        entry_fill_history = {"status": "complete", "first_blocker": None}
     _bind_conditional_parent_ids(
         normalized_fills,
         conditional_order_lineage=conditional_order_lineage,
@@ -370,6 +461,7 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         "netting_domain_key": scope.netting_domain_key,
         "open_orders": [_normalize_open_order(order) for order in open_orders or []],
         "recent_fills": normalized_fills,
+        "entry_fill_history": entry_fill_history,
         "conditional_order_lineage": conditional_order_lineage,
         "conditional_order_lineage_available": (
             should_fetch_conditional_lineage
@@ -509,6 +601,154 @@ def load_ticket_conditional_parent_order_ids(
         if exchange_order_id:
             ids.append(exchange_order_id)
     return list(dict.fromkeys(ids))
+
+
+def _load_entry_fill_recovery_request(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+) -> dict[str, Any] | None:
+    """Return durable bounds only while an exit execution snapshot is absent."""
+
+    if not ticket_id:
+        return None
+    inspector = sa.inspect(conn)
+    required_tables = {
+        "brc_ticket_bound_order_lifecycle_runs",
+        "brc_ticket_exit_policy_current",
+    }
+    if not all(inspector.has_table(name) for name in required_tables):
+        return None
+    projection = _table(conn, "brc_ticket_exit_policy_current")
+    existing_hash = conn.execute(
+        sa.select(projection.c.exit_execution_hash).where(
+            projection.c.ticket_id == ticket_id
+        )
+    ).scalar_one_or_none()
+    if str(existing_hash or "").strip():
+        return None
+    lifecycle = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
+    row = conn.execute(
+        sa.select(lifecycle).where(lifecycle.c.ticket_id == ticket_id)
+    ).mappings().first()
+    if not row or row.get("entry_fill_confirmed") not in {True, 1}:
+        return None
+    order_id = str(row.get("entry_exchange_order_id") or "").strip()
+    if not order_id:
+        return None
+    created_at_ms = _int_optional(row.get("created_at_ms"))
+    terminal_at_ms = _entry_fill_terminal_time_ms(conn, ticket_id=ticket_id)
+    expected_qty = _positive_decimal(row.get("entry_filled_qty"))
+    expected_avg = _positive_decimal(row.get("entry_avg_price"))
+    if (
+        created_at_ms is None
+        or terminal_at_ms is None
+        or terminal_at_ms < created_at_ms
+        or expected_qty is None
+        or expected_avg is None
+    ):
+        return None
+    return {
+        "exchange_order_id": order_id,
+        "entry_order_created_at_ms": created_at_ms,
+        "entry_order_terminal_at_ms": terminal_at_ms,
+        "first_durable_trade_id": None,
+        "expected_qty": expected_qty,
+        "expected_avg_price": expected_avg,
+    }
+
+
+def _entry_fill_terminal_time_ms(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+) -> int | None:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_lifecycle_events"):
+        return None
+    events = _table(conn, "brc_ticket_bound_lifecycle_events")
+    row = conn.execute(
+        sa.select(events.c.event_payload, events.c.created_at_ms)
+        .where(
+            events.c.ticket_id == ticket_id,
+            events.c.event_type == "entry_filled",
+        )
+        .order_by(events.c.created_at_ms.asc())
+        .limit(1)
+    ).mappings().first()
+    if not row:
+        return None
+    payload = _as_dict(row.get("event_payload"))
+    fill = _as_dict(payload.get("entry_fill") or payload.get("fill"))
+    return _int_optional(fill.get("fill_time_ms")) or _int_optional(
+        row.get("created_at_ms")
+    )
+
+
+def _entry_fill_truth_complete(
+    fills: list[dict[str, Any]],
+    *,
+    recovery: dict[str, Any],
+) -> bool:
+    expected_order_id = str(recovery.get("exchange_order_id") or "")
+    expected_qty = _positive_decimal(recovery.get("expected_qty"))
+    expected_avg = _positive_decimal(recovery.get("expected_avg_price"))
+    if not expected_order_id or expected_qty is None or expected_avg is None:
+        return False
+    total_qty = Decimal("0")
+    total_notional = Decimal("0")
+    for fill in fills:
+        if str(fill.get("exchange_order_id") or "") != expected_order_id:
+            continue
+        qty = _positive_decimal(fill.get("qty"))
+        price = _positive_decimal(fill.get("price"))
+        fee = _as_dict(fill.get("fee"))
+        fee_amount = _nonnegative_decimal(fee.get("cost"))
+        fee_asset = str(fee.get("currency") or "").strip()
+        if qty is None or price is None or fee_amount is None or not fee_asset:
+            return False
+        total_qty += qty
+        total_notional += qty * price
+    return (
+        total_qty == expected_qty
+        and total_qty > 0
+        and total_notional / total_qty == expected_avg
+    )
+
+
+def _merge_unique_fills(
+    primary: list[dict[str, Any]],
+    secondary: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    identities: set[str] = set()
+    for fill in [*primary, *secondary]:
+        trade_id = str(fill.get("exchange_trade_id") or "").strip()
+        if not trade_id:
+            trade_id = "|".join(
+                str(fill.get(key) or "")
+                for key in ("exchange_order_id", "timestamp_ms", "qty", "price")
+            )
+        if trade_id in identities:
+            continue
+        identities.add(trade_id)
+        merged.append(fill)
+    return merged
+
+
+def _positive_decimal(value: Any) -> Decimal | None:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return decimal_value if decimal_value > 0 else None
+
+
+def _nonnegative_decimal(value: Any) -> Decimal | None:
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return decimal_value if decimal_value >= 0 else None
 
 
 def _gateway_method_blockers(gateway: Any) -> list[str]:
