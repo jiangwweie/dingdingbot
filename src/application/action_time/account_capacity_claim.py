@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from src.domain.account_capacity_claim import (
     AccountCapacityClaimPayload,
     capacity_claim_hash,
+    load_capacity_claim_payload,
     reservation_idempotency_key,
 )
 
@@ -67,9 +68,9 @@ def insert_or_get_account_capacity_claim(
         raise AccountCapacityClaimConflict("account_capacity_claim_insert_missing")
     if persisted.payload != payload:
         drifted_fields: list[str] = []
-        for field_name in AccountCapacityClaimPayload.model_fields:
-            persisted_value = getattr(persisted.payload, field_name)
-            requested_value = getattr(payload, field_name)
+        for field_name in set(persisted.payload.model_fields) | set(payload.model_fields):
+            persisted_value = getattr(persisted.payload, field_name, object())
+            requested_value = getattr(payload, field_name, object())
             if persisted_value == requested_value:
                 continue
             if isinstance(persisted_value, BaseModel) and isinstance(
@@ -172,6 +173,8 @@ def _claim_by_invocation_id(
                    rule.exchange_max_leverage_for_claim_notional,
                    rule.source_fact_snapshot_id AS rule_source_fact_snapshot_id,
                    rule.valid_until_ms AS rule_valid_until_ms,
+                   rule.risk_calculation_kind AS rule_risk_calculation_kind,
+                   rule.semantic_hash AS rule_semantic_hash,
                    cluster.semantic_hash AS cluster_semantic_hash
             FROM brc_budget_reservations AS reservation
             JOIN brc_exchange_instruments AS instrument
@@ -194,22 +197,41 @@ def _claim_by_invocation_id(
             "account_capacity_claim_invocation_identity_conflict"
         )
     row = rows[0]
-    payload = AccountCapacityClaimPayload(
-        capacity_claim_schema_version=str(row["capacity_claim_schema_version"]),
-        reservation_id=str(row["budget_reservation_id"]),
-        ticket_id=str(row["ticket_id"]),
-        exposure_episode_id=str(row["exposure_episode_id"]),
-        action_time_invocation_id=str(row["action_time_invocation_id"]),
-        action_time_lane_input_id=str(row["action_time_lane_input_id"]),
-        promotion_candidate_id=str(row["promotion_candidate_id"]),
-        signal_event_id=str(row["signal_event_id"]),
-        event_spec_id=str(row["event_spec_id"]),
-        account_id=str(row["account_id"]),
-        runtime_profile_id=str(row["runtime_profile_id"]),
-        strategy_group_id=str(row["strategy_group_id"]),
-        symbol=str(row["symbol"]),
-        side=str(row["side"]),
-        instrument={
+    rule_snapshot = {
+        "instrument_rule_snapshot_id": row["instrument_rule_snapshot_id"],
+        "rule_schema_version": row["instrument_rule_schema_version"],
+        "price_tick": row["price_tick"],
+        "quantity_step": row["quantity_step"],
+        "min_qty": row["min_qty"],
+        "min_notional": row["min_notional"],
+        "contract_multiplier": row["contract_multiplier"],
+        "exchange_max_leverage_for_claim_notional": row[
+            "exchange_max_leverage_for_claim_notional"
+        ],
+        "source_fact_snapshot_id": row["rule_source_fact_snapshot_id"],
+        "valid_until_ms": row["rule_valid_until_ms"],
+    }
+    if str(row["capacity_claim_schema_version"]) == "v2":
+        rule_snapshot.update({
+            "risk_calculation_kind": row["rule_risk_calculation_kind"],
+            "semantic_hash": row["rule_semantic_hash"],
+        })
+    payload = load_capacity_claim_payload({
+        "capacity_claim_schema_version": str(row["capacity_claim_schema_version"]),
+        "reservation_id": str(row["budget_reservation_id"]),
+        "ticket_id": str(row["ticket_id"]),
+        "exposure_episode_id": str(row["exposure_episode_id"]),
+        "action_time_invocation_id": str(row["action_time_invocation_id"]),
+        "action_time_lane_input_id": str(row["action_time_lane_input_id"]),
+        "promotion_candidate_id": str(row["promotion_candidate_id"]),
+        "signal_event_id": str(row["signal_event_id"]),
+        "event_spec_id": str(row["event_spec_id"]),
+        "account_id": str(row["account_id"]),
+        "runtime_profile_id": str(row["runtime_profile_id"]),
+        "strategy_group_id": str(row["strategy_group_id"]),
+        "symbol": str(row["symbol"]),
+        "side": str(row["side"]),
+        "instrument": {
             "exchange_instrument_id": row["exchange_instrument_id"],
             "exchange_id": row["exchange_id"],
             "exchange_symbol": row["exchange_symbol"],
@@ -221,47 +243,34 @@ def _claim_by_invocation_id(
                 "instrument_identity_schema_version"
             ],
         },
-        rule_snapshot={
-            "instrument_rule_snapshot_id": row["instrument_rule_snapshot_id"],
-            "rule_schema_version": row["instrument_rule_schema_version"],
-            "price_tick": row["price_tick"],
-            "quantity_step": row["quantity_step"],
-            "min_qty": row["min_qty"],
-            "min_notional": row["min_notional"],
-            "contract_multiplier": row["contract_multiplier"],
-            "exchange_max_leverage_for_claim_notional": row[
-                "exchange_max_leverage_for_claim_notional"
-            ],
-            "source_fact_snapshot_id": row["rule_source_fact_snapshot_id"],
-            "valid_until_ms": row["rule_valid_until_ms"],
-        },
-        cluster_snapshot={
+        "rule_snapshot": rule_snapshot,
+        "cluster_snapshot": {
             "cluster_membership_snapshot_id": row[
                 "cluster_membership_snapshot_id"
             ],
             "primary_risk_cluster_id": row["primary_risk_cluster_id"],
             "semantic_hash": row["cluster_semantic_hash"],
         },
-        pricing_source_fact_snapshot_id=str(row["pricing_source_fact_snapshot_id"]),
-        account_source_fact_snapshot_id=str(row["account_source_fact_snapshot_id"]),
-        account_fact_schema_version=str(row["account_fact_schema_version"]),
-        account_risk_policy_version=str(row["account_risk_policy_version"]),
-        account_risk_policy_event_id=str(row["account_risk_policy_event_id"]),
-        owner_policy_version=str(row["policy_version"]),
-        claimed_budget_projection_version=int(
+        "pricing_source_fact_snapshot_id": str(row["pricing_source_fact_snapshot_id"]),
+        "account_source_fact_snapshot_id": str(row["account_source_fact_snapshot_id"]),
+        "account_fact_schema_version": str(row["account_fact_schema_version"]),
+        "account_risk_policy_version": str(row["account_risk_policy_version"]),
+        "account_risk_policy_event_id": str(row["account_risk_policy_event_id"]),
+        "owner_policy_version": str(row["policy_version"]),
+        "claimed_budget_projection_version": int(
             row["account_capacity_projection_version"]
         ),
-        entry_reference_price=row["entry_reference_price"],
-        stop_price=row["stop_price"],
-        intended_qty=row["intended_qty"],
-        target_notional=row["target_notional"],
-        allowed_risk_budget=row["allowed_risk_budget"],
-        planned_stop_risk=row["risk_at_stop"],
-        reserved_margin=row["reserved_margin"],
-        selected_leverage=int(row["selected_leverage"]),
-        reserved_at_ms=int(row["reserved_at_ms"]),
-        expires_at_ms=int(row["expires_at_ms"]),
-    )
+        "entry_reference_price": row["entry_reference_price"],
+        "stop_price": row["stop_price"],
+        "intended_qty": row["intended_qty"],
+        "target_notional": row["target_notional"],
+        "allowed_risk_budget": row["allowed_risk_budget"],
+        "planned_stop_risk": row["risk_at_stop"],
+        "reserved_margin": row["reserved_margin"],
+        "selected_leverage": int(row["selected_leverage"]),
+        "reserved_at_ms": int(row["reserved_at_ms"]),
+        "expires_at_ms": int(row["expires_at_ms"]),
+    })
     return PersistedAccountCapacityClaim(
         payload=payload,
         capacity_claim_hash=str(row["capacity_claim_hash"]),

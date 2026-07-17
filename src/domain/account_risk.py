@@ -79,6 +79,7 @@ def decide_account_capacity(
     instrument_already_claimed: bool,
     per_unit_stop_risk: Decimal,
     entry_reference_price: Decimal,
+    contract_multiplier: Decimal,
     min_qty: Decimal,
     qty_step: Decimal,
     min_notional: Decimal,
@@ -96,6 +97,7 @@ def decide_account_capacity(
         existing_cluster_held_risk,
         per_unit_stop_risk,
         entry_reference_price,
+        contract_multiplier,
         min_qty,
         qty_step,
         min_notional,
@@ -110,6 +112,7 @@ def decide_account_capacity(
         or existing_cluster_held_risk < 0
         or per_unit_stop_risk <= 0
         or entry_reference_price <= 0
+        or contract_multiplier <= 0
         or min_qty <= 0
         or qty_step <= 0
         or min_notional <= 0
@@ -155,7 +158,7 @@ def decide_account_capacity(
         available_balance, portfolio_margin_remaining
     )
     minimum_qty = _ceil_to_step(
-        max(min_qty, min_notional / entry_reference_price), qty_step
+        max(min_qty, min_notional / (entry_reference_price * contract_multiplier)), qty_step
     )
     if minimum_qty * per_unit_stop_risk > allowed_risk:
         return _blocked(
@@ -167,7 +170,7 @@ def decide_account_capacity(
         )
 
     permitted_leverage = min(policy.max_leverage, exchange_max_leverage)
-    minimum_notional = minimum_qty * entry_reference_price
+    minimum_notional = minimum_qty * entry_reference_price * contract_multiplier
     if (
         action_time_margin_remaining <= 0
         or minimum_notional / Decimal(permitted_leverage)
@@ -182,7 +185,7 @@ def decide_account_capacity(
         )
 
     risk_qty = _floor_to_step(allowed_risk / per_unit_stop_risk, qty_step)
-    risk_notional = risk_qty * entry_reference_price
+    risk_notional = risk_qty * entry_reference_price * contract_multiplier
     selected_leverage = max(
         1,
         _ceil_integer(risk_notional / action_time_margin_remaining),
@@ -190,7 +193,7 @@ def decide_account_capacity(
     selected_leverage = min(selected_leverage, permitted_leverage)
     margin_qty = _floor_to_step(
         action_time_margin_remaining * Decimal(selected_leverage)
-        / entry_reference_price,
+        / (entry_reference_price * contract_multiplier),
         qty_step,
     )
     intended_qty = min(risk_qty, margin_qty)
@@ -206,7 +209,7 @@ def decide_account_capacity(
         allowed_risk=allowed_risk,
         intended_qty=intended_qty,
         selected_leverage=selected_leverage,
-        reserved_margin=(intended_qty * entry_reference_price)
+        reserved_margin=(intended_qty * entry_reference_price * contract_multiplier)
         / Decimal(selected_leverage),
         portfolio_risk_remaining=portfolio_remaining,
         cluster_risk_remaining=cluster_remaining,
@@ -220,13 +223,23 @@ def compute_directional_risk(
     actual_average_entry_price: Decimal,
     confirmed_stop_price: Decimal,
     position_qty: Decimal,
+    contract_multiplier: Decimal = Decimal("1"),
 ) -> Decimal:
     """Calculate downside-only price risk from actual entry to confirmed stop."""
 
-    values = (actual_average_entry_price, confirmed_stop_price, position_qty)
+    values = (
+        actual_average_entry_price,
+        confirmed_stop_price,
+        position_qty,
+        contract_multiplier,
+    )
     if not all(value.is_finite() for value in values):
         raise ValueError("directional risk inputs must be finite")
-    if actual_average_entry_price <= 0 or confirmed_stop_price <= 0:
+    if (
+        actual_average_entry_price <= 0
+        or confirmed_stop_price <= 0
+        or contract_multiplier <= 0
+    ):
         raise ValueError("directional risk prices must be positive")
     qty = abs(position_qty)
     distance = (
@@ -234,7 +247,7 @@ def compute_directional_risk(
         if side == "long"
         else confirmed_stop_price - actual_average_entry_price
     )
-    return max(Decimal("0"), distance) * qty
+    return max(Decimal("0"), distance) * qty * contract_multiplier
 
 
 def _blocked(

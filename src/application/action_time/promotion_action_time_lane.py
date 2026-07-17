@@ -81,7 +81,7 @@ from src.domain.execution_sizing import (  # noqa: E402
     ExecutionSizingPolicy,
     decide_execution_sizing,
 )
-from src.domain.account_capacity_claim import AccountCapacityClaimPayload  # noqa: E402
+from src.domain.account_capacity_claim import AccountCapacityClaimPayloadV2  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -2175,7 +2175,7 @@ def _capacity_claim_payload(
     *,
     account_capacity: AccountCapacityReservationResult,
     now_ms: int,
-) -> AccountCapacityClaimPayload:
+) -> AccountCapacityClaimPayloadV2:
     decision = bundle.sizing_risk_decision
     facts = account_capacity.instrument_facts
     if decision is None or facts is None or account_capacity.selected_leverage is None:
@@ -2191,13 +2191,18 @@ def _capacity_claim_payload(
         )
     ):
         raise ValueError("account capacity claim lineage is incomplete")
-    target_notional = account_capacity.intended_qty * decision.entry_reference_price
+    target_notional = (
+        account_capacity.intended_qty
+        * decision.entry_reference_price
+        * facts.rule_snapshot.contract_multiplier
+    )
     planned_stop_risk = (
         abs(decision.entry_reference_price - decision.protective_stop_price)
         * account_capacity.intended_qty
+        * facts.rule_snapshot.contract_multiplier
     )
-    return AccountCapacityClaimPayload(
-        capacity_claim_schema_version="v1",
+    return AccountCapacityClaimPayloadV2(
+        capacity_claim_schema_version="v2",
         reservation_id=bundle.budget_reservation_id,
         ticket_id=bundle.ticket_id,
         exposure_episode_id=bundle.exposure_episode_id,

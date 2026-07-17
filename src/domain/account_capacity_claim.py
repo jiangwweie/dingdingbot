@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from src.domain.instrument_risk_identity import (
     InstrumentRiskIdentity,
     InstrumentRuleSnapshotRef,
+    InstrumentRuleSnapshotRefV2,
     RiskClusterMembershipSnapshotRef,
 )
 
@@ -65,6 +66,30 @@ class AccountCapacityClaimPayload(BaseModel):
                 raise ValueError("capacity claim string must be nonblank")
             return normalized
         return value
+
+
+class AccountCapacityClaimPayloadV2(AccountCapacityClaimPayload):
+    """New immutable Claim authority for linear quote-settled instruments."""
+
+    capacity_claim_schema_version: Literal["v2"]
+    rule_snapshot: InstrumentRuleSnapshotRefV2
+
+
+def load_capacity_claim_payload(
+    value: object,
+) -> AccountCapacityClaimPayload | AccountCapacityClaimPayloadV2:
+    """Dispatch persisted Claims without upgrading an opaque V1 in memory."""
+
+    if isinstance(value, (AccountCapacityClaimPayload, AccountCapacityClaimPayloadV2)):
+        return value
+    if not isinstance(value, dict):
+        raise ValueError("account_capacity_claim_payload_invalid")
+    version = str(value.get("capacity_claim_schema_version") or "")
+    if version == "v1":
+        return AccountCapacityClaimPayload.model_validate(value)
+    if version == "v2":
+        return AccountCapacityClaimPayloadV2.model_validate(value)
+    raise ValueError("account_capacity_claim_schema_version_unknown")
 
 
 def _canonical(value: object) -> object:

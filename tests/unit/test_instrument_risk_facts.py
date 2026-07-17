@@ -9,6 +9,7 @@ from src.application.action_time.instrument_risk_facts import (
     InstrumentRiskFactsError,
     load_instrument_risk_facts,
 )
+from src.domain.instrument_risk_identity import instrument_rule_snapshot_v2_semantic_hash
 
 
 NOW_MS = 1_752_480_000_000
@@ -25,7 +26,8 @@ def _connection() -> sa.Connection:
       rule_schema_version TEXT, price_tick NUMERIC, quantity_step NUMERIC,
       min_qty NUMERIC, min_notional NUMERIC, contract_multiplier NUMERIC,
       exchange_max_leverage_for_claim_notional INTEGER, source_fact_snapshot_id TEXT,
-      valid_until_ms BIGINT, semantic_hash TEXT, status TEXT, created_at_ms BIGINT)"""))
+      valid_until_ms BIGINT, risk_calculation_kind TEXT, semantic_hash TEXT,
+      status TEXT, created_at_ms BIGINT)"""))
     conn.execute(sa.text("""CREATE TABLE brc_risk_cluster_membership_snapshots (
       cluster_membership_snapshot_id TEXT PRIMARY KEY, risk_policy_version TEXT,
       primary_risk_cluster_id TEXT, semantic_hash TEXT, status TEXT,
@@ -42,11 +44,22 @@ def _connection() -> sa.Connection:
 
 
 def _rule(conn: sa.Connection, rule_id: str = "rule-1", *, valid_until_ms: int = NOW_MS + 1) -> None:
+    semantic_hash = instrument_rule_snapshot_v2_semantic_hash({
+        "instrument_rule_snapshot_id": rule_id, "rule_schema_version": "v2",
+        "price_tick": Decimal("0.01"), "quantity_step": Decimal("0.001"),
+        "min_qty": Decimal("0.001"), "min_notional": Decimal("5"),
+        "contract_multiplier": Decimal("1"),
+        "exchange_max_leverage_for_claim_notional": 20,
+        "source_fact_snapshot_id": "source-fact-1", "valid_until_ms": valid_until_ms,
+        "risk_calculation_kind": "linear_quote_settled",
+    })
     conn.execute(sa.text("""INSERT INTO brc_instrument_rule_snapshots VALUES (
-      :rule_id, 'instrument-1', 'v1', 0.01, 0.001, 0.001, 5, 1, 20,
-      'source-fact-1', :valid_until_ms, :rule_id, 'current', 1)"""), {
+      :rule_id, 'instrument-1', 'v2', 0.01, 0.001, 0.001, 5, 1, 20,
+      'source-fact-1', :valid_until_ms, 'linear_quote_settled', :semantic_hash,
+      'current', 1)"""), {
         "rule_id": rule_id,
         "valid_until_ms": valid_until_ms,
+        "semantic_hash": semantic_hash,
     })
 
 
@@ -143,7 +156,7 @@ def test_loader_ignores_large_rule_and_membership_history() -> None:
       )
       INSERT INTO brc_instrument_rule_snapshots
       SELECT 'old-rule-' || n, 'instrument-1', 'v1', 0.01, 0.001, 0.001, 5,
-             1, 20, 'old-source-' || n, :now_ms, 'old-' || n, 'superseded', n
+             1, 20, 'old-source-' || n, :now_ms, NULL, 'old-' || n, 'superseded', n
       FROM history
     """), {"now_ms": NOW_MS})
 

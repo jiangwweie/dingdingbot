@@ -4,7 +4,9 @@ from decimal import Decimal
 
 from src.domain.account_capacity_claim import (
     AccountCapacityClaimPayload,
+    AccountCapacityClaimPayloadV2,
     capacity_claim_hash,
+    load_capacity_claim_payload,
     reservation_idempotency_key,
 )
 
@@ -106,3 +108,32 @@ def test_decimal_claim_hash_is_canonical_and_mutable_state_is_excluded() -> None
     assert capacity_claim_hash(first) == capacity_claim_hash(same_value_different_decimal_scale)
     assert "status" not in AccountCapacityClaimPayload.model_fields
     assert "margin_accounting_state" not in AccountCapacityClaimPayload.model_fields
+
+
+def test_claim_loader_preserves_v1_and_requires_complete_v2_rule_semantics() -> None:
+    v1 = _claim_payload()
+    assert type(load_capacity_claim_payload(v1.model_dump(mode="python"))) is AccountCapacityClaimPayload
+
+    v2_values = v1.model_dump(mode="python")
+    v2_values["capacity_claim_schema_version"] = "v2"
+    v2_rule = {
+        **v2_values["rule_snapshot"],
+        "rule_schema_version": "v2",
+        "risk_calculation_kind": "linear_quote_settled",
+    }
+    from src.domain.instrument_risk_identity import instrument_rule_snapshot_v2_semantic_hash
+
+    v2_rule["semantic_hash"] = instrument_rule_snapshot_v2_semantic_hash(v2_rule)
+    v2_values["rule_snapshot"] = v2_rule
+    loaded = load_capacity_claim_payload(v2_values)
+
+    assert type(loaded) is AccountCapacityClaimPayloadV2
+    assert loaded.rule_snapshot.contract_multiplier == Decimal("1")
+    try:
+        load_capacity_claim_payload(
+            {**v2_values, "capacity_claim_schema_version": "unexpected"}
+        )
+    except ValueError as exc:
+        assert str(exc) == "account_capacity_claim_schema_version_unknown"
+    else:
+        raise AssertionError("unknown capacity claim schema must fail closed")

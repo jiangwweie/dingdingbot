@@ -40,6 +40,7 @@ def test_six_hundred_usdt_capacity_never_turns_two_positions_into_three() -> Non
         "instrument_already_claimed": False,
         "per_unit_stop_risk": Decimal("3"),
         "entry_reference_price": Decimal("150"),
+        "contract_multiplier": Decimal("1"),
         "min_qty": Decimal("0.01"),
         "qty_step": Decimal("0.01"),
         "min_notional": Decimal("5"),

@@ -240,10 +240,11 @@ def _connection() -> sa.Connection:
       instrument_rule_snapshot_id TEXT PRIMARY KEY, price_tick NUMERIC,
       quantity_step NUMERIC, min_qty NUMERIC, min_notional NUMERIC,
       contract_multiplier NUMERIC, exchange_max_leverage_for_claim_notional INTEGER,
-      source_fact_snapshot_id TEXT, valid_until_ms BIGINT)"""))
+      source_fact_snapshot_id TEXT, valid_until_ms BIGINT,
+      risk_calculation_kind TEXT, semantic_hash TEXT)"""))
     conn.execute(sa.text("""CREATE TABLE brc_risk_cluster_membership_snapshots (
       cluster_membership_snapshot_id TEXT PRIMARY KEY, semantic_hash TEXT)"""))
     conn.execute(sa.text("INSERT INTO brc_exchange_instruments VALUES ('instrument-1','venue-1','SOLUSDT','v1')"))
-    conn.execute(sa.text("INSERT INTO brc_instrument_rule_snapshots VALUES ('rule-1',.01,.001,.001,5,1,20,'rule-source-1',2000)"))
+    conn.execute(sa.text("INSERT INTO brc_instrument_rule_snapshots VALUES ('rule-1',.01,.001,.001,5,1,20,'rule-source-1',2000,NULL,'legacy-rule-hash-1')"))
     conn.execute(sa.text("INSERT INTO brc_risk_cluster_membership_snapshots VALUES ('cluster-snapshot-1','cluster-hash-1')"))
     return conn

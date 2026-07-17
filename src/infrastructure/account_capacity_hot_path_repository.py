@@ -43,6 +43,7 @@ class AccountCapacityClaimRecord:
     risk_at_stop: Decimal
     reserved_margin: Decimal
     margin_accounting_state: str
+    contract_multiplier: Decimal
 
 
 @dataclass(frozen=True)
@@ -129,11 +130,15 @@ def load_effective_reservation_rows(
                    reservation.account_fact_schema_version,
                    reservation.status, reservation.risk_at_stop,
                    reservation.reserved_margin,
-                   reservation.margin_accounting_state
+                   reservation.margin_accounting_state,
+                   rule.contract_multiplier
             FROM brc_budget_reservations AS reservation
             JOIN brc_exchange_instruments AS instrument
               ON instrument.exchange_instrument_id =
                  reservation.exchange_instrument_id
+            JOIN brc_instrument_rule_snapshots AS rule
+              ON rule.instrument_rule_snapshot_id =
+                 reservation.instrument_rule_snapshot_id
             WHERE reservation.account_id = :account_id
               AND reservation.runtime_profile_id = :runtime_profile_id
               AND reservation.status IN ('active', 'consumed')
@@ -170,6 +175,7 @@ def load_effective_reservation_rows(
                 risk_at_stop=_decimal(row["risk_at_stop"]),
                 reserved_margin=_decimal(row["reserved_margin"]),
                 margin_accounting_state=str(row["margin_accounting_state"]),
+                contract_multiplier=_decimal(row["contract_multiplier"]),
             )
             for row in rows[:max_concurrent_positions]
         ),

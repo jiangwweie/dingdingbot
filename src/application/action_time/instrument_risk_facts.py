@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 from src.domain.instrument_risk_identity import (
     InstrumentRiskIdentity,
-    InstrumentRuleSnapshotRef,
+    InstrumentRuleSnapshotRefV2,
     RiskClusterMembershipSnapshotRef,
 )
 
@@ -20,7 +20,7 @@ class InstrumentRiskFacts(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     identity: InstrumentRiskIdentity
-    rule_snapshot: InstrumentRuleSnapshotRef
+    rule_snapshot: InstrumentRuleSnapshotRefV2
     cluster_snapshot: RiskClusterMembershipSnapshotRef
 
 
@@ -87,7 +87,7 @@ def _load_one_current_rule_snapshot(
     exchange_instrument_id: str,
     planned_notional: Decimal,
     now_ms: int,
-) -> InstrumentRuleSnapshotRef:
+) -> InstrumentRuleSnapshotRefV2:
     del planned_notional  # V0 stores the already selected notional-specific leverage fact.
     rows = conn.execute(
         sa.text(
@@ -95,7 +95,8 @@ def _load_one_current_rule_snapshot(
             SELECT instrument_rule_snapshot_id, rule_schema_version, price_tick,
                    quantity_step, min_qty, min_notional, contract_multiplier,
                    exchange_max_leverage_for_claim_notional,
-                   source_fact_snapshot_id, valid_until_ms
+                   source_fact_snapshot_id, valid_until_ms,
+                   risk_calculation_kind, semantic_hash
             FROM brc_instrument_rule_snapshots
             WHERE exchange_instrument_id = :exchange_instrument_id
               AND status = 'current'
@@ -110,7 +111,7 @@ def _load_one_current_rule_snapshot(
     if int(rows[0]["valid_until_ms"] or 0) <= now_ms:
         raise InstrumentRiskFactsError("instrument_rule_snapshot_stale")
     try:
-        return InstrumentRuleSnapshotRef.model_validate(dict(rows[0]))
+        return InstrumentRuleSnapshotRefV2.model_validate(dict(rows[0]))
     except (TypeError, ValueError) as exc:
         raise InstrumentRiskFactsError("instrument_rule_snapshot_schema_invalid") from exc
 

@@ -302,6 +302,11 @@ def _row_for_position(
                     actual_average_entry_price=position.entry_price,
                     confirmed_stop_price=segment_stop_price,
                     position_qty=segment_qty,
+                    contract_multiplier=(
+                        reservation.contract_multiplier
+                        if reservation is not None
+                        else Decimal("1")
+                    ),
                 )
                 for segment_stop_price, segment_qty in stop_segments
             ),
@@ -310,7 +315,15 @@ def _row_for_position(
         remaining_entry_risk = _ZERO
         if working_entry_qty > 0:
             reference = working_entry_price or position.entry_price
-            remaining_entry_risk = abs(reference - stop_price) * working_entry_qty
+            remaining_entry_risk = (
+                abs(reference - stop_price)
+                * working_entry_qty
+                * (
+                    reservation.contract_multiplier
+                    if reservation is not None
+                    else Decimal("1")
+                )
+            )
         exposure_state = "working_entry" if working_entry_qty > 0 else "open_protected"
         protection_state = "confirmed"
         reconciliation_state = "matched"

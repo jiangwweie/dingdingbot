@@ -37,6 +37,7 @@ def _decision(**overrides: object):
         "instrument_already_claimed": False,
         "per_unit_stop_risk": Decimal("3"),
         "entry_reference_price": Decimal("150"),
+        "contract_multiplier": Decimal("1"),
         "min_qty": Decimal("0.01"),
         "qty_step": Decimal("0.01"),
         "min_notional": Decimal("5"),
@@ -101,6 +102,25 @@ def test_directional_risk_uses_confirmed_stop_and_never_counts_locked_profit_as_
         confirmed_stop_price=Decimal("105"),
         position_qty=Decimal("2"),
     ) == Decimal("0")
+
+
+def test_linear_contract_multiplier_scales_notional_margin_and_stop_risk() -> None:
+    unit = _decision(existing_cluster_held_risk=Decimal("0"))
+    multiplied = _decision(
+        existing_cluster_held_risk=Decimal("0"),
+        contract_multiplier=Decimal("10"),
+        per_unit_stop_risk=Decimal("30"),
+    )
+
+    assert multiplied.intended_qty == unit.intended_qty / Decimal("10")
+    assert multiplied.reserved_margin == unit.reserved_margin
+    assert compute_directional_risk(
+        side="long",
+        actual_average_entry_price=Decimal("100"),
+        confirmed_stop_price=Decimal("95"),
+        position_qty=Decimal("2"),
+        contract_multiplier=Decimal("10"),
+    ) == Decimal("100")
     assert compute_directional_risk(
         side="short",
         actual_average_entry_price=Decimal("100"),

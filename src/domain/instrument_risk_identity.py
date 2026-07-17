@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from hashlib import sha256
+import json
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -49,6 +52,75 @@ class InstrumentRuleSnapshotRef(_FrozenNonblankModel):
     exchange_max_leverage_for_claim_notional: int = Field(gt=0)
     source_fact_snapshot_id: str = Field(min_length=1, max_length=192)
     valid_until_ms: int = Field(gt=0)
+
+
+class InstrumentRuleSnapshotRefV2(_FrozenNonblankModel):
+    """Current linear quote-settled rule facts with explicit economics."""
+
+    instrument_rule_snapshot_id: str = Field(min_length=1, max_length=192)
+    rule_schema_version: Literal["v2"]
+    price_tick: Decimal = Field(gt=0)
+    quantity_step: Decimal = Field(gt=0)
+    min_qty: Decimal = Field(gt=0)
+    min_notional: Decimal = Field(gt=0)
+    contract_multiplier: Decimal = Field(gt=0)
+    exchange_max_leverage_for_claim_notional: int = Field(gt=0)
+    source_fact_snapshot_id: str = Field(min_length=1, max_length=192)
+    valid_until_ms: int = Field(gt=0)
+    risk_calculation_kind: Literal["linear_quote_settled"]
+    semantic_hash: str = Field(min_length=64, max_length=64)
+
+    @field_validator("semantic_hash")
+    @classmethod
+    def _verify_semantic_hash(cls, value: str, info: object) -> str:
+        data = getattr(info, "data", {})
+        required = {
+            "instrument_rule_snapshot_id",
+            "rule_schema_version",
+            "price_tick",
+            "quantity_step",
+            "min_qty",
+            "min_notional",
+            "contract_multiplier",
+            "exchange_max_leverage_for_claim_notional",
+            "source_fact_snapshot_id",
+            "valid_until_ms",
+            "risk_calculation_kind",
+        }
+        if not required <= set(data):
+            return value
+        expected = instrument_rule_snapshot_v2_semantic_hash(data)
+        if value != expected:
+            raise ValueError("instrument rule v2 semantic hash mismatch")
+        return value
+
+
+def instrument_rule_snapshot_v2_semantic_hash(value: object) -> str:
+    """Canonical immutable hash for the complete V2 linear-risk rule."""
+
+    data = value.model_dump(mode="python") if hasattr(value, "model_dump") else dict(value)
+    fields = (
+        "instrument_rule_snapshot_id",
+        "rule_schema_version",
+        "price_tick",
+        "quantity_step",
+        "min_qty",
+        "min_notional",
+        "contract_multiplier",
+        "exchange_max_leverage_for_claim_notional",
+        "source_fact_snapshot_id",
+        "valid_until_ms",
+        "risk_calculation_kind",
+    )
+    payload = {
+        field: format(data[field].normalize(), "f")
+        if isinstance(data[field], Decimal)
+        else data[field]
+        for field in fields
+    }
+    return sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 class RiskClusterMembershipSnapshotRef(_FrozenNonblankModel):

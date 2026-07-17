@@ -13,6 +13,7 @@ from src.application.action_time.instrument_risk_facts import (
     load_instrument_risk_facts,
 )
 from src.domain.execution_sizing import ExecutionSizingDecision
+from src.domain.instrument_risk_identity import instrument_rule_snapshot_v2_semantic_hash
 
 
 def test_second_same_cluster_candidate_downsizes_under_locked_budget_row() -> None:
@@ -348,7 +349,8 @@ def _connection() -> sa.Connection:
       rule_schema_version TEXT, price_tick NUMERIC, quantity_step NUMERIC,
       min_qty NUMERIC, min_notional NUMERIC, contract_multiplier NUMERIC,
       exchange_max_leverage_for_claim_notional INTEGER, source_fact_snapshot_id TEXT,
-      valid_until_ms BIGINT, semantic_hash TEXT, status TEXT, created_at_ms BIGINT)"""))
+      valid_until_ms BIGINT, risk_calculation_kind TEXT, semantic_hash TEXT,
+      status TEXT, created_at_ms BIGINT)"""))
     conn.execute(sa.text("""CREATE TABLE brc_risk_cluster_membership_snapshots (
       cluster_membership_snapshot_id TEXT PRIMARY KEY, risk_policy_version TEXT,
       primary_risk_cluster_id TEXT, semantic_hash TEXT, status TEXT,
@@ -396,6 +398,8 @@ def _seed_instrument_facts(
     cluster_id: str,
 ) -> None:
     suffix = instrument_id.replace(":", "-")
+    rule_id = f"rule-{suffix}"
+    source_id = f"source-{suffix}"
     if conn.execute(sa.text(
         "SELECT 1 FROM brc_exchange_instruments "
         "WHERE exchange_instrument_id = :instrument_id"
@@ -406,12 +410,23 @@ def _seed_instrument_facts(
             "instrument_id": instrument_id,
             "symbol": instrument_id.split(":")[-1],
         })
+        semantic_hash = instrument_rule_snapshot_v2_semantic_hash({
+            "instrument_rule_snapshot_id": rule_id, "rule_schema_version": "v2",
+            "price_tick": Decimal(".01"), "quantity_step": Decimal(".01"),
+            "min_qty": Decimal(".01"), "min_notional": Decimal("5"),
+            "contract_multiplier": Decimal("1"),
+            "exchange_max_leverage_for_claim_notional": 20,
+            "source_fact_snapshot_id": source_id, "valid_until_ms": 1752480060000,
+            "risk_calculation_kind": "linear_quote_settled",
+        })
         conn.execute(sa.text("""INSERT INTO brc_instrument_rule_snapshots VALUES (
-          :rule_id, :instrument_id, 'v1', .01, .01, .01, 5, 1, 20,
-          :source_id, 1752480060000, :rule_id, 'current', 1)"""), {
-            "rule_id": f"rule-{suffix}",
+          :rule_id, :instrument_id, 'v2', .01, .01, .01, 5, 1, 20,
+          :source_id, 1752480060000, 'linear_quote_settled', :semantic_hash,
+          'current', 1)"""), {
+            "rule_id": rule_id,
             "instrument_id": instrument_id,
-            "source_id": f"source-{suffix}",
+            "source_id": source_id,
+            "semantic_hash": semantic_hash,
         })
     existing = conn.execute(sa.text("""
       SELECT snapshot.cluster_membership_snapshot_id

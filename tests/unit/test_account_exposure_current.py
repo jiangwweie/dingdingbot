@@ -546,6 +546,7 @@ def _connection() -> sa.Connection:
                 cluster_membership_snapshot_id TEXT,
                 account_source_fact_snapshot_id TEXT,
                 account_fact_schema_version TEXT,
+                instrument_rule_snapshot_id TEXT,
                 status TEXT, risk_at_stop NUMERIC, reserved_margin NUMERIC,
                 margin_accounting_state TEXT
             )
@@ -561,8 +562,21 @@ def _connection() -> sa.Connection:
     )
     conn.execute(
         sa.text(
+            """CREATE TABLE brc_instrument_rule_snapshots (
+              instrument_rule_snapshot_id TEXT PRIMARY KEY,
+              contract_multiplier NUMERIC NOT NULL)"""
+        )
+    )
+    conn.execute(
+        sa.text(
             "INSERT INTO brc_exchange_instruments VALUES "
             "('binance_usdm:ETHUSDT','ETHUSDT')"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_instrument_rule_snapshots VALUES "
+            "('rule-1', '1')"
         )
     )
     return conn
@@ -583,13 +597,14 @@ def _insert_claim(
               asset_class, instrument_type, primary_risk_cluster_id,
               cluster_membership_snapshot_id, account_source_fact_snapshot_id,
               account_fact_schema_version, status, risk_at_stop,
-              reserved_margin, margin_accounting_state
+              reserved_margin, margin_accounting_state,
+              instrument_rule_snapshot_id
             ) VALUES (
               'budget-1', 'ticket-1', 'account-1', 'profile-1',
               'ETHUSDT', 'long', 'binance_usdm:ETHUSDT', 'episode-1',
               'crypto', 'perpetual', 'crypto-beta', 'membership-1',
               'account-fact-1', 'v1', :status, :risk, '30',
-              'reserved_unreflected'
+              'reserved_unreflected', 'rule-1'
             )
             """
         ),

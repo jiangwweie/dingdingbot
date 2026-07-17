@@ -8,7 +8,9 @@ from pydantic import ValidationError
 from src.domain.instrument_risk_identity import (
     InstrumentRiskIdentity,
     InstrumentRuleSnapshotRef,
+    InstrumentRuleSnapshotRefV2,
     RiskClusterMembershipSnapshotRef,
+    instrument_rule_snapshot_v2_semantic_hash,
 )
 
 
@@ -68,3 +70,29 @@ def test_rule_snapshot_and_cluster_membership_are_immutable_versioned_facts() ->
     assert membership.primary_risk_cluster_id == "cluster:layer-1"
     with pytest.raises((TypeError, ValueError, ValidationError)):
         rule.min_qty = Decimal("1")
+
+
+def test_v2_linear_rule_hash_binds_kind_and_multiplier() -> None:
+    values = {
+        "instrument_rule_snapshot_id": "rule-snapshot-v2",
+        "rule_schema_version": "v2",
+        "price_tick": Decimal("0.01"),
+        "quantity_step": Decimal("0.001"),
+        "min_qty": Decimal("0.001"),
+        "min_notional": Decimal("5"),
+        "contract_multiplier": Decimal("10"),
+        "exchange_max_leverage_for_claim_notional": 10,
+        "source_fact_snapshot_id": "exchange-fact-1",
+        "valid_until_ms": 1_752_480_060_000,
+        "risk_calculation_kind": "linear_quote_settled",
+    }
+    rule = InstrumentRuleSnapshotRefV2(
+        **values,
+        semantic_hash=instrument_rule_snapshot_v2_semantic_hash(values),
+    )
+
+    assert rule.contract_multiplier == Decimal("10")
+    with pytest.raises(ValidationError, match="semantic hash"):
+        InstrumentRuleSnapshotRefV2(
+            **{**rule.model_dump(), "contract_multiplier": Decimal("1")}
+        )

@@ -10,6 +10,7 @@ from src.application.action_time.account_capacity_claim import (
     insert_or_get_account_capacity_claim,
 )
 from src.domain.account_capacity_claim import AccountCapacityClaimPayload
+from src.domain.instrument_risk_identity import instrument_rule_snapshot_v2_semantic_hash
 from tests.unit.test_account_capacity_claim_persistence import (
     _connection as _claim_connection,
     _payload as _claim_payload,
@@ -272,10 +273,21 @@ def _active_connection() -> tuple[sa.Connection, dict[str, object]]:
     conn.execute(sa.text("ALTER TABLE brc_instrument_rule_snapshots ADD COLUMN exchange_instrument_id TEXT"))
     conn.execute(sa.text("ALTER TABLE brc_instrument_rule_snapshots ADD COLUMN rule_schema_version TEXT"))
     conn.execute(sa.text("ALTER TABLE brc_instrument_rule_snapshots ADD COLUMN status TEXT"))
+    rule_hash = instrument_rule_snapshot_v2_semantic_hash({
+        "instrument_rule_snapshot_id": "rule-1", "rule_schema_version": "v2",
+        "price_tick": Decimal(".01"), "quantity_step": Decimal(".001"),
+        "min_qty": Decimal(".001"), "min_notional": Decimal("5"),
+        "contract_multiplier": Decimal("1"),
+        "exchange_max_leverage_for_claim_notional": 20,
+        "source_fact_snapshot_id": "rule-source-1",
+        "valid_until_ms": NOW_MS + 60_000,
+        "risk_calculation_kind": "linear_quote_settled",
+    })
     conn.execute(sa.text("""
       UPDATE brc_instrument_rule_snapshots SET exchange_instrument_id='instrument-1',
-      rule_schema_version='v1', status='current', valid_until_ms=:valid_until_ms
-    """), {"valid_until_ms": NOW_MS + 60_000})
+      rule_schema_version='v2', risk_calculation_kind='linear_quote_settled',
+      semantic_hash=:semantic_hash, status='current', valid_until_ms=:valid_until_ms
+    """), {"valid_until_ms": NOW_MS + 60_000, "semantic_hash": rule_hash})
     conn.execute(sa.text("ALTER TABLE brc_risk_cluster_membership_snapshots ADD COLUMN risk_policy_version TEXT"))
     conn.execute(sa.text("ALTER TABLE brc_risk_cluster_membership_snapshots ADD COLUMN primary_risk_cluster_id TEXT"))
     conn.execute(sa.text("ALTER TABLE brc_risk_cluster_membership_snapshots ADD COLUMN status TEXT"))
@@ -338,17 +350,29 @@ def _replace_current_rule(conn: sa.Connection, *, quantity_step: str) -> None:
     conn.execute(sa.text(
         "UPDATE brc_instrument_rule_snapshots SET status='historical' WHERE status='current'"
     ))
+    rule_hash = instrument_rule_snapshot_v2_semantic_hash({
+        "instrument_rule_snapshot_id": "rule-2", "rule_schema_version": "v2",
+        "price_tick": Decimal(".01"), "quantity_step": Decimal(quantity_step),
+        "min_qty": Decimal(".001"), "min_notional": Decimal("5"),
+        "contract_multiplier": Decimal("1"),
+        "exchange_max_leverage_for_claim_notional": 20,
+        "source_fact_snapshot_id": "rule-source-2",
+        "valid_until_ms": NOW_MS + 60_000,
+        "risk_calculation_kind": "linear_quote_settled",
+    })
     conn.execute(sa.text("""
       INSERT INTO brc_instrument_rule_snapshots (
         instrument_rule_snapshot_id, price_tick, quantity_step, min_qty,
         min_notional, contract_multiplier,
         exchange_max_leverage_for_claim_notional, source_fact_snapshot_id,
-        valid_until_ms, exchange_instrument_id, rule_schema_version, status
+        valid_until_ms, exchange_instrument_id, rule_schema_version,
+        risk_calculation_kind, semantic_hash, status
       ) VALUES (
         'rule-2', .01, :quantity_step, .001, 5, 1, 20, 'rule-source-2',
-        :valid_until_ms, 'instrument-1', 'v2', 'current'
+        :valid_until_ms, 'instrument-1', 'v2', 'linear_quote_settled',
+        :semantic_hash, 'current'
       )
-    """), {"quantity_step": quantity_step, "valid_until_ms": NOW_MS + 60_000})
+    """), {"quantity_step": quantity_step, "valid_until_ms": NOW_MS + 60_000, "semantic_hash": rule_hash})
 
 
 def _legacy_connection() -> sa.Connection:
