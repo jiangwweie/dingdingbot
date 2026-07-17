@@ -1,11 +1,11 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN
-status: REMEDIATION_APPROVED_NOT_STARTED
+status: REMEDIATION_IN_PROGRESS_NO_GO
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
 last_verified: 2026-07-17
-implementation_state: NOT_STARTED
-integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
+implementation_state: T01_T10_IMPLEMENTED_T11_PARTIALLY_CERTIFIED
+integration_state: LOCAL_REMEDIATION_IN_PROGRESS_NO_GO
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
@@ -13,7 +13,7 @@ production_state: UNCHANGED
 deployment_state: NOT_AUTHORIZED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-current_migration_head: 133_LOCAL_ONLY
+current_migration_head: 136_LOCAL_ONLY
 planned_migration_head: 136
 ---
 
@@ -45,8 +45,8 @@ Tokyo immutable-release state machine.
 
 ### 1.1 Current authorization
 
-**This document is executable, but implementation has not started.** The approved scope is
-local repair and local certification only. The following remain outside this plan:
+**本计划已完成 T01-T10 实施，T11 正在本地认证且尚未通过全量门禁。** 批准范围仍仅为
+本地修复与本地认证。以下事项仍在本计划之外：
 
 - push or pull-request publication;
 - Tokyo staging, deploy or service mutation;

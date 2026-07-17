@@ -1,25 +1,38 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN
-status: REMEDIATION_APPROVED_NOT_STARTED
+status: REMEDIATION_IN_PROGRESS_NO_GO
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
 extends: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
 last_verified: 2026-07-17
 owner_decision_date: 2026-07-17
-implementation_state: NOT_STARTED
-integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
+implementation_state: T01_T10_IMPLEMENTED_T11_PARTIALLY_CERTIFIED
+integration_state: LOCAL_REMEDIATION_IN_PROGRESS_NO_GO
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-current_migration_head: 133_LOCAL_ONLY
+current_migration_head: 136_LOCAL_ONLY
 planned_migration_head: 136
 ---
 
 # Dual-Position Account Risk V0 Unified Remediation Design
 
 ## 1. Current Decision
+
+### 1.1 Local implementation evidence as of 2026-07-17
+
+**已知事实：** T01-T10 已在本独立 worktree 实施；migration **136**、V2 instrument
+risk identity、容量 Claim/Ticket/Lifecycle 链、runner recovery、exit-policy adoption 与
+release identity 均已有定向本地测试。无跳过 PostgreSQL 门禁 **9 passed**，发布状态机门禁
+**66 passed**；运行时文件 I/O 审计为 `performance_risk.status=clear`，没有可疑运行时
+文件权威来源或高频报告写入。
+
+**当前结论：** 状态仍为 **`REMEDIATION_IN_PROGRESS_NO_GO`**。全量套件在动态 PostgreSQL
+环境中已发现历史 RCI 集成夹具与当前 V2 schema 的兼容性失败，随后进入高内存 SQLite schema
+构建；该轮在约十分钟、约 1.5 GB 内存时被主动终止。T11 的完整全量回归尚未绿，因此本分支
+不得被描述为已部署、已激活或可部署。
 
 **方案 B 已获 Owner 确认：在新的独立 worktree 中完成全部功能性 P1、两个被不同审查口径标为 P0/P1 的容量守恒缺陷，以及影响当前正确性、恢复、部署完整性、性能和已知扩展维度的关键 P2。**
 
