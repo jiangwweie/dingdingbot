@@ -21,6 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     bind = op.get_bind()
+    _make_ticket_legacy_account_fact_nullable(bind)
     _add_column_if_missing(
         bind,
         "brc_action_time_invocations",
@@ -130,6 +131,33 @@ def _add_column_if_missing(
     columns = {column["name"] for column in sa.inspect(bind).get_columns(table_name)}
     if column_name not in columns:
         op.add_column(table_name, sa.Column(column_name, column_type, nullable=True))
+
+
+def _make_ticket_legacy_account_fact_nullable(bind: sa.Connection) -> None:
+    table_name = "brc_action_time_tickets"
+    if not sa.inspect(bind).has_table(table_name):
+        return
+    columns = {
+        column["name"]: column
+        for column in sa.inspect(bind).get_columns(table_name)
+    }
+    column = columns.get("account_safe_fact_snapshot_id")
+    if column is None or column.get("nullable") is True:
+        return
+    if bind.dialect.name == "sqlite":
+        with op.batch_alter_table(table_name) as batch:
+            batch.alter_column(
+                "account_safe_fact_snapshot_id",
+                existing_type=column["type"],
+                nullable=True,
+            )
+    else:
+        op.alter_column(
+            table_name,
+            "account_safe_fact_snapshot_id",
+            existing_type=column["type"],
+            nullable=True,
+        )
 
 
 def _create_index_if_missing(

@@ -60,7 +60,10 @@ class ActionTimeInvocationEvidence(BaseModel):
     invocation: ActionTimeInvocation
     stage_at_ms: int = Field(ge=0)
     public_fact_snapshot_id: str = Field(min_length=1, max_length=256)
-    account_safe_fact_snapshot_id: str = Field(min_length=1, max_length=256)
+    account_safe_fact_snapshot_id: str | None = Field(default=None, max_length=256)
+    account_capacity_base_fact_snapshot_id: str | None = Field(
+        default=None, max_length=256
+    )
     account_mode_fact_snapshot_id: str = Field(min_length=1, max_length=256)
     action_time_fact_snapshot_id: str = Field(min_length=1, max_length=256)
 
@@ -70,7 +73,31 @@ class ActionTimeInvocationEvidence(BaseModel):
             raise ValueError("action_time_invocation_stage_before_opening")
         if self.stage_at_ms >= self.invocation.expires_at_ms:
             raise ValueError("action_time_invocation_stage_expired")
+        if (
+            self.account_safe_fact_snapshot_id is None
+            and self.account_capacity_base_fact_snapshot_id is None
+        ) or (
+            self.account_safe_fact_snapshot_id is not None
+            and self.account_capacity_base_fact_snapshot_id is not None
+        ):
+            raise ValueError("action_time_invocation_account_fact_pair_invalid")
         return self
+
+    @property
+    def account_capacity_fact_surface(self) -> str:
+        return (
+            "account_capacity_base"
+            if self.account_capacity_base_fact_snapshot_id is not None
+            else "account_safe"
+        )
+
+    @property
+    def account_capacity_fact_snapshot_id(self) -> str:
+        return (
+            self.account_capacity_base_fact_snapshot_id
+            or self.account_safe_fact_snapshot_id
+            or ""
+        )
 
 
 class ActionTimeInvocationBlocked(ValueError):

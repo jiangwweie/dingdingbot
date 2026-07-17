@@ -94,6 +94,12 @@ def test_migration_134_adds_capacity_fact_references_and_v2_runtime_safety_colum
     assert "account_capacity_base_fact_snapshot_id" in invocation_columns
     assert "account_capacity_base_fact_snapshot_id" in lane_columns
     assert "account_capacity_base_fact_snapshot_id" in ticket_columns
+    ticket_safe_fact_column = next(
+        column
+        for column in sa.inspect(engine).get_columns("brc_action_time_tickets")
+        if column["name"] == "account_safe_fact_snapshot_id"
+    )
+    assert ticket_safe_fact_column["nullable"] is True
     assert {
         "trusted_fact_refs_schema_version",
         "account_capacity_fact_surface",

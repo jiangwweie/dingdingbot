@@ -154,6 +154,20 @@ def bind_action_time_invocation_fact_refs(
             "action_time",
         ),
     }
+    selected_legacy = (
+        account_safe_fact_snapshot_id
+        if account_safe_fact_snapshot_id is not None
+        else invocation.account_safe_fact_snapshot_id
+    )
+    selected_capacity = (
+        account_capacity_base_fact_snapshot_id
+        if account_capacity_base_fact_snapshot_id is not None
+        else invocation.account_capacity_base_fact_snapshot_id
+    )
+    if selected_legacy is not None and selected_capacity is not None:
+        raise ActionTimeInvocationBlocked(
+            "action_time_invocation_account_fact_pair_ambiguous"
+        )
     updates: dict[str, str] = {}
     for field, (fact_snapshot_id, expected_surface) in requested.items():
         if fact_snapshot_id is None:
@@ -175,17 +189,6 @@ def bind_action_time_invocation_fact_refs(
 
     if not updates:
         return invocation
-    selected_legacy = updates.get(
-        "account_safe_fact_snapshot_id", invocation.account_safe_fact_snapshot_id
-    )
-    selected_capacity = updates.get(
-        "account_capacity_base_fact_snapshot_id",
-        invocation.account_capacity_base_fact_snapshot_id,
-    )
-    if selected_legacy is not None and selected_capacity is not None:
-        raise ActionTimeInvocationBlocked(
-            "action_time_invocation_account_fact_pair_ambiguous"
-        )
     invocation_table = _table(conn, INVOCATION_TABLE)
     conn.execute(
         invocation_table.update()
@@ -258,10 +261,20 @@ def load_action_time_invocation_evidence(
         signal.get("fact_snapshot_id"),
         blocker="action_time_invocation_public_fact_id_missing",
     )
-    account_safe_fact_snapshot_id = _required_text(
-        invocation.account_safe_fact_snapshot_id,
-        blocker="action_time_invocation_account_safe_fact_missing",
+    account_safe_fact_snapshot_id = invocation.account_safe_fact_snapshot_id
+    account_capacity_base_fact_snapshot_id = (
+        invocation.account_capacity_base_fact_snapshot_id
     )
+    if (
+        account_safe_fact_snapshot_id is None
+        and account_capacity_base_fact_snapshot_id is None
+    ) or (
+        account_safe_fact_snapshot_id is not None
+        and account_capacity_base_fact_snapshot_id is not None
+    ):
+        raise ActionTimeInvocationBlocked(
+            "action_time_invocation_account_fact_pair_invalid"
+        )
     account_mode_fact_snapshot_id = _required_text(
         invocation.account_mode_fact_snapshot_id,
         blocker="action_time_invocation_account_mode_fact_missing",
@@ -281,8 +294,16 @@ def load_action_time_invocation_evidence(
         require_after_opening=False,
         require_invocation_binding=False,
     )
+    account_fact_snapshot_id = (
+        account_capacity_base_fact_snapshot_id or account_safe_fact_snapshot_id
+    )
+    account_fact_surface = (
+        "account_capacity_base"
+        if account_capacity_base_fact_snapshot_id is not None
+        else "account_safe"
+    )
     for fact_snapshot_id, expected_surface in (
-        (account_safe_fact_snapshot_id, "account_safe"),
+        (account_fact_snapshot_id, account_fact_surface),
         (account_mode_fact_snapshot_id, "account_mode"),
         (action_time_fact_snapshot_id, "action_time"),
     ):
@@ -302,6 +323,7 @@ def load_action_time_invocation_evidence(
             stage_at_ms=normalized_stage_at_ms,
             public_fact_snapshot_id=public_fact_snapshot_id,
             account_safe_fact_snapshot_id=account_safe_fact_snapshot_id,
+            account_capacity_base_fact_snapshot_id=account_capacity_base_fact_snapshot_id,
             account_mode_fact_snapshot_id=account_mode_fact_snapshot_id,
             action_time_fact_snapshot_id=action_time_fact_snapshot_id,
         )

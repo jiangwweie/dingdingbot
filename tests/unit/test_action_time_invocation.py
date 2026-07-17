@@ -152,6 +152,42 @@ def test_invocation_binds_only_existing_account_fact_references(
     ) == bound
 
 
+def test_invocation_rejects_both_account_fact_kinds_before_any_fact_write(
+    invocation_pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+
+    with pytest.raises(
+        ActionTimeInvocationBlocked,
+        match="action_time_invocation_account_fact_pair_ambiguous",
+    ):
+        bind_action_time_invocation_fact_refs(
+            invocation_pg_control_connection,
+            action_time_invocation_id=invocation.action_time_invocation_id,
+            account_safe_fact_snapshot_id="does-not-matter",
+            account_capacity_base_fact_snapshot_id="does-not-matter-either",
+            stage_at_ms=NOW_MS + 1,
+        )
+
+    stored = load_action_time_invocation(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+    )
+    assert stored.account_safe_fact_snapshot_id is None
+    assert stored.account_capacity_base_fact_snapshot_id is None
+
+
 def test_start_invocation_rejects_expired_or_identity_corrupted_signal(
     invocation_pg_control_connection,
 ):
