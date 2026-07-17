@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 import os
+import sys
 from threading import Event, Thread
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -29,8 +31,9 @@ from src.domain.account_risk import AccountRiskPolicy
 from src.domain.account_capacity_claim import AccountCapacityClaimPayload
 from src.domain.instrument_risk_identity import (
     InstrumentRiskIdentity,
-    InstrumentRuleSnapshotRef,
+    InstrumentRuleSnapshotRefV2,
     RiskClusterMembershipSnapshotRef,
+    instrument_rule_snapshot_v2_semantic_hash,
 )
 from src.infrastructure.binance_usdm_account_risk_snapshot import FullAccountRiskSnapshot
 
@@ -42,6 +45,21 @@ pytestmark = pytest.mark.skipif(
     not (_DSN and _SCHEMA),
     reason="requires isolated local PostgreSQL schema",
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_schema(monkeypatch):
+    schema = f"brc_capacity_{uuid4().hex[:12]}"
+    admin = sa.create_engine(_DSN)
+    with admin.begin() as conn:
+        conn.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
+    monkeypatch.setattr(sys.modules[__name__], "_SCHEMA", schema)
+    try:
+        yield
+    finally:
+        with admin.begin() as conn:
+            conn.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        admin.dispose()
 
 
 def test_only_one_concurrent_candidate_claims_account_budget_projection() -> None:
@@ -132,6 +150,12 @@ def test_lifecycle_flat_release_updates_account_budget_once() -> None:
             )
             conn.execute(
                 sa.text(
+                    """INSERT INTO brc_instrument_rule_snapshots VALUES
+                    ('rule-sol', 1)"""
+                )
+            )
+            conn.execute(
+                sa.text(
                     """INSERT INTO brc_budget_reservations (
                         budget_reservation_id, account_id, runtime_profile_id,
                         ticket_id, status, risk_at_stop, reserved_margin,
@@ -139,13 +163,14 @@ def test_lifecycle_flat_release_updates_account_budget_once() -> None:
                         asset_class, instrument_type, primary_risk_cluster_id,
                         cluster_membership_snapshot_id,
                         account_source_fact_snapshot_id,
-                        account_fact_schema_version, margin_accounting_state
+                        account_fact_schema_version, margin_accounting_state,
+                        instrument_rule_snapshot_id
                     ) VALUES (
                         'reservation-1', 'account-1', 'profile-1', 'ticket-1',
                         'consumed', 15, 150, 'instrument-1', 'episode-1',
                         'SOLUSDT', 'crypto', 'perpetual', 'crypto-beta',
                         'cluster-snapshot-1', 'account-snapshot-1', 'v1',
-                        'consumed_by_ticket'
+                        'consumed_by_ticket', 'rule-sol'
                     )"""
                 )
             )
@@ -196,6 +221,7 @@ def test_lifecycle_flat_release_updates_account_budget_once() -> None:
                 "brc_account_exposure_current",
                 "brc_budget_reservations",
                 "brc_exchange_instruments",
+                "brc_instrument_rule_snapshots",
                 "brc_account_budget_current",
             ):
                 conn.execute(sa.text(f"DROP TABLE IF EXISTS {table}"))
@@ -281,7 +307,8 @@ def _create_atomic_claim_tables(engine: sa.Engine) -> None:
             min_qty NUMERIC NOT NULL, min_notional NUMERIC NOT NULL,
             contract_multiplier NUMERIC NOT NULL,
             exchange_max_leverage_for_claim_notional INTEGER NOT NULL,
-            source_fact_snapshot_id TEXT NOT NULL, valid_until_ms BIGINT NOT NULL
+            source_fact_snapshot_id TEXT NOT NULL, valid_until_ms BIGINT NOT NULL,
+            risk_calculation_kind TEXT, semantic_hash TEXT
         )""",
         """CREATE TABLE brc_risk_cluster_membership_snapshots (
             cluster_membership_snapshot_id TEXT PRIMARY KEY,
@@ -360,7 +387,7 @@ def _create_atomic_claim_tables(engine: sa.Engine) -> None:
         ))
         conn.execute(sa.text(
             "INSERT INTO brc_instrument_rule_snapshots VALUES "
-            "('rule-1',.01,.001,.001,5,1,20,'rule-source-1',2000)"
+            "('rule-1',.01,.001,.001,5,1,20,'rule-source-1',2000,NULL,'legacy-rule-hash-1')"
         ))
         conn.execute(sa.text(
             "INSERT INTO brc_risk_cluster_membership_snapshots VALUES "
@@ -520,7 +547,7 @@ def _create_tables(engine: sa.Engine) -> None:
             contract_multiplier NUMERIC NOT NULL,
             exchange_max_leverage_for_claim_notional INTEGER NOT NULL,
             source_fact_snapshot_id TEXT NOT NULL, valid_until_ms BIGINT NOT NULL,
-            status TEXT NOT NULL
+            status TEXT NOT NULL, risk_calculation_kind TEXT, semantic_hash TEXT
         )""",
         """CREATE TABLE brc_account_exposure_current (
             account_id TEXT NOT NULL, exchange_instrument_id TEXT NOT NULL,
@@ -539,6 +566,7 @@ def _create_tables(engine: sa.Engine) -> None:
 
 
 def _seed(engine: sa.Engine) -> None:
+    rule_hash = instrument_rule_snapshot_v2_semantic_hash({"instrument_rule_snapshot_id": "rule-sol", "rule_schema_version": "v2", "price_tick": Decimal(".01"), "quantity_step": Decimal(".01"), "min_qty": Decimal(".01"), "min_notional": Decimal("5"), "contract_multiplier": Decimal("1"), "exchange_max_leverage_for_claim_notional": 20, "source_fact_snapshot_id": "source-sol", "valid_until_ms": 1752480060000, "risk_calculation_kind": "linear_quote_settled"})
     with engine.begin() as conn:
         conn.execute(
             sa.text(
@@ -568,8 +596,8 @@ def _seed(engine: sa.Engine) -> None:
             'binance_usdm:SOLUSDT', 'binance_usdm', 'SOLUSDT', 'crypto',
             'perpetual', 'USDT', 'USDT', 'v1', 'active')"""))
         conn.execute(sa.text("""INSERT INTO brc_instrument_rule_snapshots VALUES (
-            'rule-sol', 'binance_usdm:SOLUSDT', 'v1', .01, .01, .01, 5, 1,
-            20, 'source-sol', 1752480060000, 'current')"""))
+            'rule-sol', 'binance_usdm:SOLUSDT', 'v2', .01, .01, .01, 5, 1,
+            20, 'source-sol', 1752480060000, 'current', 'linear_quote_settled', :semantic_hash)"""), {"semantic_hash": rule_hash})
 
 
 def _create_budget_projection_tables(engine: sa.Engine) -> None:
@@ -577,6 +605,10 @@ def _create_budget_projection_tables(engine: sa.Engine) -> None:
         """CREATE TABLE brc_exchange_instruments (
             exchange_instrument_id TEXT PRIMARY KEY,
             exchange_symbol TEXT NOT NULL
+        )""",
+        """CREATE TABLE brc_instrument_rule_snapshots (
+            instrument_rule_snapshot_id TEXT PRIMARY KEY,
+            contract_multiplier NUMERIC NOT NULL
         )""",
         """CREATE TABLE brc_account_exposure_current (
             account_exposure_current_id TEXT PRIMARY KEY, account_id TEXT,
@@ -593,7 +625,8 @@ def _create_budget_projection_tables(engine: sa.Engine) -> None:
             instrument_type TEXT, primary_risk_cluster_id TEXT,
             cluster_membership_snapshot_id TEXT,
             account_source_fact_snapshot_id TEXT,
-            account_fact_schema_version TEXT, margin_accounting_state TEXT
+            account_fact_schema_version TEXT, margin_accounting_state TEXT,
+            instrument_rule_snapshot_id TEXT
         )""",
         """CREATE TABLE brc_account_budget_current (
             account_budget_current_id TEXT PRIMARY KEY, account_id TEXT,
@@ -664,9 +697,9 @@ def _candidate() -> AccountCapacityCandidate:
                 margin_asset="USDT",
                 instrument_identity_schema_version="v1",
             ),
-            rule_snapshot=InstrumentRuleSnapshotRef(
+            rule_snapshot=InstrumentRuleSnapshotRefV2(
                 instrument_rule_snapshot_id="rule-sol",
-                rule_schema_version="v1",
+                rule_schema_version="v2",
                 price_tick=Decimal(".01"),
                 quantity_step=Decimal(".01"),
                 min_qty=Decimal(".01"),
@@ -675,6 +708,8 @@ def _candidate() -> AccountCapacityCandidate:
                 exchange_max_leverage_for_claim_notional=20,
                 source_fact_snapshot_id="source-sol",
                 valid_until_ms=1_752_480_060_000,
+                risk_calculation_kind="linear_quote_settled",
+                semantic_hash=instrument_rule_snapshot_v2_semantic_hash({"instrument_rule_snapshot_id": "rule-sol", "rule_schema_version": "v2", "price_tick": Decimal(".01"), "quantity_step": Decimal(".01"), "min_qty": Decimal(".01"), "min_notional": Decimal("5"), "contract_multiplier": Decimal("1"), "exchange_max_leverage_for_claim_notional": 20, "source_fact_snapshot_id": "source-sol", "valid_until_ms": 1_752_480_060_000, "risk_calculation_kind": "linear_quote_settled"}),
             ),
             cluster_snapshot=RiskClusterMembershipSnapshotRef(
                 cluster_membership_snapshot_id="membership-sol",
