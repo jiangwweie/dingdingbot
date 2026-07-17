@@ -24,6 +24,7 @@ from src.application.action_time.ticket_bound_lifecycle_finalizer import (
     _stable_id,
     finalize_ticket_bound_lifecycle_if_ready,
 )
+from src.application.action_time import ticket_bound_lifecycle_finalizer as subject
 from src.application.action_time.ticket_bound_fill_projector import (
     project_ticket_bound_exchange_fills,
 )
@@ -91,6 +92,37 @@ def test_finalizer_closes_reconciled_flat_lifecycle_and_is_idempotent(
         "WHERE event_type IN ('reconciliation_matched', 'budget_settled', "
         "'review_recorded', 'lifecycle_closed')",
     ) == 4
+
+
+def test_failed_release_reprojection_rolls_back_budget_release(
+    pg_control_connection,
+    monkeypatch,
+):
+    ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    monkeypatch.setattr(
+        subject,
+        "reproject_account_risk_current",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            status="blocked",
+            first_blocker="account_risk_snapshot_fetch_failed",
+            model_dump=lambda: {"status": "blocked"},
+        ),
+    )
+
+    result = finalize_ticket_bound_lifecycle_if_ready(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+        account_risk_snapshot=object(),
+    )
+
+    assert result["status"] == "finalization_blocked"
+    assert result["blockers"] == ["account_risk_snapshot_fetch_failed"]
+    assert _scalar(
+        pg_control_connection,
+        "SELECT status FROM brc_budget_reservations WHERE ticket_id = :ticket_id",
+        ticket_id=ticket_id,
+    ) == "consumed"
 
 
 def test_finalizer_appends_exact_fact_repair_when_legacy_event_is_incomplete(

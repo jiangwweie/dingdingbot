@@ -22,6 +22,12 @@ from src.application.action_time.post_submit_closure import (
 from src.application.action_time.ticket_bound_budget_settlement import (
     settle_ticket_bound_budget,
 )
+from src.application.action_time.account_risk_reprojection import (
+    reproject_account_risk_current,
+)
+from src.infrastructure.binance_usdm_account_risk_snapshot import (
+    FullAccountRiskSnapshot,
+)
 
 
 FINAL_ROLES = {"SL", "RUNNER_SL"}
@@ -40,6 +46,7 @@ def finalize_ticket_bound_lifecycle_if_ready(
     *,
     ticket_id: str,
     now_ms: int,
+    account_risk_snapshot: FullAccountRiskSnapshot | None = None,
 ) -> dict[str, Any]:
     lifecycle = _row_by_id(
         conn,
@@ -141,6 +148,7 @@ def finalize_ticket_bound_lifecycle_if_ready(
         now_ms=now_ms,
     )
 
+    closure_savepoint = conn.begin_nested()
     settlement = settle_ticket_bound_budget(
         conn,
         ticket_id=ticket_id,
@@ -148,12 +156,40 @@ def finalize_ticket_bound_lifecycle_if_ready(
         now_ms=now_ms,
     )
     if settlement.get("status") != "released":
+        closure_savepoint.rollback()
         return _result(
             "finalization_blocked",
             list(settlement.get("blockers") or []),
             False,
             lifecycle_status="settlement_blocked",
         )
+    account_risk_reprojection: dict[str, Any] = {}
+    if account_risk_snapshot is not None:
+        runtime_profile_id = _ticket_runtime_profile_id(conn, ticket_id=ticket_id)
+        if not runtime_profile_id:
+            closure_savepoint.rollback()
+            return _result(
+                "finalization_blocked",
+                ["ticket_runtime_profile_missing_for_capacity_release"],
+                False,
+                lifecycle_status="settlement_blocked",
+            )
+        reprojection = reproject_account_risk_current(
+            conn,
+            snapshot=account_risk_snapshot,
+            runtime_profile_id=runtime_profile_id,
+            now_ms=now_ms,
+        )
+        account_risk_reprojection = reprojection.model_dump()
+        if reprojection.status != "reprojected":
+            closure_savepoint.rollback()
+            return _result(
+                "finalization_blocked",
+                [reprojection.first_blocker or "account_risk_release_reprojection_failed"],
+                False,
+                lifecycle_status="settlement_blocked",
+            )
+    closure_savepoint.commit()
     budget_mutated = settlement.get("runtime_budget_mutated") is True
     lifecycle = _set_lifecycle_status(
         conn,
@@ -231,6 +267,7 @@ def finalize_ticket_bound_lifecycle_if_ready(
         "reconciliation_evidence_id": reconciliation_evidence_id,
         "settlement_evidence_id": settlement_evidence_id,
         "review_evidence_id": review_evidence_id,
+        "account_risk_reprojection": account_risk_reprojection,
     }
 
 
@@ -373,6 +410,11 @@ def _close_action_time_ticket(
         .where(tickets.c.status != "closed")
         .values(status="closed")
     )
+
+
+def _ticket_runtime_profile_id(conn: sa.engine.Connection, *, ticket_id: str) -> str:
+    ticket = _row_by_id(conn, "brc_action_time_tickets", "ticket_id", ticket_id)
+    return str(ticket.get("runtime_profile_id") or "") if ticket else ""
 
 
 def _upsert_event(

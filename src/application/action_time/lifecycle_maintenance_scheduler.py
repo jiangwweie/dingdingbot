@@ -219,6 +219,9 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             conn,
             ticket_id=str(scope.get("ticket_id") or ""),
             now_ms=now_ms + index + 110,
+            account_risk_snapshot=provided_account_risk_snapshots.get(
+                str(scope.get("ticket_id") or "")
+            ),
         )
         blockers.extend(_result_blockers(finalization))
         runs.append(
@@ -419,6 +422,9 @@ async def run_ticket_bound_lifecycle_maintenance_scheduler(
             conn,
             ticket_id=str(scope.get("ticket_id") or ""),
             now_ms=now_ms + index + 175,
+            account_risk_snapshot=provided_account_risk_snapshots.get(
+                str(scope.get("ticket_id") or "")
+            ),
         )
         blockers.extend(_result_blockers(finalization))
         runs.append(
