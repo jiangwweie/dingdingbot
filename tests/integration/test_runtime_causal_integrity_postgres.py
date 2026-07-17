@@ -14,14 +14,8 @@ from src.application.action_time.action_time_invocation import (
     load_action_time_invocation,
     start_action_time_invocation,
 )
-from src.application.action_time.account_budget_current import (
-    project_account_budget_current,
-)
-from src.application.action_time.account_exchange_ownership import (
-    classify_account_exchange_truth,
-)
-from src.application.action_time.account_exposure_current import (
-    project_account_exposure_current,
+from src.application.action_time.account_capacity_materialization import (
+    refresh_account_capacity_post_claim,
 )
 from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
@@ -89,7 +83,7 @@ def _preserve_release_b_baseline_for_legacy_rci_scenarios(
     """Keep pre-canary causal tests on the disabled Release B contract."""
 
     release_c_tests = {
-        "test_rci_harness_uses_postgresql_revision_133",
+        "test_rci_harness_uses_postgresql_revision_136",
         "test_rci_exit_policy_canary_is_exactly_scoped_and_enabled",
     }
     if request.node.name not in release_c_tests:
@@ -105,7 +99,7 @@ def _preserve_release_b_baseline_for_legacy_rci_scenarios(
     yield
 
 
-def test_rci_harness_uses_postgresql_revision_133(
+def test_rci_harness_uses_postgresql_revision_136(
     postgres_certification_engine,
 ):
     assert postgres_certification_engine.dialect.name == "postgresql"
@@ -119,7 +113,7 @@ def test_rci_harness_uses_postgresql_revision_133(
             )
         ).scalar_one()
 
-    assert revision == "133"
+    assert revision == "136"
     assert invocation_table == "brc_action_time_invocations"
 
 
@@ -159,7 +153,7 @@ def test_rci_exit_policy_canary_is_exactly_scoped_and_enabled(
 
 
 def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:
-    invocation, capacity = _prepare_capacity_invocation(
+    invocation, capacity, snapshot = _prepare_capacity_invocation(
         conn,
         strategy_group_id="SOR-001",
         symbol="ETHUSDT",
@@ -171,10 +165,13 @@ def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:
         stage_at_ms=NOW_MS + 1,
         completion_clock_ms=lambda: NOW_MS + 2,
         prefetched_account_capacity=capacity,
+        prefetched_account_snapshot=snapshot,
     )
     assert sequence["status"] == "action_time_ticket_sequence_committed", sequence
     ticket = sequence["ticket"]
-    _materialize_rci_account_capacity_current(conn, ticket=ticket)
+    _materialize_rci_account_capacity_current(
+        conn, ticket=ticket, account_capacity=capacity
+    )
     lane_id = str(sequence["promotion"]["action_time_lane_input_id"])
     ticket_id = str(ticket["ticket_id"])
     preflight = finalgate.materialize_action_time_finalgate_preflight(
@@ -250,7 +247,9 @@ def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:
     return ids, prepared
 
 
-def _materialize_rci_account_capacity_current(conn, *, ticket: dict) -> None:
+def _materialize_rci_account_capacity_current(
+    conn, *, ticket: dict, account_capacity
+) -> None:
     """Project the sealed claim into the current account-risk authority."""
 
     claim = conn.execute(
@@ -298,6 +297,7 @@ def _materialize_rci_account_capacity_current(conn, *, ticket: dict) -> None:
               :risk_policy_version, CAST('{}' AS JSON), :now_ms,
               'rci_fixture'
             )
+            ON CONFLICT DO NOTHING
             """
         ),
         {
@@ -331,6 +331,7 @@ def _materialize_rci_account_capacity_current(conn, *, ticket: dict) -> None:
               :unknown_exposure_policy, :activation_state, :source_event_id,
               :now_ms
             )
+            ON CONFLICT DO NOTHING
             """
         ),
         {
@@ -355,6 +356,7 @@ def _materialize_rci_account_capacity_current(conn, *, ticket: dict) -> None:
               'rci_fixture', :cluster_membership_snapshot_id, 'primary',
               'active'
             )
+            ON CONFLICT DO NOTHING
             """
         ),
         {
@@ -380,25 +382,83 @@ def _materialize_rci_account_capacity_current(conn, *, ticket: dict) -> None:
         observed_at_ms=NOW_MS + 500,
         valid_until_ms=NOW_MS + 600_000,
     )
-    classification = classify_account_exchange_truth(conn, snapshot=snapshot)
-    assert classification.blockers == ()
-    exposure = project_account_exposure_current(
-        conn,
-        snapshot=snapshot,
-        classification=classification,
-        runtime_profile_id=str(claim["runtime_profile_id"]),
-        max_concurrent_positions=policy.max_concurrent_positions,
-        now_ms=NOW_MS + 500,
-    )
-    assert exposure.global_blockers == ()
-    budget = project_account_budget_current(
+    blocker = refresh_account_capacity_post_claim(
         conn,
         snapshot=snapshot,
         runtime_profile_id=str(claim["runtime_profile_id"]),
-        policy=policy,
+        account_capacity=account_capacity,
         now_ms=NOW_MS + 500,
     )
-    assert budget.claimed_position_slots == 1
+    assert blocker is None
+
+
+def _seed_rci_active_account_risk_policy(conn, *, account_capacity) -> None:
+    """Install the policy authority before testing an active capacity claim."""
+
+    policy = AccountRiskPolicy(
+        risk_policy_version=account_capacity.account_risk_policy_version,
+        planned_stop_risk_fraction=Decimal("0.025"),
+        max_concurrent_positions=2,
+        max_portfolio_open_risk_fraction=Decimal("0.06"),
+        max_cluster_open_risk_fraction=Decimal("0.05"),
+        max_portfolio_initial_margin_fraction=Decimal("0.90"),
+        max_leverage=10,
+        max_new_action_time_lanes=1,
+        automatic_downsize_enabled=True,
+        unknown_exposure_policy="global_fail_closed",
+        activation_state="active",
+    )
+    params = {
+        "event_id": account_capacity.account_risk_policy_event_id,
+        "account_id": "owner-subaccount-runtime-v0",
+        "runtime_profile_id": "owner-runtime-console-v1",
+        "risk_policy_version": policy.risk_policy_version,
+        "exchange_instrument_id": account_capacity.exchange_instrument_id,
+        "risk_cluster_id": account_capacity.risk_cluster_id,
+        "cluster_membership_snapshot_id": (
+            account_capacity.cluster_membership_snapshot_id
+        ),
+        "now_ms": NOW_MS,
+        **policy.model_dump(mode="python"),
+    }
+    conn.execute(text("""
+      INSERT INTO brc_account_risk_policy_events (
+        account_risk_policy_event_id, account_id, runtime_profile_id,
+        event_type, risk_policy_version, payload, created_at_ms, created_by
+      ) VALUES (
+        :event_id, :account_id, :runtime_profile_id, 'activate',
+        :risk_policy_version, CAST('{}' AS JSON), :now_ms, 'rci_fixture'
+      ) ON CONFLICT DO NOTHING
+    """), params)
+    conn.execute(text("""
+      INSERT INTO brc_account_risk_policy_current (
+        account_risk_policy_current_id, account_id, runtime_profile_id,
+        risk_policy_version, planned_stop_risk_fraction,
+        max_concurrent_positions, max_portfolio_open_risk_fraction,
+        max_cluster_open_risk_fraction, max_portfolio_initial_margin_fraction,
+        max_leverage, max_new_action_time_lanes, automatic_downsize_enabled,
+        unknown_exposure_policy, activation_state, source_event_id, updated_at_ms
+      ) VALUES (
+        'rci-account-risk-policy-current', :account_id, :runtime_profile_id,
+        :risk_policy_version, :planned_stop_risk_fraction,
+        :max_concurrent_positions, :max_portfolio_open_risk_fraction,
+        :max_cluster_open_risk_fraction,
+        :max_portfolio_initial_margin_fraction, :max_leverage,
+        :max_new_action_time_lanes, :automatic_downsize_enabled,
+        :unknown_exposure_policy, :activation_state, :event_id, :now_ms
+      ) ON CONFLICT DO NOTHING
+    """), params)
+    conn.execute(text("""
+      INSERT INTO brc_risk_cluster_memberships (
+        risk_cluster_membership_id, risk_policy_version,
+        exchange_instrument_id, risk_cluster_id, created_at_ms, created_by,
+        cluster_membership_snapshot_id, membership_role, status
+      ) VALUES (
+        'rci-risk-cluster-membership', :risk_policy_version,
+        :exchange_instrument_id, :risk_cluster_id, :now_ms, 'rci_fixture',
+        :cluster_membership_snapshot_id, 'primary', 'active'
+      ) ON CONFLICT DO NOTHING
+    """), params)
 
 
 def _prepare_capacity_invocation(
@@ -413,6 +473,10 @@ def _prepare_capacity_invocation(
         strategy_group_id,
         symbol,
         side,
+        # The invocation-specific action-time fact must be materialized after
+        # the fresh account-capacity fact has been bound below.  Pre-seeding a
+        # generic action-time fact would preserve an incomplete sizing surface
+        # and correctly fail the new capacity-claim invariant.
         insert_action_time_fact=False,
     )
     invocation = start_action_time_invocation(
@@ -424,12 +488,27 @@ def _prepare_capacity_invocation(
         conn,
         action_time_invocation_id=invocation.action_time_invocation_id,
         observed_at_ms=NOW_MS + 1,
+        enable_account_capacity_base=True,
     )
     capacity = _install_allowed_atomic_capacity(
         conn,
         exchange_instrument_id=invocation.lane_identity.exchange_instrument_id,
     )
-    return invocation, capacity
+    _seed_rci_active_account_risk_policy(conn, account_capacity=capacity)
+    snapshot = FullAccountRiskSnapshot(
+        snapshot_ready=True,
+        account_id="owner-subaccount-runtime-v0",
+        exchange_id="binance_usdm",
+        total_wallet_balance=Decimal("100"),
+        available_balance=Decimal("100"),
+        exchange_total_initial_margin=Decimal("0"),
+        can_trade=True,
+        position_mode="one_way",
+        source_snapshot_id="account-snapshot-1",
+        observed_at_ms=NOW_MS + 1,
+        valid_until_ms=NOW_MS + 600_000,
+    )
+    return invocation, capacity, snapshot
 
 
 def _prepare_exchange_commands(engine) -> None:
@@ -503,7 +582,7 @@ def test_rci_s1_two_ready_signals_keep_exact_invocation_ticket_identity(
     postgres_certification_engine,
 ):
     with postgres_certification_engine.connect() as conn:
-        invocation, capacity = _prepare_capacity_invocation(
+        invocation, capacity, snapshot = _prepare_capacity_invocation(
             conn,
             strategy_group_id="SOR-001",
             symbol="ETHUSDT",
@@ -524,6 +603,7 @@ def test_rci_s1_two_ready_signals_keep_exact_invocation_ticket_identity(
             stage_at_ms=NOW_MS + 1,
             completion_clock_ms=lambda: NOW_MS + 2,
             prefetched_account_capacity=capacity,
+            prefetched_account_snapshot=snapshot,
         )
 
         assert report["status"] == "action_time_ticket_sequence_committed", report
@@ -558,7 +638,7 @@ def test_rci_s2_ticket_blocker_rolls_back_all_action_authority_rows(
     postgres_certification_engine,
 ):
     with postgres_certification_engine.connect() as conn:
-        invocation, capacity = _prepare_capacity_invocation(
+        invocation, capacity, snapshot = _prepare_capacity_invocation(
             conn,
             strategy_group_id="SOR-001",
             symbol="ETHUSDT",
@@ -569,6 +649,7 @@ def test_rci_s2_ticket_blocker_rolls_back_all_action_authority_rows(
             action_time_invocation_id=invocation.action_time_invocation_id,
             stage_at_ms=NOW_MS + 1,
             prefetched_account_capacity=capacity,
+            prefetched_account_snapshot=snapshot,
             ticket_materializer=lambda inner_conn, now_ms: {
                 "status": "blocked",
                 "blockers": ["rci_forced_ticket_blocker"],
@@ -606,7 +687,7 @@ def test_rci_s3_ttl_expiry_survives_reconnect_without_ticket(
     postgres_certification_engine,
 ):
     with postgres_certification_engine.connect() as conn:
-        invocation, capacity = _prepare_capacity_invocation(
+        invocation, capacity, snapshot = _prepare_capacity_invocation(
             conn,
             strategy_group_id="SOR-001",
             symbol="ETHUSDT",
@@ -617,6 +698,7 @@ def test_rci_s3_ttl_expiry_survives_reconnect_without_ticket(
             action_time_invocation_id=invocation.action_time_invocation_id,
             stage_at_ms=NOW_MS + 1,
             prefetched_account_capacity=capacity,
+            prefetched_account_snapshot=snapshot,
             completion_clock_ms=lambda: NOW_MS + 600_000,
         )
         assert report["status"] == "action_time_ticket_sequence_rolled_back"

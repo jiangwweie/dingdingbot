@@ -327,6 +327,7 @@ def test_capacity_base_fact_is_independent_from_legacy_flat_account_safe_fact():
             "account_safe_facts_ready": False,
             "account_safe": False,
             "account_capacity_base_ready": True,
+            "account_capacity_base_safe": True,
             "account_trade_permission": True,
             "source_signed_get_only": True,
             "source_exchange_write_called": False,
@@ -335,6 +336,7 @@ def test_capacity_base_fact_is_independent_from_legacy_flat_account_safe_fact():
         "facts": {
             "total_wallet_balance": "600",
             "available_balance": "500",
+            "exchange_max_leverage_by_symbol": {"ETHUSDT": 100},
             "account_capacity_source_snapshot_id": "account-risk-snapshot-1",
             "account_capacity_base": {
                 "observed_at_ms": 1784246400000,
@@ -389,6 +391,8 @@ def test_capacity_base_fact_is_independent_from_legacy_flat_account_safe_fact():
         safe_values = json.loads(safe_values)
     assert capacity_values["schema_version"] == "account_capacity_base.v1"
     assert capacity_values["account_capacity_source_snapshot_id"] == "account-risk-snapshot-1"
+    assert capacity_values["exchange_max_leverage_by_symbol"] == {"ETHUSDT": 100}
+    assert capacity_values["account_capacity_base_safe"] is True
     assert safe_values["account_capacity_source_snapshot_id"] == "account-risk-snapshot-1"
     assert rows["account_capacity_base"]["observed_at_ms"] == 1784246400000
     assert rows["account_capacity_base"]["valid_until_ms"] == 1784246460000

@@ -215,6 +215,17 @@ def write_account_safe_fact_snapshots(
         "exchange_id": account_mode.get("exchange_id"),
         "runtime_profile_id": account_mode.get("runtime_profile_id"),
         "account_capacity_source_snapshot_id": capacity_source_snapshot_id,
+        # This is the exact account-bound leverage bracket used by the
+        # invocation's sizing decision.  The capacity surface replaces the
+        # legacy account-safe surface for active account-risk policy, so it
+        # must carry this typed input rather than make sizing fall back to a
+        # second, ambiguous account fact.
+        "exchange_max_leverage_by_symbol": _json_dict(
+            facts.get("exchange_max_leverage_by_symbol")
+        ),
+        "account_capacity_base_safe": (
+            checks.get("account_capacity_base_safe") is True
+        ),
     }
     capacity_observed_at_ms = _positive_int_or_none(
         capacity_values.get("observed_at_ms")
@@ -330,6 +341,7 @@ def write_account_safe_fact_snapshots(
     account_id = str(account_mode.get("account_id") or "").strip()
     exchange_id = str(account_mode.get("exchange_id") or "").strip()
     account_safe_fact_snapshot_id = ""
+    account_capacity_base_fact_snapshot_id = ""
     mode_fact_snapshot_id = ""
     for row in rows:
         fact_surface = str(row["fact_surface"])
@@ -402,6 +414,8 @@ def write_account_safe_fact_snapshots(
         inserted.append(fact_snapshot_id)
         if fact_surface == "account_safe":
             account_safe_fact_snapshot_id = fact_snapshot_id
+        if fact_surface == "account_capacity_base":
+            account_capacity_base_fact_snapshot_id = fact_snapshot_id
         if fact_surface == "account_mode":
             mode_fact_snapshot_id = fact_snapshot_id
     if account_id and exchange_id and mode_fact_snapshot_id:
@@ -428,7 +442,16 @@ def write_account_safe_fact_snapshots(
         bind_action_time_invocation_fact_refs(
             conn,
             action_time_invocation_id=action_time_invocation_id,
-            account_safe_fact_snapshot_id=account_safe_fact_snapshot_id or None,
+            account_safe_fact_snapshot_id=(
+                None
+                if capacity_ready
+                else account_safe_fact_snapshot_id or None
+            ),
+            account_capacity_base_fact_snapshot_id=(
+                account_capacity_base_fact_snapshot_id or None
+                if capacity_ready
+                else None
+            ),
             account_mode_fact_snapshot_id=mode_fact_snapshot_id or None,
             stage_at_ms=generated_at_ms,
         )

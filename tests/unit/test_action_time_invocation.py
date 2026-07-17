@@ -69,6 +69,18 @@ def invocation_pg_control_connection(pg_control_connection):
         migration_134.upgrade()
     finally:
         migration_134.op = old_op
+    # This SQLite fixture is intentionally a compact subset of the deployed
+    # migration chain.  The sequence tests below construct V2 rule facts, so
+    # include the columns introduced by migration 136 without treating SQLite
+    # as the migration-136 acceptance environment.
+    pg_control_connection.execute(text(
+        "ALTER TABLE brc_instrument_rule_snapshots "
+        "ADD COLUMN risk_calculation_kind TEXT"
+    ))
+    pg_control_connection.execute(text(
+        "ALTER TABLE brc_instrument_rule_snapshots "
+        "ADD COLUMN supersedes_instrument_rule_snapshot_id TEXT"
+    ))
     return pg_control_connection
 
 

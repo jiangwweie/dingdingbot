@@ -127,6 +127,17 @@ def pg_control_connection():
             asset_neutral_expand_migration.upgrade()
         finally:
             asset_neutral_expand_migration.op = old_expand_op
+        # The sequence helper models current V2 instrument-risk facts.  This
+        # SQLite fixture intentionally stops before the PostgreSQL-only 136
+        # migration path, so it supplies the two V2 columns explicitly.
+        conn.execute(text(
+            "ALTER TABLE brc_instrument_rule_snapshots "
+            "ADD COLUMN risk_calculation_kind TEXT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE brc_instrument_rule_snapshots "
+            "ADD COLUMN supersedes_instrument_rule_snapshot_id TEXT"
+        ))
         seed.seed_runtime_control_state_foundation(conn)
         conn.execute(
             text(

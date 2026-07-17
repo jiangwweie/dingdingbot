@@ -27,8 +27,9 @@ from src.application.action_time.account_capacity_reservation import (
 from src.application.action_time.instrument_risk_facts import InstrumentRiskFacts
 from src.domain.instrument_risk_identity import (
     InstrumentRiskIdentity,
-    InstrumentRuleSnapshotRef,
+    InstrumentRuleSnapshotRefV2,
     RiskClusterMembershipSnapshotRef,
+    instrument_rule_snapshot_v2_semantic_hash,
 )
 from src.infrastructure.binance_usdm_account_risk_snapshot import (
     FullAccountRiskSnapshot,
@@ -228,6 +229,7 @@ def _bind_fresh_invocation_account_facts(
     *,
     action_time_invocation_id: str,
     observed_at_ms: int,
+    enable_account_capacity_base: bool = False,
 ) -> list[str]:
     observed_at = datetime.fromtimestamp(
         observed_at_ms / 1000,
@@ -242,7 +244,8 @@ def _bind_fresh_invocation_account_facts(
                 "account_safe_facts_ready": True,
                 "account_safe": True,
                 "account_trade_permission": True,
-                "account_capacity_base_safe": True,
+                "account_capacity_base_ready": enable_account_capacity_base,
+                "account_capacity_base_safe": enable_account_capacity_base,
                 "open_orders_clear": True,
                 "active_position_or_open_order_clear": True,
                 "action_time_available_balance": True,
@@ -253,7 +256,16 @@ def _bind_fresh_invocation_account_facts(
             "facts": {
                 "total_wallet_balance": "100",
                 "available_balance": "100",
-                "account_capacity_base_safe": True,
+                "account_capacity_base": {
+                    "account_capacity_source_snapshot_id": "account-snapshot-1",
+                    "observed_at_ms": observed_at_ms,
+                    "valid_until_ms": observed_at_ms + 600_000,
+                    "snapshot_complete": True,
+                    "can_trade": True,
+                    "total_wallet_balance": "100",
+                    "available_balance": "100",
+                },
+                "account_capacity_base_safe": enable_account_capacity_base,
                 "exchange_max_leverage_by_symbol": {"ETHUSDT": 100},
             },
             "account_mode": {
@@ -289,15 +301,29 @@ def _install_allowed_atomic_capacity(
         instrument_rule_snapshot_id, exchange_instrument_id, rule_schema_version,
         price_tick, quantity_step, min_qty, min_notional, contract_multiplier,
         exchange_max_leverage_for_claim_notional, source_fact_snapshot_id,
-        valid_until_ms, semantic_hash, status, created_at_ms
+        valid_until_ms, risk_calculation_kind, semantic_hash, status, created_at_ms
       ) VALUES (
-        'rule-eth-v1', :exchange_instrument_id, 'v1', .01, .001, .001, 5, 1,
-        100, 'rule-source-eth', :valid_until_ms, 'rule-hash-eth', 'current', :now_ms
+        'rule-eth-v2', :exchange_instrument_id, 'v2', .01, .001, .001, 5, 1,
+        100, 'rule-source-eth', :valid_until_ms, 'linear_quote_settled', :semantic_hash,
+        'current', :now_ms
       )
     """), {
         "exchange_instrument_id": exchange_instrument_id,
         "valid_until_ms": NOW_MS + 600_000,
         "now_ms": NOW_MS,
+        "semantic_hash": instrument_rule_snapshot_v2_semantic_hash({
+            "instrument_rule_snapshot_id": "rule-eth-v2",
+            "rule_schema_version": "v2",
+            "price_tick": Decimal(".01"),
+            "quantity_step": Decimal(".001"),
+            "min_qty": Decimal(".001"),
+            "min_notional": Decimal("5"),
+            "contract_multiplier": Decimal("1"),
+            "exchange_max_leverage_for_claim_notional": 100,
+            "source_fact_snapshot_id": "rule-source-eth",
+            "valid_until_ms": NOW_MS + 600_000,
+            "risk_calculation_kind": "linear_quote_settled",
+        }),
     })
     conn.execute(text("""
       INSERT INTO brc_risk_cluster_membership_snapshots (
@@ -324,9 +350,9 @@ def _install_allowed_atomic_capacity(
             margin_asset="USDT",
             instrument_identity_schema_version="v1",
         ),
-        rule_snapshot=InstrumentRuleSnapshotRef(
-            instrument_rule_snapshot_id="rule-eth-v1",
-            rule_schema_version="v1",
+        rule_snapshot=InstrumentRuleSnapshotRefV2(
+            instrument_rule_snapshot_id="rule-eth-v2",
+            rule_schema_version="v2",
             price_tick=Decimal(".01"),
             quantity_step=Decimal(".001"),
             min_qty=Decimal(".001"),
@@ -335,6 +361,20 @@ def _install_allowed_atomic_capacity(
             exchange_max_leverage_for_claim_notional=100,
             source_fact_snapshot_id="rule-source-eth",
             valid_until_ms=NOW_MS + 600_000,
+            risk_calculation_kind="linear_quote_settled",
+            semantic_hash=instrument_rule_snapshot_v2_semantic_hash({
+                "instrument_rule_snapshot_id": "rule-eth-v2",
+                "rule_schema_version": "v2",
+                "price_tick": Decimal(".01"),
+                "quantity_step": Decimal(".001"),
+                "min_qty": Decimal(".001"),
+                "min_notional": Decimal("5"),
+                "contract_multiplier": Decimal("1"),
+                "exchange_max_leverage_for_claim_notional": 100,
+                "source_fact_snapshot_id": "rule-source-eth",
+                "valid_until_ms": NOW_MS + 600_000,
+                "risk_calculation_kind": "linear_quote_settled",
+            }),
         ),
         cluster_snapshot=RiskClusterMembershipSnapshotRef(
             cluster_membership_snapshot_id="cluster-eth-v1",
@@ -353,7 +393,7 @@ def _install_allowed_atomic_capacity(
         account_risk_policy_event_id="risk-policy-event-1",
         risk_cluster_id="crypto_usd_beta",
         exchange_instrument_id=exchange_instrument_id,
-        instrument_rule_snapshot_id="rule-eth-v1",
+        instrument_rule_snapshot_id="rule-eth-v2",
         cluster_membership_snapshot_id="cluster-eth-v1",
         instrument_facts=facts,
         account_source_fact_snapshot_id="account-snapshot-1",

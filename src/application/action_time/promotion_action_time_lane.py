@@ -485,7 +485,7 @@ def materialize_action_time_invocation_promotion_action_time_lane(
 
     bundle = _invocation_candidate_bundle(control_state, evidence=evidence)
     bundle = _apply_allocation_capital_scope([bundle], now_ms=now_ms)[0]
-    if account_snapshot is not None and account_capacity is None:
+    if account_snapshot is not None:
         bundle, capacity_gate_blocker = _prepare_active_capacity_bundle(
             conn,
             bundle=bundle,
@@ -498,20 +498,21 @@ def materialize_action_time_invocation_promotion_action_time_lane(
                 blockers=[capacity_gate_blocker],
                 next_action="repair_account_capacity_base_safety",
             )
-        candidate, candidate_blocker = _account_capacity_candidate(
-            conn, bundle=bundle, snapshot=account_snapshot, now_ms=now_ms
-        )
-        if candidate_blocker:
-            return _invocation_promotion_result(
-                "action_time_invocation_promotion_blocked", evidence=evidence,
-                blockers=[candidate_blocker],
-                next_action="repair_account_capacity_candidate",
+        if account_capacity is None:
+            candidate, candidate_blocker = _account_capacity_candidate(
+                conn, bundle=bundle, snapshot=account_snapshot, now_ms=now_ms
             )
-        account_capacity = materialize_account_capacity_from_snapshot(
-            conn, snapshot=account_snapshot,
-            runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
-            candidate=candidate, now_ms=now_ms,
-        )
+            if candidate_blocker:
+                return _invocation_promotion_result(
+                    "action_time_invocation_promotion_blocked", evidence=evidence,
+                    blockers=[candidate_blocker],
+                    next_action="repair_account_capacity_candidate",
+                )
+            account_capacity = materialize_account_capacity_from_snapshot(
+                conn, snapshot=account_snapshot,
+                runtime_profile_id=str(bundle.runtime_scope["runtime_profile_id"]),
+                candidate=candidate, now_ms=now_ms,
+            )
     if account_capacity is not None:
         if not account_capacity.allowed:
             return _invocation_promotion_result(
