@@ -211,7 +211,7 @@ def _position_rows(
     reservations: dict[str, AccountCapacityClaimRecord],
 ) -> list[AccountExposureCurrentRow]:
     classified_positions = {
-        (item.exchange_symbol, item.exchange_instrument_id): item
+        (item.exchange_symbol, item.exchange_instrument_id, item.position_bucket): item
         for item in classification.positions
     }
     rows: list[AccountExposureCurrentRow] = []
@@ -240,10 +240,13 @@ def _position_rows(
 
 def _find_position_classification(
     position: ExchangePositionRow,
-    rows: dict[tuple[str, str], AccountPositionClassification],
+    rows: dict[tuple[str, str, str], AccountPositionClassification],
 ) -> AccountPositionClassification | None:
+    position_bucket = _position_bucket(position.position_side)
     matches = [
-        row for (symbol, _instrument), row in rows.items() if symbol == position.exchange_symbol
+        row
+        for (symbol, _instrument, bucket), row in rows.items()
+        if symbol == position.exchange_symbol and bucket == position_bucket
     ]
     return matches[0] if len(matches) == 1 else None
 
@@ -274,6 +277,7 @@ def _row_for_position(
         classifications=classifications,
         exchange_symbol=position.exchange_symbol,
         owner_ticket_id=classified.owner_ticket_id,
+        position_bucket=classified.position_bucket,
     )
     blocker = classified.blocker
     if classified.ownership_state not in {"owned_by_ticket", "owned_by_other_known_ticket"}:
@@ -316,7 +320,10 @@ def _row_for_position(
         )
     return AccountExposureCurrentRow(
         account_exposure_current_id=_stable_id(
-            "account_exposure", snapshot.account_id, classified.exchange_instrument_id, "BOTH"
+            "account_exposure",
+            snapshot.account_id,
+            classified.exchange_instrument_id,
+            classified.position_bucket,
         ),
         account_id=snapshot.account_id,
         exchange_id=snapshot.exchange_id,
@@ -342,7 +349,7 @@ def _row_for_position(
         account_source_fact_snapshot_id=snapshot.source_snapshot_id,
         account_fact_schema_version="brc.account-risk-snapshot.v1",
         position_mode=str(snapshot.position_mode or "one_way"),
-        position_bucket="BOTH",
+        position_bucket=classified.position_bucket,
         owner_ticket_id=classified.owner_ticket_id,
         ownership_state=classified.ownership_state,
         position_slot_claimed=True,
@@ -384,6 +391,7 @@ def _confirmed_stop_segments(
         if (
             classified.exchange_symbol == exchange_symbol
             and classified.owner_ticket_id == owner_ticket_id
+            and classified.position_bucket == _position_bucket(position_side)
             and classified.purpose in _STOP_PURPOSES
         ):
             order = matching_orders.get(_classification_identity(classified))
@@ -439,6 +447,7 @@ def _working_entry(
     classifications: tuple[AccountOrderClassification, ...],
     exchange_symbol: str,
     owner_ticket_id: str | None,
+    position_bucket: str,
 ) -> tuple[Decimal, Decimal | None]:
     if not owner_ticket_id:
         return _ZERO, None
@@ -452,6 +461,7 @@ def _working_entry(
         if (
             classified.exchange_symbol == exchange_symbol
             and classified.owner_ticket_id == owner_ticket_id
+            and classified.position_bucket == position_bucket
             and classified.purpose == "working_entry"
         )
     ]
@@ -776,11 +786,26 @@ def _typed_current_statement(sql: str) -> sa.TextClause:
 
 
 def _order_identity(order: ExchangeOpenOrderRow) -> str:
-    return order.exchange_order_id or order.algo_id or order.client_order_id
+    return (
+        order.exchange_order_id
+        or order.algo_id
+        or order.client_order_id
+        or order.client_algo_id
+    )
 
 
 def _classification_identity(order: AccountOrderClassification) -> str:
-    return order.exchange_order_id or order.algo_id or order.client_order_id
+    return (
+        order.exchange_order_id
+        or order.algo_id
+        or order.client_order_id
+        or order.client_algo_id
+    )
+
+
+def _position_bucket(position_side: str) -> str:
+    normalized = str(position_side or "BOTH").upper()
+    return normalized if normalized in {"LONG", "SHORT"} else "BOTH"
 
 
 def _decimal(value: object) -> Decimal:

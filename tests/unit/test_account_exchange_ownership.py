@@ -316,3 +316,79 @@ def test_missing_canonical_instrument_mapping_blocks_position_ownership() -> Non
     assert result.positions[0].blocker == "account_exchange_instrument_identity_missing"
     assert result.new_entry_allowed is False
     conn.close()
+
+
+def test_cross_instrument_order_id_collision_cannot_claim_another_instrument() -> None:
+    conn = _connection()
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_symbol_instrument_mappings VALUES "
+            "('BTCUSDT', 'binance_usdm:BTCUSDT', 'active')"
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO brc_exchange_instruments VALUES "
+            "('binance_usdm:BTCUSDT', 'binance_usdm', 'crypto', 'perpetual', 'active')"
+        )
+    )
+    _insert_command(
+        conn,
+        command_id="btc-command",
+        ticket_id="ticket-btc",
+        exchange_order_id="shared-id",
+        client_order_id="btc-client",
+        role="ENTRY",
+        instrument="binance_usdm:BTCUSDT",
+    )
+
+    result = classify_account_exchange_truth(
+        conn,
+        snapshot=_snapshot(
+            order=ExchangeOpenOrderRow(
+                exchange_symbol="ETHUSDT",
+                exchange_order_id="shared-id",
+            )
+        ),
+    )
+
+    assert result.orders[0].ownership_state == "external_unowned"
+    assert result.orders[0].blocker == "account_exchange_order_unknown_global_fail_closed"
+    assert result.new_entry_allowed is False
+
+
+def test_opposite_hedge_buckets_are_a_global_new_entry_hold() -> None:
+    conn = _connection()
+    snapshot = FullAccountRiskSnapshot(
+        snapshot_ready=True,
+        account_id="account-1",
+        exchange_id="binance_usdm",
+        total_wallet_balance="600",
+        available_balance="500",
+        exchange_total_initial_margin="0",
+        can_trade=True,
+        position_mode="hedge",
+        positions=(
+            ExchangePositionRow(
+                exchange_symbol="ETHUSDT",
+                position_qty="1",
+                entry_price="100",
+                position_side="LONG",
+            ),
+            ExchangePositionRow(
+                exchange_symbol="ETHUSDT",
+                position_qty="-1",
+                entry_price="110",
+                position_side="SHORT",
+            ),
+        ),
+        source_snapshot_id="snapshot-1",
+        observed_at_ms=1_752_480_000_000,
+        valid_until_ms=1_752_480_060_000,
+    )
+
+    result = classify_account_exchange_truth(conn, snapshot=snapshot)
+
+    assert result.new_entry_allowed is False
+    assert result.blockers == ("account_exchange_opposite_hedge_bucket_global_fail_closed",)
+    assert {row.ownership_state for row in result.positions} == {"identity_conflict"}

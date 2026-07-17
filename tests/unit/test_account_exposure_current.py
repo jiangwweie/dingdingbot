@@ -401,10 +401,68 @@ def test_unresolved_instrument_creates_budget_blocker_without_fake_exposure() ->
     )
 
 
+def test_hedge_long_and_short_positions_project_to_separate_netting_domains() -> None:
+    conn = _connection()
+    snapshot = _snapshot(
+        position_mode="hedge",
+        positions=(
+            ExchangePositionRow(
+                exchange_symbol="ETHUSDT",
+                position_qty=Decimal("0.1"),
+                entry_price=Decimal("2000"),
+                position_side="LONG",
+            ),
+            ExchangePositionRow(
+                exchange_symbol="ETHUSDT",
+                position_qty=Decimal("-0.2"),
+                entry_price=Decimal("2100"),
+                position_side="SHORT",
+            ),
+        ),
+    )
+    classification = AccountExchangeTruthClassification(
+        orders=(),
+        positions=(
+            AccountPositionClassification(
+                exchange_symbol="ETHUSDT",
+                exchange_instrument_id="binance_usdm:ETHUSDT",
+                position_bucket="LONG",
+                ownership_state="external_unowned",
+                blocker="account_exchange_position_unknown_global_fail_closed",
+            ),
+            AccountPositionClassification(
+                exchange_symbol="ETHUSDT",
+                exchange_instrument_id="binance_usdm:ETHUSDT",
+                position_bucket="SHORT",
+                ownership_state="external_unowned",
+                blocker="account_exchange_position_unknown_global_fail_closed",
+            ),
+        ),
+        new_entry_allowed=False,
+        blockers=("account_exchange_position_unknown_global_fail_closed",),
+    )
+
+    result = project_account_exposure_current(
+        conn,
+        snapshot=snapshot,
+        classification=classification,
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
+        now_ms=NOW_MS,
+    )
+
+    assert {(row.position_bucket, row.position_qty) for row in result.rows} == {
+        ("LONG", Decimal("0.1")),
+        ("SHORT", Decimal("0.2")),
+    }
+    assert len({row.account_exposure_current_id for row in result.rows}) == 2
+
+
 def _snapshot(
     *,
     positions: tuple[ExchangePositionRow, ...] = (),
     orders: tuple[ExchangeOpenOrderRow, ...] = (),
+    position_mode: str = "one_way",
 ) -> FullAccountRiskSnapshot:
     return FullAccountRiskSnapshot(
         snapshot_ready=True,
@@ -414,7 +472,7 @@ def _snapshot(
         available_balance=Decimal("500"),
         exchange_total_initial_margin=Decimal("100"),
         can_trade=True,
-        position_mode="one_way",
+        position_mode=position_mode,
         positions=positions,
         regular_open_orders=orders,
         source_snapshot_id="snapshot-1",

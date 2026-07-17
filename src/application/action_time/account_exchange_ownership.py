@@ -56,9 +56,12 @@ class AccountOrderClassification(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     exchange_symbol: str
+    exchange_instrument_id: str = ""
     exchange_order_id: str
     algo_id: str
     client_order_id: str
+    client_algo_id: str = ""
+    position_bucket: str = "BOTH"
     ownership_state: OwnershipState
     purpose: OrderPurpose
     owner_ticket_id: str | None = None
@@ -72,6 +75,7 @@ class AccountPositionClassification(BaseModel):
     exchange_instrument_id: str
     asset_class: str | None = None
     instrument_type: str | None = None
+    position_bucket: str = "BOTH"
     ownership_state: OwnershipState
     owner_ticket_id: str | None = None
     blocker: str | None = None
@@ -106,7 +110,9 @@ def classify_account_exchange_truth(
     )
     order_rows = tuple(
         _classify_order(
+            conn,
             order,
+            exchange_id=snapshot.exchange_id,
             position_mode=snapshot.position_mode or "one_way",
             identities=identities,
         )
@@ -121,6 +127,10 @@ def classify_account_exchange_truth(
             ticket_instruments=ticket_instruments,
         )
         for position in snapshot.positions
+    )
+    position_rows = _apply_opposite_hedge_bucket_hold(
+        position_rows,
+        position_mode=snapshot.position_mode or "one_way",
     )
     blockers = tuple(
         sorted(
@@ -140,33 +150,52 @@ def classify_account_exchange_truth(
 
 
 def _classify_order(
+    conn: sa.Connection,
     order: ExchangeOpenOrderRow,
     *,
+    exchange_id: str,
     position_mode: str,
-    identities: dict[str, set[tuple[str, str]]],
+    identities: dict[tuple[str, str, str], set[tuple[str, str]]],
 ) -> AccountOrderClassification:
+    instrument = _instrument_identity(conn, exchange_id, order.exchange_symbol)
+    if instrument is None:
+        return _order_result(
+            order,
+            "external_unowned",
+            "external_unknown",
+            blocker="account_exchange_order_instrument_identity_missing",
+        )
+    instrument_id, _asset_class, _instrument_type = instrument
+    bucket = _position_bucket(position_mode, order.position_side)
+    if bucket is None:
+        return _order_result(
+            order,
+            "mode_or_side_ambiguous",
+            "external_unknown",
+            exchange_instrument_id=instrument_id,
+            blocker="account_exchange_order_position_side_ambiguous",
+        )
     matched = set()
-    for identity in (order.exchange_order_id, order.algo_id, order.client_order_id):
-        if identity:
-            matched.update(identities.get(identity, set()))
+    for identity_kind, identity in _order_identity_keys(order):
+        matched.update(identities.get((instrument_id, identity_kind, identity), set()))
     ticket_ids = {ticket_id for ticket_id, _role in matched}
     if len(ticket_ids) > 1:
-        return _order_result(order, "identity_conflict", "external_unknown", blocker="account_exchange_order_identity_conflict")
+        return _order_result(order, "identity_conflict", "external_unknown", exchange_instrument_id=instrument_id, position_bucket=bucket, blocker="account_exchange_order_identity_conflict")
     if len(ticket_ids) == 1:
         ticket_id = next(iter(ticket_ids))
         roles = {role for owner, role in matched if owner == ticket_id}
         if len(roles) != 1 or next(iter(roles)) not in _PURPOSE_BY_ROLE:
-            return _order_result(order, "identity_conflict", "external_unknown", blocker="account_exchange_order_role_ambiguous")
+            return _order_result(order, "identity_conflict", "external_unknown", exchange_instrument_id=instrument_id, position_bucket=bucket, blocker="account_exchange_order_role_ambiguous")
         role = next(iter(roles))
         return _order_result(
             order,
             "owned_by_ticket",
             _PURPOSE_BY_ROLE[role],
+            exchange_instrument_id=instrument_id,
+            position_bucket=bucket,
             owner_ticket_id=ticket_id,
         )
-    if position_mode == "hedge" and order.position_side not in {"LONG", "SHORT"}:
-        return _order_result(order, "mode_or_side_ambiguous", "external_unknown", blocker="account_exchange_order_position_side_ambiguous")
-    return _order_result(order, "external_unowned", "external_unknown", blocker="account_exchange_order_unknown_global_fail_closed")
+    return _order_result(order, "external_unowned", "external_unknown", exchange_instrument_id=instrument_id, position_bucket=bucket, blocker="account_exchange_order_unknown_global_fail_closed")
 
 
 def _classify_position(
@@ -186,12 +215,14 @@ def _classify_position(
             blocker="account_exchange_instrument_identity_missing",
         )
     instrument_id, asset_class, instrument_type = instrument
-    if position_mode == "hedge" and position.position_side not in {"LONG", "SHORT"}:
+    bucket = _position_bucket(position_mode, position.position_side)
+    if bucket is None:
         return AccountPositionClassification(
             exchange_symbol=position.exchange_symbol,
             exchange_instrument_id=instrument_id,
             asset_class=asset_class,
             instrument_type=instrument_type,
+            position_bucket="BOTH",
             ownership_state="mode_or_side_ambiguous",
             blocker="account_exchange_position_side_ambiguous",
         )
@@ -206,6 +237,7 @@ def _classify_position(
             exchange_instrument_id=instrument_id,
             asset_class=asset_class,
             instrument_type=instrument_type,
+            position_bucket=bucket,
             ownership_state="identity_conflict",
             blocker="account_exchange_position_multiple_ticket_claims",
         )
@@ -215,6 +247,7 @@ def _classify_position(
             exchange_instrument_id=instrument_id,
             asset_class=asset_class,
             instrument_type=instrument_type,
+            position_bucket=bucket,
             ownership_state="owned_by_ticket",
             owner_ticket_id=next(iter(owner_tickets)),
         )
@@ -223,6 +256,7 @@ def _classify_position(
         exchange_instrument_id=instrument_id,
         asset_class=asset_class,
         instrument_type=instrument_type,
+        position_bucket=bucket,
         ownership_state="external_unowned",
         blocker="account_exchange_position_unknown_global_fail_closed",
     )
@@ -232,8 +266,11 @@ def _command_identity_evidence(
     conn: sa.Connection,
     *,
     account_id: str,
-) -> tuple[dict[str, set[tuple[str, str]]], dict[str, set[str]]]:
-    identity_map: dict[str, set[tuple[str, str]]] = defaultdict(set)
+) -> tuple[
+    dict[tuple[str, str, str], set[tuple[str, str]]],
+    dict[str, set[str]],
+]:
+    identity_map: dict[tuple[str, str, str], set[tuple[str, str]]] = defaultdict(set)
     ticket_instruments: dict[str, set[str]] = defaultdict(set)
     ticket_ids = load_current_account_ticket_ids(conn, account_id=account_id)
     rows = load_current_command_identity_evidence(
@@ -249,14 +286,14 @@ def _command_identity_evidence(
             continue
         if instrument_id:
             ticket_instruments[ticket_id].add(instrument_id)
-        for identity in (
-            row.exchange_order_id,
-            row.client_order_id,
-            row.parent_order_id,
+        for identity_kind, identity in (
+            ("exchange_order_id", row.exchange_order_id),
+            ("client_order_id", row.client_order_id),
+            ("parent_order_id", row.parent_order_id),
         ):
             text = str(identity or "").strip()
             if text:
-                identity_map[text].add((ticket_id, role))
+                identity_map[(instrument_id, identity_kind, text)].add((ticket_id, role))
     return dict(identity_map), dict(ticket_instruments)
 
 
@@ -292,19 +329,72 @@ def _instrument_identity(
     )
 
 
+def _apply_opposite_hedge_bucket_hold(
+    rows: tuple[AccountPositionClassification, ...],
+    *,
+    position_mode: str,
+) -> tuple[AccountPositionClassification, ...]:
+    if position_mode != "hedge":
+        return rows
+    buckets_by_instrument: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        buckets_by_instrument[row.exchange_instrument_id].add(row.position_bucket)
+    conflicting = {
+        instrument_id
+        for instrument_id, buckets in buckets_by_instrument.items()
+        if {"LONG", "SHORT"}.issubset(buckets)
+    }
+    if not conflicting:
+        return rows
+    return tuple(
+        row.model_copy(
+            update={
+                "ownership_state": "identity_conflict",
+                "owner_ticket_id": None,
+                "blocker": "account_exchange_opposite_hedge_bucket_global_fail_closed",
+            }
+        )
+        if row.exchange_instrument_id in conflicting
+        else row
+        for row in rows
+    )
+
+
+def _position_bucket(position_mode: str, position_side: str) -> str | None:
+    if position_mode != "hedge":
+        return "BOTH"
+    normalized = str(position_side or "").upper()
+    return normalized if normalized in {"LONG", "SHORT"} else None
+
+
+def _order_identity_keys(order: ExchangeOpenOrderRow) -> tuple[tuple[str, str], ...]:
+    values = (
+        ("exchange_order_id", order.exchange_order_id),
+        ("exchange_order_id", order.algo_id),
+        ("client_order_id", order.client_order_id),
+        ("client_order_id", order.client_algo_id),
+    )
+    return tuple((kind, value) for kind, value in values if value)
+
+
 def _order_result(
     order: ExchangeOpenOrderRow,
     ownership_state: OwnershipState,
     purpose: OrderPurpose,
     *,
+    exchange_instrument_id: str = "",
+    position_bucket: str | None = None,
     owner_ticket_id: str | None = None,
     blocker: str | None = None,
 ) -> AccountOrderClassification:
     return AccountOrderClassification(
         exchange_symbol=order.exchange_symbol,
+        exchange_instrument_id=exchange_instrument_id,
         exchange_order_id=order.exchange_order_id,
         algo_id=order.algo_id,
         client_order_id=order.client_order_id,
+        client_algo_id=order.client_algo_id,
+        position_bucket=position_bucket or order.position_side,
         ownership_state=ownership_state,
         purpose=purpose,
         owner_ticket_id=owner_ticket_id,
