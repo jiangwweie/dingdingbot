@@ -163,6 +163,44 @@ def test_canonical_release_tree_digest_binds_path_mode_and_content(tmp_path):
         machine.canonical_release_tree_digest(release)
 
 
+def test_certification_generation_journal_appends_superseding_pair_proof_and_commit(
+    tmp_path,
+):
+    path = tmp_path / "certification-generations.jsonl"
+    journal = machine.CertificationGenerationJournal.load_or_create(
+        path,
+        transaction_id="a1b2c3d4",
+        deploy_nonce="nonce-a1b2c3d4",
+        target_sha="a" * 40,
+    )
+    for generation in (1, 2):
+        journal.append(
+            cert_pair={
+                "ref": f"cert:{generation}",
+                "payload": {"fact_min_valid_until_ms": 9_999_999_999_999},
+                "generation": generation,
+            },
+            lifecycle={"lifecycle_proof_ref": f"proof:{generation}", "enabled": True},
+            activation_commit={
+                "action_time_certification_ref": f"cert:{generation}",
+                "certification_generation": generation,
+                "lifecycle_proof_ref": f"proof:{generation}",
+            },
+        )
+
+    reloaded = machine.CertificationGenerationJournal.load_or_create(
+        path,
+        transaction_id="a1b2c3d4",
+        deploy_nonce="nonce-a1b2c3d4",
+        target_sha="a" * 40,
+    )
+
+    assert len(path.read_text(encoding="utf-8").splitlines()) == 2
+    assert reloaded.latest is not None
+    assert reloaded.latest["cert_pair"]["ref"] == "cert:2"
+    assert reloaded.latest["activation_commit"]["lifecycle_proof_ref"] == "proof:2"
+
+
 def test_incomplete_immutable_venv_is_rebuilt_with_hashed_lock(tmp_path):
     release = tmp_path / "release"
     release.mkdir()
@@ -335,6 +373,62 @@ def test_candidate_staging_exports_exact_sha_and_writes_manifest_atomically(
     assert any("fetch" in command for command in git_repo_commands)
     assert any("archive" in command for command in git_repo_commands)
     assert any(command[:2] == ("/usr/bin/tar", "-xf") for command in commands)
+
+
+def test_candidate_reuse_rejects_coherent_tree_and_manifest_rewrite(tmp_path):
+    deploy_root = tmp_path / "brc-deploy"
+    source_repo = deploy_root / "source" / "dingdingbot"
+    release = deploy_root / "releases" / "candidate"
+    lock_path = tmp_path / "deploy-state" / "tokyo-runtime-deploy.lock"
+    lock = machine.acquire_deploy_lock(lock_path, require_root_owner=False)
+    assert lock is not None
+
+    def runner(command, **kwargs):
+        if command[:2] == ["/usr/bin/git", "clone"]:
+            (source_repo / ".git").mkdir(parents=True)
+        if command[-2:] == ["rev-parse", "FETCH_HEAD"]:
+            return machine.ChildResult(returncode=0, stdout="a" * 40 + "\n", stderr="")
+        if command[:2] == ["/usr/bin/tar", "-xf"]:
+            destination = Path(command[command.index("-C") + 1])
+            (destination / "src").mkdir(parents=True)
+            (destination / "src" / "tracked.py").write_text(
+                "value = 'target'\n", encoding="utf-8"
+            )
+        return machine.ChildResult(returncode=0, stdout="", stderr="")
+
+    try:
+        machine.stage_candidate_release(
+            deploy_root=deploy_root,
+            repo_url="https://example.invalid/repo.git",
+            git_ref="codex/release",
+            target_sha="a" * 40,
+            release_name="candidate",
+            lock_handle=lock,
+            canonical_lock_path=lock_path,
+            require_root_owner=False,
+            runner=runner,
+        )
+        (release / "src" / "tracked.py").write_text(
+            "value = 'rewritten'\n", encoding="utf-8"
+        )
+        manifest = release / ".brc-release-manifest.json"
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["source_tree_digest"] = machine.canonical_release_tree_digest(release)
+        manifest.write_text(json.dumps(payload), encoding="utf-8")
+        with pytest.raises(ValueError, match="candidate_release_target_tree_digest_mismatch"):
+            machine.stage_candidate_release(
+                deploy_root=deploy_root,
+                repo_url="https://example.invalid/repo.git",
+                git_ref="codex/release",
+                target_sha="a" * 40,
+                release_name="candidate",
+                lock_handle=lock,
+                canonical_lock_path=lock_path,
+                require_root_owner=False,
+                runner=runner,
+            )
+    finally:
+        lock.close()
 
 
 def test_previous_release_gets_compatible_venv_before_unit_mutation(tmp_path):
@@ -1015,7 +1109,7 @@ def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
 
     def stage(**kwargs):
         calls.append("stage")
-        release.mkdir(parents=True)
+        release.mkdir(parents=True, exist_ok=True)
         (release / "requirements-runtime.lock").write_text(
             "ccxt==4.5.56 --hash=sha256:" + "a" * 64 + "\n",
             encoding="utf-8",
@@ -1111,7 +1205,7 @@ def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
     assert first["lifecycle_policy_enabled"] is True
     assert second["lifecycle_policy_enabled"] is True
     assert [entry["phase"] for entry in journal.entries] == list(machine.DEPLOY_PHASES)
-    assert calls == ["stage"]
+    assert calls == ["stage", "stage", "stage"]
 
 
 @pytest.mark.parametrize(

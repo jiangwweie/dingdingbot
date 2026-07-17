@@ -404,6 +404,49 @@ def canonical_release_tree_digest(root: Path) -> str:
     return hashlib.sha256(b"".join(records)).hexdigest()
 
 
+def canonical_target_git_tree_digest(
+    *,
+    source_repo: Path,
+    target_sha: str,
+    deploy_state_root: Path,
+    run: Callable[..., ChildResult],
+) -> str:
+    """Derive the expected release digest from the fetched Git object itself.
+
+    A release manifest is an assertion copied beside the candidate, never its
+    trust anchor.  Re-exporting the exact fetched object into a private
+    temporary directory lets the same canonical tree algorithm compare source
+    paths, modes and bytes without trusting candidate contents or metadata.
+    """
+
+    target_sha = _sha(target_sha, "target_sha")
+    source_repo = Path(source_repo).resolve(strict=True)
+    deploy_state_root = Path(deploy_state_root)
+    deploy_state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    environment = dict(os.environ)
+    environment["SUDO_UID"] = str(source_repo.stat().st_uid)
+    with tempfile.TemporaryDirectory(
+        prefix="target-git-tree-", dir=deploy_state_root
+    ) as temporary_root:
+        temporary = Path(temporary_root)
+        archive = temporary / "target.tar"
+        tree = temporary / "tree"
+        tree.mkdir(mode=0o700)
+        for command, cwd in (
+            (
+                ["/usr/bin/git", "archive", "--format=tar", "-o", str(archive), target_sha],
+                source_repo,
+            ),
+            (["/usr/bin/tar", "-xf", str(archive), "-C", str(tree)], temporary),
+        ):
+            result = run(command, cwd=cwd, timeout=120, env=environment)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    "target_git_tree_digest_export_failed:" + Path(command[0]).name
+                )
+        return canonical_release_tree_digest(tree)
+
+
 def stage_candidate_release(
     *,
     deploy_root: Path,
@@ -432,14 +475,6 @@ def stage_candidate_release(
     temporary = releases / f"{release_name}.tmp"
     archive = deploy_root / "deploy-state" / f"{release_name}.{target_sha}.tar"
     manifest = release / ".brc-release-manifest.json"
-
-    if release.exists():
-        payload = json.loads(manifest.read_text(encoding="utf-8"))
-        if payload.get("target_sha") != target_sha:
-            raise ValueError("candidate_release_identity_mismatch")
-        if payload.get("source_tree_digest") != canonical_release_tree_digest(release):
-            raise ValueError("candidate_release_tree_digest_mismatch")
-        return {"status": "candidate_release_staged", "release_path": str(release)}
 
     source_root.mkdir(parents=True, exist_ok=True, mode=0o755)
     releases.mkdir(parents=True, exist_ok=True, mode=0o755)
@@ -490,6 +525,26 @@ def stage_candidate_release(
     if resolved != target_sha:
         raise ValueError("candidate_fetch_head_mismatch")
 
+    expected_source_tree_digest = canonical_target_git_tree_digest(
+        source_repo=source_repo,
+        target_sha=target_sha,
+        deploy_state_root=deploy_root / "deploy-state",
+        run=run,
+    )
+    if release.exists():
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        if payload.get("target_sha") != target_sha:
+            raise ValueError("candidate_release_identity_mismatch")
+        if payload.get("source_tree_digest") != expected_source_tree_digest:
+            raise ValueError("candidate_release_target_tree_digest_mismatch")
+        if canonical_release_tree_digest(release) != expected_source_tree_digest:
+            raise ValueError("candidate_release_tree_digest_mismatch")
+        return {
+            "status": "candidate_release_staged",
+            "release_path": str(release),
+            "source_tree_digest": expected_source_tree_digest,
+        }
+
     if temporary.exists():
         if temporary.is_symlink():
             raise ValueError("candidate_temporary_path_unsafe")
@@ -507,6 +562,8 @@ def stage_candidate_release(
         if result.returncode != 0:
             raise RuntimeError("candidate_export_command_failed:" + Path(command[0]).name)
     source_tree_digest = canonical_release_tree_digest(temporary)
+    if source_tree_digest != expected_source_tree_digest:
+        raise ValueError("candidate_release_target_tree_digest_mismatch")
     release_manifest_payload = {
             "schema": "brc.runtime_release_manifest.v2",
             "target_sha": target_sha,
@@ -525,7 +582,11 @@ def stage_candidate_release(
     if archive.exists():
         archive.unlink()
         _fsync_directory(archive.parent)
-    return {"status": "candidate_release_staged", "release_path": str(release)}
+    return {
+        "status": "candidate_release_staged",
+        "release_path": str(release),
+        "source_tree_digest": expected_source_tree_digest,
+    }
 
 
 def build_immutable_venv(
@@ -2155,10 +2216,20 @@ def execute_deploy_transaction(
             old_sha=old_sha,
             target_sha=target_sha,
         )
+    generation_journal = CertificationGenerationJournal.load_or_create(
+        journal_path.with_name(journal_path.name + ".certification-generations.jsonl"),
+        transaction_id=transaction_id,
+        deploy_nonce=deploy_nonce,
+        target_sha=target_sha,
+    )
 
     def phase(name: str, action: Callable[[], Mapping[str, Any]]) -> dict[str, Any]:
         index = DEPLOY_PHASES.index(name)
         if len(journal.entries) > index:
+            if name == "candidate_staged":
+                # A resumed candidate is trusted only after its source bytes are
+                # again compared with the fetched target Git object.
+                return dict(action())
             result = journal.entries[index]["facts"].get("result")
             if not isinstance(result, dict):
                 raise ValueError("deploy_journal_phase_result_invalid")
@@ -2257,14 +2328,27 @@ def execute_deploy_transaction(
         canonical_lock_path=canonical_lock,
         require_root_owner=require_root,
     ))
-    phase("pointer_active", lambda: install_candidate_units_and_switch_pointer(
-        release_path=release,
-        app_current=app_current,
-        target_sha=target_sha,
-        lock_handle=lock_handle,
-        canonical_lock_path=canonical_lock,
-        require_root_owner=require_root,
-    ))
+    def pointer_action() -> Mapping[str, Any]:
+        stage_candidate_release(
+            deploy_root=deploy_root,
+            repo_url=str(config["repo_url"]),
+            git_ref=str(config["git_ref"]),
+            target_sha=target_sha,
+            release_name=release_name,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock,
+            require_root_owner=require_root,
+        )
+        return install_candidate_units_and_switch_pointer(
+            release_path=release,
+            app_current=app_current,
+            target_sha=target_sha,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock,
+            require_root_owner=require_root,
+        )
+
+    phase("pointer_active", pointer_action)
     phase("release_activation_recorded", lambda: record_candidate_release_activation(
         release_path=release,
         env_path=env_path,
@@ -2403,11 +2487,16 @@ def execute_deploy_transaction(
             require_root_owner=require_root,
         ),
     )
-    cert_pair = {
-        "ref": str(post_cert["certification_ref"]),
-        "payload": dict(post_cert["certification_reference"]),
-        "generation": 1,
-    }
+    latest_generation = generation_journal.latest
+    cert_pair = (
+        dict(latest_generation["cert_pair"])
+        if latest_generation is not None
+        else {
+            "ref": str(post_cert["certification_ref"]),
+            "payload": dict(post_cert["certification_reference"]),
+            "generation": 1,
+        }
+    )
 
     def lifecycle_action() -> Mapping[str, Any]:
         now_ms = int(time.time() * 1000)
@@ -2445,7 +2534,15 @@ def execute_deploy_transaction(
             cert_pair.update({
                 "ref": str(renewed_cert["certification_ref"]),
                 "payload": dict(renewed_cert["certification_reference"]),
-                "generation": int(cert_pair["generation"]) + 1,
+                # Before the first durable generation record, a short-lived
+                # post-canary pair is merely replaced.  Once a pair/proof/
+                # commit generation is append-only durable, every renewal is
+                # its strictly superseding successor.
+                "generation": (
+                    int(cert_pair["generation"]) + 1
+                    if generation_journal.entries
+                    else 1
+                ),
             })
             reference = dict(cert_pair["payload"])
             now_ms = int(time.time() * 1000)
@@ -2464,27 +2561,69 @@ def execute_deploy_transaction(
             require_root_owner=require_root,
         )
 
-    lifecycle = phase("lifecycle_proof_persisted", lifecycle_action)
+    lifecycle = (
+        dict(latest_generation["lifecycle"])
+        if latest_generation is not None
+        else phase("lifecycle_proof_persisted", lifecycle_action)
+    )
     fence_info = dict(fenced["fence"])
-    activation_commit = phase("runtime_activation_committed", lambda: {
-        "schema": "brc.runtime_activation_commit.v1",
-        "status": "runtime_activation_committed",
-        "deploy_transaction_id": transaction_id,
-        "deploy_nonce": deploy_nonce,
-        "target_runtime_head": target_sha,
-        "fence_inode": int(fence_info["fence_inode"]),
-        "lifecycle_policy_enabled": bool(lifecycle["enabled"]),
-        "lifecycle_proof_ref": lifecycle.get("lifecycle_proof_ref"),
-        "release_pointer": str(app_current),
-        "schema_revision": expected_revision,
-        "dependency_identity": dependency_identity(release / "requirements-runtime.lock"),
-        "pre_canary_sentinel_digest": pre_sentinel["digest"],
-        "post_projection_sentinel_digest": post_projection["sentinel"]["digest"],
-        "action_time_certification_ref": cert_pair["ref"],
-        "certification_generation": cert_pair["generation"],
-        "activation_machine_facts": machine_facts,
-        "zero_deployment_exchange_side_effect": True,
-    })
+    def activation_commit_for_current_generation() -> dict[str, Any]:
+        return {
+            "schema": "brc.runtime_activation_commit.v1",
+            "status": "runtime_activation_committed",
+            "deploy_transaction_id": transaction_id,
+            "deploy_nonce": deploy_nonce,
+            "target_runtime_head": target_sha,
+            "fence_inode": int(fence_info["fence_inode"]),
+            "lifecycle_policy_enabled": bool(lifecycle["enabled"]),
+            "lifecycle_proof_ref": lifecycle.get("lifecycle_proof_ref"),
+            "release_pointer": str(app_current),
+            "schema_revision": expected_revision,
+            "dependency_identity": dependency_identity(release / "requirements-runtime.lock"),
+            "pre_canary_sentinel_digest": pre_sentinel["digest"],
+            "post_projection_sentinel_digest": post_projection["sentinel"]["digest"],
+            "action_time_certification_ref": cert_pair["ref"],
+            "certification_generation": cert_pair["generation"],
+            "activation_machine_facts": machine_facts,
+            "zero_deployment_exchange_side_effect": True,
+        }
+
+    activation_commit = (
+        dict(latest_generation["activation_commit"])
+        if latest_generation is not None
+        else phase("runtime_activation_committed", activation_commit_for_current_generation)
+    )
+    if latest_generation is None:
+        generation_journal.append(
+            cert_pair=cert_pair,
+            lifecycle=lifecycle,
+            activation_commit=activation_commit,
+        )
+
+    policy_phase_index = DEPLOY_PHASES.index("policy_applied")
+    policy_not_durable = len(journal.entries) <= policy_phase_index
+    now_ms = int(time.time() * 1000)
+    if (
+        policy_not_durable
+        and int(cert_pair["payload"].get("fact_min_valid_until_ms") or 0) - now_ms
+        < 30_000
+    ):
+        try:
+            lifecycle = lifecycle_action()
+            activation_commit = activation_commit_for_current_generation()
+            generation_journal.append(
+                cert_pair=cert_pair,
+                lifecycle=lifecycle,
+                activation_commit=activation_commit,
+            )
+        except Exception as error:
+            raise RuntimeError("resume_certification_generation_failed") from error
+    if (
+        activation_commit.get("action_time_certification_ref") != cert_pair["ref"]
+        or activation_commit.get("certification_generation") != cert_pair["generation"]
+        or activation_commit.get("lifecycle_proof_ref") != lifecycle.get("lifecycle_proof_ref")
+    ):
+        raise RuntimeError("certification_generation_activation_mismatch")
     phase("policy_applied", lambda: apply_committed_activation(
         release_path=release,
         env_path=env_path,
@@ -2754,6 +2893,118 @@ class DeployJournal:
             deploy_nonce=payload["deploy_nonce"],
             old_sha=payload["old_sha"],
             target_sha=payload["target_sha"],
+            entries=entries,
+        )
+
+
+class CertificationGenerationJournal:
+    """Append-only certification/proof/activation generations for deploy resume.
+
+    The main deploy journal is intentionally one record per monotonic phase. A
+    pre-policy recertification is a new authority generation inside an already
+    journaled phase, so it must be appended independently rather than rewriting
+    an old lifecycle proof or activation commit.
+    """
+
+    schema = "brc.tokyo_runtime_certification_generation.v1"
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        transaction_id: str,
+        deploy_nonce: str,
+        target_sha: str,
+        entries: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.path = Path(path)
+        self.transaction_id = _required(transaction_id, "transaction_id")
+        self.deploy_nonce = _required(deploy_nonce, "deploy_nonce")
+        self.target_sha = _sha(target_sha, "target_sha")
+        self.entries = list(entries or [])
+
+    @property
+    def latest(self) -> dict[str, Any] | None:
+        return dict(self.entries[-1]) if self.entries else None
+
+    def append(
+        self,
+        *,
+        cert_pair: Mapping[str, Any],
+        lifecycle: Mapping[str, Any],
+        activation_commit: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        generation = len(self.entries) + 1
+        if int(cert_pair.get("generation") or 0) != generation:
+            raise ValueError("certification_generation_sequence_invalid")
+        previous = self.entries[-1] if self.entries else None
+        entry = {
+            "schema": self.schema,
+            "sequence": generation,
+            "deploy_transaction_id": self.transaction_id,
+            "deploy_nonce": self.deploy_nonce,
+            "target_runtime_head": self.target_sha,
+            "previous_digest": previous.get("entry_digest") if previous else None,
+            "cert_pair": dict(cert_pair),
+            "lifecycle": dict(lifecycle),
+            "activation_commit": dict(activation_commit),
+            "recorded_at_ms": int(time.time() * 1000),
+        }
+        entry["entry_digest"] = _digest(entry)
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, _canonical_bytes(entry) + b"\n")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        self.entries.append(entry)
+        return dict(entry)
+
+    @classmethod
+    def load_or_create(
+        cls,
+        path: Path,
+        *,
+        transaction_id: str,
+        deploy_nonce: str,
+        target_sha: str,
+    ) -> "CertificationGenerationJournal":
+        path = Path(path)
+        if not path.exists():
+            return cls(
+                path,
+                transaction_id=transaction_id,
+                deploy_nonce=deploy_nonce,
+                target_sha=target_sha,
+            )
+        entries: list[dict[str, Any]] = []
+        previous = None
+        for sequence, raw in enumerate(path.read_bytes().splitlines(), start=1):
+            if not raw:
+                raise ValueError("certification_generation_journal_invalid")
+            entry = json.loads(raw)
+            candidate = dict(entry)
+            digest = candidate.pop("entry_digest", None)
+            if (
+                entry.get("schema") != cls.schema
+                or entry.get("sequence") != sequence
+                or entry.get("deploy_transaction_id") != transaction_id
+                or entry.get("deploy_nonce") != deploy_nonce
+                or entry.get("target_runtime_head") != target_sha
+                or entry.get("previous_digest") != (
+                    previous.get("entry_digest") if previous else None
+                )
+                or digest != _digest(candidate)
+            ):
+                raise ValueError("certification_generation_journal_invalid")
+            entries.append(entry)
+            previous = entry
+        return cls(
+            path,
+            transaction_id=transaction_id,
+            deploy_nonce=deploy_nonce,
+            target_sha=target_sha,
             entries=entries,
         )
 
