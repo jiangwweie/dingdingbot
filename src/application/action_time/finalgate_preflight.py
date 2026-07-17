@@ -383,13 +383,17 @@ def _finalgate_blockers(
         blockers,
         "action_time_fact_snapshot_missing",
     )
+    account_fact_surface, account_fact_id = _ticket_account_fact_pair(
+        ticket,
+        blockers=blockers,
+    )
     account_safe_fact = _row_by_id(
         control_state,
         "runtime_fact_snapshots",
         "fact_snapshot_id",
-        ticket.get("account_safe_fact_snapshot_id"),
+        account_fact_id,
         blockers,
-        "account_safe_fact_snapshot_missing",
+        f"{account_fact_surface}_fact_snapshot_missing",
     )
     account_mode_fact = _row_by_id(
         control_state,
@@ -438,7 +442,7 @@ def _finalgate_blockers(
         ("runtime_scope", runtime_scope),
         ("public_fact", public_fact),
         ("action_time_fact", action_time_fact),
-        ("account_safe_fact", account_safe_fact),
+        ("account_fact", account_safe_fact),
         ("account_mode_fact", account_mode_fact),
         ("budget", budget),
         ("protection", protection),
@@ -485,17 +489,24 @@ def _finalgate_blockers(
     for name, fact in (
         ("public_fact", public_fact),
         ("action_time_fact", action_time_fact),
-        ("account_safe_fact", account_safe_fact),
+        ("account_fact", account_safe_fact),
         ("account_mode_fact", account_mode_fact),
     ):
         _assert_fact_ready(blockers, name=name, fact=fact, now_ms=now_ms)
     account_values = _as_dict(account_safe_fact.get("fact_values"))
-    if account_values.get("account_safe") is not True:
-        blockers.append("account_safe_fact_not_true")
-    if account_values.get("open_orders_clear") is not True:
-        blockers.append("open_orders_not_clear")
-    if account_values.get("active_position_or_open_order_clear") is False:
-        blockers.append("active_position_or_open_order_conflict")
+    if account_fact_surface == "account_safe":
+        if account_values.get("account_safe") is not True:
+            blockers.append("account_safe_fact_not_true")
+        if account_values.get("open_orders_clear") is not True:
+            blockers.append("open_orders_not_clear")
+        if account_values.get("active_position_or_open_order_clear") is False:
+            blockers.append("active_position_or_open_order_conflict")
+    elif (
+        account_values.get("schema_version") != "account_capacity_base.v1"
+        or account_values.get("snapshot_complete") is not True
+        or account_values.get("can_trade") is not True
+    ):
+        blockers.append("account_capacity_base_fact_not_safe")
     if budget and budget.get("ticket_id") != ticket.get("ticket_id"):
         blockers.append("budget_reservation_ticket_mismatch")
     if budget and budget.get("status") not in {"active", "consumed"}:
@@ -509,14 +520,8 @@ def _finalgate_blockers(
     )
     blockers.extend(capacity_blockers)
     if active_capacity_policy and not capacity_blockers:
-        if account_values.get("account_capacity_base_safe") is not True:
-            blockers.append("account_capacity_base_fact_not_safe")
-        else:
-            blockers = [
-                blocker
-                for blocker in blockers
-                if blocker not in _CAPACITY_REPLACED_LEGACY_BLOCKERS
-            ]
+        if account_fact_surface != "account_capacity_base":
+            blockers.append("account_capacity_fact_surface_required")
     if protection and int(protection.get("expires_at_ms") or 0) <= now_ms:
         blockers.append("protection_ref_expired")
     if execution_policy and execution_policy.get("status") != "current":
@@ -869,6 +874,25 @@ def _latest_finalgate_pass_id(control_state: dict[str, Any], ticket_id: str) -> 
     event = sorted(events, key=lambda row: int(row.get("occurred_at_ms") or 0))[-1]
     payload = _as_dict(event.get("event_payload"))
     return str(payload.get("finalgate_pass_id") or "") or None
+
+
+def _ticket_account_fact_pair(
+    ticket: dict[str, Any],
+    *,
+    blockers: list[str],
+) -> tuple[str, str]:
+    legacy_fact_id = str(ticket.get("account_safe_fact_snapshot_id") or "").strip()
+    capacity_fact_id = str(
+        ticket.get("account_capacity_base_fact_snapshot_id") or ""
+    ).strip()
+    if bool(legacy_fact_id) == bool(capacity_fact_id):
+        blockers.append("action_time_ticket_account_fact_pair_invalid")
+        return "account_safe", ""
+    return (
+        ("account_capacity_base", capacity_fact_id)
+        if capacity_fact_id
+        else ("account_safe", legacy_fact_id)
+    )
 
 
 def _row_by_id(
