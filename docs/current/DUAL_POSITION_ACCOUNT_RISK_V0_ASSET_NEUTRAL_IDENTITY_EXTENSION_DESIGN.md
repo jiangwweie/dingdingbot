@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN
-status: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
+status: REMEDIATION_APPROVED_NOT_STARTED
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md
 extends:
   - docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
@@ -11,12 +11,13 @@ supersedes_in_part:
   - docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md#budget-reservation
 implementation_plan: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-17
-implementation_state: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
-integration_state: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
+implementation_state: DEEP_REVIEW_NO_GO_REMEDIATION_NOT_STARTED
+integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-migration_head: 133_LOCAL_ONLY
+current_migration_head: 133_LOCAL_ONLY
+planned_migration_head: 136
 performance_review_input: 2026-07-15-production-oom-review
 ---
 
@@ -46,11 +47,32 @@ Candidate Scope
 最多 **2** 个仓位、组合 open risk **6%**、单主风险簇 open risk **4%**、
 initial margin **90%**、最大杠杆 **10x**、同一 instrument 不允许第二个新 Ticket。
 
-本设计现已完成本地代码、migration 与测试认证。**尚未执行部署、生产
-migration apply、生产政策激活、交易品种扩张或 exchange write**；生产运行状态
-保持不变。
+本设计的资产中立组件已经进入合并树，但 **2026-07-17 深度审查撤销了本地认证
+结论**：合并树仍存在 identity、projection、multiplier 与 production-shape 因果链
+缺陷。方案 B 已确认，当前实施权威是统一 remediation 设计和执行计划；修复尚未
+开始。**尚未执行部署、生产 migration apply、生产政策激活、交易品种扩张或
+exchange write**，生产运行状态保持不变。
 
-### 1.1 2026-07-17 独立 worktree 合并认证结果
+### 1.1 统一 remediation 语义覆盖
+
+资产中立模型的当前可执行补充固定如下；详细字段、失败码、migration 和测试命令以
+统一 remediation 设计/计划为准：
+
+| 边界 | 已冻结语义 | 执行任务 |
+| --- | --- | --- |
+| **Rule/Claim 版本** | `InstrumentRuleSnapshotRefV2` 与 `account_capacity_claim.v2` 显式绑定 `linear_quote_settled` 和正数 multiplier；V1 verifier 永久冻结 | T09 |
+| **Migration 136** | 先完整 preflight current/referenced target set；满足 exact Binance USD-M linear predicate 的 current V1 以确定性 ID/semantic hash 克隆为 V2，历史 referenced V1 保持不可变；任何不确定性在语义行 mutation 前整批中止 | T09/T11 |
+| **Ticket/事实哈希** | Ticket V2 绑定 canonical capacity fact pair、episode 和 Claim hash；migration 不重写 V1 | T04/T11 |
+| **未来资产类别** | identity/schema 可表达不等于 execution eligible；非当前 venue/type 不能借 migration 自动取得 linear 或 live 权限 | T09/T12 |
+
+原 `### 1.1 2026-07-17 历史组件测试结果` 仅保留历史证据，编号顺延不改变其非权威
+性质。
+
+### 1.2 2026-07-17 历史组件测试结果
+
+下表保留用于定位原组件覆盖面，**不能再作为 release-ready 或本地 remediation
+完成证据**。统一计划要求补充 raw payload -> PG fact -> Claim -> Ticket -> FinalGate ->
+release 的生产入口全链证明。
 
 | 验收面 | 已观察结果 | 结论 |
 | --- | ---: | --- |

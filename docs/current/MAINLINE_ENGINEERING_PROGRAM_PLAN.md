@@ -3,6 +3,7 @@ title: MAINLINE_ENGINEERING_PROGRAM_PLAN
 status: CURRENT_PROGRAM_PLAN
 authority: docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md
 last_verified: 2026-07-14
+dual_position_status_verified: 2026-07-17
 ---
 
 # Mainline Engineering Program Plan
@@ -81,7 +82,7 @@ repo MD/JSON/output/report files.
 | **P1 Risk Reservation v0** | P1 | Require ticket-level stop-risk estimate and budget reservation before FinalGate-ready state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Consumer calculation is deployed; closure now requires RT-1 to prove the production price/quantity producer chain and a positive reservation before Ticket creation |
 | **P1-C Owner Explanation Read Model** | P1 | Make no-trade, signal, ticket, submit, runner, and closure states human-readable | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, `RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` | Owner can see whether the system is waiting, processing, blocked, protected, or closed without decoding internal terms |
 | **P1-D Performance And Retention Control** | P1 | Keep no-signal ticks, monitor runs, PG rows, logs, and reports bounded | `SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md`, `PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` | No recurring report growth; no restart storm; PG/file-authority validators remain clear |
-| **P1-F Dual-Position Hard-Cap Account Risk Model V0** | P1 local implementation complete; no deploy | Full-account ownership, Exposure/Budget Current and atomic capacity reservation are implemented while one new Lane remains fixed | `DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md`, `DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md` | At most two different-instrument positions; 2.5% per Ticket, 6% portfolio, 4% cluster, 90% margin, 10x leverage; production shadow and rollback certification remain required before activation |
+| **P1-F Dual-Position Hard-Cap Account Risk Model V0** | **P1 remediation approved, not started; deep-review NO-GO** | Repair full-account truth, exactly-once Exposure/Budget Current, atomic Claim-to-Ticket, lifecycle release, runner recovery and release identity while one new Lane remains fixed | `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` | T01-T12 and migrations 134-136 pass production-shape PostgreSQL, runtime-lock, deployment-identity, performance, file-I/O and complete-suite gates before any deploy decision |
 | **P2-E Advanced Capital Risk Allocation** | P2 | Allocate capital by portfolio exposure, StrategyGroup sleeve, symbol/side cap, cluster exposure, cooldown, and drawdown state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Multi-strategy / multi-symbol allocation can scale or pause exposure without changing per-ticket safety facts |
 | **P2-F Frontend Read Model Integration** | P2 | Build frontend against backend explanation/read models, not raw PG internals | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, frontend `OWNER_EXPLANATION_READ_MODEL_FRONTEND_CONTRACT.md` | UI shows runtime health, signal progress, account state, ticket status, and why-no-trade from backend read models |
 
@@ -121,7 +122,7 @@ resumes the interrupted checklist item.
 | 4 | **RCI-3 Finding gate and repairs** | P0 complete | Four implementation defects have RED-GREEN fixes or bounded deployment remediation; no architecture gap was demonstrated; live-only unknowns stay R1B |
 | 5 | **RCI-4 Regression, audit, and deploy decision** | P0 complete | `3030 passed, 1 skipped`; file-I/O audits pass; production behavior changes are deployed and read-only accepted |
 | P0 interrupt | **R1B Natural-event acceptance** | P0 interrupt | The next distinct live signal persists its exact Ticket-chain and real venue outcome without synthetic production mutation |
-| 6 | **Dual-Position Hard-Cap Account Risk V0 design/implementation** | P1 next | Full-account exchange truth, ownership, current projections, reservation conservation and atomic capacity arbitration pass shadow certification before activation |
+| 6 | **Dual-Position Hard-Cap Account Risk V0 unified remediation T01-T12** | **P1 approved; not started** | Full-account exchange truth, ownership, exactly-once current projections, atomic Claim-to-Ticket, lifecycle release, runner recovery and release identity pass local production-shape certification before a separate deploy decision |
 | 7 | **Deliberate execution-core stop outside V0 scope** | P0/P1 boundary | No third position, strategy sleeve, dynamic correlation, fee reserve or multi-asset execution expansion enters this program |
 
 ## P0-RT Real Signal -> Ticket Closure

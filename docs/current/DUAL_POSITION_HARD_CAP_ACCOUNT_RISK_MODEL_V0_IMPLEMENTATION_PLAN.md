@@ -1,24 +1,40 @@
 ---
 title: DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN
-status: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
+status: SUPERSEDED_BY_UNIFIED_REMEDIATION_PLAN
 authority: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md
 design: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
 base_commit: 2001644581cccc968ba695d3ff129960db6a7e84
 branch: codex/dual-position-account-risk-v0
 integration_branch: codex/integrate-ffc73899-dual-position-risk-v0
-integration_state: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
+repair_branch: codex/dual-position-account-risk-remediation-v1
+repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
+integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-migration_head: 133_LOCAL_ONLY
+current_migration_head: 133_LOCAL_ONLY
+planned_migration_head: 136
+superseded_by: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 ---
 
 # Dual-Position Hard-Cap Account Risk Model V0 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:executing-plans`
-> task-by-task with review checkpoints. Repository constraints prohibit subagent
-> dispatch unless the Owner explicitly asks for it. Track every step with the
-> checkboxes below.
+> **执行状态覆盖：**本文保留原始实施拆解和组件证据，不再作为当前执行入口。
+> 2026-07-17 深度审查确认合并树仍有容量守恒、快照、runner 恢复和部署身份缺陷；
+> 后续只能执行
+> `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md`。
+
+## Current Execution Status
+
+**方案 B 已确认，统一 remediation 尚未开始，合并树仍为 NO-GO。** 当前可执行路径
+固定在 `codex/dual-position-account-risk-remediation-v1` 独立 worktree，使用 migration
+`134 -> 136`，不得从本文旧任务直接继续编码。
+
+当前执行入口已进一步冻结 **容量事实全消费者守恒、Ticket/Claim 哈希 V1/V2、真实
+Binance `/userTrades` 回补契约、revoked adoption 能力拆分、exact migration-136
+predicate、resume-safe release tree、mandatory revision 与自包含 no-skip PostgreSQL gate**。
+这些约束分别由统一计划 T04、T07-T11 执行；本文旧 File Responsibility Map、旧命令和
+“Remaining Release Work”不得覆盖它们。
 
 **Goal:** 在保留一个新 Action-Time Lane、同一 Protected Submit 和 Ticket lifecycle
 的前提下，使账户最多顺序建立两个不同 instrument 的受保护仓位，并用 PG current
@@ -56,7 +72,10 @@ Ticket-bound lifecycle。
 - **激活边界**：先 shadow、后 policy activation；migration 不把生产从 1 仓自动改为 2 仓。
 - **回滚边界**：`max_concurrent_positions=1` 只停止新 ENTRY，不强平、不撤保护单。
 
-## Local Integration Status (2026-07-17)
+## Historical Component Evidence (Superseded 2026-07-17)
+
+以下结果只说明当时的组件/fixture 集合通过，已被生产因果链深度审查推翻为
+release-readiness 证据；不得据此跳过统一 remediation 的 T01-T12。
 
 ### Completed in This Worktree
 

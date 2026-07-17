@@ -3,6 +3,7 @@ title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
 last_verified: 2026-07-14
+dual_position_status_verified: 2026-07-17
 ---
 
 # Main Control Roadmap
@@ -54,7 +55,7 @@ design documents and acceptance proof.
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
 | 3 | **P0 Runtime Causal Integrity And Adversarial Certification** | **completed and deployed; 12 PostgreSQL/process scenarios passed and four demonstrated defects were repaired** | `docs/current/P0_RUNTIME_CAUSAL_INTEGRITY_AND_ADVERSARIAL_CERTIFICATION_DESIGN.md` |
 | 4 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
-| 5 | **Dual-Position Hard-Cap Account Risk Model V0** | **local remediation implemented; asset-neutral identity extension reviewed and implementation plan ready; no deploy** | `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md` |
+| 5 | **Dual-Position Hard-Cap Account Risk Model V0** | **方案 B 已确认；深度审查 NO-GO；统一 remediation 设计与 T01-T12 执行计划已明确，尚未开始修复或部署** | `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | 6 | **Capital Allocation V1** | P2 after V0 dual-position and additional real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 7 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
@@ -73,7 +74,7 @@ validated market wait while Owner-facing product integration continues.
 | Area | Current fact |
 | --- | --- |
 | **Live Candidate Baseline** | Tokyo runs release `2001644581cccc968ba695d3ff129960db6a7e84`; real exchange trades have occurred and the current ETHUSDT Ticket is protected and reconciled |
-| **Active delivery branch** | `codex/dual-position-account-risk-v0` is isolated at `.worktrees/dual-position-account-risk-v0` from release head `2001644581cccc968ba695d3ff129960db6a7e84`; local implementation is complete and remains not deployed/not activated |
+| **Active delivery branch** | `codex/dual-position-account-risk-remediation-v1` is isolated at `.worktrees/dual-position-account-risk-remediation-v1`; `60bb7fedcd2b9bd300cef900c6bbb304c5a34770` is the frozen two-parent repair baseline only. The executable remediation design/plan is approved, but code repair and local certification have not started; production remains unchanged |
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` and its release manifest are the exact deployed-head authority |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
 | **PG migration** | Tokyo is at migration `120` (`2026-07-13-120_reconcile_terminal_predispatch_commands.py`) |
@@ -111,7 +112,7 @@ then resumes this order.
 | 5 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
 | 6 | **Runtime causal integrity certification** | P0 complete | Twelve bounded real-PostgreSQL/process scenarios pass; six demonstrated implementation defects are repaired without authority expansion; migration 120 conserves historical pre-dispatch failure truth and notification correlation preserves production identity |
 | 7 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
-| 8 | **Dual-Position Hard-Cap Account Risk Model V0** | P1 local implementation complete; no deploy | Full-account exchange truth, ownership, Exposure/Budget Current, reservation conservation and atomic capacity arbitration require separately authorized shadow certification before 2.5%/two-position activation |
+| 8 | **Dual-Position Hard-Cap Account Risk Model V0** | **P1 remediation approved, not started; deep-review NO-GO** | Execute unified T01-T12 and migrations 134-136 in the dedicated worktree; local production-shape certification must pass before a separate shadow/deploy/activation decision |
 
 ## Why This Was Not Detected Before Production Signals
 

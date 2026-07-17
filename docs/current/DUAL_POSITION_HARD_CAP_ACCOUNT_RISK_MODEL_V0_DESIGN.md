@@ -1,23 +1,49 @@
 ---
 title: DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN
-status: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
+status: REMEDIATION_APPROVED_NOT_STARTED
 authority: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
 owner_decision_date: 2026-07-14
-implementation_state: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
-integration_state: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
+implementation_state: DEEP_REVIEW_NO_GO_REMEDIATION_NOT_STARTED
+integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-migration_head: 133_LOCAL_ONLY
+current_migration_head: 133_LOCAL_ONLY
+planned_migration_head: 136
+remediation_design: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
+remediation_plan: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 ---
 
 # Dual-Position Hard-Cap Account Risk Model V0
 
-> **Asset-neutral identity override:** instrument identity、rule snapshot、
-> capacity claim、exposure episode 与 risk-cluster membership 的目标设计，以
-> `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md`
-> 为当前权威。本文风险参数继续有效；资产中立扩展已经在独立集成 worktree 完成本地
-> 合并认证，但尚未部署或激活，因此不得据此宣称 production release 已完成。
+> **当前实施状态覆盖：**本文的 Owner 风险政策和目标模型继续有效；
+> instrument identity、rule snapshot、Claim、ExposureEpisode 与 risk-cluster membership
+> 继续由资产中立扩展定义。2026-07-17 深度审查已经撤销“本地合并已认证”结论；统一
+> 修复设计与可执行计划分别以
+> `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md` 和
+> `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md`
+> 为当前实施权威。
+
+## Deep-Review Status Override
+
+**合并基线 `60bb7fed` 当前为功能性 NO-GO，方案 B 已获确认但修复尚未开始。**
+此前的组件测试和本地合并证据保留为历史证据，不能再证明 release-ready。当前
+migration head 仍为本地 `133`；计划只通过 forward migrations `134 -> 136` 修复，
+生产部署、政策激活和 exchange write 均未发生。
+
+### 可执行语义覆盖
+
+本文继续拥有 **Owner 风险政策数值**，但以下工程语义已由统一 remediation 设计覆盖，
+实现者不得从本文旧章节自行推导：
+
+1. **容量事实**使用 `account_safe` / `account_capacity_base` 的版本化二选一引用，并在
+   retention、canary、readmodel、FinalGate 与 Runtime Safety 全链守恒。
+2. **历史 Ticket/Claim 哈希**使用冻结 V1 verifier；新增容量引用与
+   `risk_calculation_kind` 只进入显式 V2，migration 不重算历史哈希。
+3. **当前线性合约计算**必须包含正数 `contract_multiplier`；未知、inverse、quanto 或
+   nonlinear 类型在 Claim 前 fail-closed。
+4. **执行入口**唯一为统一 remediation 计划 T01-T12；本文后续历史任务、旧测试数量或
+   migration 编号均不构成可执行指令。
 
 ## Decision Summary
 
@@ -135,9 +161,13 @@ exchange_available_balance = available_balance
 
 ```text
 ticket_risk_budget = total_wallet_balance * 0.025
-per_unit_stop_risk = abs(entry_reference_price - protective_stop_price)
+risk_calculation_kind = linear_quote_settled
+per_unit_stop_risk = abs(entry_reference_price - protective_stop_price) * contract_multiplier
 risk_limited_qty = floor_to_step(ticket_risk_budget / per_unit_stop_risk)
 ```
+
+`contract_multiplier` 来自绑定 Claim 的 versioned Instrument Rule Snapshot，必须为正数；
+不能缺省为 `1`。未知 calculation kind 不进入 sizing。
 
 ### 组合与风险簇剩余容量
 
@@ -159,7 +189,9 @@ allowed_new_ticket_risk = min(
 
 ```text
 portfolio_margin_limit = total_wallet_balance * 0.90
-unreflected_pending_margin = local_pending_margin_not_yet_visible_at_exchange
+exchange_reflected_entry_qty = exact_owned_position_qty + exact_owned_remaining_entry_order_qty
+unreflected_qty = max(planned_qty - min(exchange_reflected_entry_qty, planned_qty), 0)
+unreflected_pending_margin = reserved_margin * unreflected_qty / planned_qty
 
 portfolio_margin_remaining = max(
     0,
@@ -175,15 +207,17 @@ action_time_margin_remaining = min(
 ```
 
 不能把 exchange 已计入 `totalInitialMargin` 或已从 `availableBalance` 扣除的 open order
-margin 再次当作本地 pending margin 扣减。`unreflected_pending_margin` 只包含尚未向
-交易所发出 ENTRY、因而尚未进入交易所账户事实的 reservation。
+margin 再次当作本地 pending margin 扣减。`unreflected_pending_margin` 只覆盖计划数量中
+尚未被 exact owned position / remaining Entry order 反映的部分；无法证明精确数量和 lineage
+时进入 `unknown` 并阻断新 ENTRY，不能猜测比例。
 
 ### 最终数量
 
 ```text
 risk_qty = floor_to_step(allowed_new_ticket_risk / per_unit_stop_risk)
 margin_qty = floor_to_step(
-    action_time_margin_remaining * selected_leverage / entry_reference_price
+    action_time_margin_remaining * selected_leverage
+    / (entry_reference_price * contract_multiplier)
 )
 intended_qty = min(risk_qty, margin_qty)
 ```

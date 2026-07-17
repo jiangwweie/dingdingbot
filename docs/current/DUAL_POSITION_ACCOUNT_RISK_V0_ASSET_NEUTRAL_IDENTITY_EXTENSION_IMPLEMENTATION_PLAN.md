@@ -1,25 +1,31 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN
-status: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
+status: SUPERSEDED_BY_UNIFIED_REMEDIATION_PLAN
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md
 last_verified: 2026-07-17
-deployment_state: LOCAL_ONLY_NO_DEPLOY
+deployment_state: NOT_AUTHORIZED
 checkpoint_d2_commit: abe8d300
-integration_state: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
+integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-migration_head: 133_LOCAL_ONLY
+current_migration_head: 133_LOCAL_ONLY
+planned_migration_head: 136
+superseded_by: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 ---
 
 # Dual-Position Account Risk V0 Asset-Neutral Identity Extension Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: use
-> `superpowers:executing-plans` and execute inline in this isolated worktree.
-> Repository policy and the current task prohibit subagent implementation.
-> Every production change follows failing test -> minimal implementation ->
-> focused regression -> local commit.
+> **执行状态覆盖：**本文保留资产中立扩展的原始任务和历史组件证据，不再作为
+> 当前执行入口。后续实施必须使用统一 remediation 计划 T01-T12；不得从本文未勾选
+> 项继续，也不得把下方绿色结果解释为 release-ready。
+
+> **新增执行覆盖：**统一计划已经明确 Claim/Ticket/Canary/Runtime Safety 的 V1/V2
+> hash 兼容、migration 136 的 exact current/referenced target preflight、确定性 current
+> V1-to-V2 Rule clone/semantic hash、历史 referenced V1 不可变、
+> `linear_quote_settled` Binance USD-M predicate 与 downgrade abort。本文旧 Task 编号、
+> migration 126-133 说明和历史 round-trip 结果只作 provenance，不得用于实施 134-136。
 
 **Goal:** Extend the existing Dual-Position Account Risk V0 mainline so exact
 instrument identity, versioned rules, immutable capacity claim, exposure episode,
@@ -37,7 +43,10 @@ without retaining full raw bodies. Ticket remains the sole business lifecycle ow
 **Tech Stack:** Python 3, Pydantic v2, `decimal.Decimal`, SQLAlchemy, Alembic,
 PostgreSQL, `ijson>=3.5.1,<4.0.0`, pytest.
 
-## Local Completion Evidence
+## Historical Component Evidence (Superseded 2026-07-17)
+
+**深度审查结论为 NO-GO，方案 B 已确认但 remediation 尚未开始。** 下表只记录原
+fixture/组件覆盖，不证明真实生产因果链、恢复和部署身份已经闭合。
 
 | Gate | Result | Evidence meaning |
 | --- | ---: | --- |
@@ -141,14 +150,14 @@ Candidate Scope
 -> Action-Time Ticket
 -> FinalGate
 
-local_state_before:
-dual-position risk remediation implemented
+historical_component_state_before_supersession:
+original dual-position component implementation present
 + symbol-derived instrument paths still exist
 + capacity claim lacks asset-neutral identity and episode lineage
 + Budget projector materializes account history before Python filtering
 + full-account HTTP collector retains unbounded raw responses
 
-local_state_after:
+historical_component_state_after_supersession:
 exact-instrument asset-neutral claim is locally certified
 + two-position risk calculations unchanged
 + Budget hot path cost follows current active facts, not terminal history
@@ -1709,9 +1718,9 @@ do not weaken or skip account-risk gates to make the suite green.
 
 - [x] **Step 9: Update documents with observed evidence only**
 
-Change design/plan status to local implementation complete only after all required
-commands actually pass. Record exact commit, test counts, PostgreSQL non-skip proof,
-file-I/O audit and Action-Time timing. Do not claim deployed or live-enabled.
+This historical step changed the component documents after the then-required commands passed.
+It is no longer a valid status transition. Unified remediation plan T12 now owns the next
+status change and requires the new production-shape gates before any local certification.
 
 - [x] **Step 10: Commit checkpoint D2**
 
