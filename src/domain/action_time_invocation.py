@@ -24,6 +24,9 @@ class ActionTimeInvocation(BaseModel):
     opened_at_ms: int = Field(ge=0)
     expires_at_ms: int = Field(gt=0)
     account_safe_fact_snapshot_id: str | None = Field(default=None, max_length=256)
+    account_capacity_base_fact_snapshot_id: str | None = Field(
+        default=None, max_length=256
+    )
     account_mode_fact_snapshot_id: str | None = Field(default=None, max_length=256)
     action_time_fact_snapshot_id: str | None = Field(default=None, max_length=256)
     ticket_id: str | None = Field(default=None, max_length=192)
@@ -35,6 +38,11 @@ class ActionTimeInvocation(BaseModel):
             raise ValueError("action_time_invocation_deadline_not_after_opening")
         if self.closed_at_ms is not None and self.closed_at_ms < self.opened_at_ms:
             raise ValueError("action_time_invocation_close_before_opening")
+        if (
+            self.account_safe_fact_snapshot_id is not None
+            and self.account_capacity_base_fact_snapshot_id is not None
+        ):
+            raise ValueError("action_time_invocation_account_fact_pair_ambiguous")
         return self
 
 

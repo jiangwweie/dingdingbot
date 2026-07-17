@@ -71,6 +71,7 @@ def start_action_time_invocation(
         "opened_at_ms": normalized_opened_at_ms,
         "expires_at_ms": int(signal_row["expires_at_ms"]),
         "account_safe_fact_snapshot_id": None,
+        "account_capacity_base_fact_snapshot_id": None,
         "account_mode_fact_snapshot_id": None,
         "action_time_fact_snapshot_id": None,
         "ticket_id": None,
@@ -119,6 +120,7 @@ def bind_action_time_invocation_fact_refs(
     action_time_invocation_id: str,
     stage_at_ms: int,
     account_safe_fact_snapshot_id: str | None = None,
+    account_capacity_base_fact_snapshot_id: str | None = None,
     account_mode_fact_snapshot_id: str | None = None,
     action_time_fact_snapshot_id: str | None = None,
 ) -> ActionTimeInvocation:
@@ -138,6 +140,10 @@ def bind_action_time_invocation_fact_refs(
         "account_safe_fact_snapshot_id": (
             account_safe_fact_snapshot_id,
             "account_safe",
+        ),
+        "account_capacity_base_fact_snapshot_id": (
+            account_capacity_base_fact_snapshot_id,
+            "account_capacity_base",
         ),
         "account_mode_fact_snapshot_id": (
             account_mode_fact_snapshot_id,
@@ -169,6 +175,17 @@ def bind_action_time_invocation_fact_refs(
 
     if not updates:
         return invocation
+    selected_legacy = updates.get(
+        "account_safe_fact_snapshot_id", invocation.account_safe_fact_snapshot_id
+    )
+    selected_capacity = updates.get(
+        "account_capacity_base_fact_snapshot_id",
+        invocation.account_capacity_base_fact_snapshot_id,
+    )
+    if selected_legacy is not None and selected_capacity is not None:
+        raise ActionTimeInvocationBlocked(
+            "action_time_invocation_account_fact_pair_ambiguous"
+        )
     invocation_table = _table(conn, INVOCATION_TABLE)
     conn.execute(
         invocation_table.update()
@@ -445,6 +462,9 @@ def _invocation_from_row(row: dict[str, Any]) -> ActionTimeInvocation:
             expires_at_ms=int(row.get("expires_at_ms") or 0),
             account_safe_fact_snapshot_id=_optional_text(
                 row.get("account_safe_fact_snapshot_id")
+            ),
+            account_capacity_base_fact_snapshot_id=_optional_text(
+                row.get("account_capacity_base_fact_snapshot_id")
             ),
             account_mode_fact_snapshot_id=_optional_text(
                 row.get("account_mode_fact_snapshot_id")

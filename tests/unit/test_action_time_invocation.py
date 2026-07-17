@@ -31,6 +31,10 @@ MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
 )
+MIGRATION_134_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-17-134_repair_account_risk_current_authority.py"
+)
 
 
 def _migration():
@@ -53,6 +57,18 @@ def invocation_pg_control_connection(pg_control_connection):
         migration.upgrade()
     finally:
         migration.op = old_op
+    spec = importlib.util.spec_from_file_location(
+        "migration_134_action_time_invocation", MIGRATION_134_PATH
+    )
+    assert spec is not None and spec.loader is not None
+    migration_134 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration_134)
+    old_op = migration_134.op
+    migration_134.op = Operations(MigrationContext.configure(pg_control_connection))
+    try:
+        migration_134.upgrade()
+    finally:
+        migration_134.op = old_op
     return pg_control_connection
 
 

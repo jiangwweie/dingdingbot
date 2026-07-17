@@ -13,6 +13,7 @@ from alembic.runtime.migration import MigrationContext
 ROOT = Path(__file__).resolve().parents[2]
 FOUNDATION = ROOT / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 COMMANDS = ROOT / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
+INVOCATION = ROOT / "migrations/versions/2026-07-13-119_action_time_invocation_consistency.py"
 ACCOUNT_POLICY = ROOT / "migrations/versions/2026-07-17-126_create_account_risk_policy.py"
 ACCOUNT_CURRENT = ROOT / "migrations/versions/2026-07-17-127_create_account_risk_current_projections.py"
 ACCOUNT_RESERVATION_SCOPE = (
@@ -24,6 +25,10 @@ ACCOUNT_CLAIM_POLICY_EVENT = (
 EXPAND = ROOT / "migrations/versions/2026-07-17-131_expand_asset_neutral_account_risk_identity.py"
 BACKFILL = ROOT / "migrations/versions/2026-07-17-132_backfill_asset_neutral_account_risk_identity.py"
 ENFORCE = ROOT / "migrations/versions/2026-07-17-133_enforce_asset_neutral_account_risk_identity.py"
+CAPACITY_FACT_AUTHORITY = (
+    ROOT
+    / "migrations/versions/2026-07-17-134_repair_account_risk_current_authority.py"
+)
 
 
 def _load(path: Path, name: str):
@@ -45,6 +50,16 @@ def _upgrade(conn: sa.Connection, path: Path, name: str) -> None:
         module.op = old_op
 
 
+def _downgrade(conn: sa.Connection, path: Path, name: str) -> None:
+    module = _load(path, name)
+    old_op = module.op
+    module.op = Operations(MigrationContext.configure(conn))
+    try:
+        module.downgrade()
+    finally:
+        module.op = old_op
+
+
 def _upgrade_to_125(conn: sa.Connection) -> None:
     _upgrade(conn, FOUNDATION, "migration_086_asset_neutral")
     _upgrade(conn, COMMANDS, "migration_105_asset_neutral")
@@ -61,6 +76,58 @@ def _upgrade_to_126(conn: sa.Connection) -> None:
 
 def _columns(conn: sa.Connection, table_name: str) -> set[str]:
     return {column["name"] for column in sa.inspect(conn).get_columns(table_name)}
+
+
+def test_migration_134_adds_capacity_fact_references_and_v2_runtime_safety_columns() -> None:
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        _upgrade_to_126(conn)
+        _upgrade(conn, INVOCATION, "migration_119_capacity_fact_authority")
+        _upgrade(conn, ENFORCE, "migration_133_capacity_fact_authority")
+        _upgrade(conn, CAPACITY_FACT_AUTHORITY, "migration_134_capacity_fact_authority")
+
+        invocation_columns = _columns(conn, "brc_action_time_invocations")
+        lane_columns = _columns(conn, "brc_action_time_lane_inputs")
+        ticket_columns = _columns(conn, "brc_action_time_tickets")
+        runtime_safety_columns = _columns(conn, "brc_runtime_safety_state_snapshots")
+
+    assert "account_capacity_base_fact_snapshot_id" in invocation_columns
+    assert "account_capacity_base_fact_snapshot_id" in lane_columns
+    assert "account_capacity_base_fact_snapshot_id" in ticket_columns
+    assert {
+        "trusted_fact_refs_schema_version",
+        "account_capacity_fact_surface",
+        "account_capacity_fact_snapshot_id",
+    } <= runtime_safety_columns
+
+
+def test_migration_134_downgrade_aborts_before_ddl_when_v2_history_exists() -> None:
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        _upgrade_to_126(conn)
+        _upgrade(conn, INVOCATION, "migration_119_capacity_fact_downgrade")
+        _upgrade(conn, ENFORCE, "migration_133_capacity_fact_downgrade")
+        _upgrade(conn, CAPACITY_FACT_AUTHORITY, "migration_134_capacity_fact_downgrade")
+        conn.execute(
+            sa.text(
+                "INSERT INTO brc_runtime_safety_state_snapshots "
+                "(runtime_safety_snapshot_id, strategy_group_id, safety_state, "
+                "submit_allowed, finalgate_ready, operation_layer_ready, "
+                "protection_ready, active_position_conflict, facts_fresh, "
+                "trusted_fact_refs_complete, observed_at_ms, created_at_ms, "
+                "authority_boundary, trusted_fact_refs_schema_version) "
+                "VALUES ('v2-history', 'group', 'blocked_safety', false, false, "
+                "false, false, true, false, false, 1, 1, 'unit', "
+                "'runtime_safety_trusted_refs.v2')"
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="capacity_fact_history_not_legacy_compatible"):
+            _downgrade(conn, CAPACITY_FACT_AUTHORITY, "migration_134_capacity_fact_downgrade")
+
+        assert "account_capacity_fact_snapshot_id" in _columns(
+            conn, "brc_runtime_safety_state_snapshots"
+        )
 
 
 def _create_terminal_capacity_repair_tables(conn: sa.Connection) -> None:
