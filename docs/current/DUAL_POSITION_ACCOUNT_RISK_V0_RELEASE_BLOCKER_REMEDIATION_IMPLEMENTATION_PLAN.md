@@ -4,7 +4,7 @@ status: REMEDIATION_IN_PROGRESS_NO_GO
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
 last_verified: 2026-07-17
-implementation_state: T01_T10_IMPLEMENTED_T11_PARTIALLY_CERTIFIED
+implementation_state: T01_T10_IMPLEMENTED_T11_BLOCKED_RUNTIME_LOCK_GATE
 integration_state: LOCAL_REMEDIATION_IN_PROGRESS_NO_GO
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
@@ -45,8 +45,12 @@ Tokyo immutable-release state machine.
 
 ### 1.1 Current authorization
 
-**本计划已完成 T01-T10 实施，T11 正在本地认证且尚未通过全量门禁。** 批准范围仍仅为
-本地修复与本地认证。以下事项仍在本计划之外：
+**本计划已完成 T01-T10；T11 的 PostgreSQL、消费者、部署、审计与完整仓库回归均已通过，
+但 clean Linux/amd64 CPython 3.10 hash-lock 安装因外部下载超时未通过。** 两次只读
+`docker run --rm` 尝试均在 `pip install --require-hashes` 下载阶段失败：一次为包索引截断
+JSON，一次为 `files.pythonhosted.org` `ReadTimeoutError`；未到项目导入或 `pip check`。因此
+本计划仍为 **`REMEDIATION_IN_PROGRESS_NO_GO`**，不允许以手改 hash、复制其他 worktree lock
+或跳过门禁替代。批准范围仍仅为本地修复与本地认证。以下事项仍在本计划之外：
 
 - push or pull-request publication;
 - Tokyo staging, deploy or service mutation;
@@ -1753,6 +1757,26 @@ entry points, and independent review has no open required finding.
 
 **Hard Stop:** any test requires production secrets, network access, exchange writes or local
 runtime file authority.
+
+### 14.4 Current T11 evidence and first blocker
+
+**Verified local evidence on the remediation branch:**
+
+- one-shell disposable PostgreSQL, fail-on-skip certification: **33 passed**;
+- capacity-fact consumer, runner, recovery and direct invariant matrix: **489 passed** with
+  no skip or xfail accepted;
+- deploy state-machine, release identity and writer-fence matrix: **77 passed**;
+- frozen-migration, output scope, runtime-file-authority, current-doc and production file-I/O
+  audits: passed, with `performance_risk.status=clear` and no suspicious runtime file authority;
+- full repository suite in disposable PostgreSQL: **3617 passed, 1 skipped**. The skipped case
+  is permitted only for the broad suite and is not evidence for any required no-skip gate.
+
+**First blocker:** the clean Linux/amd64 CPython 3.10 hash-lock install/import gate is not
+certified. Two independent read-only Docker attempts failed while fetching public dependencies:
+one package-index JSON was truncated and one `files.pythonhosted.org` download timed out. Both
+failed before hash verification completed, before project imports, and before `pip check`.
+Per T10/T11, keep the branch `NO_GO`; do not edit lock hashes or substitute any other worktree's
+lock. No server, production database, policy, credential or exchange state was touched.
 
 ## 15. T12 — Close Current Documentation Authority
 
