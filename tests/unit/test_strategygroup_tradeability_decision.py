@@ -2619,9 +2619,17 @@ def _attach_verified_sor_chain(control_state: dict, *, now_ms: int) -> None:
         valid_until_ms=now_ms + 60_000,
         lane_id=lane_id,
     )
+    snapshot.update(
+        {
+            "trusted_fact_refs_schema_version": "runtime_safety_trusted_refs.v2",
+            "account_capacity_fact_surface": "account_capacity_base",
+            "account_capacity_fact_snapshot_id": "fact:account-capacity:verified",
+        }
+    )
     snapshot["trusted_fact_refs"] = {
         "ticket_id": ticket_id,
         "ticket_hash": "ticket-hash:verified",
+        "ticket_hash_schema_version": "action_time_ticket_hash.v2",
         "finalgate_pass_id": "finalgate-pass:verified",
         "signal_event_id": signal_id,
         "operation_layer_handoff_id": handoff_id,
@@ -2630,7 +2638,8 @@ def _attach_verified_sor_chain(control_state: dict, *, now_ms: int) -> None:
         "protection_ref_id": "protection:verified",
         "public_fact_snapshot_id": "fact:public:verified",
         "action_time_fact_snapshot_id": "fact:action-time:verified",
-        "account_safe_fact_snapshot_id": "fact:account-safe:verified",
+        "account_capacity_fact_surface": "account_capacity_base",
+        "account_capacity_fact_snapshot_id": "fact:account-capacity:verified",
         "account_mode_snapshot_id": "fact:account-mode:verified",
     }
     control_state["runtime_safety_state"].append(snapshot)
@@ -2692,7 +2701,7 @@ def _attach_verified_sor_chain(control_state: dict, *, now_ms: int) -> None:
             "protection_ref_id": "protection:verified",
             "public_fact_snapshot_id": "fact:public:verified",
             "action_time_fact_snapshot_id": "fact:action-time:verified",
-            "account_safe_fact_snapshot_id": "fact:account-safe:verified",
+            "account_capacity_base_fact_snapshot_id": "fact:account-capacity:verified",
             "account_mode_snapshot_id": "fact:account-mode:verified",
         }
     )
