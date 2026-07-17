@@ -51,6 +51,15 @@ def upgrade() -> None:
             column_name,
             column_type,
         )
+    if sa.inspect(bind).has_table("brc_runtime_safety_state_snapshots"):
+        bind.execute(
+            sa.text(
+                "UPDATE brc_runtime_safety_state_snapshots "
+                "SET trusted_fact_refs_schema_version = "
+                "'runtime_safety_trusted_refs.v1' "
+                "WHERE trusted_fact_refs_schema_version IS NULL"
+            )
+        )
     _create_index_if_missing(
         bind,
         "brc_action_time_invocations",

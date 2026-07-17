@@ -65,7 +65,6 @@ FORBIDDEN_EFFECTS = {
 FACT_REF_KEYS = (
     "public_fact_snapshot_id",
     "action_time_fact_snapshot_id",
-    "account_safe_fact_snapshot_id",
     "account_mode_snapshot_id",
 )
 
@@ -309,6 +308,10 @@ def _snapshot_row(
         "signal_event_id",
         ticket.get("signal_event_id"),
     )
+    account_fact_surface, account_fact_snapshot_id = _ticket_account_fact_pair(
+        ticket,
+        blockers=blockers,
+    )
     facts = {
         key: _row_by_id(
             control_state,
@@ -318,6 +321,12 @@ def _snapshot_row(
         )
         for key in FACT_REF_KEYS
     }
+    facts["account_capacity_fact_snapshot_id"] = _row_by_id(
+        control_state,
+        "runtime_fact_snapshots",
+        "fact_snapshot_id",
+        account_fact_snapshot_id,
+    )
 
     blockers.extend(_ticket_blockers(control_state, ticket=ticket, now_ms=now_ms))
     blockers.extend(_handoff_blockers(ticket=ticket, handoff=handoff))
@@ -360,14 +369,10 @@ def _snapshot_row(
         facts=facts,
         now_ms=now_ms,
     )
-    if active_capacity_policy and not capacity_blockers:
-        fact_blockers, facts_fresh, active_position_conflict = (
-            _relax_legacy_account_position_fact_gate(
-                facts=facts,
-                blockers=fact_blockers,
-                now_ms=now_ms,
-            )
-        )
+    if active_capacity_policy and not capacity_blockers and account_fact_surface != "account_capacity_base":
+        fact_blockers.append("account_capacity_fact_surface_required")
+        facts_fresh = False
+        active_position_conflict = True
     blockers.extend(fact_blockers)
     trusted_fact_refs = _trusted_fact_refs(
         ticket=ticket,
@@ -376,6 +381,7 @@ def _snapshot_row(
         protection=protection,
         budget=budget,
         facts=facts,
+        account_fact_surface=account_fact_surface,
     )
     trusted_fact_refs_complete = all(
         bool(trusted_fact_refs.get(key))
@@ -389,6 +395,8 @@ def _snapshot_row(
             "budget_reservation_id",
             "protection_ref_id",
             *FACT_REF_KEYS,
+            "account_capacity_fact_surface",
+            "account_capacity_fact_snapshot_id",
         )
     )
     if not trusted_fact_refs_complete:
@@ -443,6 +451,9 @@ def _snapshot_row(
         "active_position_conflict": active_position_conflict,
         "facts_fresh": facts_fresh,
         "trusted_fact_refs_complete": trusted_fact_refs_complete,
+        "trusted_fact_refs_schema_version": "runtime_safety_trusted_refs.v2",
+        "account_capacity_fact_surface": account_fact_surface,
+        "account_capacity_fact_snapshot_id": account_fact_snapshot_id,
         "blockers": blockers,
         "trusted_fact_refs": trusted_fact_refs,
         "observed_at_ms": now_ms,
@@ -653,14 +664,21 @@ def _fact_blockers(
         if int(fact.get("valid_until_ms") or 0) <= now_ms:
             blockers.append(f"{key}_expired")
             facts_fresh = False
-    account_values = _as_dict(facts.get("account_safe_fact_snapshot_id", {}).get("fact_values"))
-    if account_values.get("account_safe") is not True:
-        blockers.append("account_safe_fact_not_true")
-    if account_values.get("open_orders_clear") is not True:
-        blockers.append("open_orders_not_clear")
-    if account_values.get("active_position_or_open_order_clear") is not True:
-        active_position_conflict = True
-        blockers.append("active_position_or_open_order_conflict")
+    account_values = _as_dict(
+        facts.get("account_capacity_fact_snapshot_id", {}).get("fact_values")
+    )
+    if account_values.get("schema_version") == "account_capacity_base.v1":
+        if account_values.get("snapshot_complete") is not True or account_values.get("can_trade") is not True:
+            blockers.append("account_capacity_base_fact_not_safe")
+            active_position_conflict = True
+    else:
+        if account_values.get("account_safe") is not True:
+            blockers.append("account_safe_fact_not_true")
+        if account_values.get("open_orders_clear") is not True:
+            blockers.append("open_orders_not_clear")
+        if account_values.get("active_position_or_open_order_clear") is not True:
+            active_position_conflict = True
+            blockers.append("active_position_or_open_order_conflict")
     return blockers, facts_fresh and not blockers, active_position_conflict
 
 
@@ -729,6 +747,7 @@ def _trusted_fact_refs(
     protection: dict[str, Any],
     budget: dict[str, Any],
     facts: dict[str, dict[str, Any]],
+    account_fact_surface: str,
 ) -> dict[str, Any]:
     finalgate_pass_id = _as_dict(handoff.get("command_plan")).get("finalgate_pass_id")
     return {
@@ -740,11 +759,34 @@ def _trusted_fact_refs(
         "signal_event_id": signal.get("signal_event_id"),
         "budget_reservation_id": budget.get("budget_reservation_id"),
         "protection_ref_id": protection.get("protection_ref_id"),
+        "account_capacity_fact_surface": account_fact_surface,
+        "account_capacity_fact_snapshot_id": facts.get(
+            "account_capacity_fact_snapshot_id", {}
+        ).get("fact_snapshot_id"),
         **{
             key: facts.get(key, {}).get("fact_snapshot_id")
             for key in FACT_REF_KEYS
         },
     }
+
+
+def _ticket_account_fact_pair(
+    ticket: dict[str, Any],
+    *,
+    blockers: list[str],
+) -> tuple[str, str]:
+    legacy_fact_id = str(ticket.get("account_safe_fact_snapshot_id") or "").strip()
+    capacity_fact_id = str(
+        ticket.get("account_capacity_base_fact_snapshot_id") or ""
+    ).strip()
+    if bool(legacy_fact_id) == bool(capacity_fact_id):
+        blockers.append("action_time_ticket_account_fact_pair_invalid")
+        return "account_safe", ""
+    return (
+        ("account_capacity_base", capacity_fact_id)
+        if capacity_fact_id
+        else ("account_safe", legacy_fact_id)
+    )
 
 
 def _latest_finalgate_pass_id(control_state: dict[str, Any], ticket_id: str) -> str:
@@ -793,6 +835,11 @@ def _upsert_row(
         **row,
         "blockers": row["blockers"],
         "trusted_fact_refs": row["trusted_fact_refs"],
+    }
+    values = {
+        column.name: values[column.name]
+        for column in table.columns
+        if column.name in values
     }
     if existing is None:
         conn.execute(table.insert().values(**values))

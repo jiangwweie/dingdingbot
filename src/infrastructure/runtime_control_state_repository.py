@@ -2824,6 +2824,8 @@ def runtime_safety_submit_authorized(row: dict[str, Any]) -> bool:
     ``tradable_now`` or any equivalent Owner-facing state.
     """
 
+    if row.get("trusted_fact_refs_schema_version") != "runtime_safety_trusted_refs.v2":
+        return False
     blockers = row.get("blockers")
     blockers_clear = isinstance(blockers, list) and not blockers
     trusted_refs = row.get("trusted_fact_refs")
@@ -2838,7 +2840,8 @@ def runtime_safety_submit_authorized(row: dict[str, Any]) -> bool:
         "protection_ref_id",
         "public_fact_snapshot_id",
         "action_time_fact_snapshot_id",
-        "account_safe_fact_snapshot_id",
+        "account_capacity_fact_surface",
+        "account_capacity_fact_snapshot_id",
         "account_mode_snapshot_id",
     )
     trusted_refs_concrete = isinstance(trusted_refs, dict) and all(
