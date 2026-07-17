@@ -488,25 +488,13 @@ def evaluate_exit_policy(value: ExitEvaluationInput) -> ExitDecision:
                 close_qty=value.position_qty,
             )
 
-    if value.tp1_completion_state == "complete":
-        if value.immediate_runner_floor is None:
-            return _blocked("runner_break_even_floor_missing", source_watermark)
-        minimum_ticks = (
-            value.policy.post_tp1_floor_rule.minimum_improvement_ticks
-            if value.policy.post_tp1_floor_rule is not None
-            else 1
-        )
-        return _stop_decision(
-            value=value,
-            proposed=value.immediate_runner_floor,
-            minimum_improvement_ticks=minimum_ticks,
-            reason_code="tp1_completion_runner_floor",
-            source_watermark=source_watermark,
-        )
-
     if fact is None:
+        if value.tp1_completion_state == "complete":
+            return _floor_only_decision(value, source_watermark)
         return _decision(ExitDecisionKind.NOOP, "no_due_market_fact", source_watermark)
     if not fact.is_final_closed_candle:
+        if value.tp1_completion_state == "complete":
+            return _floor_only_decision(value, source_watermark)
         return _decision(ExitDecisionKind.NOOP, "open_candle_ignored", source_watermark)
     if isinstance(value.policy.runner_rule, StructuralAtrRunnerRule):
         candidate = fact.structural_stop_candidate
@@ -521,12 +509,42 @@ def evaluate_exit_policy(value: ExitEvaluationInput) -> ExitDecision:
         minimum_ticks = 1
         reason_code = "runner_candidate_absent"
     if candidate is None:
+        if value.tp1_completion_state == "complete":
+            return _floor_only_decision(value, source_watermark)
         return _decision(ExitDecisionKind.NOOP, "runner_candidate_absent", source_watermark)
+    if value.tp1_completion_state == "complete":
+        if value.immediate_runner_floor is None:
+            return _blocked("runner_break_even_floor_missing", source_watermark)
+        candidate = (
+            max(candidate, value.immediate_runner_floor)
+            if value.side == "long"
+            else min(candidate, value.immediate_runner_floor)
+        )
     return _stop_decision(
         value=value,
         proposed=candidate,
         minimum_improvement_ticks=minimum_ticks,
         reason_code=reason_code,
+        source_watermark=source_watermark,
+    )
+
+
+def _floor_only_decision(
+    value: ExitEvaluationInput,
+    source_watermark: int,
+) -> ExitDecision:
+    if value.immediate_runner_floor is None:
+        return _blocked("runner_break_even_floor_missing", source_watermark)
+    minimum_ticks = (
+        value.policy.post_tp1_floor_rule.minimum_improvement_ticks
+        if value.policy.post_tp1_floor_rule is not None
+        else 1
+    )
+    return _stop_decision(
+        value=value,
+        proposed=value.immediate_runner_floor,
+        minimum_improvement_ticks=minimum_ticks,
+        reason_code="tp1_completion_runner_floor",
         source_watermark=source_watermark,
     )
 
