@@ -47,6 +47,7 @@ CONTROL_STATE_TABLES: dict[str, str] = {
     "candidate_scope": "brc_strategy_group_candidate_scope",
     "candidate_scope_event_bindings": "brc_candidate_scope_event_bindings",
     "runtime_scope_bindings": "brc_runtime_scope_bindings",
+    "strategy_runtime_instances": "strategy_runtime_instances",
     "symbols": "brc_symbols",
     "exchange_instruments": "brc_exchange_instruments",
     "symbol_instrument_mappings": "brc_symbol_instrument_mappings",
@@ -87,6 +88,10 @@ CONTROL_STATE_TABLES: dict[str, str] = {
 }
 
 OPTIONAL_CONTROL_STATE_TABLES = {
+    # Runtime instances predate the PG control-state foundation in several
+    # historical/unit fixtures.  A production schema that has the table must
+    # expose it to monitor/current readers; an older fixture may omit it.
+    "strategy_runtime_instances",
     "allocation_decisions",
     "runtime_process_outcomes",
     "strategy_semantic_admissions",
