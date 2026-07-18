@@ -9,7 +9,7 @@ implementation_state: T01_T12_COMPLETE_LOCAL_ONLY
 integration_state: LOCAL_REMEDIATION_CERTIFICATION_REOPENED
 component_certification: T01_T12_EVIDENCE_RETAINED
 release_gate_blocker: docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md
-certified_source_commit: 1a88a88d416880a76cc58635a83ce9301734cc31
+certified_source_commit: f8a930a2aeaadd4e7f2fbaa23eec5cebea37752e
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
@@ -49,6 +49,14 @@ writer unit 均处于关闭状态。失败发生在 migration 133 的 Ticket–R
    原子替换 marker；不存在 marker 缺失窗口。
 5. 新事务继承旧 journal `production_writers_fenced.unit_prepolicy`，不得从已隔离主机重新
    捕获恢复策略。
+
+**继任后的新增发现：** migration 134 的 V1 preflight 将终态 Ticket 的后续生命周期投影
+字段变化误判为 V1 身份损坏。东京只读审计证明 **56/56** 不匹配 Ticket 均为 `expired` 或
+`closed`，且无非终态记录；原 hash 不可安全重算。（来源：东京 PG read-only query，
+2026-07-18）修复 `f8a930a2aeaadd4e7f2fbaa23eec5cebea37752e` 保留原 hash，并只将该
+精确类别标记为 **`action_time_ticket_hash.legacy_terminal_unverifiable`**。该标签不是
+V1/V2 权威，不能进入 FinalGate、Operation Layer 或任何新的执行路径；任意非终态不匹配
+仍以 `ticket_hash_v1_preflight_invalid` 失败关闭。
 
 任何条件不满足均保持 fence，并以 fail-closed 错误退出。成功继任后仍须重跑候选迁移、
 22-lane readonly canary、PG/current projection、认证与 activation commit；只有完整

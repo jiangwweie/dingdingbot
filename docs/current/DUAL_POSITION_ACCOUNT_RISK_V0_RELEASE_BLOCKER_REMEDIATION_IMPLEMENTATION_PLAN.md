@@ -8,7 +8,7 @@ implementation_state: T01_T12_COMPLETE_LOCAL_ONLY
 integration_state: LOCAL_REMEDIATION_CERTIFICATION_REOPENED
 component_certification: T01_T12_EVIDENCE_RETAINED
 release_gate_blocker: docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md
-certified_source_commit: 1a88a88d416880a76cc58635a83ce9301734cc31
+certified_source_commit: f8a930a2aeaadd4e7f2fbaa23eec5cebea37752e
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
@@ -50,14 +50,14 @@ Tokyo immutable-release state machine.
 
 ### 1.1.1 Controlled forward-fix runbook — 2026-07-18
 
-**前置条件：** 只接受事务
-`eea8f1bc1bf44a599ebd8098040ebdc4` 与 nonce
-`99950f53dff8c45a517dfe2f1cad09ee7e101a39d7f2b7ddec31ecd3b67fe5ae` 的继任；旧
-schema 必须仍是 **125**，旧运行头必须仍是
-**`6aad77ea4c67609ceed9b545d392de4ff1eaab3b`**。（来源：东京部署 journal 与只读
-PG 审计，2026-07-18）
+**当前前置条件：** 第一继任事务
+`c7d7f9897b6e48c7a4c4aa94245a4e4a` 与 nonce
+`377b38a726e28cfd3c2690f00fa2427b2fb2a00e9af9b775149a060d7426c7bf`
+已原子接管旧 fence，但 migration 134 在 schema **125** 失败；其 journal、marker、
+旧运行头 **`6aad77ea4c67609ceed9b545d392de4ff1eaab3b`** 和所有 inactive writer unit 是下一
+继任的唯一输入。（来源：东京部署 journal、systemd 与 PG read-only audit，2026-07-18）
 
-1. 推送精确提交 **`1a88a88d416880a76cc58635a83ce9301734cc31`**，并以新的 transaction ID、
+1. 推送精确提交 **`f8a930a2aeaadd4e7f2fbaa23eec5cebea37752e`**，并以新的 transaction ID、
    nonce、release name 启动单个远端状态机。
 2. 通过 `--predecessor-transaction-id` 与 `--predecessor-deploy-nonce` 显式绑定旧
    事务；状态机在写新 marker 前执行 marker/journal/pointer/manifest/revision/unit/capability
@@ -65,7 +65,10 @@ PG 审计，2026-07-18）
 3. migration 132 只修补 `released`、`expired` 或 `invalidated` Reservation 的空
    `ticket_id`，且只能取其唯一关联 Ticket；任何非终态、缺失或冲突关系均以
    `asset_neutral_ticket_reservation_lineage_unresolved` 失败关闭。
-4. 迁移完成后完成既有 readonly canary、当前投影、生命周期证明与 activation commit；
+4. migration 134 保留终态 `expired`/`closed` Ticket 的原 hash，并把无法以当前行复算的
+   历史快照标记为 `legacy_terminal_unverifiable`；它们不获得 V1/V2 运行时权威。任意
+   非终态 hash mismatch 仍停止迁移。
+5. 迁移完成后完成既有 readonly canary、当前投影、生命周期证明与 activation commit；
    禁止主动创建订单、调用交易所写接口、修改凭证、资金划转或扩大策略/资金范围。
 5. 远端验收只读取 PG、journal、systemd 和 monitor：确认 schema **136**、22 lane
    canary 成功、当前 watcher coverage 新鲜，并确认 `exchange_write_called=false`。
