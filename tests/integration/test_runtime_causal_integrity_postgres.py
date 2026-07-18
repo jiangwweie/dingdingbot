@@ -44,8 +44,15 @@ from src.application.readmodels.lifecycle_mutation_enablement_proof import (
 from src.application.runtime_process_outcome import (
     materialize_runtime_process_outcome,
 )
+from src.application.runtime_signal_forensics import (
+    RuntimeSignalForensicsQuery,
+    reduce_runtime_signal_forensics,
+)
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
+)
+from src.infrastructure.runtime_signal_forensics_repository import (
+    PgRuntimeSignalForensicsRepository,
 )
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
@@ -150,6 +157,52 @@ def test_rci_exit_policy_canary_is_exactly_scoped_and_enabled(
             ),
         }
     ]
+
+
+def test_rci_forensics_v2_uses_persisted_invocation_process_blocker_before_promotion_gap(
+    postgres_certification_engine,
+):
+    signal_event_id = "signal:SOR-001:BTCUSDT:long:unit"
+    with postgres_certification_engine.begin() as conn:
+        _insert_ready_fresh_signal(conn, "SOR-001", "BTCUSDT", "long")
+        invocation = start_action_time_invocation(
+            conn,
+            signal_event_id=signal_event_id,
+            opened_at_ms=NOW_MS,
+        )
+        materialize_runtime_process_outcome(
+            conn,
+            process_name="action_time_fact_snapshots",
+            scope_key=None,
+            run_id="rci-forensics-v2",
+            result_status="action_time_fact_snapshots_blocked",
+            blockers=["active_position_clear"],
+            started_at_ms=NOW_MS,
+            completed_at_ms=NOW_MS + 1,
+            runtime_head="rci-forensics-v2",
+            source_watermark=invocation.source_watermark,
+            lane_identity=invocation.lane_identity,
+            action_time_invocation_id=invocation.action_time_invocation_id,
+        )
+
+    query = RuntimeSignalForensicsQuery(
+        start_ms=NOW_MS - 60_000,
+        end_ms=NOW_MS + 60_000,
+        strategy_group_id="SOR-001",
+        symbol="BTCUSDT",
+        side="long",
+    )
+    with postgres_certification_engine.connect() as conn:
+        rows = PgRuntimeSignalForensicsRepository(conn).query(query)
+    result = reduce_runtime_signal_forensics(query, rows)
+
+    finding = result.findings[0]
+    assert result.schema_name == "brc.runtime_signal_forensics.v2"
+    assert finding.action_time_invocation_id == invocation.action_time_invocation_id
+    assert finding.process_name == "action_time_fact_snapshots"
+    assert finding.process_state == "business_blocked"
+    assert finding.first_blocker == "active_position_clear"
+    assert finding.classification == "runtime_business_blocked"
 
 
 def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:

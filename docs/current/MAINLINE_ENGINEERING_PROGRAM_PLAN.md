@@ -2,8 +2,9 @@
 title: MAINLINE_ENGINEERING_PROGRAM_PLAN
 status: CURRENT_PROGRAM_PLAN
 authority: docs/current/MAINLINE_ENGINEERING_PROGRAM_PLAN.md
-last_verified: 2026-07-14
+last_verified: 2026-07-18
 dual_position_status_verified: 2026-07-17
+runtime_observation_truth_status_verified: 2026-07-18
 ---
 
 # Mainline Engineering Program Plan
@@ -82,7 +83,8 @@ repo MD/JSON/output/report files.
 | **P1 Risk Reservation v0** | P1 | Require ticket-level stop-risk estimate and budget reservation before FinalGate-ready state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Consumer calculation is deployed; closure now requires RT-1 to prove the production price/quantity producer chain and a positive reservation before Ticket creation |
 | **P1-C Owner Explanation Read Model** | P1 | Make no-trade, signal, ticket, submit, runner, and closure states human-readable | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, `RUNTIME_TERMINOLOGY_OWNER_EXPLANATION_GOVERNANCE.md` | Owner can see whether the system is waiting, processing, blocked, protected, or closed without decoding internal terms |
 | **P1-D Performance And Retention Control** | P1 | Keep no-signal ticks, monitor runs, PG rows, logs, and reports bounded | `SERVER_SIDE_RUNTIME_MONITOR_CONTRACT.md`, `PRODUCTION_RUNTIME_FILE_IO_ELIMINATION_DESIGN.md` | No recurring report growth; no restart storm; PG/file-authority validators remain clear |
-| **P1-F Dual-Position Hard-Cap Account Risk Model V0** | **T01-T12 locally certified, not deployed** | Full-account truth, exactly-once Exposure/Budget Current, atomic Claim-to-Ticket, lifecycle release, runner recovery and release identity are repaired while one new Lane remains fixed | `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` | Migrations 134-136 and production-shape PostgreSQL, runtime-lock, deployment-identity, performance, file-I/O and complete-suite gates passed; separate deploy decision remains |
+| **P0-ROT Runtime Observation Truth And Forensics Remediation** | **P0 implementation complete; exact-head certification in progress; deployment remains no-go** | Preserve typed blockers through compact transport, bind PG liveness to actual observation results, restore causal Signal/Invocation/Process Outcome forensics, and remove false market-wait ownership | `P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md`, `P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md` | 22/22 lanes have actual results, 19/22 HTTP-400 production shape is closed, market wait requires complete healthy coverage, and five PG ghost orders close only through official reconciliation |
+| **P1-F Dual-Position Hard-Cap Account Risk Model V0** | **T01-T12 component evidence retained; branch certification reopened** | Full-account truth, exactly-once Exposure/Budget Current, atomic Claim-to-Ticket, lifecycle release, runner recovery and release identity are repaired while one new Lane remains fixed | `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` | Migrations 134-136 and prior production-shape gates remain component evidence; deployment requires one exact-head recertification after P0-ROT |
 | **P2-E Advanced Capital Risk Allocation** | P2 | Allocate capital by portfolio exposure, StrategyGroup sleeve, symbol/side cap, cluster exposure, cooldown, and drawdown state | `TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md`, `RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md` | Multi-strategy / multi-symbol allocation can scale or pause exposure without changing per-ticket safety facts |
 | **P2-F Frontend Read Model Integration** | P2 | Build frontend against backend explanation/read models, not raw PG internals | `OWNER_EXPLANATION_READ_MODEL_CONTRACT.md`, frontend `OWNER_EXPLANATION_READ_MODEL_FRONTEND_CONTRACT.md` | UI shows runtime health, signal progress, account state, ticket status, and why-no-trade from backend read models |
 
@@ -99,9 +101,10 @@ deployed component baselines. They must not run as separate medium-scale WIP.
 | 4 | **P0-SIN Signal Identity Conservation And Owner Notification Truth** | Deployed and production-accepted; prevents anonymous readiness and watcher-local messages from masquerading as tradable opportunity truth |
 | P0 interrupt | **Natural Live Lifecycle Calibration** | A different-identity fresh signal or active safety incident preempts P1-OFC at the next committed transaction boundary |
 | 5 | **Owner Supervision Product Integration** | Deployed baseline; natural-event language calibration remains event-driven |
-| 6 | **P1-F Dual-Position Hard-Cap Account Risk Model V0** | The single-Ticket lifecycle has real trade truth; the current blocker is the account-wide flat gate, not missing strategy capability |
-| 7 | **P2 Capital Allocation V1** | Strategy sleeves, dynamic allocation and drawdown controls require V0 dual-position truth plus more real outcomes |
-| 8 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one live-calibrated lifecycle through adapters |
+| 6 | **P0-ROT Runtime Observation Truth And Forensics Remediation** | 19 of 22 production lanes returned HTTP 400 while PG liveness could remain active; this invalidates market-wait and deploy-readiness claims |
+| 7 | **P1-F Dual-Position Hard-Cap Account Risk Model V0** | Component work is locally complete, but deployment waits for one exact-head P0-ROT plus Dual-Position recertification |
+| 8 | **P2 Capital Allocation V1** | Strategy sleeves, dynamic allocation and drawdown controls require V0 dual-position truth, observation truth, and more real outcomes |
+| 9 | **P2 Multi-Asset Execution Kernel** | Equity contracts, precious metals, and other instruments should reuse one live-calibrated lifecycle through adapters |
 
 ## Current Next Execution Order
 
@@ -122,8 +125,9 @@ resumes the interrupted checklist item.
 | 4 | **RCI-3 Finding gate and repairs** | P0 complete | Four implementation defects have RED-GREEN fixes or bounded deployment remediation; no architecture gap was demonstrated; live-only unknowns stay R1B |
 | 5 | **RCI-4 Regression, audit, and deploy decision** | P0 complete | `3030 passed, 1 skipped`; file-I/O audits pass; production behavior changes are deployed and read-only accepted |
 | P0 interrupt | **R1B Natural-event acceptance** | P0 interrupt | The next distinct live signal persists its exact Ticket-chain and real venue outcome without synthetic production mutation |
-| 6 | **Dual-Position Hard-Cap Account Risk V0 unified remediation T01-T12** | **P1 locally certified; not deployed** | Full-account exchange truth, ownership, exactly-once current projections, atomic Claim-to-Ticket, lifecycle release, runner recovery and release identity passed local production-shape certification; separate deploy decision remains |
-| 7 | **Deliberate execution-core stop outside V0 scope** | P0/P1 boundary | No third position, strategy sleeve, dynamic correlation, fee reserve or multi-asset execution expansion enters this program |
+| 6 | **Runtime Observation Truth And Forensics Remediation T00-T10** | **P0 active** | Close typed compact, HTTP, liveness, current projection, causal forensics, PG ghost-order, PostgreSQL, exact-head, and Tokyo acceptance gates |
+| 7 | **Dual-Position Hard-Cap Account Risk V0 unified remediation T01-T12** | **P1 component evidence retained; branch certification reopened** | Re-run the prior gates at the same exact source head after P0-ROT; no separate deployment candidate remains |
+| 8 | **Deliberate execution-core stop outside V0 scope** | P0/P1 boundary | No third position, strategy sleeve, dynamic correlation, fee reserve or multi-asset execution expansion enters this program |
 
 ## P0-RT Real Signal -> Ticket Closure
 

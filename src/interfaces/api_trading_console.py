@@ -26,7 +26,9 @@ from src.application.readmodels.watcher_decision_fact_projection import (
     ActionTimeDecisionFactProjection,
     WATCHER_SAFETY_BOOLEAN_KEYS,
     WatcherRuntimeEffect,
+    WatcherCompactProjectionError,
     compact_json_size,
+    project_compact_blocker_array,
     project_compact_text_array,
     validate_compact_text_array,
 )
@@ -1442,13 +1444,21 @@ async def runtime_next_attempt_observation_cycle(
             payload,
             response_projection=request.response_projection,
         )
+    except WatcherCompactProjectionError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="runtime_observation_compact_projection_failed",
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         message = str(exc)
         if "not found" in message.lower():
             raise HTTPException(status_code=404, detail=message) from exc
-        raise HTTPException(status_code=400, detail=message) from exc
+        raise HTTPException(
+            status_code=500,
+            detail="runtime_observation_internal_error",
+        ) from exc
 
 
 def _runtime_observation_response_projection(
@@ -1472,7 +1482,7 @@ def _runtime_observation_response_projection(
             ),
         }
     )
-    blockers = project_compact_text_array(
+    blockers = project_compact_blocker_array(
         "blockers",
         list(payload.get("blockers") or []),
     )
@@ -1491,7 +1501,7 @@ def _runtime_observation_response_projection(
         "include_exchange": payload.get("include_exchange"),
         "signal_artifact": signal_artifact,
         "action_time_ticket": payload.get("action_time_ticket"),
-        "blockers": blockers,
+        "blockers": [item.model_dump(mode="json") for item in blockers],
         "warnings": warnings,
         "observation_cycle_plan": payload.get("observation_cycle_plan") or {},
         "safety_invariants": effect.safety_invariants,

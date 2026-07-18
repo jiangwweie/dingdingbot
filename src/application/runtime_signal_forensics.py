@@ -38,7 +38,12 @@ class RuntimeSignalFinding(BaseModel):
     classification: str
     first_blocker: str | None
     explanation: str
+    action_time_invocation_id: str | None = None
+    promotion_candidate_id: str | None = None
+    action_time_lane_input_id: str | None = None
     ticket_id: str | None = None
+    process_name: str | None = None
+    process_state: str | None = None
     notification_state: str = "not_recorded"
     net_pnl: str | None = None
     r_multiple: str | None = None
@@ -48,7 +53,7 @@ class RuntimeSignalForensicsResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
     schema_name: str = Field(
-        default="brc.runtime_signal_forensics.v1", alias="schema"
+        default="brc.runtime_signal_forensics.v2", alias="schema"
     )
     start_ms: int
     end_ms: int
@@ -79,6 +84,7 @@ def reduce_runtime_signal_forensics(
         covered = _window_covered(
             _rows(rows.get("watcher_runtime_coverage")),
             _rows(rows.get("server_monitor_runs")),
+            _rows(rows.get("strategy_group_candidate_scope")),
             query,
         )
         return _result(
@@ -128,6 +134,10 @@ def _reduce_signal(
     rows: Mapping[str, Any],
 ) -> RuntimeSignalFinding:
     signal_id = str(signal.get("signal_event_id") or "")
+    invocation = _first(
+        rows.get("action_time_invocations"), "signal_event_id", signal_id
+    )
+    invocation_id = str(invocation.get("action_time_invocation_id") or "")
     promotion = _first(
         rows.get("promotion_candidates"), "signal_event_id", signal_id
     )
@@ -156,17 +166,65 @@ def _reduce_signal(
         rows.get("ticket_bound_order_lifecycle_runs"), "ticket_id", ticket_id
     )
     outcome = _first(rows.get("live_outcome_ledger"), "ticket_id", ticket_id)
+    lineage = {
+        "action_time_invocation_id": invocation_id or None,
+        "promotion_candidate_id": promotion_id or None,
+        "action_time_lane_input_id": lane_id or None,
+        "ticket_id": ticket_id or None,
+    }
+    signal = {**signal, "__forensics_lineage__": lineage}
     notification_state = _notification_state(
         _rows(rows.get("server_monitor_notifications")), signal_id, ticket_id
     )
 
     if not promotion:
+        if not invocation:
+            return _finding(
+                signal,
+                "action_time_invocation",
+                "engineering_handoff_gap",
+                "action_time_invocation_missing",
+                "信号已经记录，但没有建立对应的下单前调用上下文。",
+                notification_state=notification_state,
+            )
+        invocation_outcomes = _invocation_process_outcomes(
+            rows.get("runtime_process_outcomes"),
+            invocation=invocation,
+            signal=signal,
+        )
+        blocking_outcome = _earliest_blocking_process_outcome(invocation_outcomes)
+        if blocking_outcome:
+            lineage["process_name"] = _text_or_none(
+                blocking_outcome.get("process_name")
+            )
+            lineage["process_state"] = _text_or_none(
+                blocking_outcome.get("process_state")
+            )
+            process_state = str(blocking_outcome.get("process_state") or "")
+            return _finding(
+                signal,
+                "runtime_process",
+                _process_outcome_classification(process_state),
+                _text_or_none(blocking_outcome.get("first_blocker"))
+                or f"runtime_process_{process_state}",
+                _process_outcome_explanation(process_state),
+                notification_state=notification_state,
+            )
+        if not invocation_outcomes:
+            return _finding(
+                signal,
+                "runtime_process",
+                "engineering_handoff_gap",
+                "runtime_process_outcome_missing",
+                "下单前调用已经建立，但没有记录到对应的运行过程结果。",
+                notification_state=notification_state,
+            )
         return _finding(
             signal,
             "signal",
             "engineering_handoff_gap",
-            "promotion_candidate_missing",
-            "信号已经记录，但没有生成候选晋级记录。",
+            "promotion_candidate_missing_after_successful_invocation",
+            "下单前调用已经完成，但没有生成候选晋级记录。",
             notification_state=notification_state,
         )
     if not lane:
@@ -372,6 +430,8 @@ def _finding(
     net_pnl: str | None = None,
     r_multiple: str | None = None,
 ) -> RuntimeSignalFinding:
+    lineage = signal.get("__forensics_lineage__")
+    lineage = lineage if isinstance(lineage, Mapping) else {}
     return RuntimeSignalFinding(
         signal_event_id=str(signal.get("signal_event_id") or ""),
         strategy_group_id=str(signal.get("strategy_group_id") or "unknown"),
@@ -382,7 +442,16 @@ def _finding(
         classification=classification,
         first_blocker=first_blocker,
         explanation=explanation,
-        ticket_id=ticket_id,
+        action_time_invocation_id=_text_or_none(
+            lineage.get("action_time_invocation_id")
+        ),
+        promotion_candidate_id=_text_or_none(lineage.get("promotion_candidate_id")),
+        action_time_lane_input_id=_text_or_none(
+            lineage.get("action_time_lane_input_id")
+        ),
+        ticket_id=ticket_id or _text_or_none(lineage.get("ticket_id")),
+        process_name=_text_or_none(lineage.get("process_name")),
+        process_state=_text_or_none(lineage.get("process_state")),
         notification_state=notification_state,
         net_pnl=net_pnl,
         r_multiple=r_multiple,
@@ -407,16 +476,21 @@ def _matches_scope(row: Mapping[str, Any], query: RuntimeSignalForensicsQuery) -
 def _window_covered(
     coverage_rows: list[dict[str, Any]],
     monitor_rows: list[dict[str, Any]],
+    candidate_scope_rows: list[dict[str, Any]],
     query: RuntimeSignalForensicsQuery,
 ) -> bool:
-    coverage_ok = bool(coverage_rows) and all(
-        str(row.get("coverage_state") or "") == "covered"
-        and str(row.get("liveness_state") or "") in {"healthy", "ok", "active"}
-        and bool(row.get("is_current"))
-        and int(row.get("created_at_ms") or 0) <= query.start_ms
-        and int(row.get("last_tick_at_ms") or 0) >= query.end_ms - 1_200_000
-        and int(row.get("valid_until_ms") or 0) >= query.end_ms
-        for row in coverage_rows
+    required_lanes = {
+        _lane_key(row)
+        for row in candidate_scope_rows
+        if _scope_effective_in_window(row, query)
+    }
+    if not required_lanes:
+        return False
+    coverage_ok = all(
+        _lane_window_is_healthy(
+            [row for row in coverage_rows if _lane_key(row) == lane], query
+        )
+        for lane in required_lanes
     )
     monitor_times = sorted(
         int(row.get("finished_at_ms") or 0)
@@ -435,6 +509,142 @@ def _window_covered(
         for earlier, later in zip(monitor_times, monitor_times[1:])
     )
     return boundary_ok and gaps_ok
+
+
+def _invocation_process_outcomes(
+    value: Any,
+    *,
+    invocation: Mapping[str, Any],
+    signal: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Bind process evidence to Invocation first, then exact lane identity."""
+
+    rows = _rows(value)
+    invocation_id = str(invocation.get("action_time_invocation_id") or "")
+    direct = [
+        row
+        for row in rows
+        if invocation_id
+        and str(row.get("action_time_invocation_id") or "") == invocation_id
+    ]
+    if direct:
+        return direct
+    lane_identity_key = str(
+        invocation.get("lane_identity_key") or signal.get("lane_identity_key") or ""
+    )
+    source_watermark = str(
+        invocation.get("source_watermark") or signal.get("source_watermark") or ""
+    )
+    return [
+        row
+        for row in rows
+        if lane_identity_key
+        and str(row.get("lane_identity_key") or "") == lane_identity_key
+        and (
+            not source_watermark
+            or str(row.get("source_watermark") or "") == source_watermark
+        )
+    ]
+
+
+def _earliest_blocking_process_outcome(
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    blocking = [
+        row
+        for row in rows
+        if str(row.get("process_state") or "")
+        in {"business_blocked", "retryable_failure", "hard_failure"}
+    ]
+    process_order = {
+        "live_signal_materialization": 10,
+        "action_time_fact_snapshots": 20,
+        "promotion_action_time_lane": 30,
+        "action_time_ticket_sequence": 40,
+    }
+    return min(
+        blocking,
+        key=lambda row: (
+            process_order.get(str(row.get("process_name") or ""), 99),
+            int(
+                row.get("completed_at_ms")
+                or row.get("updated_at_ms")
+                or row.get("started_at_ms")
+                or 0
+            ),
+        ),
+        default={},
+    )
+
+
+def _process_outcome_classification(process_state: str) -> str:
+    return {
+        "business_blocked": "runtime_business_blocked",
+        "retryable_failure": "engineering_runtime_failure",
+        "hard_failure": "runtime_safety_or_identity_failure",
+    }.get(process_state, "engineering_runtime_failure")
+
+
+def _process_outcome_explanation(process_state: str) -> str:
+    return {
+        "business_blocked": "下单前运行过程被已记录的业务或安全条件阻断。",
+        "retryable_failure": "下单前运行过程发生可重试的工程失败。",
+        "hard_failure": "下单前运行过程触发了身份或安全硬失败。",
+    }.get(process_state, "下单前运行过程未能完成，需要工程排查。")
+
+
+def _lane_key(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("strategy_group_id") or ""),
+        str(row.get("symbol") or ""),
+        str(row.get("side") or ""),
+    )
+
+
+def _scope_effective_in_window(
+    row: Mapping[str, Any], query: RuntimeSignalForensicsQuery
+) -> bool:
+    if str(row.get("status") or "active") not in {"active", "enabled"}:
+        return False
+    starts_at_ms = int(
+        row.get("effective_from_ms") or row.get("created_at_ms") or 0
+    )
+    ends_at_ms = int(
+        row.get("closed_at_ms") or row.get("expires_at_ms") or 2**63 - 1
+    )
+    return starts_at_ms <= query.end_ms and ends_at_ms >= query.start_ms
+
+
+def _lane_window_is_healthy(
+    rows: list[dict[str, Any]], query: RuntimeSignalForensicsQuery
+) -> bool:
+    if not rows:
+        return False
+    intervals: list[tuple[int, int]] = []
+    for row in rows:
+        start = int(
+            row.get("coverage_start_ms")
+            or row.get("created_at_ms")
+            or row.get("last_tick_at_ms")
+            or 0
+        )
+        end = int(row.get("coverage_end_ms") or row.get("valid_until_ms") or 0)
+        if end < query.start_ms or start > query.end_ms:
+            continue
+        if (
+            str(row.get("coverage_state") or "") != "covered"
+            or str(row.get("liveness_state") or "") not in {"healthy", "ok"}
+        ):
+            return False
+        intervals.append((max(start, query.start_ms), min(end, query.end_ms)))
+    if not intervals:
+        return False
+    cursor = query.start_ms
+    for start, end in sorted(intervals):
+        if start > cursor:
+            return False
+        cursor = max(cursor, end)
+    return cursor >= query.end_ms
 
 
 def _first(value: Any, key: str, expected: str) -> dict[str, Any]:

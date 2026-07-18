@@ -44,7 +44,9 @@ from src.application.runtime_process_outcome import (  # noqa: E402
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity  # noqa: E402
 from src.application.readmodels.watcher_decision_fact_projection import (  # noqa: E402
     WATCHER_SAFETY_BOOLEAN_KEYS,
+    WatcherObservationResult,
     WatcherRuntimeEffect,
+    compact_blocker_codes,
     compact_json_size,
 )
 from scripts.runtime_first_real_submit_api_flow import (  # noqa: E402
@@ -514,6 +516,7 @@ def _candidate_universe_coverage(
     source: dict[str, Any],
     active: list[dict[str, Any]],
     selected: list[dict[str, Any]],
+    observation_results: dict[str, dict[str, Any]] | None = None,
     side_scope: dict[str, tuple[str, ...]] | None = None,
 ) -> dict[str, Any]:
     selected_lanes: dict[tuple[str, str, str], list[str]] = {}
@@ -569,14 +572,33 @@ def _candidate_universe_coverage(
                         and item.get("side") != expected_side
                     }
                 )
+                observation_result = _lane_observation_result(
+                    selected_matches,
+                    observation_results or {},
+                )
                 if selected_matches:
                     state = "active_watcher_scope"
-                    blocker_class = "none"
-                    next_action = "continue_pretrade_observation"
+                    liveness_state = (
+                        "active"
+                        if observation_results is None
+                        else _observation_liveness_state(observation_result)
+                    )
+                    # ``active`` is the deliberately narrow compatibility
+                    # state for callers which have not run an observation
+                    # cycle at all (``observation_results is None``).  A
+                    # real watcher cycle always supplies a result map and may
+                    # therefore only certify ``healthy`` here.
+                    if liveness_state in {"healthy", "active"}:
+                        blocker_class = "none"
+                        next_action = "continue_pretrade_observation"
+                    else:
+                        blocker_class = "watcher_tick_missing"
+                        next_action = "repair_runtime_observation_cycle_api"
                 elif active_matches:
                     state = "active_runtime_filtered_out"
                     blocker_class = "runtime_profile_scope_missing"
                     next_action = "include_candidate_runtime_in_watcher_scope"
+                    liveness_state = "not_covered"
                 else:
                     state = "runtime_profile_scope_missing"
                     blocker_class = "runtime_profile_scope_missing"
@@ -585,6 +607,7 @@ def _candidate_universe_coverage(
                         if side_mismatch_runtime_instance_ids
                         else "bind_or_start_pretrade_runtime_for_candidate_symbol"
                     )
+                    liveness_state = "missing"
                 rows.append(
                     {
                         "strategy_group_id": strategy_group_id,
@@ -592,6 +615,8 @@ def _candidate_universe_coverage(
                         "side": expected_side,
                         "state": state,
                         "blocker_class": blocker_class,
+                        "liveness_state": liveness_state,
+                        "observation_result": observation_result,
                         "active_runtime_instance_ids": active_matches,
                         "selected_runtime_instance_ids": selected_matches,
                         "expected_side": expected_side,
@@ -632,6 +657,33 @@ def _candidate_universe_coverage(
             "does_not_create_runtime_or_expand_live_submit"
         ),
     }
+
+
+def _lane_observation_result(
+    runtime_ids: list[str],
+    observation_results: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    if len(runtime_ids) != 1:
+        return None
+    result = observation_results.get(runtime_ids[0])
+    return dict(result) if isinstance(result, dict) else None
+
+
+def _observation_liveness_state(result: dict[str, Any] | None) -> str:
+    if result is None:
+        return "failed"
+    try:
+        typed = WatcherObservationResult.model_validate(result)
+    except ValueError:
+        return "failed"
+    if (
+        typed.transport_state == "success"
+        and typed.projection_state == "valid"
+    ):
+        return "healthy"
+    if typed.transport_state == "deadline_exceeded":
+        return "degraded"
+    return "failed"
 
 
 def _watcher_coverage_lane_identity(
@@ -1036,7 +1088,7 @@ def _live_signal_candidates_from_summaries(
                 "runtime_instance_id": row.get("runtime_instance_id"),
                 "strategy_family_version_id": row.get("strategy_family_version_id"),
                 "runtime_status": row.get("status"),
-                "runtime_blockers": list(row.get("blockers") or []),
+                "runtime_blockers": _summary_blocker_codes(row),
                 "forbidden_effects": row.get("forbidden_effects")
                 if isinstance(row.get("forbidden_effects"), dict)
                 else {},
@@ -1100,7 +1152,7 @@ def _materializable_identity_faults_from_summaries(
                 "runtime_instance_id": lane_identity.runtime_instance_id,
                 "strategy_family_version_id": row.get("strategy_family_version_id"),
                 "runtime_status": row.get("status"),
-                "runtime_blockers": list(row.get("blockers") or []),
+                "runtime_blockers": _summary_blocker_codes(row),
                 "forbidden_effects": {},
                 "signal_summary": signal,
                 "signal_input_ref": row.get("signal_input_ref"),
@@ -1647,6 +1699,20 @@ def _truthy_forbidden_effects(value: Any) -> list[str]:
     return sorted(str(key) for key, flag in value.items() if bool(flag))
 
 
+def _summary_blocker_codes(row: dict[str, Any]) -> list[str]:
+    """Return normalized compact codes from typed and legacy monitor rows.
+
+    Production summaries carry ``blocker_codes`` derived from the typed
+    observation response.  The fallback retains compatibility with direct
+    unit callers while never stringifying structured blocker dictionaries.
+    """
+
+    explicit = row.get("blocker_codes")
+    if isinstance(explicit, list):
+        return compact_blocker_codes(explicit)
+    return compact_blocker_codes(row.get("blockers"))
+
+
 def _replace_current_watcher_runtime_coverage(
     conn: sa.engine.Connection,
     *,
@@ -1678,7 +1744,19 @@ def _replace_current_watcher_runtime_coverage(
             if state == "active_runtime_filtered_out"
             else "missing"
         )
-        liveness_state = "active" if coverage_state == "covered" else coverage_state
+        liveness_state = coverage_state
+        if coverage_state == "covered":
+            declared_liveness = str(row.get("liveness_state") or "")
+            if declared_liveness:
+                liveness_state = declared_liveness
+            elif "observation_result" not in row:
+                # Scope-only callers predate the typed observation result.
+                # This compatibility branch is intentionally unreachable from
+                # ``_build_monitor_artifact``, whose rows always include the
+                # key, even when the actual result is unavailable.
+                liveness_state = "active"
+            else:
+                liveness_state = "failed"
         runtime_profile = row.get("runtime_profile")
         if not isinstance(runtime_profile, dict):
             runtime_profile = {}
@@ -2058,7 +2136,9 @@ def _build_runtime_observation_cycle_artifact(
         ),
     )
     payload = response.get("body")
+    completed_at_ms = int(time.time() * 1000)
     if response.get("http_status", 0) >= 300 or response.get("error"):
+        http_status = _int_or_zero(response.get("http_status")) or None
         return {
             "scope": "runtime_next_attempt_observation_cycle_api",
             "status": "blocked",
@@ -2067,6 +2147,19 @@ def _build_runtime_observation_cycle_artifact(
                 f"runtime_observation_cycle_http_{response.get('http_status')}"
             ],
             "warnings": [str(payload)] if payload else [],
+            "observation_result": WatcherObservationResult(
+                attempted=True,
+                transport_state="http_error",
+                projection_state="unavailable",
+                business_state="unknown",
+                http_status=http_status,
+                first_blocker_code=(
+                    f"runtime_observation_cycle_http_{http_status}"
+                    if http_status is not None
+                    else "runtime_observation_cycle_transport_error"
+                ),
+                completed_at_ms=completed_at_ms,
+            ).model_dump(mode="json"),
             "observation_cycle_plan": {
                 "next_step": "repair_runtime_observation_cycle_api",
                 "not_executed": True,
@@ -2084,6 +2177,15 @@ def _build_runtime_observation_cycle_artifact(
             "runtime_instance_id": args.runtime_instance_id,
             "blockers": ["runtime_observation_cycle_response_not_object"],
             "warnings": [],
+            "observation_result": WatcherObservationResult(
+                attempted=True,
+                transport_state="success",
+                projection_state="invalid",
+                business_state="unknown",
+                http_status=_int_or_zero(response.get("http_status")) or 200,
+                first_blocker_code="runtime_observation_cycle_response_not_object",
+                completed_at_ms=completed_at_ms,
+            ).model_dump(mode="json"),
             "observation_cycle_plan": {
                 "next_step": "repair_runtime_observation_cycle_api",
                 "not_executed": True,
@@ -2094,7 +2196,37 @@ def _build_runtime_observation_cycle_artifact(
             },
             "safety_invariants": _non_executing_runtime_observation_safety(),
         }
-    return payload
+    result = _observation_result_from_payload(
+        payload,
+        http_status=_int_or_zero(response.get("http_status")) or 200,
+        completed_at_ms=completed_at_ms,
+    )
+    return {**payload, "observation_result": result.model_dump(mode="json")}
+
+
+def _observation_result_from_payload(
+    payload: dict[str, Any],
+    *,
+    http_status: int,
+    completed_at_ms: int,
+) -> WatcherObservationResult:
+    blocker_codes = compact_blocker_codes(payload.get("blockers"))
+    status = str(payload.get("status") or "")
+    return WatcherObservationResult(
+        attempted=True,
+        transport_state="success",
+        projection_state="valid",
+        business_state=(
+            "business_blocked"
+            if status == "blocked"
+            else "waiting_for_signal"
+            if status in {"waiting_for_signal", "waiting_for_opportunity"}
+            else "computed"
+        ),
+        http_status=http_status,
+        first_blocker_code=blocker_codes[0] if blocker_codes else None,
+        completed_at_ms=completed_at_ms,
+    )
 
 
 def _non_executing_runtime_observation_safety() -> dict[str, bool]:
@@ -2267,6 +2399,8 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
             "ready_for_final_gate_preflight"
         ),
         "blockers": list(artifact.get("blockers") or []),
+        "blocker_codes": compact_blocker_codes(artifact.get("blockers")),
+        "observation_result": _normalized_observation_result(artifact),
         "warnings": list(artifact.get("warnings") or []),
         "signal_input_ref": signal_input_ref,
         "action_time_ticket_id": artifact.get("ticket_id"),
@@ -2304,6 +2438,41 @@ def _summary(runtime: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any
     ):
         raise RuntimeError("watcher_compact_projection_oversize:signal_summary")
     return summary
+
+
+def _normalized_observation_result(artifact: dict[str, Any]) -> dict[str, Any]:
+    raw = artifact.get("observation_result")
+    if isinstance(raw, dict):
+        try:
+            return WatcherObservationResult.model_validate(raw).model_dump(mode="json")
+        except ValueError:
+            pass
+    blockers = compact_blocker_codes(artifact.get("blockers"))
+    first = blockers[0] if blockers else None
+    if first == "watcher_global_deadline_exceeded":
+        state = "deadline_exceeded"
+        projection_state = "unavailable"
+    elif first and first.startswith("runtime_observation_cycle_http_"):
+        state = "http_error"
+        projection_state = "unavailable"
+    else:
+        state = "success"
+        projection_state = "valid"
+    status = str(artifact.get("status") or "")
+    return WatcherObservationResult(
+        attempted=state != "deadline_exceeded",
+        transport_state=state,
+        projection_state=projection_state,
+        business_state=(
+            "business_blocked"
+            if status == "blocked" and state == "success"
+            else "waiting_for_signal"
+            if status in {"waiting_for_signal", "waiting_for_opportunity"}
+            else "unknown"
+        ),
+        first_blocker_code=first,
+        completed_at_ms=int(time.time() * 1000),
+    ).model_dump(mode="json")
 
 
 def _validated_runtime_safety(artifact: dict[str, Any]) -> dict[str, bool]:
@@ -2443,14 +2612,6 @@ def _build_monitor_artifact(
         )
         if unexpected_excluded:
             raise RuntimeError("active_runtime_pagination_invalid")
-    candidate_universe_coverage = _candidate_universe_coverage(
-        candidate_universe=candidate_universe,
-        source=candidate_universe_source,
-        active=active,
-        selected=selected,
-        side_scope=side_scope,
-    )
-
     runtime_artifacts: list[dict[str, Any]] = []
     runtime_effects: list[dict[str, Any]] = []
     summaries: list[dict[str, Any]] = []
@@ -2465,6 +2626,14 @@ def _build_monitor_artifact(
                     "status": "blocked",
                     "blockers": ["watcher_global_deadline_exceeded"],
                     "warnings": [],
+                    "observation_result": WatcherObservationResult(
+                        attempted=False,
+                        transport_state="deadline_exceeded",
+                        projection_state="unavailable",
+                        business_state="unknown",
+                        first_blocker_code="watcher_global_deadline_exceeded",
+                        completed_at_ms=int(time.time() * 1000),
+                    ).model_dump(mode="json"),
                     "safety_invariants": _non_executing_runtime_observation_safety(),
                 }
                 runtime_args.timeout_seconds = 0.0
@@ -2489,13 +2658,28 @@ def _build_monitor_artifact(
         if args.include_runtime_artifacts:
             runtime_artifacts.append(runtime_artifact)
 
+    observation_results = {
+        str(summary.get("runtime_instance_id") or ""): summary["observation_result"]
+        for summary in summaries
+        if str(summary.get("runtime_instance_id") or "")
+        and isinstance(summary.get("observation_result"), dict)
+    }
+    candidate_universe_coverage = _candidate_universe_coverage(
+        candidate_universe=candidate_universe,
+        source=candidate_universe_source,
+        active=active,
+        selected=selected,
+        observation_results=observation_results,
+        side_scope=side_scope,
+    )
+
     status = _overall_status(runtime_effects)
     blockers: list[str] = []
     for item in summaries:
-        for blocker in item["blockers"]:
+        for blocker in item["blocker_codes"]:
             if _is_waiting_for_signal_blocker(
                 status=str(item.get("status") or ""),
-                blocker=str(blocker),
+                blocker=blocker,
             ):
                 continue
             scoped = f"{item['runtime_instance_id']}:{blocker}"

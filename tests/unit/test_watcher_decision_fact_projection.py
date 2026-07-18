@@ -7,7 +7,9 @@ import pytest
 from src.application.readmodels.watcher_decision_fact_projection import (
     ActionTimeDecisionFactProjection,
     WATCHER_SAFETY_BOOLEAN_KEYS,
+    WatcherCompactProjectionError,
     WatcherRuntimeEffect,
+    project_compact_blocker_array,
 )
 from src.interfaces.api_trading_console import (
     _runtime_observation_response_projection,
@@ -147,6 +149,53 @@ def test_compact_observation_bounds_blocker_cardinality_without_hiding_first_blo
     )
 
     assert len(compact["blockers"]) == 64
-    assert compact["blockers"][0] == blockers[0]
-    assert compact["blockers"][-1] == "additional_blockers_omitted:17"
+    assert compact["blockers"][0]["code"] == blockers[0]
+    assert compact["blockers"][-1]["code"] == "additional_blockers_omitted:17"
     assert payload["blockers"] == blockers
+
+
+def test_compact_observation_preserves_structured_next_attempt_blocker():
+    payload = {
+        "scope": "runtime_next_attempt_observation_cycle_api",
+        "status": "blocked",
+        "runtime_instance_id": "runtime-1",
+        "owner_action_scope": {},
+        "include_exchange": False,
+        "signal_artifact": None,
+        "action_time_ticket": None,
+        "blockers": [
+            {
+                "id": "NEXT-ATTEMPT-POSITION-ORDER-CONFLICT",
+                "stage": "pre_next_attempt",
+                "severity": "hard_blocker",
+                "evidence": "pg_open_order_count=1",
+                "recovery_action": "official_reconciliation_or_hygiene_cleanup",
+            }
+        ],
+        "warnings": [],
+        "observation_cycle_plan": {"next_step": "resolve"},
+        "safety_invariants": _runtime_next_attempt_observation_safety(),
+    }
+
+    compact = _runtime_observation_response_projection(
+        payload,
+        response_projection="watcher_compact",
+    )
+
+    assert compact["blockers"] == [
+        {
+            "code": "NEXT-ATTEMPT-POSITION-ORDER-CONFLICT",
+            "stage": "pre_next_attempt",
+            "severity": "hard_blocker",
+            "detail": "pg_open_order_count=1",
+            "recovery_action": "official_reconciliation_or_hygiene_cleanup",
+        }
+    ]
+
+
+def test_compact_blocker_rejects_object_without_stable_code():
+    with pytest.raises(
+        WatcherCompactProjectionError,
+        match="watcher_compact_projection_invalid:blockers",
+    ):
+        project_compact_blocker_array("blockers", [{"stage": "missing_code"}])

@@ -1,11 +1,13 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN
-status: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
+status: LOCAL_REMEDIATION_CERTIFICATION_REOPENED
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
 last_verified: 2026-07-18
 implementation_state: T01_T12_COMPLETE_LOCAL_ONLY
-integration_state: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
+integration_state: LOCAL_REMEDIATION_CERTIFICATION_REOPENED
+component_certification: T01_T12_EVIDENCE_RETAINED
+release_gate_blocker: docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md
 certified_source_commit: e4f49dcfa77932f6ec440b3a869943eb2ade73a1
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
@@ -46,11 +48,16 @@ Tokyo immutable-release state machine.
 
 ### 1.1 Current authorization
 
-**本计划已完成 T01-T12，本地状态为 `LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED`。**
+**本计划的 T01-T12 组件工作已经完成，但整分支状态因 P0 Runtime Observation Truth
+缺陷重新打开为 `LOCAL_REMEDIATION_CERTIFICATION_REOPENED`，部署状态为
+`DEPLOYMENT_NO_GO`。**
 PostgreSQL、消费者、部署状态机、审计、完整仓库回归与 clean Linux/amd64 CPython 3.10
 hash-lock 安装/导入门禁均已通过。最终 lock gate 使用官方 PyPI、只读 worktree、
 `--require-hashes`、禁用受污染缓存，完成四个要求导入及 `pip check`，退出码为 `0`；lock、
-版本和 hash 无修改。批准范围仍仅为本地修复、本地认证与预部署审查。以下事项仍在本计划之外：
+版本和 hash 无修改。上述结果继续作为组件证据，但必须与
+`P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md`
+在同一 exact HEAD 重新认证后，才能恢复整分支部署候选状态。批准范围仍仅为本地修复、
+本地认证与预部署审查。以下事项仍在本计划之外：
 
 - push or pull-request publication;
 - Tokyo staging, deploy or service mutation;
@@ -1807,7 +1814,10 @@ state.
 **Requirements:**
 
 1. Record exact certified commit SHA, migration head 136 and actual gate commands/results.
-2. Use `LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED` only if T11 is fully green.
+2. Preserve `LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED` only as the historical
+   T11/T12 component result. The current whole-branch status remains
+   `LOCAL_REMEDIATION_CERTIFICATION_REOPENED` until P0 Runtime Observation Truth
+   and the prior Dual-Position gates pass at one exact HEAD.
 3. Keep deployment, production migration, policy activation and exchange write explicitly
    unperformed.
 4. If any required gate remains unrun or failed, keep status `REMEDIATION_IN_PROGRESS_NO_GO`

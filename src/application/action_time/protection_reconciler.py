@@ -232,6 +232,25 @@ def reconcile_ticket_bound_exit_protection_set(
             exchange_snapshot=exchange_snapshot,
             now_ms=now_ms,
         )
+    if (
+        position_flat
+        and not recent_fills
+        and not live_protection_orders
+        and not ownership_blockers
+        and _is_exact_flat_absent_protection_set(orders)
+    ):
+        # The position is authoritatively flat and the exact Ticket-bound
+        # protection order identities are absent from the exchange snapshot.
+        # This is a PG-only ghost-residue closure, not an exchange cancel.
+        return _apply_flat_absent_protection_reconciliation(
+            conn,
+            protection_set=protection_set,
+            lifecycle=lifecycle,
+            orders=orders,
+            exchange_scope=exchange_scope,
+            exchange_snapshot=exchange_snapshot,
+            now_ms=now_ms,
+        )
     ownership_blockers = _dedupe(ownership_blockers + external_close_blockers)
     classification = classify_protection_reconciliation(
         position_qty=position.get("qty") or position.get("position_qty"),
@@ -661,6 +680,131 @@ def _apply_flat_external_close_reconciliation(
         source_kind="exit_protection_reconciler",
         source_id=str(protection_set.get("exit_protection_set_id") or ""),
         resolution_source="flat_external_close_reconciliation",
+        now_ms=now_ms,
+    )
+    return _result(
+        "reconciliation_matched",
+        now_ms=now_ms,
+        blockers=[],
+        protection_set=protection_update,
+        lifecycle=lifecycle_update,
+        next_action="finalize_ticket_bound_lifecycle",
+    )
+
+
+def _is_exact_flat_absent_protection_set(orders: list[dict[str, Any]]) -> bool:
+    active_statuses = {
+        "planned",
+        "submitted",
+        "open",
+        "partially_filled",
+        "cancel_pending",
+        "replace_pending",
+    }
+    active_orders = [
+        order for order in orders if str(order.get("status") or "") in active_statuses
+    ]
+    return bool(active_orders) and all(
+        str(order.get("exchange_order_id") or "")
+        and str(order.get("role") or "") in {"SL", "TP1", "RUNNER_SL"}
+        for order in active_orders
+    )
+
+
+def _apply_flat_absent_protection_reconciliation(
+    conn: sa.engine.Connection,
+    *,
+    protection_set: dict[str, Any],
+    lifecycle: dict[str, Any],
+    orders: list[dict[str, Any]],
+    exchange_scope: Any,
+    exchange_snapshot: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    """Terminalize only exact PG ghosts after an exchange-flat proof.
+
+    The reconciler has already validated the runtime exchange scope, position
+    snapshot, and ownership.  With no open order and no recent fill, marking
+    these known Ticket-bound rows cancelled conserves the audit trail without
+    sending any exchange command.
+    """
+
+    order_table = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    active_statuses = {
+        "planned",
+        "submitted",
+        "open",
+        "partially_filled",
+        "cancel_pending",
+        "replace_pending",
+    }
+    ghost_orders = [
+        order for order in orders if str(order.get("status") or "") in active_statuses
+    ]
+    for order in ghost_orders:
+        conn.execute(
+            order_table.update()
+            .where(
+                order_table.c.exit_protection_order_id
+                == order["exit_protection_order_id"]
+            )
+            .values(status="cancelled", updated_at_ms=now_ms)
+        )
+    protection_update = {
+        **protection_set,
+        "status": "closed",
+        "reconciled_with_exchange": True,
+        "first_blocker": None,
+        "blockers": [],
+        "updated_at_ms": now_ms,
+    }
+    lifecycle_update = {
+        **lifecycle,
+        "status": "reconciliation_matched",
+        "first_blocker": None,
+        "blockers": [],
+        "updated_at_ms": now_ms,
+    }
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_exit_protection_sets",
+        "exit_protection_set_id",
+        protection_update,
+    )
+    _upsert_row(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "lifecycle_run_id",
+        lifecycle_update,
+    )
+    _insert_event(
+        conn,
+        lifecycle_update,
+        "reconciliation_matched",
+        {
+            "reconciliation_kind": "pg_ghost_protection_terminalized",
+            "position_flat_confirmed": True,
+            "exchange_open_order_absent": True,
+            "exchange_write_called": False,
+            "exchange_snapshot_ref": exchange_snapshot.get("snapshot_ref")
+            or exchange_snapshot.get("snapshot_id"),
+            "terminalized_orders": [
+                {
+                    "exit_protection_order_id": order["exit_protection_order_id"],
+                    "exchange_order_id": order["exchange_order_id"],
+                    "role": order["role"],
+                }
+                for order in ghost_orders
+            ],
+        },
+        now_ms=now_ms,
+    )
+    resolve_netting_domain_hold_source(
+        conn,
+        netting_domain_key=exchange_scope.netting_domain_key,
+        source_kind="exit_protection_reconciler",
+        source_id=str(protection_set.get("exit_protection_set_id") or ""),
+        resolution_source="flat_absent_protection_reconciliation",
         now_ms=now_ms,
     )
     return _result(

@@ -1180,9 +1180,27 @@ def _pg_runtime_active_monitor_projection(
         runtime_scope = runtime_by_candidate.get(candidate_scope_id, {})
         policy = policy_by_id.get(str(candidate.get("policy_current_id") or ""), {})
         coverage = coverage_by_lane.get(_lane_key(candidate), {})
-        active = (
-            coverage.get("coverage_state") == "covered"
-            and coverage.get("liveness_state") in {"healthy", "ok", "active"}
+        coverage_state = str(coverage.get("coverage_state") or "")
+        liveness_state = str(coverage.get("liveness_state") or "")
+        # ``active`` remains valid only for historical/current rows written
+        # before the typed observation-result field existed.  The current
+        # watcher now writes an explicit failed/degraded liveness value on a
+        # technical observation failure, so this compatibility state can no
+        # longer hide an actual failed cycle.
+        active = coverage_state == "covered" and liveness_state in {
+            "healthy",
+            "ok",
+            "active",
+        }
+        technical_observation_failure = (
+            coverage_state == "covered" and liveness_state in {"failed", "degraded"}
+        )
+        blocker_class = (
+            "none"
+            if active
+            else "watcher_tick_missing"
+            if technical_observation_failure
+            else "runtime_profile_scope_missing"
         )
         rows.append(
             {
@@ -1192,8 +1210,11 @@ def _pg_runtime_active_monitor_projection(
                 "expected_side": str(candidate.get("side") or ""),
                 "state": "active_watcher_scope"
                 if active
+                else "runtime_observation_failed"
+                if technical_observation_failure
                 else "runtime_profile_scope_missing",
-                "blocker_class": "none" if active else "runtime_profile_scope_missing",
+                "blocker_class": blocker_class,
+                "liveness_state": liveness_state or "missing",
                 "active_runtime_instance_ids": [
                     str(runtime_scope.get("runtime_scope_binding_id") or "")
                 ]
@@ -1220,6 +1241,8 @@ def _pg_runtime_active_monitor_projection(
                 },
                 "next_action": "continue_pretrade_observation"
                 if active
+                else "repair_runtime_observation_cycle_api"
+                if technical_observation_failure
                 else "bind_or_start_pretrade_runtime_for_candidate_symbol",
                 "authority_boundary": AUTHORITY_BOUNDARY,
             }

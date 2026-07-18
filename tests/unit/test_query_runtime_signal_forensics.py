@@ -44,7 +44,7 @@ def test_cli_emits_stdout_only_json_and_masks_database_configuration(tmp_path: P
         },
     )
     payload = json.loads(completed.stdout)
-    assert payload["schema"] == "brc.runtime_signal_forensics.v1"
+    assert payload["schema"] == "brc.runtime_signal_forensics.v2"
     assert payload["conclusion_code"] == "runtime_data_gap"
     assert payload["configuration"] == {"database_configured": True}
     assert str(database) not in completed.stdout

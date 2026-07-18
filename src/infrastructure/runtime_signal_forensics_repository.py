@@ -12,6 +12,9 @@ from src.application.runtime_signal_forensics import RuntimeSignalForensicsQuery
 
 TABLES = {
     "live_signal_events": "brc_live_signal_events",
+    "action_time_invocations": "brc_action_time_invocations",
+    "runtime_process_outcomes": "brc_runtime_process_outcomes",
+    "strategy_group_candidate_scope": "brc_strategy_group_candidate_scope",
     "promotion_candidates": "brc_promotion_candidates",
     "action_time_lane_inputs": "brc_action_time_lane_inputs",
     "action_time_tickets": "brc_action_time_tickets",
@@ -35,6 +38,15 @@ class PgRuntimeSignalForensicsRepository:
     def query(self, query: RuntimeSignalForensicsQuery) -> dict[str, list[dict[str, Any]]]:
         signals = self._signal_rows(query)
         signal_ids = _texts(row.get("signal_event_id") for row in signals)
+        invocations = self._related(
+            "action_time_invocations", "signal_event_id", signal_ids, query.limit
+        )
+        invocation_ids = _texts(
+            row.get("action_time_invocation_id") for row in invocations
+        )
+        lane_identity_keys = _texts(
+            row.get("lane_identity_key") for row in [*signals, *invocations]
+        )
         promotions = self._related("promotion_candidates", "signal_event_id", signal_ids, query.limit)
         promotion_ids = _texts(row.get("promotion_candidate_id") for row in promotions)
         lanes = self._related_any(
@@ -58,6 +70,16 @@ class PgRuntimeSignalForensicsRepository:
         }
         return {
             "live_signal_events": signals,
+            "action_time_invocations": invocations,
+            "runtime_process_outcomes": self._related_any(
+                "runtime_process_outcomes",
+                (
+                    ("action_time_invocation_id", invocation_ids),
+                    ("lane_identity_key", lane_identity_keys),
+                ),
+                query.limit,
+            ),
+            "strategy_group_candidate_scope": self._candidate_scope_rows(query),
             "promotion_candidates": promotions,
             "action_time_lane_inputs": lanes,
             "action_time_tickets": tickets,
@@ -144,6 +166,35 @@ class PgRuntimeSignalForensicsRepository:
         if "coverage_start_ms" in table.c and "coverage_end_ms" in table.c:
             statement = statement.where(table.c.coverage_start_ms <= query.start_ms).where(
                 table.c.coverage_end_ms >= query.end_ms
+            )
+        elif "last_tick_at_ms" in table.c and "valid_until_ms" in table.c:
+            statement = statement.where(table.c.last_tick_at_ms <= query.end_ms).where(
+                table.c.valid_until_ms >= query.start_ms
+            )
+        return self._execute(statement.limit(query.limit))
+
+    def _candidate_scope_rows(
+        self, query: RuntimeSignalForensicsQuery
+    ) -> list[dict[str, Any]]:
+        table = self._table("strategy_group_candidate_scope")
+        if table is None:
+            return []
+        statement = sa.select(table)
+        for column_name, expected in (
+            ("strategy_group_id", query.strategy_group_id),
+            ("symbol", query.symbol),
+            ("side", query.side),
+        ):
+            if expected is not None and column_name in table.c:
+                statement = statement.where(table.c[column_name] == expected)
+        if "effective_from_ms" in table.c:
+            statement = statement.where(table.c.effective_from_ms <= query.end_ms)
+        if "closed_at_ms" in table.c:
+            statement = statement.where(
+                sa.or_(
+                    table.c.closed_at_ms.is_(None),
+                    table.c.closed_at_ms >= query.start_ms,
+                )
             )
         return self._execute(statement.limit(query.limit))
 

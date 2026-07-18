@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import json
 
 from sqlalchemy import text
 
@@ -122,6 +123,44 @@ def test_protection_reconciler_flags_missing_exchange_sl(pg_control_connection):
         "owner_action_required": False,
     }
     assert _lifecycle_status(pg_control_connection) == "protection_reconciliation_mismatch"
+
+
+def test_protection_reconciler_terminalizes_exact_pg_ghosts_after_flat_absent_proof(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    snapshot = _snapshot(pg_control_connection, set_id)
+    snapshot["position"] = {"qty": "0", "position_flat": True, "complete": True}
+    snapshot["open_orders"] = []
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9000,
+    )
+
+    assert payload["status"] == "reconciliation_matched"
+    assert payload["blockers"] == []
+    assert _lifecycle_status(pg_control_connection) == "reconciliation_matched"
+    statuses = pg_control_connection.execute(
+        text(
+            "SELECT status FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE exit_protection_set_id = :set_id ORDER BY role"
+        ),
+        {"set_id": set_id},
+    ).scalars().all()
+    assert statuses == ["cancelled", "cancelled"]
+    event = pg_control_connection.execute(
+        text(
+            "SELECT event_payload FROM brc_ticket_bound_lifecycle_events "
+            "WHERE event_type = 'reconciliation_matched'"
+        )
+    ).scalar_one()
+    event = json.loads(event) if isinstance(event, str) else event
+    assert event["reconciliation_kind"] == "pg_ghost_protection_terminalized"
+    assert event["exchange_write_called"] is False
+    assert {row["role"] for row in event["terminalized_orders"]} == {"SL", "TP1"}
 
 
 def test_protection_reconciler_blocks_unowned_entry_order_in_same_domain(

@@ -42,12 +42,24 @@ def test_no_signal_is_only_market_absence_when_window_coverage_is_proven() -> No
             "live_signal_events": [],
             "watcher_runtime_coverage": [
                 {
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "BTCUSDT",
+                    "side": "long",
                     "coverage_state": "covered",
                     "liveness_state": "healthy",
                     "is_current": True,
                     "created_at_ms": 900,
                     "last_tick_at_ms": 9_900,
                     "valid_until_ms": 10_100,
+                }
+            ],
+            "strategy_group_candidate_scope": [
+                {
+                    "strategy_group_id": "SOR-001",
+                    "symbol": "BTCUSDT",
+                    "side": "long",
+                    "status": "active",
+                    "created_at_ms": 900,
                 }
             ],
             "server_monitor_runs": [
@@ -64,6 +76,86 @@ def test_no_signal_without_coverage_is_runtime_data_gap() -> None:
     result = reduce_runtime_signal_forensics(_query(), {"live_signal_events": []})
     assert result.conclusion_code == "runtime_data_gap"
     assert result.market_absence_proven is False
+
+
+@pytest.mark.parametrize(
+    ("process_state", "expected_classification"),
+    [
+        ("business_blocked", "runtime_business_blocked"),
+        ("retryable_failure", "engineering_runtime_failure"),
+        ("hard_failure", "runtime_safety_or_identity_failure"),
+    ],
+)
+def test_missing_promotion_uses_invocation_process_blocker_before_handoff_gap(
+    process_state: str, expected_classification: str
+) -> None:
+    result = reduce_runtime_signal_forensics(
+        _query(),
+        {
+            "live_signal_events": [_signal()],
+            "action_time_invocations": [
+                {
+                    "action_time_invocation_id": "invocation-1",
+                    "signal_event_id": "signal-1",
+                    "lane_identity_key": "lane-1",
+                    "source_watermark": "watermark-1",
+                }
+            ],
+            "runtime_process_outcomes": [
+                {
+                    "action_time_invocation_id": "invocation-1",
+                    "process_name": "action_time_fact_snapshots",
+                    "process_state": process_state,
+                    "first_blocker": "active_position_clear",
+                    "completed_at_ms": 3_000,
+                }
+            ],
+        },
+    )
+
+    finding = result.findings[0]
+    assert result.schema_name == "brc.runtime_signal_forensics.v2"
+    assert finding.classification == expected_classification
+    assert finding.first_blocker == "active_position_clear"
+    assert finding.action_time_invocation_id == "invocation-1"
+    assert finding.process_name == "action_time_fact_snapshots"
+    assert finding.process_state == process_state
+
+
+def test_successful_invocation_without_promotion_is_true_handoff_gap() -> None:
+    result = reduce_runtime_signal_forensics(
+        _query(),
+        {
+            "live_signal_events": [_signal()],
+            "action_time_invocations": [
+                {"action_time_invocation_id": "invocation-1", "signal_event_id": "signal-1"}
+            ],
+            "runtime_process_outcomes": [
+                {
+                    "action_time_invocation_id": "invocation-1",
+                    "process_name": "action_time_fact_snapshots",
+                    "process_state": "succeeded",
+                }
+            ],
+        },
+    )
+
+    finding = result.findings[0]
+    assert finding.classification == "engineering_handoff_gap"
+    assert finding.first_blocker == (
+        "promotion_candidate_missing_after_successful_invocation"
+    )
+    assert finding.action_time_invocation_id == "invocation-1"
+
+
+def test_missing_invocation_is_not_reported_as_promotion_gap() -> None:
+    result = reduce_runtime_signal_forensics(
+        _query(), {"live_signal_events": [_signal()]}
+    )
+
+    finding = result.findings[0]
+    assert finding.chain_stage == "action_time_invocation"
+    assert finding.first_blocker == "action_time_invocation_missing"
 
 
 def test_signal_chain_reports_first_missing_machine_object() -> None:
@@ -231,6 +323,8 @@ def test_closed_ticket_reports_trade_result_and_notification_state() -> None:
     assert finding.classification == "trade_completed"
     assert finding.notification_state == "sent"
     assert finding.net_pnl == "12.50"
+    assert finding.promotion_candidate_id == "p-1"
+    assert finding.action_time_lane_input_id == "lane-1"
     assert result.forbidden_effects["calls_exchange_write"] is False
 
 

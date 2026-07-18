@@ -46,6 +46,7 @@ OPEN_PG_LANE_STATUSES = {"opened", "facts_refreshing", "ticket_pending", "ticket
 READY_STATUS = "ready_for_action_time_final_gate"
 FINALGATE_READY_STATUS = "finalgate_ready"
 WAITING_STATUS = "waiting_for_market"
+NO_ACTIONABLE_PG_TICKET_STATUS = "no_actionable_pg_ticket"
 NON_EXECUTING_PREPARE_STATUS = "ready_for_non_executing_prepare"
 FRESH_AUTHORIZATION_STATUSES = {
     "ready_for_fresh_submit_authorization",
@@ -351,9 +352,11 @@ def _waiting_pg_ticket_resume_pack() -> dict[str, Any]:
         "scope": "pg_ticket_bound_resume_identity",
         "source_mode": "db_backed",
         "projection_target": "production_current",
-        "status": WAITING_STATUS,
+        # This dispatcher can establish only Ticket/Lane identity.  It must
+        # not infer a market condition from the absence of one.
+        "status": NO_ACTIONABLE_PG_TICKET_STATUS,
         "action_time_resume": {
-            "status": WAITING_STATUS,
+            "status": NO_ACTIONABLE_PG_TICKET_STATUS,
             "allowed_auto_actions": [],
             "places_order": False,
             "calls_order_lifecycle": False,
@@ -361,10 +364,10 @@ def _waiting_pg_ticket_resume_pack() -> dict[str, Any]:
             "withdrawal_or_transfer_requested": False,
         },
         "owner_state": {
-            "status": "waiting_for_opportunity",
-            "blocker_class": "waiting_for_market",
+            "status": "running",
+            "blocker_class": "none",
             "blocked_at": "pg_action_time_ticket_identity",
-            "blocked_reason": "no_open_pg_action_time_lane_or_ticket",
+            "blocked_reason": "no_actionable_pg_ticket",
             "non_authority_checkpoint": CONTINUE_ACTION,
             "owner_action_required": False,
         },
@@ -379,7 +382,7 @@ def _waiting_pg_ticket_resume_pack() -> dict[str, Any]:
         },
         "blockers": [],
         "warnings": [],
-        "pg_ticket_identity_dispatch_status": "waiting_for_pg_action_time_ticket",
+        "pg_ticket_identity_dispatch_status": "no_actionable_pg_ticket",
     }
 
 
@@ -1125,6 +1128,22 @@ def build_dispatch_artifact(
                 or "blocked_by_missing_pg_ticket_identity"
             ),
             blockers=base_blockers,
+            command_plan=None,
+            selected_strategy_group_id=selected_strategy_group_id,
+        )
+
+    if status == NO_ACTIONABLE_PG_TICKET_STATUS:
+        return _dispatch_artifact(
+            label=label,
+            source_path=source_path,
+            resume_pack=resume_pack,
+            action_time_resume=action_time_resume,
+            owner_state=owner_state,
+            status=NO_ACTIONABLE_PG_TICKET_STATUS,
+            blocker_class="none",
+            dispatch_action=CONTINUE_ACTION,
+            dispatch_status="no_actionable_pg_ticket",
+            blockers=[],
             command_plan=None,
             selected_strategy_group_id=selected_strategy_group_id,
         )
@@ -2965,6 +2984,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     return 0 if artifact["status"] in {
         WAITING_STATUS,
+        NO_ACTIONABLE_PG_TICKET_STATUS,
         READY_STATUS,
         *FRESH_AUTHORIZATION_STATUSES,
         NON_EXECUTING_PREPARE_STATUS,
