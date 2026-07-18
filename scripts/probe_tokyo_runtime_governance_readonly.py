@@ -23,11 +23,6 @@ from typing import Any, Callable
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_EXPECTED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 120
-DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-13-120_reconcile_terminal_predispatch_commands.py"
-)
 BACKEND_PROCESS_MARKER = "python -m " + "src.main"
 
 
@@ -442,19 +437,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--expected-current-head",
-        default=DEFAULT_EXPECTED_HEAD,
-        help="Expected current remote release commit before controlled deploy.",
+        default=None,
+        help="Optional exact remote release commit for a named deploy baseline.",
     )
     parser.add_argument(
         "--expected-migration-count",
         type=int,
-        default=DEFAULT_EXPECTED_MIGRATION_COUNT,
-        help="Expected current remote migration-file count before controlled deploy.",
+        default=None,
+        help="Optional exact remote migration-file count for a named deploy baseline.",
     )
     parser.add_argument(
         "--expected-latest-migration",
-        default=DEFAULT_EXPECTED_LATEST_MIGRATION,
-        help="Expected current remote latest migration filename before controlled deploy.",
+        default=None,
+        help="Optional exact remote latest migration filename for a named deploy baseline.",
     )
     parser.add_argument(
         "--connect-timeout-seconds",

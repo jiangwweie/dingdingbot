@@ -94,9 +94,9 @@ def test_release_readiness_report_passes_for_clean_ancestor_release(tmp_path: Pa
 def test_release_readiness_defaults_track_current_stage_migration_head():
     module = _load_module()
 
-    assert module.DEFAULT_EXPECTED_MIN_MIGRATIONS == 133
+    assert module.DEFAULT_EXPECTED_MIN_MIGRATIONS == 137
     assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-07-17-133_enforce_asset_neutral_account_risk_identity.py"
+        "2026-07-18-137_add_pretrade_strategy_detector_fact_index.py"
     )
 
 

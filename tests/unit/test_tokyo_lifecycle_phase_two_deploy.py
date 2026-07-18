@@ -15,7 +15,7 @@ from scripts.plan_tokyo_runtime_governance_git_deploy import (
 
 def test_deploy_plan_default_tracks_current_migration_head():
     assert DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-07-17-136_add_instrument_risk_calculation_kind.py"
+        "2026-07-18-137_add_pretrade_strategy_detector_fact_index.py"
     )
 
 

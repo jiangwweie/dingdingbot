@@ -41,6 +41,10 @@ from src.application.budgeted_autonomy_v01 import (
 from src.application.candidate_action_product_loop import (
     build_candidate_action_product_loop,
 )
+from src.application.action_time.lifecycle_occupancy import (
+    LifecycleOccupancyState,
+    classify_lifecycle_occupancy,
+)
 from src.application.notional_sizing import (
     ContractMarketRules,
     compute_notional_sizing,
@@ -4897,6 +4901,15 @@ def _post_action_next_attempt_gate(
     pg_active_position_count = len(snap.pg_positions)
     pg_open_order_count = len(snap.pg_open_orders)
     lifecycle_status = str(review_ledger.get("lifecycle_status") or "not_started_or_unknown")
+    occupancy = classify_lifecycle_occupancy(
+        pg_active_position_count=pg_active_position_count,
+        pg_open_order_count=pg_open_order_count,
+        exchange_position_count=exchange_position_count,
+        exchange_open_protection_count=exchange_open_protection_count,
+        exchange_facts_requested=snap.include_exchange,
+        exchange_facts_available=not bool(exchange_state.get("exchange_error")),
+        lifecycle_status=lifecycle_status,
+    )
     blockers: list[dict[str, Any]] = []
     warnings: list[str] = []
     if exchange_state.get("cleanup_required") is True:
@@ -4911,13 +4924,8 @@ def _post_action_next_attempt_gate(
                 "retry_condition": "Run official reconciliation/review cleanup until PG and exchange facts agree.",
             }
         )
-    if pg_active_position_count or pg_open_order_count or exchange_position_count or exchange_open_protection_count:
-        if (
-            pg_active_position_count
-            and pg_open_order_count
-            and (not snap.include_exchange or exchange_position_count)
-            and (not snap.include_exchange or exchange_open_protection_count)
-        ):
+    if occupancy.state != LifecycleOccupancyState.FLAT_AND_CLEAR:
+        if occupancy.state == LifecycleOccupancyState.OPEN_PROTECTED:
             lifecycle_gate = "current_lifecycle_open_protected"
             lifecycle_classification = "still_open_protected"
             warnings.append("current_position_or_protection_open_no_next_attempt")
@@ -4925,7 +4933,11 @@ def _post_action_next_attempt_gate(
             disabled_reason = "Current lifecycle is still open and protected; next bounded-live attempt is blocked until close and review."
         else:
             lifecycle_gate = "position_order_conflict_requires_recovery"
-            lifecycle_classification = "inconsistent_requires_recovery"
+            lifecycle_classification = (
+                "unknown_fail_closed"
+                if occupancy.state == LifecycleOccupancyState.UNKNOWN_FAIL_CLOSED
+                else "inconsistent_requires_recovery"
+            )
             retry_condition = "Resolve active position/open order/protection conflict through official recovery before any new attempt."
             disabled_reason = "Position/order/protection facts are inconsistent; recovery is required before any new attempt."
             blockers.append(
@@ -5019,6 +5031,7 @@ def _post_action_next_attempt_gate(
         "pg_open_order_count": pg_open_order_count,
         "exchange_position_count": exchange_position_count,
         "exchange_open_protection_count": exchange_open_protection_count,
+        "lifecycle_occupancy": occupancy.model_dump(mode="json"),
         "review_lifecycle_status": lifecycle_status,
         "warnings": warnings,
         "blockers": blockers,

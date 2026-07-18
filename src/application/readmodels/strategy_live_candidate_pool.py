@@ -339,9 +339,13 @@ def _candidate_pool_inputs_from_control_state(
             suppress_persistent_action_time_outcomes
         ),
     )
-    fact_by_lane = _current_fact_snapshot_by_lane(
+    public_fact_by_lane = _current_fact_snapshot_by_lane(
         control_state,
         fact_surface="pretrade_public",
+    )
+    fact_by_lane = _current_fact_snapshot_by_lane(
+        control_state,
+        fact_surface="pretrade_strategy",
     )
     action_time_fact_by_lane = _current_fact_snapshot_by_lane(
         control_state,
@@ -423,7 +427,7 @@ def _candidate_pool_inputs_from_control_state(
             binding_by_candidate=binding_by_candidate,
             event_by_id=event_by_id,
             readiness_by_lane=readiness_by_lane,
-            public_fact_by_lane=fact_by_lane,
+            public_fact_by_lane=public_fact_by_lane,
             action_time_fact_by_lane=action_time_fact_by_lane,
             account_safe_fact=account_safe_fact,
             account_safe_fact_by_lane=account_safe_fact_by_lane,
@@ -893,19 +897,20 @@ def _pg_replay_live_parity_projection(
         readiness = readiness_by_lane.get(key, {})
         facts = fact_by_lane.get(key, {})
         signal = signal_by_lane.get(key, {})
+        detector_fact = (
+            facts if str(facts.get("fact_surface") or "") == "pretrade_strategy" else {}
+        )
         computed = bool(
-            readiness.get("public_facts_state") in {"satisfied", "computed_not_satisfied"}
-            or _is_true(facts.get("computed"))
+            _is_true(detector_fact.get("computed"))
         )
         satisfied = (
-            readiness.get("public_facts_state") == "satisfied"
-            or _is_true(facts.get("satisfied"))
+            _is_true(detector_fact.get("satisfied"))
         )
         failed_facts = [
             str(item)
             for item in (
                 readiness.get("computed_not_satisfied")
-                or facts.get("failed_facts")
+                or detector_fact.get("failed_facts")
                 or []
             )
             if str(item or "")
@@ -917,7 +922,7 @@ def _pg_replay_live_parity_projection(
             )
         ) or _pg_replay_live_blocker_class(
             readiness=readiness,
-            facts=facts,
+            facts=detector_fact,
             signal=signal,
             computed=computed,
             satisfied=satisfied,
@@ -936,14 +941,13 @@ def _pg_replay_live_parity_projection(
                     readiness.get("persistent_engineering_blocker") is True
                 ),
                 "detector_attached": computed,
-                "watcher_tick_present": facts.get("freshness_state") == "fresh"
-                or readiness.get("watcher_state") == "fresh",
+                "watcher_tick_present": readiness.get("watcher_state") == "fresh",
                 "computed": computed,
                 "fresh_signal_present": bool(signal),
                 "event_time_utc": _ms_to_iso(_signal_event_time_ms(signal)),
                 "failed_facts": failed_facts,
                 "next_action": _pg_next_action(blocker_class),
-                "evidence_source": "pg_runtime_control_state:pretrade_readiness_or_fact_snapshot",
+                "evidence_source": "pg_runtime_control_state:pretrade_strategy_detector_fact",
             }
         )
     return {
@@ -965,6 +969,8 @@ def _pg_replay_live_blocker_class(
     readiness_blocker = str(readiness.get("first_blocker_class") or "")
     fact_blocker = str(facts.get("blocker_class") or "")
     current_signal_present = bool(signal)
+    if readiness_blocker == "market_wait_validated" and not facts:
+        return "detector_not_attached"
     if readiness_blocker and (
         readiness.get("persistent_engineering_blocker") is True
         or current_signal_present
@@ -1399,8 +1405,15 @@ def _pg_candidate_first_blocker(
         return EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED
     readiness = readiness_by_lane.get(key, {})
     if readiness.get("first_blocker_class"):
+        if (
+            str(readiness.get("first_blocker_class")) == "market_wait_validated"
+            and not facts
+        ):
+            return "detector_not_attached"
         return str(readiness["first_blocker_class"])
     facts = fact_by_lane.get(key, {})
+    if facts and str(facts.get("fact_surface") or "") != "pretrade_strategy":
+        return "detector_not_attached"
     if facts:
         if facts.get("computed") is not True:
             return "artifact_missing"
@@ -2580,6 +2593,8 @@ def _symbol_readiness_row(
         risk_state=risk_state,
         runtime_scope_missing=action_time_scope_missing,
     )
+    if str(daily_row.get("first_blocker") or "") == EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED:
+        first_blocker = EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED
     if first_blocker == "action_time_preflight_ready" and not runtime_profile_ready:
         first_blocker = "runtime_profile_scope_missing"
     if (

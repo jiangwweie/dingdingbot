@@ -1,6 +1,6 @@
 ---
 title: P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN
-status: CURRENT_IMPLEMENTATION_PLAN
+status: DEPLOYED_COMPONENT_BASELINE_WITH_REOPENED_GAPS
 authority: docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md
 implements: docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md
 last_verified: 2026-07-18
@@ -9,15 +9,24 @@ repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-accoun
 repair_baseline_head: 473be8113a34c35082798a18019f758bf57bf120
 prior_certified_source_commit: e4f49dcfa77932f6ec440b3a869943eb2ade73a1
 exact_certified_source_commit: bf634a7e2695e397adcc4a7107d4a48cb33ac98c
-implementation_state: LOCAL_EXACT_HEAD_CERTIFIED_AWAITING_T09
-release_gate: LOCAL_REMEDIATION_CERTIFIED_AWAITING_TOKYO_CANARY
-deployment_state: DEPLOYMENT_NO_GO
-production_state: UNCHANGED
+implementation_state: DEPLOYED_COMPONENT_BASELINE
+release_gate: REOPENED_BY_FULL_CHAIN_READINESS_FINDINGS
+deployment_state: DEPLOYED_AT_19719B93
+production_state: NOT_FULL_CHAIN_READY
 policy_activation: NOT_PERFORMED
 exchange_write: 0
 ---
 
 # P0 Runtime Observation Truth And Forensics Remediation Implementation Plan
+
+## Current Authority Notice
+
+**T09/T10 production closure is not accepted by this document anymore.** The
+current implementation sequence is
+`P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_IMPLEMENTATION_PLAN.md`,
+which adds observation/action-time separation, core-order terminal projection
+convergence, durable detector decision facts, closure-aware Goal Status, and
+exact production projection repair.
 
 ## 1. Goal
 

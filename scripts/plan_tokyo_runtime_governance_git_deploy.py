@@ -43,7 +43,7 @@ DEFAULT_VENV_PYTHON = (
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 DEFAULT_GIT_REF = "program/live-safe-v1"
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-17-136_add_instrument_risk_calculation_kind.py"
+    "2026-07-18-137_add_pretrade_strategy_detector_fact_index.py"
 )
 CONFIRMATION_PHRASE = "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
 DEFAULT_RUNTIME_SIGNAL_WATCHER_SERVICE_NAME = "brc-runtime-signal-watcher.service"

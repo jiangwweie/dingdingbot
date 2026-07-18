@@ -176,6 +176,7 @@ def _pg_latest_successful_protected_submit_attempt(
         row
         for row in _pg_rows(control_state.get("ticket_bound_protected_submit_attempts"))
         if str(row.get("status") or "") in COMPLETED_PROTECTED_SUBMIT_STATUSES
+        and _pg_submit_attempt_is_unresolved(control_state, row)
     ]
     if not attempts:
         return {}
@@ -184,6 +185,41 @@ def _pg_latest_successful_protected_submit_attempt(
         key=lambda row: int(row.get("created_at_ms") or 0),
         reverse=True,
     )[0]
+
+
+def _pg_submit_attempt_is_unresolved(
+    control_state: dict[str, Any],
+    attempt: dict[str, Any],
+) -> bool:
+    """Return whether a submitted attempt still owns current product status.
+
+    Submit attempts are immutable audit evidence.  A terminal lifecycle or a
+    terminal post-submit closure retires the attempt from the current Owner
+    status without deleting the audit record.
+    """
+
+    attempt_id = str(attempt.get("protected_submit_attempt_id") or "")
+    ticket_id = str(attempt.get("ticket_id") or "")
+    if not attempt_id:
+        return False
+    closures = _pg_rows(control_state.get("ticket_bound_post_submit_closures"))
+    if any(
+        str(row.get("protected_submit_attempt_id") or "") == attempt_id
+        and str(row.get("status") or "") == "closed"
+        for row in closures
+    ):
+        return False
+    lifecycles = _pg_rows(control_state.get("ticket_bound_order_lifecycle_runs"))
+    if any(
+        (
+            str(row.get("protected_submit_attempt_id") or "") == attempt_id
+            or (ticket_id and str(row.get("ticket_id") or "") == ticket_id)
+        )
+        and str(row.get("status") or "") == "lifecycle_closed"
+        for row in lifecycles
+    ):
+        return False
+    return True
 
 
 def _created_at_ms(row: dict[str, Any]) -> int:

@@ -23,10 +23,6 @@ from typing import Any, Callable
 DEFAULT_HOST = "tokyo"
 DEFAULT_DEPLOY_ROOT = "~/brc-deploy"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
-DEFAULT_EXPECTED_MIGRATION_COUNT = 125
-DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-16-125_add_active_ticket_exit_policy_adoption.py"
-)
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 20
 DEFAULT_VENV_PYTHON = (
     "/home/ubuntu/brc-deploy/app/current/.venv/bin/python"
@@ -826,11 +822,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--expected-migration-count",
         type=int,
-        default=DEFAULT_EXPECTED_MIGRATION_COUNT,
+        required=True,
     )
     parser.add_argument(
         "--expected-latest-migration",
-        default=DEFAULT_EXPECTED_LATEST_MIGRATION,
+        required=True,
     )
     parser.add_argument("--venv-python", default=DEFAULT_VENV_PYTHON)
     parser.add_argument(

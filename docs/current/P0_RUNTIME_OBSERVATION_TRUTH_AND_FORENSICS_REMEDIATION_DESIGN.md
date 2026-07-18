@@ -1,20 +1,32 @@
 ---
 title: P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN
-status: CURRENT_DESIGN
+status: DEPLOYED_COMPONENT_BASELINE_SUPERSEDED_FOR_CURRENT_CLOSURE
 authority: docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md
 last_verified: 2026-07-18
 owner_decision: repair_on_current_merge_branch
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_baseline_head: 473be8113a34c35082798a18019f758bf57bf120
 prior_certified_source_commit: e4f49dcfa77932f6ec440b3a869943eb2ade73a1
-release_gate: LOCAL_REMEDIATION_CERTIFICATION_IN_PROGRESS
-deployment_state: DEPLOYMENT_NO_GO
-production_state: UNCHANGED
+release_gate: DEPLOYED_COMPONENT_BASELINE
+deployment_state: DEPLOYED_AT_19719B93
+production_state: REOPENED_BY_FULL_CHAIN_READINESS_FINDINGS
 policy_activation: NOT_PERFORMED
 exchange_write: 0
 ---
 
 # P0 Runtime Observation Truth And Forensics Remediation Design
+
+## Current Authority Notice
+
+**The HTTP/compact/liveness work in this document is a deployed component
+baseline, but its production-closure assumptions are superseded by
+`P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_DESIGN.md`.**
+
+Post-deployment evidence proved that typed HTTP 200 business blockers still stop
+detector computation, ticket-bound ghost terminalization does not converge the
+core `orders` projection, healthy coverage is being consumed as detector truth,
+and terminal submitted attempts remain current in Goal Status. Current repair
+planning must follow the superseding design.
 
 ## 1. Decision
 

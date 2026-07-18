@@ -20,9 +20,9 @@ from typing import Any
 
 
 DEFAULT_DEPLOYED_HEAD = "ae9b209e33cd287273491f2e93dfdff3b6a814fd"
-DEFAULT_EXPECTED_MIN_MIGRATIONS = 133
+DEFAULT_EXPECTED_MIN_MIGRATIONS = 137
 DEFAULT_EXPECTED_LATEST_MIGRATION = (
-    "2026-07-17-133_enforce_asset_neutral_account_risk_identity.py"
+    "2026-07-18-137_add_pretrade_strategy_detector_fact_index.py"
 )
 
 

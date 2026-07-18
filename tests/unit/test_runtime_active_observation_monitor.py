@@ -2086,6 +2086,7 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
     finally:
         engine.dispose()
 
+
     result = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
         {
             "runtime_summaries": [
@@ -2237,6 +2238,55 @@ def test_write_runtime_signal_summaries_to_pg_creates_live_signal_event(tmp_path
         "first_blocker": None,
         "source_watermark": result["signal_event_ids"][0],
     }
+
+
+def test_write_runtime_detector_decisions_persists_computed_false_fact(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'detector-decisions.db'}"
+    engine = sa.create_engine(database_url)
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+        result = runtime_active_observation_monitor.write_runtime_detector_decisions_to_pg(
+            {
+                "runtime_summaries": [
+                    {
+                        "lane_identity": _typed_coverage_identity(
+                            strategy_group_id="MPG-001",
+                            symbol="OPUSDT",
+                            side="long",
+                            runtime_profile_id="runtime-profile:mpg",
+                            runtime_instance_id="runtime:mpg:op:long",
+                        ),
+                        "signal_summary": {
+                            "evaluation_status": "computed_not_satisfied",
+                            "evaluated_at_ms": 1000,
+                            "valid_until_ms": 2000,
+                            "trigger_candle_close_time_ms": 900,
+                            "reason_codes": ["momentum_floor_not_met"],
+                            "fact_observations": [],
+                        },
+                    }
+                ]
+            },
+            database_url=database_url,
+            allow_non_postgres_for_test=True,
+            now_ms=1100,
+        )
+        assert result["written_count"] == 1
+        with engine.connect() as conn:
+            row = conn.execute(
+                sa.text(
+                    "SELECT fact_surface, computed, satisfied, blocker_class, failed_facts "
+                    "FROM brc_runtime_fact_snapshots"
+                )
+            ).mappings().one()
+        assert row["fact_surface"] == "pretrade_strategy"
+        assert row["computed"] in {True, 1}
+        assert row["satisfied"] in {False, 0}
+        assert row["blocker_class"] == "computed_not_satisfied"
+        assert json.loads(row["failed_facts"]) == ["momentum_floor_not_met"]
+    finally:
+        engine.dispose()
 
 
 def test_write_runtime_signal_summaries_to_pg_blocks_evaluator_authority_upgrade(
@@ -3374,11 +3424,16 @@ def _create_live_signal_writer_schema(conn: sa.engine.Connection) -> None:
               strategy_group_id TEXT,
               symbol TEXT,
               side TEXT,
+              runtime_profile_id TEXT,
               fact_surface TEXT,
               source_kind TEXT,
+              source_ref TEXT,
               computed BOOLEAN,
               satisfied BOOLEAN,
               freshness_state TEXT,
+              failed_facts TEXT,
+              fact_values TEXT,
+              blocker_class TEXT,
               valid_until_ms INTEGER,
               observed_at_ms INTEGER,
               created_at_ms INTEGER

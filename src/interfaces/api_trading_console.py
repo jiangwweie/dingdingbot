@@ -5920,32 +5920,6 @@ async def _runtime_next_attempt_observation_cycle_payload(
         and next_attempt_gate.get("next_attempt_allowed_by_lifecycle") is True
         and jit_audit.get("can_execute_live") is not True
     )
-    if not gate_clear:
-        return {
-            "scope": "runtime_next_attempt_observation_cycle_api",
-            "status": "blocked",
-            "blocked_stage": "next_attempt_gate",
-            "runtime_instance_id": runtime_instance_id,
-            "owner_action_scope": owner_scope,
-            "include_exchange": request.include_exchange,
-            "next_attempt_gate": next_attempt_gate,
-            "just_in_time_lifecycle_audit": jit_audit,
-            "signal_artifact": None,
-            "action_time_ticket": None,
-            "blockers": list(next_attempt_gate.get("blockers") or ["next_attempt_gate_blocked"]),
-            "warnings": list(next_attempt_gate.get("warnings") or []),
-            "observation_cycle_plan": {
-                "next_step": next_attempt_gate.get("required_next_step")
-                or "resolve_next_attempt_gate_blocker",
-                "not_executed": True,
-                "creates_action_time_ticket": False,
-                "creates_execution_intent": False,
-                "places_order": False,
-                "calls_order_lifecycle": False,
-            },
-            "safety_invariants": _runtime_next_attempt_observation_safety(),
-        }
-
     try:
         lane_resolution = await _resolve_runtime_lane_resolution(runtime=runtime)
     except RuntimeLaneIdentityResolutionError as exc:
@@ -6091,6 +6065,12 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "owner_action_scope": owner_scope,
             "include_exchange": request.include_exchange,
             "next_attempt_gate": next_attempt_gate,
+            "action_time_readiness": {
+                "status": "clear" if gate_clear else "blocked",
+                "next_attempt_gate": next_attempt_gate,
+                "may_materialize_action_time_lane": False,
+                "may_materialize_action_time_ticket": False,
+            },
             "just_in_time_lifecycle_audit": jit_audit,
             "signal_artifact": signal_artifact,
             "action_time_ticket": None,
@@ -6115,6 +6095,12 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "owner_action_scope": owner_scope,
             "include_exchange": request.include_exchange,
             "next_attempt_gate": next_attempt_gate,
+            "action_time_readiness": {
+                "status": "clear" if gate_clear else "blocked",
+                "next_attempt_gate": next_attempt_gate,
+                "may_materialize_action_time_lane": gate_clear,
+                "may_materialize_action_time_ticket": False,
+            },
             "just_in_time_lifecycle_audit": jit_audit,
             "signal_artifact": signal_artifact,
             "action_time_ticket": None,
@@ -6131,6 +6117,40 @@ async def _runtime_next_attempt_observation_cycle_payload(
             "safety_invariants": _runtime_next_attempt_observation_safety(),
         }
 
+    if not gate_clear:
+        return {
+            "scope": "runtime_next_attempt_observation_cycle_api",
+            "status": "blocked",
+            "blocked_stage": "action_time_readiness",
+            "runtime_instance_id": runtime_instance_id,
+            "owner_action_scope": owner_scope,
+            "include_exchange": request.include_exchange,
+            "next_attempt_gate": next_attempt_gate,
+            "action_time_readiness": {
+                "status": "blocked",
+                "next_attempt_gate": next_attempt_gate,
+                "may_materialize_action_time_lane": False,
+                "may_materialize_action_time_ticket": False,
+            },
+            "just_in_time_lifecycle_audit": jit_audit,
+            "signal_artifact": signal_artifact,
+            "action_time_ticket": None,
+            "blockers": list(
+                next_attempt_gate.get("blockers") or ["next_attempt_gate_blocked"]
+            ),
+            "warnings": list(evaluation.warnings) + list(next_attempt_gate.get("warnings") or []),
+            "observation_cycle_plan": {
+                "next_step": next_attempt_gate.get("required_next_step")
+                or "resolve_next_attempt_gate_blocker",
+                "not_executed": True,
+                "creates_action_time_ticket": False,
+                "creates_execution_intent": False,
+                "places_order": False,
+                "calls_order_lifecycle": False,
+            },
+            "safety_invariants": _runtime_next_attempt_observation_safety(),
+        }
+
     return {
         "scope": "runtime_next_attempt_observation_cycle_api",
         "status": "ready_for_action_time_ticket_materialization",
@@ -6138,6 +6158,12 @@ async def _runtime_next_attempt_observation_cycle_payload(
         "owner_action_scope": owner_scope,
         "include_exchange": request.include_exchange,
         "next_attempt_gate": next_attempt_gate,
+        "action_time_readiness": {
+            "status": "clear",
+            "next_attempt_gate": next_attempt_gate,
+            "may_materialize_action_time_lane": True,
+            "may_materialize_action_time_ticket": False,
+        },
         "just_in_time_lifecycle_audit": jit_audit,
         "signal_artifact": signal_artifact,
         "action_time_ticket": None,

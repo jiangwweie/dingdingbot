@@ -40,6 +40,9 @@ from src.domain.ticket_exit_protection import (
     order_mapping_for_view,
     resolve_active_exit_protection_rows,
 )
+from src.application.action_time.core_order_terminal_projection import (
+    project_terminal_ticket_bound_orders_to_core,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -572,6 +575,14 @@ def _apply_flat_final_exit_reconciliation(
         },
         now_ms=now_ms,
     )
+    project_terminal_ticket_bound_orders_to_core(
+        conn,
+        ticket_id=str(protection_set.get("ticket_id") or ""),
+        symbol=str(protection_set.get("symbol") or ""),
+        protection_orders=_orders_for_set(conn, str(protection_set["exit_protection_set_id"])),
+        lifecycle_status="reconciliation_matched",
+        now_ms=now_ms,
+    )
     resolve_netting_domain_hold_source(
         conn,
         netting_domain_key=exchange_scope.netting_domain_key,
@@ -673,6 +684,14 @@ def _apply_flat_external_close_reconciliation(
             or exchange_snapshot.get("snapshot_id"),
         },
         now_ms=now_ms + 1,
+    )
+    project_terminal_ticket_bound_orders_to_core(
+        conn,
+        ticket_id=str(protection_set.get("ticket_id") or ""),
+        symbol=str(protection_set.get("symbol") or ""),
+        protection_orders=_orders_for_set(conn, str(protection_set["exit_protection_set_id"])),
+        lifecycle_status="reconciliation_matched",
+        now_ms=now_ms,
     )
     resolve_netting_domain_hold_source(
         conn,
@@ -797,6 +816,14 @@ def _apply_flat_absent_protection_reconciliation(
                 for order in ghost_orders
             ],
         },
+        now_ms=now_ms,
+    )
+    project_terminal_ticket_bound_orders_to_core(
+        conn,
+        ticket_id=str(protection_set.get("ticket_id") or ""),
+        symbol=str(protection_set.get("symbol") or ""),
+        protection_orders=_orders_for_set(conn, str(protection_set["exit_protection_set_id"])),
+        lifecycle_status="reconciliation_matched",
         now_ms=now_ms,
     )
     resolve_netting_domain_hold_source(

@@ -550,6 +550,28 @@ def test_pg_non_market_blockers_ignores_action_time_preflight_ready() -> None:
     ]
 
 
+def test_goal_status_retires_submitted_attempt_after_terminal_closure() -> None:
+    attempt = {
+        "protected_submit_attempt_id": "attempt:terminal",
+        "ticket_id": "ticket:terminal",
+        "status": "submitted",
+        "created_at_ms": PG_TEST_NOW_MS,
+    }
+    control_state = {
+        "ticket_bound_protected_submit_attempts": [attempt],
+        "ticket_bound_post_submit_closures": [
+            {
+                "protected_submit_attempt_id": "attempt:terminal",
+                "ticket_id": "ticket:terminal",
+                "status": "closed",
+            }
+        ],
+        "ticket_bound_order_lifecycle_runs": [],
+    }
+
+    assert goal_status._pg_latest_successful_protected_submit_attempt(control_state) == {}
+
+
 def test_goal_owner_action_required_does_not_escalate_engineering_gaps() -> None:
     assert goal_status._goal_owner_label("runtime_liveness_degraded") == "处理中"
     assert goal_status._goal_owner_label("missing_fact") == "处理中"
@@ -604,11 +626,8 @@ def test_pg_goal_status_uses_pg_current_when_current_is_clear(
         control_state=repository.read_control_state(),
     )
 
-    assert packet["status"] == "waiting_for_signal"
-    assert packet["plain_language_stage"] == "等待市场机会"
-    assert packet["plain_language_next_system_action"] == (
-        "系统继续观察市场，不需要 Owner 操作"
-    )
+    assert packet["status"] == "missing_fact"
+    assert packet["plain_language_stage"] == "前置事实不完整"
     assert packet["owner_action_required"] is False
     assert packet["action_time_ticket_explanation"]["plain_language_stage"] == (
         "当前没有 action-time lane"
@@ -964,7 +983,7 @@ def test_pg_goal_status_ignores_expired_runtime_safety_conflict(
         control_state=repository.read_control_state(),
     )
 
-    assert packet["status"] == "waiting_for_signal"
+    assert packet["status"] == "missing_fact"
     assert packet["ready_for_real_order_action"] is False
     assert "active_position_resolution" not in packet["blockers"]
 

@@ -925,6 +925,139 @@ def write_runtime_signal_summaries_to_pg(
     )
 
 
+def write_runtime_detector_decisions_to_pg(
+    artifact: dict[str, Any],
+    *,
+    database_url: str,
+    allow_non_postgres_for_test: bool = False,
+    now_ms: int | None = None,
+    conn: sa.engine.Connection | None = None,
+) -> dict[str, Any]:
+    """Persist actual detector outcomes, distinct from transport/public facts.
+
+    A successful HTTP call is coverage only.  This writer records a decision
+    only when the pure lane evaluator actually returned a computed result.
+    """
+
+    summaries = [row for row in artifact.get("runtime_summaries") or [] if isinstance(row, dict)]
+    observed_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    if not database_url and conn is None:
+        return {"status": "pg_detector_decisions_skipped", "reason": "database_url_missing", "written_count": 0}
+    if conn is not None:
+        written = _write_runtime_detector_decisions(conn, summaries=summaries, observed_ms=observed_ms)
+        return {"status": "pg_detector_decisions_written", "written_count": len(written), "fact_snapshot_ids": written}
+    normalized_url = normalize_sync_postgres_dsn(database_url)
+    if not is_sync_postgres_dsn(normalized_url) and not allow_non_postgres_for_test:
+        raise RuntimeError("PG detector decision write requires PostgreSQL DSN")
+    engine = sa.create_engine(normalized_url)
+    try:
+        with engine.begin() as connection:
+            written = _write_runtime_detector_decisions(
+                connection,
+                summaries=summaries,
+                observed_ms=observed_ms,
+            )
+    finally:
+        engine.dispose()
+    return {"status": "pg_detector_decisions_written", "written_count": len(written), "fact_snapshot_ids": written}
+
+
+def _write_runtime_detector_decisions(
+    conn: sa.engine.Connection,
+    *,
+    summaries: list[dict[str, Any]],
+    observed_ms: int,
+) -> list[str]:
+    if not sa.inspect(conn).has_table("brc_runtime_fact_snapshots"):
+        return []
+    written: list[str] = []
+    for row in summaries:
+        raw_identity = row.get("lane_identity")
+        signal = row.get("signal_summary")
+        if not isinstance(raw_identity, dict) or not isinstance(signal, dict):
+            continue
+        try:
+            identity = RuntimeLaneIdentity.model_validate(
+                {
+                    field: raw_identity.get(field)
+                    for field in RuntimeLaneIdentity.model_fields
+                }
+            )
+        except ValueError:
+            continue
+        evaluation_status = str(signal.get("evaluation_status") or "")
+        if evaluation_status not in {"event_satisfied", "computed_not_satisfied"}:
+            continue
+        evaluated_at_ms = _int_or_zero(signal.get("evaluated_at_ms")) or observed_ms
+        valid_until_ms = _int_or_zero(signal.get("valid_until_ms"))
+        if valid_until_ms <= evaluated_at_ms:
+            continue
+        trigger_candle_close_time_ms = _int_or_zero(signal.get("trigger_candle_close_time_ms"))
+        decision_identity = trigger_candle_close_time_ms or evaluated_at_ms
+        fact_snapshot_id = (
+            "fact:"
+            f"{identity.strategy_group_id}:{identity.symbol}:{identity.side}:"
+            f"pretrade_strategy:{identity.strategy_group_version_id}:{decision_identity}"
+        )
+        satisfied = evaluation_status == "event_satisfied"
+        failed_facts = [] if satisfied else [
+            str(item) for item in signal.get("reason_codes") or [] if str(item)
+        ]
+        fact_values = {
+            "evaluator_id": signal.get("evaluator_id"),
+            "evaluation_status": evaluation_status,
+            "trigger_candle_close_time_ms": trigger_candle_close_time_ms,
+            "signal_grade": signal.get("signal_grade"),
+            "required_execution_mode": signal.get("required_execution_mode"),
+            "reason_codes": list(signal.get("reason_codes") or []),
+            "fact_observations": list(signal.get("fact_observations") or []),
+            "signal_snapshot": signal.get("signal_snapshot") or {},
+            "action_time_fact_values": signal.get("action_time_fact_values") or {},
+        }
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO brc_runtime_fact_snapshots (
+                  fact_snapshot_id, strategy_group_id, symbol, side,
+                  runtime_profile_id, fact_surface, source_kind, source_ref,
+                  computed, satisfied, freshness_state, failed_facts, fact_values,
+                  blocker_class, observed_at_ms, valid_until_ms, created_at_ms
+                ) VALUES (
+                  :fact_snapshot_id, :strategy_group_id, :symbol, :side,
+                  :runtime_profile_id, 'pretrade_strategy', 'live_market', :source_ref,
+                  true, :satisfied, 'fresh', :failed_facts, :fact_values,
+                  :blocker_class, :observed_at_ms, :valid_until_ms, :created_at_ms
+                ) ON CONFLICT (fact_snapshot_id) DO UPDATE SET
+                  satisfied = excluded.satisfied,
+                  freshness_state = excluded.freshness_state,
+                  failed_facts = excluded.failed_facts,
+                  fact_values = excluded.fact_values,
+                  blocker_class = excluded.blocker_class,
+                  observed_at_ms = excluded.observed_at_ms,
+                  valid_until_ms = excluded.valid_until_ms,
+                  created_at_ms = excluded.created_at_ms
+                """
+            ),
+            {
+                "fact_snapshot_id": fact_snapshot_id,
+                "strategy_group_id": identity.strategy_group_id,
+                "symbol": identity.symbol,
+                "side": identity.side,
+                "runtime_profile_id": identity.runtime_profile_id,
+                "source_ref": f"runtime_instance:{identity.runtime_instance_id}",
+                "satisfied": satisfied,
+                "failed_facts": json.dumps(failed_facts),
+                "fact_values": json.dumps(fact_values, default=str),
+                "blocker_class": None if satisfied else "computed_not_satisfied",
+                "observed_at_ms": evaluated_at_ms,
+                "valid_until_ms": valid_until_ms,
+                "created_at_ms": observed_ms,
+            },
+        )
+        written.append(fact_snapshot_id)
+    return written
+
+
 def _pg_live_signal_events_result(
     *,
     written: list[str],
@@ -1089,6 +1222,7 @@ def _live_signal_candidates_from_summaries(
                 "strategy_family_version_id": row.get("strategy_family_version_id"),
                 "runtime_status": row.get("status"),
                 "runtime_blockers": _summary_blocker_codes(row),
+                "observation_computed": True,
                 "forbidden_effects": row.get("forbidden_effects")
                 if isinstance(row.get("forbidden_effects"), dict)
                 else {},
@@ -1197,7 +1331,18 @@ def _write_live_signal_candidate(
         if str(item).strip()
     ]
     forbidden_effects = _truthy_forbidden_effects(candidate.get("forbidden_effects"))
-    if runtime_status == "blocked" or runtime_blockers:
+    action_time_only_blockers = [
+        blocker
+        for blocker in runtime_blockers
+        if blocker.startswith("NEXT-ATTEMPT-")
+    ]
+    non_observation_blockers = [
+        blocker for blocker in runtime_blockers if blocker not in action_time_only_blockers
+    ]
+    if (
+        (runtime_status == "blocked" and not action_time_only_blockers)
+        or non_observation_blockers
+    ):
         return {
             "written": False,
             "blocker": f"runtime_summary_blocked:{runtime_status or 'unknown'}",
@@ -2878,6 +3023,13 @@ def main(argv: list[str] | None = None) -> int:
         artifact = _build_monitor_artifact(args)
         artifact["pg_watcher_runtime_coverage"] = (
             write_candidate_universe_coverage_to_pg(
+                artifact,
+                database_url=str(args.database_url or ""),
+                allow_non_postgres_for_test=bool(args.allow_non_postgres_for_test),
+            )
+        )
+        artifact["pg_detector_decisions"] = (
+            write_runtime_detector_decisions_to_pg(
                 artifact,
                 database_url=str(args.database_url or ""),
                 allow_non_postgres_for_test=bool(args.allow_non_postgres_for_test),

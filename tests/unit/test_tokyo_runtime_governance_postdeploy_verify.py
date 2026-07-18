@@ -267,13 +267,11 @@ def test_postdeploy_http_check_retries_only_transport_failure_inside_one_ssh_cal
     assert result["body_json"] == {"error_code": "401"}
 
 
-def test_postdeploy_verifier_defaults_track_current_stage_migration_head():
+def test_postdeploy_verifier_requires_exact_target_migration_baseline():
     module = _load_module()
 
-    assert module.DEFAULT_EXPECTED_MIGRATION_COUNT == 125
-    assert module.DEFAULT_EXPECTED_LATEST_MIGRATION == (
-        "2026-07-16-125_add_active_ticket_exit_policy_adoption.py"
-    )
+    assert not hasattr(module, "DEFAULT_EXPECTED_MIGRATION_COUNT")
+    assert not hasattr(module, "DEFAULT_EXPECTED_LATEST_MIGRATION")
 
 
 def test_postdeploy_verifier_certifies_adoption_timeout_and_performance_contracts():
@@ -512,7 +510,14 @@ def test_postdeploy_verifier_checks_ccxt_with_configured_runtime_venv():
 def test_postdeploy_verifier_cli_defaults_to_runtime_service_venv():
     module = _load_module()
 
-    args = module._parse_args(["--expected-current-head", EXPECTED_HEAD])
+    args = module._parse_args(
+        [
+            "--expected-current-head", EXPECTED_HEAD,
+            "--expected-migration-count", "137",
+            "--expected-latest-migration",
+            "2026-07-18-137_add_pretrade_strategy_detector_fact_index.py",
+        ]
+    )
 
     assert args.venv_python == RUNTIME_VENV_PYTHON
 

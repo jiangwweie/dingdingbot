@@ -163,6 +163,74 @@ def test_protection_reconciler_terminalizes_exact_pg_ghosts_after_flat_absent_pr
     assert {row["role"] for row in event["terminalized_orders"]} == {"SL", "TP1"}
 
 
+def test_protection_reconciler_converges_exact_terminal_ghosts_to_core_orders(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    protection_set = _one(
+        pg_control_connection,
+        "brc_ticket_bound_exit_protection_sets",
+        "exit_protection_set_id",
+        set_id,
+    )
+    tracked = pg_control_connection.execute(
+        text(
+            "SELECT local_order_id, exchange_order_id, role "
+            "FROM brc_ticket_bound_exit_protection_orders "
+            "WHERE exit_protection_set_id = :set_id"
+        ),
+        {"set_id": set_id},
+    ).mappings().all()
+    pg_control_connection.execute(
+        text(
+            "CREATE TABLE orders ("
+            "id TEXT PRIMARY KEY, symbol TEXT, order_role TEXT, status TEXT, "
+            "exchange_order_id TEXT, updated_at INTEGER, filled_at INTEGER)"
+        )
+    )
+    pg_control_connection.execute(
+        text(
+            "CREATE TABLE order_audit_logs ("
+            "id TEXT PRIMARY KEY, order_id TEXT, old_status TEXT, new_status TEXT, "
+            "event_type TEXT, triggered_by TEXT, metadata TEXT, created_at INTEGER)"
+        )
+    )
+    for row in tracked:
+        pg_control_connection.execute(
+            text(
+                "INSERT INTO orders (id, symbol, order_role, status, exchange_order_id) "
+                "VALUES (:id, :symbol, :order_role, 'OPEN', :exchange_order_id)"
+            ),
+            {
+                "id": row["local_order_id"],
+                "symbol": protection_set["symbol"],
+                "order_role": row["role"],
+                "exchange_order_id": row["exchange_order_id"],
+            },
+        )
+    snapshot = _snapshot(pg_control_connection, set_id)
+    snapshot["position"] = {"qty": "0", "position_flat": True, "complete": True}
+    snapshot["open_orders"] = []
+
+    payload = reconcile_ticket_bound_exit_protection_set(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 9_000,
+    )
+
+    assert payload["status"] == "reconciliation_matched"
+    assert pg_control_connection.execute(
+        text("SELECT count(*) FROM orders WHERE status = 'CANCELED'")
+    ).scalar_one() == 2
+    assert pg_control_connection.execute(
+        text(
+            "SELECT count(*) FROM order_audit_logs "
+            "WHERE event_type = 'ticket_bound_terminal_projection'"
+        )
+    ).scalar_one() == 2
+
+
 def test_protection_reconciler_blocks_unowned_entry_order_in_same_domain(
     pg_control_connection,
 ):
