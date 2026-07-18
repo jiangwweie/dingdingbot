@@ -1351,6 +1351,7 @@ def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
             "runtime_instance_id",
             "policy_current_id",
             "strategy_group_version_id",
+            "exchange_instrument_id",
             "asset_class",
             "event_spec_id",
             "event_spec_version",
@@ -1407,7 +1408,7 @@ def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
         rows = conn.execute(
             """
             SELECT strategy_group_id, symbol, side, detector_key, runtime_profile_id,
-                   runtime_instance_id, lane_identity_key, source_watermark,
+                   runtime_instance_id, exchange_instrument_id, lane_identity_key, source_watermark,
                    coverage_state, liveness_state, last_tick_at_ms, is_current
             FROM brc_watcher_runtime_coverage
             ORDER BY strategy_group_id, symbol, side
@@ -1419,6 +1420,7 @@ def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
             "BTCUSDT",
             "short",
             "runtime_active_observation_monitor",
+            None,
             None,
             None,
             None,
@@ -1435,6 +1437,13 @@ def test_active_monitor_writes_candidate_universe_coverage_to_pg(tmp_path):
             "runtime_active_observation_monitor",
             "owner-runtime-console-v1",
             "runtime-mpg-op-long",
+            _typed_coverage_identity(
+                strategy_group_id="MPG-001",
+                symbol="OPUSDT",
+                side="long",
+                runtime_profile_id="owner-runtime-console-v1",
+                runtime_instance_id="runtime-mpg-op-long",
+            )["exchange_instrument_id"],
             _typed_coverage_identity(
                 strategy_group_id="MPG-001",
                 symbol="OPUSDT",

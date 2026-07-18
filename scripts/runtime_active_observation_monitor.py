@@ -1933,6 +1933,7 @@ def _replace_current_watcher_runtime_coverage(
                   runtime_profile_id,
                   policy_current_id,
                   strategy_group_version_id,
+                  exchange_instrument_id,
                   asset_class,
                   event_spec_id,
                   event_spec_version,
@@ -1960,6 +1961,7 @@ def _replace_current_watcher_runtime_coverage(
                   :runtime_profile_id,
                   :policy_current_id,
                   :strategy_group_version_id,
+                  :exchange_instrument_id,
                   :asset_class,
                   :event_spec_id,
                   :event_spec_version,
@@ -2015,6 +2017,11 @@ def _replace_current_watcher_runtime_coverage(
                     if lane_identity
                     else None
                 ),
+                "exchange_instrument_id": (
+                    lane_identity.exchange_instrument_id
+                    if lane_identity
+                    else None
+                ),
                 "asset_class": (
                     lane_identity.asset_class if lane_identity else None
                 ),
@@ -2052,6 +2059,7 @@ def _require_typed_watcher_coverage_schema(conn: sa.engine.Connection) -> None:
         "runtime_profile_id",
         "policy_current_id",
         "strategy_group_version_id",
+        "exchange_instrument_id",
         "asset_class",
         "event_spec_id",
         "event_spec_version",
