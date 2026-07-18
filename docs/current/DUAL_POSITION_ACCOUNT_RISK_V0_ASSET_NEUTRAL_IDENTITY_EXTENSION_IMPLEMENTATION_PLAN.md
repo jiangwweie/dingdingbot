@@ -1,16 +1,16 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN
-status: SUPERSEDED_BY_UNIFIED_REMEDIATION_PLAN
+status: SUPERSEDED_BY_CERTIFIED_UNIFIED_REMEDIATION
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 deployment_state: NOT_AUTHORIZED
 checkpoint_d2_commit: abe8d300
-integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
+integration_state: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-current_migration_head: 133_LOCAL_ONLY
+current_migration_head: 136_LOCAL_ONLY
 planned_migration_head: 136
 superseded_by: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 ---
@@ -18,8 +18,8 @@ superseded_by: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDI
 # Dual-Position Account Risk V0 Asset-Neutral Identity Extension Implementation Plan
 
 > **执行状态覆盖：**本文保留资产中立扩展的原始任务和历史组件证据，不再作为
-> 当前执行入口。后续实施必须使用统一 remediation 计划 T01-T12；不得从本文未勾选
-> 项继续，也不得把下方绿色结果解释为 release-ready。
+> 当前执行入口。统一 remediation 计划 T01-T12 已完成本地认证；不得从本文未勾选
+> 项继续，也不得把下方历史结果解释为已部署或已激活。
 
 > **新增执行覆盖：**统一计划已经明确 Claim/Ticket/Canary/Runtime Safety 的 V1/V2
 > hash 兼容、migration 136 的 exact current/referenced target preflight、确定性 current
@@ -45,8 +45,9 @@ PostgreSQL, `ijson>=3.5.1,<4.0.0`, pytest.
 
 ## Historical Component Evidence (Superseded 2026-07-17)
 
-**深度审查结论为 NO-GO，方案 B 已确认但 remediation 尚未开始。** 下表只记录原
-fixture/组件覆盖，不证明真实生产因果链、恢复和部署身份已经闭合。
+**以下是 2026-07-17 深度审查时的 NO-GO 历史证据；统一 remediation 已于 2026-07-18
+完成本地认证。** 下表只记录原 fixture/组件覆盖，不作为当前生产因果链、恢复和部署身份
+闭合证据；当前证据以统一 remediation 设计和执行计划为准。
 
 | Gate | Result | Evidence meaning |
 | --- | ---: | --- |

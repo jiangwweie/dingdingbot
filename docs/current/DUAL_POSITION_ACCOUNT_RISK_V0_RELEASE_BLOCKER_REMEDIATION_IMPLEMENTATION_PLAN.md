@@ -1,11 +1,12 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN
-status: REMEDIATION_IN_PROGRESS_NO_GO
+status: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
-last_verified: 2026-07-17
-implementation_state: T01_T10_IMPLEMENTED_T11_BLOCKED_RUNTIME_LOCK_GATE
-integration_state: LOCAL_REMEDIATION_IN_PROGRESS_NO_GO
+last_verified: 2026-07-18
+implementation_state: T01_T12_COMPLETE_LOCAL_ONLY
+integration_state: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
+certified_source_commit: e4f49dcfa77932f6ec440b3a869943eb2ade73a1
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
@@ -45,12 +46,11 @@ Tokyo immutable-release state machine.
 
 ### 1.1 Current authorization
 
-**本计划已完成 T01-T10；T11 的 PostgreSQL、消费者、部署、审计与完整仓库回归均已通过，
-但 clean Linux/amd64 CPython 3.10 hash-lock 安装因外部下载超时未通过。** 两次只读
-`docker run --rm` 尝试均在 `pip install --require-hashes` 下载阶段失败：一次为包索引截断
-JSON，一次为 `files.pythonhosted.org` `ReadTimeoutError`；未到项目导入或 `pip check`。因此
-本计划仍为 **`REMEDIATION_IN_PROGRESS_NO_GO`**，不允许以手改 hash、复制其他 worktree lock
-或跳过门禁替代。批准范围仍仅为本地修复与本地认证。以下事项仍在本计划之外：
+**本计划已完成 T01-T12，本地状态为 `LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED`。**
+PostgreSQL、消费者、部署状态机、审计、完整仓库回归与 clean Linux/amd64 CPython 3.10
+hash-lock 安装/导入门禁均已通过。最终 lock gate 使用官方 PyPI、只读 worktree、
+`--require-hashes`、禁用受污染缓存，完成四个要求导入及 `pip check`，退出码为 `0`；lock、
+版本和 hash 无修改。批准范围仍仅为本地修复、本地认证与预部署审查。以下事项仍在本计划之外：
 
 - push or pull-request publication;
 - Tokyo staging, deploy or service mutation;
@@ -1758,7 +1758,7 @@ entry points, and independent review has no open required finding.
 **Hard Stop:** any test requires production secrets, network access, exchange writes or local
 runtime file authority.
 
-### 14.4 Current T11 evidence and first blocker
+### 14.4 Final T11 evidence
 
 **Verified local evidence on the remediation branch:**
 
@@ -1770,13 +1770,16 @@ runtime file authority.
   audits: passed, with `performance_risk.status=clear` and no suspicious runtime file authority;
 - full repository suite in disposable PostgreSQL: **3617 passed, 1 skipped**. The skipped case
   is permitted only for the broad suite and is not evidence for any required no-skip gate.
+- clean Linux/amd64 CPython 3.10 hash-lock gate: **passed** from official PyPI with
+  `--require-hashes`, read-only source mount, required imports and `pip check`; exit `0`,
+  `No broken requirements found`;
+- `psycopg-binary==3.3.4` official metadata and independently downloaded CPython 3.10
+  Linux/amd64 wheel both prove SHA256
+  `fa1cbc10768a796c96d3243656016bf4e337c81c71097270bb7b0ad6210d9765`, already present in the
+  tracked lock. The earlier mismatched payload was a corrupted download/cache, not a lock change.
 
-**First blocker:** the clean Linux/amd64 CPython 3.10 hash-lock install/import gate is not
-certified. Two independent read-only Docker attempts failed while fetching public dependencies:
-one package-index JSON was truncated and one `files.pythonhosted.org` download timed out. Both
-failed before hash verification completed, before project imports, and before `pip check`.
-Per T10/T11, keep the branch `NO_GO`; do not edit lock hashes or substitute any other worktree's
-lock. No server, production database, policy, credential or exchange state was touched.
+**T11 conclusion:** all required local gates are green. No server, production database, policy,
+credential or exchange state was touched. Deployment remains a separate explicit execution step.
 
 ## 15. T12 — Close Current Documentation Authority
 

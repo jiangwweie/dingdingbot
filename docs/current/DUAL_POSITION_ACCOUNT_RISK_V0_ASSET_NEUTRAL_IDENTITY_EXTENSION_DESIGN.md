@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN
-status: REMEDIATION_APPROVED_NOT_STARTED
+status: SUPERSEDED_BY_CERTIFIED_UNIFIED_REMEDIATION
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_DESIGN.md
 extends:
   - docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
@@ -10,13 +10,13 @@ supersedes_in_part:
   - docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md#symbol-and-instrument-authority
   - docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md#budget-reservation
 implementation_plan: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_ASSET_NEUTRAL_IDENTITY_EXTENSION_IMPLEMENTATION_PLAN.md
-last_verified: 2026-07-17
-implementation_state: DEEP_REVIEW_NO_GO_REMEDIATION_NOT_STARTED
-integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
+last_verified: 2026-07-18
+implementation_state: SUPERSEDED_BY_T01_T12_LOCAL_CERTIFICATION
+integration_state: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-current_migration_head: 133_LOCAL_ONLY
+current_migration_head: 136_LOCAL_ONLY
 planned_migration_head: 136
 performance_review_input: 2026-07-15-production-oom-review
 ---
@@ -47,11 +47,10 @@ Candidate Scope
 最多 **2** 个仓位、组合 open risk **6%**、单主风险簇 open risk **4%**、
 initial margin **90%**、最大杠杆 **10x**、同一 instrument 不允许第二个新 Ticket。
 
-本设计的资产中立组件已经进入合并树，但 **2026-07-17 深度审查撤销了本地认证
-结论**：合并树仍存在 identity、projection、multiplier 与 production-shape 因果链
-缺陷。方案 B 已确认，当前实施权威是统一 remediation 设计和执行计划；修复尚未
-开始。**尚未执行部署、生产 migration apply、生产政策激活、交易品种扩张或
-exchange write**，生产运行状态保持不变。
+本设计的资产中立组件已经进入合并树；**2026-07-17 深度审查发现的 identity、projection、
+multiplier 与 production-shape 因果链缺陷，已由统一 remediation T01-T12 在 2026-07-18
+完成本地认证**。当前实施权威是统一 remediation 设计和执行计划。**尚未执行部署、生产
+migration apply、生产政策激活、交易品种扩张或 exchange write**，生产运行状态保持不变。
 
 ### 1.1 统一 remediation 语义覆盖
 

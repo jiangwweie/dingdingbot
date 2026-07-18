@@ -55,7 +55,7 @@ design documents and acceptance proof.
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
 | 3 | **P0 Runtime Causal Integrity And Adversarial Certification** | **completed and deployed; 12 PostgreSQL/process scenarios passed and four demonstrated defects were repaired** | `docs/current/P0_RUNTIME_CAUSAL_INTEGRITY_AND_ADVERSARIAL_CERTIFICATION_DESIGN.md` |
 | 4 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
-| 5 | **Dual-Position Hard-Cap Account Risk Model V0** | **方案 B 已确认；深度审查 NO-GO；统一 remediation 设计与 T01-T12 执行计划已明确，尚未开始修复或部署** | `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` |
+| 5 | **Dual-Position Hard-Cap Account Risk Model V0** | **T01-T12 本地认证完成；migration 136、PostgreSQL、消费者、runtime-lock、部署状态机、审计和全量回归均通过；尚未 push 或部署** | `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | 6 | **Capital Allocation V1** | P2 after V0 dual-position and additional real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 7 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
@@ -112,7 +112,7 @@ then resumes this order.
 | 5 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
 | 6 | **Runtime causal integrity certification** | P0 complete | Twelve bounded real-PostgreSQL/process scenarios pass; six demonstrated implementation defects are repaired without authority expansion; migration 120 conserves historical pre-dispatch failure truth and notification correlation preserves production identity |
 | 7 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
-| 8 | **Dual-Position Hard-Cap Account Risk Model V0** | **P1 remediation approved, not started; deep-review NO-GO** | Execute unified T01-T12 and migrations 134-136 in the dedicated worktree; local production-shape certification must pass before a separate shadow/deploy/activation decision |
+| 8 | **Dual-Position Hard-Cap Account Risk Model V0** | **P1 local remediation certified; not deployed** | T01-T12 and migrations 134-136 passed local production-shape certification; the next boundary is a separate deploy decision, production migration and activation review |
 
 ## Why This Was Not Detected Before Production Signals
 

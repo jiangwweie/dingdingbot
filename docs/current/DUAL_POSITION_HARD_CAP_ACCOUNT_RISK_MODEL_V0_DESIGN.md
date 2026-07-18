@@ -1,14 +1,14 @@
 ---
 title: DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN
-status: REMEDIATION_APPROVED_NOT_STARTED
+status: SUPERSEDED_BY_CERTIFIED_UNIFIED_REMEDIATION
 authority: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
 owner_decision_date: 2026-07-14
-implementation_state: DEEP_REVIEW_NO_GO_REMEDIATION_NOT_STARTED
-integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
+implementation_state: SUPERSEDED_BY_T01_T12_LOCAL_CERTIFICATION
+integration_state: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-current_migration_head: 133_LOCAL_ONLY
+current_migration_head: 136_LOCAL_ONLY
 planned_migration_head: 136
 remediation_design: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
 remediation_plan: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
@@ -18,17 +18,17 @@ remediation_plan: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REM
 
 > **当前实施状态覆盖：**本文的 Owner 风险政策和目标模型继续有效；
 > instrument identity、rule snapshot、Claim、ExposureEpisode 与 risk-cluster membership
-> 继续由资产中立扩展定义。2026-07-17 深度审查已经撤销“本地合并已认证”结论；统一
-> 修复设计与可执行计划分别以
+> 继续由资产中立扩展定义。2026-07-18 统一 remediation 已完成 T01-T12 本地认证；当前
+> 修复设计与执行证据分别以
 > `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md` 和
 > `DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md`
 > 为当前实施权威。
 
 ## Deep-Review Status Override
 
-**合并基线 `60bb7fed` 当前为功能性 NO-GO，方案 B 已获确认但修复尚未开始。**
-此前的组件测试和本地合并证据保留为历史证据，不能再证明 release-ready。当前
-migration head 仍为本地 `133`；计划只通过 forward migrations `134 -> 136` 修复，
+**合并基线 `60bb7fed` 的统一 remediation 已完成本地认证，但尚未部署。**
+此前的组件测试和本地合并证据只作历史证据；当前认证以 remediation 分支、migration
+head `136`、完整 PostgreSQL/消费者/runtime-lock/部署状态机/全量回归门禁为准。
 生产部署、政策激活和 exchange write 均未发生。
 
 ### 可执行语义覆盖

@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN
-status: SUPERSEDED_BY_UNIFIED_REMEDIATION_PLAN
+status: SUPERSEDED_BY_CERTIFIED_UNIFIED_REMEDIATION
 authority: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md
 design: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
 base_commit: 2001644581cccc968ba695d3ff129960db6a7e84
@@ -8,11 +8,11 @@ branch: codex/dual-position-account-risk-v0
 integration_branch: codex/integrate-ffc73899-dual-position-risk-v0
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
-integration_state: LOCAL_MERGE_DEEP_REVIEW_NO_GO
+integration_state: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
-current_migration_head: 133_LOCAL_ONLY
+current_migration_head: 136_LOCAL_ONLY
 planned_migration_head: 136
 superseded_by: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 ---
@@ -20,15 +20,14 @@ superseded_by: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDI
 # Dual-Position Hard-Cap Account Risk Model V0 Implementation Plan
 
 > **执行状态覆盖：**本文保留原始实施拆解和组件证据，不再作为当前执行入口。
-> 2026-07-17 深度审查确认合并树仍有容量守恒、快照、runner 恢复和部署身份缺陷；
-> 后续只能执行
+> 2026-07-18 统一 remediation 已完成 T01-T12 本地认证；后续部署与生产验收只能使用
 > `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md`。
 
 ## Current Execution Status
 
-**方案 B 已确认，统一 remediation 尚未开始，合并树仍为 NO-GO。** 当前可执行路径
-固定在 `codex/dual-position-account-risk-remediation-v1` 独立 worktree，使用 migration
-`134 -> 136`，不得从本文旧任务直接继续编码。
+**方案 B 的统一 remediation 已完成本地认证，尚未部署。** 当前预部署候选固定在
+`codex/dual-position-account-risk-remediation-v1` 独立 worktree，migration head 为 `136`，
+不得从本文旧任务直接继续编码或部署。
 
 当前执行入口已进一步冻结 **容量事实全消费者守恒、Ticket/Claim 哈希 V1/V2、真实
 Binance `/userTrades` 回补契约、revoked adoption 能力拆分、exact migration-136

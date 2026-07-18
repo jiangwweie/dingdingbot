@@ -1,12 +1,13 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN
-status: REMEDIATION_IN_PROGRESS_NO_GO
+status: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
 extends: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
-last_verified: 2026-07-17
+last_verified: 2026-07-18
 owner_decision_date: 2026-07-17
-implementation_state: T01_T10_IMPLEMENTED_T11_BLOCKED_RUNTIME_LOCK_GATE
-integration_state: LOCAL_REMEDIATION_IN_PROGRESS_NO_GO
+implementation_state: T01_T12_COMPLETE_LOCAL_ONLY
+integration_state: LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED
+certified_source_commit: e4f49dcfa77932f6ec440b3a869943eb2ade73a1
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
@@ -21,7 +22,7 @@ planned_migration_head: 136
 
 ## 1. Current Decision
 
-### 1.1 Local implementation evidence as of 2026-07-17
+### 1.1 Local implementation evidence as of 2026-07-18
 
 **已知事实：** T01-T10 已在本独立 worktree 实施；migration **136**、V2 instrument
 risk identity、容量 Claim/Ticket/Lifecycle 链、runner recovery、exit-policy adoption 与
@@ -31,12 +32,14 @@ release identity 均已有定向本地测试。无跳过 PostgreSQL 门禁累计
 PostgreSQL 环境中的完整仓库回归为 **3617 passed, 1 skipped**；该 skip 只存在于文档允许
 保留既有 skip 的广义套件，未替代无跳过 PostgreSQL 门禁。
 
-**当前结论：** 状态仍为 **`REMEDIATION_IN_PROGRESS_NO_GO`**。唯一首要阻断是 clean
-Linux/amd64 CPython 3.10 的 `requirements-runtime.lock` 安装门禁：两次独立只读容器运行
-均在 `pip install --require-hashes` 的外部下载阶段失败，第一次为包索引截断 JSON，第二次为
-`files.pythonhosted.org` `ReadTimeoutError`。两次均未进入项目导入或 `pip check`，因此不能
-把它解释为 lock、hash 或源码错误；也不得通过手改 hash、复制其他 worktree lock 或跳过该门禁
-解决。T11 未全绿，本分支不得被描述为已部署、已激活或可部署。
+**当前结论：** 状态为 **`LOCAL_REMEDIATION_CERTIFIED_NOT_DEPLOYED`**。clean
+Linux/amd64 CPython 3.10 容器已从官方 `pypi.org/files.pythonhosted.org` 完成
+`pip install --require-hashes`、`ijson` 与三条生产导入链、以及 `pip check`，最终退出码为
+`0`、结果为 `No broken requirements found`。此前 `psycopg-binary` hash mismatch 已被
+证明是损坏下载/缓存：官方元数据、独立重新下载 wheel 与当前 lock 均一致为
+`fa1cbc10768a796c96d3243656016bf4e337c81c71097270bb7b0ad6210d9765`；lock、版本与 hash
+均未修改。T11 全绿，T12 文档权威已闭合。本状态只证明本地预部署候选，不代表已 push、已部署、
+已执行生产 migration、已激活政策或具有 exchange-write authority。
 
 **方案 B 已获 Owner 确认：在新的独立 worktree 中完成全部功能性 P1、两个被不同审查口径标为 P0/P1 的容量守恒缺陷，以及影响当前正确性、恢复、部署完整性、性能和已知扩展维度的关键 P2。**
 
