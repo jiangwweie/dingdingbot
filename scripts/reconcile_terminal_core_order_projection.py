@@ -11,9 +11,15 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
+import sys
 from typing import Any
 
 import sqlalchemy as sa
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from src.application.action_time.core_order_terminal_projection import (
     project_terminal_ticket_bound_orders_to_core,
