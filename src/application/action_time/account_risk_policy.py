@@ -13,6 +13,25 @@ import sqlalchemy as sa
 from src.domain.account_risk import AccountRiskPolicy, RiskClusterMembership
 
 
+# These blockers name missing or changed Owner-governed account risk authority.
+# Keeping the classification shared prevents Action-Time failures from being
+# misreported as account-safety or generic engineering failures.
+ACCOUNT_RISK_POLICY_BLOCKERS = frozenset(
+    {
+        "account_risk_policy_missing_or_changed",
+        "account_risk_policy_not_active",
+        "account_risk_policy_event_missing",
+        "account_risk_policy_event_changed",
+    }
+)
+
+
+def is_account_risk_policy_blocker(value: object) -> bool:
+    """Return whether an exact Action-Time blocker requires Owner policy."""
+
+    return str(value or "").strip() in ACCOUNT_RISK_POLICY_BLOCKERS
+
+
 class AccountRiskPolicyCurrentProjection(BaseModel):
     """Current policy plus the immutable Owner command that authorized it."""
 

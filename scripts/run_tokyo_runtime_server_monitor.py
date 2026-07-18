@@ -40,6 +40,9 @@ from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # 
 from src.application.action_time.process_outcome_relevance import (  # noqa: E402
     process_outcome_has_current_blocking_authority,
 )
+from src.application.action_time.account_risk_policy import (  # noqa: E402
+    is_account_risk_policy_blocker,
+)
 from src.application.owner_notification import (  # noqa: E402
     MAX_INTENTS_PER_RUN,
     OwnerNotificationIntent,
@@ -539,10 +542,13 @@ def _runtime_process_failure_event(
             "action_time_refresh_sequence",
         }
     ):
+        policy_blocked = is_account_risk_policy_blocker(blocker)
         return {
             "event_type": "action_time_processing_blocked",
             "notify": True,
-            "decision_status": "temporarily_unavailable",
+            "decision_status": (
+                "needs_intervention" if policy_blocked else "temporarily_unavailable"
+            ),
             "strategy_group_id": str(
                 row.get("strategy_group_id")
                 or (scope_parts[1] if len(scope_parts) == 4 else "runtime")
@@ -556,10 +562,16 @@ def _runtime_process_failure_event(
                 or (scope_parts[3] if len(scope_parts) == 4 else "")
             ),
             "checkpoint": process_name,
-            "blocker_class": "action_time_boundary_not_reproduced",
+            "blocker_class": (
+                "policy_scope_missing"
+                if policy_blocked
+                else "action_time_boundary_not_reproduced"
+            ),
             "reasons": ["action_time_processing_blocked", blocker],
             "owner_message": (
-                "发现交易机会；系统处理链路未完成，本次未交易，系统正在自动处理。"
+                "当前交易风险范围尚未配置，本次未交易，需要确认风险策略。"
+                if policy_blocked
+                else "发现交易机会；系统处理链路未完成，本次未交易，系统正在自动处理。"
             ),
         }
     if (

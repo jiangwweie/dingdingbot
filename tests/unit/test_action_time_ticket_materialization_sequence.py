@@ -593,6 +593,44 @@ def test_invocation_sequence_rolls_back_before_lane_when_prefetched_capacity_blo
     assert _count(invocation_pg_control_connection, "brc_action_time_tickets") == 0
 
 
+def test_capacity_fact_without_active_policy_reports_policy_gap_not_legacy_account_failure(
+    invocation_pg_control_connection,
+):
+    """Capacity observations cannot silently become legacy account authority."""
+
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+    _bind_fresh_invocation_account_facts(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=NOW_MS + 1,
+        enable_account_capacity_base=True,
+    )
+
+    report = materialize_action_time_ticket_sequence(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=NOW_MS + 1,
+        completion_clock_ms=lambda: NOW_MS + 2,
+    )
+
+    assert report["status"] == "action_time_ticket_sequence_rolled_back"
+    assert report["blockers"] == ["account_risk_policy_missing_or_changed"]
+    assert _count(invocation_pg_control_connection, "brc_promotion_candidates") == 0
+    assert _count(invocation_pg_control_connection, "brc_action_time_lane_inputs") == 0
+    assert _count(invocation_pg_control_connection, "brc_action_time_tickets") == 0
+
+
 def test_invocation_sequence_commits_one_sealed_claim_ticket_and_episode(
     invocation_pg_control_connection,
 ):

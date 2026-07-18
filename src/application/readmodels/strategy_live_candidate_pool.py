@@ -42,6 +42,9 @@ from src.application.readmodels.daily_live_enablement_table import (  # noqa: E4
 from src.application.action_time.process_outcome_relevance import (  # noqa: E402
     process_outcome_has_current_blocking_authority,
 )
+from src.application.action_time.account_risk_policy import (  # noqa: E402
+    is_account_risk_policy_blocker,
+)
 from src.application.action_time.capability_certification import (  # noqa: E402
     ActionTimeCapabilityTruth,
     current_action_time_capability_truth_by_lane,
@@ -568,6 +571,8 @@ def _current_pretrade_readiness_by_lane(
     for key, outcome in unresolved_outcomes.items():
         strategy_group_id, symbol, side = key
         current = readiness.get(key, {})
+        first_blocker_detail = str(outcome.get("first_blocker") or "")
+        policy_blocked = is_account_risk_policy_blocker(first_blocker_detail)
         readiness[key] = {
             **current,
             "strategy_group_id": strategy_group_id,
@@ -577,10 +582,18 @@ def _current_pretrade_readiness_by_lane(
             "signal_lifecycle_status": "engineering_blocked",
             "signal_freshness_state": "absent",
             "promotion_state": "blocked",
-            "first_blocker_class": "action_time_boundary_not_reproduced",
-            "first_blocker_detail": str(outcome.get("first_blocker") or ""),
-            "next_action": "repair_non_executing_action_time_rehearsal_path",
-            "persistent_engineering_blocker": True,
+            "first_blocker_class": (
+                "policy_scope_missing"
+                if policy_blocked
+                else "action_time_boundary_not_reproduced"
+            ),
+            "first_blocker_detail": first_blocker_detail,
+            "next_action": (
+                "record_or_activate_scoped_account_risk_policy"
+                if policy_blocked
+                else "repair_non_executing_action_time_rehearsal_path"
+            ),
+            "persistent_engineering_blocker": not policy_blocked,
             "process_outcome_id": str(outcome.get("process_outcome_id") or ""),
             "process_outcome_updated_at_ms": int(outcome.get("updated_at_ms") or 0),
         }

@@ -182,6 +182,39 @@ def test_action_time_business_block_remains_visible_not_market_wait():
     )
 
 
+def test_action_time_account_risk_policy_gap_requires_owner_intervention():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "runtime_process_outcomes": [
+            {
+                "process_name": "action_time_ticket_sequence",
+                "scope_key": "lane:SOR-001:ETHUSDT:long",
+                "process_state": "business_blocked",
+                "business_state": "temporarily_unavailable",
+                "first_blocker": "account_risk_policy_missing_or_changed",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            }
+        ],
+        "ticket_bound_exchange_commands": [],
+        "action_time_tickets": [],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "waiting_for_signal", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "needs_intervention"
+    assert decision["blocker_class"] == "policy_scope_missing"
+    assert decision["owner_message"] == (
+        "当前交易风险范围尚未配置，本次未交易，需要确认风险策略。"
+    )
+
+
 def test_signal_identity_gap_is_named_and_explained_without_owner_action():
     module = _load_module()
     control_state = {
@@ -760,6 +793,61 @@ def _insert_pg_coverage_and_unsatisfied_facts(conn) -> None:
                 "side": row["side"],
                 "detector_key": f"detector:{row['strategy_group_id']}:{row['side']}",
                 "runtime_profile_id": row["runtime_profile_id"],
+                "observed_at_ms": observed_at_ms,
+                "valid_until_ms": observed_at_ms + 3_600_000,
+            },
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO brc_runtime_fact_snapshots (
+                  fact_snapshot_id,
+                  strategy_group_id,
+                  symbol,
+                  side,
+                  runtime_profile_id,
+                  fact_surface,
+                  source_kind,
+                  source_ref,
+                  computed,
+                  satisfied,
+                  freshness_state,
+                  failed_facts,
+                  fact_values,
+                  blocker_class,
+                  observed_at_ms,
+                  valid_until_ms,
+                  created_at_ms
+                ) VALUES (
+                  :fact_snapshot_id,
+                  :strategy_group_id,
+                  :symbol,
+                  :side,
+                  :runtime_profile_id,
+                  'pretrade_strategy',
+                  'live_market',
+                  :source_ref,
+                  true,
+                  false,
+                  'fresh',
+                  :failed_facts,
+                  :fact_values,
+                  'computed_not_satisfied',
+                  :observed_at_ms,
+                  :valid_until_ms,
+                  :observed_at_ms
+                )
+                """
+            ),
+            {
+                "fact_snapshot_id": f"fact:{lane_key}:strategy",
+                "strategy_group_id": row["strategy_group_id"],
+                "symbol": row["symbol"],
+                "side": row["side"],
+                "runtime_profile_id": row["runtime_profile_id"],
+                "source_ref": f"pg_test:{lane_key}:strategy",
+                "failed_facts": json.dumps(["market_condition_not_satisfied"]),
+                "fact_values": json.dumps({"market_condition_not_satisfied": False}),
                 "observed_at_ms": observed_at_ms,
                 "valid_until_ms": observed_at_ms + 3_600_000,
             },

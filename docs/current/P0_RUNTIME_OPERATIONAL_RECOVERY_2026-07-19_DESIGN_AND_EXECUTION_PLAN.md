@@ -1,6 +1,6 @@
 ---
 title: P0_RUNTIME_OPERATIONAL_RECOVERY_2026-07-19_DESIGN_AND_EXECUTION_PLAN
-status: PROPOSED_PENDING_OWNER_CONFIRMATION
+status: ACTIVE_IMPLEMENTATION_OWNER_POLICY_PENDING
 authority: docs/current/P0_RUNTIME_OPERATIONAL_RECOVERY_2026-07-19_DESIGN_AND_EXECUTION_PLAN.md
 last_verified: 2026-07-19
 ---
@@ -241,3 +241,56 @@ invalid_split_state
 3. 三条 timer 驱动链路持续正常，且监控能如实报告异常；
 4. 新鲜自然 signal 的 pre-trade 链路要么到达合法 ticket，要么留下精确的、安全分类 blocker；
 5. 所有真实提交安全边界保持 fail-closed，未发生越权订单、转账、提现、凭证或风险配置变更。
+
+## 11. 2026-07-19 自然信号后的账户容量策略补充
+
+### 11.1 新事实与重新分类
+
+前述 P0-FRR 部署恢复后，东京在 **2026-07-19 02:00 CST** 自然检测到
+`SOR-001 / SOLUSDT / long` 等四个新鲜信号。观察、公共行情和账户只读事实均成功，
+且 `exchange_write_called=false`。Action-Time 没有创建 Ticket，精确 PG outcome 为：
+
+```text
+account_safe_fact_not_true
+```
+
+该字符串不是账户事实的真实状态。对应的 `account_capacity_base` 事实实际为
+`snapshot_complete=true`、`can_trade=true`、无持仓/挂单且余额为正；但
+`brc_account_risk_policy_current` 当前为 **0 行**。容量事实被写入 Invocation 后，
+旧的 `account_safe` 字段校验错误地读取该容量事实，因而把“缺少账户风险策略”伪报为
+“账户不安全”。（来源：东京 PG `brc_runtime_fact_snapshots`、
+`brc_action_time_invocations`、`brc_runtime_process_outcomes`，2026-07-19。）
+
+| 维度 | 已验证事实 | 正确结论 |
+| --- | --- | --- |
+| 账户/交易所事实 | `account_safe=true`、`can_trade=true`、无持仓/挂单 | 不是账户安全或交易所故障 |
+| 容量策略权威 | `brc_account_risk_policy_current=0` | 缺少 Owner 定义的账户级风险范围 |
+| Action-Time 投影 | 容量事实被按旧字段校验 | 工程分类错误，必须修复 |
+| lifecycle capability | `disabled` | 尚不允许真实提交/保护链 mutation |
+
+### 11.2 工作包 E：容量事实与风险策略权威闭环
+
+1. Action-Time 必须根据 Invocation 选定的事实表面分别验证：
+   `account_safe` 使用旧安全字段；`account_capacity_base` 使用
+   `schema_version + snapshot_complete + can_trade`。两类事实不得交叉解释。
+2. `account_capacity_base` 进入 promotion 前必须存在匹配
+   `account_id + runtime_profile_id` 的 **active** Account Risk Policy；缺失、shadow、
+   策略版本变化或缺少完整账户快照均 fail-closed。
+3. 缺策略必须记录精确 blocker
+   `account_risk_policy_missing_or_changed` / `account_risk_policy_not_active`；
+   Candidate Pool 与东京监控将其归类为 **`policy_scope_missing`**，而不是
+   `action_time_boundary_not_reproduced` 或 `account_safe_fact_not_true`。
+4. `set_account_risk_policy.py` 不得再携带账户、profile 或风险参数默认值；所有数值必须
+   显式提供，并在写入前验证它们与 PG 当前 active runtime scope 的账户绑定完全匹配。
+
+### 11.3 验收与 Owner 边界
+
+| 阶段 | 验收标准 | 权限边界 |
+| --- | --- | --- |
+| 本次工程修复 | 容量事实无旧字段误判；无策略时只留下精确 policy blocker | 不写生产策略、不创建 Ticket 或订单 |
+| Owner policy 写入 | 所有风险参数显式、与 active runtime scope 精确匹配、PG event 可审计 | 必须由 Owner 确认风险数值和激活意图 |
+| 后续自然信号 | `Signal → Promotion → Lane → Ticket` 或精确安全/策略 blocker | 不伪造信号，不绕过 FinalGate/Operation Layer |
+| lifecycle phase two | 仅在正式认证后恢复 capability | 不以 policy 写入替代 lifecycle 认证 |
+
+因此，P0-FRR 的服务恢复部分已经推进到持续运行；完整真实交易能力仍依赖两个独立且
+不可绕过的条件：**Owner 记录账户风险策略** 与 **lifecycle phase-two certification**。

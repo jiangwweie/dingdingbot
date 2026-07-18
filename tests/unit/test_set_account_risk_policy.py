@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import sqlalchemy as sa
+import pytest
 
 from scripts.ops import set_account_risk_policy as subject
 
@@ -17,12 +18,7 @@ def test_shadow_policy_derives_explicit_cluster_memberships_from_pg_registry(
     engine = sa.create_engine(database_url)
     with engine.begin() as conn:
         _create_tables(conn)
-        conn.execute(
-            sa.text(
-                """INSERT INTO brc_strategy_group_candidate_scope VALUES
-                ('scope-1', 'SOLUSDT', 'crypto', 'active')"""
-            )
-        )
+        _seed_bound_scope(conn)
         conn.execute(
             sa.text(
                 """INSERT INTO brc_symbol_instrument_mappings VALUES
@@ -36,7 +32,7 @@ def test_shadow_policy_derives_explicit_cluster_memberships_from_pg_registry(
             )
         )
 
-    assert subject.main(["--mode", "shadow", "--database-url", database_url]) == 0
+    assert subject.main(_policy_args(database_url, mode="shadow")) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["activation_state"] == "shadow"
     with engine.connect() as conn:
@@ -60,6 +56,7 @@ def test_rollback_does_not_replace_the_existing_cluster_memberships(
     engine = sa.create_engine(database_url)
     with engine.begin() as conn:
         _create_tables(conn)
+        _seed_bound_scope(conn)
         conn.execute(
             sa.text(
                 """INSERT INTO brc_risk_cluster_memberships VALUES
@@ -70,7 +67,11 @@ def test_rollback_does_not_replace_the_existing_cluster_memberships(
         )
 
     assert subject.main(
-        ["--mode", "rollback-single-position", "--database-url", database_url]
+        _policy_args(
+            database_url,
+            mode="rollback-single-position",
+            max_concurrent_positions="1",
+        )
     ) == 0
     with engine.connect() as conn:
         count = conn.execute(
@@ -81,6 +82,102 @@ def test_rollback_does_not_replace_the_existing_cluster_memberships(
         ).scalar_one()
     assert count == 1
     assert max_positions == 1
+
+
+def test_policy_command_requires_explicit_risk_values() -> None:
+    with pytest.raises(SystemExit):
+        subject.main(["--mode", "shadow", "--database-url", "sqlite:///unit.db"])
+
+
+def test_policy_command_rejects_account_outside_current_runtime_scope(
+    tmp_path: Path,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'mismatch.db'}"
+    engine = sa.create_engine(database_url)
+    with engine.begin() as conn:
+        _create_tables(conn)
+        _seed_bound_scope(conn, account_id="other-account")
+        conn.execute(
+            sa.text(
+                """INSERT INTO brc_symbol_instrument_mappings VALUES
+                ('SOLUSDT', 'binance_usdm:SOLUSDT', 'active')"""
+            )
+        )
+        conn.execute(
+            sa.text(
+                """INSERT INTO brc_exchange_instruments VALUES
+                ('binance_usdm:SOLUSDT', 'binance_usdm', 'active')"""
+            )
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="account_id_not_bound_to_exact_active_runtime_scope",
+    ):
+        subject.main(_policy_args(database_url, mode="shadow"))
+
+    with engine.connect() as conn:
+        assert conn.execute(
+            sa.text("SELECT COUNT(*) FROM brc_account_risk_policy_events")
+        ).scalar_one() == 0
+
+
+def _policy_args(
+    database_url: str,
+    *,
+    mode: str,
+    max_concurrent_positions: str = "2",
+) -> list[str]:
+    return [
+        "--mode", mode,
+        "--database-url", database_url,
+        "--account-id", "owner-subaccount-runtime-v0",
+        "--runtime-profile-id", "owner-runtime-console-v1",
+        "--risk-policy-version", "account-risk-v1-unit",
+        "--planned-stop-risk-fraction", "0.025",
+        "--max-concurrent-positions", max_concurrent_positions,
+        "--max-portfolio-open-risk-fraction", "0.06",
+        "--max-cluster-open-risk-fraction", "0.04",
+        "--max-portfolio-initial-margin-fraction", "0.90",
+        "--max-leverage", "10",
+        "--max-new-action-time-lanes", "1",
+        "--automatic-downsize-enabled",
+        "--unknown-exposure-policy", "global_fail_closed",
+    ]
+
+
+def _seed_bound_scope(
+    conn: sa.Connection,
+    *,
+    account_id: str = "owner-subaccount-runtime-v0",
+) -> None:
+    conn.execute(
+        sa.text(
+            """INSERT INTO brc_strategy_group_candidate_scope
+            (candidate_scope_id, symbol, asset_class, status, strategy_group_id,
+             scope_state)
+            VALUES ('scope-1', 'SOLUSDT', 'crypto', 'active', 'SOR-001',
+                    'live_submit_allowed')"""
+        )
+    )
+    conn.execute(
+        sa.text(
+            """INSERT INTO brc_strategy_groups VALUES ('SOR-001', 'SOR-001-v1')"""
+        )
+    )
+    conn.execute(
+        sa.text(
+            """INSERT INTO brc_strategy_group_versions VALUES
+            ('SOR-001-v1', :risk_envelope)"""
+        ),
+        {"risk_envelope": json.dumps({"account_id": account_id})},
+    )
+    conn.execute(
+        sa.text(
+            """INSERT INTO brc_runtime_scope_bindings VALUES
+            ('scope-1', 'owner-runtime-console-v1', 'active')"""
+        )
+    )
 
 
 def _create_tables(conn: sa.Connection) -> None:
@@ -113,7 +210,17 @@ def _create_tables(conn: sa.Connection) -> None:
             semantic_hash TEXT, status TEXT, created_at_ms BIGINT
         )""",
         """CREATE TABLE brc_strategy_group_candidate_scope (
-            candidate_scope_id TEXT, symbol TEXT, asset_class TEXT, status TEXT
+            candidate_scope_id TEXT, symbol TEXT, asset_class TEXT, status TEXT,
+            strategy_group_id TEXT, scope_state TEXT
+        )""",
+        """CREATE TABLE brc_strategy_groups (
+            strategy_group_id TEXT, current_version_id TEXT
+        )""",
+        """CREATE TABLE brc_strategy_group_versions (
+            strategy_group_version_id TEXT, risk_envelope JSON
+        )""",
+        """CREATE TABLE brc_runtime_scope_bindings (
+            candidate_scope_id TEXT, runtime_profile_id TEXT, status TEXT
         )""",
         """CREATE TABLE brc_symbol_instrument_mappings (
             symbol TEXT, exchange_instrument_id TEXT, status TEXT

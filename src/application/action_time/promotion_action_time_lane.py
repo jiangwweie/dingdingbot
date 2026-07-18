@@ -484,6 +484,18 @@ def materialize_action_time_invocation_promotion_action_time_lane(
         )
 
     bundle = _invocation_candidate_bundle(control_state, evidence=evidence)
+    capacity_authority_blocker = _capacity_fact_policy_blocker(
+        conn,
+        bundle=bundle,
+        account_snapshot=account_snapshot,
+    )
+    if capacity_authority_blocker:
+        return _invocation_promotion_result(
+            "action_time_invocation_promotion_blocked",
+            evidence=evidence,
+            blockers=[capacity_authority_blocker],
+            next_action="record_or_activate_scoped_account_risk_policy",
+        )
     bundle = _apply_allocation_capital_scope([bundle], now_ms=now_ms)[0]
     if account_snapshot is not None:
         bundle, capacity_gate_blocker = _prepare_active_capacity_bundle(
@@ -798,6 +810,7 @@ def _invocation_candidate_bundle(
             account_id=_account_id(control_state, candidate),
             lane_identity=lane_identity,
             require_typed_coverage=True,
+            account_fact_surface=evidence.account_capacity_fact_surface,
         )
     )
     return CandidateBundle(
@@ -828,6 +841,30 @@ def _invocation_candidate_bundle(
         source_lineage=source_lineage,
         action_time_invocation_id=invocation.action_time_invocation_id,
     )
+
+
+def _capacity_fact_policy_blocker(
+    conn: sa.Connection,
+    *,
+    bundle: CandidateBundle,
+    account_snapshot: FullAccountRiskSnapshot | None,
+) -> str | None:
+    """Require explicit active policy before capacity facts enter Action-Time."""
+
+    if bundle.account_fact_surface != "account_capacity_base":
+        return None
+    policy = load_account_risk_policy_current(
+        conn,
+        account_id=bundle.account_id,
+        runtime_profile_id=str(bundle.runtime_scope.get("runtime_profile_id") or ""),
+    )
+    if policy is None:
+        return "account_risk_policy_missing_or_changed"
+    if policy.activation_state != "active":
+        return "account_risk_policy_not_active"
+    if account_snapshot is None:
+        return "account_risk_snapshot_missing"
+    return None
 
 
 def _account_capacity_candidate(
@@ -1661,6 +1698,7 @@ def _candidate_blockers(
     account_id: str,
     lane_identity: RuntimeLaneIdentity | None,
     require_typed_coverage: bool = False,
+    account_fact_surface: str = "account_safe",
 ) -> list[str]:
     blockers: list[str] = []
     blockers.extend(
@@ -1831,12 +1869,20 @@ def _candidate_blockers(
     _assert_fact_ready(blockers, "account_safe_fact", account_safe_fact, now_ms=now_ms)
     _assert_fact_ready(blockers, "account_mode_fact", account_mode_fact, now_ms=now_ms)
     account_values = _as_dict(account_safe_fact.get("fact_values"))
-    if account_values.get("account_safe") is not True:
-        blockers.append("account_safe_fact_not_true")
-    if account_values.get("open_orders_clear") is not True:
-        blockers.append("open_orders_not_clear")
-    if account_values.get("active_position_or_open_order_clear") is False:
-        blockers.append("active_position_or_open_order_conflict")
+    if account_fact_surface == "account_capacity_base":
+        if (
+            account_values.get("schema_version") != "account_capacity_base.v1"
+            or account_values.get("snapshot_complete") is not True
+            or account_values.get("can_trade") is not True
+        ):
+            blockers.append("account_capacity_base_fact_not_safe")
+    else:
+        if account_values.get("account_safe") is not True:
+            blockers.append("account_safe_fact_not_true")
+        if account_values.get("open_orders_clear") is not True:
+            blockers.append("open_orders_not_clear")
+        if account_values.get("active_position_or_open_order_clear") is False:
+            blockers.append("active_position_or_open_order_conflict")
 
     blockers.extend(
         _required_fact_blockers(

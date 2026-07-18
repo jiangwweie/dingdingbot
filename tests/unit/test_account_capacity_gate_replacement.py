@@ -32,6 +32,22 @@ def test_active_account_capacity_requires_non_position_account_safety(
     assert blocker == "account_capacity_base_fact_not_safe"
 
 
+def test_capacity_fact_requires_an_active_account_risk_policy(monkeypatch) -> None:
+    monkeypatch.setattr(
+        subject,
+        "load_account_risk_policy_current",
+        lambda *_args, **_kwargs: None,
+    )
+
+    blocker = subject._capacity_fact_policy_blocker(
+        object(),
+        bundle=_bundle(base_safe=True),
+        account_snapshot=_snapshot(),
+    )
+
+    assert blocker == "account_risk_policy_missing_or_changed"
+
+
 def _bundle(*, base_safe: bool) -> subject.CandidateBundle:
     return subject.CandidateBundle(
         candidate={"strategy_group_id": "SOR-001", "symbol": "SOLUSDT", "side": "long"},
@@ -41,6 +57,7 @@ def _bundle(*, base_safe: bool) -> subject.CandidateBundle:
         account_safe_fact={"fact_values": {"account_capacity_base_safe": base_safe}},
         account_mode_fact={}, coverage={}, owner_policy_version="owner-policy-1",
         account_id="account-1",
+        account_fact_surface="account_capacity_base",
         blockers=(
             "account_safe_fact_not_satisfied",
             "account_safe_fact_not_fresh",

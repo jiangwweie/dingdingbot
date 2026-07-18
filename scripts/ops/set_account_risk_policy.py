@@ -27,16 +27,16 @@ from src.application.action_time.account_risk_policy import (  # noqa: E402
 from src.domain.account_risk import RiskClusterMembership  # noqa: E402
 
 
-DEFAULT_ACCOUNT_ID = "owner-subaccount-runtime-v0"
-DEFAULT_RUNTIME_PROFILE_ID = "runtime-order-capable"
-DEFAULT_POLICY_VERSION = "account-risk-v0-owner-20260714"
-
-
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    policy, event_type = _policy_for_mode(args.mode)
+    policy, event_type = _policy_from_args(args)
     engine = sa.create_engine(args.database_url)
     with engine.begin() as conn:
+        _require_exact_active_runtime_scope(
+            conn,
+            account_id=args.account_id,
+            runtime_profile_id=args.runtime_profile_id,
+        )
         append_account_risk_policy_event(
             conn,
             account_id=args.account_id,
@@ -88,36 +88,112 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         choices=("shadow", "activate", "rollback-single-position"),
     )
     parser.add_argument("--database-url", required=True)
-    parser.add_argument("--account-id", default=DEFAULT_ACCOUNT_ID)
-    parser.add_argument("--runtime-profile-id", default=DEFAULT_RUNTIME_PROFILE_ID)
+    parser.add_argument("--account-id", required=True)
+    parser.add_argument("--runtime-profile-id", required=True)
+    parser.add_argument("--risk-policy-version", required=True)
+    parser.add_argument("--planned-stop-risk-fraction", type=Decimal, required=True)
+    parser.add_argument("--max-concurrent-positions", type=int, choices=(1, 2), required=True)
+    parser.add_argument("--max-portfolio-open-risk-fraction", type=Decimal, required=True)
+    parser.add_argument("--max-cluster-open-risk-fraction", type=Decimal, required=True)
+    parser.add_argument(
+        "--max-portfolio-initial-margin-fraction",
+        type=Decimal,
+        required=True,
+    )
+    parser.add_argument("--max-leverage", type=int, required=True)
+    parser.add_argument("--max-new-action-time-lanes", type=int, choices=(1,), required=True)
+    downsize = parser.add_mutually_exclusive_group(required=True)
+    downsize.add_argument(
+        "--automatic-downsize-enabled",
+        dest="automatic_downsize_enabled",
+        action="store_true",
+    )
+    downsize.add_argument(
+        "--no-automatic-downsize",
+        dest="automatic_downsize_enabled",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--unknown-exposure-policy",
+        choices=("global_fail_closed",),
+        required=True,
+    )
     parser.add_argument("--created-by", default="codex_account_risk_policy_ops")
     parser.add_argument("--operation-id", default=uuid4().hex)
     return parser.parse_args(argv)
 
 
-def _policy_for_mode(mode: str) -> tuple[AccountRiskPolicy, str]:
-    activation_state = "shadow" if mode == "shadow" else "active"
-    max_positions = 1 if mode == "rollback-single-position" else 2
+def _policy_from_args(args: argparse.Namespace) -> tuple[AccountRiskPolicy, str]:
+    activation_state = "shadow" if args.mode == "shadow" else "active"
+    if args.mode == "rollback-single-position" and args.max_concurrent_positions != 1:
+        raise ValueError("rollback-single-position requires max_concurrent_positions=1")
     return (
         AccountRiskPolicy(
-            risk_policy_version=DEFAULT_POLICY_VERSION,
-            planned_stop_risk_fraction=Decimal("0.025"),
-            max_concurrent_positions=max_positions,
-            max_portfolio_open_risk_fraction=Decimal("0.06"),
-            max_cluster_open_risk_fraction=Decimal("0.04"),
-            max_portfolio_initial_margin_fraction=Decimal("0.90"),
-            max_leverage=10,
-            max_new_action_time_lanes=1,
-            automatic_downsize_enabled=True,
-            unknown_exposure_policy="global_fail_closed",
+            risk_policy_version=args.risk_policy_version,
+            planned_stop_risk_fraction=args.planned_stop_risk_fraction,
+            max_concurrent_positions=args.max_concurrent_positions,
+            max_portfolio_open_risk_fraction=args.max_portfolio_open_risk_fraction,
+            max_cluster_open_risk_fraction=args.max_cluster_open_risk_fraction,
+            max_portfolio_initial_margin_fraction=(
+                args.max_portfolio_initial_margin_fraction
+            ),
+            max_leverage=args.max_leverage,
+            max_new_action_time_lanes=args.max_new_action_time_lanes,
+            automatic_downsize_enabled=args.automatic_downsize_enabled,
+            unknown_exposure_policy=args.unknown_exposure_policy,
             activation_state=activation_state,
         ),
         {
             "shadow": "shadow_dual_position_v0",
             "activate": "activate_dual_position_v0",
             "rollback-single-position": "rollback_single_position",
-        }[mode],
+        }[args.mode],
     )
+
+
+def _require_exact_active_runtime_scope(
+    conn: sa.Connection,
+    *,
+    account_id: str,
+    runtime_profile_id: str,
+) -> None:
+    """Reject policy writes that do not match the current runtime authority."""
+
+    rows = conn.execute(
+        sa.text(
+            """
+            SELECT DISTINCT version.risk_envelope
+            FROM brc_runtime_scope_bindings AS runtime
+            JOIN brc_strategy_group_candidate_scope AS candidate
+              ON candidate.candidate_scope_id = runtime.candidate_scope_id
+            JOIN brc_strategy_groups AS strategy_group
+              ON strategy_group.strategy_group_id = candidate.strategy_group_id
+            JOIN brc_strategy_group_versions AS version
+              ON version.strategy_group_version_id = strategy_group.current_version_id
+            WHERE runtime.status = 'active'
+              AND candidate.status = 'active'
+              AND candidate.scope_state = 'live_submit_allowed'
+              AND runtime.runtime_profile_id = :runtime_profile_id
+            """
+        ),
+        {"runtime_profile_id": runtime_profile_id},
+    ).scalars()
+    scope_account_ids = {
+        str(_json_object(value).get("account_id") or "").strip()
+        for value in rows
+    }
+    if scope_account_ids != {account_id}:
+        raise ValueError("account_id_not_bound_to_exact_active_runtime_scope")
+
+
+def _json_object(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(str(value or ""))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _active_crypto_binance_memberships(
