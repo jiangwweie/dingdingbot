@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN
-status: FORWARD_FIX_DEPLOY_PENDING
+status: DEPLOYED_READONLY_CANARY_ACCEPTED
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
 last_verified: 2026-07-18
@@ -8,12 +8,12 @@ implementation_state: T01_T12_COMPLETE_LOCAL_ONLY
 integration_state: LOCAL_REMEDIATION_CERTIFICATION_REOPENED
 component_certification: T01_T12_EVIDENCE_RETAINED
 release_gate_blocker: docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md
-certified_source_commit: f8a930a2aeaadd4e7f2fbaa23eec5cebea37752e
+certified_source_commit: 19719b93d840742a76fd8f79548c720193a08989
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
-production_state: CONTAINED_AT_SCHEMA_125
-deployment_state: OWNER_AUTHORIZED_FORWARD_FIX
+production_state: DEPLOYED_SCHEMA_136
+deployment_state: DEPLOYED_READONLY_CANARY_ACCEPTED
 policy_activation: NOT_PERFORMED
 exchange_write: 0
 current_migration_head: 136_LOCAL_ONLY
