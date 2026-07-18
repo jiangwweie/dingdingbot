@@ -226,7 +226,11 @@ def _verify_storage_schemas(conn: sa.engine.Connection) -> None:
     inspector = sa.inspect(conn)
     for relation, expected in expected_storage_columns().items():
         actual = frozenset(str(item["name"]) for item in inspector.get_columns(relation))
-        if actual != expected:
+        # The sentinel selects only its versioned projection columns.  A later
+        # additive migration must not make a read-only canary fail merely
+        # because storage has extra columns; a missing required column remains
+        # a hard schema incompatibility.
+        if not expected <= actual:
             raise ValueError(f"canary_sentinel_storage_schema_mismatch:{relation}")
 
 
