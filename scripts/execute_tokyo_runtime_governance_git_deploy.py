@@ -62,6 +62,8 @@ def build_remote_state_machine_invocation(
     transaction_id: str,
     deploy_nonce: str,
     bootstrap_path: Path | None = None,
+    predecessor_transaction_id: str | None = None,
+    predecessor_deploy_nonce: str | None = None,
 ) -> dict[str, str]:
     """Build the one bounded, stdin-bootstrapped remote mutation session."""
 
@@ -69,6 +71,14 @@ def build_remote_state_machine_invocation(
         raise GitDeployExecutionError("deploy_transaction_id_invalid")
     if not deploy_nonce or any(char.isspace() for char in deploy_nonce):
         raise GitDeployExecutionError("deploy_nonce_invalid")
+    if bool(predecessor_transaction_id) != bool(predecessor_deploy_nonce):
+        raise GitDeployExecutionError("fence_supersession_predecessor_identity_incomplete")
+    if predecessor_transaction_id and not _LOWER_HEX_TRANSACTION_ID.fullmatch(
+        predecessor_transaction_id
+    ):
+        raise GitDeployExecutionError("fence_supersession_predecessor_transaction_invalid")
+    if predecessor_deploy_nonce and any(char.isspace() for char in predecessor_deploy_nonce):
+        raise GitDeployExecutionError("fence_supersession_predecessor_nonce_invalid")
     inputs = plan.get("inputs") or {}
     release = plan.get("release") or {}
     repo_root = Path(str(plan.get("repo_root") or _repo_root()))
@@ -121,6 +131,9 @@ def build_remote_state_machine_invocation(
     ]
     if expected_revision:
         remote_argv.extend(("--expected-revision", expected_revision))
+    if predecessor_transaction_id:
+        remote_argv.extend(("--predecessor-transaction-id", predecessor_transaction_id))
+        remote_argv.extend(("--predecessor-deploy-nonce", predecessor_deploy_nonce))
     command = (
         f"ssh {shlex.quote(host)} {shlex.quote(shlex.join(remote_argv))} "
         f"< {shlex.quote(str(source))}"
@@ -168,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
         require_confirmation_phrase=args.require_confirmation_phrase,
         transaction_id=args.transaction_id,
         deploy_nonce=args.deploy_nonce,
+        predecessor_transaction_id=args.predecessor_transaction_id,
+        predecessor_deploy_nonce=args.predecessor_deploy_nonce,
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -184,6 +199,8 @@ def execute_git_deploy_plan(
     require_confirmation_phrase: bool = False,
     transaction_id: str | None = None,
     deploy_nonce: str | None = None,
+    predecessor_transaction_id: str | None = None,
+    predecessor_deploy_nonce: str | None = None,
     runner: ShellRunner | None = None,
 ) -> dict[str, Any]:
     blockers = list(plan.get("checks", {}).get("blockers") or [])
@@ -279,6 +296,8 @@ def execute_git_deploy_plan(
                 plan,
                 transaction_id=transaction_identity["transaction_id"],
                 deploy_nonce=transaction_identity["deploy_nonce"],
+                predecessor_transaction_id=predecessor_transaction_id,
+                predecessor_deploy_nonce=predecessor_deploy_nonce,
             )
             mutation_started = True
             result = command_runner(invocation["command"])
@@ -724,6 +743,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--deploy-nonce",
         help="Resume nonce printed by the first attempt; requires --transaction-id.",
+    )
+    parser.add_argument(
+        "--predecessor-transaction-id",
+        help="Contained migration-in-progress transaction to atomically supersede.",
+    )
+    parser.add_argument(
+        "--predecessor-deploy-nonce",
+        help="Exact nonce bound to --predecessor-transaction-id.",
     )
     parser.add_argument(
         "--apply",

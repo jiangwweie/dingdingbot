@@ -89,6 +89,15 @@ def test_migration_classifies_100000_terminal_rows_without_python_materializatio
     _seed_instrument_and_mapping(conn)
     _seed_terminal_history(conn)
     _seed_complete_active_claim_and_ticket(conn)
+    conn.execute(
+        sa.text(
+            """
+            UPDATE brc_budget_reservations
+            SET ticket_id = NULL, status = 'expired'
+            WHERE budget_reservation_id = 'reservation-active'
+            """
+        )
+    )
 
     source = BACKFILL.read_text()
     assert ".fetchall(" not in source
@@ -127,6 +136,17 @@ def test_migration_classifies_100000_terminal_rows_without_python_materializatio
     assert peak_bytes <= 16 * 1024 * 1024
     assert elapsed_seconds < 60
 
+    repaired_ticket_id = conn.execute(
+        sa.text(
+            """
+            SELECT ticket_id
+            FROM brc_budget_reservations
+            WHERE budget_reservation_id = 'reservation-active'
+            """
+        )
+    ).scalar_one()
+    assert repaired_ticket_id == "ticket-active"
+
     _run_upgrade(conn, ENFORCE, "migration_asset_neutral_scale_128")
     index_names = {
         row[0]
@@ -145,6 +165,32 @@ def test_migration_classifies_100000_terminal_rows_without_python_materializatio
         "uq_brc_budget_reservation_invocation",
         "idx_brc_budget_reservation_effective_hot_path",
     } <= index_names
+
+
+def test_backfill_rejects_nonterminal_blank_ticket_reservation_lineage(
+    postgres_scale_connection: sa.Connection,
+) -> None:
+    conn = postgres_scale_connection
+    for index, migration in enumerate(MIGRATIONS):
+        _run_upgrade(conn, migration, f"migration_asset_neutral_negative_{index}")
+    _seed_instrument_and_mapping(conn)
+    _seed_complete_active_claim_and_ticket(conn)
+    conn.execute(
+        sa.text(
+            """
+            UPDATE brc_budget_reservations
+            SET ticket_id = NULL
+            WHERE budget_reservation_id = 'reservation-active'
+            """
+        )
+    )
+
+    backfill = _load(BACKFILL, "migration_asset_neutral_negative_backfill")
+    with pytest.raises(
+        RuntimeError,
+        match="asset_neutral_ticket_reservation_lineage_unresolved",
+    ):
+        _run_loaded_upgrade(conn, backfill)
 
 
 def _seed_instrument_and_mapping(conn: sa.Connection) -> None:

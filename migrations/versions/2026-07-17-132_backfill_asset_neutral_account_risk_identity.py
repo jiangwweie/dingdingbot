@@ -38,6 +38,7 @@ def upgrade() -> None:
     _release_terminal_presubmit_capacity(bind)
     _backfill_candidate_scope_instruments(bind)
     _backfill_reservation_instruments(bind)
+    _repair_terminal_ticket_reservation_lineage(bind)
     _backfill_exposure_episode_lineage(bind)
     _backfill_asset_neutral_dimensions(bind)
     _mark_unresolved_terminal_history_audit_only(bind)
@@ -284,6 +285,62 @@ def _backfill_reservation_instruments(bind: sa.Connection) -> None:
             """
         )
     )
+
+
+def _repair_terminal_ticket_reservation_lineage(bind: sa.Connection) -> None:
+    """Fill only a provable blank terminal Reservation ticket identity."""
+
+    required_tables = {"brc_action_time_tickets", "brc_budget_reservations"}
+    if not required_tables <= _tables(bind):
+        return
+    ticket_columns = _columns(bind, "brc_action_time_tickets")
+    reservation_columns = _columns(bind, "brc_budget_reservations")
+    required_ticket_columns = {"ticket_id", "budget_reservation_id"}
+    required_reservation_columns = {
+        "budget_reservation_id",
+        "ticket_id",
+        "status",
+    }
+    if not (
+        required_ticket_columns <= ticket_columns
+        and required_reservation_columns <= reservation_columns
+    ):
+        return
+    terminal_statuses = ", ".join(
+        repr(status) for status in _TERMINAL_RESERVATION_STATUSES
+    )
+    bind.execute(
+        sa.text(
+            f"""
+            UPDATE brc_budget_reservations AS reservation
+            SET ticket_id = ticket.ticket_id
+            FROM brc_action_time_tickets AS ticket
+            WHERE ticket.budget_reservation_id = reservation.budget_reservation_id
+              AND reservation.status IN ({terminal_statuses})
+              AND (reservation.ticket_id IS NULL OR trim(reservation.ticket_id) = '')
+              AND ticket.ticket_id IS NOT NULL
+              AND trim(ticket.ticket_id) <> ''
+            """
+        )
+    )
+    unresolved = bind.execute(
+        sa.text(
+            """
+            SELECT count(*)
+            FROM brc_action_time_tickets AS ticket
+            LEFT JOIN brc_budget_reservations AS reservation
+              ON reservation.budget_reservation_id = ticket.budget_reservation_id
+            WHERE ticket.budget_reservation_id IS NOT NULL
+              AND (
+                reservation.budget_reservation_id IS NULL
+                OR reservation.ticket_id IS NULL
+                OR ticket.ticket_id <> reservation.ticket_id
+              )
+            """
+        )
+    ).scalar_one()
+    if int(unresolved):
+        raise RuntimeError("asset_neutral_ticket_reservation_lineage_unresolved")
 
 
 def _backfill_asset_neutral_dimensions(bind: sa.Connection) -> None:

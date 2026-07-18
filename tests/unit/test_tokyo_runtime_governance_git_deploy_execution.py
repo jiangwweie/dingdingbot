@@ -101,6 +101,33 @@ def test_remote_state_machine_invocation_is_one_bounded_transient_service(tmp_pa
     assert len(invocation["bootstrap_sha256"]) == 64
 
 
+def test_remote_invocation_binds_exact_predecessor_for_fence_supersession(tmp_path):
+    script = tmp_path / "tokyo_runtime_deploy_remote_state_machine.py"
+    script.write_text("print('verified bootstrap')\n", encoding="utf-8")
+    plan = {
+        "repo_root": str(tmp_path),
+        "inputs": {
+            "host": "tokyo",
+            "target_commit": "a" * 40,
+            "expected_deployed_head": "b" * 40,
+            "expected_latest_migration": "2026-07-17-136_x.py",
+        },
+        "release": {"head": "a" * 40},
+    }
+
+    invocation = build_remote_state_machine_invocation(
+        plan,
+        transaction_id="c" * 32,
+        deploy_nonce="successor-nonce",
+        predecessor_transaction_id="e" * 32,
+        predecessor_deploy_nonce="predecessor-nonce",
+        bootstrap_path=script,
+    )
+
+    assert "--predecessor-transaction-id " + "e" * 32 in invocation["command"]
+    assert "--predecessor-deploy-nonce predecessor-nonce" in invocation["command"]
+
+
 def test_executor_prints_identity_then_runs_exactly_one_remote_mutation(
     tmp_path, capsys
 ):

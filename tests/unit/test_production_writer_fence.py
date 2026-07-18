@@ -8,6 +8,7 @@ import pytest
 from scripts.set_production_writer_fence import (
     create_fence,
     remove_fence,
+    supersede_fence,
 )
 
 
@@ -72,6 +73,58 @@ def test_remove_rejects_wrong_nonce_without_mutation(tmp_path):
         remove_fence(marker, activation_commit=receipt)
 
     assert marker.exists()
+
+
+def test_supersede_replaces_only_exact_predecessor_without_fence_gap(tmp_path):
+    marker = tmp_path / "production-writers.blocked"
+    create_fence(
+        marker,
+        deploy_transaction_id="old-tx",
+        deploy_nonce="old-nonce",
+        target_runtime_head="a" * 40,
+    )
+    predecessor = json.loads(marker.read_text(encoding="utf-8"))
+
+    result = supersede_fence(
+        marker,
+        predecessor_fence=predecessor,
+        deploy_transaction_id="new-tx",
+        deploy_nonce="new-nonce",
+        target_runtime_head="b" * 40,
+    )
+
+    successor = json.loads(marker.read_text(encoding="utf-8"))
+    assert result["status"] == "fence_superseded"
+    assert result["predecessor_inode"] != result["inode"]
+    assert successor == {
+        "schema": "brc.production_writer_fence.v1",
+        "deploy_transaction_id": "new-tx",
+        "deploy_nonce": "new-nonce",
+        "target_runtime_head": "b" * 40,
+    }
+
+
+def test_supersede_rejects_changed_predecessor_without_mutation(tmp_path):
+    marker = tmp_path / "production-writers.blocked"
+    create_fence(
+        marker,
+        deploy_transaction_id="old-tx",
+        deploy_nonce="old-nonce",
+        target_runtime_head="a" * 40,
+    )
+    predecessor = json.loads(marker.read_text(encoding="utf-8"))
+    predecessor["deploy_nonce"] = "wrong"
+
+    with pytest.raises(ValueError, match="fence_predecessor_lineage_mismatch"):
+        supersede_fence(
+            marker,
+            predecessor_fence=predecessor,
+            deploy_transaction_id="new-tx",
+            deploy_nonce="new-nonce",
+            target_runtime_head="b" * 40,
+        )
+
+    assert json.loads(marker.read_text(encoding="utf-8"))["deploy_transaction_id"] == "old-tx"
 
 
 def test_create_rejects_symlink_marker(tmp_path):

@@ -163,6 +163,23 @@ def test_canonical_release_tree_digest_binds_path_mode_and_content(tmp_path):
         machine.canonical_release_tree_digest(release)
 
 
+def test_canonical_release_tree_digest_ignores_runtime_bytecode_only(tmp_path):
+    release = tmp_path / "release"
+    release.mkdir()
+    source = release / "src.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    original = machine.canonical_release_tree_digest(release)
+
+    cache = release / "__pycache__"
+    cache.mkdir()
+    (cache / "src.cpython-310.pyc").write_bytes(b"runtime-cache")
+    (release / "generated.pyo").write_bytes(b"runtime-cache")
+
+    assert machine.canonical_release_tree_digest(release) == original
+    source.write_text("value = 2\n", encoding="utf-8")
+    assert machine.canonical_release_tree_digest(release) != original
+
+
 def test_certification_generation_journal_appends_superseding_pair_proof_and_commit(
     tmp_path,
 ):
@@ -565,6 +582,181 @@ def test_writer_fence_treats_not_yet_installed_canary_units_as_stopped(tmp_path)
     assert sorted(result["units_not_installed"]) == sorted(missing)
 
 
+def _write_migration_in_progress_predecessor_journal(
+    path: Path,
+    *,
+    old_sha: str,
+    target_sha: str,
+    transaction_id: str = "deadbeef",
+    deploy_nonce: str = "old-nonce",
+) -> dict[str, dict[str, object]]:
+    journal = machine.DeployJournal(
+        path,
+        transaction_id=transaction_id,
+        deploy_nonce=deploy_nonce,
+        old_sha=old_sha,
+        target_sha=target_sha,
+    )
+    prepolicy = {
+        unit: {"active": unit.endswith("watcher.timer")}
+        for unit in machine.PRODUCTION_WRITER_UNITS
+    }
+    for phase in machine.DEPLOY_PHASES[:7]:
+        result: dict[str, object] = {"status": phase}
+        if phase == "production_writers_fenced":
+            result["unit_prepolicy"] = prepolicy
+        if phase == "pre_migration":
+            result["actual_revision"] = "125"
+        journal.append(phase, {"result": result})
+    return prepolicy
+
+
+def test_forward_fix_fence_supersession_requires_exact_stranded_predecessor(tmp_path):
+    old_sha = "b" * 40
+    failed_target = "a" * 40
+    new_target = "c" * 40
+    previous = tmp_path / "releases/old"
+    previous.mkdir(parents=True)
+    (previous / ".brc-release-manifest.json").write_text(
+        json.dumps({"target_sha": old_sha}), encoding="utf-8"
+    )
+    current = tmp_path / "app/current"
+    current.parent.mkdir(parents=True)
+    current.symlink_to(previous)
+    release = tmp_path / "releases/new"
+    release.mkdir()
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL=postgresql://example.invalid/db\n")
+    journal_dir = tmp_path / "deploy-state"
+    journal_dir.mkdir()
+    prepolicy = _write_migration_in_progress_predecessor_journal(
+        journal_dir / "tokyo-runtime-deploy-deadbeef.json",
+        old_sha=old_sha,
+        target_sha=failed_target,
+    )
+    marker = tmp_path / "production-writers.blocked"
+    marker.write_text(
+        json.dumps(
+            {
+                "schema": "brc.production_writer_fence.v1",
+                "deploy_transaction_id": "deadbeef",
+                "deploy_nonce": "old-nonce",
+                "target_runtime_head": failed_target,
+            }
+        ),
+        encoding="utf-8",
+    )
+    marker.chmod(0o600)
+
+    def runner(command, **kwargs):
+        if command[-2:] == ["alembic", "current"]:
+            return machine.ChildResult(returncode=0, stdout="125 (head)\n", stderr="")
+        if command[0] == "/usr/bin/systemctl":
+            return machine.ChildResult(returncode=0, stdout="inactive\n", stderr="")
+        if any(str(item).endswith("set_ticket_lifecycle_mutation_capability.py") for item in command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"enabled":false,"exchange_write_called":false}',
+                stderr="",
+            )
+        raise AssertionError(command)
+
+    result = machine.validate_forward_fix_fence_supersession(
+        predecessor_transaction_id="deadbeef",
+        predecessor_deploy_nonce="old-nonce",
+        old_sha=old_sha,
+        target_sha=new_target,
+        previous_release_path=previous,
+        app_current=current,
+        release_path=release,
+        env_path=env_file,
+        deploy_journal_directory=journal_dir,
+        runner=runner,
+        require_root_owner=False,
+        fence_marker=marker,
+    )
+
+    assert result["status"] == "forward_fix_fence_supersession_authorized"
+    assert result["predecessor_fence"]["target_runtime_head"] == failed_target
+    assert result["unit_prepolicy"] == prepolicy
+
+
+@pytest.mark.parametrize(
+    ("mutate", "error"),
+    [
+        ("marker", "fence_supersession_marker_journal_mismatch"),
+        ("schema", "fence_supersession_schema_revision_mismatch"),
+        ("writer", "fence_supersession_writer_not_inactive"),
+    ],
+)
+def test_forward_fix_fence_supersession_rejects_any_changed_containment_fact(
+    tmp_path, mutate, error
+):
+    old_sha = "b" * 40
+    failed_target = "a" * 40
+    previous = tmp_path / "releases/old"
+    previous.mkdir(parents=True)
+    (previous / ".brc-release-manifest.json").write_text(
+        json.dumps({"target_sha": old_sha}), encoding="utf-8"
+    )
+    current = tmp_path / "app/current"
+    current.parent.mkdir(parents=True)
+    current.symlink_to(previous)
+    release = tmp_path / "releases/new"
+    release.mkdir()
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL=postgresql://example.invalid/db\n")
+    journal_dir = tmp_path / "deploy-state"
+    journal_dir.mkdir()
+    _write_migration_in_progress_predecessor_journal(
+        journal_dir / "tokyo-runtime-deploy-deadbeef.json",
+        old_sha=old_sha,
+        target_sha=failed_target,
+    )
+    marker = tmp_path / "production-writers.blocked"
+    marker_payload = {
+        "schema": "brc.production_writer_fence.v1",
+        "deploy_transaction_id": "deadbeef",
+        "deploy_nonce": "old-nonce",
+        "target_runtime_head": failed_target,
+    }
+    if mutate == "marker":
+        marker_payload["deploy_nonce"] = "wrong"
+    marker.write_text(json.dumps(marker_payload), encoding="utf-8")
+    marker.chmod(0o600)
+
+    def runner(command, **kwargs):
+        if command[-2:] == ["alembic", "current"]:
+            revision = "124" if mutate == "schema" else "125"
+            return machine.ChildResult(returncode=0, stdout=revision + " (head)\n", stderr="")
+        if command[0] == "/usr/bin/systemctl":
+            state = "active" if mutate == "writer" else "inactive"
+            return machine.ChildResult(returncode=0, stdout=state + "\n", stderr="")
+        if any(str(item).endswith("set_ticket_lifecycle_mutation_capability.py") for item in command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"enabled":false,"exchange_write_called":false}',
+                stderr="",
+            )
+        raise AssertionError(command)
+
+    with pytest.raises((RuntimeError, ValueError), match=error):
+        machine.validate_forward_fix_fence_supersession(
+            predecessor_transaction_id="deadbeef",
+            predecessor_deploy_nonce="old-nonce",
+            old_sha=old_sha,
+            target_sha="c" * 40,
+            previous_release_path=previous,
+            app_current=current,
+            release_path=release,
+            env_path=env_file,
+            deploy_journal_directory=journal_dir,
+            runner=runner,
+            require_root_owner=False,
+            fence_marker=marker,
+        )
+
+
 def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
     tmp_path
 ):
@@ -622,6 +814,150 @@ def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
         item["env"]["DATABASE_URL"] == "postgresql://example.invalid/db"
         for _, item in commands
     )
+
+
+def test_fenced_migration_reports_only_bounded_terminal_stderr_line(tmp_path):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+
+    def runner(command, **kwargs):
+        if "upgrade" in command:
+            return machine.ChildResult(
+                returncode=1,
+                stdout="",
+                stderr="verbose internal context\npsycopg.errors.UndefinedColumn: missing_column",
+            )
+        if "--status" in command:
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"enabled":false,"exchange_write_called":false}',
+                stderr="",
+            )
+        if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "status": "canary_readonly_role_preflight_passed",
+                        "current_user": "pg_read_all_data",
+                        "exchange_write_called": False,
+                    }
+                ),
+                stderr="",
+            )
+        return machine.ChildResult(returncode=0, stdout='{"status":"ok"}', stderr="")
+
+    with pytest.raises(
+        RuntimeError,
+        match="fenced_schema_command_failed:-m:alembic:upgrade:psycopg.errors.UndefinedColumn: missing_column",
+    ):
+        machine.run_fenced_schema_migration(
+            release_path=release,
+            env_path=env_file,
+            transaction_id="a1b2c3d4",
+            expected_revision="124",
+            runner=runner,
+        )
+
+
+def test_fenced_migration_omits_sqlalchemy_context_link_from_failure_summary(tmp_path):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+
+    def runner(command, **kwargs):
+        if "upgrade" in command:
+            return machine.ChildResult(
+                returncode=1,
+                stdout="",
+                stderr="psycopg.errors.UniqueViolation: duplicate identity\n(Background on this error at: https://sqlalche.me/e/20/gkpj)",
+            )
+        if "--status" in command:
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"enabled":false,"exchange_write_called":false}',
+                stderr="",
+            )
+        if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "status": "canary_readonly_role_preflight_passed",
+                        "current_user": "pg_read_all_data",
+                        "exchange_write_called": False,
+                    }
+                ),
+                stderr="",
+            )
+        return machine.ChildResult(returncode=0, stdout='{"status":"ok"}', stderr="")
+
+    with pytest.raises(
+        RuntimeError,
+        match="fenced_schema_command_failed:-m:alembic:upgrade:psycopg.errors.UniqueViolation: duplicate identity",
+    ):
+        machine.run_fenced_schema_migration(
+            release_path=release,
+            env_path=env_file,
+            transaction_id="a1b2c3d4",
+            expected_revision="124",
+            runner=runner,
+        )
+
+
+def test_fenced_migration_prefers_database_error_to_sql_statement(tmp_path):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+
+    def runner(command, **kwargs):
+        if "upgrade" in command:
+            return machine.ChildResult(
+                returncode=1,
+                stdout="",
+                stderr="sqlalchemy.exc.IntegrityError: foreign key violation\n[SQL: ALTER TABLE brc_action_time_tickets ADD CONSTRAINT unsafe]\n(Background on this error at: https://sqlalche.me/e/20/gkpj)",
+            )
+        if "--status" in command:
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"enabled":false,"exchange_write_called":false}',
+                stderr="",
+            )
+        if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "status": "canary_readonly_role_preflight_passed",
+                        "current_user": "pg_read_all_data",
+                        "exchange_write_called": False,
+                    }
+                ),
+                stderr="",
+            )
+        return machine.ChildResult(returncode=0, stdout='{"status":"ok"}', stderr="")
+
+    with pytest.raises(
+        RuntimeError,
+        match="fenced_schema_command_failed:-m:alembic:upgrade:sqlalchemy.exc.IntegrityError: foreign key violation",
+    ):
+        machine.run_fenced_schema_migration(
+            release_path=release,
+            env_path=env_file,
+            transaction_id="a1b2c3d4",
+            expected_revision="124",
+            runner=runner,
+        )
 
 
 def test_candidate_units_install_while_fenced_then_pointer_switches_atomically(tmp_path):

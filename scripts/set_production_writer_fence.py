@@ -67,6 +67,65 @@ def create_fence(
     }
 
 
+def supersede_fence(
+    marker: Path,
+    *,
+    predecessor_fence: Mapping[str, Any],
+    deploy_transaction_id: str,
+    deploy_nonce: str,
+    target_runtime_head: str,
+) -> dict[str, Any]:
+    """Atomically replace one already-engaged, exact predecessor fence.
+
+    This deliberately has no ``unlink`` step.  The old writer interlock stays
+    continuously present while a forward-fix deployment transfers ownership to
+    its successor transaction.
+    """
+
+    marker = Path(marker)
+    expected = _fence_payload(predecessor_fence)
+    actual = _read_safe_marker(marker)
+    if actual != expected:
+        raise ValueError("fence_predecessor_lineage_mismatch")
+    predecessor_inode = marker.stat().st_ino
+    successor = _fence_payload(
+        {
+            "schema": "brc.production_writer_fence.v1",
+            "deploy_transaction_id": deploy_transaction_id,
+            "deploy_nonce": deploy_nonce,
+            "target_runtime_head": target_runtime_head,
+        }
+    )
+    tmp = marker.with_name(f".{marker.name}.{uuid.uuid4().hex}.tmp")
+    raw = _canonical_bytes(successor)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb", closefd=False) as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.close(fd)
+        fd = -1
+        # Re-read directly before replacement so a changed predecessor cannot
+        # be silently overwritten between the initial validation and rename.
+        if _read_safe_marker(marker) != expected:
+            raise ValueError("fence_predecessor_lineage_changed")
+        os.replace(tmp, marker)
+        _fsync_dir(marker.parent)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        if tmp.exists():
+            tmp.unlink()
+    _validate_existing_marker(marker, successor)
+    return {
+        "status": "fence_superseded",
+        "marker": str(marker),
+        "predecessor_inode": predecessor_inode,
+        "inode": marker.stat().st_ino,
+    }
+
+
 def remove_fence(
     marker: Path,
     *,
@@ -105,8 +164,27 @@ def remove_fence(
 
 
 def _validate_existing_marker(marker: Path, expected: Mapping[str, Any]) -> None:
-    if _read_safe_marker(marker) != dict(expected):
+    if _read_safe_marker(marker) != _fence_payload(expected):
         raise ValueError("fence_existing_lineage_mismatch")
+
+
+def _fence_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    candidate = dict(payload)
+    expected = {
+        "schema": "brc.production_writer_fence.v1",
+        "deploy_transaction_id": _required(
+            str(candidate.get("deploy_transaction_id") or ""), "transaction_id"
+        ),
+        "deploy_nonce": _required(
+            str(candidate.get("deploy_nonce") or ""), "deploy_nonce"
+        ),
+        "target_runtime_head": _runtime_head(
+            str(candidate.get("target_runtime_head") or "")
+        ),
+    }
+    if candidate != expected:
+        raise ValueError("fence_payload_invalid")
+    return expected
 
 
 def _read_safe_marker(marker: Path) -> dict[str, Any]:
@@ -157,26 +235,35 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--marker", default=str(DEFAULT_MARKER))
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--engage", action="store_true")
+    mode.add_argument("--supersede", action="store_true")
     mode.add_argument("--remove", action="store_true")
     parser.add_argument("--deploy-transaction-id", default="")
     parser.add_argument("--deploy-nonce", default="")
     parser.add_argument("--target-runtime-head", default="")
+    parser.add_argument("--predecessor-fence-json", default="")
     parser.add_argument("--activation-commit-json", default="")
     args = parser.parse_args(argv)
     try:
-        result = (
-            create_fence(
+        if args.engage:
+            result = create_fence(
                 Path(args.marker),
                 deploy_transaction_id=args.deploy_transaction_id,
                 deploy_nonce=args.deploy_nonce,
                 target_runtime_head=args.target_runtime_head,
             )
-            if args.engage
-            else remove_fence(
+        elif args.supersede:
+            result = supersede_fence(
+                Path(args.marker),
+                predecessor_fence=json.loads(args.predecessor_fence_json),
+                deploy_transaction_id=args.deploy_transaction_id,
+                deploy_nonce=args.deploy_nonce,
+                target_runtime_head=args.target_runtime_head,
+            )
+        else:
+            result = remove_fence(
                 Path(args.marker),
                 activation_commit=json.loads(args.activation_commit_json),
             )
-        )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"status": "blocked", "error": str(exc)}))
         return 2

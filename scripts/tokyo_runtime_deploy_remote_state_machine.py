@@ -34,6 +34,9 @@ STDLIB_IMPORT_ALLOWLIST = frozenset(
 CANONICAL_LOCK_PATH = Path(
     "/var/lib/brc-deploy/deploy-state/tokyo-runtime-deploy.lock"
 )
+PRODUCTION_WRITER_FENCE_MARKER = Path(
+    "/home/ubuntu/brc-deploy/control-plane/production-writers.blocked"
+)
 MAX_JOURNAL_ENTRIES = 48
 DEPLOY_PHASES = (
     "bootstrap_locked",
@@ -383,7 +386,13 @@ def canonical_release_tree_digest(root: Path) -> str:
     ignored = {".brc-release-manifest.json", ".venv"}
     for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
         relative = path.relative_to(root).as_posix()
-        if relative in ignored or relative.startswith(".venv/"):
+        path_parts = relative.split("/")
+        if (
+            relative in ignored
+            or relative.startswith(".venv/")
+            or "__pycache__" in path_parts
+            or relative.endswith((".pyc", ".pyo"))
+        ):
             continue
         info = path.lstat()
         if stat.S_ISLNK(info.st_mode):
@@ -847,6 +856,7 @@ def engage_production_writer_fence(
     canonical_lock_path: Path = CANONICAL_LOCK_PATH,
     require_root_owner: bool = True,
     systemd_root: Path = Path("/etc/systemd/system"),
+    predecessor_fence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Install boot-persistent interlocks, engage marker, then stop writers."""
 
@@ -884,14 +894,26 @@ def engage_production_writer_fence(
         destination = Path(systemd_root) / f"{unit}.d/05-production-writer-fence.conf"
         run(["/usr/bin/install", "-D", "-m", "0644", str(dropin), str(destination)])
     run(["/usr/bin/systemctl", "daemon-reload"])
-    fence = run(
-        [
-            str(python), str(helper), "--engage",
-            "--deploy-transaction-id", _required(transaction_id, "transaction_id"),
-            "--deploy-nonce", _required(deploy_nonce, "deploy_nonce"),
-            "--target-runtime-head", target_sha,
-        ]
-    )
+    fence_command = [
+        str(python), str(helper),
+        "--supersede" if predecessor_fence is not None else "--engage",
+        "--deploy-transaction-id", _required(transaction_id, "transaction_id"),
+        "--deploy-nonce", _required(deploy_nonce, "deploy_nonce"),
+        "--target-runtime-head", target_sha,
+    ]
+    if predecessor_fence is not None:
+        fence_command.extend(
+            [
+                "--predecessor-fence-json",
+                json.dumps(
+                    dict(predecessor_fence),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ]
+        )
+    fence = run(fence_command)
     try:
         fence_payload = json.loads(fence.stdout)
         fence_inode = int(fence_payload["inode"])
@@ -918,7 +940,11 @@ def engage_production_writer_fence(
         if state in {"active", "activating", "reloading"}:
             raise RuntimeError("production_writer_still_active")
     return {
-        "status": "production_writers_fenced",
+        "status": (
+            "production_writer_fence_superseded"
+            if predecessor_fence is not None
+            else "production_writers_fenced"
+        ),
         "fence_inode": fence_inode,
         "writer_units": list(PRODUCTION_WRITER_UNITS),
         "units_not_installed": units_not_installed,
@@ -971,6 +997,7 @@ def run_fenced_schema_migration(
         raise ValueError("expected_revision_invalid")
     environment = load_runtime_environment(Path(env_path))
     environment["PYTHONPATH"] = str(release)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
 
     def run(arguments: list[str], timeout: int = 120) -> ChildResult:
         command = [str(python), *arguments]
@@ -989,7 +1016,12 @@ def run_fenced_schema_migration(
         else:
             raise ValueError("schema_migration_lock_required")
         if result.returncode != 0:
-            raise RuntimeError("fenced_schema_command_failed:" + ":".join(arguments[:3]))
+            raise RuntimeError(
+                "fenced_schema_command_failed:"
+                + ":".join(arguments[:3])
+                + ":"
+                + _bounded_child_failure_summary(result.stderr)
+            )
         return result
 
     status_result = run(
@@ -1036,6 +1068,22 @@ def run_fenced_schema_migration(
         "revision": str(expected_revision),
         "lifecycle_capability_was_enabled": was_enabled,
     }
+
+
+def _bounded_child_failure_summary(stderr: str) -> str:
+    """Return a bounded diagnostic class without exposing environment values."""
+
+    lines = [line.strip() for line in str(stderr or "").splitlines() if line.strip()]
+    if not lines:
+        return "stderr_unavailable"
+    for line in reversed(lines):
+        lowered = line.lower()
+        if (
+            not line.startswith("(Background on this error at:")
+            and ("error" in lowered or "exception" in lowered or "violation" in lowered)
+        ):
+            return line.replace("\x00", "")[-240:]
+    return "stderr_error_class_unavailable"
 
 
 def install_candidate_units_and_switch_pointer(
@@ -1792,6 +1840,213 @@ def capture_production_unit_prepolicy(
     return policy
 
 
+def validate_forward_fix_fence_supersession(
+    *,
+    predecessor_transaction_id: str,
+    predecessor_deploy_nonce: str,
+    old_sha: str,
+    target_sha: str,
+    previous_release_path: Path,
+    app_current: Path,
+    release_path: Path,
+    env_path: Path,
+    deploy_journal_directory: Path,
+    runner: Callable[..., ChildResult] | None = None,
+    lock_handle: Any | None = None,
+    canonical_lock_path: Path = CANONICAL_LOCK_PATH,
+    require_root_owner: bool = True,
+    fence_marker: Path = PRODUCTION_WRITER_FENCE_MARKER,
+) -> dict[str, Any]:
+    """Authorize a one-way successor before replacing a stranded fence.
+
+    A different deployment lineage may take over only before the predecessor's
+    migration has committed.  This is intentionally narrower than resume: it
+    proves the old pointer and schema are still compatible, writers remain
+    disabled, and the old journal's captured restore policy is inherited rather
+    than recaptured from the contained host.
+    """
+
+    predecessor_transaction_id = _required(
+        predecessor_transaction_id, "predecessor_transaction_id"
+    )
+    predecessor_deploy_nonce = _required(
+        predecessor_deploy_nonce, "predecessor_deploy_nonce"
+    )
+    old_sha = _sha(old_sha, "old_sha")
+    target_sha = _sha(target_sha, "target_sha")
+    if old_sha == target_sha:
+        raise ValueError("fence_supersession_target_must_differ")
+    journal_path = Path(deploy_journal_directory) / (
+        f"tokyo-runtime-deploy-{predecessor_transaction_id}.json"
+    )
+    if not journal_path.is_file() or journal_path.is_symlink():
+        raise ValueError("fence_supersession_predecessor_journal_missing")
+    predecessor = DeployJournal.load(journal_path)
+    if (
+        predecessor.transaction_id != predecessor_transaction_id
+        or predecessor.deploy_nonce != predecessor_deploy_nonce
+        or predecessor.old_sha != old_sha
+    ):
+        raise ValueError("fence_supersession_predecessor_journal_lineage_mismatch")
+    phases = [str(entry.get("phase") or "") for entry in predecessor.entries]
+    if (
+        not phases
+        or phases[-1] != "migration_in_progress"
+        or "schema_migrated" in phases
+    ):
+        raise ValueError("fence_supersession_predecessor_phase_invalid")
+    expected_marker = {
+        "schema": "brc.production_writer_fence.v1",
+        "deploy_transaction_id": predecessor.transaction_id,
+        "deploy_nonce": predecessor.deploy_nonce,
+        "target_runtime_head": predecessor.target_sha,
+    }
+    actual_marker = _read_production_writer_fence(
+        fence_marker, require_root_owner=require_root_owner
+    )
+    if actual_marker != expected_marker:
+        raise ValueError("fence_supersession_marker_journal_mismatch")
+    previous_release = Path(previous_release_path).resolve(strict=True)
+    if Path(app_current).resolve(strict=True) != previous_release:
+        raise ValueError("fence_supersession_old_pointer_mismatch")
+    try:
+        manifest = json.loads(
+            (previous_release / ".brc-release-manifest.json").read_text("utf-8")
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("fence_supersession_old_release_manifest_invalid") from exc
+    if (manifest.get("target_sha") or manifest.get("target_commit")) != old_sha:
+        raise ValueError("fence_supersession_old_release_head_mismatch")
+    pre_migration_phase = predecessor.entries[DEPLOY_PHASES.index("pre_migration")]
+    pre_migration_result = (pre_migration_phase.get("facts") or {}).get("result")
+    predecessor_revision = (
+        str(pre_migration_result.get("actual_revision") or "")
+        if isinstance(pre_migration_result, dict)
+        else ""
+    )
+    if not predecessor_revision.isdigit():
+        raise ValueError("fence_supersession_predecessor_revision_invalid")
+    actual_revision = read_candidate_schema_revision(
+        release_path=release_path,
+        env_path=env_path,
+        runner=runner,
+        lock_handle=lock_handle,
+        canonical_lock_path=canonical_lock_path,
+        require_root_owner=require_root_owner,
+    )
+    if actual_revision != predecessor_revision:
+        raise RuntimeError("fence_supersession_schema_revision_mismatch")
+    _verify_contained_writer_state(
+        release_path=release_path,
+        env_path=env_path,
+        runner=runner,
+        lock_handle=lock_handle,
+        canonical_lock_path=canonical_lock_path,
+        require_root_owner=require_root_owner,
+    )
+    predecessor_fence_phase = predecessor.entries[
+        DEPLOY_PHASES.index("production_writers_fenced")
+    ]
+    fence_result = (
+        predecessor_fence_phase.get("facts") or {}
+    ).get("result")
+    inherited_prepolicy = (
+        fence_result.get("unit_prepolicy") if isinstance(fence_result, dict) else None
+    )
+    _validate_inherited_unit_prepolicy(inherited_prepolicy)
+    return {
+        "status": "forward_fix_fence_supersession_authorized",
+        "predecessor_transaction_id": predecessor.transaction_id,
+        "predecessor_target_runtime_head": predecessor.target_sha,
+        "predecessor_fence": expected_marker,
+        "unit_prepolicy": dict(inherited_prepolicy),
+        "actual_revision": actual_revision,
+    }
+
+
+def _read_production_writer_fence(
+    marker: Path,
+    *,
+    require_root_owner: bool,
+) -> dict[str, Any]:
+    marker = Path(marker)
+    info = marker.lstat()
+    expected_uid = 0 if require_root_owner else os.geteuid()
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_uid != expected_uid
+    ):
+        raise ValueError("fence_supersession_marker_unsafe")
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("fence_supersession_marker_invalid") from exc
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema", "deploy_transaction_id", "deploy_nonce", "target_runtime_head"
+    }:
+        raise ValueError("fence_supersession_marker_invalid")
+    if (
+        payload.get("schema") != "brc.production_writer_fence.v1"
+        or not str(payload.get("deploy_transaction_id") or "").strip()
+        or not str(payload.get("deploy_nonce") or "").strip()
+    ):
+        raise ValueError("fence_supersession_marker_invalid")
+    _sha(str(payload.get("target_runtime_head") or ""), "fence_target_runtime_head")
+    return payload
+
+
+def _verify_contained_writer_state(
+    *,
+    release_path: Path,
+    env_path: Path,
+    runner: Callable[..., ChildResult] | None,
+    lock_handle: Any | None,
+    canonical_lock_path: Path,
+    require_root_owner: bool,
+) -> None:
+    for unit in PRODUCTION_WRITER_UNITS:
+        state = _run_candidate_command(
+            ["/usr/bin/systemctl", "show", "--property=ActiveState", "--value", unit],
+            release=Path(release_path).resolve(strict=True),
+            timeout=30,
+            env=None,
+            runner=runner,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock_path,
+            require_root_owner=require_root_owner,
+        )
+        if state.returncode != 0 or state.stdout.strip() != "inactive":
+            raise RuntimeError("fence_supersession_writer_not_inactive:" + unit)
+    capability = _run_release_python_script(
+        release_path=release_path,
+        env_path=env_path,
+        arguments=[
+            "scripts/set_ticket_lifecycle_mutation_capability.py", "--status",
+            "--require-database-url", "--json",
+        ],
+        timeout=60,
+        runner=runner,
+        lock_handle=lock_handle,
+        canonical_lock_path=canonical_lock_path,
+        require_root_owner=require_root_owner,
+    )
+    payload = _json_receipt(
+        capability, "fence_supersession_lifecycle_capability_receipt_invalid"
+    )
+    if payload.get("enabled") is not False or payload.get("exchange_write_called") is not False:
+        raise RuntimeError("fence_supersession_lifecycle_capability_not_disabled")
+
+
+def _validate_inherited_unit_prepolicy(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != set(PRODUCTION_WRITER_UNITS):
+        raise ValueError("fence_supersession_predecessor_prepolicy_invalid")
+    for unit in PRODUCTION_WRITER_UNITS:
+        facts = value.get(unit)
+        if not isinstance(facts, dict) or not isinstance(facts.get("active"), bool):
+            raise ValueError("fence_supersession_predecessor_prepolicy_invalid")
+
+
 def apply_committed_activation(
     *,
     release_path: Path,
@@ -2188,6 +2443,16 @@ def execute_deploy_transaction(
     expected_revision = _required(
         str(config.get("expected_revision") or ""), "expected_revision"
     )
+    predecessor_transaction_id = str(
+        config.get("predecessor_transaction_id") or ""
+    ).strip()
+    predecessor_deploy_nonce = str(
+        config.get("predecessor_deploy_nonce") or ""
+    ).strip()
+    if bool(predecessor_transaction_id) != bool(predecessor_deploy_nonce):
+        raise ValueError("fence_supersession_predecessor_identity_incomplete")
+    if predecessor_transaction_id == transaction_id:
+        raise ValueError("fence_supersession_predecessor_transaction_reused")
     bootstrap_sha256 = _required(
         str(config.get("bootstrap_sha256") or ""), "bootstrap_sha256"
     )
@@ -2287,12 +2552,30 @@ def execute_deploy_transaction(
     phase("previous_release_venv_compatible", previous_compatibility_action)
 
     def fence_action() -> Mapping[str, Any]:
-        prepolicy = capture_production_unit_prepolicy(
-            release_path=release,
-            lock_handle=lock_handle,
-            canonical_lock_path=canonical_lock,
-            require_root_owner=require_root,
-        )
+        supersession = None
+        if predecessor_transaction_id:
+            supersession = validate_forward_fix_fence_supersession(
+                predecessor_transaction_id=predecessor_transaction_id,
+                predecessor_deploy_nonce=predecessor_deploy_nonce,
+                old_sha=old_sha,
+                target_sha=target_sha,
+                previous_release_path=previous_release,
+                app_current=app_current,
+                release_path=release,
+                env_path=env_path,
+                deploy_journal_directory=canonical_lock.parent,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock,
+                require_root_owner=require_root,
+            )
+            prepolicy = supersession["unit_prepolicy"]
+        else:
+            prepolicy = capture_production_unit_prepolicy(
+                release_path=release,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock,
+                require_root_owner=require_root,
+            )
         fence = engage_production_writer_fence(
             release_path=release,
             transaction_id=transaction_id,
@@ -2301,8 +2584,16 @@ def execute_deploy_transaction(
             lock_handle=lock_handle,
             canonical_lock_path=canonical_lock,
             require_root_owner=require_root,
+            predecessor_fence=(
+                supersession["predecessor_fence"] if supersession is not None else None
+            ),
         )
-        return {"status": "production_writers_fenced", "fence": fence, "unit_prepolicy": prepolicy}
+        return {
+            "status": "production_writers_fenced",
+            "fence": fence,
+            "unit_prepolicy": prepolicy,
+            "fence_supersession": supersession,
+        }
 
     fenced = phase("production_writers_fenced", fence_action)
     phase("pre_migration", lambda: {
@@ -2880,6 +3171,10 @@ class DeployJournal:
             if (
                 entry.get("sequence") != index
                 or entry.get("phase") != DEPLOY_PHASES[index - 1]
+                or entry.get("deploy_transaction_id") != payload.get("transaction_id")
+                or entry.get("deploy_nonce") != payload.get("deploy_nonce")
+                or entry.get("old_sha") != payload.get("old_sha")
+                or entry.get("target_sha") != payload.get("target_sha")
                 or entry.get("previous_digest") != (
                     previous.get("entry_digest") if previous else None
                 )
@@ -3089,6 +3384,8 @@ def main(
     parser.add_argument("--expected-latest-migration")
     parser.add_argument("--legacy-venv-path")
     parser.add_argument("--expected-revision", required=True)
+    parser.add_argument("--predecessor-transaction-id", default="")
+    parser.add_argument("--predecessor-deploy-nonce", default="")
     args = parser.parse_args(argv)
     source = bootstrap_source
     if source is None:
@@ -3133,6 +3430,8 @@ def main(
                     "service_name": args.service_name,
                     "env_path": args.env_path,
                     "expected_revision": args.expected_revision,
+                    "predecessor_transaction_id": args.predecessor_transaction_id,
+                    "predecessor_deploy_nonce": args.predecessor_deploy_nonce,
                     "bootstrap_sha256": args.bootstrap_sha256,
                 },
                 lock_handle=lock,
