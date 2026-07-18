@@ -117,12 +117,22 @@ def _closed_terminal_candidates(conn: sa.engine.Connection) -> dict[str, dict[st
 def _has_active_core_position(conn: sa.engine.Connection, *, symbol: str) -> bool:
     if not sa.inspect(conn).has_table("positions"):
         return False
-    columns = {column["name"] for column in sa.inspect(conn).get_columns("positions")}
+    columns = {
+        str(column["name"]): column
+        for column in sa.inspect(conn).get_columns("positions")
+    }
     if not {"symbol", "is_closed"}.issubset(columns):
         return True
+    is_closed_type = columns["is_closed"]["type"]
+    closed_value: bool | int = (
+        False if isinstance(is_closed_type, sa.Boolean) else 0
+    )
     row = conn.execute(
-        sa.text("SELECT 1 FROM positions WHERE symbol = :symbol AND is_closed = false LIMIT 1"),
-        {"symbol": symbol},
+        sa.text(
+            "SELECT 1 FROM positions "
+            "WHERE symbol = :symbol AND is_closed = :closed_value LIMIT 1"
+        ),
+        {"symbol": symbol, "closed_value": closed_value},
     ).first()
     return row is not None
 

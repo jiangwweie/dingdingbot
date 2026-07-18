@@ -55,3 +55,41 @@ def test_terminal_core_order_repair_applies_only_closed_exact_identity(tmp_path,
             assert conn.execute(sa.text("SELECT status FROM orders")).scalar_one() == "FILLED"
     finally:
         engine.dispose()
+
+
+def test_terminal_core_order_repair_accepts_integer_closed_position_schema(
+    tmp_path,
+    capsys,
+) -> None:
+    url = _database_url(tmp_path)
+    engine = sa.create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    "CREATE TABLE positions (symbol TEXT NOT NULL, is_closed INTEGER NOT NULL)"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "INSERT INTO positions (symbol, is_closed) "
+                    "VALUES ('BTC/USDT:USDT', 0)"
+                )
+            )
+
+        assert repair.main(
+            ["--database-url", url, "--allow-non-postgres-for-test", "--apply"]
+        ) == 0
+        blocked = ast.literal_eval(capsys.readouterr().out)
+        assert blocked["projected_count"] == 0
+
+        with engine.begin() as conn:
+            conn.execute(sa.text("UPDATE positions SET is_closed = 1"))
+
+        assert repair.main(
+            ["--database-url", url, "--allow-non-postgres-for-test", "--apply"]
+        ) == 0
+        repaired = ast.literal_eval(capsys.readouterr().out)
+        assert repaired["projected_count"] == 1
+    finally:
+        engine.dispose()
