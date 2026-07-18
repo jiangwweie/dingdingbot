@@ -63,6 +63,7 @@ CANARY_LANE_COLUMNS_V1 = (
     "required_execution_mode", "execution_eligible", "authority_source_ref",
     "lane_identity_key", "source_watermark", "action_time_invocation_id",
     "account_safe_fact_snapshot_id", "account_mode_fact_snapshot_id",
+    "account_capacity_base_fact_snapshot_id",
 )
 CANARY_TICKET_COLUMNS_V1 = (
     "ticket_id", "action_time_lane_input_id", "promotion_candidate_id",
@@ -84,6 +85,7 @@ CANARY_TICKET_COLUMNS_V1 = (
     "exit_policy_snapshot", "exit_policy_hash",
     "exposure_episode_id", "asset_class", "instrument_type",
     "capacity_claim_hash",
+    "account_capacity_base_fact_snapshot_id", "ticket_hash_schema_version",
 )
 CANARY_PROTECTED_ATTEMPT_COLUMNS_V1 = (
     "protected_submit_attempt_id", "ticket_id", "finalgate_pass_id",

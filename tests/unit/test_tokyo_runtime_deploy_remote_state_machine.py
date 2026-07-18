@@ -668,6 +668,7 @@ def test_forward_fix_fence_supersession_requires_exact_stranded_predecessor(tmp_
         target_sha=new_target,
         previous_release_path=previous,
         app_current=current,
+        expected_revision="136",
         release_path=release,
         env_path=env_file,
         deploy_journal_directory=journal_dir,
@@ -679,6 +680,56 @@ def test_forward_fix_fence_supersession_requires_exact_stranded_predecessor(tmp_
     assert result["status"] == "forward_fix_fence_supersession_authorized"
     assert result["predecessor_fence"]["target_runtime_head"] == failed_target
     assert result["unit_prepolicy"] == prepolicy
+
+
+def test_forward_fix_fence_supersession_allows_post_migration_pre_activation_only(tmp_path):
+    old_sha, predecessor_sha, successor_sha = "b" * 40, "a" * 40, "c" * 40
+    previous = tmp_path / "releases/current"
+    previous.mkdir(parents=True)
+    (previous / ".brc-release-manifest.json").write_text(
+        json.dumps({"target_sha": predecessor_sha}), encoding="utf-8"
+    )
+    current = tmp_path / "app/current"
+    current.parent.mkdir(parents=True)
+    current.symlink_to(previous)
+    release = tmp_path / "releases/successor"
+    release.mkdir()
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL=postgresql://example.invalid/db\n")
+    journal_dir = tmp_path / "deploy-state"
+    journal_dir.mkdir()
+    journal_path = journal_dir / "tokyo-runtime-deploy-deadbeef.json"
+    _write_migration_in_progress_predecessor_journal(
+        journal_path, old_sha=old_sha, target_sha=predecessor_sha
+    )
+    journal = machine.DeployJournal.load(journal_path)
+    for phase in machine.DEPLOY_PHASES[7:13]:
+        result = {"status": phase}
+        if phase == "schema_migrated":
+            result["revision"] = "136"
+        journal.append(phase, {"result": result})
+    marker = tmp_path / "production-writers.blocked"
+    marker.write_text(json.dumps({
+        "schema": "brc.production_writer_fence.v1", "deploy_transaction_id": "deadbeef",
+        "deploy_nonce": "old-nonce", "target_runtime_head": predecessor_sha,
+    }), encoding="utf-8")
+    marker.chmod(0o600)
+
+    def runner(command, **kwargs):
+        if command[-2:] == ["alembic", "current"]:
+            return machine.ChildResult(returncode=0, stdout="136 (head)\n", stderr="")
+        if command[0] == "/usr/bin/systemctl":
+            return machine.ChildResult(returncode=0, stdout="inactive\n", stderr="")
+        return machine.ChildResult(returncode=0, stdout='{"enabled":false,"exchange_write_called":false}', stderr="")
+
+    result = machine.validate_forward_fix_fence_supersession(
+        predecessor_transaction_id="deadbeef", predecessor_deploy_nonce="old-nonce",
+        old_sha=predecessor_sha, target_sha=successor_sha,
+        previous_release_path=previous, app_current=current, expected_revision="136",
+        release_path=release, env_path=env_file, deploy_journal_directory=journal_dir,
+        runner=runner, require_root_owner=False, fence_marker=marker,
+    )
+    assert result["mode"] == "post_migration_pre_activation"
 
 
 @pytest.mark.parametrize(
@@ -748,6 +799,7 @@ def test_forward_fix_fence_supersession_rejects_any_changed_containment_fact(
             target_sha="c" * 40,
             previous_release_path=previous,
             app_current=current,
+            expected_revision="136",
             release_path=release,
             env_path=env_file,
             deploy_journal_directory=journal_dir,

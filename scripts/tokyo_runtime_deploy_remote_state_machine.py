@@ -1848,6 +1848,7 @@ def validate_forward_fix_fence_supersession(
     target_sha: str,
     previous_release_path: Path,
     app_current: Path,
+    expected_revision: str,
     release_path: Path,
     env_path: Path,
     deploy_journal_directory: Path,
@@ -1882,18 +1883,13 @@ def validate_forward_fix_fence_supersession(
     if not journal_path.is_file() or journal_path.is_symlink():
         raise ValueError("fence_supersession_predecessor_journal_missing")
     predecessor = DeployJournal.load(journal_path)
-    if (
-        predecessor.transaction_id != predecessor_transaction_id
-        or predecessor.deploy_nonce != predecessor_deploy_nonce
-        or predecessor.old_sha != old_sha
-    ):
+    if predecessor.transaction_id != predecessor_transaction_id or predecessor.deploy_nonce != predecessor_deploy_nonce:
         raise ValueError("fence_supersession_predecessor_journal_lineage_mismatch")
     phases = [str(entry.get("phase") or "") for entry in predecessor.entries]
-    if (
-        not phases
-        or phases[-1] != "migration_in_progress"
-        or "schema_migrated" in phases
-    ):
+    if not phases or "runtime_activation_committed" in phases:
+        raise ValueError("fence_supersession_predecessor_phase_invalid")
+    post_migration = "schema_migrated" in phases
+    if not post_migration and phases[-1] != "migration_in_progress":
         raise ValueError("fence_supersession_predecessor_phase_invalid")
     expected_marker = {
         "schema": "brc.production_writer_fence.v1",
@@ -1915,7 +1911,8 @@ def validate_forward_fix_fence_supersession(
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("fence_supersession_old_release_manifest_invalid") from exc
-    if (manifest.get("target_sha") or manifest.get("target_commit")) != old_sha:
+    pointer_head = manifest.get("target_sha") or manifest.get("target_commit")
+    if pointer_head != old_sha:
         raise ValueError("fence_supersession_old_release_head_mismatch")
     pre_migration_phase = predecessor.entries[DEPLOY_PHASES.index("pre_migration")]
     pre_migration_result = (pre_migration_phase.get("facts") or {}).get("result")
@@ -1924,8 +1921,19 @@ def validate_forward_fix_fence_supersession(
         if isinstance(pre_migration_result, dict)
         else ""
     )
-    if not predecessor_revision.isdigit():
+    if not predecessor_revision.isdigit() or not str(expected_revision).isdigit():
         raise ValueError("fence_supersession_predecessor_revision_invalid")
+    if post_migration:
+        migrated = (predecessor.entries[DEPLOY_PHASES.index("schema_migrated")].get("facts") or {}).get("result")
+        if (
+            predecessor.target_sha != old_sha
+            or not isinstance(migrated, dict)
+            or str(migrated.get("revision") or "") != str(expected_revision)
+        ):
+            raise ValueError("fence_supersession_post_migration_lineage_invalid")
+        predecessor_revision = str(expected_revision)
+    elif predecessor.old_sha != old_sha:
+        raise ValueError("fence_supersession_predecessor_journal_lineage_mismatch")
     actual_revision = read_candidate_schema_revision(
         release_path=release_path,
         env_path=env_path,
@@ -1961,6 +1969,7 @@ def validate_forward_fix_fence_supersession(
         "predecessor_fence": expected_marker,
         "unit_prepolicy": dict(inherited_prepolicy),
         "actual_revision": actual_revision,
+        "mode": "post_migration_pre_activation" if post_migration else "pre_migration",
     }
 
 
@@ -2561,6 +2570,7 @@ def execute_deploy_transaction(
                 target_sha=target_sha,
                 previous_release_path=previous_release,
                 app_current=app_current,
+                expected_revision=expected_revision,
                 release_path=release,
                 env_path=env_path,
                 deploy_journal_directory=canonical_lock.parent,
