@@ -90,7 +90,7 @@ def _preserve_release_b_baseline_for_legacy_rci_scenarios(
     """Keep pre-canary causal tests on the disabled Release B contract."""
 
     release_c_tests = {
-        "test_rci_harness_uses_postgresql_revision_136",
+        "test_rci_harness_uses_postgresql_revision_137",
         "test_rci_exit_policy_canary_is_exactly_scoped_and_enabled",
     }
     if request.node.name not in release_c_tests:
@@ -106,7 +106,7 @@ def _preserve_release_b_baseline_for_legacy_rci_scenarios(
     yield
 
 
-def test_rci_harness_uses_postgresql_revision_136(
+def test_rci_harness_uses_postgresql_revision_137(
     postgres_certification_engine,
 ):
     assert postgres_certification_engine.dialect.name == "postgresql"
@@ -120,7 +120,7 @@ def test_rci_harness_uses_postgresql_revision_136(
             )
         ).scalar_one()
 
-    assert revision == "136"
+    assert revision == "137"
     assert invocation_table == "brc_action_time_invocations"
 
 

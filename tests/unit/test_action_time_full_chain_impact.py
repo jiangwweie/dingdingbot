@@ -1953,6 +1953,12 @@ def _write_monitor_signal_summary_to_pg(
             ],
         }
     summary = dict(summary)
+    # ``_evaluator_signal_summary`` exercises the lower-level evaluator, whose
+    # successful state is ``ready_for_semantic_binding``.  The runtime API
+    # subsequently resolves that result against the typed lane and emits the
+    # detector decision consumed here: ``event_satisfied``.  This PG fixture
+    # starts at that runtime-lane boundary, not at the lower evaluator layer.
+    summary["evaluation_status"] = "event_satisfied"
     if summary.get("evaluated_at_ms") is None:
         summary["evaluated_at_ms"] = NOW_MS - 60_000
     if summary.get("valid_until_ms") is None:
@@ -1978,6 +1984,15 @@ def _write_monitor_signal_summary_to_pg(
     }
     if lane_identity is not None:
         runtime_summary["lane_identity"] = lane_identity.model_dump(mode="json")
+    runtime_active_observation_monitor.write_runtime_detector_decisions_to_pg(
+        {
+            "runtime_summaries": [runtime_summary],
+        },
+        database_url="unused://pg-control-test",
+        allow_non_postgres_for_test=True,
+        now_ms=NOW_MS,
+        conn=conn,
+    )
     return runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
         {
             "runtime_summaries": [runtime_summary],

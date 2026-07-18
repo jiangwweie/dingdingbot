@@ -417,6 +417,7 @@ def _candidate_pool_inputs_from_control_state(
             candidate_rows=candidate_rows,
             readiness_by_lane=readiness_by_lane,
             fact_by_lane=fact_by_lane,
+            coverage_by_lane=coverage_by_lane,
             signal_by_lane=signal_by_lane,
             event_spec_by_candidate=event_spec_by_candidate,
         ),
@@ -888,6 +889,7 @@ def _pg_replay_live_parity_projection(
     candidate_rows: list[dict[str, Any]],
     readiness_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     fact_by_lane: dict[tuple[str, str, str], dict[str, Any]],
+    coverage_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     signal_by_lane: dict[tuple[str, str, str], dict[str, Any]],
     event_spec_by_candidate: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
@@ -896,6 +898,7 @@ def _pg_replay_live_parity_projection(
         key = _lane_key(candidate)
         readiness = readiness_by_lane.get(key, {})
         facts = fact_by_lane.get(key, {})
+        coverage = coverage_by_lane.get(key, {})
         signal = signal_by_lane.get(key, {})
         detector_fact = (
             facts if str(facts.get("fact_surface") or "") == "pretrade_strategy" else {}
@@ -941,7 +944,11 @@ def _pg_replay_live_parity_projection(
                     readiness.get("persistent_engineering_blocker") is True
                 ),
                 "detector_attached": computed,
-                "watcher_tick_present": readiness.get("watcher_state") == "fresh",
+                "watcher_tick_present": (
+                    str(coverage.get("coverage_state") or "") == "covered"
+                    and str(coverage.get("liveness_state") or "")
+                    in {"healthy", "ok", "active"}
+                ),
                 "computed": computed,
                 "fresh_signal_present": bool(signal),
                 "event_time_utc": _ms_to_iso(_signal_event_time_ms(signal)),

@@ -1653,45 +1653,54 @@ def _insert_constructed_raw_input(
             {"event_spec_id": row["event_spec_id"]},
         ).mappings()
     }
+    runtime_summary = {
+        "runtime_instance_id": runtime_instance_id,
+        "strategy_family_id": row["strategy_group_id"],
+        "strategy_family_version_id": (
+            f"simulation-evaluator:{row['strategy_group_id']}:v1"
+        ),
+        "lane_identity": lane_identity.model_dump(mode="json"),
+        "can_materialize_live_signal_event": True,
+        "status": "waiting_for_signal",
+        "signal_summary": {
+            "evaluation_status": "event_satisfied",
+            "signal_type": "would_enter",
+            "signal_grade": "trial_grade_signal",
+            "required_execution_mode": "trial_live",
+            "side": lane_identity.side,
+            "confidence": "0.90",
+            "reason_codes": ["simulation_producer_input"],
+            "trigger_candle_close_time_ms": event_time_ms,
+            "evaluated_at_ms": event_time_ms,
+            "valid_until_ms": valid_until_ms,
+            "time_authority": lane_identity.time_authority,
+            "fact_observations": [
+                {
+                    "fact_key": key,
+                    "observed_value": semantic_fact_values[key],
+                    "observed_at_ms": event_time_ms,
+                    "valid_until_ms": valid_until_ms,
+                    "source_ref": (
+                        f"simulation:evaluator:{row['event_spec_id']}:{key}"
+                    ),
+                }
+                for key in sorted(required_fact_keys)
+                if key in semantic_fact_values
+            ],
+        },
+    }
+    detector = runtime_active_observation_monitor.write_runtime_detector_decisions_to_pg(
+        {"runtime_summaries": [runtime_summary]},
+        database_url="",
+        allow_non_postgres_for_test=True,
+        now_ms=now_ms,
+        conn=conn,
+    )
+    if detector.get("written_count") != 1:
+        raise ValueError(f"simulation_producer_detector_fact_write_failed:{detector}")
     signal = runtime_active_observation_monitor.write_runtime_signal_summaries_to_pg(
         {
-            "runtime_summaries": [
-                {
-                    "runtime_instance_id": runtime_instance_id,
-                    "strategy_family_id": row["strategy_group_id"],
-                    "strategy_family_version_id": (
-                        f"simulation-evaluator:{row['strategy_group_id']}:v1"
-                    ),
-                    "lane_identity": lane_identity.model_dump(mode="json"),
-                    "can_materialize_live_signal_event": True,
-                    "status": "waiting_for_signal",
-                    "signal_summary": {
-                        "signal_type": "would_enter",
-                        "signal_grade": "trial_grade_signal",
-                        "required_execution_mode": "trial_live",
-                        "side": lane_identity.side,
-                        "confidence": "0.90",
-                        "reason_codes": ["simulation_producer_input"],
-                        "trigger_candle_close_time_ms": event_time_ms,
-                        "evaluated_at_ms": event_time_ms,
-                        "valid_until_ms": valid_until_ms,
-                        "time_authority": lane_identity.time_authority,
-                        "fact_observations": [
-                            {
-                                "fact_key": key,
-                                "observed_value": semantic_fact_values[key],
-                                "observed_at_ms": event_time_ms,
-                                "valid_until_ms": valid_until_ms,
-                                "source_ref": (
-                                    f"simulation:evaluator:{row['event_spec_id']}:{key}"
-                                ),
-                            }
-                            for key in sorted(required_fact_keys)
-                            if key in semantic_fact_values
-                        ],
-                    },
-                }
-            ]
+            "runtime_summaries": [runtime_summary]
         },
         database_url="",
         allow_non_postgres_for_test=True,
