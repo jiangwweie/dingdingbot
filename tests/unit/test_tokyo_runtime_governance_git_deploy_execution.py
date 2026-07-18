@@ -24,8 +24,8 @@ def test_post_mutation_failure_engages_persistent_writer_fence():
                 "OWNER_APPROVES_TOKYO_RUNTIME_GOVERNANCE_DEPLOY"
             ),
         },
-        "inputs": {"host": "tokyo"},
-        "release": {"remote_release_path": "/candidate"},
+        "inputs": {"host": "tokyo", "target_commit": "a" * 40},
+        "release": {"remote_release_path": "/candidate", "head": "a" * 40},
         "plan_phases": [
             {
                 "phase": "3_quiesce_and_migrate",
@@ -48,6 +48,10 @@ def test_post_mutation_failure_engages_persistent_writer_fence():
     assert report["checks"]["writers_left_disabled"] is True
     assert any(
         "systemctl stop brc-runtime-signal-watcher.timer" in command
+        for command in calls
+    )
+    assert any(
+        "set_production_writer_fence.py --engage" in command
         for command in calls
     )
     assert any(

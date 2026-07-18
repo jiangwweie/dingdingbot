@@ -374,7 +374,15 @@ def execute_git_deploy_plan(
                 writers_left_disabled = False
                 status = "failed"
                 if mutation_started:
-                    containment_command = _failure_containment_command(plan)
+                    if transaction_identity is None:
+                        transaction_identity = {
+                            "transaction_id": uuid.uuid4().hex,
+                            "deploy_nonce": secrets.token_hex(32),
+                        }
+                    containment_command = _failure_containment_command(
+                        plan,
+                        transaction_identity=transaction_identity,
+                    )
                     containment = command_runner(containment_command)
                     command_results.append(
                         {
@@ -511,7 +519,11 @@ def _execution_report(
     }
 
 
-def _failure_containment_command(plan: dict[str, Any]) -> str:
+def _failure_containment_command(
+    plan: dict[str, Any],
+    *,
+    transaction_identity: dict[str, str] | None,
+) -> str:
     inputs = plan.get("inputs") or {}
     release = plan.get("release") or {}
     host = str(inputs.get("host") or DEFAULT_HOST)
@@ -521,7 +533,11 @@ def _failure_containment_command(plan: dict[str, Any]) -> str:
         or f"{DEFAULT_DEPLOY_ROOT}/app/current"
     )
     python = f"{release_path.rstrip('/')}/.venv/bin/python"
+    target_head = str(release.get("head") or inputs.get("target_commit") or "")
+    if transaction_identity is None or not target_head:
+        raise GitDeployExecutionError("failure_containment_identity_missing")
     services = (
+        "brc-owner-console-backend.service",
         "brc-runtime-signal-watcher.timer",
         "brc-runtime-monitor.timer",
         "brc-ticket-lifecycle-maintenance.timer",
@@ -533,11 +549,17 @@ def _failure_containment_command(plan: dict[str, Any]) -> str:
     )
     remote = (
         "set -eu; "
+        + f"cd {shlex.quote(release_path)}; "
+        + f"PYTHONPATH=$PWD {shlex.quote(python)} "
+        + "scripts/set_production_writer_fence.py --engage "
+        + f"--deploy-transaction-id {shlex.quote(transaction_identity['transaction_id'])} "
+        + f"--deploy-nonce {shlex.quote(transaction_identity['deploy_nonce'])} "
+        + f"--target-runtime-head {shlex.quote(target_head)}; "
         + " ".join(
             f"sudo -n systemctl stop {shlex.quote(service)};"
             for service in services
         )
-        + f" cd {shlex.quote(release_path)}; "
+        + " "
         + f"set -a; . {shlex.quote(env_path)}; set +a; "
         + f"PYTHONPATH=$PWD {shlex.quote(python)} "
         + "scripts/set_ticket_lifecycle_mutation_capability.py --disable "

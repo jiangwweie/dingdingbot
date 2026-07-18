@@ -1833,7 +1833,13 @@ def capture_production_unit_prepolicy(
         if facts.get("ActiveState") not in {"active", "inactive", "failed", "activating", "deactivating"}:
             raise RuntimeError("unit_prepolicy_active_state_invalid:" + unit)
         policy[unit] = {
-            "active": facts["ActiveState"] == "active",
+            "active": (
+                facts["ActiveState"] == "active"
+                or (
+                    unit in TIMER_OWNED_SERVICES
+                    and facts.get("UnitFileState") == "enabled"
+                )
+            ),
             "active_state": facts["ActiveState"],
             "unit_file_state": facts.get("UnitFileState", ""),
         }

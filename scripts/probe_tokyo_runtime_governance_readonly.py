@@ -482,9 +482,12 @@ def _remote_health(
     connect_timeout_seconds: int,
     runner: Runner,
 ) -> dict[str, Any]:
+    url = shlex.quote(api_base.rstrip("/") + "/api/health")
     command = (
-        f"curl -fsS -m 5 -w '\\nHTTP_STATUS:%{{http_code}}' "
-        f"{shlex.quote(api_base.rstrip('/') + '/api/health')}"
+        "last=''; for attempt in $(seq 1 12); do "
+        f"if response=$(curl -fsS -m 5 -w '\\nHTTP_STATUS:%{{http_code}}' {url} 2>&1); then "
+        "printf '%s' \"$response\"; exit 0; fi; "
+        "last=$response; sleep 1; done; printf '%s\\n' \"$last\" >&2; exit 1"
     )
     raw = _ssh_text(
         host,
