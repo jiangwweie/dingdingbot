@@ -2744,6 +2744,7 @@ def _insert_ready_fresh_signal(
     row = _candidate_runtime_row(conn, strategy_group_id, symbol, side)
     suffix = f"{strategy_group_id}:{symbol}:{side}:unit"
     public_fact_id = f"fact:{suffix}:public"
+    detector_fact_id = f"fact:{suffix}:pretrade-strategy"
     action_time_fact_id = f"fact:{suffix}:action-time"
     account_safe_fact_id = f"fact:{suffix}:account-safe"
     account_mode_fact_id = f"fact:{suffix}:account-mode"
@@ -2771,6 +2772,25 @@ def _insert_ready_fresh_signal(
         )
 
     _insert_coverage(conn, row, expires_at_ms=expires_at_ms)
+    # The production watcher records one evaluated detector decision before it
+    # materializes a live signal.  Keep this full-chain fixture on that same
+    # PG contract so the Candidate Pool cannot mistake a fresh signal for an
+    # unattached detector.
+    _insert_fact(
+        conn,
+        fact_snapshot_id=detector_fact_id,
+        row=row,
+        fact_surface="pretrade_strategy",
+        fact_values={
+            "evaluation_status": "event_satisfied",
+            "trigger_candle_close_time_ms": NOW_MS - 60_000,
+            "reason_codes": [],
+            "fact_observations": [],
+        },
+        observed_at_ms=NOW_MS - 20_000,
+        valid_until_ms=expires_at_ms,
+        source_kind="live_market",
+    )
     _insert_fact(
         conn,
         fact_snapshot_id=public_fact_id,

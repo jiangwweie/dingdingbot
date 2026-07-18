@@ -2074,57 +2074,37 @@ def apply_committed_activation(
     python = release / ".venv/bin/python"
     environment = load_runtime_environment(Path(env_path))
     environment["PYTHONPATH"] = str(release)
-    if Path(fence_marker).exists() or runner is not None:
-        removal = _run_candidate_command(
-            [
-                str(python), "scripts/set_production_writer_fence.py", "--remove",
-                "--activation-commit-json",
-                json.dumps(dict(activation_commit), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-            ],
-            release=release,
-            timeout=30,
-            env=environment,
-            runner=runner,
-            lock_handle=lock_handle,
-            canonical_lock_path=canonical_lock_path,
-            require_root_owner=require_root_owner,
-        )
-        if _json_receipt(removal, "fence_removal_receipt_invalid").get("status") != "fence_removed":
-            raise RuntimeError("fence_removal_receipt_mismatch")
-    elif (
-        activation_commit.get("schema") != "brc.runtime_activation_commit.v1"
-        or activation_commit.get("status") != "runtime_activation_committed"
-    ):
-        raise RuntimeError("activation_commit_invalid_after_fence_removal")
-    for canary in (
-        "brc-runtime-signal-watcher-canary.service",
-        "brc-owner-console-canary-readonly.service",
-    ):
-        _run_candidate_command(
-            ["/usr/bin/systemctl", "stop", canary],
-            release=release,
-            timeout=30,
-            env=None,
-            runner=runner,
-            lock_handle=lock_handle,
-            canonical_lock_path=canonical_lock_path,
-            require_root_owner=require_root_owner,
-        )
-    timer_owned_services = set(TIMER_OWNED_SERVICES.values())
-    restore_order = [
-        unit
-        for unit in PRODUCTION_WRITER_UNITS
-        if unit not in timer_owned_services
-        and unit != "brc-runtime-signal-watcher.timer"
-    ] + ["brc-runtime-signal-watcher.timer"]
-    restored: list[str] = []
-    for unit in restore_order:
-        if not bool((unit_prepolicy.get(unit) or {}).get("active")):
-            continue
-        timer_service = TIMER_OWNED_SERVICES.get(unit)
-        if timer_service is not None:
+    fence_removed = False
+    try:
+        if Path(fence_marker).exists() or runner is not None:
+            removal = _run_candidate_command(
+                [
+                    str(python), "scripts/set_production_writer_fence.py", "--remove",
+                    "--activation-commit-json",
+                    json.dumps(dict(activation_commit), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                ],
+                release=release,
+                timeout=30,
+                env=environment,
+                runner=runner,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+            )
+            if _json_receipt(removal, "fence_removal_receipt_invalid").get("status") != "fence_removed":
+                raise RuntimeError("fence_removal_receipt_mismatch")
+            fence_removed = True
+        elif (
+            activation_commit.get("schema") != "brc.runtime_activation_commit.v1"
+            or activation_commit.get("status") != "runtime_activation_committed"
+        ):
+            raise RuntimeError("activation_commit_invalid_after_fence_removal")
+        for canary in (
+            "brc-runtime-signal-watcher-canary.service",
+            "brc-owner-console-canary-readonly.service",
+        ):
             _run_candidate_command(
-                ["/usr/bin/systemctl", "reset-failed", timer_service],
+                ["/usr/bin/systemctl", "stop", canary],
                 release=release,
                 timeout=30,
                 env=None,
@@ -2133,39 +2113,147 @@ def apply_committed_activation(
                 canonical_lock_path=canonical_lock_path,
                 require_root_owner=require_root_owner,
             )
-        _run_candidate_command(
-            ["/usr/bin/systemctl", "start", unit],
-            release=release,
-            timeout=90,
-            env=None,
-            runner=runner,
-            lock_handle=lock_handle,
-            canonical_lock_path=canonical_lock_path,
-            require_root_owner=require_root_owner,
-        )
-        active = _run_candidate_command(
-            ["/usr/bin/systemctl", "is-active", unit],
-            release=release,
-            timeout=30,
-            env=None,
-            runner=runner,
-            lock_handle=lock_handle,
-            canonical_lock_path=canonical_lock_path,
-            require_root_owner=require_root_owner,
-        )
-        if active.stdout.strip() != "active":
-            raise RuntimeError("restored_unit_not_active:" + unit)
-        if timer_service is not None:
-            _wait_for_immediate_timer_service(
+        timer_owned_services = set(TIMER_OWNED_SERVICES.values())
+        restore_order = [
+            unit
+            for unit in PRODUCTION_WRITER_UNITS
+            if unit not in timer_owned_services
+            and unit != "brc-runtime-signal-watcher.timer"
+        ] + ["brc-runtime-signal-watcher.timer"]
+        restored: list[str] = []
+        for unit in restore_order:
+            if not bool((unit_prepolicy.get(unit) or {}).get("active")):
+                continue
+            timer_service = TIMER_OWNED_SERVICES.get(unit)
+            if timer_service is not None:
+                _run_candidate_command(
+                    ["/usr/bin/systemctl", "reset-failed", timer_service],
+                    release=release,
+                    timeout=30,
+                    env=None,
+                    runner=runner,
+                    lock_handle=lock_handle,
+                    canonical_lock_path=canonical_lock_path,
+                    require_root_owner=require_root_owner,
+                )
+            _run_candidate_command(
+                ["/usr/bin/systemctl", "start", unit],
                 release=release,
-                service=timer_service,
+                timeout=90,
+                env=None,
                 runner=runner,
                 lock_handle=lock_handle,
                 canonical_lock_path=canonical_lock_path,
                 require_root_owner=require_root_owner,
             )
-        restored.append(unit)
-    return {"status": "activation_applied", "restored_units": restored}
+            active = _run_candidate_command(
+                ["/usr/bin/systemctl", "is-active", unit],
+                release=release,
+                timeout=30,
+                env=None,
+                runner=runner,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+            )
+            if active.stdout.strip() != "active":
+                raise RuntimeError("restored_unit_not_active:" + unit)
+            if timer_service is not None:
+                _wait_for_immediate_timer_service(
+                    release=release,
+                    service=timer_service,
+                    runner=runner,
+                    lock_handle=lock_handle,
+                    canonical_lock_path=canonical_lock_path,
+                    require_root_owner=require_root_owner,
+                )
+            restored.append(unit)
+        return {"status": "activation_applied", "restored_units": restored}
+    except Exception as error:
+        if not fence_removed:
+            raise
+        try:
+            containment = _contain_failed_activation_restore(
+                release_path=release,
+                env_path=Path(env_path),
+                activation_commit=activation_commit,
+                runner=runner,
+                lock_handle=lock_handle,
+                canonical_lock_path=canonical_lock_path,
+                require_root_owner=require_root_owner,
+            )
+        except Exception as containment_error:
+            raise RuntimeError(
+                "activation_restore_failed_and_containment_failed"
+            ) from containment_error
+        raise RuntimeError(
+            "activation_restore_failed_contained:"
+            + str(containment["fence_status"])
+        ) from error
+
+
+def _contain_failed_activation_restore(
+    *,
+    release_path: Path,
+    env_path: Path,
+    activation_commit: Mapping[str, Any],
+    runner: Callable[..., ChildResult] | None,
+    lock_handle: Any | None,
+    canonical_lock_path: Path,
+    require_root_owner: bool,
+) -> dict[str, Any]:
+    """Restore the durable containment invariant after post-fence activation fails."""
+
+    transaction_id = _required(
+        str(activation_commit.get("deploy_transaction_id") or ""),
+        "activation_commit_transaction_id",
+    )
+    deploy_nonce = _required(
+        str(activation_commit.get("deploy_nonce") or ""),
+        "activation_commit_deploy_nonce",
+    )
+    target_sha = _sha(
+        str(activation_commit.get("target_runtime_head") or ""),
+        "activation_commit_target_runtime_head",
+    )
+    fence = engage_production_writer_fence(
+        release_path=release_path,
+        transaction_id=transaction_id,
+        deploy_nonce=deploy_nonce,
+        target_sha=target_sha,
+        runner=runner,
+        lock_handle=lock_handle,
+        canonical_lock_path=canonical_lock_path,
+        require_root_owner=require_root_owner,
+    )
+    lifecycle = _run_release_python_script(
+        release_path=release_path,
+        env_path=env_path,
+        arguments=[
+            "scripts/set_ticket_lifecycle_mutation_capability.py",
+            "--disable",
+            "--require-database-url",
+            "--certification-ref",
+            f"activation-restore-failure:{transaction_id}",
+            "--json",
+        ],
+        timeout=60,
+        runner=runner,
+        lock_handle=lock_handle,
+        canonical_lock_path=canonical_lock_path,
+        require_root_owner=require_root_owner,
+    )
+    lifecycle_payload = _json_receipt(
+        lifecycle,
+        "activation_restore_containment_lifecycle_receipt_invalid",
+    )
+    if lifecycle_payload.get("enabled") is not False:
+        raise RuntimeError("activation_restore_containment_lifecycle_not_disabled")
+    return {
+        "status": "activation_restore_contained",
+        "fence_status": fence["status"],
+        "lifecycle_enabled": False,
+    }
 
 
 def _wait_for_immediate_timer_service(
@@ -2209,7 +2297,7 @@ def _wait_for_immediate_timer_service(
         elif active_state == "failed":
             raise RuntimeError("restored_timer_service_failed:" + service)
         elif active_state == "inactive":
-            if observed_running and (
+            if (
                 facts.get("Result") != "success"
                 or facts.get("ExecMainStatus") != "0"
             ):

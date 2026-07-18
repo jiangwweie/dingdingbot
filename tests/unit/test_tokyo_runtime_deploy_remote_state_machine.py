@@ -1477,6 +1477,95 @@ def test_activation_apply_removes_fence_then_restores_timers_without_transient_s
     assert result["status"] == "activation_applied"
 
 
+def test_activation_restore_failure_reengages_fence_and_disables_lifecycle(
+    tmp_path, monkeypatch,
+):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    (release / "scripts").mkdir()
+    (release / "scripts/set_production_writer_fence.py").write_text(
+        "", encoding="utf-8"
+    )
+    (release / "deploy/systemd").mkdir(parents=True)
+    (release / "deploy/systemd/production-writer-fence.conf").write_text(
+        "", encoding="utf-8"
+    )
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+    commands = []
+    monkeypatch.setattr(machine.time, "sleep", lambda _seconds: None)
+
+    def runner(command, **kwargs):
+        commands.append(tuple(command))
+        joined = " ".join(command)
+        if "set_production_writer_fence.py" in joined:
+            return machine.ChildResult(
+                returncode=0,
+                stdout=(
+                    '{"status":"fence_removed"}'
+                    if "--remove" in command
+                    else '{"status":"fence_engaged","inode":42}'
+                ),
+                stderr="",
+            )
+        if "set_ticket_lifecycle_mutation_capability.py" in joined:
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"status":"not_ready","enabled":false}',
+                stderr="",
+            )
+        if command[1:3] == ["show", "brc-runtime-signal-watcher.service"]:
+            return machine.ChildResult(
+                returncode=0,
+                stdout="ActiveState=inactive\nResult=exit-code\nExecMainStatus=1\n",
+                stderr="",
+            )
+        if (
+            command[1:2] == ["show"]
+            and "--property=ActiveState" in command
+        ):
+            return machine.ChildResult(returncode=0, stdout="inactive\n", stderr="")
+        return machine.ChildResult(returncode=0, stdout="active\n", stderr="")
+
+    prepolicy = {
+        unit: {"active": unit == "brc-runtime-signal-watcher.timer"}
+        for unit in machine.PRODUCTION_WRITER_UNITS
+    }
+    activation_commit = {
+        "schema": "brc.runtime_activation_commit.v1",
+        "status": "runtime_activation_committed",
+        "deploy_transaction_id": "a1b2c3d4",
+        "deploy_nonce": "nonce-a1b2c3d4",
+        "target_runtime_head": "a" * 40,
+    }
+
+    with pytest.raises(RuntimeError, match="activation_restore_failed_contained"):
+        machine.apply_committed_activation(
+            release_path=release,
+            env_path=env_file,
+            activation_commit=activation_commit,
+            unit_prepolicy=prepolicy,
+            runner=runner,
+        )
+
+    fence_commands = [
+        command
+        for command in commands
+        if "set_production_writer_fence.py" in " ".join(command)
+    ]
+    assert "--remove" in fence_commands[0]
+    assert "--engage" in fence_commands[1]
+    assert any(
+        "set_ticket_lifecycle_mutation_capability.py" in " ".join(command)
+        and "--disable" in command
+        for command in commands
+    )
+    stopped = [command[-1] for command in commands if command[1:2] == ("stop",)]
+    assert set(machine.DEPLOY_STOP_UNITS).issubset(stopped)
+
+
 def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
     tmp_path, monkeypatch
 ):

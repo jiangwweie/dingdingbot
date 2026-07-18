@@ -1449,6 +1449,7 @@ def _refresh_steps(
                 "scripts/materialize_action_time_ticket_sequence.py",
                 *pg_required,
                 *invocation_args,
+                "--json",
             ),
         ),
         RefreshStep(

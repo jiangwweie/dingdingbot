@@ -461,10 +461,11 @@ def test_server_product_state_refresh_sequence_action_time_if_needed_runs_on_pg_
         for command in calls
         if command[1] == "scripts/materialize_action_time_ticket_sequence.py"
     )
-    assert ticket_command[-2:] == (
+    assert ticket_command[-3:-1] == (
         "--action-time-invocation-id",
         "action_time_invocation:unit",
     )
+    assert ticket_command[-1] == "--json"
 
 
 def test_action_time_refresh_binds_account_collection_to_triggered_invocation(
@@ -632,10 +633,11 @@ def test_server_product_state_refresh_sequence_uses_stage_local_time_after_invoc
         for command in materializer_calls
         if command[1] == "scripts/materialize_action_time_ticket_sequence.py"
     )
-    assert ticket_command[-2:] == (
+    assert ticket_command[-3:-1] == (
         "--action-time-invocation-id",
         "action_time_invocation:unit",
     )
+    assert ticket_command[-1] == "--json"
     assert all("--now-ms" not in command for command in calls)
 
 
@@ -1167,6 +1169,42 @@ def test_server_product_state_refresh_sequence_fails_closed_on_action_time_fact_
     assert "materialize_action_time_finalgate_preflight" in skipped_names
     assert "materialize_action_time_operation_layer_handoff" in skipped_names
     assert "materialize_ticket_bound_runtime_safety_state" in skipped_names
+
+
+def test_action_time_ticket_sequence_uses_structured_json_for_exact_blocker(
+    tmp_path: Path,
+):
+    module = _load_module()
+
+    def runner(command: tuple[str, ...]):
+        if command[1] == "scripts/materialize_action_time_ticket_sequence.py":
+            assert "--json" in command
+            return module.CommandResult(
+                returncode=1,
+                stdout=(
+                    '{"status":"action_time_ticket_sequence_rolled_back",'
+                    '"process_outcome":{"process_state":"hard_failure",'
+                    '"business_state":"needs_intervention",'
+                    '"first_blocker":"runtime_lane_identity_mismatch:coverage_typed_identity"}}'
+                ),
+                stderr="",
+            )
+        return module.CommandResult(returncode=0, stdout="ok", stderr="")
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time_if_needed",
+        action_time_trigger_state=_fresh_signal_trigger(),
+        action_time_invocation_starter=_unit_invocation_starter,
+        runner=runner,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_failed"
+    assert report["process_outcome"]["first_blocker"] == (
+        "materialize_action_time_ticket_sequence_failed:"
+        "runtime_lane_identity_mismatch:coverage_typed_identity"
+    )
 
 
 def test_server_product_state_refresh_sequence_omits_legacy_candidate_pool_materializer(
