@@ -1719,7 +1719,7 @@ def restore_lifecycle_mutation_policy(
     release_path: Path,
     env_path: Path,
     target_sha: str,
-    was_enabled: bool,
+    enable_after_certification: bool,
     post_certification_ref: str,
     post_certification_reference: Mapping[str, Any],
     post_projection_slice_digests: Mapping[str, str],
@@ -1729,7 +1729,7 @@ def restore_lifecycle_mutation_policy(
     require_root_owner: bool = True,
 ) -> dict[str, Any]:
     target_sha = _sha(target_sha, "target_sha")
-    if was_enabled:
+    if enable_after_certification:
         lane_payload = {
             "schema": "brc.lane_identity_digest.v1",
             "lane_source_watermarks": list(
@@ -1788,15 +1788,15 @@ def restore_lifecycle_mutation_policy(
     )
     payload = _json_receipt(result, "lifecycle_policy_restore_receipt_invalid")
     if (
-        payload.get("status") != ("ready" if was_enabled else "not_ready")
-        or payload.get("enabled") is not was_enabled
-        or (was_enabled and payload.get("blockers") != [])
+        payload.get("status") != ("ready" if enable_after_certification else "not_ready")
+        or payload.get("enabled") is not enable_after_certification
+        or (enable_after_certification and payload.get("blockers") != [])
     ):
         raise RuntimeError("lifecycle_policy_restore_receipt_mismatch")
     return {
         "status": "lifecycle_policy_restored",
-        "enabled": was_enabled,
-        "lifecycle_proof_ref": proof_ref if was_enabled else None,
+        "enabled": enable_after_certification,
+        "lifecycle_proof_ref": proof_ref if enable_after_certification else None,
         "proof": proof,
     }
 
@@ -2565,6 +2565,11 @@ def execute_deploy_transaction(
         raise ValueError("bootstrap_sha256_invalid")
     canonical_lock = Path(str(config.get("canonical_lock_path") or CANONICAL_LOCK_PATH))
     require_root = bool(config.get("require_root_owner", True))
+    lifecycle_enablement_requested = config.get(
+        "enable_lifecycle_mutation_after_certification", False
+    )
+    if not isinstance(lifecycle_enablement_requested, bool):
+        raise ValueError("lifecycle_enablement_request_invalid")
     journal_path = Path(journal_path)
     resuming_existing_journal = journal_path.exists()
     if resuming_existing_journal:
@@ -2947,7 +2952,10 @@ def execute_deploy_transaction(
             release_path=release,
             env_path=env_path,
             target_sha=target_sha,
-            was_enabled=bool(migrated["lifecycle_capability_was_enabled"]),
+            enable_after_certification=bool(
+                migrated["lifecycle_capability_was_enabled"]
+                or lifecycle_enablement_requested
+            ),
             post_certification_ref=str(cert_pair["ref"]),
             post_certification_reference=reference,
             post_projection_slice_digests=post_projection["sentinel"]["slice_digests"],
@@ -2971,6 +2979,7 @@ def execute_deploy_transaction(
             "target_runtime_head": target_sha,
             "fence_inode": int(fence_info["fence_inode"]),
             "lifecycle_policy_enabled": bool(lifecycle["enabled"]),
+            "lifecycle_enablement_requested": lifecycle_enablement_requested,
             "lifecycle_proof_ref": lifecycle.get("lifecycle_proof_ref"),
             "release_pointer": str(app_current),
             "schema_revision": expected_revision,
@@ -3490,6 +3499,10 @@ def main(
     parser.add_argument("--expected-revision", required=True)
     parser.add_argument("--predecessor-transaction-id", default="")
     parser.add_argument("--predecessor-deploy-nonce", default="")
+    parser.add_argument(
+        "--enable-lifecycle-mutation-after-certification",
+        action="store_true",
+    )
     args = parser.parse_args(argv)
     source = bootstrap_source
     if source is None:
@@ -3537,6 +3550,9 @@ def main(
                     "predecessor_transaction_id": args.predecessor_transaction_id,
                     "predecessor_deploy_nonce": args.predecessor_deploy_nonce,
                     "bootstrap_sha256": args.bootstrap_sha256,
+                    "enable_lifecycle_mutation_after_certification": (
+                        args.enable_lifecycle_mutation_after_certification
+                    ),
                 },
                 lock_handle=lock,
                 journal_path=journal_path,

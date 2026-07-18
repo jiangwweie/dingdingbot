@@ -64,6 +64,7 @@ def build_remote_state_machine_invocation(
     bootstrap_path: Path | None = None,
     predecessor_transaction_id: str | None = None,
     predecessor_deploy_nonce: str | None = None,
+    enable_lifecycle_mutation_after_certification: bool = False,
 ) -> dict[str, str]:
     """Build the one bounded, stdin-bootstrapped remote mutation session."""
 
@@ -134,6 +135,8 @@ def build_remote_state_machine_invocation(
     if predecessor_transaction_id:
         remote_argv.extend(("--predecessor-transaction-id", predecessor_transaction_id))
         remote_argv.extend(("--predecessor-deploy-nonce", predecessor_deploy_nonce))
+    if enable_lifecycle_mutation_after_certification:
+        remote_argv.append("--enable-lifecycle-mutation-after-certification")
     command = (
         f"ssh {shlex.quote(host)} {shlex.quote(shlex.join(remote_argv))} "
         f"< {shlex.quote(str(source))}"
@@ -183,6 +186,9 @@ def main(argv: list[str] | None = None) -> int:
         deploy_nonce=args.deploy_nonce,
         predecessor_transaction_id=args.predecessor_transaction_id,
         predecessor_deploy_nonce=args.predecessor_deploy_nonce,
+        enable_lifecycle_mutation_after_certification=(
+            args.enable_lifecycle_mutation_after_certification
+        ),
     )
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -201,6 +207,7 @@ def execute_git_deploy_plan(
     deploy_nonce: str | None = None,
     predecessor_transaction_id: str | None = None,
     predecessor_deploy_nonce: str | None = None,
+    enable_lifecycle_mutation_after_certification: bool = False,
     runner: ShellRunner | None = None,
 ) -> dict[str, Any]:
     blockers = list(plan.get("checks", {}).get("blockers") or [])
@@ -298,6 +305,9 @@ def execute_git_deploy_plan(
                 deploy_nonce=transaction_identity["deploy_nonce"],
                 predecessor_transaction_id=predecessor_transaction_id,
                 predecessor_deploy_nonce=predecessor_deploy_nonce,
+                enable_lifecycle_mutation_after_certification=(
+                    enable_lifecycle_mutation_after_certification
+                ),
             )
             mutation_started = True
             result = command_runner(invocation["command"])
@@ -791,6 +801,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--require-confirmation-phrase",
         action="store_true",
         help="Require the legacy exact confirmation phrase even during apply.",
+    )
+    parser.add_argument(
+        "--enable-lifecycle-mutation-after-certification",
+        action="store_true",
+        help=(
+            "Explicitly bootstrap lifecycle mutation after exact-head certification; "
+            "ordinary deploys preserve the capability pre-state."
+        ),
     )
     return parser.parse_args(argv)
 

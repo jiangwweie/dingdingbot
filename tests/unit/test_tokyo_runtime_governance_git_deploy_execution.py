@@ -132,6 +132,36 @@ def test_remote_invocation_binds_exact_predecessor_for_fence_supersession(tmp_pa
     assert "--predecessor-deploy-nonce predecessor-nonce" in invocation["command"]
 
 
+def test_remote_invocation_requires_explicit_capability_bootstrap_intent(tmp_path):
+    script = tmp_path / "tokyo_runtime_deploy_remote_state_machine.py"
+    script.write_text("print('verified bootstrap')\n", encoding="utf-8")
+    plan = {
+        "repo_root": str(tmp_path),
+        "inputs": {
+            "host": "tokyo",
+            "target_commit": "a" * 40,
+            "expected_deployed_head": "b" * 40,
+            "expected_latest_migration": "2026-07-17-136_x.py",
+        },
+        "release": {"head": "a" * 40},
+    }
+
+    default = build_remote_state_machine_invocation(
+        plan, transaction_id="a1b2c3d4", deploy_nonce="default", bootstrap_path=script
+    )
+    requested = build_remote_state_machine_invocation(
+        plan,
+        transaction_id="a1b2c3d5",
+        deploy_nonce="requested",
+        bootstrap_path=script,
+        enable_lifecycle_mutation_after_certification=True,
+    )
+
+    flag = "--enable-lifecycle-mutation-after-certification"
+    assert flag not in default["command"]
+    assert requested["command"].count(flag) == 1
+
+
 def test_executor_prints_identity_then_runs_exactly_one_remote_mutation(
     tmp_path, capsys
 ):

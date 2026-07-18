@@ -1322,7 +1322,7 @@ def test_candidate_certification_uses_typed_stage_nonce_and_exact_fact_ids(tmp_p
     assert result["certification_ref"].startswith("action-time-cert:v2:")
 
 
-def test_lifecycle_policy_restore_persists_v2_proof_when_prestate_enabled(tmp_path):
+def test_lifecycle_policy_restore_persists_v2_proof_when_enablement_is_authorized(tmp_path):
     release = tmp_path / "candidate"
     python = release / ".venv/bin/python"
     python.parent.mkdir(parents=True)
@@ -1370,7 +1370,7 @@ def test_lifecycle_policy_restore_persists_v2_proof_when_prestate_enabled(tmp_pa
         release_path=release,
         env_path=env_file,
         target_sha="a" * 40,
-        was_enabled=True,
+        enable_after_certification=True,
         post_certification_ref=typed_reference.certification_ref(),
         post_certification_reference=reference,
         post_projection_slice_digests={"process_current": "sha256:" + "c" * 64},
@@ -1566,7 +1566,7 @@ def test_activation_restore_failure_reengages_fence_and_disables_lifecycle(
     assert set(machine.DEPLOY_STOP_UNITS).issubset(stopped)
 
 
-def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
+def test_deploy_transaction_bootstraps_lifecycle_only_with_explicit_intent_and_is_resumable(
     tmp_path, monkeypatch
 ):
     deploy_root = tmp_path / "brc-deploy"
@@ -1600,7 +1600,7 @@ def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
     monkeypatch.setattr(machine, "capture_production_unit_prepolicy", lambda **kwargs: {unit: {"active": False} for unit in machine.PRODUCTION_WRITER_UNITS})
     monkeypatch.setattr(machine, "engage_production_writer_fence", lambda **kwargs: {"status": "production_writers_fenced", "fence_inode": 77})
     monkeypatch.setattr(machine, "read_candidate_schema_revision", lambda **kwargs: "120")
-    monkeypatch.setattr(machine, "run_fenced_schema_migration", lambda **kwargs: {"status": "schema_migrated", "revision": "124", "lifecycle_capability_was_enabled": True})
+    monkeypatch.setattr(machine, "run_fenced_schema_migration", lambda **kwargs: {"status": "schema_migrated", "revision": "124", "lifecycle_capability_was_enabled": False})
     monkeypatch.setattr(machine, "install_candidate_units_and_switch_pointer", lambda **kwargs: {"status": "candidate_pointer_active"})
     monkeypatch.setattr(machine, "record_candidate_release_activation", lambda **kwargs: {"status": "runtime_release_activation_completed"})
     monkeypatch.setattr(machine, "refresh_candidate_account_facts", lambda **kwargs: {"status": "candidate_account_facts_refreshed", "fact_snapshot_ids": ("fact:1",)})
@@ -1646,7 +1646,11 @@ def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
     monkeypatch.setattr(machine, "run_five_readonly_canaries", lambda **kwargs: {"status": "readonly_canary_complete", "successful_ticks": 5})
     monkeypatch.setattr(machine, "verify_candidate_phase_two_ready", lambda **kwargs: {"status": "phase_two_ready", "exchange_write_called": False})
     monkeypatch.setattr(machine, "collect_activation_machine_facts", lambda **kwargs: {"status": "activation_machine_facts_verified"})
-    monkeypatch.setattr(machine, "restore_lifecycle_mutation_policy", lambda **kwargs: {"status": "lifecycle_policy_restored", "enabled": True, "lifecycle_proof_ref": "lifecycle-cert:v2:" + "e" * 64, "proof": {}})
+    def restore_policy(**kwargs):
+        assert kwargs["enable_after_certification"] is True
+        return {"status": "lifecycle_policy_restored", "enabled": True, "lifecycle_proof_ref": "lifecycle-cert:v2:" + "e" * 64, "proof": {}}
+
+    monkeypatch.setattr(machine, "restore_lifecycle_mutation_policy", restore_policy)
     monkeypatch.setattr(machine, "apply_committed_activation", lambda **kwargs: {"status": "activation_applied"})
     config = {
         "transaction_id": "a1b2c3d4",
@@ -1662,6 +1666,7 @@ def test_deploy_transaction_runs_all_monotonic_phases_and_is_resumable(
         "env_path": str(env_file),
         "expected_revision": "124",
         "bootstrap_sha256": "c" * 64,
+        "enable_lifecycle_mutation_after_certification": True,
         "canonical_lock_path": str(lock_path),
         "require_root_owner": False,
     }

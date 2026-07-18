@@ -1,8 +1,8 @@
 ---
 title: P0_RUNTIME_OPERATIONAL_RECOVERY_2026-07-19_DESIGN_AND_EXECUTION_PLAN
-status: ACTIVE_IMPLEMENTATION_OWNER_POLICY_PENDING
+status: PROPOSED_COMPLETION_PLAN_OWNER_CONFIRMATION_PENDING
 authority: docs/current/P0_RUNTIME_OPERATIONAL_RECOVERY_2026-07-19_DESIGN_AND_EXECUTION_PLAN.md
-last_verified: 2026-07-19
+last_verified: 2026-07-19 02:32 CST
 ---
 
 # P0 生产运行链路恢复设计与执行方案
@@ -294,3 +294,178 @@ account_safe_fact_not_true
 
 因此，P0-FRR 的服务恢复部分已经推进到持续运行；完整真实交易能力仍依赖两个独立且
 不可绕过的条件：**Owner 记录账户风险策略** 与 **lifecycle phase-two certification**。
+
+## 12. 当前恢复基线与最终闭环方案
+
+### 12.1 本次只读复核结论
+
+**工程服务已恢复，但系统尚不具备真实交易提交能力。** 这是当前代码的预期
+fail-closed 状态，不能被解释为市场无机会，也不能通过手工改数据库或临时启用 capability
+绕过。
+
+| 验收面 | 当前证据 | 当前结论 | 对真实提交的影响 |
+| --- | --- | --- | --- |
+| 部署版本 | 东京 `current_head=f08f093c2264db698ab0d3bdd5ac6adf37c711c4`，本地当前分支同一提交 | 已对齐 | 无版本漂移阻塞 |
+| 数据模型 | 东京 migration count 为 **137**，最新迁移为 `2026-07-18-137_add_pretrade_strategy_detector_fact_index.py` | 已对齐 | 无 schema 阻塞 |
+| 后端 | `GET /health` 返回 HTTP **200**、`runtime_bound=true`、`live_ready=false` | 服务正常；真实交易条件未齐 | 不能据此提交订单 |
+| 观察 timer | `brc-runtime-signal-watcher.timer=active/waiting`；下一次触发已登记 | 已恢复 | 可持续产生新的自然信号 |
+| 监控 timer | `brc-runtime-monitor.timer=active/waiting`；下一次触发已登记 | 已恢复 | 可报告真实异常状态 |
+| 生命周期 timer | `brc-ticket-lifecycle-maintenance.timer=active/waiting`；最近运行无 blocker | 调度正常 | 只读维护正常，mutation 仍关闭 |
+| 观察结果 | watcher 最新结果为 `watching_no_signal` 且 `watcher_status_evidence_status=ok` | 当前没有新鲜信号，不是 HTTP 400 故障 | 等待自然触发 |
+| 部署围栏 | `production-writers.blocked` 不存在，三个 timer 均 active | 不存在 `invalid_split_state` | 运行恢复正确 |
+| 账户风险策略 | `brc_account_risk_policy_current=0`（前次自然信号的 PG 证据） | 缺少 Owner policy | Ticket 前必须阻塞 |
+| 生命周期 mutation capability | maintenance journal 为 `durable_mutation_enabled=false`，ref 绑定 `f08f093c…` | 尚未 phase-two 认证 | 即使有 ticket 也不得真实提交/保护 |
+
+来源：东京只读 deploy probe、`systemctl list-timers`、watcher/lifecycle journal 与 PG
+current/provenance 查询，**2026-07-19 02:28–02:32 CST**。所有上述检查均未读取密钥、
+未改远端文件、未调用交易所、未创建订单。
+
+### 12.2 根因收敛图
+
+```text
+已关闭的工程故障
+HTTP 400 observation contract
+  -> typed coverage identity 缺失
+  -> deploy containment 未保留 writer fence
+  -> account capacity 被误判为 account_safe=false
+  已由当前 f08f093c 前向修复并在东京运行
+
+仍然生效的安全边界
+缺少 Account Risk Policy（Owner policy）
+  -> account_risk_policy_missing_or_changed
+  -> 禁止 Action-Time Ticket
+
+lifecycle durable mutation capability = disabled（认证状态）
+  -> 禁止 Operation Layer 后的真实提交与保护 mutation
+
+当前无 fresh signal（市场事实）
+  -> 尚无新的 Signal -> Ticket 自然验证样本
+```
+
+这三类状态不能混为一个“程序异常”：前一类是**已完成的工程修复**，第二类是**Owner
+政策缺失**，第三类是**尚未完成的生产认证**，最后一类是**当前市场计算结果**。
+
+### 12.3 目标状态与不可变约束
+
+目标状态定义为 **`live_submit_ready`**，它不是“服务 active”，而是以下状态同时成立：
+
+```text
+healthy_running
++ active Account Risk Policy matching current runtime scope
++ phase-two lifecycle capability certification bound to deployed head
++ fresh natural signal with conserved RuntimeLaneIdentity
++ Ticket -> FinalGate -> official Operation Layer checks all pass
++ protection / duplicate-submit / reconciliation safeguards remain fail-closed
+= live_submit_ready
+```
+
+以下约束在所有工作包中保持不变：
+
+1. 不伪造 signal、promotion、lane、ticket、FinalGate 结果或交易所回执。
+2. 不修改历史 PG evidence，不通过 SQL 手工把 capability 标记为 enabled。
+3. 不绕过 **FinalGate**、**Operation Layer**、保护、对账、TTL、账户/仓位/挂单冲突检查。
+4. 不扩大 StrategyGroup、symbol、side、runtime profile、杠杆、名义金额或资金范围。
+5. no-signal cadence 不产生 JSON/Markdown 运行时权威；继续以 PG current + audit lineage 为准。
+
+### 12.4 详细修复与验收工作包
+
+| 工作包 | 问题与设计 | 执行动作 | 通过标准 | 失败处理 |
+| --- | --- | --- | --- | --- |
+| **WP-1 政策闭环** | 账户容量必须由与 `account_id + runtime_profile_id` 精确匹配的 active policy 约束；不可复用旧默认值 | 用 `set_account_risk_policy.py` 写入一条可审计 event，并由 PG registry 推导风险 cluster membership | current projection 恰为一行、版本和 scope 匹配、`activation_state=active`、所有数值显式 | 保持 `policy_scope_missing`；不生成 Ticket |
+| **WP-2 生命周期认证** | lifecycle timer 正常不代表允许 mutation；能力必须绑定部署 head 的 phase-two proof | 在当前 `f08f093c` 上执行官方 zero-exchange phase-two verifier，再由脚本原子启用 capability | verifier=`phase_two_ready`，capability ref 指向当前 head，五条 API-only canary 与 postdeploy checks 通过 | capability 保持 disabled；不提交、不保护、不做补偿性写入 |
+| **WP-3 自然链路验证** | 仅新自然 signal 能证明修复后的 coverage/identity 与 Ticket 路径 | 持续 watcher observation，采集首个满足条件的新 signal 的 PG lineage | `Signal -> Promotion -> Lane -> Ticket` 完整，或同一 outcome 有精确 first blocker | blocker 按 contract 分类；业务 blocker 不得停止其它观察 lane |
+| **WP-4 提交前认证** | Ticket 存在仍不等于可提交；必须在 action time 再次校验账户、容量、保护、TTL 和冲突 | 对该 Ticket 执行官方 FinalGate 与 Operation Layer 的正常非绕过流程 | 唯一 submit intent；无 stale fact、无重复提交、无未保护风险、无未知 command | 立即 fail-closed，保留可审计 blocker；不重试为新订单 |
+| **WP-5 首笔后生命周期验收** | 真实 ENTRY 成功后才会出现保护、对账、结算的真实运行证据 | 由已认证 lifecycle worker 正常处理 ENTRY/SL/TP1、reconciliation、settlement、review | ENTRY 之后的保护完整，exchange command 唯一，状态最终可闭环 | 任一保护/对账异常进入 hard-stop，冻结对应 scope，禁止新的同 scope 提交 |
+
+**补充根因（2026-07-19 02:45 CST）**：原部署状态机把 phase-two 后的 capability
+恢复条件错误地绑定为“部署前已经 enabled”。东京的部署前状态是 disabled，因此即使
+所有认证完成，也只能恢复为 disabled。这不是安全策略，而是缺失了一个**显式、可审计的
+首次 bootstrap 意图**。修复后的正式部署命令仅在携带
+`--enable-lifecycle-mutation-after-certification` 时允许从 disabled 进入 enabled；它仍必须
+完成同一 exact-head phase-two、Action-Time certification、current projection publish 和
+writer timer restore。没有该 flag 的任何普通部署继续保持原状态，不能意外扩大能力。
+
+### 12.5 Owner 政策输入与工程输入的边界
+
+**WP-1** 唯一需要 Owner 决定具体数值。工程端不得从旧脚本默认值、历史 chat 或其它账户
+自动推断。确认时须作为同一份政策输入明确以下字段：
+
+| 字段 | 含义 | 允许的决定者 |
+| --- | --- | --- |
+| `account_id` | 绑定的真实子账户身份 | Owner |
+| `runtime_profile_id` | 生效运行配置 | Owner |
+| `risk_policy_version` | 新政策的版本标识 | Owner |
+| `planned_stop_risk_fraction` | 单笔计划止损风险比例 | Owner |
+| `max_concurrent_positions` | 同时持仓上限（当前脚本仅允许 1 或 2） | Owner |
+| `max_portfolio_open_risk_fraction` | 组合已开风险上限 | Owner |
+| `max_cluster_open_risk_fraction` | 同风险 cluster 上限 | Owner |
+| `max_portfolio_initial_margin_fraction` | 组合初始保证金上限 | Owner |
+| `max_leverage` | 最大杠杆 | Owner |
+| `max_new_action_time_lanes` | 新增 Action-Time lane 上限（当前固定 1） | 固定安全约束 |
+| `automatic_downsize_enabled` | 是否允许规则内自动缩小 | Owner |
+| `unknown_exposure_policy` | 未知暴露处理（当前固定 `global_fail_closed`） | 固定安全约束 |
+| `activation_state` | 先 `shadow` 或直接 `active` | Owner |
+
+**WP-2 至 WP-5** 是工程和既有正式运行链路的职责；不会改变上述政策字段，也不会扩展
+交易范围。若 WP-3/4 遇到新的精确工程 blocker，再以该 blocker 为唯一修复目标重新开
+工作包，禁止把它归为“等待市场”。
+
+### 12.6 执行顺序、暂停点与回滚
+
+```text
+Owner policy confirmation
+-> WP-1 写入并只读核验
+-> WP-2 exact-head zero-exchange phase-two certification
+-> 持续 WP-3 自然信号观察
+-> WP-4 正式 ticket 前检查
+-> 首笔合规提交后 WP-5 生命周期验收
+```
+
+| 暂停点 | 允许状态 | 不允许状态 | 回退方式 |
+| --- | --- | --- | --- |
+| WP-1 前 | services active，policy missing | 手工写 policy 或复用默认值 | 继续只读观察 |
+| WP-2 前 | policy active，capability disabled | 手工 enable capability | 保持 disabled |
+| WP-3 前 | timer active，no signal | 伪造自然 signal | 等待 watcher 原生事件 |
+| WP-4 前 | 有合法 Ticket | 绕过 FinalGate / Operation Layer | Ticket 过期或被精确拒绝 |
+| WP-5 中 | 已提交且保护/对账处理中 | 忽略未知订单或缺少保护 | hard-stop + scope freeze，按官方恢复命令处理 |
+
+软件回滚仅允许回到同一 migration 137 兼容的、已认证的前向 release；若任一认证失败，
+系统应进入 **`safe_contained`**（writer fence 存在、相关 timer 停止、lifecycle capability
+disabled、Owner 状态 `temporarily_unavailable`），不得退回带有 HTTP 400 或 identity 缺口的
+历史 release。
+
+### 12.7 验证矩阵与完成定义
+
+| 能力 | 当前状态 | 最终机器证据 | 完成判定 |
+| --- | --- | --- | --- |
+| 后端与 PG 绑定 | 已通过 | `/health=200`、runtime bound、migration 137 | 已完成 |
+| watcher / monitor / lifecycle 调度 | 已通过 | 三个 timer active + next trigger，近期 successful run | 已完成，但持续监控 |
+| 观察与信号计算 | 已通过 | `watcher_status_evidence_status=ok`；每 lane 有 computed fact 或精确 blocker | 已完成，但等待自然信号 |
+| Account Risk Policy | 未完成 | active PG policy event/current projection 严格匹配 scope | WP-1 后完成 |
+| Ticket 物化 | 未完成自然复验 | 新 signal 的 PG lineage 至 ticket 或精确安全 blocker | WP-3 后完成 |
+| lifecycle mutation | 未完成 | exact-head `phase_two_ready` + enabled capability receipt | WP-2 后完成 |
+| 真实提交资格 | 未完成 | Ticket、FinalGate、Operation Layer、保护、账户事实同时合格 | WP-4 后才可判定 |
+| 首笔全生命周期 | 未完成 | 保护、对账、结算、review 真实链路闭环 | WP-5 后完成 |
+
+本修复计划完成的严格定义是：**所有服务持续正常、所有 current policy/认证条件可追溯、
+自然信号可以到达合法 Ticket、并且仅在实时安全条件都通过时由官方链路发生真实交易。**
+它不以人为制造一笔交易、盈利结果或放宽安全门为验收手段。
+
+### 12.8 当前链路位置
+
+```text
+chain_position: action_time_boundary
+strategy_group_id: SOR-001
+symbol: SOLUSDT
+stage: active_observation
+first_blocker: account_risk_policy_missing_or_changed
+evidence: 东京 PG 的自然信号 outcome；当前 brc_account_risk_policy_current=0
+next_action: Owner 确认显式 Account Risk Policy 后写入并核验 current projection
+stop_condition: active policy 与 runtime scope 精确匹配；随后等待新的自然 signal
+owner_action_required: true
+authority_boundary: 本文与复核均未调用 FinalGate、Operation Layer 或交易所写接口
+signal_event_id: 已存在自然信号（历史，不能复用为验证样本）
+promotion_candidate_id: none（该自然样本未通过 policy 边界）
+action_time_lane_input_id: none
+ticket_id: none
+```
