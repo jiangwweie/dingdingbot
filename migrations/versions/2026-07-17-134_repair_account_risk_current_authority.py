@@ -50,6 +50,12 @@ _FROZEN_TICKET_DECIMAL_FIELDS = {
 _FROZEN_TICKET_INTEGER_FIELDS = {
     "event_time_ms", "trigger_candle_close_time_ms", "expires_at_ms",
 }
+_LEGACY_TERMINAL_HASH_SCHEMA = (
+    "action_time_ticket_hash.legacy_terminal_unverifiable"
+)
+_TERMINAL_TICKET_STATUSES = frozenset(
+    {"expired", "closed", "invalidated", "rejected", "cancelled"}
+)
 
 
 def upgrade() -> None:
@@ -80,14 +86,7 @@ def upgrade() -> None:
         sa.String(64),
     )
     if sa.inspect(bind).has_table("brc_action_time_tickets"):
-        _assert_historical_ticket_hashes_are_v1_valid(bind)
-        bind.execute(
-            sa.text(
-                "UPDATE brc_action_time_tickets "
-                "SET ticket_hash_schema_version = 'action_time_ticket_hash.v1' "
-                "WHERE ticket_hash_schema_version IS NULL"
-            )
-        )
+        _classify_historical_ticket_hashes(bind)
     for column_name, column_type in (
         ("trusted_fact_refs_schema_version", sa.String(64)),
         ("account_capacity_fact_surface", sa.String(64)),
@@ -177,12 +176,15 @@ def _assert_no_v2_history(bind: sa.Connection) -> None:
             raise RuntimeError("capacity_fact_history_not_legacy_compatible")
 
 
-def _assert_historical_ticket_hashes_are_v1_valid(bind: sa.Connection) -> None:
-    """Fail before any V1 label is written when a historical hash is corrupt.
+def _classify_historical_ticket_hashes(bind: sa.Connection) -> None:
+    """Label only proven V1 rows; quarantine terminal snapshot drift.
 
     The scan is deliberately keyset-batched to avoid materializing Ticket
-    history in application memory.  It performs no update; therefore an
-    invalid later batch cannot leave a partially labelled history behind.
+    history in application memory.  A nonterminal hash mismatch remains a
+    hard failure.  An already terminal row whose mutable lifecycle projection
+    drifted after its immutable Ticket hash was issued is retained as history
+    under an explicitly non-authoritative schema label; it is never rehashed
+    or upgraded into V1/V2 execution authority.
     """
 
     tickets = sa.Table("brc_action_time_tickets", sa.MetaData(), autoload_with=bind)
@@ -199,11 +201,46 @@ def _assert_historical_ticket_hashes_are_v1_valid(bind: sa.Connection) -> None:
         ).mappings().all()
         if not rows:
             return
+        v1_ticket_ids: list[str] = []
+        legacy_terminal_ticket_ids: list[str] = []
         for row in rows:
             expected = _frozen_ticket_hash_v1(row)
-            if str(row.get("ticket_hash") or "") != expected:
+            if str(row.get("ticket_hash") or "") == expected:
+                v1_ticket_ids.append(str(row["ticket_id"]))
+            elif str(row.get("status") or "") in _TERMINAL_TICKET_STATUSES:
+                legacy_terminal_ticket_ids.append(str(row["ticket_id"]))
+            else:
                 raise RuntimeError("ticket_hash_v1_preflight_invalid")
+        _label_ticket_hash_schema_batch(
+            bind,
+            ticket_ids=v1_ticket_ids,
+            schema_version="action_time_ticket_hash.v1",
+        )
+        _label_ticket_hash_schema_batch(
+            bind,
+            ticket_ids=legacy_terminal_ticket_ids,
+            schema_version=_LEGACY_TERMINAL_HASH_SCHEMA,
+        )
         last_ticket_id = str(rows[-1]["ticket_id"])
+
+
+def _label_ticket_hash_schema_batch(
+    bind: sa.Connection,
+    *,
+    ticket_ids: list[str],
+    schema_version: str,
+) -> None:
+    if not ticket_ids:
+        return
+    bind.execute(
+        sa.text(
+            "UPDATE brc_action_time_tickets "
+            "SET ticket_hash_schema_version = :schema_version "
+            "WHERE ticket_hash_schema_version IS NULL "
+            "AND ticket_id IN :ticket_ids"
+        ).bindparams(sa.bindparam("ticket_ids", expanding=True)),
+        {"schema_version": schema_version, "ticket_ids": ticket_ids},
+    )
 
 
 def _frozen_ticket_hash_v1(row: sa.RowMapping) -> str:

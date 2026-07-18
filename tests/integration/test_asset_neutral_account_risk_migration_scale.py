@@ -31,6 +31,7 @@ MIGRATIONS = (
 )
 BACKFILL = VERSIONS / "2026-07-17-132_backfill_asset_neutral_account_risk_identity.py"
 ENFORCE = VERSIONS / "2026-07-17-133_enforce_asset_neutral_account_risk_identity.py"
+CURRENT_AUTHORITY = VERSIONS / "2026-07-17-134_repair_account_risk_current_authority.py"
 _DSN = os.getenv("BRC_LOCAL_TEST_POSTGRES_DSN", "")
 _SAFE_SCHEMA = re.compile(r"^brc_asset_neutral_scale_[a-f0-9]{12}$")
 
@@ -191,6 +192,39 @@ def test_backfill_rejects_nonterminal_blank_ticket_reservation_lineage(
         match="asset_neutral_ticket_reservation_lineage_unresolved",
     ):
         _run_loaded_upgrade(conn, backfill)
+
+
+def test_current_authority_quarantines_terminal_ticket_hash_drift_on_postgres(
+    postgres_scale_connection: sa.Connection,
+) -> None:
+    conn = postgres_scale_connection
+    for index, migration in enumerate(MIGRATIONS):
+        _run_upgrade(conn, migration, f"migration_terminal_hash_postgres_{index}")
+    _seed_instrument_and_mapping(conn)
+    _seed_complete_active_claim_and_ticket(conn)
+    _run_upgrade(conn, BACKFILL, "migration_terminal_hash_postgres_backfill")
+    _run_upgrade(conn, ENFORCE, "migration_terminal_hash_postgres_enforce")
+    conn.execute(
+        sa.text(
+            "UPDATE brc_action_time_tickets SET status = 'expired' "
+            "WHERE ticket_id = 'ticket-active'"
+        )
+    )
+
+    _run_upgrade(conn, CURRENT_AUTHORITY, "migration_terminal_hash_postgres_current")
+
+    row = conn.execute(
+        sa.text(
+            "SELECT ticket_hash, ticket_hash_schema_version "
+            "FROM brc_action_time_tickets WHERE ticket_id = 'ticket-active'"
+        )
+    ).mappings().one()
+    assert row == {
+        "ticket_hash": "ticket-hash-active",
+        "ticket_hash_schema_version": (
+            "action_time_ticket_hash.legacy_terminal_unverifiable"
+        ),
+    }
 
 
 def _seed_instrument_and_mapping(conn: sa.Connection) -> None:

@@ -200,6 +200,38 @@ def test_migration_134_aborts_before_labelling_invalid_v1_ticket_hash() -> None:
         ).scalar_one_or_none() is None
 
 
+def test_migration_134_quarantines_terminal_hash_drift_without_rehashing() -> None:
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(
+            sa.text(
+                "CREATE TABLE brc_action_time_tickets "
+                "(ticket_id TEXT PRIMARY KEY, status TEXT NOT NULL, ticket_hash TEXT NOT NULL)"
+            )
+        )
+        conn.execute(
+            sa.text(
+                "INSERT INTO brc_action_time_tickets VALUES "
+                "('legacy-terminal-drift', 'expired', 'old-immutable-hash')"
+            )
+        )
+
+        _upgrade(conn, CAPACITY_FACT_AUTHORITY, "migration_134_terminal_hash_drift")
+
+        row = conn.execute(
+            sa.text(
+                "SELECT ticket_hash, ticket_hash_schema_version "
+                "FROM brc_action_time_tickets"
+            )
+        ).mappings().one()
+    assert row == {
+        "ticket_hash": "old-immutable-hash",
+        "ticket_hash_schema_version": (
+            "action_time_ticket_hash.legacy_terminal_unverifiable"
+        ),
+    }
+
+
 def _create_terminal_capacity_repair_tables(conn: sa.Connection) -> None:
     for statement in (
         "CREATE TABLE brc_budget_reservations (budget_reservation_id TEXT PRIMARY KEY, ticket_id TEXT, status TEXT, release_reason TEXT, released_at_ms BIGINT, reserved_at_ms BIGINT, exchange_instrument_id TEXT, reconciliation_state TEXT, current_first_blocker TEXT)",
