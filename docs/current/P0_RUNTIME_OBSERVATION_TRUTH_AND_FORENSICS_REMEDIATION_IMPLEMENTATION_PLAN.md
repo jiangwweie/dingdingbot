@@ -8,8 +8,9 @@ repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
 repair_baseline_head: 473be8113a34c35082798a18019f758bf57bf120
 prior_certified_source_commit: e4f49dcfa77932f6ec440b3a869943eb2ade73a1
-implementation_state: LOCAL_IMPLEMENTATION_COMPLETE_EXACT_HEAD_CERTIFICATION_IN_PROGRESS
-release_gate: LOCAL_REMEDIATION_CERTIFICATION_IN_PROGRESS
+exact_certified_source_commit: bf634a7e2695e397adcc4a7107d4a48cb33ac98c
+implementation_state: LOCAL_EXACT_HEAD_CERTIFIED_AWAITING_T09
+release_gate: LOCAL_REMEDIATION_CERTIFIED_AWAITING_TOKYO_CANARY
 deployment_state: DEPLOYMENT_NO_GO
 production_state: UNCHANGED
 policy_activation: NOT_PERFORMED
@@ -143,11 +144,28 @@ false market-wait compression.
 | **T05** | complete | Forensics stdout contract is `brc.runtime_signal_forensics.v2`; persisted Invocation and Process Outcome win over a missing Promotion. |
 | **T06** | complete in rehearsal | Exact Ticket-bound PG ghost protection rows terminalize only after flat-position plus absent-order proof; audit payload records `exchange_write_called=false`. Production apply remains T10. |
 | **T07** | complete | Disposable PostgreSQL causal-integrity suite passed **15 tests**, including the new v2 forensics lineage case. |
-| **T08** | in progress | Focused P0 suite passed **334 tests**; required Dual-Position disposable-PostgreSQL gate passed **33 tests**. Full exact-head repository regression and final source commit remain before T09. |
+| **T08** | complete locally | Exact source commit `bf634a7e2695e397adcc4a7107d4a48cb33ac98c` passed focused P0 **334**, causal PostgreSQL **15**, Dual-Position PostgreSQL **33**, Action-Time impact **84**, and complete isolated PostgreSQL **3626 passed, 1 skipped, 5 warnings**. Linux/amd64 CPython 3.10 installed the unchanged version/hash lock through a transient Tencent mirror index, imported the required modules, and returned `pip check: No broken requirements found`. Docs authority, output scope, diff, and file-I/O gates passed; `performance_risk.status=clear`. |
 | **T09–T10** | not started by design | Tokyo deployment, production read-only acceptance, and production ghost closure require the later explicit deploy decision. |
 
 All evidence above is local/disposable only. It does not change production state,
 Owner policy, runtime profile, migration state, or exchange-write authority.
+
+### 5.2 Exact-head certification record — 2026-07-18
+
+| Gate | Result | Evidence boundary |
+| --- | --- | --- |
+| **Source commit** | `bf634a7e2695e397adcc4a7107d4a48cb33ac98c` | This is the certified code head; the following C08 commit is documentation-only. |
+| **Focused and causal gates** | **334 + 15 + 33 + 84 passed** | P0 focused suite, P0 causal PostgreSQL suite, Dual-Position mandatory PostgreSQL gate, and Action-Time impact suite. |
+| **Complete regression** | **3626 passed, 1 skipped, 5 warnings** | Isolated disposable PostgreSQL suite; no production database or exchange was contacted. |
+| **Linux runtime lock** | **passed** | Clean Linux/amd64 CPython 3.10 container ran `pip install --require-hashes`, the required imports, and `pip check`. The repository lock was read-only and unchanged; only a temporary container copy substituted the download index with `https://mirrors.cloud.tencent.com/pypi/simple`, while all pinned versions and SHA-256 hashes remained enforced. |
+| **Current-doc authority** | **passed** | `current_docs_authority_valid`. |
+| **Runtime file-I/O and output scope** | **passed** | `suspicious_runtime_file_authority=0`, `frequent_report_write=0`, and `output_artifact_scope_valid`; `performance_risk.status=clear`. |
+| **Diff integrity** | **passed** | `git diff --check` returned zero findings before the documentation-only C08 update. |
+
+The exact-head local certification removes the branch-level test-certification
+blocker only. It does **not** claim Tokyo observation recovery, close production
+ghost rows, authorize a production exchange write, or replace
+`DEPLOYMENT_NO_GO`. T09 remains the first deployment action.
 
 Tasks are sequential where they share watcher/API/readmodel files. No parallel
 writer may edit `api_trading_console.py`, `runtime_active_observation_monitor.py`,
@@ -1391,11 +1409,11 @@ The program is complete only when:
 chain_position: pretrade_candidate_readiness
 strategy_group_id: SOR-001
 symbol: BTCUSDT
-stage: active_observation
-first_blocker: schema_invalid
-evidence: current merge branch watcher_compact rejects a structured next-attempt blocker and production observation recorded HTTP 400 on 19 of 22 lanes
-next_action: execute P0-ROT-T01 through P0-ROT-T08 locally before any Tokyo deploy decision
-stop_condition: one exact branch head passes typed compact, result-backed liveness, causal forensics, official ghost-order closure proof, PostgreSQL, full regression, Linux lock, deploy, and file-I/O gates
+stage: local_exact_head_certified_awaiting_tokyo_canary
+first_blocker: deployment_not_started
+evidence: exact code head bf634a7e2695e397adcc4a7107d4a48cb33ac98c passed local watcher, PostgreSQL, full-regression, Linux hash-lock, docs, and file-I/O certification; Tokyo remains at its prior release and has not observed this code
+next_action: execute P0-ROT-T09 through the immutable Tokyo deployment state machine, then perform read-only 22-lane observation acceptance
+stop_condition: Tokyo canary observes all active lanes with result-backed liveness and no forbidden production effect; T10 then applies only official Ticket-bound ghost closure where exact proof exists
 owner_action_required: false
 signal_event_id: none
 promotion_candidate_id: none

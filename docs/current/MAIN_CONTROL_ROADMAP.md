@@ -56,8 +56,8 @@ design documents and acceptance proof.
 | P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
 | 3 | **P0 Runtime Causal Integrity And Adversarial Certification** | **completed and deployed; 12 PostgreSQL/process scenarios passed and four demonstrated defects were repaired** | `docs/current/P0_RUNTIME_CAUSAL_INTEGRITY_AND_ADVERSARIAL_CERTIFICATION_DESIGN.md` |
 | 4 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
-| 5 | **P0 Runtime Observation Truth And Forensics Remediation** | **current-branch implementation complete; exact-head certification in progress; branch deployment remains no-go** | `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md`, `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md` |
-| 6 | **Dual-Position Hard-Cap Account Risk Model V0** | **T01-T12 component evidence retained, but whole-branch deployment certification is reopened until P0 observation truth is closed** | `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` |
+| 5 | **P0 Runtime Observation Truth And Forensics Remediation** | **exact source head locally certified; Tokyo canary/deploy acceptance is next and branch deployment remains `DEPLOYMENT_NO_GO`** | `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md`, `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md` |
+| 6 | **Dual-Position Hard-Cap Account Risk Model V0** | **T01-T12 component evidence and whole-branch local certification are retained; deployment waits for P0 Tokyo observation-truth acceptance** | `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | 7 | **Capital Allocation V1** | P2 after V0 dual-position, observation truth closure, and additional real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 8 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
@@ -77,7 +77,7 @@ be called validated market wait until P0 Runtime Observation Truth closes.
 | Area | Current fact |
 | --- | --- |
 | **Live Candidate Baseline** | Tokyo runs release `2001644581cccc968ba695d3ff129960db6a7e84`; real exchange trades have occurred and the current ETHUSDT Ticket is protected and reconciled |
-| **Active delivery branch** | `codex/dual-position-account-risk-remediation-v1` is isolated at `.worktrees/dual-position-account-risk-remediation-v1`; Dual-Position T01-T12 component work and P0 Runtime Observation Truth implementation are locally complete, but exact-head full certification is still running and whole-branch deployment state is `DEPLOYMENT_NO_GO` |
+| **Active delivery branch** | `codex/dual-position-account-risk-remediation-v1` is isolated at `.worktrees/dual-position-account-risk-remediation-v1`; exact code head `bf634a7e2695e397adcc4a7107d4a48cb33ac98c` passed focused, PostgreSQL, full isolated regression, Linux/amd64 hash-lock, docs, output-scope, and file-I/O certification. Tokyo has not received this head, so deployment remains `DEPLOYMENT_NO_GO`. |
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` and its release manifest are the exact deployed-head authority |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
 | **PG migration** | Tokyo is at migration `120` (`2026-07-13-120_reconcile_terminal_predispatch_commands.py`) |
@@ -115,8 +115,8 @@ then resumes this order.
 | 5 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
 | 6 | **Runtime causal integrity certification** | P0 complete | Twelve bounded real-PostgreSQL/process scenarios pass; six demonstrated implementation defects are repaired without authority expansion; migration 120 conserves historical pre-dispatch failure truth and notification correlation preserves production identity |
 | 7 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
-| 8 | **Runtime Observation Truth And Forensics Remediation** | **P0 active** | Typed compact blockers, correct HTTP semantics, result-backed liveness, causal forensics, market-wait ownership, and official PG ghost-order closure pass one exact-head certification |
-| 9 | **Dual-Position Hard-Cap Account Risk Model V0** | **P1 component evidence retained; branch certification reopened** | T01-T12 and migrations 134-136 remain valid component evidence; deployment waits for P0 observation-truth re-certification at one exact branch head |
+| 8 | **Runtime Observation Truth And Forensics Remediation** | **P0 local certification complete** | Typed compact blockers, correct HTTP semantics, result-backed liveness, causal forensics, market-wait ownership, and official PG ghost-order closure passed local exact-head certification; Tokyo canary/read-only acceptance is next |
+| 9 | **Dual-Position Hard-Cap Account Risk Model V0** | **P1 component and local whole-branch certification retained** | T01-T12 and migrations 134-136 remain valid component evidence; deployment waits for P0 Tokyo observation-truth acceptance |
 
 ## Why This Was Not Detected Before Production Signals
 
