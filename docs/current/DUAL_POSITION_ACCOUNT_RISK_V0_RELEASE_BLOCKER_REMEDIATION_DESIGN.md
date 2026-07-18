@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN
-status: LOCAL_REMEDIATION_CERTIFICATION_REOPENED
+status: FORWARD_FIX_DEPLOY_PENDING
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
 extends: docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
 last_verified: 2026-07-18
@@ -9,11 +9,11 @@ implementation_state: T01_T12_COMPLETE_LOCAL_ONLY
 integration_state: LOCAL_REMEDIATION_CERTIFICATION_REOPENED
 component_certification: T01_T12_EVIDENCE_RETAINED
 release_gate_blocker: docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md
-certified_source_commit: e4f49dcfa77932f6ec440b3a869943eb2ade73a1
+certified_source_commit: 1a88a88d416880a76cc58635a83ce9301734cc31
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
-production_state: UNCHANGED
+production_state: CONTAINED_AT_SCHEMA_125
 policy_activation: NOT_PERFORMED
 exchange_write: 0
 current_migration_head: 136_LOCAL_ONLY
@@ -23,6 +23,36 @@ planned_migration_head: 136
 # Dual-Position Account Risk V0 Unified Remediation Design
 
 ## 1. Current Decision
+
+### 1.0 Forward-fix deployment decision — 2026-07-18
+
+**已知事实：** 东京原事务
+`eea8f1bc1bf44a599ebd8098040ebdc4` 已持久化到
+**`migration_in_progress`**，但 PostgreSQL 仍为 **`125`**、`app/current` 仍指向
+**`6aad77ea4c67609ceed9b545d392de4ff1eaab3b`**，且持久化 writer fence 与所有
+writer unit 均处于关闭状态。失败发生在 migration 133 的 Ticket–Reservation 外键
+创建：一个终态 Reservation 缺失可由唯一关联 Ticket 证明的 `ticket_id`。
+（来源：东京只读 PG 审计、部署 journal、systemd 当前状态，2026-07-18）
+
+**Owner 明确决定：** 允许在东京执行受控的**前向修复部署**，不允许人工 SQL、手工
+删除 fence、恢复旧 writer、FinalGate/Operation Layer 绕过或交易所写入。
+
+**设计：** 新事务只有同时证明以下事实才可成为旧围栏的继任者：
+
+1. 旧 marker 与 hash-chain journal 的事务、nonce、目标 SHA 完全一致，且 journal 最后阶段
+   必须是 `migration_in_progress`，不得存在 `schema_migrated`。
+2. 旧 pointer 与 release manifest 均绑定旧 SHA，候选解释器读出的 PG revision 与旧
+   `pre_migration.actual_revision` 相同，即 **125**。
+3. backend、watcher、monitor、lifecycle 的 service/timer 全为 **`inactive`**，生命周期
+   mutation capability 为 **disabled**。
+4. 新 helper 先再次比对旧 marker，再通过同目录临时文件、`fsync` 与 `os.replace` 直接
+   原子替换 marker；不存在 marker 缺失窗口。
+5. 新事务继承旧 journal `production_writers_fenced.unit_prepolicy`，不得从已隔离主机重新
+   捕获恢复策略。
+
+任何条件不满足均保持 fence，并以 fail-closed 错误退出。成功继任后仍须重跑候选迁移、
+22-lane readonly canary、PG/current projection、认证与 activation commit；只有完整
+activation commit 匹配新 fence inode 才能移除 fence 并按继承策略恢复单元。
 
 ### 1.1 Local implementation evidence as of 2026-07-18
 

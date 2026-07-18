@@ -1,6 +1,6 @@
 ---
 title: DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN
-status: LOCAL_REMEDIATION_CERTIFICATION_REOPENED
+status: FORWARD_FIX_DEPLOY_PENDING
 authority: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md
 implements: docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md
 last_verified: 2026-07-18
@@ -8,12 +8,12 @@ implementation_state: T01_T12_COMPLETE_LOCAL_ONLY
 integration_state: LOCAL_REMEDIATION_CERTIFICATION_REOPENED
 component_certification: T01_T12_EVIDENCE_RETAINED
 release_gate_blocker: docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md
-certified_source_commit: e4f49dcfa77932f6ec440b3a869943eb2ade73a1
+certified_source_commit: 1a88a88d416880a76cc58635a83ce9301734cc31
 repair_baseline: 60bb7fedcd2b9bd300cef900c6bbb304c5a34770
 repair_branch: codex/dual-position-account-risk-remediation-v1
 repair_worktree: /Users/jiangwei/Documents/final/.worktrees/dual-position-account-risk-remediation-v1
-production_state: UNCHANGED
-deployment_state: NOT_AUTHORIZED
+production_state: CONTAINED_AT_SCHEMA_125
+deployment_state: OWNER_AUTHORIZED_FORWARD_FIX
 policy_activation: NOT_PERFORMED
 exchange_write: 0
 current_migration_head: 136_LOCAL_ONLY
@@ -47,6 +47,31 @@ Tokyo immutable-release state machine.
 ## 1. Execution Authorization And Frozen Topology
 
 ### 1.1 Current authorization
+
+### 1.1.1 Controlled forward-fix runbook — 2026-07-18
+
+**前置条件：** 只接受事务
+`eea8f1bc1bf44a599ebd8098040ebdc4` 与 nonce
+`99950f53dff8c45a517dfe2f1cad09ee7e101a39d7f2b7ddec31ecd3b67fe5ae` 的继任；旧
+schema 必须仍是 **125**，旧运行头必须仍是
+**`6aad77ea4c67609ceed9b545d392de4ff1eaab3b`**。（来源：东京部署 journal 与只读
+PG 审计，2026-07-18）
+
+1. 推送精确提交 **`1a88a88d416880a76cc58635a83ce9301734cc31`**，并以新的 transaction ID、
+   nonce、release name 启动单个远端状态机。
+2. 通过 `--predecessor-transaction-id` 与 `--predecessor-deploy-nonce` 显式绑定旧
+   事务；状态机在写新 marker 前执行 marker/journal/pointer/manifest/revision/unit/capability
+   全部核验，并拒绝任一不符事实。
+3. migration 132 只修补 `released`、`expired` 或 `invalidated` Reservation 的空
+   `ticket_id`，且只能取其唯一关联 Ticket；任何非终态、缺失或冲突关系均以
+   `asset_neutral_ticket_reservation_lineage_unresolved` 失败关闭。
+4. 迁移完成后完成既有 readonly canary、当前投影、生命周期证明与 activation commit；
+   禁止主动创建订单、调用交易所写接口、修改凭证、资金划转或扩大策略/资金范围。
+5. 远端验收只读取 PG、journal、systemd 和 monitor：确认 schema **136**、22 lane
+   canary 成功、当前 watcher coverage 新鲜，并确认 `exchange_write_called=false`。
+
+**停止条件：** 任何继任条件、迁移、canary、认证或 activation commit 不通过时，保持
+writer fence 与单元停机；绝不手工删除 marker 或恢复旧代码。
 
 **本计划的 T01-T12 组件工作已经完成，但整分支状态因 P0 Runtime Observation Truth
 缺陷重新打开为 `LOCAL_REMEDIATION_CERTIFICATION_REOPENED`，部署状态为
