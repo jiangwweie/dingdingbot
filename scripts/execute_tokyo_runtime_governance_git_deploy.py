@@ -344,17 +344,24 @@ def execute_git_deploy_plan(
             continue
         for command in phase.get("commands") or []:
             if (
-                transaction_id is not None
-                and deploy_nonce is not None
-                and phase.get("phase") == "1_remote_preflight_readonly"
+                (
+                    transaction_id is not None
+                    and deploy_nonce is not None
+                )
+                or (
+                    predecessor_transaction_id is not None
+                    and predecessor_deploy_nonce is not None
+                )
+            ) and (
+                phase.get("phase") == "1_remote_preflight_readonly"
                 and "probe_tokyo_runtime_governance_readonly.py" in str(command)
             ):
                 command_results.append(
                     {
                         "phase": phase.get("phase"),
-                        "command": "<resume-skip-old-runtime-health-probe>",
+                        "command": "<contained-runtime-health-probe-skipped>",
                         "returncode": 0,
-                        "stdout_tail": "explicit_journaled_resume",
+                        "stdout_tail": "explicit_contained_transaction",
                         "stderr_tail": "",
                         "skipped": True,
                     }

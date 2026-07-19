@@ -687,7 +687,7 @@ def test_forward_fix_fence_supersession_allows_post_migration_pre_activation_onl
     previous = tmp_path / "releases/current"
     previous.mkdir(parents=True)
     (previous / ".brc-release-manifest.json").write_text(
-        json.dumps({"target_sha": predecessor_sha}), encoding="utf-8"
+        json.dumps({"target_sha": old_sha}), encoding="utf-8"
     )
     current = tmp_path / "app/current"
     current.parent.mkdir(parents=True)
@@ -724,7 +724,7 @@ def test_forward_fix_fence_supersession_allows_post_migration_pre_activation_onl
 
     result = machine.validate_forward_fix_fence_supersession(
         predecessor_transaction_id="deadbeef", predecessor_deploy_nonce="old-nonce",
-        old_sha=predecessor_sha, target_sha=successor_sha,
+        old_sha=old_sha, target_sha=successor_sha,
         previous_release_path=previous, app_current=current, expected_revision="136",
         release_path=release, env_path=env_file, deploy_journal_directory=journal_dir,
         runner=runner, require_root_owner=False, fence_marker=marker,

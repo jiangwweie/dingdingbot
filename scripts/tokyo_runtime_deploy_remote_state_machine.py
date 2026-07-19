@@ -1971,7 +1971,8 @@ def validate_forward_fix_fence_supersession(
     if post_migration:
         migrated = (predecessor.entries[DEPLOY_PHASES.index("schema_migrated")].get("facts") or {}).get("result")
         if (
-            predecessor.target_sha != old_sha
+            predecessor.old_sha != old_sha
+            or predecessor.target_sha == target_sha
             or not isinstance(migrated, dict)
             or str(migrated.get("revision") or "") != str(expected_revision)
         ):
