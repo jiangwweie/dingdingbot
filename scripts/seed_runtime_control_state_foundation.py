@@ -27,11 +27,16 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.pg_dsn import is_sync_postgres_dsn, normalize_sync_postgres_dsn  # noqa: E402
+from src.domain.instrument_risk_identity import (  # noqa: E402
+    CANONICAL_INSTRUMENT_IDENTITY_SCHEMA_VERSION,
+    build_canonical_exchange_instrument_id,
+)
 
 
 DEFAULT_RUNTIME_PROFILE_ID = "owner-runtime-console-v1"
 DEFAULT_ACCOUNT_ID = "owner-subaccount-runtime-v0"
 SEED_VERSION = "runtime-control-state-foundation-v1"
+CANONICAL_INSTRUMENT_GENERATION = "identity-v2"
 DEFAULT_NOW_MS = 1770000000000
 
 
@@ -206,8 +211,13 @@ def build_seed_rows(
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID,
     account_id: str = DEFAULT_ACCOUNT_ID,
     event_seeds: tuple[EventSeed, ...] | None = None,
+    scope_generation: str | None = None,
+    legacy_instrument_identity: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
     selected_event_seeds = event_seeds or ACTIVE_EVENT_SEEDS
+    seed_asset_class = (
+        "crypto_usdm_perp" if legacy_instrument_identity else "crypto"
+    )
     rows: dict[str, list[dict[str, Any]]] = {
         "brc_strategy_groups": [],
         "brc_strategy_group_versions": [],
@@ -291,11 +301,14 @@ def build_seed_rows(
 
     for symbol in sorted({symbol for seed in selected_event_seeds for symbol in seed.symbols}):
         exchange_symbol = _exchange_symbol(symbol)
-        instrument_id = f"binance_usdm:{exchange_symbol}"
+        instrument_id = _instrument_id(
+            exchange_symbol,
+            legacy_instrument_identity=legacy_instrument_identity,
+        )
         rows["brc_symbols"].append(
             {
                 "symbol": symbol,
-                "asset_class": "crypto_usdm_perp",
+                "asset_class": seed_asset_class,
                 "status": "active",
                 "created_at_ms": now_ms,
             }
@@ -305,7 +318,17 @@ def build_seed_rows(
                 "exchange_instrument_id": instrument_id,
                 "exchange_id": "binance_usdm",
                 "exchange_symbol": exchange_symbol,
-                "asset_class": "crypto_usdm_perp",
+                "asset_class": seed_asset_class,
+                "instrument_type": (
+                    None if legacy_instrument_identity else "perpetual"
+                ),
+                "settlement_asset": None if legacy_instrument_identity else "USDT",
+                "margin_asset": None if legacy_instrument_identity else "USDT",
+                "instrument_identity_schema_version": (
+                    None
+                    if legacy_instrument_identity
+                    else CANONICAL_INSTRUMENT_IDENTITY_SCHEMA_VERSION
+                ),
                 "price_tick": None,
                 "quantity_step": None,
                 "min_notional": None,
@@ -315,7 +338,7 @@ def build_seed_rows(
         )
         rows["brc_symbol_instrument_mappings"].append(
             {
-                "mapping_id": f"mapping:{symbol}:binance_usdm",
+                "mapping_id": _mapping_id(symbol, scope_generation),
                 "symbol": symbol,
                 "exchange_instrument_id": instrument_id,
                 "status": "active",
@@ -380,9 +403,14 @@ def build_seed_rows(
         )
 
         for rank, symbol in enumerate(seed.symbols, start=1):
-            candidate_scope_id = _candidate_scope_id(seed, symbol)
-            policy_event_id = f"policy_event:{candidate_scope_id}:v1"
-            policy_current_id = f"policy_current:{candidate_scope_id}"
+            policy_scope_id = _candidate_scope_id(seed, symbol)
+            candidate_scope_id = _candidate_scope_id(
+                seed,
+                symbol,
+                scope_generation=scope_generation,
+            )
+            policy_event_id = f"policy_event:{policy_scope_id}:v1"
+            policy_current_id = f"policy_current:{policy_scope_id}"
             runtime_scope_binding_id = f"runtime_scope:{candidate_scope_id}:{runtime_profile_id}"
             rows["brc_owner_policy_events"].append(
                 {
@@ -441,10 +469,11 @@ def build_seed_rows(
                     "strategy_group_id": seed.strategy_group_id,
                     "symbol": symbol,
                     "exchange_symbol": _exchange_symbol(symbol),
-                    "exchange_instrument_id": (
-                        f"binance_usdm:{_exchange_symbol(symbol)}"
+                    "exchange_instrument_id": _instrument_id(
+                        _exchange_symbol(symbol),
+                        legacy_instrument_identity=legacy_instrument_identity,
                     ),
-                    "asset_class": "crypto_usdm_perp",
+                    "asset_class": seed_asset_class,
                     "side": seed.side,
                     "timeframe": seed.timeframe,
                     "candidate_role": "primary" if rank == 1 else "candidate",
@@ -460,6 +489,9 @@ def build_seed_rows(
                     "metadata": {
                         "event_id": seed.event_id,
                         "seed_version": SEED_VERSION,
+                        "instrument_identity_generation": (
+                            scope_generation or "fresh"
+                        ),
                         "unsupported_side_mirroring_allowed": False,
                     },
                 }
@@ -569,6 +601,7 @@ def seed_runtime_control_state_foundation(
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID,
     account_id: str = DEFAULT_ACCOUNT_ID,
     migration_baseline_revision: str | None = None,
+    scope_generation: str | None = None,
 ) -> dict[str, Any]:
     event_seeds = (
         _migration_baseline_event_seeds(migration_baseline_revision)
@@ -580,6 +613,10 @@ def seed_runtime_control_state_foundation(
         runtime_profile_id=runtime_profile_id,
         account_id=account_id,
         event_seeds=event_seeds,
+        scope_generation=(
+            scope_generation or _current_scope_generation(conn)
+        ),
+        legacy_instrument_identity=bool(migration_baseline_revision),
     )
     table_counts: dict[str, int] = {}
     for table_name, table_rows in rows.items():
@@ -595,6 +632,7 @@ def dry_run_report(
     runtime_profile_id: str = DEFAULT_RUNTIME_PROFILE_ID,
     account_id: str = DEFAULT_ACCOUNT_ID,
     migration_baseline_revision: str | None = None,
+    scope_generation: str | None = None,
 ) -> dict[str, Any]:
     event_seeds = (
         _migration_baseline_event_seeds(migration_baseline_revision)
@@ -606,6 +644,8 @@ def dry_run_report(
         runtime_profile_id=runtime_profile_id,
         account_id=account_id,
         event_seeds=event_seeds,
+        scope_generation=scope_generation,
+        legacy_instrument_identity=bool(migration_baseline_revision),
     )
     table_counts = {table_name: len(table_rows) for table_name, table_rows in rows.items()}
     return _report(rows, table_counts=table_counts, applied=False)
@@ -618,6 +658,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-profile-id", default=DEFAULT_RUNTIME_PROFILE_ID)
     parser.add_argument("--account-id", default=DEFAULT_ACCOUNT_ID)
     parser.add_argument("--now-ms", type=int, default=DEFAULT_NOW_MS)
+    parser.add_argument(
+        "--scope-generation",
+        choices=(CANONICAL_INSTRUMENT_GENERATION,),
+        default=None,
+    )
     parser.add_argument(
         "--migration-baseline-revision",
         choices=["106"],
@@ -633,6 +678,7 @@ def main(argv: list[str] | None = None) -> int:
             runtime_profile_id=args.runtime_profile_id,
             account_id=args.account_id,
             migration_baseline_revision=args.migration_baseline_revision,
+            scope_generation=args.scope_generation,
         )
         _print_report(report, json_output=args.json)
         return 0
@@ -653,6 +699,7 @@ def main(argv: list[str] | None = None) -> int:
             runtime_profile_id=args.runtime_profile_id,
             account_id=args.account_id,
             migration_baseline_revision=args.migration_baseline_revision,
+            scope_generation=args.scope_generation,
         )
     _print_report(report, json_output=args.json)
     return 0
@@ -962,8 +1009,52 @@ def _event_spec_id(seed: EventSeed) -> str:
     )
 
 
-def _candidate_scope_id(seed: EventSeed, symbol: str) -> str:
-    return f"candidate_scope:{seed.strategy_group_id}:{symbol}:{seed.side}:{seed.event_id}"
+def _candidate_scope_id(
+    seed: EventSeed,
+    symbol: str,
+    *,
+    scope_generation: str | None = None,
+) -> str:
+    base = f"candidate_scope:{seed.strategy_group_id}:{symbol}:{seed.side}:{seed.event_id}"
+    return f"{base}:{scope_generation}" if scope_generation else base
+
+
+def _mapping_id(symbol: str, scope_generation: str | None) -> str:
+    base = f"mapping:{symbol}:binance_usdm"
+    return f"{base}:{scope_generation}" if scope_generation else base
+
+
+def _instrument_id(
+    exchange_symbol: str,
+    *,
+    legacy_instrument_identity: bool,
+) -> str:
+    if legacy_instrument_identity:
+        return f"binance_usdm:{exchange_symbol}"
+    return build_canonical_exchange_instrument_id(
+        exchange_id="binance_usdm",
+        exchange_symbol=exchange_symbol,
+        asset_class="crypto",
+        instrument_type="perpetual",
+        settlement_asset="USDT",
+        margin_asset="USDT",
+    )
+
+
+def _current_scope_generation(conn: sa.Connection) -> str | None:
+    if not sa.inspect(conn).has_table("alembic_version"):
+        return None
+    revision = conn.execute(
+        sa.text("SELECT version_num FROM alembic_version LIMIT 1")
+    ).scalar_one_or_none()
+    try:
+        return (
+            CANONICAL_INSTRUMENT_GENERATION
+            if int(str(revision or "0")) >= 138
+            else None
+        )
+    except ValueError:
+        return None
 
 
 def _exchange_symbol(symbol: str) -> str:

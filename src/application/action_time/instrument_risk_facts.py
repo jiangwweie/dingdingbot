@@ -39,8 +39,8 @@ def load_instrument_risk_facts(
     if not planned_notional.is_finite() or planned_notional <= 0:
         raise InstrumentRiskFactsError("instrument_rule_planned_notional_invalid")
     return InstrumentRiskFacts(
-        identity=_load_exact_instrument_identity(conn, exchange_instrument_id),
-        rule_snapshot=_load_one_current_rule_snapshot(
+        identity=load_exact_instrument_identity(conn, exchange_instrument_id),
+        rule_snapshot=load_current_instrument_rule_snapshot(
             conn,
             exchange_instrument_id=exchange_instrument_id,
             planned_notional=planned_notional,
@@ -54,7 +54,7 @@ def load_instrument_risk_facts(
     )
 
 
-def _load_exact_instrument_identity(
+def load_exact_instrument_identity(
     conn: sa.Connection,
     exchange_instrument_id: str,
 ) -> InstrumentRiskIdentity:
@@ -81,7 +81,7 @@ def _load_exact_instrument_identity(
         raise InstrumentRiskFactsError("instrument_identity_schema_invalid") from exc
 
 
-def _load_one_current_rule_snapshot(
+def load_current_instrument_rule_snapshot(
     conn: sa.Connection,
     *,
     exchange_instrument_id: str,

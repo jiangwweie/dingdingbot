@@ -1,8 +1,8 @@
 ---
 title: P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_IMPLEMENTATION_PLAN
-status: PROPOSED_OWNER_CONFIRMATION_PENDING
+status: OWNER_CONFIRMED_LOCAL_CERTIFIED_TOKYO_DEPLOY_PENDING
 authority: docs/current/P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_IMPLEMENTATION_PLAN.md
-last_verified: 2026-07-19 08:30 CST
+last_verified: 2026-07-19 CST
 ---
 
 # P0 账户风险品种身份与风险簇成员闭环执行方案
@@ -29,7 +29,7 @@ leverage 或 notional scope。
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支 HEAD | `ae0e0466649114f3ded1774ba9222d56a269804a` |
+| 本地实现基线 | `92cce621` 上的未提交 P0 修复实现，待完成 commit/push |
 | 东京 release | `brc-runtime-governance-ae0e0466-20260718T185000Z` |
 | PG migration | **137** |
 | Active lanes | **22** |
@@ -38,9 +38,18 @@ leverage 或 notional scope。
 | Current V2 rule snapshots | **0** |
 | Active Account Risk Policy | **0** |
 | Active cluster memberships | **0** |
-| lifecycle capability | exact-head certified enabled；部署切换时必须先 quiesce |
+| lifecycle capability | 东京 exact-head certified enabled；部署切换时必须先 quiesce |
 
 来源：当前 Git、东京 release manifest、东京 PG current 查询，2026-07-19。
+
+### 2.1 本地完成与东京待执行边界
+
+| 工作包 | 状态 | 结果 |
+| --- | --- | --- |
+| P0-ARIC-01 至 P0-ARIC-05 | **本地完成并认证** | 新增/更新测试均已通过；本地 PostgreSQL 完整走通 **106 → 138 → seed → rule projection → policy**。 |
+| P0-ARIC-06 部署状态机 | **本地完成并认证** | writer fence 下的 migration 后，强制执行 GET-only rule projector 和 **22 lane / 6 identity / 6 rule** PG readiness certification。 |
+| P0-ARIC-06 东京 apply | **待执行** | 仅在 commit/push 与本地全量验证通过后执行受控单事务部署。 |
+| P0-ARIC-07 自然信号 | **待市场事件** | 不伪造 signal、Ticket 或交易所写入；自然新信号到来后只接受合法 Ticket 或精确 blocker。 |
 
 ## 3. 执行顺序
 
@@ -218,7 +227,7 @@ readonly preflight
 -> apply migration 138
 -> publish 6 canonical identities and 22 current scopes
 -> run read-only rule projector
--> certify 6/6 rules and 22/22 lane identities
+-> certify 6/6 rules and 22/22 lane identities in PG
 -> exact-head lifecycle phase-two certification
 -> publish current projections
 -> remove fence and restore timers
@@ -335,6 +344,6 @@ producer 无法复用现有 read-only source，必须先停在架构审查，不
 
 ## 10. 当前停止点
 
-文档确认前不实施 migration 138、identity cutover、rule projector 或 policy retry。生产保持
-现有服务运行、policy absent、Ticket fail-closed 状态。
-
+Owner 已确认实施与受控部署。东京 apply 前仍必须满足本计划的 predeploy hard stop；任何
+migration、rule projection、22/6 readiness certification 或 lifecycle certification 失败都保持
+writer fence、lifecycle capability disabled、Ticket fail-closed，不能恢复 watcher 或 policy apply。

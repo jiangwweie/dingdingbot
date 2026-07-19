@@ -248,7 +248,7 @@ def _migrate(database_url: URL) -> None:
         failure_code="rci_migration_baseline_seed_failed",
     )
     _run_checked(
-        [sys.executable, "-m", "alembic", "upgrade", "137"],
+        [sys.executable, "-m", "alembic", "upgrade", "138"],
         env=env,
         failure_code="rci_alembic_upgrade_head_failed",
     )

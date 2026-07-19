@@ -89,6 +89,51 @@ def test_seed_dry_run_reports_current_active_scope(seed_module):
     assert all(value is False for value in report["forbidden_effects"].values())
 
 
+def test_seed_uses_complete_canonical_instrument_identity(seed_module):
+    rows = seed_module.build_seed_rows()
+    instruments = rows["brc_exchange_instruments"]
+    candidates = rows["brc_strategy_group_candidate_scope"]
+
+    assert len(instruments) == 6
+    assert all(
+        row["exchange_instrument_id"].startswith("exchange_instrument:v2:")
+        and row["asset_class"] == "crypto"
+        and row["instrument_type"] == "perpetual"
+        and row["settlement_asset"] == "USDT"
+        and row["margin_asset"] == "USDT"
+        and row["instrument_identity_schema_version"] == "v2"
+        for row in instruments
+    )
+    instrument_ids = {row["exchange_instrument_id"] for row in instruments}
+    assert len(instrument_ids) == 6
+    assert all(
+        row["asset_class"] == "crypto"
+        and row["exchange_instrument_id"] in instrument_ids
+        for row in candidates
+    )
+
+
+def test_seed_can_emit_migration_138_scope_generation(seed_module):
+    rows = seed_module.build_seed_rows(scope_generation="identity-v2")
+
+    assert all(
+        row["candidate_scope_id"].endswith(":identity-v2")
+        for row in rows["brc_strategy_group_candidate_scope"]
+    )
+    assert all(
+        row["mapping_id"].endswith(":identity-v2")
+        for row in rows["brc_symbol_instrument_mappings"]
+    )
+    assert all(
+        ":identity-v2:" in row["binding_id"]
+        for row in rows["brc_candidate_scope_event_bindings"]
+    )
+    assert all(
+        ":identity-v2:" in row["runtime_scope_binding_id"]
+        for row in rows["brc_runtime_scope_bindings"]
+    )
+
+
 def test_seed_applies_current_strategy_event_scope_without_runtime_events(
     connection,
     seed_module,
@@ -276,7 +321,7 @@ def test_seed_validator_rejects_mirrored_unsupported_side(seed_module):
             "strategy_group_id": "CPM-RO-001",
             "symbol": "ETHUSDT",
             "exchange_symbol": "ETH/USDT:USDT",
-            "asset_class": "crypto_usdm_perp",
+            "asset_class": "crypto",
             "side": "short",
             "timeframe": "1h",
             "candidate_role": "candidate",

@@ -10,6 +10,7 @@ from src.domain.instrument_risk_identity import (
     InstrumentRuleSnapshotRef,
     InstrumentRuleSnapshotRefV2,
     RiskClusterMembershipSnapshotRef,
+    build_canonical_exchange_instrument_id,
     instrument_rule_snapshot_v2_semantic_hash,
 )
 
@@ -45,6 +46,28 @@ def test_instrument_identity_rejects_missing_or_blank_canonical_identity() -> No
         InstrumentRiskIdentity.model_validate(
             {**_identity_values(), "exchange_instrument_id": "   "}
         )
+
+
+def test_canonical_instrument_id_is_stable_opaque_and_semantic() -> None:
+    values = {
+        "exchange_id": "binance_usdm",
+        "exchange_symbol": "BTC/USDT:USDT",
+        "asset_class": "crypto",
+        "instrument_type": "perpetual",
+        "settlement_asset": "USDT",
+        "margin_asset": "USDT",
+    }
+
+    first = build_canonical_exchange_instrument_id(**values)
+    second = build_canonical_exchange_instrument_id(**values)
+    changed = build_canonical_exchange_instrument_id(
+        **{**values, "instrument_type": "future"}
+    )
+
+    assert first == second
+    assert first.startswith("exchange_instrument:v2:")
+    assert "BTC" not in first
+    assert first != changed
 
 
 def test_rule_snapshot_and_cluster_membership_are_immutable_versioned_facts() -> None:

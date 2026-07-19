@@ -1059,6 +1059,43 @@ def run_fenced_schema_migration(
     run(["-m", "alembic", "heads"])
     run(["-m", "alembic", "upgrade", "head"], timeout=300)
     run(["scripts/seed_runtime_control_state_foundation.py", "--apply", "--json"], timeout=180)
+    rule_projection = run(
+        [
+            "scripts/ops/project_instrument_rule_snapshots.py",
+            "--apply",
+        ],
+        timeout=45,
+    )
+    rule_projection_payload = _json_receipt(
+        rule_projection, "instrument_rule_projection_receipt_invalid"
+    )
+    if (
+        rule_projection_payload.get("status") != "instrument_rules_projected"
+        or rule_projection_payload.get("target_count") != 6
+        or len(rule_projection_payload.get("current_rule_ids") or ()) != 6
+        or rule_projection_payload.get("exchange_write_called") is not False
+        or rule_projection_payload.get("order_created") is not False
+    ):
+        raise RuntimeError("instrument_rule_projection_receipt_mismatch")
+    readiness = run(
+        [
+            "scripts/verify_canonical_instrument_identity_readiness.py",
+            "--json",
+        ]
+    )
+    readiness_payload = _json_receipt(
+        readiness, "canonical_instrument_readiness_receipt_invalid"
+    )
+    if (
+        readiness_payload.get("status")
+        != "canonical_instrument_identity_readiness_certified"
+        or readiness_payload.get("active_lane_count") != 22
+        or readiness_payload.get("canonical_instrument_count") != 6
+        or readiness_payload.get("current_v2_rule_count") != 6
+        or readiness_payload.get("exchange_write_called") is not False
+        or readiness_payload.get("order_created") is not False
+    ):
+        raise RuntimeError("canonical_instrument_readiness_receipt_mismatch")
     run(["scripts/validate_runtime_control_state_repository.py", "--json"])
     current = run(["-m", "alembic", "current"]).stdout
     if str(expected_revision) not in current.split():
@@ -1067,6 +1104,8 @@ def run_fenced_schema_migration(
         "status": "schema_migrated",
         "revision": str(expected_revision),
         "lifecycle_capability_was_enabled": was_enabled,
+        "instrument_rule_projection": rule_projection_payload,
+        "canonical_instrument_readiness": readiness_payload,
     }
 
 

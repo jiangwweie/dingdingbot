@@ -1,8 +1,8 @@
 ---
 title: P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_DESIGN
-status: PROPOSED_OWNER_CONFIRMATION_PENDING
+status: OWNER_CONFIRMED_LOCAL_CERTIFIED_TOKYO_DEPLOY_PENDING
 authority: docs/current/P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_DESIGN.md
-last_verified: 2026-07-19 08:30 CST
+last_verified: 2026-07-19 CST
 ---
 
 # P0 账户风险品种身份与风险簇成员闭环设计
@@ -46,6 +46,16 @@ Active Candidate Scope
 完成标准不是“policy 脚本不报错”，而是 22 条 active lane 对应的 6 个 instrument 都能
 加载完整 `InstrumentRiskFacts`，并在自然信号出现时到达合法 Ticket 或精确的实时安全
 blocker。
+
+### 1.3 已确认实施状态
+
+| 项目 | 当前状态 | 证据 |
+| --- | --- | --- |
+| Owner 决策 | **已确认** | Owner 已授权在当前合并分支完成修复并继续受控部署。 |
+| 本地实现 | **已完成** | migration **138**、canonical seed、PG-only V2 rule projector、exact-scope membership service 已在当前分支实现。 |
+| 本地 PostgreSQL 认证 | **通过** | revision **106 → 138**：**6** canonical identities、**22** active lanes、**6** V2 rules、**6** memberships、**1** active policy。 |
+| 部署状态机 | **已加固** | migration/seed 后必须完成 V2 rule projection 与 **22/6** PG readiness certification，才允许 pointer switch 或恢复 watcher。 |
+| 东京生产 | **待部署** | 当前仍为 revision **137**、legacy identity、rule/policy/membership 均未激活。 |
 
 ## 2. 已知客观事实
 
@@ -384,4 +394,3 @@ ticket_id: none
 采用 **方案 D：规范身份替换并闭合规则事实**。这是对现有资产中立核心合同的落实，不是
 新增兼容层。旧 `crypto_usdm_perp` seed 和 symbol-mapping membership builder 在新路径
 验收后必须删除或失效，不能长期双轨运行。
-

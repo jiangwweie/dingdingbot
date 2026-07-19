@@ -840,6 +840,35 @@ def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
                 ),
                 stderr="",
             )
+        if any(str(item).endswith("project_instrument_rule_snapshots.py") for item in command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "status": "instrument_rules_projected",
+                        "target_count": 6,
+                        "current_rule_ids": [f"rule:{index}" for index in range(6)],
+                        "exchange_write_called": False,
+                        "order_created": False,
+                    }
+                ),
+                stderr="",
+            )
+        if any(str(item).endswith("verify_canonical_instrument_identity_readiness.py") for item in command):
+            return machine.ChildResult(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "status": "canonical_instrument_identity_readiness_certified",
+                        "active_lane_count": 22,
+                        "canonical_instrument_count": 6,
+                        "current_v2_rule_count": 6,
+                        "exchange_write_called": False,
+                        "order_created": False,
+                    }
+                ),
+                stderr="",
+            )
         if command[-2:] == ["alembic", "current"]:
             return machine.ChildResult(returncode=0, stdout="124 (head)\n", stderr="")
         return machine.ChildResult(returncode=0, stdout='{"status":"ok"}', stderr="")
@@ -856,12 +885,30 @@ def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
         "status": "schema_migrated",
         "revision": "124",
         "lifecycle_capability_was_enabled": True,
+        "instrument_rule_projection": {
+            "status": "instrument_rules_projected",
+            "target_count": 6,
+            "current_rule_ids": [f"rule:{index}" for index in range(6)],
+            "exchange_write_called": False,
+            "order_created": False,
+        },
+        "canonical_instrument_readiness": {
+            "status": "canonical_instrument_identity_readiness_certified",
+            "active_lane_count": 22,
+            "canonical_instrument_count": 6,
+            "current_v2_rule_count": 6,
+            "exchange_write_called": False,
+            "order_created": False,
+        },
     }
     assert all(command[0] == str(python) for command, _ in commands)
     role_index = next(index for index, (command, _) in enumerate(commands) if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command))
     migration_index = next(index for index, (command, _) in enumerate(commands) if "upgrade" in command)
     assert role_index < migration_index
     assert any(command[-3:] == ("-m", "alembic", "upgrade") or "upgrade" in command for command, _ in commands)
+    projector_index = next(index for index, (command, _) in enumerate(commands) if any(str(item).endswith("project_instrument_rule_snapshots.py") for item in command))
+    readiness_index = next(index for index, (command, _) in enumerate(commands) if any(str(item).endswith("verify_canonical_instrument_identity_readiness.py") for item in command))
+    assert migration_index < projector_index < readiness_index
     assert all(
         item["env"]["DATABASE_URL"] == "postgresql://example.invalid/db"
         for _, item in commands

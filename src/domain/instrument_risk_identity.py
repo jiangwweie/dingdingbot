@@ -10,6 +10,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+CANONICAL_INSTRUMENT_IDENTITY_SCHEMA_VERSION = "v2"
+
+
 class _FrozenNonblankModel(BaseModel):
     """Shared pure-domain validation for immutable persisted fact objects."""
 
@@ -37,6 +40,48 @@ class InstrumentRiskIdentity(_FrozenNonblankModel):
     settlement_asset: str = Field(min_length=1, max_length=64)
     margin_asset: str = Field(min_length=1, max_length=64)
     instrument_identity_schema_version: str = Field(min_length=1, max_length=32)
+
+
+def build_canonical_exchange_instrument_id(
+    *,
+    exchange_id: str,
+    exchange_symbol: str,
+    asset_class: str,
+    instrument_type: str,
+    settlement_asset: str,
+    margin_asset: str,
+    instrument_identity_schema_version: str = (
+        CANONICAL_INSTRUMENT_IDENTITY_SCHEMA_VERSION
+    ),
+) -> str:
+    """Build one stable opaque ID from immutable instrument semantics.
+
+    The digest is deliberately opaque. Runtime consumers must load the typed
+    registry row and must never recover business meaning by parsing this ID.
+    """
+
+    payload = {
+        "exchange_id": _canonical_identity_text(exchange_id),
+        "exchange_symbol": _canonical_identity_text(exchange_symbol),
+        "asset_class": _canonical_identity_text(asset_class),
+        "instrument_type": _canonical_identity_text(instrument_type),
+        "settlement_asset": _canonical_identity_text(settlement_asset),
+        "margin_asset": _canonical_identity_text(margin_asset),
+        "instrument_identity_schema_version": _canonical_identity_text(
+            instrument_identity_schema_version
+        ),
+    }
+    digest = sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"exchange_instrument:{instrument_identity_schema_version}:{digest[:40]}"
+
+
+def _canonical_identity_text(value: object) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ValueError("canonical instrument identity fields must be nonblank")
+    return normalized
 
 
 class InstrumentRuleSnapshotRef(_FrozenNonblankModel):

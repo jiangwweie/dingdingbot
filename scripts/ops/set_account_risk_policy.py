@@ -24,7 +24,9 @@ from src.application.action_time.account_risk_policy import (  # noqa: E402
     load_account_risk_policy_current_projection,
     replace_risk_cluster_memberships,
 )
-from src.domain.account_risk import RiskClusterMembership  # noqa: E402
+from src.application.action_time.risk_cluster_membership import (  # noqa: E402
+    build_runtime_scope_primary_cluster_memberships,
+)
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 
 
@@ -33,11 +35,21 @@ def main(argv: list[str] | None = None) -> int:
     policy, event_type = _policy_from_args(args)
     engine = sa.create_engine(normalize_sync_postgres_dsn(args.database_url))
     with engine.begin() as conn:
+        now_ms = int(time.time() * 1000)
         _require_exact_active_runtime_scope(
             conn,
             account_id=args.account_id,
             runtime_profile_id=args.runtime_profile_id,
         )
+        memberships = None
+        if args.mode in {"shadow", "activate"}:
+            memberships = build_runtime_scope_primary_cluster_memberships(
+                conn,
+                runtime_profile_id=args.runtime_profile_id,
+                risk_policy_version=policy.risk_policy_version,
+                now_ms=now_ms,
+                expected_instrument_count=6,
+            )
         append_account_risk_policy_event(
             conn,
             account_id=args.account_id,
@@ -45,16 +57,17 @@ def main(argv: list[str] | None = None) -> int:
             event_type=event_type,
             policy=policy,
             created_by=args.created_by,
-            now_ms=int(time.time() * 1000),
+            now_ms=now_ms,
             operation_id=args.operation_id,
         )
         if args.mode in {"shadow", "activate"}:
+            assert memberships is not None
             replace_risk_cluster_memberships(
                 conn,
                 risk_policy_version=policy.risk_policy_version,
-                memberships=_active_crypto_binance_memberships(conn),
+                memberships=memberships,
                 created_by=args.created_by,
-                now_ms=int(time.time() * 1000),
+                now_ms=now_ms,
             )
         current = load_account_risk_policy_current_projection(
             conn,
@@ -195,42 +208,6 @@ def _json_object(value: object) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
-
-
-def _active_crypto_binance_memberships(
-    conn: sa.Connection,
-) -> list[RiskClusterMembership]:
-    """Read the current PG Registry, never a JSON/MD symbol list."""
-
-    rows = conn.execute(
-        sa.text(
-            """
-            SELECT DISTINCT mapping.exchange_instrument_id
-            FROM brc_strategy_group_candidate_scope AS candidate
-            JOIN brc_symbol_instrument_mappings AS mapping
-              ON mapping.symbol = candidate.symbol
-             AND mapping.status = 'active'
-            JOIN brc_exchange_instruments AS instrument
-              ON instrument.exchange_instrument_id = mapping.exchange_instrument_id
-             AND instrument.status = 'active'
-            WHERE candidate.status = 'active'
-              AND candidate.asset_class = 'crypto'
-              AND instrument.exchange_id = 'binance_usdm'
-            ORDER BY mapping.exchange_instrument_id
-            """
-        )
-    ).scalars()
-    memberships = [
-        RiskClusterMembership(
-            exchange_instrument_id=str(instrument_id),
-            risk_cluster_id="crypto_usd_beta",
-        )
-        for instrument_id in rows
-        if str(instrument_id or "").strip()
-    ]
-    if not memberships:
-        raise ValueError("active_crypto_binance_instrument_registry_empty")
-    return memberships
 
 
 if __name__ == "__main__":

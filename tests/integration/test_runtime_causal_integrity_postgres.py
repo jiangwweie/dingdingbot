@@ -106,7 +106,7 @@ def _preserve_release_b_baseline_for_legacy_rci_scenarios(
     yield
 
 
-def test_rci_harness_uses_postgresql_revision_137(
+def test_rci_harness_uses_postgresql_revision_138(
     postgres_certification_engine,
 ):
     assert postgres_certification_engine.dialect.name == "postgresql"
@@ -120,7 +120,7 @@ def test_rci_harness_uses_postgresql_revision_137(
             )
         ).scalar_one()
 
-    assert revision == "137"
+    assert revision == "138"
     assert invocation_table == "brc_action_time_invocations"
 
 

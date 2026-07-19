@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import sqlalchemy as sa
 import pytest
 
 from scripts.ops import set_account_risk_policy as subject
+from src.domain.instrument_risk_identity import (
+    build_canonical_exchange_instrument_id,
+    instrument_rule_snapshot_v2_semantic_hash,
+)
+
+
+SYMBOLS = ("AVAXUSDT", "BTCUSDT", "ETHUSDT", "OPUSDT", "SOLUSDT", "SUIUSDT")
 
 
 def test_shadow_policy_derives_explicit_cluster_memberships_from_pg_registry(
@@ -22,13 +30,7 @@ def test_shadow_policy_derives_explicit_cluster_memberships_from_pg_registry(
         conn.execute(
             sa.text(
                 """INSERT INTO brc_symbol_instrument_mappings VALUES
-                ('SOLUSDT', 'binance_usdm:SOLUSDT', 'active')"""
-            )
-        )
-        conn.execute(
-            sa.text(
-                """INSERT INTO brc_exchange_instruments VALUES
-                ('binance_usdm:SOLUSDT', 'binance_usdm', 'active')"""
+                ('SOLUSDT', 'misleading-legacy-instrument', 'active')"""
             )
         )
 
@@ -36,15 +38,17 @@ def test_shadow_policy_derives_explicit_cluster_memberships_from_pg_registry(
     payload = json.loads(capsys.readouterr().out)
     assert payload["activation_state"] == "shadow"
     with engine.connect() as conn:
-        membership = conn.execute(
+        memberships = conn.execute(
             sa.text(
                 """SELECT exchange_instrument_id, risk_cluster_id
-                FROM brc_risk_cluster_memberships"""
+                FROM brc_risk_cluster_memberships
+                ORDER BY exchange_instrument_id"""
             )
-        ).mappings().one()
-    assert dict(membership) == {
-        "exchange_instrument_id": "binance_usdm:SOLUSDT",
-        "risk_cluster_id": "crypto_usd_beta",
+        ).mappings().all()
+    assert len(memberships) == 6
+    assert {row["risk_cluster_id"] for row in memberships} == {"crypto_usd_beta"}
+    assert "misleading-legacy-instrument" not in {
+        row["exchange_instrument_id"] for row in memberships
     }
 
 
@@ -97,18 +101,6 @@ def test_policy_command_rejects_account_outside_current_runtime_scope(
     with engine.begin() as conn:
         _create_tables(conn)
         _seed_bound_scope(conn, account_id="other-account")
-        conn.execute(
-            sa.text(
-                """INSERT INTO brc_symbol_instrument_mappings VALUES
-                ('SOLUSDT', 'binance_usdm:SOLUSDT', 'active')"""
-            )
-        )
-        conn.execute(
-            sa.text(
-                """INSERT INTO brc_exchange_instruments VALUES
-                ('binance_usdm:SOLUSDT', 'binance_usdm', 'active')"""
-            )
-        )
 
     with pytest.raises(
         ValueError,
@@ -119,6 +111,88 @@ def test_policy_command_rejects_account_outside_current_runtime_scope(
     with engine.connect() as conn:
         assert conn.execute(
             sa.text("SELECT COUNT(*) FROM brc_account_risk_policy_events")
+        ).scalar_one() == 0
+
+
+def test_policy_command_rejects_incomplete_canonical_identity_atomically(
+    tmp_path: Path,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'identity.db'}"
+    engine = sa.create_engine(database_url)
+    with engine.begin() as conn:
+        _create_tables(conn)
+        _seed_bound_scope(conn)
+        conn.execute(
+            sa.text(
+                """UPDATE brc_exchange_instruments
+                SET settlement_asset = NULL
+                WHERE exchange_symbol = 'SOL/USDT:USDT'"""
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="instrument_identity_schema_invalid"):
+        subject.main(_policy_args(database_url, mode="activate"))
+
+    with engine.connect() as conn:
+        assert conn.execute(
+            sa.text("SELECT COUNT(*) FROM brc_account_risk_policy_events")
+        ).scalar_one() == 0
+        assert conn.execute(
+            sa.text("SELECT COUNT(*) FROM brc_risk_cluster_memberships")
+        ).scalar_one() == 0
+
+
+def test_policy_command_rejects_missing_current_v2_rule_atomically(
+    tmp_path: Path,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'rule.db'}"
+    engine = sa.create_engine(database_url)
+    with engine.begin() as conn:
+        _create_tables(conn)
+        _seed_bound_scope(conn)
+        conn.execute(
+            sa.text(
+                """DELETE FROM brc_instrument_rule_snapshots
+                WHERE exchange_instrument_id = (
+                  SELECT exchange_instrument_id
+                  FROM brc_exchange_instruments
+                  WHERE exchange_symbol = 'SOL/USDT:USDT'
+                )"""
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="instrument_rule_snapshot_invalid"):
+        subject.main(_policy_args(database_url, mode="activate"))
+
+    with engine.connect() as conn:
+        assert conn.execute(
+            sa.text("SELECT COUNT(*) FROM brc_account_risk_policy_current")
+        ).scalar_one() == 0
+
+
+def test_policy_and_membership_writes_share_one_transaction(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'rollback-write.db'}"
+    engine = sa.create_engine(database_url)
+    with engine.begin() as conn:
+        _create_tables(conn)
+        _seed_bound_scope(conn)
+
+    def fail_membership_write(*_args, **_kwargs):
+        raise RuntimeError("simulated_membership_write_failure")
+
+    monkeypatch.setattr(subject, "replace_risk_cluster_memberships", fail_membership_write)
+    with pytest.raises(RuntimeError, match="simulated_membership_write_failure"):
+        subject.main(_policy_args(database_url, mode="activate"))
+
+    with engine.connect() as conn:
+        assert conn.execute(
+            sa.text("SELECT COUNT(*) FROM brc_account_risk_policy_events")
+        ).scalar_one() == 0
+        assert conn.execute(
+            sa.text("SELECT COUNT(*) FROM brc_account_risk_policy_current")
         ).scalar_one() == 0
 
 
@@ -153,15 +227,6 @@ def _seed_bound_scope(
 ) -> None:
     conn.execute(
         sa.text(
-            """INSERT INTO brc_strategy_group_candidate_scope
-            (candidate_scope_id, symbol, asset_class, status, strategy_group_id,
-             scope_state)
-            VALUES ('scope-1', 'SOLUSDT', 'crypto', 'active', 'SOR-001',
-                    'live_submit_allowed')"""
-        )
-    )
-    conn.execute(
-        sa.text(
             """INSERT INTO brc_strategy_groups VALUES ('SOR-001', 'SOR-001-v1')"""
         )
     )
@@ -172,12 +237,72 @@ def _seed_bound_scope(
         ),
         {"risk_envelope": json.dumps({"account_id": account_id})},
     )
-    conn.execute(
-        sa.text(
-            """INSERT INTO brc_runtime_scope_bindings VALUES
-            ('scope-1', 'owner-runtime-console-v1', 'active')"""
+    for symbol in SYMBOLS:
+        exchange_symbol = f"{symbol.removesuffix('USDT')}/USDT:USDT"
+        instrument_id = build_canonical_exchange_instrument_id(
+            exchange_id="binance_usdm",
+            exchange_symbol=exchange_symbol,
+            asset_class="crypto",
+            instrument_type="perpetual",
+            settlement_asset="USDT",
+            margin_asset="USDT",
         )
-    )
+        scope_id = f"scope:{symbol}"
+        conn.execute(
+            sa.text(
+                """INSERT INTO brc_strategy_group_candidate_scope
+                (candidate_scope_id, symbol, asset_class, status,
+                 strategy_group_id, scope_state, exchange_instrument_id)
+                VALUES (:scope_id, :symbol, 'crypto', 'active', 'SOR-001',
+                        'live_submit_allowed', :instrument_id)"""
+            ),
+            {"scope_id": scope_id, "symbol": symbol, "instrument_id": instrument_id},
+        )
+        conn.execute(
+            sa.text(
+                """INSERT INTO brc_runtime_scope_bindings VALUES
+                (:scope_id, 'owner-runtime-console-v1', 'active')"""
+            ),
+            {"scope_id": scope_id},
+        )
+        conn.execute(
+            sa.text(
+                """INSERT INTO brc_exchange_instruments VALUES
+                (:instrument_id, 'binance_usdm', :exchange_symbol, 'crypto',
+                 'perpetual', 'USDT', 'USDT', 'v2', 'active')"""
+            ),
+            {"instrument_id": instrument_id, "exchange_symbol": exchange_symbol},
+        )
+        rule_id = f"rule:{symbol}"
+        rule_values = {
+            "instrument_rule_snapshot_id": rule_id,
+            "rule_schema_version": "v2",
+            "price_tick": Decimal("0.01"),
+            "quantity_step": Decimal("0.01"),
+            "min_qty": Decimal("0.01"),
+            "min_notional": Decimal("5"),
+            "contract_multiplier": Decimal("1"),
+            "exchange_max_leverage_for_claim_notional": 20,
+            "source_fact_snapshot_id": f"source:{symbol}",
+            "valid_until_ms": 9_999_999_999_999,
+            "risk_calculation_kind": "linear_quote_settled",
+        }
+        conn.execute(
+            sa.text(
+                """INSERT INTO brc_instrument_rule_snapshots VALUES
+                (:rule_id, :instrument_id, 'v2', 0.01, 0.01, 0.01, 5, 1,
+                 20, :source_id, 9999999999999, 'linear_quote_settled',
+                 :semantic_hash, 'current')"""
+            ),
+            {
+                "rule_id": rule_id,
+                "instrument_id": instrument_id,
+                "source_id": f"source:{symbol}",
+                "semantic_hash": instrument_rule_snapshot_v2_semantic_hash(
+                    rule_values
+                ),
+            },
+        )
 
 
 def _create_tables(conn: sa.Connection) -> None:
@@ -211,7 +336,7 @@ def _create_tables(conn: sa.Connection) -> None:
         )""",
         """CREATE TABLE brc_strategy_group_candidate_scope (
             candidate_scope_id TEXT, symbol TEXT, asset_class TEXT, status TEXT,
-            strategy_group_id TEXT, scope_state TEXT
+            strategy_group_id TEXT, scope_state TEXT, exchange_instrument_id TEXT
         )""",
         """CREATE TABLE brc_strategy_groups (
             strategy_group_id TEXT, current_version_id TEXT
@@ -226,7 +351,19 @@ def _create_tables(conn: sa.Connection) -> None:
             symbol TEXT, exchange_instrument_id TEXT, status TEXT
         )""",
         """CREATE TABLE brc_exchange_instruments (
-            exchange_instrument_id TEXT, exchange_id TEXT, status TEXT
+            exchange_instrument_id TEXT, exchange_id TEXT, exchange_symbol TEXT,
+            asset_class TEXT, instrument_type TEXT, settlement_asset TEXT,
+            margin_asset TEXT, instrument_identity_schema_version TEXT,
+            status TEXT
+        )""",
+        """CREATE TABLE brc_instrument_rule_snapshots (
+            instrument_rule_snapshot_id TEXT PRIMARY KEY,
+            exchange_instrument_id TEXT, rule_schema_version TEXT,
+            price_tick NUMERIC, quantity_step NUMERIC, min_qty NUMERIC,
+            min_notional NUMERIC, contract_multiplier NUMERIC,
+            exchange_max_leverage_for_claim_notional INTEGER,
+            source_fact_snapshot_id TEXT, valid_until_ms BIGINT,
+            risk_calculation_kind TEXT, semantic_hash TEXT, status TEXT
         )""",
     ):
         conn.execute(sa.text(statement))
