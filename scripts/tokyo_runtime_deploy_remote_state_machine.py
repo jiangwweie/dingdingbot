@@ -1968,6 +1968,14 @@ def validate_forward_fix_fence_supersession(
     )
     if not predecessor_revision.isdigit() or not str(expected_revision).isdigit():
         raise ValueError("fence_supersession_predecessor_revision_invalid")
+    actual_revision = read_candidate_schema_revision(
+        release_path=release_path,
+        env_path=env_path,
+        runner=runner,
+        lock_handle=lock_handle,
+        canonical_lock_path=canonical_lock_path,
+        require_root_owner=require_root_owner,
+    )
     if post_migration:
         migrated = (predecessor.entries[DEPLOY_PHASES.index("schema_migrated")].get("facts") or {}).get("result")
         if (
@@ -1978,16 +1986,19 @@ def validate_forward_fix_fence_supersession(
         ):
             raise ValueError("fence_supersession_post_migration_lineage_invalid")
         predecessor_revision = str(expected_revision)
+        mode = "post_migration_pre_activation"
+    elif actual_revision == str(expected_revision):
+        if (
+            predecessor.old_sha != old_sha
+            or predecessor.target_sha == target_sha
+        ):
+            raise ValueError("fence_supersession_unjournaled_migration_lineage_invalid")
+        predecessor_revision = str(expected_revision)
+        mode = "post_migration_unjournaled_pre_activation"
     elif predecessor.old_sha != old_sha:
         raise ValueError("fence_supersession_predecessor_journal_lineage_mismatch")
-    actual_revision = read_candidate_schema_revision(
-        release_path=release_path,
-        env_path=env_path,
-        runner=runner,
-        lock_handle=lock_handle,
-        canonical_lock_path=canonical_lock_path,
-        require_root_owner=require_root_owner,
-    )
+    else:
+        mode = "pre_migration"
     if actual_revision != predecessor_revision:
         raise RuntimeError("fence_supersession_schema_revision_mismatch")
     _verify_contained_writer_state(
@@ -2015,7 +2026,7 @@ def validate_forward_fix_fence_supersession(
         "predecessor_fence": expected_marker,
         "unit_prepolicy": dict(inherited_prepolicy),
         "actual_revision": actual_revision,
-        "mode": "post_migration_pre_activation" if post_migration else "pre_migration",
+        "mode": mode,
     }
 
 
