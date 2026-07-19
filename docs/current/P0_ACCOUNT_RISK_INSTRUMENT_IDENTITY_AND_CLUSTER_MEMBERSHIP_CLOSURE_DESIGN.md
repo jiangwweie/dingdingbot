@@ -1,6 +1,6 @@
 ---
 title: P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_DESIGN
-status: TOKYO_DEPLOY_CONTAINED_PENDING_FORWARD_FIX
+status: TOKYO_DEPLOYED_LIFECYCLE_AND_POLICY_ACTIVATION_PENDING
 authority: docs/current/P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_DESIGN.md
 last_verified: 2026-07-19 CST
 ---
@@ -55,7 +55,7 @@ blocker。
 | 本地实现 | **已完成** | migration **138**、canonical seed、PG-only V2 rule projector、exact-scope membership service 已在当前分支实现。 |
 | 本地 PostgreSQL 认证 | **通过** | revision **106 → 138**：**6** canonical identities、**22** active lanes、**6** V2 rules、**6** memberships、**1** active policy。 |
 | 部署状态机 | **已加固** | migration/seed 后必须完成 V2 rule projection 与 **22/6** PG readiness certification，才允许 pointer switch 或恢复 watcher。 |
-| 东京生产 | **安全封锁，待前向修复** | revision **138** migration 前的 rule projection 发现真实 exchange fact 兼容缺口；writer fence 保持，policy/membership 未激活。 |
+| 东京生产 | **已部署，待 lifecycle 与 policy activation** | release **87e5236a**、revision **138**、6 canonical identities、22 lanes、6 V2 rules 已验收；writer fence 已移除。 |
 
 ### 1.4 东京部署反馈与前向修复
 
@@ -74,8 +74,15 @@ policy 上限；最终 selected leverage 仍取 `min(policy, exchange)`，本次
 
 部署失败已触发 **`failed_contained`**：backend、watcher、monitor、lifecycle timers 均已停止，
 writer fence 与 disabled lifecycle capability 保持，未创建 policy、membership、Ticket 或订单。
-后续仅允许使用新 commit 通过 predecessor transaction 前向修复，不允许解除旧封锁后继续运行旧
-release。
+随后通过 predecessor transaction 前向修复部署 release **`87e5236a`**，并完成 **138**、6/22/6
+identity-rule readiness、只读 canary 与 activation commit；writer fence 已移除，backend 与全部
+production timers 已恢复。（来源：东京 deployment journal、只读 deploy probe，2026-07-19。）
+
+**剩余闭环：**前一封锁事务使 lifecycle capability 恢复为 disabled，且 Account Risk Policy
+activation 是设计上独立于 deploy 的下一事务，因此当前 `brc_account_risk_policy_current` 与 active
+primary membership 均为 **0**。后续必须先经正式 deploy certification 恢复 lifecycle capability，
+再调用官方 policy operation 原子写入 **1** current policy 与 **6** current primary memberships；
+在此之前容量、Ticket、真实 submit 保持 fail-closed。
 
 ## 2. 已知客观事实
 
