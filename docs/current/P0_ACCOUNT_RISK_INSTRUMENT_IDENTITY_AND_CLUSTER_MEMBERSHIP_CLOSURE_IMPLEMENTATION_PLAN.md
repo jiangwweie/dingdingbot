@@ -1,6 +1,6 @@
 ---
 title: P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_IMPLEMENTATION_PLAN
-status: TOKYO_DEPLOYED_LIFECYCLE_AND_POLICY_ACTIVATION_PENDING
+status: IMPLEMENTED_TOKYO_CERTIFIED_NATURAL_SIGNAL_PENDING
 authority: docs/current/P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-19 CST
 ---
@@ -49,9 +49,9 @@ leverage 或 notional scope。
 | P0-ARIC-01 至 P0-ARIC-05 | **本地完成并认证** | 新增/更新测试均已通过；本地 PostgreSQL 完整走通 **106 → 138 → seed → rule projection → policy**。 |
 | P0-ARIC-06 部署状态机 | **本地完成并认证** | writer fence 下的 migration 后，强制执行 GET-only rule projector 和 **22 lane / 6 identity / 6 rule** PG readiness certification。 |
 | P0-ARIC-06 东京 apply | **已完成核心部署** | 前向恢复 release **87e5236a** 已通过 schema **138**、6 rule、22 lane、readonly canary、activation commit；backend/timers active，writer fence removed。 |
-| P0-ARIC-06 lifecycle restore | **待正式认证执行** | 前一 containment 使 capability 保守保持 disabled；必须通过正式 deployment certification 恢复，不能手工改 PG。 |
-| P0-ARIC-06 policy apply | **待官方操作** | `brc_account_risk_policy_current=0`、active primary membership=0；需原子激活 **1 + 6**。 |
-| P0-ARIC-07 自然信号 | **待市场事件** | 不伪造 signal、Ticket 或交易所写入；自然新信号到来后只接受合法 Ticket 或精确 blocker。 |
+| P0-ARIC-06 lifecycle restore | **已完成** | release **1aa05462** 完成正式 certification，PG lifecycle capability=`enabled`，postdeploy verifier passed。 |
+| P0-ARIC-06 policy apply | **已完成** | 官方 activate operation 原子写入 **1** current policy 与 **6** active primary memberships。 |
+| P0-ARIC-07 自然信号 | **持续自然验收** | 2026-07-19 11:55–12:00 CST 的 **110** 条 watcher coverage 证明无新信号；不伪造 signal、Ticket 或交易所写入。 |
 
 ## 3. 执行顺序
 

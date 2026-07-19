@@ -1,6 +1,6 @@
 ---
 title: P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_DESIGN
-status: TOKYO_DEPLOYED_LIFECYCLE_AND_POLICY_ACTIVATION_PENDING
+status: IMPLEMENTED_TOKYO_CERTIFIED_NATURAL_SIGNAL_PENDING
 authority: docs/current/P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_DESIGN.md
 last_verified: 2026-07-19 CST
 ---
@@ -55,7 +55,7 @@ blocker。
 | 本地实现 | **已完成** | migration **138**、canonical seed、PG-only V2 rule projector、exact-scope membership service 已在当前分支实现。 |
 | 本地 PostgreSQL 认证 | **通过** | revision **106 → 138**：**6** canonical identities、**22** active lanes、**6** V2 rules、**6** memberships、**1** active policy。 |
 | 部署状态机 | **已加固** | migration/seed 后必须完成 V2 rule projection 与 **22/6** PG readiness certification，才允许 pointer switch 或恢复 watcher。 |
-| 东京生产 | **已部署，待 lifecycle 与 policy activation** | release **87e5236a**、revision **138**、6 canonical identities、22 lanes、6 V2 rules 已验收；writer fence 已移除。 |
+| 东京生产 | **已认证运行** | release **1aa05462**、revision **138**、6 canonical identities、22 lanes、6 V2 rules、1 active policy、6 primary memberships、enabled lifecycle 已验收；writer fence 已移除。 |
 
 ### 1.4 东京部署反馈与前向修复
 
@@ -78,11 +78,22 @@ writer fence 与 disabled lifecycle capability 保持，未创建 policy、membe
 identity-rule readiness、只读 canary 与 activation commit；writer fence 已移除，backend 与全部
 production timers 已恢复。（来源：东京 deployment journal、只读 deploy probe，2026-07-19。）
 
-**剩余闭环：**前一封锁事务使 lifecycle capability 恢复为 disabled，且 Account Risk Policy
-activation 是设计上独立于 deploy 的下一事务，因此当前 `brc_account_risk_policy_current` 与 active
-primary membership 均为 **0**。后续必须先经正式 deploy certification 恢复 lifecycle capability，
-再调用官方 policy operation 原子写入 **1** current policy 与 **6** current primary memberships；
-在此之前容量、Ticket、真实 submit 保持 fail-closed。
+**闭环完成：**正式 deploy certification 已恢复 lifecycle capability 为 `enabled`；官方 policy
+operation 已原子写入 **1** current Account Risk Policy 和 **6** current primary memberships。当前
+22 条 active lane 均能 join 至 complete canonical identity 与 fresh V2 rule，容量、Ticket、
+FinalGate、Operation Layer、保护及 lifecycle 的既有 fail-closed 边界没有被放宽。
+
+### 1.5 激活后自然观察验收
+
+Policy 激活后的第一个完整 watcher 窗口为 **2026-07-19 11:55–12:00 CST**：PG 记录 **110** 条
+watcher coverage，`live_signal_events=0`、`promotion_candidates=0`、`action_time_lane_inputs=0`、
+`action_time_tickets=0`，watcher 与 monitor oneshot 均以 `Result=success` 结束。因此该窗口可确认
+为 `no_detected_signal_with_coverage`：系统健康运行但没有满足策略条件的新自然信号。（来源：东京
+`query_runtime_signal_forensics.py`、PG current 与 systemd，2026-07-19。）
+
+这个结论只覆盖上述窗口；下一项 live validation 是等待新的自然信号，然后验证
+`Signal → Promotion → Lane → Ticket` 或记录精确实时 safety blocker。不得伪造 signal、Ticket
+或交易所写入来缩短该验证。
 
 ## 2. 已知客观事实
 
