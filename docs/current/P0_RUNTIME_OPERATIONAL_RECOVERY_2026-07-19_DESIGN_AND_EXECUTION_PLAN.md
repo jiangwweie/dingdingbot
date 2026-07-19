@@ -7,6 +7,14 @@ last_verified: 2026-07-19 02:32 CST
 
 # P0 生产运行链路恢复设计与执行方案
 
+当前 Account Risk Policy 后续阻塞的详细设计与执行权威已拆分为：
+
+- `docs/current/P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_DESIGN.md`
+- `docs/current/P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_IMPLEMENTATION_PLAN.md`
+
+这两份文档覆盖 2026-07-19 生产 policy apply 暴露的 `crypto_usdm_perp` legacy identity、
+缺失 Instrument Rule Snapshot 与风险簇 membership 闭环问题；后续实现以新文档为准。
+
 ## 1. 决策摘要
 
 ### 1.1 建议结论
