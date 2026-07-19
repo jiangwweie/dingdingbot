@@ -46,9 +46,16 @@ from src.application.action_time.exchange_snapshot_provider import (  # noqa: E4
 from src.application.action_time.post_submit_reconciliation_tick import (  # noqa: E402
     select_ticket_bound_first_reconciliation_tick_scopes,
 )
+from src.application.action_time.ticket_exit_market_fact_service import (  # noqa: E402
+    ExistingClosedCandleSourceAdapter,
+    materialize_due_ticket_exit_market_facts,
+)
 from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     is_sync_postgres_dsn,
     normalize_sync_postgres_dsn,
+)
+from src.infrastructure.binance_public_kline_market_source import (  # noqa: E402
+    BinancePublicKlineMarketSource,
 )
 from src.infrastructure.binance_usdm_account_risk_snapshot import (  # noqa: E402
     BinanceUsdmAccountRiskSnapshotProvider,
@@ -298,6 +305,52 @@ async def _amain(argv: list[str] | None = None) -> int:
                 _remaining_seconds(deadline_at, "account_risk_snapshot"),
             ),
         )
+        ticket_exit_market_facts: list[dict[str, Any]] = []
+        ticket_ids = sorted(
+            {
+                str(item.get("ticket_id") or "")
+                for item in [*first_tick_scopes, *scopes]
+                if str(item.get("ticket_id") or "")
+            }
+        )
+        if ticket_ids:
+            with engine.connect() as conn:
+                exchange_symbols = _load_exchange_symbols(
+                    conn,
+                    ticket_ids=ticket_ids,
+                )
+                conn.rollback()
+            market_source = ExistingClosedCandleSourceAdapter(
+                source=BinancePublicKlineMarketSource(
+                    timeout_seconds=min(
+                        5.0,
+                        _remaining_seconds(deadline_at, "ticket_exit_market_source"),
+                    )
+                ),
+                exchange_symbol_resolver=lambda instrument_id, venue_id: (
+                    _resolve_exchange_symbol(
+                        exchange_symbols,
+                        exchange_instrument_id=instrument_id,
+                        venue_id=venue_id,
+                    )
+                ),
+            )
+            with telemetry.stage("ticket_exit_market_facts"):
+                ticket_exit_market_facts = await _await_before_deadline(
+                    materialize_due_ticket_exit_market_facts(
+                        engine,
+                        ticket_ids=ticket_ids,
+                        now_ms=int(time.time() * 1000),
+                        source=market_source,
+                    ),
+                    deadline_at=deadline_at,
+                    stage="ticket_exit_market_facts",
+                )
+            if any(
+                item.get("status") == "exit_market_fact_materialized"
+                for item in ticket_exit_market_facts
+            ):
+                telemetry.exchange_request_count += 1
 
         _remaining_seconds(deadline_at, "pg_lifecycle_projection")
         with telemetry.stage("pg_lifecycle_projection"):
@@ -323,6 +376,7 @@ async def _amain(argv: list[str] | None = None) -> int:
             ),
             "exchange_command_worker": worker_payload,
             "exchange_command_reconciliation": reconciliation_payload,
+            "ticket_exit_market_facts": ticket_exit_market_facts,
             "exchange_write_called": (
                 worker_payload.get("exchange_write_called") is True
             ),
@@ -418,6 +472,60 @@ def _prepared_or_unknown_command_exists(conn: sa.engine.Connection) -> bool:
         ).bindparams(sa.bindparam("command_sources", expanding=True)),
         {"command_sources": tuple(LIFECYCLE_MUTATION_COMMAND_SOURCES)},
     ).first() is not None
+
+
+def _load_exchange_symbols(
+    conn: sa.Connection,
+    *,
+    ticket_ids: list[str],
+) -> dict[tuple[str, str], str]:
+    normalized_ticket_ids = tuple(sorted({value for value in ticket_ids if value}))
+    if not normalized_ticket_ids:
+        return {}
+    instruments = sa.Table(
+        "brc_exchange_instruments",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    tickets = sa.Table(
+        "brc_action_time_tickets",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    rows = conn.execute(
+        sa.select(
+            instruments.c.exchange_instrument_id,
+            instruments.c.exchange_id,
+            instruments.c.exchange_symbol,
+        )
+        .select_from(
+            tickets.join(
+                instruments,
+                instruments.c.exchange_instrument_id
+                == tickets.c.exchange_instrument_id,
+            )
+        )
+        .where(tickets.c.ticket_id.in_(normalized_ticket_ids))
+    ).mappings()
+    return {
+        (str(row["exchange_instrument_id"]), str(row["exchange_id"])): str(
+            row["exchange_symbol"]
+        )
+        for row in rows
+        if str(row.get("exchange_symbol") or "").strip()
+    }
+
+
+def _resolve_exchange_symbol(
+    symbols: dict[tuple[str, str], str],
+    *,
+    exchange_instrument_id: str,
+    venue_id: str,
+) -> str:
+    symbol = symbols.get((exchange_instrument_id, venue_id))
+    if not symbol:
+        raise ValueError("ticket_exit_market_exchange_symbol_missing")
+    return symbol
 
 
 def _prepare_snapshot_scopes(

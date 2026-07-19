@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 import json
@@ -29,6 +30,9 @@ LEGACY_UNBOUND_HASH = canonical_payload_hash(LEGACY_UNBOUND_SNAPSHOT)
 
 class TicketExitPolicyBindingError(ValueError):
     """Raised when one exact immutable policy binding cannot be proved."""
+
+
+EXIT_REFERENCE_SCHEMA_VERSION = "brc.ticket_exit_reference_snapshot.v1"
 
 
 class TicketExitPolicyBinding(BaseModel):
@@ -207,6 +211,185 @@ def initialize_ticket_exit_policy_projection(
             raise TicketExitPolicyBindingError("ticket_exit_policy_projection_contradiction")
         return
     conn.execute(table.insert().values(**values))
+    bind_ticket_exit_reference_snapshot(
+        conn,
+        ticket=ticket,
+        now_ms=now_ms,
+    )
+
+
+def bind_ticket_exit_reference_snapshot(
+    conn: sa.engine.Connection,
+    *,
+    ticket: dict[str, Any],
+    now_ms: int,
+) -> None:
+    """Freeze policy-required strategy references from the exact signal event.
+
+    The migration is additive, so older disposable schemas intentionally retain
+    their legacy test shape.  Once the columns exist, an active versioned Ticket
+    cannot continue without one exact immutable snapshot.
+    """
+
+    if not sa.inspect(conn).has_table("brc_ticket_exit_policy_current"):
+        return
+    projection_table = _table(conn, "brc_ticket_exit_policy_current")
+    required_columns = {
+        "exit_reference_schema_version",
+        "exit_reference_snapshot",
+        "exit_reference_hash",
+        "exit_reference_bound_at_ms",
+    }
+    if not required_columns <= set(projection_table.c.keys()):
+        return
+    binding = _binding_from_ticket_snapshot(ticket)
+    if binding.snapshot is None:
+        return
+    required_keys = sorted(
+        {
+            rule.reference_key
+            for rule in binding.snapshot.invalidation_rules
+        }
+        | (
+            {binding.snapshot.runner_rule.reference_key}
+            if hasattr(binding.snapshot.runner_rule, "reference_key")
+            else set()
+        )
+    )
+    projection = conn.execute(
+        sa.select(projection_table).where(
+            projection_table.c.ticket_id == str(ticket["ticket_id"])
+        )
+    ).mappings().one()
+    existing = _mapping(projection.get("exit_reference_snapshot"))
+    if existing:
+        existing_hash = str(projection.get("exit_reference_hash") or "")
+        if canonical_payload_hash(existing) != existing_hash:
+            raise TicketExitPolicyBindingError("ticket_exit_reference_hash_contradiction")
+        _validate_exit_reference_snapshot(
+            existing,
+            ticket=ticket,
+            required_keys=required_keys,
+        )
+        return
+    snapshot = _build_exit_reference_snapshot(
+        conn,
+        ticket=ticket,
+        required_keys=required_keys,
+    )
+    projection_table_update = (
+        projection_table.update()
+        .where(projection_table.c.ticket_id == str(ticket["ticket_id"]))
+        .values(
+            exit_reference_schema_version=EXIT_REFERENCE_SCHEMA_VERSION,
+            exit_reference_snapshot=snapshot,
+            exit_reference_hash=canonical_payload_hash(snapshot),
+            exit_reference_bound_at_ms=now_ms,
+            updated_at_ms=now_ms,
+        )
+    )
+    updated = conn.execute(projection_table_update)
+    if updated.rowcount != 1:
+        raise TicketExitPolicyBindingError("ticket_exit_reference_projection_missing")
+
+
+def _build_exit_reference_snapshot(
+    conn: sa.engine.Connection,
+    *,
+    ticket: dict[str, Any],
+    required_keys: list[str],
+) -> dict[str, Any]:
+    if not sa.inspect(conn).has_table("brc_live_signal_events"):
+        raise TicketExitPolicyBindingError("ticket_exit_reference_signal_table_missing")
+    signals = _table(conn, "brc_live_signal_events")
+    signal = conn.execute(
+        sa.select(signals).where(
+            signals.c.signal_event_id == str(ticket.get("signal_event_id") or "")
+        )
+    ).mappings().first()
+    if signal is None:
+        raise TicketExitPolicyBindingError("ticket_exit_reference_signal_missing")
+    signal_row = dict(signal)
+    for key in ("strategy_group_id", "symbol", "side", "event_spec_id"):
+        ticket_key = "event_spec_id" if key == "event_spec_id" else key
+        if str(signal_row.get(key) or "") != str(ticket.get(ticket_key) or ""):
+            raise TicketExitPolicyBindingError(
+                f"ticket_exit_reference_{key}_mismatch"
+            )
+    evidence = _signal_reference_evidence(_mapping(signal_row.get("signal_payload")))
+    values: list[dict[str, str]] = []
+    for key in required_keys:
+        value = _positive_decimal(evidence.get(key))
+        if value is None:
+            raise TicketExitPolicyBindingError(
+                f"ticket_exit_reference_missing:{key}"
+            )
+        values.append(
+            {
+                "reference_key": key,
+                "decimal_value": str(value),
+                "source_kind": "bound_live_signal_evidence",
+                "source_ref": str(signal_row["signal_event_id"]),
+            }
+        )
+    return {
+        "schema_version": EXIT_REFERENCE_SCHEMA_VERSION,
+        "ticket_id": str(ticket["ticket_id"]),
+        "signal_event_id": str(signal_row["signal_event_id"]),
+        "strategy_group_id": str(ticket["strategy_group_id"]),
+        "strategy_version": str(ticket["strategy_group_version_id"]),
+        "event_spec_id": str(ticket["event_spec_id"]),
+        "event_spec_version": str(ticket["event_spec_version_id"]),
+        "exchange_instrument_id": str(ticket["exchange_instrument_id"]),
+        "side": str(ticket["side"]),
+        "values": values,
+    }
+
+
+def _validate_exit_reference_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    ticket: dict[str, Any],
+    required_keys: list[str],
+) -> None:
+    required_identity = {
+        "schema_version": EXIT_REFERENCE_SCHEMA_VERSION,
+        "ticket_id": str(ticket["ticket_id"]),
+        "signal_event_id": str(ticket["signal_event_id"]),
+        "strategy_group_id": str(ticket["strategy_group_id"]),
+        "event_spec_id": str(ticket["event_spec_id"]),
+        "exchange_instrument_id": str(ticket["exchange_instrument_id"]),
+        "side": str(ticket["side"]),
+    }
+    for key, expected in required_identity.items():
+        if str(snapshot.get(key) or "") != expected:
+            raise TicketExitPolicyBindingError(
+                f"ticket_exit_reference_{key}_contradiction"
+            )
+    values = {
+        str(item.get("reference_key") or ""): _positive_decimal(
+            item.get("decimal_value")
+        )
+        for item in list(snapshot.get("values") or [])
+        if isinstance(item, dict)
+    }
+    if any(values.get(key) is None for key in required_keys):
+        raise TicketExitPolicyBindingError("ticket_exit_reference_required_key_missing")
+
+
+def _signal_reference_evidence(payload: dict[str, Any]) -> dict[str, Any]:
+    summary = _mapping(payload.get("signal_summary"))
+    nested = _mapping(summary.get("evidence_payload"))
+    direct = _mapping(payload.get("evidence_payload"))
+    return {**payload, **direct, **nested}
+
+
+def _positive_decimal(value: Any) -> Decimal | None:
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed.is_finite() and parsed > 0 else None
 
 
 def resolve_effective_ticket_exit_policy_binding(

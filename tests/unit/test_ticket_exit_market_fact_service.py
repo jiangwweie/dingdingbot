@@ -125,7 +125,9 @@ async def test_before_due_time_performs_zero_source_calls(pg_control_connection)
         {"due": NOW_MS + 60_000, "ticket_id": ticket_id},
     )
     pg_control_connection.commit()
-    source = _Source([_candle()])
+    source = _Source(
+        [_candle(exchange_instrument_id=_ticket_instrument(pg_control_connection, ticket_id))]
+    )
 
     result = await materialize_due_ticket_exit_market_facts(
         pg_control_connection.engine,
@@ -144,7 +146,9 @@ async def test_new_final_candle_is_persisted_once_and_same_watermark_is_idempote
 ):
     ticket_id = _materialize_versioned_ticket(pg_control_connection)
     pg_control_connection.commit()
-    source = _Source([_candle()])
+    source = _Source(
+        [_candle(exchange_instrument_id=_ticket_instrument(pg_control_connection, ticket_id))]
+    )
 
     first = await materialize_due_ticket_exit_market_facts(
         pg_control_connection.engine,
@@ -199,6 +203,15 @@ async def test_stale_or_scope_mismatched_candle_blocks_without_claiming_watermar
 ):
     ticket_id = _materialize_versioned_ticket(pg_control_connection)
     pg_control_connection.commit()
+    if expected_blocker == "exit_market_fact_stale":
+        candle = candle.model_copy(
+            update={
+                "exchange_instrument_id": _ticket_instrument(
+                    pg_control_connection,
+                    ticket_id,
+                )
+            }
+        )
     source = _Source([candle])
 
     result = await materialize_due_ticket_exit_market_facts(
@@ -258,3 +271,15 @@ async def test_duplicate_ticket_scope_is_coalesced_and_timeout_preserves_project
             ),
             {"ticket_id": ticket_id},
         ).scalar_one() is None
+
+
+def _ticket_instrument(conn, ticket_id: str) -> str:
+    return str(
+        conn.execute(
+            text(
+                "SELECT exchange_instrument_id FROM brc_action_time_tickets "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).scalar_one()
+    )

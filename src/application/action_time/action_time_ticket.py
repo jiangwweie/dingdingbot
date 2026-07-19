@@ -1180,12 +1180,16 @@ def _insert_ticket_bundle(
         for column in ticket_table.columns
         if column.name in ticket
     }
-    conn.execute(ticket_table.insert().values(**ticket_values))
-    initialize_ticket_exit_policy_projection(
-        conn,
-        ticket=ticket,
-        now_ms=int(ticket["created_at_ms"]),
-    )
+    try:
+        with conn.begin_nested():
+            conn.execute(ticket_table.insert().values(**ticket_values))
+            initialize_ticket_exit_policy_projection(
+                conn,
+                ticket=ticket,
+                now_ms=int(ticket["created_at_ms"]),
+            )
+    except TicketExitPolicyBindingError as exc:
+        raise TicketMaterializationBlocked([str(exc)]) from exc
     conn.execute(
         text(
             """

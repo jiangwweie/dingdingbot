@@ -30,7 +30,7 @@ from src.infrastructure.binance_usdm_account_risk_snapshot import (
 )
 
 
-FINAL_ROLES = {"SL", "RUNNER_SL"}
+FINAL_ROLES = {"SL", "RUNNER_SL", "FINAL_EXIT"}
 LIVE_PROTECTION_ORDER_STATUSES = {
     "planned",
     "submitted",
@@ -57,6 +57,11 @@ def finalize_ticket_bound_lifecycle_if_ready(
     if not lifecycle:
         return _result("not_ready_lifecycle_missing", [], False)
     if str(lifecycle.get("status") or "") == "lifecycle_closed":
+        _terminalize_ticket_exit_policy_projection(
+            conn,
+            ticket_id=ticket_id,
+            now_ms=now_ms,
+        )
         _close_action_time_ticket(conn, ticket_id=ticket_id)
         outcome = materialize_live_outcome_ledger(
             conn,
@@ -250,6 +255,11 @@ def finalize_ticket_bound_lifecycle_if_ready(
             "closure_status": closure.get("status"),
         }
     _close_action_time_ticket(conn, ticket_id=ticket_id)
+    _terminalize_ticket_exit_policy_projection(
+        conn,
+        ticket_id=ticket_id,
+        now_ms=now_ms,
+    )
     outcome = materialize_live_outcome_ledger(
         conn,
         ticket_id=ticket_id,
@@ -328,6 +338,43 @@ def _final_exit_evidence(
             "lifecycle_event_id": row.get("lifecycle_event_id"),
         }
     return {}
+
+
+def _terminalize_ticket_exit_policy_projection(
+    conn: sa.engine.Connection,
+    *,
+    ticket_id: str,
+    now_ms: int,
+) -> None:
+    """Clear mutable Runner state once lifecycle and exchange truth are closed."""
+
+    if not sa.inspect(conn).has_table("brc_ticket_exit_policy_current"):
+        return
+    table = _table(conn, "brc_ticket_exit_policy_current")
+    row = conn.execute(
+        sa.select(table).where(table.c.ticket_id == ticket_id)
+    ).mappings().first()
+    if not row:
+        return
+    values: dict[str, Any] = {
+        "remaining_position_qty": 0,
+        "state": "terminal",
+        "active_runner_order_id": None,
+        "active_runner_generation": None,
+        "active_runner_stop": None,
+        "pending_runner_order_id": None,
+        "pending_generation": None,
+        "replaced_runner_order_id": None,
+        "first_blocker": None,
+        "updated_at_ms": now_ms,
+    }
+    if "terminal_at_ms" in table.c:
+        values["terminal_at_ms"] = (
+            int(row.get("terminal_at_ms") or 0) or now_ms
+        )
+    conn.execute(
+        table.update().where(table.c.ticket_id == ticket_id).values(**values)
+    )
 
 
 def _latest_flat_reconciliation_tick(

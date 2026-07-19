@@ -61,7 +61,7 @@ class ExchangeOrderLookupRequest(ExchangeCommandModel):
     exchange_id: str = Field(min_length=1, max_length=128)
     gateway_symbol: str = Field(min_length=1, max_length=128)
     command_kind: str = Field(pattern="^(place_order|cancel_order)$")
-    order_role: str = Field(pattern="^(ENTRY|SL|TP1|RUNNER_SL)$")
+    order_role: str = Field(pattern="^(ENTRY|SL|TP1|RUNNER_SL|FINAL_EXIT)$")
     order_type: str = Field(min_length=1, max_length=64)
     client_order_id: str = Field(min_length=1, max_length=36)
     target_exchange_order_id: Optional[str] = Field(default=None, max_length=192)
@@ -81,7 +81,7 @@ def required_exchange_order_lookup_view(
     order_type = request.order_type.lower()
     if order_role in {"SL", "RUNNER_SL"} and order_type == "stop_market":
         return ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
-    if order_role in {"ENTRY", "TP1", "RUNNER_SL"} and order_type != "stop_market":
+    if order_role in {"ENTRY", "TP1", "RUNNER_SL", "FINAL_EXIT"} and order_type != "stop_market":
         return ExchangeOrderLookupView.REGULAR_ORDER
     raise ValueError("unsupported Binance command role/type lookup combination")
 
@@ -123,7 +123,7 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     exchange_id: str = Field(min_length=1, max_length=128)
     gateway_symbol: str = Field(min_length=1, max_length=128)
     symbol: str = Field(min_length=1, max_length=128)
-    order_role: str = Field(pattern="^(ENTRY|SL|TP1|RUNNER_SL)$")
+    order_role: str = Field(pattern="^(ENTRY|SL|TP1|RUNNER_SL|FINAL_EXIT)$")
     side: str = Field(pattern="^(long|short)$")
     gateway_side: str = Field(min_length=1, max_length=32)
     local_order_id: str = Field(min_length=1, max_length=192)

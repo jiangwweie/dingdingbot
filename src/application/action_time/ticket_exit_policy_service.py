@@ -823,11 +823,29 @@ def _advance_tp1_reprice(
             blocker="tp1_reprice_cancel_confirmation_invalid",
             now_ms=now_ms,
         )
-    if completion != "unfilled":
+    cumulative_qty = _required_nonnegative_decimal(
+        projection.get("tp1_cumulative_filled_qty"),
+        "tp1_reprice_cumulative_filled_qty",
+    )
+    residual_qty = execution.resolved_tp1_target_qty - cumulative_qty
+    tolerance = (
+        loaded["instrument_rule"].quantity_step
+        * loaded["policy"].tp_completion_tolerance_qty_steps
+    )
+    if residual_qty < Decimal("0"):
+        return _block_projection(
+            conn,
+            projection=projection,
+            ticket_id=ticket_id,
+            blocker="tp1_reprice_cumulative_fill_exceeds_target",
+            now_ms=now_ms,
+        )
+    if residual_qty <= tolerance:
         _update_projection(
             conn,
             ticket_id=ticket_id,
             values={
+                "tp1_completion_state": "complete",
                 "state": "execution_bound",
                 "first_blocker": None,
                 "updated_at_ms": now_ms,
@@ -850,7 +868,7 @@ def _advance_tp1_reprice(
             projection.get("remaining_position_qty"),
             "tp1_reprice_remaining_qty",
         )
-        if remaining_qty < execution.resolved_tp1_target_qty:
+        if remaining_qty < residual_qty:
             return _block_projection(
                 conn,
                 projection=projection,
@@ -866,7 +884,7 @@ def _advance_tp1_reprice(
             command_kind="place_order",
             order_role="TP1",
             order_type="limit",
-            amount=execution.resolved_tp1_target_qty,
+            amount=residual_qty,
             stop_price=None,
             target_exchange_order_id=None,
             local_order_id=f"{source_id}:tp1",
@@ -1077,13 +1095,16 @@ def _prepare_runner_close(
         str(decision.source_watermark_ms),
         decision.reason_code,
     )
+    final_exit_role = (
+        "FINAL_EXIT" if _final_exit_role_enabled(conn) else "RUNNER_SL"
+    )
     command = _materialize_policy_command(
         conn,
         loaded=loaded,
         command_source="exit_policy_close",
         source_command_id=source_id,
         command_kind="place_order",
-        order_role="RUNNER_SL",
+        order_role=final_exit_role,
         order_type="market",
         amount=qty,
         stop_price=None,
@@ -1144,7 +1165,77 @@ def _existing_close_state(
             str(projection["ticket_id"]),
             blockers=[f"runner_close_{state}"],
         )
+    if (
+        _final_exit_role_enabled(conn)
+        and state in CONFIRMED_COMMAND_STATES
+        and str(close.get("exchange_order_id") or "")
+    ):
+        _ensure_final_exit_order(
+            conn,
+            loaded=None,
+            command=close,
+            projection=projection,
+            now_ms=int(close.get("updated_at_ms") or 0),
+        )
     return _result("runner_close_pending", str(projection["ticket_id"]))
+
+
+def _ensure_final_exit_order(
+    conn: sa.engine.Connection,
+    *,
+    loaded: dict[str, Any] | None,
+    command: dict[str, Any],
+    projection: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    del loaded
+    table = _table(conn, "brc_ticket_bound_exit_protection_orders")
+    existing = conn.execute(
+        sa.select(table).where(
+            table.c.local_order_id == str(command["local_order_id"])
+        )
+    ).mappings().first()
+    if existing:
+        return dict(existing)
+    active = _row_by_id(
+        conn,
+        "brc_ticket_bound_exit_protection_orders",
+        "exit_protection_order_id",
+        str(projection.get("active_runner_order_id") or ""),
+    )
+    if not active:
+        raise ValueError("final_exit_active_runner_order_missing")
+    row = {
+        "exit_protection_order_id": _stable_id(
+            "ticket-exit-protection-order",
+            str(command["exchange_command_id"]),
+        ),
+        "exit_protection_set_id": str(active["exit_protection_set_id"]),
+        "ticket_id": str(command["ticket_id"]),
+        "role": "FINAL_EXIT",
+        "local_order_id": str(command["local_order_id"]),
+        "exchange_order_id": str(command["exchange_order_id"]),
+        "status": "submitted",
+        "order_type": "market",
+        "side": str(command["gateway_side"]),
+        "qty": _required_decimal(command["amount"], "final_exit_amount"),
+        "price": None,
+        "trigger_price": None,
+        "reduce_only": True,
+        "replaces_exit_protection_order_id": str(
+            active["exit_protection_order_id"]
+        ),
+        "generation": int(active.get("generation") or 1),
+        "created_at_ms": now_ms,
+        "updated_at_ms": now_ms,
+    }
+    conn.execute(table.insert().values(**row))
+    return row
+
+
+def _final_exit_role_enabled(conn: sa.engine.Connection) -> bool:
+    table = _table(conn, "brc_ticket_exit_policy_current")
+    return "exit_reference_schema_version" in set(table.c.keys())
 
 
 def _materialize_policy_command(
@@ -1393,9 +1484,16 @@ def _load_latest_exit_market_fact(
     if not candles:
         return None, "ticket_exit_market_candles_missing"
     policy: TicketExitPolicySnapshot = loaded["policy"]
+    references, reference_blocker = _ticket_exit_reference_values(
+        projection=projection,
+        policy=policy,
+        dynamic_values=values,
+    )
+    if reference_blocker:
+        return None, reference_blocker
     missing_reference_keys = {
         rule.reference_key for rule in policy.invalidation_rules
-    } - set(_mapping(values.get("references")))
+    } - set(references)
     explicit_hits = tuple(str(item) for item in values.get("invalidation_rule_ids_hit", []))
     if missing_reference_keys and not explicit_hits:
         return None, f"ticket_exit_reference_fact_missing:{sorted(missing_reference_keys)[0]}"
@@ -1403,12 +1501,52 @@ def _load_latest_exit_market_fact(
         policy=policy,
         side=loaded["scope"].side,
         candles=candles,
-        references=_mapping(values.get("references")),
+        references=references,
         explicit_invalidation_hits=explicit_hits,
         entry_time_ms=_entry_fill_time_ms(conn, loaded["lifecycle"]),
         minimum_price_tick=loaded["instrument_rule"].price_tick,
     )
     return market_fact, None
+
+
+def _ticket_exit_reference_values(
+    *,
+    projection: dict[str, Any],
+    policy: TicketExitPolicySnapshot,
+    dynamic_values: dict[str, Any],
+) -> tuple[dict[str, Any], str | None]:
+    """Read immutable Ticket references after migration 139.
+
+    Legacy schemas retain the old dynamic-fact value only so historical unit
+    fixtures remain readable.  A migrated projection has no file or candle
+    fallback: static strategy truth is Ticket-bound.
+    """
+
+    snapshot = _mapping(projection.get("exit_reference_snapshot"))
+    if not snapshot:
+        if "exit_reference_schema_version" not in projection:
+            return _mapping(dynamic_values.get("references")), None
+        return {}, "ticket_exit_reference_snapshot_missing"
+    expected_hash = str(projection.get("exit_reference_hash") or "")
+    if canonical_payload_hash(snapshot) != expected_hash:
+        return {}, "ticket_exit_reference_hash_contradiction"
+    if (
+        str(snapshot.get("ticket_id") or "") != str(projection.get("ticket_id") or "")
+        or str(snapshot.get("side") or "") != policy.side
+        or str(snapshot.get("schema_version") or "")
+        != "brc.ticket_exit_reference_snapshot.v1"
+    ):
+        return {}, "ticket_exit_reference_identity_mismatch"
+    values: dict[str, Any] = {}
+    for item in list(snapshot.get("values") or []):
+        if not isinstance(item, dict):
+            return {}, "ticket_exit_reference_values_invalid"
+        key = str(item.get("reference_key") or "").strip()
+        value = _decimal_or_none(item.get("decimal_value"))
+        if not key or value is None or value <= 0 or key in values:
+            return {}, "ticket_exit_reference_values_invalid"
+        values[key] = str(value)
+    return values, None
 
 
 def _derive_exit_market_fact(
@@ -1671,6 +1809,13 @@ def _decimal_or_none(value: Any) -> Decimal | None:
 def _required_decimal(value: Any, field: str) -> Decimal:
     parsed = _decimal_or_none(value)
     if parsed is None or parsed <= 0:
+        raise ValueError(f"{field}_invalid")
+    return parsed
+
+
+def _required_nonnegative_decimal(value: Any, field: str) -> Decimal:
+    parsed = _decimal_or_none(value)
+    if parsed is None or parsed < 0:
         raise ValueError(f"{field}_invalid")
     return parsed
 

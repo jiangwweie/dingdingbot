@@ -22,7 +22,7 @@ from src.application.action_time.ticket_instrument_rule import (
 )
 
 
-FINAL_EXIT_ROLES = {"SL", "RUNNER_SL"}
+FINAL_EXIT_ROLES = {"SL", "RUNNER_SL", "FINAL_EXIT"}
 
 
 def project_ticket_bound_exchange_fills(

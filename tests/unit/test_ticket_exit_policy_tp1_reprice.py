@@ -141,6 +141,58 @@ def test_tp1_fill_race_after_cancel_supersedes_reprice_without_new_order(
     assert len(_reprice_commands(pg_control_connection, ticket_id)) == 1
 
 
+def test_tp1_partial_fill_after_cancel_places_only_frozen_target_residual(
+    pg_control_connection,
+):
+    ticket_id, old_tp1, _expected_price = _reprice_fixture(pg_control_connection)
+    maintain_ticket_exit_policy_in_transaction(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+    cancel = _reprice_commands(pg_control_connection, ticket_id)[0]
+    _set_command_state(
+        pg_control_connection,
+        cancel["exchange_command_id"],
+        state="confirmed_submitted",
+        exchange_order_id=old_tp1["exchange_order_id"],
+    )
+    projection = _projection(pg_control_connection, ticket_id)
+    target = Decimal(str(projection["resolved_tp1_target_qty"]))
+    partial = target / Decimal("2")
+    execution = TicketExitExecutionSnapshot.model_validate(
+        _mapping(projection["exit_execution_snapshot"])
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_exit_policy_current SET "
+            "tp1_completion_state='partial', "
+            "tp1_cumulative_filled_qty=:partial, "
+            "remaining_position_qty=:remaining "
+            "WHERE ticket_id=:ticket_id"
+        ),
+        {
+            "partial": str(partial),
+            "remaining": str(execution.runner_target_qty + target - partial),
+            "ticket_id": ticket_id,
+        },
+    )
+
+    result = maintain_ticket_exit_policy_in_transaction(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_100,
+    )
+
+    assert result["status"] == "tp1_reprice_place_prepared"
+    place = next(
+        item
+        for item in _reprice_commands(pg_control_connection, ticket_id)
+        if item["command_kind"] == "place_order"
+    )
+    assert Decimal(str(place["amount"])) == target - partial
+
+
 @pytest.mark.asyncio
 async def test_existing_worker_dispatches_cancel_then_exact_reduce_only_limit(
     pg_control_connection,

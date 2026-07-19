@@ -43,7 +43,7 @@ AUTHORITY_BOUNDARY = (
     "state only; no exchange/order/runtime authority"
 )
 PROTECTION_COMPLETE_STATUSES = {"submitted", "reconciled", "runner_protected", "closed"}
-FINAL_EXIT_ROLES = {"SL", "RUNNER_SL", "TP1", "EXTERNAL_CLOSE"}
+FINAL_EXIT_ROLES = {"SL", "RUNNER_SL", "TP1", "FINAL_EXIT", "EXTERNAL_CLOSE"}
 LIVE_PROTECTION_ORDER_STATUSES = {
     "planned",
     "submitted",
