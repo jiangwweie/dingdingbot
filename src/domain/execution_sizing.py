@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.instrument_risk_identity import MAX_EXCHANGE_RULE_LEVERAGE
+
 
 PLANNED_STOP_RISK_BASIS = "wallet_fraction_stop_distance_v1"
 
@@ -22,7 +24,7 @@ class ExecutionInstrumentRules(BaseModel):
     min_qty: Decimal = Field(gt=Decimal("0"))
     qty_step: Decimal = Field(gt=Decimal("0"))
     min_notional: Decimal = Field(gt=Decimal("0"))
-    exchange_max_leverage: int = Field(ge=1, le=125)
+    exchange_max_leverage: int = Field(ge=1, le=MAX_EXCHANGE_RULE_LEVERAGE)
     source_fact_snapshot_id: str = Field(min_length=1)
     observed_at_ms: int = Field(gt=0)
     valid_until_ms: int = Field(gt=0)

@@ -1,6 +1,6 @@
 ---
 title: P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_IMPLEMENTATION_PLAN
-status: OWNER_CONFIRMED_LOCAL_CERTIFIED_TOKYO_DEPLOY_PENDING
+status: TOKYO_DEPLOY_CONTAINED_PENDING_FORWARD_FIX
 authority: docs/current/P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_IMPLEMENTATION_PLAN.md
 last_verified: 2026-07-19 CST
 ---
@@ -48,7 +48,7 @@ leverage 或 notional scope。
 | --- | --- | --- |
 | P0-ARIC-01 至 P0-ARIC-05 | **本地完成并认证** | 新增/更新测试均已通过；本地 PostgreSQL 完整走通 **106 → 138 → seed → rule projection → policy**。 |
 | P0-ARIC-06 部署状态机 | **本地完成并认证** | writer fence 下的 migration 后，强制执行 GET-only rule projector 和 **22 lane / 6 identity / 6 rule** PG readiness certification。 |
-| P0-ARIC-06 东京 apply | **待执行** | 仅在 commit/push 与本地全量验证通过后执行受控单事务部署。 |
+| P0-ARIC-06 东京 apply | **安全封锁，待前向修复** | 事务 `ad3a2e3d…` 在 read-only rule projection 发现 150x venue metadata 与 125x parser cap 不兼容；services remain stopped。 |
 | P0-ARIC-07 自然信号 | **待市场事件** | 不伪造 signal、Ticket 或交易所写入；自然新信号到来后只接受合法 Ticket 或精确 blocker。 |
 
 ## 3. 执行顺序
@@ -347,3 +347,5 @@ producer 无法复用现有 read-only source，必须先停在架构审查，不
 Owner 已确认实施与受控部署。东京 apply 前仍必须满足本计划的 predeploy hard stop；任何
 migration、rule projection、22/6 readiness certification 或 lifecycle certification 失败都保持
 writer fence、lifecycle capability disabled、Ticket fail-closed，不能恢复 watcher 或 policy apply。
+当前 transaction 的前向修复还必须接受真实 **150x** exchange rule fact，同时证明 Owner policy
+和 selected leverage 不扩张；不得通过截断交易所事实或提高 Owner policy 绕过该 blocker。

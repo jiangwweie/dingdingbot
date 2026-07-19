@@ -66,6 +66,23 @@ def test_parse_binance_rules_rejects_missing_notional_bracket() -> None:
         )
 
 
+def test_parse_binance_rules_accepts_current_150x_exchange_bracket() -> None:
+    target = _target("BTCUSDT", "BTC/USDT:USDT", Decimal("20"))
+    brackets = _leverage_brackets("BTCUSDT")
+    brackets[0]["brackets"][0]["initialLeverage"] = 150
+
+    observation = parse_binance_usdm_instrument_rule_observations(
+        targets=(target,),
+        exchange_info_payload=_exchange_info("BTCUSDT"),
+        leverage_bracket_payload=brackets,
+        observed_at_ms=1000,
+        valid_until_ms=2000,
+        source_ref="unit:binance-readonly",
+    )[0]
+
+    assert observation.exchange_max_leverage_for_claim_notional == 150
+
+
 def test_load_targets_uses_exact_candidate_identity_without_symbol_mapping() -> None:
     engine = sa.create_engine("sqlite://")
     target = _target("BTCUSDT", "BTC/USDT:USDT", Decimal("20"))

@@ -18,6 +18,7 @@ def _rules(
     step: str = "0.001",
     min_notional: str = "5",
     side: str = "long",
+    exchange_max_leverage: int = 125,
 ) -> ExecutionInstrumentRules:
     return ExecutionInstrumentRules(
         symbol="TESTUSDT",
@@ -26,7 +27,7 @@ def _rules(
         min_qty=Decimal(min_qty),
         qty_step=Decimal(step),
         min_notional=Decimal(min_notional),
-        exchange_max_leverage=125,
+        exchange_max_leverage=exchange_max_leverage,
         source_fact_snapshot_id="public-fact-1",
         observed_at_ms=NOW_MS - 1_000,
         valid_until_ms=NOW_MS + 30_000,
@@ -91,6 +92,21 @@ def test_max_leverage_shrinks_quantity_without_blocking() -> None:
     assert result.decision.effective_notional == Decimal("450.0")
     assert result.decision.reserved_margin == Decimal("90.0")
     assert result.decision.planned_stop_risk == Decimal("2.25")
+
+
+def test_exchange_rule_above_policy_limit_does_not_expand_selected_leverage() -> None:
+    result = decide_execution_sizing(
+        rules=_rules(exchange_max_leverage=150),
+        account=_account(),
+        policy=_policy(max_leverage=10),
+        protective_stop_price=Decimal("99.5"),
+        now_ms=NOW_MS,
+    )
+
+    assert result.blockers == ()
+    assert result.decision is not None
+    assert result.decision.selected_leverage == 7
+    assert result.decision.selected_leverage <= 10
 
 
 def test_minimum_executable_quantity_above_risk_budget_blocks() -> None:

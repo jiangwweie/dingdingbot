@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 CANONICAL_INSTRUMENT_IDENTITY_SCHEMA_VERSION = "v2"
+MAX_EXCHANGE_RULE_LEVERAGE = 200
 
 
 class _FrozenNonblankModel(BaseModel):

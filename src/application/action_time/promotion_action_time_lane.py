@@ -81,6 +81,7 @@ from src.domain.execution_sizing import (  # noqa: E402
     ExecutionSizingPolicy,
     decide_execution_sizing,
 )
+from src.domain.instrument_risk_identity import MAX_EXCHANGE_RULE_LEVERAGE  # noqa: E402
 from src.domain.account_capacity_claim import AccountCapacityClaimPayloadV2  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
@@ -2089,7 +2090,7 @@ def _sizing_risk_decision_result(
         )
     except (TypeError, ValueError):
         exchange_max_leverage = 0
-    if not 1 <= exchange_max_leverage <= 125:
+    if not 1 <= exchange_max_leverage <= MAX_EXCHANGE_RULE_LEVERAGE:
         return None, ["exchange_leverage_bracket_missing_or_invalid"]
     try:
         policy = ExecutionSizingPolicy(

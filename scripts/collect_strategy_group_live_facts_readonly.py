@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import sys
 import time
 from typing import Any, Callable
 from urllib.parse import urlencode
@@ -24,6 +25,11 @@ import urllib.request
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.domain.instrument_risk_identity import MAX_EXCHANGE_RULE_LEVERAGE  # noqa: E402
+
 DEFAULT_BASE_URL = "https://fapi.binance.com"
 ACCOUNT_MODE_ENDPOINT = "/fapi/v1/positionSide/dual"
 ACCOUNT_MODE_SOURCE = f"binance_usdm_signed_get:{ACCOUNT_MODE_ENDPOINT}"
@@ -251,7 +257,7 @@ def _leverage_bracket_summary(
             for item in brackets
             if isinstance(item, dict)
             for value in [item.get("initialLeverage")]
-            if isinstance(value, int) and 1 <= value <= 125
+            if isinstance(value, int) and 1 <= value <= MAX_EXCHANGE_RULE_LEVERAGE
         ]
         if leverages:
             values[symbol] = max(leverages)

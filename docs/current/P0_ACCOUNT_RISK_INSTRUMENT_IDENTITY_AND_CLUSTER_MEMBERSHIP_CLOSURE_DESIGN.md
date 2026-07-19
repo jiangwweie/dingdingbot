@@ -1,6 +1,6 @@
 ---
 title: P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_DESIGN
-status: OWNER_CONFIRMED_LOCAL_CERTIFIED_TOKYO_DEPLOY_PENDING
+status: TOKYO_DEPLOY_CONTAINED_PENDING_FORWARD_FIX
 authority: docs/current/P0_ACCOUNT_RISK_INSTRUMENT_IDENTITY_AND_CLUSTER_MEMBERSHIP_CLOSURE_DESIGN.md
 last_verified: 2026-07-19 CST
 ---
@@ -55,7 +55,27 @@ blocker。
 | 本地实现 | **已完成** | migration **138**、canonical seed、PG-only V2 rule projector、exact-scope membership service 已在当前分支实现。 |
 | 本地 PostgreSQL 认证 | **通过** | revision **106 → 138**：**6** canonical identities、**22** active lanes、**6** V2 rules、**6** memberships、**1** active policy。 |
 | 部署状态机 | **已加固** | migration/seed 后必须完成 V2 rule projection 与 **22/6** PG readiness certification，才允许 pointer switch 或恢复 watcher。 |
-| 东京生产 | **待部署** | 当前仍为 revision **137**、legacy identity、rule/policy/membership 均未激活。 |
+| 东京生产 | **安全封锁，待前向修复** | revision **138** migration 前的 rule projection 发现真实 exchange fact 兼容缺口；writer fence 保持，policy/membership 未激活。 |
+
+### 1.4 东京部署反馈与前向修复
+
+**已知客观事实：**首次东京部署事务
+`ad3a2e3d85ee4983aeab33588c33ca8e` 在 migration 后的 read-only V2 rule projection 阶段返回
+`claim_notional_leverage_bracket_invalid`。对 Binance signed GET
+`/fapi/v1/leverageBracket` 的只读复核显示，`BTCUSDT` 与 `ETHUSDT` 的首档
+`initialLeverage` 为 **150x**，而 six candidate scopes 的 Owner policy `max_notional`
+均为 **20 USDT**、`max_leverage` 均为 **10x**。（来源：东京 deployment journal 与 Binance
+USD-M signed GET，2026-07-19。）
+
+**基于事实的修复判断：**当前实现错误地把“交易所规则事实”的最大值限制为 **125x**，使真实
+150x 事实被当作不存在。该限制不能应用到 venue metadata。修复将 exchange rule fact 的有界
+上限设为 **200x**，同时保持 Owner policy、runtime config、sizing selection 的 **125x**
+policy 上限；最终 selected leverage 仍取 `min(policy, exchange)`，本次仍不超过 **10x**。
+
+部署失败已触发 **`failed_contained`**：backend、watcher、monitor、lifecycle timers 均已停止，
+writer fence 与 disabled lifecycle capability 保持，未创建 policy、membership、Ticket 或订单。
+后续仅允许使用新 commit 通过 predecessor transaction 前向修复，不允许解除旧封锁后继续运行旧
+release。
 
 ## 2. 已知客观事实
 

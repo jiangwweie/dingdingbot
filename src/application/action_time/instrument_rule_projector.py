@@ -13,6 +13,7 @@ import sqlalchemy as sa
 from src.domain.instrument_risk_identity import (
     InstrumentRiskIdentity,
     InstrumentRuleSnapshotRefV2,
+    MAX_EXCHANGE_RULE_LEVERAGE,
     instrument_rule_snapshot_v2_semantic_hash,
 )
 
@@ -43,7 +44,9 @@ class InstrumentRuleObservation(BaseModel):
     min_qty: Decimal = Field(gt=0)
     min_notional: Decimal = Field(gt=0)
     contract_multiplier: Decimal = Field(gt=0)
-    exchange_max_leverage_for_claim_notional: int = Field(ge=1, le=125)
+    exchange_max_leverage_for_claim_notional: int = Field(
+        ge=1, le=MAX_EXCHANGE_RULE_LEVERAGE
+    )
     claim_notional_ceiling: Decimal = Field(gt=0)
     observed_at_ms: int = Field(gt=0)
     valid_until_ms: int = Field(gt=0)
@@ -444,7 +447,7 @@ def _leverage_for_notional(value: object, notional: Decimal) -> int:
             floor is None
             or cap is None
             or not isinstance(leverage, int)
-            or not 1 <= leverage <= 125
+            or not 1 <= leverage <= MAX_EXCHANGE_RULE_LEVERAGE
         ):
             continue
         if floor <= notional < cap:
