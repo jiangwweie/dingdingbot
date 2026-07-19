@@ -25,12 +25,13 @@ from src.application.action_time.account_risk_policy import (  # noqa: E402
     replace_risk_cluster_memberships,
 )
 from src.domain.account_risk import RiskClusterMembership  # noqa: E402
+from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     policy, event_type = _policy_from_args(args)
-    engine = sa.create_engine(args.database_url)
+    engine = sa.create_engine(normalize_sync_postgres_dsn(args.database_url))
     with engine.begin() as conn:
         _require_exact_active_runtime_scope(
             conn,
