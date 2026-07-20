@@ -2,12 +2,12 @@
 title: RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN
 status: CURRENT_DESIGN
 authority: docs/current/RUNTIME_CONTROL_STATE_DB_TABLE_DESIGN.md
-last_verified: 2026-07-17
-integration_state: LOCAL_MERGE_CERTIFIED_NOT_DEPLOYED
-production_state: UNCHANGED
-policy_activation: NOT_PERFORMED
+last_verified: 2026-07-20
+integration_state: CURRENT_CONTRACT
+production_state: SEE_MAIN_CONTROL_ROADMAP
+policy_activation: SEE_PG_CURRENT_POLICY
 exchange_write: 0
-migration_head: 133_LOCAL_ONLY
+migration_head: NOT_A_DURABLE_CONTRACT_FIELD
 ---
 
 # Runtime Control State DB Table Design
@@ -40,15 +40,16 @@ The table design is intentionally split into:
 
 ## Design Status
 
-The asset-neutral override referenced above is **implemented and locally merge-certified** by
-revisions **126–133** on `codex/integrate-ffc73899-dual-position-risk-v0`. The broader historical
-table catalog in this document remains design authority where it is not superseded. The local
-integration has one Alembic head at revision `133`. No production migration apply, policy
-activation, deployment, or exchange write occurred in this task.
+This document is a **durable table-design contract**, not a deployment-status surface.
+Revisions **126–140** and the active dual-position policy are deployed component facts as of
+2026-07-20, but the current branch、release、migration head and production occupancy must be
+read from `MAIN_CONTROL_ROADMAP.md`, the release manifest and PG current state.
 
-Fresh schema seed now persists exact `exchange_instrument_id`; existing databases use
-the expand/backfill/enforce sequence. Production Action-Time continues to require PG
-identity directly and does not infer instrument identity from symbol or ID prefixes.
+The asset-neutral identity, Account Capacity Claim, Exposure/Budget Current and canonical
+instrument constraints remain active design authority where they are not superseded by the
+P0-ACH Schema Truth Gate. Production Action-Time requires exact PG identity and does not infer
+instrument identity from symbol or ID prefixes. Future schema changes must use Alembic as the
+sole production Schema Authority; this document does not authorize runtime `create_all()`.
 
 ## Naming And Type Rules
 

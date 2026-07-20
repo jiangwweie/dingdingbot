@@ -1,18 +1,22 @@
 ---
 title: P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_IMPLEMENTATION_PLAN
-status: LOCAL_IMPLEMENTED_DEPLOYMENT_APPROVAL_REQUIRED
+status: DEPLOYED_COMPONENT_BASELINE
 authority: docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_IMPLEMENTATION_PLAN.md
 design: docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_DESIGN.md
 baseline_branch: codex/budget-model-review-20260714
-baseline_head: 881f192b88e32610a6e27af0eb0e6df6cf1d1bcf
-production_head: 881f192b88e32610a6e27af0eb0e6df6cf1d1bcf
-production_migration_head: 139
+baseline_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
+production_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
+production_migration_head: 140
 planned_migration_head: 140
 owner_policy_change: none
 exchange_write_authority: unchanged
 ---
 
 # P0 Account Truth Convergence And Failed-Submit Capacity Conservation Implementation Plan
+
+> **Current authority note:** T00-T11 are deployed component history at release
+> `386cc3d7` / migration `140`. Any new schema、multi-signal、dual-position or runtime
+> semantic work must follow P0-ACH rather than reopening this plan.
 
 ## 1. 执行目标
 

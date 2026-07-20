@@ -2,9 +2,9 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-07-18
-dual_position_status_verified: 2026-07-17
-runtime_observation_truth_status_verified: 2026-07-18
+last_verified: 2026-07-20
+dual_position_status_verified: 2026-07-20
+runtime_observation_truth_status_verified: 2026-07-20
 ---
 
 # Main Control Roadmap
@@ -51,15 +51,16 @@ design documents and acceptance proof.
 
 | Order | Program | State | Primary design surface |
 | --- | --- | --- | --- |
-| 1 | **P0 Action-Time Failure Conservation And Natural-Event Acceptance** | **deployed and accepted; natural-event production calibration remains interrupt-driven** | `docs/current/P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_DESIGN.md` |
+| 1 | **P0 Action-Time Failure Conservation And Natural-Event Acceptance** | **deployed and accepted; natural-event production calibration remains R1B after P0-ACH certification and fence release** | `docs/current/P0_ACTION_TIME_FAILURE_CONSERVATION_AND_NATURAL_EVENT_ACCEPTANCE_DESIGN.md` |
 | 2 | **P0 Signal Identity Conservation And Owner Notification Truth** | **deployed and production-accepted; anonymous readiness is conserved as a PG lane failure and only the server monitor notifies the Owner** | `docs/current/P0_SIGNAL_IDENTITY_CONSERVATION_AND_OWNER_NOTIFICATION_TRUTH_DESIGN.md` |
-| P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Starts only on a different-identity natural fresh signal or an active safety incident | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
+| P0 interrupt | **R1B Natural Live Lifecycle Calibration** | Active safety incidents may interrupt immediately; natural live calibration starts only after P0-ACH reaches `multi_position_pre_live_certified` and the new-entry fence is deliberately released | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md` |
 | 3 | **P0 Runtime Causal Integrity And Adversarial Certification** | **completed and deployed; 12 PostgreSQL/process scenarios passed and four demonstrated defects were repaired** | `docs/current/P0_RUNTIME_CAUSAL_INTEGRITY_AND_ADVERSARIAL_CERTIFICATION_DESIGN.md` |
 | 4 | **Owner Supervision Product Integration** | **P0 notification/forensics closure deployed and accepted** | `docs/current/P0_OWNER_NOTIFICATION_LANGUAGE_AND_RUNTIME_FORENSICS_DESIGN.md`, `docs/current/OWNER_EXPLANATION_READ_MODEL_CONTRACT.md` |
 | 5 | **P0 Runtime Observation Truth And Forensics Remediation** | **deployed component baseline; HTTP 400/compact transport defect is closed, but production closure is superseded** | `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md`, `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md` |
-| 6 | **P0 Production Runtime Full-Chain Readiness Remediation** | **design complete; awaiting Owner confirmation before implementation** | `docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_DESIGN.md`, `docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_IMPLEMENTATION_PLAN.md` |
-| P0 correction | **P0 Account Truth Convergence And Failed-Submit Capacity Conservation** | **2026-07-20 local implementation and PostgreSQL certification complete; awaiting Tokyo deployment approval for T09-T10** | `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_DESIGN.md`, `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_IMPLEMENTATION_PLAN.md` |
-| 7 | **Dual-Position Hard-Cap Account Risk Model V0** | **migrations 134-136 and component evidence are deployed; full-chain recertification is folded into P0 readiness remediation** | `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` |
+| 6 | **P0 Production Runtime Full-Chain Readiness Remediation** | **remaining active work superseded by P0-ACH; retained as component design source** | `docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_DESIGN.md`, `docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_IMPLEMENTATION_PLAN.md` |
+| P0 correction | **P0 Account Truth Convergence And Failed-Submit Capacity Conservation** | **deployed at `386cc3d7` / migration 140; two-position Account Current authority is active** | `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_DESIGN.md`, `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_IMPLEMENTATION_PLAN.md` |
+| P0 current | **P0 Schema Truth、Action-Time 与双仓位实盘前置收敛** | **consolidated design and execution plan complete; awaiting implementation confirmation** | `docs/current/P0_ACTION_TIME_INVOCATION_CLAIM_AND_RUNTIME_HEALTH_CONVERGENCE_DESIGN.md`, `docs/current/P0_ACTION_TIME_INVOCATION_CLAIM_AND_RUNTIME_HEALTH_CONVERGENCE_IMPLEMENTATION_PLAN.md` |
+| 7 | **Dual-Position Hard-Cap Account Risk Model V0** | **migrations 134-140 and active policy are deployed component baselines; whole-chain recertification is folded into P0-ACH** | `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | 8 | **Capital Allocation V1** | P2 after V0 dual-position, observation truth closure, and additional real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 9 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
 
@@ -74,42 +75,44 @@ claim that all 22 lanes had healthy observation coverage: 19 lanes returned HTTP
 400. The deployed transport fix then exposed a deeper current blocker: 19 lanes
 now return typed `NEXT-ATTEMPT-POSITION-ORDER-CONFLICT` before detector
 computation because five terminal ticket-bound protection orders remain OPEN in
-the core `orders` projection. No current lane may be called validated market
-wait until P0 Production Runtime Full-Chain Readiness closes.
+the core `orders` projection. The later 2026-07-20 production window exposed
+multi-signal Invocation loss, persisted Decimal Claim failure, Ticket expiry and
+current-health drift. No current lane may be called validated market wait until
+P0-ACH reaches `multi_position_pre_live_certified`.
 
 ## Current Verified Progress
 
 | Area | Current fact |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs release `19719b93d840742a76fd8f79548c720193a08989`; real exchange trades have occurred and six ticket-bound production lifecycles are terminally closed |
-| **Active delivery branch** | `codex/dual-position-account-risk-remediation-v1` remains the repair branch. The deployed component head closed HTTP/compact transport failure, while new full-chain readiness design awaits Owner confirmation before implementation. |
+| **Live Candidate Baseline** | Tokyo runs release `386cc3d761f17231a6c35d2bc96b347153cbd907`; Account Current reports 2/2 occupied slots, while the 2026-07-20 window produced 67 Signal Events, 32 Invocations and 3 Tickets without a new completed outcome |
+| **Active delivery branch** | `codex/budget-model-review-20260714` is the current repair branch and is aligned with Tokyo head `386cc3d7` |
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` and its release manifest are the exact deployed-head authority |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
-| **PG migration** | Tokyo is at migration **136** (`2026-07-17-136_add_instrument_risk_calculation_kind.py`) |
+| **PG migration** | Tokyo is at migration **140** (`2026-07-20-140_account_truth_convergence.py`) |
 | **P0-LC deployment acceptance** | Postdeploy verification passes; backend HTTP checks, schema count, lifecycle units, and no-active lifecycle service are accepted without exchange write |
-| **Backend / watcher / monitor / lifecycle** | Backend and all three timers are active; infrastructure is healthy, but watcher business observation remains blocked before detector computation on 19 selected instances |
+| **Backend / watcher / monitor / lifecycle** | Backend and all three timers are active; 22/22 coverage is fresh, but detector current, multi-signal Invocation/process outcome conservation and Action-Time TTL remain incomplete |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
 | **Post-submit first tick** | Deployed release includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, retry limit, scope freeze writes, and stop-risk reservation rechecks |
 | **P0 capital-safety closure** | `381aed34` deploys current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, Live Outcome Ledger projection, and protective stop-risk direction validation |
-| **Current runtime coverage** | Five StrategyGroups and 22 candidate lanes have current healthy technical coverage; this no longer proves detector computation because 19 selected instances return typed lifecycle blockers before signal evaluation |
+| **Current runtime coverage** | Five StrategyGroups and 22 candidate lanes have current healthy technical coverage; Candidate Pool still reports 22 `detector_not_attached`, while production signals prove detectors can emit events without a current decision projection |
 | **Typed Ticket boundary** | Side-aware price, normalized quantity, positive stop risk, one reservation, atomic fact-to-Ticket transaction, and six-Event-Spec production-shaped certification are deployed |
-| **Current tradeability** | Market wait is not validated. The first systemic blocker is observation/action-time coupling backed by five stale core OPEN protection rows while ticket-bound lifecycle, reconciliation and post-submit closure are terminal |
+| **Current tradeability** | Market wait is not validated. The recurring systemic first blocker is `action_time_invocation_missing`; deeper rows reached Claim, Ticket and Operation Layer but exposed process-outcome loss, persisted Decimal mismatch, Ticket expiry and local Order registration failure |
 | **Opportunity calibration** | All 22 scopes produced historical signals with zero invalid observations; Replay was stdout-only and created no PG/file/runtime/exchange authority |
 | **Lifecycle production capability** | Typed exchange truth, fill projection, durable short-transaction commands, continuous reconciliation, settlement, finalization, terminal Outcome, account-mode bootstrap, and migration-shaped ops health are deployed |
 | **Trade feedback core** | P1-TFC uses one typed lifecycle decision across production callers, rehearsal, and Owner feedback; it is deployed rather than active WIP |
-| **Dynamic execution risk** | Deployed sizing uses fresh wallet/available balance, **3%** planned Stop risk, 90% margin utilization, lowest sufficient leverage, and a 10x Owner ceiling; the Owner-approved V0 target is **2.5%** per Ticket and is not active before implementation/shadow acceptance |
+| **Dynamic execution risk** | Active PG policy is `account-risk-v0-owner-20260714`: **2.5%** planned Stop risk, max **2** concurrent positions, max **1** new Action-Time lane, 6% portfolio open risk, 4% cluster risk, 90% initial-margin utilization and 10x leverage ceiling |
 | **Historical Action-Time acceptance** | Five 2026-07-12 CPM Tickets and the separate ETH sizing-control signal reach protected-submit preparation plus durable ENTRY/SL/TP1 commands inside their original validity windows in isolated fixed-clock tests; all stop before exchange write |
 | **Signal identity and notification truth** | Deployed `8b6cd166` conserves anonymous readiness as a lane-scoped PG process failure, removes direct watcher Feishu, and makes the Tokyo server monitor the sole typed Owner notification path; production acceptance captured `CPM-RO-001 + SOLUSDT + short` and sent one Chinese no-order card with repeated delivery suppressed by PG dedupe |
 | **Runtime causal integrity certification** | All 12 bounded PostgreSQL/process scenarios pass; contradictory repeat fill truth hard-stops, newer success clears older current blockers, and terminal pre-dispatch attempts cannot leave reclaimable or misleading command truth |
 
 ## Current Next Execution Order
 
-Action-Time Boundary Reproduction And Projection Truth is deployed and
-accepted. A new different
-`signal_event_id` is a P0 interrupt event: after any unprotected position or
-unknown exchange outcome is handled, engineering pauses at the next committed
-transaction boundary, runs natural-signal acceptance, persists the result, and
-then resumes this order.
+Action-Time Boundary Reproduction And Projection Truth is a deployed component
+baseline. An unprotected position, unknown exchange outcome, duplicate command
+or other active safety incident interrupts immediately. A new natural
+`signal_event_id` does not start R1B until P0-ACH reaches
+`multi_position_pre_live_certified` and the deployment-scoped new-entry fence is
+deliberately released.
 
 | Order | Work | Priority | Done when |
 | --- | --- | --- | --- |
@@ -117,12 +120,14 @@ then resumes this order.
 | 2 | **Six-event historical pre-exchange acceptance** | P0 complete | Five Ticket cases and one sizing-control signal reach durable prepared commands without exchange write inside original validity windows |
 | 3 | **Deploy certification ordering** | P0 complete | Watcher starts only after exact-head capability and current projection truth publish; mixed-generation tick race is removed |
 | 4 | **Signal identity and notification truth** | P0 complete | Only named execution-eligible PG signals can produce opportunity language; materialization failures persist by lane and the server monitor owns typed deduplicated Owner notification |
-| 5 | **Natural-signal interrupt acceptance** | P0 interrupt | A different-identity natural event preempts normal work and persists its live Ticket-chain outcome through the deployed refresh outcome path |
+| 5 | **Natural-signal live acceptance** | **deferred R1B after P0-ACH** | After pre-live certification and deliberate fence release, a different-identity natural event persists its official Ticket-to-venue lifecycle outcome |
 | 6 | **Runtime causal integrity certification** | P0 complete | Twelve bounded real-PostgreSQL/process scenarios pass; six demonstrated implementation defects are repaired without authority expansion; migration 120 conserves historical pre-dispatch failure truth and notification correlation preserves production identity |
 | 7 | **Owner Supervision Product Integration** | P1 deployed baseline | Typed static notifications and read-only runtime forensics consume conserved PG truth without exposing internal gate vocabulary; natural-event language calibration remains event-driven |
 | 8 | **Runtime Observation Truth And Forensics Remediation** | **P0 deployed component baseline** | Typed compact blockers and HTTP semantics are accepted; its observation/business-gate and core-order closure assumptions are superseded |
-| 9 | **Production Runtime Full-Chain Readiness Remediation FRR-T00-T10** | **P0 proposed; awaiting Owner confirmation** | Separate observation from action-time safety, converge core/ticket lifecycle order truth, persist detector decisions, repair Goal Status/Monitor, and certify natural-signal-capable production |
-| 10 | **Dual-Position Hard-Cap Account Risk Model V0** | **P1 deployed component baseline** | Migrations 134-136 remain active; exact-head regression is included in FRR-T08 |
+| 9 | **Production Runtime Full-Chain Readiness Remediation** | **component design retained; active work superseded** | Its detector/occupancy/projection tasks execute only through P0-ACH |
+| 10 | **Account Truth Convergence And Failed-Submit Capacity Conservation** | **P0 deployed component baseline** | Migration 140 and release `386cc3d7` provide active 2-position Account Current and terminal pre-dispatch capacity release |
+| 11 | **P0-ACH T00-T13 Schema Truth、Action-Time 与双仓位实盘前置收敛** | **design/plan complete; awaiting implementation confirmation** | Freeze RED evidence; establish one Schema Authority and Runtime Semantic Kernel; certify multi-signal and 0/1/2 position behavior; finish shadow restore and Tokyo no-write canary |
+| 12 | **R1B Natural Live Lifecycle Calibration** | **interrupt after P0-ACH pre-live certification** | A natural eligible event may exercise the official real-order path; no forced second position is part of P0-ACH |
 
 ## Why This Was Not Detected Before Production Signals
 

@@ -1,18 +1,21 @@
 ---
 title: P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_IMPLEMENTATION_PLAN
-status: IMPLEMENTATION_IN_PROGRESS
+status: SUPERSEDED_ACTIVE_WORK_RETAINED_COMPONENT_PLAN
 authority: docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_IMPLEMENTATION_PLAN.md
 implements: docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_DESIGN.md
-last_verified: 2026-07-19
-repair_branch: codex/dual-position-account-risk-remediation-v1
-production_head: 19719b93d840742a76fd8f79548c720193a08989
-implementation_state: FRR_T08_LOCAL_CERTIFICATION_IN_PROGRESS
+last_verified: 2026-07-20
+repair_branch: codex/budget-model-review-20260714
+production_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
+implementation_state: SUPERSEDED_BY_P0_ACH
 owner_decision: CONFIRMED_2026-07-18
 deployment_state: NO_CHANGE
 exchange_write: 0
 ---
 
 # P0 Production Runtime Full-Chain Readiness Remediation Implementation Plan
+
+> **Current authority note:** this plan is not independently executable. Its remaining
+> tasks are sequenced and accepted only through the current P0-ACH implementation plan.
 
 ## 1. Goal
 

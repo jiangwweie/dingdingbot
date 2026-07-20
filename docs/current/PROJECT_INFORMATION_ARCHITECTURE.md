@@ -136,6 +136,7 @@ authority.
 | P0 capital safety closure | `docs/current/P0_CAPITAL_SAFETY_CLOSURE_DESIGN.md` |
 | P0 lifecycle production wiring, truth, reconciliation, and closure | `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_AND_CLOSURE_DESIGN.md`, `docs/current/P0_LIFECYCLE_PRODUCTION_CERTIFICATION_IMPLEMENTATION_PLAN.md` |
 | P0 account truth convergence and failed-submit capacity conservation | `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_DESIGN.md`, `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_IMPLEMENTATION_PLAN.md` |
+| P0 Schema Truth、Action-Time and dual-position pre-live convergence | `docs/current/P0_ACTION_TIME_INVOCATION_CLAIM_AND_RUNTIME_HEALTH_CONVERGENCE_DESIGN.md`, `docs/current/P0_ACTION_TIME_INVOCATION_CLAIM_AND_RUNTIME_HEALTH_CONVERGENCE_IMPLEMENTATION_PLAN.md` |
 | Ticket-bound lifecycle and protection | `docs/current/TICKET_BOUND_ORDER_LIFECYCLE_AND_EXIT_PROTECTION_DESIGN.md`, `docs/current/TICKET_BOUND_LIFECYCLE_SAFETY_CORE_IMPLEMENTATION_PLAN.md` |
 | Post-submit reconciliation and recovery commands | `docs/current/POST_SUBMIT_RECONCILIATION_AND_RECOVERY_COMMAND_DESIGN.md` |
 | Live outcome ledger contract | `docs/current/LIVE_OUTCOME_LEDGER_CONTRACT.md` |

@@ -1,17 +1,22 @@
 ---
 title: P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_DESIGN
-status: IMPLEMENTATION_IN_PROGRESS
+status: SUPERSEDED_ACTIVE_WORK_RETAINED_COMPONENT_DESIGN
 authority: docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_DESIGN.md
-last_verified: 2026-07-18
-repair_branch: codex/dual-position-account-risk-remediation-v1
-production_head: 19719b93d840742a76fd8f79548c720193a08989
-production_schema_count: 136
+last_verified: 2026-07-20
+repair_branch: codex/budget-model-review-20260714
+production_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
+production_schema_count: 140
 owner_decision: CONFIRMED_2026-07-18
-implementation_authority: GRANTED_WITHIN_EXISTING_PROFILE
+implementation_authority: SUPERSEDED_BY_P0_ACH
 exchange_write_authority: NOT_CHANGED
 ---
 
 # P0 Production Runtime Full-Chain Readiness Remediation Design
+
+> **Current authority note:** remaining detector、occupancy、core-order、Goal/Monitor
+> and production-certification work is absorbed by `P0-ACH Schema Truth、Action-Time
+> 与双仓位实盘前置收敛`. This document remains a component design source and must not
+> run as a separate active P0 program.
 
 ## 1. Decision Summary
 

@@ -1,6 +1,6 @@
 ---
 title: P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_DESIGN
-status: LOCAL_IMPLEMENTED_DEPLOYMENT_APPROVAL_REQUIRED
+status: DEPLOYED_COMPONENT_BASELINE
 authority: docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_DESIGN.md
 extends:
   - docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md
@@ -12,15 +12,19 @@ scoped_correction_of:
   - account current refresh ownership
   - account budget entry-capacity semantics
   - runtime coverage health classification
-evidence_head: 881f192b88e32610a6e27af0eb0e6df6cf1d1bcf
-production_head: 881f192b88e32610a6e27af0eb0e6df6cf1d1bcf
-production_migration_head: 139
+evidence_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
+production_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
+production_migration_head: 140
 incident_date: 2026-07-20
 exchange_write_during_analysis: 0
 owner_policy_change: none
 ---
 
 # P0 Account Truth Convergence And Failed-Submit Capacity Conservation Design
+
+> **Current authority note:** this correction is deployed at release `386cc3d7` /
+> migration `140` and is retained as a component baseline. Whole-chain schema、Claim、
+> multi-signal and dual-position recertification now belongs to P0-ACH.
 
 ## 1. 决策摘要
 

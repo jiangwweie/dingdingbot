@@ -2,18 +2,17 @@
 title: RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE
 status: CURRENT_PROFILE
 authority: docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md
-last_verified: 2026-07-14
+last_verified: 2026-07-20
 ---
 
 # Runtime Order-Capable Experiment Profile
 
 Last updated: 2026-07-14
 
-## Account Risk Policy Transition
+## Current Account Risk Policy
 
-**已部署事实与 Owner 目标必须分开表达。** 当前发布版本仍使用 **3% 单 Ticket planned
-Stop risk、单仓位 flat gate、90% margin utilization、10x leverage ceiling**。Owner 在
-2026-07-14 已批准的下一目标是：
+**已部署事实与 Owner 目标必须分开表达。** 截至 **2026-07-20**，东京 PG
+`brc_account_risk_policy_current` 已激活 `account-risk-v0-owner-20260714`：
 
 ```text
 planned_stop_risk_fraction = 0.025
@@ -25,13 +24,18 @@ max_portfolio_initial_margin_fraction = 0.90
 max_leverage = 10
 ```
 
-目标设计和执行计划分别位于：
+该政策已随当前 migration **140** 和 release `386cc3d7` 进入生产 current
+authority。它允许两个不同、已归属、受保护且对账一致的 instrument 仓位，同时继续
+限制一次最多一个新 Action-Time Lane。
+
+设计和执行计划分别位于：
 
 - `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_DESIGN.md`
 - `docs/current/DUAL_POSITION_HARD_CAP_ACCOUNT_RISK_MODEL_V0_IMPLEMENTATION_PLAN.md`
 
-该目标只有在代码、migration、完整账户影子投影和 rollback 认证通过后，才通过
-版本化 Account Risk Policy event 激活。文档批准本身不改变生产 sizing 或双仓位权限。
+该事实不授予第三仓位、live profile、symbol、side、notional 或 leverage 扩张。
+P0-ACH 负责对当前双仓位能力执行 whole-chain pre-live recertification；文档本身不改变
+现有生产 policy。
 
 ## Purpose
 
