@@ -1,12 +1,13 @@
 ---
 title: P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN
-status: PROPOSED_IMPLEMENTATION_CONFIRMATION_REQUIRED
+status: IMPLEMENTATION_IN_PROGRESS
 authority: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN.md
 program_id: P0-ACH
 design: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md
 r7_design: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN.md
 r7_plan: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_IMPLEMENTATION_PLAN.md
 baseline_commit: 60999176
+current_certified_commit: 1fd49cc09efdb9653d5e1df4da8b8bb2b5fe86f1
 target_stop: deployment_confirmation_gate
 production_deploy: out_of_scope_until_owner_confirmation
 ---
@@ -338,6 +339,28 @@ R1 与 R0 结束前不得并行修改 execution core。R5、R6 涉及相同 life
 **Hard Stop:** SQLite 替代 lock/Numeric/concurrency 认证。
 
 ## 14. R9 — Shadow Restore 与部署前包
+
+### 14.1 当前执行状态
+
+**R7** 的共享 Current Truth 与旧路径退役已完成，**R8** 的 disposable
+PostgreSQL 全链与 chaos 认证已完成。R9 尚未改变东京、生产 schema、生产
+role、Writer Fence 或交易所；它只允许生成 exact commit 的预部署证据，并将
+缺失的 shadow/role/previous-writer 证据保持为明确 blocker，不能以本地测试
+替代。
+
+### 14.2 已获得的 R9 只读证据
+
+| 证据项 | 结论 | 影响 | 来源 |
+| --- | --- | --- | --- |
+| Migration graph | 单 head **`142`**；checksum 由 `prepare_multi_position_predeploy_package.py` 计算 | 可作为 candidate release 的不可变输入 | 本地 Git，2026-07-20 |
+| Local PostgreSQL | disposable certification DB 当前无业务表，不能冒充 production shadow | 必须从 production backup 恢复到新 shadow 后再 fingerprint | 本地 Docker readonly catalog，2026-07-20 |
+| Tokyo role topology | 当前登录 runtime identity 为 `brc_dryrun`，且具有 superuser、`CREATEROLE` 与 `CREATEDB` | 不满足 application/migration identity 分离；不得进入部署前通过状态 | Tokyo `dingdingbot-pg` container readonly catalog，2026-07-20 |
+
+因此 `role_topology_decision` 为
+**`credential_or_secret_change_required`**：目标 application identity 必须无 schema
+DDL、managed object ownership 或可通过 membership/`SET ROLE` 绕过的权限。当前没有
+第二个可用 application identity；建立并分发该身份会涉及 credential/secret change，
+本计划禁止自动执行。R9 保持 **`blocked_owner`**，直到该生产权限边界得到单独授权。
 
 ### Task Packet
 
