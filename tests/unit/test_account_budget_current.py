@@ -62,7 +62,8 @@ def test_consumed_reservation_is_claim_ceiling_not_additive_to_open_exposure() -
     assert budget.portfolio_held_risk == Decimal("22")
     assert budget.claimed_position_slots == 2
     assert budget.pending_ticket_claims == 1
-    assert budget.new_entry_allowed is True
+    assert budget.new_entry_allowed is False
+    assert budget.first_blocker == "max_concurrent_positions_reached"
 
 
 def test_semantically_identical_refresh_preserves_capacity_projection_version() -> None:

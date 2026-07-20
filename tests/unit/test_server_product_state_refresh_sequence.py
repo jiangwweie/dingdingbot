@@ -743,7 +743,7 @@ def test_expire_stale_action_time_objects_closes_pg_current_rows():
                 "expired_promotion_candidates": 1,
                 "expired_action_time_lane_inputs": 1,
                 "expired_action_time_tickets": 1,
-                "expired_budget_reservations": 1,
+                "expired_budget_reservations": 0,
             }
             assert counts == {
                 "fresh_live_signal_events": 0,
@@ -772,17 +772,13 @@ def test_expire_stale_action_time_objects_closes_pg_current_rows():
             ).scalar_one() == "expired"
             assert conn.execute(
                 sa.text("SELECT status FROM brc_budget_reservations")
-            ).scalar_one() == "released"
+            ).scalar_one() == "consumed"
             assert conn.execute(
                 sa.text(
                     "SELECT from_status, to_status, reason "
                     "FROM brc_budget_reservation_events"
                 )
-            ).one() == (
-                "consumed",
-                "released",
-                "terminal_presubmit_ticket_capacity_reclaimed",
-            )
+            ).first() is None
     finally:
         engine.dispose()
 

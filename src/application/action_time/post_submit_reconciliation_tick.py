@@ -388,9 +388,10 @@ def materialize_ticket_bound_reconciliation_tick(
     }
     _upsert_row(conn, "brc_ticket_bound_reconciliation_ticks", "reconciliation_tick_id", tick)
     account_risk_reprojection: dict[str, Any] = {}
-    if account_risk_snapshot is not None and _tick_semantics_changed(
-        existing, tick
-    ):
+    # Account Current is a projection of each complete fresh account snapshot,
+    # not a side effect of lifecycle-state changes.  Lifecycle semantics still
+    # control lifecycle audit/event mutation below.
+    if account_risk_snapshot is not None:
         account_risk_reprojection = reproject_account_risk_current(
             conn,
             snapshot=account_risk_snapshot,

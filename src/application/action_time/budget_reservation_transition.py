@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from hashlib import sha256
 
 from pydantic import BaseModel, ConfigDict
 import sqlalchemy as sa
+
+from src.infrastructure.binance_usdm_account_risk_snapshot import (
+    FullAccountRiskSnapshot,
+)
 
 from src.application.action_time.account_capacity_claim import (
     load_account_capacity_claim_by_invocation,
@@ -200,8 +205,17 @@ def reclaim_terminal_presubmit_reservations(
     *,
     now_ms: int,
     evidence_ref_prefix: str,
+    snapshot: FullAccountRiskSnapshot | None = None,
 ) -> int:
-    """Release only terminal Ticket claims proven absent from exchange and exposure."""
+    """Release only terminal claims proven absent by one fresh full snapshot."""
+
+    if (
+        snapshot is None
+        or not snapshot.snapshot_ready
+        or snapshot.can_trade is not True
+        or snapshot.valid_until_ms <= now_ms
+    ):
+        return 0
 
     required_tables = {
         "brc_budget_reservations",
@@ -211,7 +225,11 @@ def reclaim_terminal_presubmit_reservations(
         "brc_ticket_bound_exchange_commands",
         "brc_account_exposure_current",
     }
-    if not required_tables <= set(sa.inspect(conn).get_table_names()):
+    try:
+        table_names = set(sa.inspect(conn).get_table_names())
+    except sa.exc.NoInspectionAvailable:
+        return 0
+    if not required_tables <= table_names:
         return 0
     reservations = _table(conn, "brc_budget_reservations")
     tickets = _table(conn, "brc_action_time_tickets")
@@ -234,6 +252,11 @@ def reclaim_terminal_presubmit_reservations(
             attempts=attempts,
             commands=commands,
             ticket_id=ticket_id,
+        ) or _ticket_has_snapshot_exposure_or_order(
+            conn,
+            commands=commands,
+            ticket_id=ticket_id,
+            snapshot=snapshot,
         ) or _ticket_claimed_position_slot(exposure, conn, ticket_id):
             continue
         result = transition_budget_reservation(
@@ -244,7 +267,14 @@ def reclaim_terminal_presubmit_reservations(
             evidence_ref=f"{evidence_ref_prefix}:{ticket_id}",
             now_ms=now_ms,
         )
-        reclaimed += int(result.transitioned)
+        if result.transitioned:
+            _mark_presubmit_reconciled_absent(
+                conn,
+                ticket_id=ticket_id,
+                now_ms=now_ms,
+                evidence_ref=f"{evidence_ref_prefix}:{ticket_id}",
+            )
+            reclaimed += 1
     return reclaimed
 
 
@@ -266,8 +296,23 @@ def _ticket_has_exchange_write_or_unknown(
         return True
     if conn.execute(sa.select(attempts.c.ticket_id).where(sa.and_(*attempt_predicates)).limit(1)).first():
         return True
+    safe_attempt = conn.execute(
+        sa.select(attempts.c.ticket_id)
+        .where(attempts.c.ticket_id == ticket_id)
+        .where(attempts.c.exchange_write_called.is_(False))
+        .where(attempts.c.status.in_(("submit_failed", "hard_stopped", "blocked")))
+        .limit(1)
+    ).first()
+    if safe_attempt is None:
+        return True
     required_command_columns = {"ticket_id", "command_state", "dispatch_started_at_ms", "exchange_order_id"}
     if not required_command_columns <= set(commands.c.keys()):
+        return True
+    command_rows = conn.execute(
+        sa.select(commands.c.command_state, commands.c.dispatch_started_at_ms, commands.c.exchange_order_id)
+        .where(commands.c.ticket_id == ticket_id)
+    ).mappings().all()
+    if not command_rows:
         return True
     unsafe_command = sa.or_(
         commands.c.dispatch_started_at_ms.is_not(None),
@@ -289,12 +334,112 @@ def _ticket_claimed_position_slot(
 ) -> bool:
     if not {"owner_ticket_id", "position_slot_claimed"} <= set(exposure.c.keys()):
         return True
-    return conn.execute(
-        sa.select(exposure.c.owner_ticket_id)
+    rows = conn.execute(
+        sa.select(
+            exposure.c.exposure_state,
+            exposure.c.position_qty,
+            exposure.c.working_entry_qty,
+            exposure.c.position_slot_claimed,
+        )
         .where(exposure.c.owner_ticket_id == ticket_id)
-        .where(exposure.c.position_slot_claimed.is_(True))
-        .limit(1)
-    ).first() is not None
+    ).mappings()
+    for row in rows:
+        if row.get("position_slot_claimed") is not True:
+            continue
+        if (
+            str(row.get("exposure_state") or "") == "reserved"
+            and _decimal(row.get("position_qty")) == 0
+            and _decimal(row.get("working_entry_qty")) == 0
+        ):
+            continue
+        return True
+    return False
+
+
+def _ticket_has_snapshot_exposure_or_order(
+    conn: sa.Connection,
+    *,
+    commands: sa.Table,
+    ticket_id: str,
+    snapshot: FullAccountRiskSnapshot,
+) -> bool:
+    rows = conn.execute(
+        sa.select(commands.c.gateway_symbol, commands.c.client_order_id)
+        .where(commands.c.ticket_id == ticket_id)
+    ).mappings().all()
+    symbols = {str(row.get("gateway_symbol") or "") for row in rows}
+    client_ids = {str(row.get("client_order_id") or "") for row in rows}
+    if not symbols or not client_ids:
+        return True
+    if any(
+        position.exchange_symbol in symbols and position.position_qty != 0
+        for position in snapshot.positions
+    ):
+        return True
+    for order in (*snapshot.regular_open_orders, *snapshot.algo_open_orders):
+        if order.exchange_symbol not in symbols:
+            continue
+        # A same-instrument order not provably owned by this terminal Ticket is
+        # unsafe to ignore; it may be a manual or unknown exchange outcome.
+        if (
+            str(order.client_order_id or "") not in client_ids
+            and str(order.client_algo_id or "") not in client_ids
+        ):
+            return True
+        return True
+    return False
+
+
+def _mark_presubmit_reconciled_absent(
+    conn: sa.Connection,
+    *,
+    ticket_id: str,
+    now_ms: int,
+    evidence_ref: str,
+) -> None:
+    required = {
+        "brc_ticket_bound_order_lifecycle_runs",
+        "brc_ticket_bound_lifecycle_events",
+    }
+    if not required <= set(sa.inspect(conn).get_table_names()):
+        return
+    lifecycles = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
+    events = _table(conn, "brc_ticket_bound_lifecycle_events")
+    lifecycle = conn.execute(
+        sa.select(lifecycles).where(lifecycles.c.ticket_id == ticket_id)
+    ).mappings().first()
+    if lifecycle is None or str(lifecycle.get("status") or "") == "presubmit_reconciled_absent":
+        return
+    conn.execute(
+        lifecycles.update()
+        .where(lifecycles.c.lifecycle_run_id == lifecycle["lifecycle_run_id"])
+        .values(
+            status="presubmit_reconciled_absent",
+            first_blocker=None,
+            blockers=[],
+            updated_at_ms=now_ms,
+        )
+    )
+    event_id = _stable_id("lifecycle_event", ticket_id, "presubmit_reconciled_absent")
+    if conn.execute(
+        sa.select(events.c.lifecycle_event_id)
+        .where(events.c.lifecycle_event_id == event_id)
+    ).first() is None:
+        conn.execute(
+            events.insert().values(
+                lifecycle_event_id=event_id,
+                lifecycle_run_id=lifecycle["lifecycle_run_id"],
+                ticket_id=ticket_id,
+                protected_submit_attempt_id=lifecycle["protected_submit_attempt_id"],
+                event_type="presubmit_reconciled_absent",
+                event_payload={"evidence_ref": evidence_ref, "exchange_write_called": False},
+                created_at_ms=now_ms,
+            )
+        )
+
+
+def _decimal(value: object) -> Decimal:
+    return value if isinstance(value, Decimal) else Decimal(str(value or "0"))
 
 
 def _stable_id(prefix: str, *parts: str) -> str:

@@ -143,6 +143,16 @@ def project_account_budget_current(
     pending = len({key for key in pending_ticket_keys if key})
     limit = snapshot.total_wallet_balance * policy.max_portfolio_open_risk_fraction
     margin_limit = snapshot.total_wallet_balance * policy.max_portfolio_initial_margin_fraction
+    claimed_slots = slots + pending
+    capacity_blocker: str | None = None
+    if claimed_slots >= policy.max_concurrent_positions:
+        capacity_blocker = "max_concurrent_positions_reached"
+    elif held >= limit:
+        capacity_blocker = "portfolio_risk_limit_reached"
+    elif snapshot.exchange_total_initial_margin + pending_margin >= margin_limit:
+        capacity_blocker = "portfolio_margin_limit_reached"
+    entry_blockers = [*ordered_blockers, *([capacity_blocker] if capacity_blocker else [])]
+    new_entry_allowed = not entry_blockers
     existing = _existing(conn, snapshot.account_id, runtime_profile_id, policy.risk_policy_version)
     semantic_values = {
         "risk_policy_version": policy.risk_policy_version,
@@ -155,11 +165,11 @@ def project_account_budget_current(
         "unknown_held_risk": unknown_risk,
         "portfolio_held_risk": held,
         "unreflected_pending_margin": pending_margin,
-        "claimed_position_slots": slots + pending,
+        "claimed_position_slots": claimed_slots,
         "pending_ticket_claims": pending,
         "max_concurrent_positions": policy.max_concurrent_positions,
-        "new_entry_allowed": not ordered_blockers,
-        "first_blocker": ordered_blockers[0] if ordered_blockers else None,
+        "new_entry_allowed": new_entry_allowed,
+        "first_blocker": entry_blockers[0] if entry_blockers else None,
     }
     if projection_version_override is not None and projection_version_override <= 0:
         raise ValueError("projection_version_override must be positive")
@@ -168,9 +178,9 @@ def project_account_budget_current(
         risk_policy_version=policy.risk_policy_version, open_directional_risk=open_risk,
         reserved_risk=reserved_risk, working_entry_risk=working_risk,
         unknown_held_risk=unknown_risk, unreflected_pending_margin=pending_margin,
-        portfolio_held_risk=held, claimed_position_slots=slots + pending,
-        pending_ticket_claims=pending, new_entry_allowed=not ordered_blockers,
-        first_blocker=ordered_blockers[0] if ordered_blockers else None,
+        portfolio_held_risk=held, claimed_position_slots=claimed_slots,
+        pending_ticket_claims=pending, new_entry_allowed=new_entry_allowed,
+        first_blocker=entry_blockers[0] if entry_blockers else None,
         projection_version=(
             projection_version_override
             if projection_version_override is not None
@@ -222,7 +232,9 @@ def _persist(conn: sa.Connection, result: AccountBudgetCurrent, snapshot: FullAc
         ),
         "pending_ticket_claims": result.pending_ticket_claims,
         "max_concurrent_positions": policy.max_concurrent_positions,
-        "reconciliation_state": "matched" if result.new_entry_allowed else "mismatch", "source_snapshot_id": snapshot.source_snapshot_id,
+        # Capacity exhaustion is a normal matched account fact, not a failed
+        # reconciliation.  Only truth/safety blockers make Current mismatched.
+        "reconciliation_state": "matched" if not _truth_blocked(result.first_blocker) else "mismatch", "source_snapshot_id": snapshot.source_snapshot_id,
         "source_watermark": snapshot.source_snapshot_id, "valid_until_ms": snapshot.valid_until_ms, "updated_at_ms": now_ms,
     }
     columns = tuple(values)
@@ -254,6 +266,14 @@ def _persist(conn: sa.Connection, result: AccountBudgetCurrent, snapshot: FullAc
 
 def _decimal(value: object) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(str(value or "0"))
+
+
+def _truth_blocked(first_blocker: str | None) -> bool:
+    return bool(first_blocker) and first_blocker not in {
+        "max_concurrent_positions_reached",
+        "portfolio_risk_limit_reached",
+        "portfolio_margin_limit_reached",
+    }
 
 
 def _driver_params(values: dict[str, object]) -> dict[str, object]:

@@ -50,6 +50,9 @@ from src.application.action_time.ticket_exit_market_fact_service import (  # noq
     ExistingClosedCandleSourceAdapter,
     materialize_due_ticket_exit_market_facts,
 )
+from src.application.action_time.account_risk_reprojection import (  # noqa: E402
+    reproject_account_risk_current,
+)
 from src.infrastructure.sync_pg_dsn import (  # noqa: E402
     is_sync_postgres_dsn,
     normalize_sync_postgres_dsn,
@@ -305,6 +308,30 @@ async def _amain(argv: list[str] | None = None) -> int:
                 _remaining_seconds(deadline_at, "account_risk_snapshot"),
             ),
         )
+        account_truth_results: list[dict[str, Any]] = []
+        _remaining_seconds(deadline_at, "account_truth_projection")
+        with telemetry.stage("account_truth_projection"):
+            # Account truth has its own committed transaction.  Candidate and
+            # lifecycle work later in this invocation cannot roll it back.
+            with engine.begin() as conn:
+                telemetry.pg_transaction_count += 1
+                for scope_key, (
+                    account_id,
+                    runtime_profile_id,
+                    exchange_id,
+                ) in sorted(account_risk_scopes.items()):
+                    if not scope_key.startswith("account_risk_scope:"):
+                        continue
+                    snapshot = provided_account_risk_snapshots.get(scope_key)
+                    if snapshot is None:
+                        continue
+                    result = reproject_account_risk_current(
+                        conn,
+                        snapshot=snapshot,
+                        runtime_profile_id=runtime_profile_id,
+                        now_ms=int(time.time() * 1000),
+                    )
+                    account_truth_results.append(result.model_dump())
         ticket_exit_market_facts: list[dict[str, Any]] = []
         ticket_ids = sorted(
             {
@@ -377,6 +404,7 @@ async def _amain(argv: list[str] | None = None) -> int:
             "exchange_command_worker": worker_payload,
             "exchange_command_reconciliation": reconciliation_payload,
             "ticket_exit_market_facts": ticket_exit_market_facts,
+            "account_truth_results": account_truth_results,
             "exchange_write_called": (
                 worker_payload.get("exchange_write_called") is True
             ),
@@ -591,16 +619,13 @@ def _active_account_risk_scopes(
     *,
     prepared_scopes: list[dict[str, Any]],
 ) -> dict[str, tuple[str, str, str]]:
-    """Return Ticket-to-account scopes only for active capacity policy.
+    """Return every active-policy account plus selected Ticket aliases.
 
-    The result is intentionally keyed by Ticket rather than symbol.  A single
-    full-account snapshot may be reused for multiple selected Tickets of the
-    same account, while the scheduler remains unable to infer account truth
-    from per-Ticket exchange snapshots.
+    The collector currently implements the approved Binance USD-M full-account
+    surface.  Its account-scope rows deliberately exist even when no lifecycle
+    Ticket is active, so Current does not depend on lifecycle activity.
     """
 
-    if not prepared_scopes:
-        return {}
     active_pairs = {
         (str(row["account_id"]), str(row["runtime_profile_id"]))
         for row in conn.execute(
@@ -614,7 +639,14 @@ def _active_account_risk_scopes(
             )
         ).mappings()
     }
-    result: dict[str, tuple[str, str, str]] = {}
+    result: dict[str, tuple[str, str, str]] = {
+        f"account_risk_scope:{account_id}:{runtime_profile_id}": (
+            account_id,
+            runtime_profile_id,
+            "binance_usdm",
+        )
+        for account_id, runtime_profile_id in active_pairs
+    }
     for prepared in prepared_scopes:
         scope = prepared.get("scope")
         if scope is None:

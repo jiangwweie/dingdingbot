@@ -103,6 +103,9 @@ from src.domain.runtime_lane_identity import (  # noqa: E402
 from src.infrastructure.binance_usdm_account_risk_snapshot import (  # noqa: E402
     FullAccountRiskSnapshot,
 )
+from src.application.runtime_coverage_health import (  # noqa: E402
+    runtime_coverage_is_healthy,
+)
 
 
 OPEN_REAL_LANE_STATUSES = {
@@ -1849,14 +1852,15 @@ def _candidate_blockers(
                 f"{readiness.get('first_blocker_class') or 'missing'}"
             )
 
-    if coverage.get("coverage_state") != "covered":
-        blockers.append(f"runtime_coverage_not_covered:{coverage.get('coverage_state') or 'missing'}")
-    if coverage.get("liveness_state") not in {"healthy", "ok", "active"}:
-        blockers.append(f"runtime_coverage_not_healthy:{coverage.get('liveness_state') or 'missing'}")
-    if coverage.get("is_current") is not True:
-        blockers.append("runtime_coverage_not_current")
-    if int(coverage.get("valid_until_ms") or 0) <= now_ms:
-        blockers.append("runtime_coverage_expired")
+    if not runtime_coverage_is_healthy(coverage, now_ms=now_ms):
+        if coverage.get("coverage_state") != "covered":
+            blockers.append(f"runtime_coverage_not_covered:{coverage.get('coverage_state') or 'missing'}")
+        if coverage.get("liveness_state") not in {"healthy", "ok", "active"}:
+            blockers.append(f"runtime_coverage_not_healthy:{coverage.get('liveness_state') or 'missing'}")
+        if coverage.get("is_current") is not True:
+            blockers.append("runtime_coverage_not_current")
+        if int(coverage.get("valid_until_ms") or 0) <= now_ms:
+            blockers.append("runtime_coverage_expired")
     if require_typed_coverage:
         blockers.extend(
             _invocation_coverage_identity_blockers(

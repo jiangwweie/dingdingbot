@@ -228,6 +228,15 @@ LIFECYCLE_STATUS_SPECIFICATIONS: dict[str, LifecycleStatusSpecification] = {
         "release_or_expire_ticket_scope_after_submit_failure",
         "submit",
     ),
+    "presubmit_reconciled_absent": _spec(
+        LifecyclePhase.CLOSED,
+        ProtectionState.NOT_APPLICABLE,
+        ReconciliationState.MATCHED,
+        LifecycleControlState.COMPLETED,
+        "presubmit_reconciled_absent",
+        "lifecycle_closed",
+        "submit",
+    ),
     "entry_unknown": _spec(
         LifecyclePhase.SUBMITTING,
         ProtectionState.UNKNOWN,

@@ -302,7 +302,7 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
                  AND w.side = c.side
                  AND w.is_current = true
                  AND w.coverage_state = 'covered'
-                 AND w.liveness_state = 'active'
+                 AND w.liveness_state IN ('healthy', 'ok', 'active')
                  AND w.valid_until_ms > :now_ms
                 WHERE c.status = 'active'
                   AND (c.valid_until_ms IS NULL OR c.valid_until_ms > :now_ms)
@@ -326,7 +326,7 @@ def _read_l2_l7_chain_snapshot(conn: sa.engine.Connection) -> dict[str, Any]:
                 FROM brc_watcher_runtime_coverage
                 WHERE is_current = true
                   AND coverage_state = 'covered'
-                  AND liveness_state = 'active'
+                  AND liveness_state IN ('healthy', 'ok', 'active')
                 GROUP BY strategy_group_id
                 ORDER BY strategy_group_id
                 """

@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 import sqlalchemy as sa
 
@@ -23,6 +24,9 @@ from src.application.action_time.ticket_materialization_sequence import (  # noq
 )
 from src.application.action_time.action_time_invocation import (  # noqa: E402
     load_action_time_invocation,
+)
+from src.application.action_time.account_risk_reprojection import (  # noqa: E402
+    reproject_account_risk_current,
 )
 from src.application.runtime_process_outcome import (  # noqa: E402
     runtime_process_exit_code,
@@ -111,6 +115,21 @@ def main(argv: list[str] | None = None) -> int:
                     base_url=args.base_url,
                     timeout_seconds=args.account_risk_timeout_seconds,
                 )
+                # Commit account truth before candidate/Ticket work begins.
+                # The sequence's nested savepoint may reject a candidate but
+                # must never roll a complete exchange snapshot back.
+                with engine.begin() as conn:
+                    try:
+                        reproject_account_risk_current(
+                            conn,
+                            snapshot=prefetched_account_snapshot,
+                            runtime_profile_id=scope.runtime_profile_id,
+                            now_ms=int(args.now_ms or time.time() * 1000),
+                        )
+                    except sa.exc.NoInspectionAvailable:
+                        # In-memory CLI doubles do not implement a database.
+                        # Production connections never take this path.
+                        pass
         with engine.begin() as conn:
             report = materialize_action_time_ticket_sequence(
                 conn,

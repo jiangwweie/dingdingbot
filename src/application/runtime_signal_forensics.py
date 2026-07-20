@@ -7,6 +7,7 @@ from typing import Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.application.owner_notification import owner_correlation_id
+from src.application.runtime_coverage_health import runtime_coverage_is_healthy
 
 
 class RuntimeSignalForensicsQuery(BaseModel):
@@ -631,10 +632,7 @@ def _lane_window_is_healthy(
         end = int(row.get("coverage_end_ms") or row.get("valid_until_ms") or 0)
         if end < query.start_ms or start > query.end_ms:
             continue
-        if (
-            str(row.get("coverage_state") or "") != "covered"
-            or str(row.get("liveness_state") or "") not in {"healthy", "ok"}
-        ):
+        if not runtime_coverage_is_healthy(row):
             return False
         intervals.append((max(start, query.start_ms), min(end, query.end_ms)))
     if not intervals:

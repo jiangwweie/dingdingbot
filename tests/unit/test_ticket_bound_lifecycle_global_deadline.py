@@ -122,7 +122,14 @@ def test_active_account_risk_scope_requires_matching_active_policy(
         ],
     )
 
-    assert scopes == {"ticket-1": ("account-1", "profile-1", "binance_usdm")}
+    assert scopes == {
+        "account_risk_scope:account-1:profile-1": (
+            "account-1",
+            "profile-1",
+            "binance_usdm",
+        ),
+        "ticket-1": ("account-1", "profile-1", "binance_usdm"),
+    }
 
 
 @pytest.mark.asyncio

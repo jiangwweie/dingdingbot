@@ -1084,6 +1084,17 @@ class Order(FinancialModel):
     signal_evaluation_id: Optional[str] = None
     order_candidate_id: Optional[str] = None
 
+    # Ticket-bound command lineage.  These values are intentionally separate
+    # from signal/evaluation semantics: a Ticket is not a signal evaluation.
+    ticket_id: Optional[str] = None
+    exchange_command_id: Optional[str] = None
+    account_id: Optional[str] = None
+    exchange_id: Optional[str] = None
+    exchange_instrument_id: Optional[str] = None
+    runtime_profile_id: Optional[str] = None
+    strategy_group_id: Optional[str] = None
+    exposure_episode_id: Optional[str] = None
+
     # T4 - 订单持久化扩展
     filled_at: Optional[int] = None  # 成交时间戳（毫秒），用于回测记录订单实际成交时间
 

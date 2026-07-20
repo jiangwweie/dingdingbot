@@ -2816,7 +2816,10 @@ async def _execute_one_ticket_bound_exchange_command(
         InsufficientMarginError,
         InvalidOrderError,
     )
-    from src.domain.models import Direction, Order, OrderRole, OrderStatus
+    from src.application.action_time.ticket_bound_local_order import (
+        assert_ticket_bound_local_order_identity,
+        build_ticket_bound_local_order,
+    )
     from src.domain.ticket_bound_exchange_command import (
         ExchangeCommandOutcomeClass,
         ExchangeCommandState,
@@ -2907,26 +2910,16 @@ async def _execute_one_ticket_bound_exchange_command(
                 "order_lifecycle_called": False,
             }
     try:
-        direction = Direction.LONG if command["side"] == "long" else Direction.SHORT
-        amount = Decimal(str(command["amount"]))
-        order = Order(
-            id=str(command["local_order_id"]),
-            signal_id=str(command["ticket_id"]),
-            symbol=str(command["gateway_symbol"]),
-            direction=direction,
-            order_type=_ticket_bound_order_type(command["order_type"]),
-            order_role=OrderRole(str(command["order_role"])),
-            price=_optional_decimal(command.get("price")),
-            trigger_price=_optional_decimal(command.get("stop_price")),
-            requested_qty=amount,
-            status=OrderStatus.CREATED,
-            created_at=now_ms,
-            updated_at=now_ms,
-            reduce_only=command.get("reduce_only") is True,
-            parent_order_id=command.get("parent_order_id"),
-            signal_evaluation_id=str(command["ticket_id"]),
+        signal_event_id = _ticket_bound_signal_event_id(
+            engine, ticket_id=str(command["ticket_id"])
         )
-        await order_lifecycle_service.register_created_order(
+        order = build_ticket_bound_local_order(
+            command=command,
+            signal_event_id=signal_event_id,
+            now_ms=now_ms,
+            order_type=_ticket_bound_order_type(command["order_type"]),
+        )
+        persisted = await order_lifecycle_service.register_created_order(
             order,
             metadata={
                 "scope": "ticket_bound_exchange_command",
@@ -2939,12 +2932,17 @@ async def _execute_one_ticket_bound_exchange_command(
                 "exchange_called": False,
             },
         )
+        assert_ticket_bound_local_order_identity(
+            order=persisted,
+            command=command,
+            signal_event_id=signal_event_id,
+        )
     except Exception as exc:
+        failure = _classify_local_order_registration_error(exc)
         return {
-            "status": "local_order_registration_failed",
+            "status": failure,
             "blockers": [
-                "local_order_registration_failed:"
-                f"{command.get('local_order_id')}:{type(exc).__name__}"
+                f"{failure}:{command.get('local_order_id')}"
             ],
             "exchange_write_called": False,
             "order_created": False,
@@ -3539,6 +3537,43 @@ def _optional_decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
         return None
     return Decimal(str(value))
+
+
+def _ticket_bound_signal_event_id(engine: Any, *, ticket_id: str) -> str:
+    """Resolve the Ticket's authoritative Signal Event identity before dispatch."""
+
+    with engine.connect() as conn:
+        tickets = sa.Table(
+            "brc_action_time_tickets", sa.MetaData(), autoload_with=conn
+        )
+        row = conn.execute(
+            sa.select(tickets.c.signal_event_id).where(tickets.c.ticket_id == ticket_id)
+        ).mappings().first()
+    signal_event_id = str((row or {}).get("signal_event_id") or "").strip()
+    if not signal_event_id:
+        raise ValueError("ticket_bound_signal_event_id_missing")
+    return signal_event_id
+
+
+def _classify_local_order_registration_error(exc: Exception) -> str:
+    """Return a stable, non-sensitive failure category before exchange dispatch."""
+
+    if isinstance(exc, (sa.exc.IntegrityError, sa.exc.DataError)):
+        return "local_order_registration_constraint_violation"
+    if isinstance(exc, sa.exc.DBAPIError):
+        sqlstate = str(
+            getattr(getattr(exc, "orig", None), "sqlstate", "")
+            or getattr(getattr(exc, "orig", None), "pgcode", "")
+        )
+        if sqlstate in {"22001", "22003", "23502", "23503", "23505", "23514"}:
+            return "local_order_registration_constraint_violation"
+        if sqlstate.startswith("08"):
+            return "local_order_registration_connection_unavailable"
+    if isinstance(exc, (sa.exc.OperationalError, ConnectionError, TimeoutError)):
+        return "local_order_registration_connection_unavailable"
+    if "ticket_bound_local_order" in str(exc):
+        return "local_order_registration_schema_invalid"
+    return "local_order_registration_unknown"
 
 
 def _decimal_or_zero(value: Any) -> Decimal:

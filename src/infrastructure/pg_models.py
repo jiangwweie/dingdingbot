@@ -52,8 +52,8 @@ class PGOrderORM(PGCoreBase):
 
     __tablename__ = "orders"
 
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    signal_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    id: Mapped[str] = mapped_column(String(192), primary_key=True)
+    signal_id: Mapped[Optional[str]] = mapped_column(String(192), nullable=True)
     symbol: Mapped[str] = mapped_column(String(64), nullable=False)
     direction: Mapped[str] = mapped_column(String(16), nullable=False)
     order_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -72,7 +72,7 @@ class PGOrderORM(PGCoreBase):
     exchange_reduce_only_param_sent: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     exchange_reduce_only_omit_reason: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     parent_order_id: Mapped[Optional[str]] = mapped_column(
-        String(64),
+        String(192),
         ForeignKey("orders.id", deferrable=True, initially="DEFERRED"),
         nullable=True,
     )
@@ -83,8 +83,16 @@ class PGOrderORM(PGCoreBase):
     trial_binding_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     strategy_family_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     strategy_family_version_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    signal_evaluation_id: Mapped[Optional[str]] = mapped_column(String(192), nullable=True)
     order_candidate_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    ticket_id: Mapped[Optional[str]] = mapped_column(String(192), nullable=True)
+    exchange_command_id: Mapped[Optional[str]] = mapped_column(String(192), nullable=True)
+    account_id: Mapped[Optional[str]] = mapped_column(String(192), nullable=True)
+    exchange_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    exchange_instrument_id: Mapped[Optional[str]] = mapped_column(String(192), nullable=True)
+    runtime_profile_id: Mapped[Optional[str]] = mapped_column(String(192), nullable=True)
+    strategy_group_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    exposure_episode_id: Mapped[Optional[str]] = mapped_column(String(192), nullable=True)
     filled_at: Mapped[Optional[int]] = mapped_column(BIGINT, nullable=True)
     created_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
     updated_at: Mapped[int] = mapped_column(BIGINT, nullable=False, default=_now_ms)
@@ -121,6 +129,21 @@ class PGOrderORM(PGCoreBase):
         Index("idx_orders_trial_binding_id", "trial_binding_id"),
         Index("idx_orders_strategy_family_version_id", "strategy_family_version_id"),
         Index("idx_orders_order_candidate_id", "order_candidate_id"),
+        Index(
+            "uq_orders_exchange_command_id",
+            "exchange_command_id",
+            unique=True,
+            postgresql_where=exchange_command_id.is_not(None),
+            sqlite_where=exchange_command_id.is_not(None),
+        ),
+        CheckConstraint(
+            "exchange_command_id IS NULL OR "
+            "(ticket_id IS NOT NULL AND account_id IS NOT NULL AND "
+            "exchange_id IS NOT NULL AND exchange_instrument_id IS NOT NULL AND "
+            "runtime_profile_id IS NOT NULL AND strategy_group_id IS NOT NULL AND "
+            "exposure_episode_id IS NOT NULL)",
+            name="ck_orders_ticket_bound_lineage",
+        ),
     )
 
 

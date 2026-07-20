@@ -9,6 +9,9 @@ from src.application.action_time.account_budget_current import (
     AccountBudgetCurrent,
     project_account_budget_current,
 )
+from src.application.action_time.budget_reservation_transition import (
+    reclaim_terminal_presubmit_reservations,
+)
 from src.application.action_time.account_exchange_ownership import (
     classify_account_exchange_truth,
 )
@@ -60,6 +63,14 @@ def reproject_account_risk_current(
     )
     if policy is None:
         return _blocked(snapshot, runtime_profile_id, "account_risk_policy_missing_or_changed")
+    # This happens before Current projection so a terminal, proven-absent
+    # reservation cannot recreate its own reservation-only slot forever.
+    reclaim_terminal_presubmit_reservations(
+        conn,
+        now_ms=now_ms,
+        evidence_ref_prefix="account_risk_reprojection",
+        snapshot=snapshot,
+    )
     classification = classify_account_exchange_truth(conn, snapshot=snapshot)
     exposure = project_account_exposure_current(
         conn,

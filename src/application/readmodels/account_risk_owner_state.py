@@ -20,7 +20,7 @@ def account_risk_owner_state_from_budget(row: dict[str, object]) -> AccountRiskO
     maximum = max(1, int(row.get("max_concurrent_positions") or 1))
     reconciliation_state = str(row.get("reconciliation_state") or "")
     new_entry_allowed = row.get("new_entry_allowed") is True
-    if reconciliation_state != "matched" or not new_entry_allowed:
+    if reconciliation_state != "matched":
         return AccountRiskOwnerState(
             state="needs_intervention",
             summary="账户事实需要重新对账；系统已停止新开仓，现有保护继续运行",
@@ -30,6 +30,12 @@ def account_risk_owner_state_from_budget(row: dict[str, object]) -> AccountRiskO
         return AccountRiskOwnerState(
             state="running",
             summary=f"当前 {slots}/{maximum} 个仓位正在运行；新机会暂不入场",
+            owner_action_required=False,
+        )
+    if not new_entry_allowed:
+        return AccountRiskOwnerState(
+            state="temporarily_unavailable",
+            summary="账户当前风险或保证金容量不足；系统已停止新开仓，现有保护继续运行",
             owner_action_required=False,
         )
     return AccountRiskOwnerState(
