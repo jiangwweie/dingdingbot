@@ -2103,14 +2103,18 @@ def validate_forward_fix_fence_supersession(
     if post_migration:
         migrated = (predecessor.entries[DEPLOY_PHASES.index("schema_migrated")].get("facts") or {}).get("result")
         if (
-            predecessor.old_sha != old_sha
-            or predecessor.target_sha == target_sha
+            predecessor.target_sha == target_sha
             or not isinstance(migrated, dict)
             or str(migrated.get("revision") or "") != str(expected_revision)
         ):
             raise ValueError("fence_supersession_post_migration_lineage_invalid")
         predecessor_revision = str(expected_revision)
-        mode = "post_migration_pre_activation"
+        if predecessor.old_sha == old_sha:
+            mode = "post_migration_pre_activation"
+        elif predecessor.target_sha == old_sha:
+            mode = "post_activation_pre_policy"
+        else:
+            raise ValueError("fence_supersession_post_migration_lineage_invalid")
     elif actual_revision == str(expected_revision):
         if (
             predecessor.old_sha != old_sha
