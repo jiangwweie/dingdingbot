@@ -31,6 +31,10 @@ class ActionTimeInvocation(BaseModel):
     action_time_fact_snapshot_id: str | None = Field(default=None, max_length=256)
     ticket_id: str | None = Field(default=None, max_length=192)
     closed_at_ms: int | None = Field(default=None, ge=0)
+    terminal_kind: str | None = Field(default=None, max_length=32)
+    terminal_reason_code: str | None = Field(default=None, max_length=160)
+    arbitration_rank: int | None = Field(default=None, ge=1)
+    winner_signal_event_id: str | None = Field(default=None, max_length=192)
 
     @model_validator(mode="after")
     def _validate_time_bounds(self) -> "ActionTimeInvocation":
@@ -43,6 +47,10 @@ class ActionTimeInvocation(BaseModel):
             and self.account_capacity_base_fact_snapshot_id is not None
         ):
             raise ValueError("action_time_invocation_account_fact_pair_ambiguous")
+        if self.terminal_kind is not None and self.closed_at_ms is None:
+            raise ValueError("action_time_invocation_terminal_kind_requires_close")
+        if self.terminal_kind == "not_selected" and not self.winner_signal_event_id:
+            raise ValueError("action_time_invocation_not_selected_requires_winner")
         return self
 
 

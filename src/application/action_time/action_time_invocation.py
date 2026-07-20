@@ -23,6 +23,13 @@ from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 INVOCATION_TABLE = "brc_action_time_invocations"
 FACT_TABLE = "brc_runtime_fact_snapshots"
 SIGNAL_TABLE = "brc_live_signal_events"
+INVOCATION_TERMINAL_KINDS = {
+    "selected",
+    "not_selected",
+    "expired",
+    "rejected",
+    "cancelled",
+}
 
 
 def start_action_time_invocation(
@@ -79,6 +86,7 @@ def start_action_time_invocation(
         "created_at_ms": normalized_opened_at_ms,
         "updated_at_ms": normalized_opened_at_ms,
     }
+    row = {key: value for key, value in row.items() if key in invocation_table.c}
     try:
         with conn.begin_nested():
             conn.execute(invocation_table.insert().values(**row))
@@ -388,6 +396,13 @@ def bind_action_time_invocation_ticket(
             .values(action_time_invocation_id=invocation.action_time_invocation_id)
         )
     invocation_table = _table(conn, INVOCATION_TABLE)
+    terminal_values = {
+        "ticket_id": normalized_ticket_id,
+        "closed_at_ms": normalized_stage_at_ms,
+        "terminal_kind": "selected",
+        "terminal_reason_code": "action_time_ticket_bound",
+        "updated_at_ms": normalized_stage_at_ms,
+    }
     conn.execute(
         invocation_table.update()
         .where(
@@ -395,8 +410,95 @@ def bind_action_time_invocation_ticket(
             == invocation.action_time_invocation_id
         )
         .values(
-            ticket_id=normalized_ticket_id,
+            **{
+                key: value
+                for key, value in terminal_values.items()
+                if key in invocation_table.c
+            }
+        )
+    )
+    return load_action_time_invocation(
+        conn,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+    )
+
+
+def close_action_time_invocation_without_ticket(
+    conn: sa.engine.Connection,
+    *,
+    action_time_invocation_id: str,
+    terminal_kind: str,
+    terminal_reason_code: str,
+    stage_at_ms: int,
+    arbitration_rank: int | None = None,
+    winner_signal_event_id: str | None = None,
+) -> ActionTimeInvocation:
+    """Persist the exact non-Ticket result for one conserved Signal.
+
+    A non-selected, expired or rejected invocation is terminal and must never
+    be reopened on a later watcher tick. The terminal columns are required
+    schema capability; falling back to an untyped ``closed_at`` would recreate
+    the signal-to-promotion causality gap.
+    """
+
+    normalized_kind = str(terminal_kind or "").strip()
+    if normalized_kind not in INVOCATION_TERMINAL_KINDS - {"selected"}:
+        raise ActionTimeInvocationBlocked("action_time_invocation_terminal_kind_invalid")
+    normalized_reason = _required_text(
+        terminal_reason_code,
+        blocker="action_time_invocation_terminal_reason_missing",
+    )
+    invocation = load_action_time_invocation(
+        conn,
+        action_time_invocation_id=action_time_invocation_id,
+    )
+    invocation_table = _table(conn, INVOCATION_TABLE)
+    required_columns = {
+        "terminal_kind",
+        "terminal_reason_code",
+        "arbitration_rank",
+        "winner_signal_event_id",
+    }
+    if not required_columns <= set(invocation_table.c.keys()):
+        raise ActionTimeInvocationBlocked(
+            "action_time_invocation_terminal_capability_missing"
+        )
+    normalized_stage_at_ms = int(stage_at_ms)
+    if invocation.ticket_id is not None:
+        raise ActionTimeInvocationBlocked("action_time_invocation_ticket_already_bound")
+    if invocation.closed_at_ms is not None:
+        if (
+            invocation.terminal_kind == normalized_kind
+            and invocation.terminal_reason_code == normalized_reason
+            and invocation.arbitration_rank == arbitration_rank
+            and invocation.winner_signal_event_id == winner_signal_event_id
+        ):
+            return invocation
+        raise ActionTimeInvocationBlocked("action_time_invocation_already_terminal")
+    _require_stage_within_invocation(invocation, stage_at_ms=normalized_stage_at_ms)
+    normalized_winner = _optional_text(winner_signal_event_id)
+    if normalized_kind == "not_selected" and normalized_winner is None:
+        raise ActionTimeInvocationBlocked(
+            "action_time_invocation_not_selected_winner_missing"
+        )
+    if normalized_kind != "not_selected" and normalized_winner is not None:
+        raise ActionTimeInvocationBlocked("action_time_invocation_unexpected_winner")
+    if arbitration_rank is not None and int(arbitration_rank) <= 0:
+        raise ActionTimeInvocationBlocked(
+            "action_time_invocation_arbitration_rank_invalid"
+        )
+    conn.execute(
+        invocation_table.update()
+        .where(
+            invocation_table.c.action_time_invocation_id
+            == invocation.action_time_invocation_id
+        )
+        .values(
             closed_at_ms=normalized_stage_at_ms,
+            terminal_kind=normalized_kind,
+            terminal_reason_code=normalized_reason,
+            arbitration_rank=arbitration_rank,
+            winner_signal_event_id=normalized_winner,
             updated_at_ms=normalized_stage_at_ms,
         )
     )
@@ -500,6 +602,14 @@ def _invocation_from_row(row: dict[str, Any]) -> ActionTimeInvocation:
                 if row.get("closed_at_ms") is not None
                 else None
             ),
+            terminal_kind=_optional_text(row.get("terminal_kind")),
+            terminal_reason_code=_optional_text(row.get("terminal_reason_code")),
+            arbitration_rank=(
+                int(row["arbitration_rank"])
+                if row.get("arbitration_rank") is not None
+                else None
+            ),
+            winner_signal_event_id=_optional_text(row.get("winner_signal_event_id")),
         )
     except ActionTimeInvocationBlocked:
         raise

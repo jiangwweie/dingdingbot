@@ -13,11 +13,16 @@ from sqlalchemy import text
 from src.application.action_time.action_time_invocation import (
     ActionTimeInvocationBlocked,
     bind_action_time_invocation_fact_refs,
+    close_action_time_invocation_without_ticket,
     load_action_time_invocation,
     start_action_time_invocation,
 )
 from src.application.action_time.runtime_pg_fact_snapshots import (
     write_account_safe_fact_snapshots,
+)
+from src.application.action_time.signal_arbitration import ArbitrationDisposition
+from src.application.action_time.signal_intake import (
+    conserve_and_arbitrate_fresh_signals,
 )
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
@@ -81,6 +86,15 @@ def invocation_pg_control_connection(pg_control_connection):
         "ALTER TABLE brc_instrument_rule_snapshots "
         "ADD COLUMN supersedes_instrument_rule_snapshot_id TEXT"
     ))
+    for column in (
+        "terminal_kind TEXT",
+        "terminal_reason_code TEXT",
+        "arbitration_rank INTEGER",
+        "winner_signal_event_id TEXT",
+    ):
+        pg_control_connection.execute(
+            text(f"ALTER TABLE brc_action_time_invocations ADD COLUMN {column}")
+        )
     return pg_control_connection
 
 
@@ -115,6 +129,123 @@ def test_start_invocation_binds_one_fresh_typed_signal_and_deadline(
     assert invocation_pg_control_connection.execute(
         text("SELECT COUNT(*) FROM brc_action_time_invocations")
     ).scalar_one() == 1
+
+
+def test_non_ticket_terminal_invocation_conserves_rank_winner_and_is_irreversible(
+    invocation_pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    invocation = start_action_time_invocation(
+        invocation_pg_control_connection,
+        signal_event_id="signal:SOR-001:ETHUSDT:long:unit",
+        opened_at_ms=NOW_MS,
+    )
+
+    closed = close_action_time_invocation_without_ticket(
+        invocation_pg_control_connection,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        terminal_kind="not_selected",
+        terminal_reason_code="action_time_arbitration_winner_selected",
+        stage_at_ms=NOW_MS + 1,
+        arbitration_rank=2,
+        winner_signal_event_id="signal:other:unit",
+    )
+
+    assert closed.closed_at_ms == NOW_MS + 1
+    assert closed.terminal_kind == "not_selected"
+    assert closed.arbitration_rank == 2
+    assert closed.winner_signal_event_id == "signal:other:unit"
+    assert (
+        close_action_time_invocation_without_ticket(
+            invocation_pg_control_connection,
+            action_time_invocation_id=invocation.action_time_invocation_id,
+            terminal_kind="not_selected",
+            terminal_reason_code="action_time_arbitration_winner_selected",
+            stage_at_ms=NOW_MS + 1,
+            arbitration_rank=2,
+            winner_signal_event_id="signal:other:unit",
+        )
+        == closed
+    )
+    with pytest.raises(
+        ActionTimeInvocationBlocked,
+        match="action_time_invocation_already_terminal",
+    ):
+        close_action_time_invocation_without_ticket(
+            invocation_pg_control_connection,
+            action_time_invocation_id=invocation.action_time_invocation_id,
+            terminal_kind="expired",
+            terminal_reason_code="action_time_signal_expired",
+            stage_at_ms=NOW_MS + 1,
+        )
+
+
+def test_pg_signal_intake_conserves_each_fresh_signal_and_closes_nonwinner(
+    invocation_pg_control_connection,
+):
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "ETHUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    _insert_ready_fresh_signal(
+        invocation_pg_control_connection,
+        "SOR-001",
+        "SOLUSDT",
+        "long",
+        insert_action_time_fact=False,
+    )
+    invocation_pg_control_connection.execute(
+        text(
+            """
+            UPDATE brc_strategy_group_candidate_scope
+            SET priority_rank = CASE symbol
+              WHEN 'ETHUSDT' THEN 1
+              WHEN 'SOLUSDT' THEN 2
+              ELSE priority_rank
+            END
+            WHERE strategy_group_id = 'SOR-001'
+              AND side = 'long'
+            """
+        )
+    )
+
+    persisted = conserve_and_arbitrate_fresh_signals(
+        invocation_pg_control_connection,
+        now_ms=NOW_MS,
+    )
+
+    assert len(persisted) == 2
+    selected = [
+        item
+        for item in persisted
+        if item.decision.disposition is ArbitrationDisposition.SELECTED
+    ]
+    rejected = [
+        item
+        for item in persisted
+        if item.decision.disposition is ArbitrationDisposition.NOT_SELECTED_THIS_ROUND
+    ]
+    assert len(selected) == 1
+    assert selected[0].decision.signal_event_id == "signal:SOR-001:ETHUSDT:long:unit"
+    assert len(rejected) == 1
+    closed = load_action_time_invocation(
+        invocation_pg_control_connection,
+        action_time_invocation_id=rejected[0].action_time_invocation_id,
+    )
+    assert closed.terminal_kind == "not_selected"
+    assert closed.winner_signal_event_id == selected[0].decision.signal_event_id
+    assert invocation_pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_runtime_process_outcomes")
+    ).scalar_one() >= 2
 
 
 def test_invocation_binds_only_existing_account_fact_references(

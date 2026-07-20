@@ -47,6 +47,12 @@ from src.application.runtime_process_outcome import (  # noqa: E402
     classify_process_outcome,
     materialize_runtime_process_outcome,
 )
+from src.application.action_time.signal_arbitration import (  # noqa: E402
+    ArbitrationDisposition,
+)
+from src.application.action_time.signal_intake import (  # noqa: E402
+    conserve_and_arbitrate_fresh_signals,
+)
 from src.domain.action_time_deadline import (  # noqa: E402
     ActionTimeDeadline,
     SYSTEM_ACTION_TIME_BUDGET_MS,
@@ -800,7 +806,7 @@ def _persist_action_time_refresh_process_outcome(
             else:
                 effective_payload = _with_current_trigger_identity(
                     payload,
-                    _action_time_trigger_identity(
+                    _action_time_continuation_identity(
                         conn,
                         now_ms=int(payload["started_at_ms"]),
                     ),
@@ -1000,8 +1006,38 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
     try:
         with engine.begin() as conn:
             expiry_counts = _expire_stale_action_time_objects(conn, now_ms=now_ms)
+            continuation_identity = _action_time_continuation_identity(
+                conn,
+                now_ms=now_ms,
+            )
+            persisted = conserve_and_arbitrate_fresh_signals(
+                conn,
+                now_ms=now_ms,
+                global_blocker=(
+                    "action_time_continuation_active"
+                    if continuation_identity
+                    else None
+                ),
+            )
+            selected = next(
+                (
+                    item
+                    for item in persisted
+                    if item.decision.disposition is ArbitrationDisposition.SELECTED
+                ),
+                None,
+            )
+            trigger_identity = (
+                continuation_identity
+                if continuation_identity
+                else _trigger_identity_from_invocation(
+                    conn,
+                    action_time_invocation_id=selected.action_time_invocation_id,
+                )
+                if selected is not None
+                else {}
+            )
             counts = _action_time_trigger_counts(conn, now_ms=now_ms)
-            trigger_identity = _action_time_trigger_identity(conn, now_ms=now_ms)
             expiry_candidates_ms = _action_time_trigger_expiry_candidates(
                 conn,
                 trigger_identity=trigger_identity,
@@ -1341,7 +1377,7 @@ def _action_time_trigger_counts(
     }
 
 
-def _action_time_trigger_identity(
+def _action_time_continuation_identity(
     conn: sa.engine.Connection,
     *,
     now_ms: int,
@@ -1417,30 +1453,30 @@ def _action_time_trigger_identity(
                 promotion_candidate_id=str(promotion["promotion_candidate_id"]),
             )
 
-    if inspector.has_table("brc_live_signal_events"):
-        signals = sa.Table(
-            "brc_live_signal_events",
-            metadata,
-            autoload_with=conn,
-        )
-        signal = conn.execute(
-            sa.select(signals)
-            .where(
-                signals.c.source_kind == "live_market",
-                signals.c.status == "facts_validated",
-                signals.c.freshness_state == "fresh",
-                signals.c.expires_at_ms > now_ms,
-                signals.c.invalidated_at_ms.is_(None),
-            )
-            .order_by(signals.c.observed_at_ms.desc())
-            .limit(1)
-        ).mappings().first()
-        if signal is not None:
-            return _trigger_identity_row(
-                signal,
-                signal_event_id=str(signal["signal_event_id"]),
-            )
     return {}
+
+
+def _trigger_identity_from_invocation(
+    conn: sa.engine.Connection,
+    *,
+    action_time_invocation_id: str,
+) -> dict[str, str]:
+    invocations = sa.Table(
+        "brc_action_time_invocations",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    row = conn.execute(
+        sa.select(invocations).where(
+            invocations.c.action_time_invocation_id == action_time_invocation_id
+        )
+    ).mappings().first()
+    if row is None:
+        return {}
+    return _trigger_identity_row(
+        row,
+        action_time_invocation_id=action_time_invocation_id,
+    )
 
 
 def _action_time_trigger_expiry_candidates(

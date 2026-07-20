@@ -910,7 +910,7 @@ def test_action_time_trigger_counts_ignore_expired_handoff_ready_ticket():
     assert counts["operation_layer_handoffs_ready_without_protected_submit"] == 0
 
 
-def test_action_time_trigger_identity_prefers_exact_open_ticket_lineage():
+def test_action_time_continuation_identity_prefers_exact_open_ticket_lineage():
     module = _load_module()
     engine = create_engine(
         "sqlite://",
@@ -954,7 +954,7 @@ def test_action_time_trigger_identity_prefers_exact_open_ticket_lineage():
                 },
             )
 
-            identity = module._action_time_trigger_identity(conn, now_ms=now_ms)
+            identity = module._action_time_continuation_identity(conn, now_ms=now_ms)
     finally:
         engine.dispose()
 

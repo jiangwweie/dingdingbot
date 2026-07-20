@@ -61,6 +61,7 @@ RUNTIME_LANE_PROCESS_NAMES = {
     "promotion_action_time_lane",
     "action_time_ticket_sequence",
     "action_time_capability_certification",
+    "action_time_signal_arbitration",
 }
 
 
