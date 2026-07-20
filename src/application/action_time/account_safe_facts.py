@@ -90,42 +90,18 @@ def main(argv: list[str] | None = None) -> int:
 
     engine = sa.create_engine(database_url)
     try:
-        # Read PG identity first, then release its transaction before any signed GET.
-        with engine.connect() as conn:
-            scope = _pg_account_safe_scope_summary(conn)
-            conn.rollback()
-        live_facts = collect_account_safe_live_facts_from_scope(
-            scope,
+        artifact = materialize_account_safe_facts(
+            engine,
+            action_time_invocation_id=args.action_time_invocation_id,
             env_file=Path(args.env_file).expanduser() if args.env_file else None,
             base_url=args.base_url,
             timeout_seconds=args.timeout_seconds,
         )
-        artifact = build_runtime_account_safe_facts(live_facts=live_facts)
-        account_safe_ready = artifact["checks"]["account_safe_facts_ready"] is True
-        business_blocker = None
-        fact_binding_invocation_id = args.action_time_invocation_id
-        if args.action_time_invocation_id and not account_safe_ready:
-            business_blocker = str(
-                (artifact.get("blockers") or [
-                    "action_time_account_safe_facts_not_satisfied"
-                ])[0]
-            )
-            # Persist the fail-closed facts, but never bind an unsatisfied
-            # fact set into the action-time invocation.
-            fact_binding_invocation_id = None
-        with engine.begin() as conn:
-            fact_snapshot_ids = write_account_safe_fact_snapshots(
-                conn,
-                artifact=artifact,
-                source_ref="runtime_account_safe_pg_scope_readonly",
-                action_time_invocation_id=fact_binding_invocation_id,
-            )
     finally:
         engine.dispose()
-    artifact["source_mode"] = "db_backed"
-    artifact["projection_target"] = "production_current"
-    artifact["collector_source_mode"] = "pg_scope_direct_readonly_exchange"
-    artifact["pg_fact_snapshot_ids"] = fact_snapshot_ids
+    account_safe_ready = artifact["checks"]["account_safe_facts_ready"] is True
+    business_blocker = artifact.get("business_blocker")
+    fact_snapshot_ids = artifact["pg_fact_snapshot_ids"]
     print(
         json.dumps(
             {
@@ -160,6 +136,62 @@ def main(argv: list[str] | None = None) -> int:
         )
         else 2
     )
+
+
+def materialize_account_safe_facts(
+    engine: sa.Engine,
+    *,
+    action_time_invocation_id: str | None,
+    env_file: Path | None,
+    base_url: str = DEFAULT_BASE_URL,
+    timeout_seconds: float = 12,
+    urlopen: UrlOpen | None = None,
+) -> dict[str, Any]:
+    """Collect readonly facts and persist their PG snapshots without a CLI hop.
+
+    The short PG scope read completes before signed network I/O.  Only the
+    final snapshot insert uses a write transaction, so no database lock spans
+    an exchange request.
+    """
+
+    with engine.connect() as conn:
+        scope = _pg_account_safe_scope_summary(conn)
+        conn.rollback()
+    live_facts = collect_account_safe_live_facts_from_scope(
+        scope,
+        env_file=env_file,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        urlopen=urlopen,
+    )
+    artifact = build_runtime_account_safe_facts(live_facts=live_facts)
+    account_safe_ready = artifact["checks"]["account_safe_facts_ready"] is True
+    business_blocker = None
+    fact_binding_invocation_id = action_time_invocation_id
+    if action_time_invocation_id and not account_safe_ready:
+        business_blocker = str(
+            (artifact.get("blockers") or [
+                "action_time_account_safe_facts_not_satisfied"
+            ])[0]
+        )
+        # Persist the fail-closed facts, but never bind an unsatisfied fact set
+        # into the Action-Time invocation.
+        fact_binding_invocation_id = None
+    with engine.begin() as conn:
+        fact_snapshot_ids = write_account_safe_fact_snapshots(
+            conn,
+            artifact=artifact,
+            source_ref="runtime_account_safe_pg_scope_readonly",
+            action_time_invocation_id=fact_binding_invocation_id,
+        )
+    return {
+        **artifact,
+        "business_blocker": business_blocker,
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "collector_source_mode": "pg_scope_direct_readonly_exchange",
+        "pg_fact_snapshot_ids": fact_snapshot_ids,
+    }
 
 
 def collect_account_safe_live_facts_from_pg_scope(

@@ -53,6 +53,10 @@ from src.application.action_time.signal_arbitration import (  # noqa: E402
 from src.application.action_time.signal_intake import (  # noqa: E402
     conserve_and_arbitrate_fresh_signals,
 )
+from src.application.action_time.typed_coordinator import (  # noqa: E402
+    TypedActionTimeCoordinatorResult,
+    coordinate_action_time_invocation,
+)
 from src.domain.action_time_deadline import (  # noqa: E402
     ActionTimeDeadline,
     SYSTEM_ACTION_TIME_BUDGET_MS,
@@ -242,6 +246,27 @@ def run_server_product_state_refresh_sequence(
                         f"{type(exc).__name__}"
                     ),
                 )
+    typed_invocation_id = (
+        str(action_time_invocation.get("action_time_invocation_id") or "")
+        if action_time_invocation is not None
+        else ""
+    )
+    if (
+        effective_mode == "action_time"
+        and typed_invocation_id
+        and runner is None
+        and action_time_deadline is not None
+    ):
+        return _run_typed_action_time_refresh(
+            mode=mode,
+            started_at_utc=started,
+            command_env=command_env,
+            env_file=env_file,
+            api_base=api_base,
+            trigger_state=trigger_state,
+            invocation=action_time_invocation,
+            deadline=action_time_deadline,
+        )
     steps = _refresh_steps(
         python=python,
         api_base=api_base,
@@ -964,6 +989,124 @@ def _action_time_invocation_start_failure_report(
     step["name"] = "start_action_time_invocation"
     report["summary"]["blocked_by_required_step"] = "start_action_time_invocation"
     report["action_time_invocation"] = None
+    return report
+
+
+def _run_typed_action_time_refresh(
+    *,
+    mode: str,
+    started_at_utc: str,
+    command_env: Mapping[str, str],
+    env_file: Path,
+    api_base: str,
+    trigger_state: dict[str, Any] | None,
+    invocation: dict[str, Any] | None,
+    deadline: ActionTimeDeadline,
+) -> dict[str, Any]:
+    """Execute the production Action-Time path in-process, never via stdout."""
+
+    invocation_id = str((invocation or {}).get("action_time_invocation_id") or "")
+    database_url = normalize_sync_postgres_dsn(
+        command_env.get("PG_DATABASE_URL") or command_env.get("DATABASE_URL") or ""
+    )
+    if not database_url:
+        return _action_time_invocation_start_failure_report(
+            mode=mode,
+            started_at_utc=started_at_utc,
+            trigger_state={
+                **(trigger_state or {}),
+                "status": "blocked",
+                "blocker": "missing_action_time_database_url",
+            },
+            blocker="missing_action_time_database_url",
+        )
+    engine = sa.create_engine(database_url)
+    try:
+        result = coordinate_action_time_invocation(
+            engine,
+            action_time_invocation_id=invocation_id,
+            deadline=deadline,
+            env_file=env_file,
+            base_url=api_base,
+            monotonic_clock_ms=_monotonic_ms,
+        )
+    except Exception as exc:  # noqa: BLE001 - persist fail-closed refresh state.
+        result = TypedActionTimeCoordinatorResult(
+            status="business_blocked",
+            action_time_invocation_id=invocation_id,
+            ticket_id=None,
+            finalgate_pass_id=None,
+            operation_layer_handoff_id=None,
+            steps=(),
+            first_blocker=f"typed_action_time_coordinator_failed:{type(exc).__name__}",
+        )
+    finally:
+        engine.dispose()
+    report = _empty_refresh_report(
+        mode=mode,
+        effective_mode="action_time",
+        started_at_utc=started_at_utc,
+        status=(
+            "server_product_state_refresh_sequence_ready"
+            if result.status == "ready"
+            else "server_product_state_refresh_sequence_business_blocked"
+        ),
+        action_time_trigger=trigger_state,
+    )
+    report["action_time_invocation"] = invocation
+    report["action_time_deadline"] = {
+        "global_deadline_ms": deadline.global_deadline_ms,
+        "remaining_budget_ms": deadline.remaining_ms(
+            monotonic_now_ms=_monotonic_ms()
+        ),
+    }
+    report["step_results"] = [
+        {
+            "name": step.name,
+            "required": True,
+            "returncode": 0,
+            "status": "passed" if not step.blockers else "business_blocked",
+            "command": [],
+            "stdout_tail": "",
+            "stderr_tail": "",
+            "duration_ms": 0,
+            "remaining_budget_ms": deadline.remaining_ms(
+                monotonic_now_ms=_monotonic_ms()
+            ),
+            "typed_identity": step.identity,
+            "blockers": list(step.blockers),
+        }
+        for step in result.steps
+    ]
+    report["summary"].update(
+        {
+            "step_count": len(result.steps),
+            "required_step_count": len(result.steps),
+            "failed_required_step_count": 0,
+            "business_blocked_required_step_count": (
+                0 if result.status == "ready" else 1
+            ),
+            "blocked_by_required_step": (
+                "" if result.status == "ready" else result.steps[-1].name if result.steps else "typed_action_time_coordinator"
+            ),
+            "blocked_required_stdout_tail": "",
+            "blocked_required_stderr_tail": "",
+            "latency_budget_status": (
+                "within_budget"
+                if deadline.remaining_ms(monotonic_now_ms=_monotonic_ms()) > 0
+                else "deadline_exhausted"
+            ),
+            "typed_coordinator": True,
+            "first_blocker": result.first_blocker or "",
+        }
+    )
+    report["typed_action_time_result"] = {
+        "status": result.status,
+        "ticket_id": result.ticket_id,
+        "finalgate_pass_id": result.finalgate_pass_id,
+        "operation_layer_handoff_id": result.operation_layer_handoff_id,
+        "first_blocker": result.first_blocker,
+    }
     return report
 
 
