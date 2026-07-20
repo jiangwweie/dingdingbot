@@ -1129,14 +1129,6 @@ def run_fenced_schema_migration(
             raise ValueError("lifecycle_status_exchange_side_effect")
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("lifecycle_capability_status_invalid") from exc
-    role_preflight = run(["scripts/verify_canary_readonly_role_preflight.py"])
-    role_payload = _json_receipt(role_preflight, "canary_role_preflight_receipt_invalid")
-    if (
-        role_payload.get("status") != "canary_readonly_role_preflight_passed"
-        or role_payload.get("current_user") != "brc_runtime_app"
-        or role_payload.get("exchange_write_called") is not False
-    ):
-        raise RuntimeError("canary_role_preflight_receipt_mismatch")
     run(
         [
             "scripts/verify_ticket_lifecycle_phase_two_readiness.py",
@@ -1202,6 +1194,43 @@ def run_fenced_schema_migration(
         "instrument_rule_projection": rule_projection_payload,
         "canonical_instrument_readiness": readiness_payload,
     }
+
+
+def verify_runtime_application_role_preflight(
+    *,
+    release_path: Path,
+    env_path: Path,
+    runner: Callable[..., ChildResult] | None = None,
+    lock_handle: Any | None = None,
+    canonical_lock_path: Path = CANONICAL_LOCK_PATH,
+    require_root_owner: bool = True,
+) -> dict[str, Any]:
+    """Prove the candidate connects with the least-privilege application role."""
+
+    release = Path(release_path).resolve(strict=True)
+    python = release / ".venv/bin/python"
+    if not python.is_file():
+        raise ValueError("candidate_python_missing")
+    environment = load_runtime_environment(Path(env_path))
+    environment["PYTHONPATH"] = str(release)
+    result = _run_candidate_command(
+        [str(python), "scripts/verify_canary_readonly_role_preflight.py"],
+        release=release,
+        timeout=30,
+        env=environment,
+        runner=runner,
+        lock_handle=lock_handle,
+        canonical_lock_path=canonical_lock_path,
+        require_root_owner=require_root_owner,
+    )
+    payload = _json_receipt(result, "canary_role_preflight_receipt_invalid")
+    if (
+        payload.get("status") != "canary_readonly_role_preflight_passed"
+        or payload.get("current_user") != "brc_runtime_app"
+        or payload.get("exchange_write_called") is not False
+    ):
+        raise RuntimeError("canary_role_preflight_receipt_mismatch")
+    return dict(payload)
 
 
 def _bounded_child_failure_summary(stderr: str) -> str:
@@ -2858,11 +2887,22 @@ def execute_deploy_transaction(
         }
 
     fenced = phase("production_writers_fenced", fence_action)
-    phase("runtime_application_env_activated", lambda: activate_runtime_application_environment(
-        base_env_path=env_path,
-        pending_application_env_path=pending_application_env_path,
-        active_env_path=runtime_application_env_path,
-    ))
+    def runtime_application_env_action() -> Mapping[str, Any]:
+        activation = activate_runtime_application_environment(
+            base_env_path=env_path,
+            pending_application_env_path=pending_application_env_path,
+            active_env_path=runtime_application_env_path,
+        )
+        preflight = verify_runtime_application_role_preflight(
+            release_path=release,
+            env_path=runtime_application_env_path,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock,
+            require_root_owner=require_root,
+        )
+        return {**activation, "role_preflight": preflight}
+
+    phase("runtime_application_env_activated", runtime_application_env_action)
     phase("pre_migration", lambda: {
         "status": "pre_migration",
         "actual_revision": read_candidate_schema_revision(

@@ -958,9 +958,7 @@ def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
         },
     }
     assert all(command[0] == str(python) for command, _ in commands)
-    role_index = next(index for index, (command, _) in enumerate(commands) if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command))
     migration_index = next(index for index, (command, _) in enumerate(commands) if "upgrade" in command)
-    assert role_index < migration_index
     assert any(command[-3:] == ("-m", "alembic", "upgrade") or "upgrade" in command for command, _ in commands)
     projector_index = next(index for index, (command, _) in enumerate(commands) if any(str(item).endswith("project_instrument_rule_snapshots.py") for item in command))
     readiness_index = next(index for index, (command, _) in enumerate(commands) if any(str(item).endswith("verify_canonical_instrument_identity_readiness.py") for item in command))
@@ -969,6 +967,44 @@ def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
         item["env"]["DATABASE_URL"] == "postgresql://example.invalid/db"
         for _, item in commands
     )
+
+
+def test_application_role_preflight_uses_application_environment_only(tmp_path):
+    release = tmp_path / "candidate"
+    python = release / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    env_file = tmp_path / "runtime-application.env"
+    env_file.write_text(
+        "PG_DATABASE_URL='postgresql://application.invalid/db'\n",
+        encoding="utf-8",
+    )
+    env_file.chmod(0o600)
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return machine.ChildResult(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "status": "canary_readonly_role_preflight_passed",
+                    "current_user": "brc_runtime_app",
+                    "exchange_write_called": False,
+                }
+            ),
+            stderr="",
+        )
+
+    result = machine.verify_runtime_application_role_preflight(
+        release_path=release,
+        env_path=env_file,
+        runner=runner,
+    )
+
+    assert result["current_user"] == "brc_runtime_app"
+    assert calls[0][0][-1] == "scripts/verify_canary_readonly_role_preflight.py"
+    assert calls[0][1]["env"]["PG_DATABASE_URL"] == "postgresql://application.invalid/db"
 
 
 def test_fenced_migration_reports_only_bounded_terminal_stderr_line(tmp_path):
@@ -1717,6 +1753,11 @@ def test_deploy_transaction_bootstraps_lifecycle_only_with_explicit_intent_and_i
     monkeypatch.setattr(machine, "install_and_verify_shared_readiness_helper", lambda **kwargs: {"status": "shared_readiness_helper_verified", "readiness_helper_sha256": "1" * 64})
     monkeypatch.setattr(machine, "capture_production_unit_prepolicy", lambda **kwargs: {unit: {"active": False} for unit in machine.PRODUCTION_WRITER_UNITS})
     monkeypatch.setattr(machine, "engage_production_writer_fence", lambda **kwargs: {"status": "production_writers_fenced", "fence_inode": 77})
+    monkeypatch.setattr(machine, "verify_runtime_application_role_preflight", lambda **kwargs: {
+        "status": "canary_readonly_role_preflight_passed",
+        "current_user": "brc_runtime_app",
+        "exchange_write_called": False,
+    })
     monkeypatch.setattr(machine, "read_candidate_schema_revision", lambda **kwargs: "120")
     migration_env_paths = []
 

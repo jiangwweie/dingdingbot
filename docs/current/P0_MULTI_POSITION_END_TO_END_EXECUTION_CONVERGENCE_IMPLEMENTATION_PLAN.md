@@ -390,6 +390,7 @@ agent context。
 Writer Fence engaged + writer units stopped
 -> validate pending migration/application credentials
 -> atomically promote pending application env to active runtime env
+-> execute application-role readonly preflight with active application env
 -> use migration identity for Alembic only
 -> use active application env for candidate current/projection/canary/runtime
 -> prove application session user has no DDL/owner/membership bypass
@@ -408,6 +409,8 @@ Writer Fence + forward-fix，不回退 schema 或重新启用旧 superuser runti
 env。`pre_migration`/`schema_migrated` 只使用 migration env；pointer 之后的
 projection、facts、canary、lifecycle 与 systemd runtime 使用 active application env。
 若 active env 已存在但内容与本次 merge 不一致，transaction fail closed。
+application preflight 在 `pre_migration` 前独立运行，绝不从 migration env 中调用；
+否则 migration identity 会伪装成 application identity，必须 fail closed。
 
 no-write canary 不再通过旧超级用户 `SET ROLE pg_read_all_data` 伪造只读身份；它必须
 直接连接 `brc_runtime_app`，验证非 superuser、无 schema CREATE，并在
