@@ -969,6 +969,64 @@ def test_action_time_continuation_identity_prefers_exact_open_ticket_lineage():
     }
 
 
+def test_action_time_continuation_identity_fails_closed_for_multiple_tickets():
+    module = _load_module()
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_action_time_tickets (
+                        ticket_id TEXT PRIMARY KEY,
+                        action_time_lane_input_id TEXT,
+                        promotion_candidate_id TEXT,
+                        signal_event_id TEXT,
+                        strategy_group_id TEXT,
+                        symbol TEXT,
+                        side TEXT,
+                        status TEXT,
+                        expires_at_ms INTEGER,
+                        created_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            for ticket_id, symbol in (("ticket:btc", "BTCUSDT"), ("ticket:eth", "ETHUSDT")):
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_action_time_tickets VALUES (
+                          :ticket_id, :lane_id, :promotion_id, :signal_id,
+                          'SOR-001', :symbol, 'long', 'preflight_pending',
+                          :expires_at_ms, :created_at_ms
+                        )
+                        """
+                    ),
+                    {
+                        "ticket_id": ticket_id,
+                        "lane_id": f"lane:{symbol}",
+                        "promotion_id": f"promotion:{symbol}",
+                        "signal_id": f"signal:{symbol}",
+                        "symbol": symbol,
+                        "expires_at_ms": now_ms + 60_000,
+                        "created_at_ms": now_ms,
+                    },
+                )
+            with pytest.raises(
+                RuntimeError,
+                match="multiple_current_action_time_ticket_continuations",
+            ):
+                module._action_time_continuation_identity(conn, now_ms=now_ms)
+    finally:
+        engine.dispose()
+
+
 def test_refresh_outcome_rebinds_to_post_sequence_ticket_identity():
     module = _load_module()
     payload = {

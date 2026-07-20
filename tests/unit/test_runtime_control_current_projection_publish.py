@@ -103,8 +103,8 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
         assert readiness_count == report["candidate_pool"]["symbol_readiness_count"]
         assert readiness_count > 0
         assert goal_count == 1
-        assert current_snapshot_count == 3
-        assert projection_run_count == 3
+        assert current_snapshot_count == 4
+        assert projection_run_count == 4
         assert projection_heads == [TEST_RUNTIME_HEAD]
         assert {
             (
@@ -114,6 +114,20 @@ def test_publish_current_projections_persists_readiness_goal_and_snapshots(tmp_p
             )["code_version"]
             for payload in snapshot_payloads
         } == {TEST_RUNTIME_HEAD}
+        bundle_lineages = [
+            (
+                json.loads(payload)
+                if isinstance(payload, str)
+                else dict(payload)
+            )["current_truth_bundle"]
+            for payload in snapshot_payloads
+        ]
+        assert {item["bundle_run_id"] for item in bundle_lineages} == {
+            report["bundle_run_id"]
+        }
+        assert {item["input_watermark_digest"] for item in bundle_lineages} == {
+            report["input_watermark_digest"]
+        }
         assert output_path_count == 0
         assert report["safety_invariants"]["calls_exchange_write"] is False
         assert not (tmp_path / "candidate-pool.json").exists()
@@ -222,6 +236,7 @@ def test_publish_current_projections_keeps_one_current_snapshot_per_model(tmp_pa
 
         assert {row["model_type"]: row["current_count"] for row in rows} == {
             "candidate_pool": 1,
+            "tradeability_decision": 1,
             "daily_live_enablement_table": 1,
             "goal_status": 1,
         }
@@ -420,6 +435,11 @@ def test_projection_publisher_does_not_feed_materialized_readiness_back_into_goa
         module,
         "build_daily_live_enablement_table_from_control_state",
         lambda *args, **kwargs: {"rows": [candidate_row]},
+    )
+    monkeypatch.setattr(
+        module,
+        "build_tradeability_decision_from_control_state",
+        lambda *args, **kwargs: {"decision_rows": [candidate_row]},
     )
 
     seen = {}

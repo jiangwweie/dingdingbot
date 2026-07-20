@@ -35,6 +35,16 @@ from src.application.readmodels.strategy_live_candidate_pool import (  # noqa: E
 from src.application.readmodels.strategygroup_runtime_goal_status import (  # noqa: E402
     build_goal_status_artifact_from_control_state,
 )
+from src.application.current_truth_reducer import reduce_current_truth  # noqa: E402
+from src.application.current_truth_projection_adapters import (  # noqa: E402
+    adapt_candidate_pool,
+    adapt_daily_table,
+    adapt_goal_status,
+    adapt_tradeability,
+)
+from scripts.build_strategygroup_tradeability_decision import (  # noqa: E402
+    build_tradeability_decision_from_control_state,
+)
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
@@ -103,6 +113,31 @@ def publish_runtime_control_current_projections(
         generated_at_utc=generated,
         suppress_persistent_action_time_outcomes=False,
     )
+    # Every operational field exposed by the current projections is derived
+    # from this one immutable snapshot reduction.  The existing rich builders
+    # still provide presentation-only fields during the R7 cutover.
+    current_truth_bundle = reduce_current_truth(
+        projection_control_state,
+        runtime_head=runtime_head,
+        read_now_ms=started_ms,
+    )
+    candidate_pool = adapt_candidate_pool(
+        candidate_pool,
+        bundle=current_truth_bundle,
+    )
+    tradeability = adapt_tradeability(
+        build_tradeability_decision_from_control_state(
+            projection_control_state,
+            generated_at_utc=generated,
+            candidate_pool=candidate_pool,
+        ),
+        bundle=current_truth_bundle,
+    )
+    readiness_rows = _readiness_rows_for_control_state(
+        candidate_pool,
+        control_state=control_state,
+        computed_at_ms=started_ms,
+    )
     daily_table = build_daily_live_enablement_table_from_control_state(
         {
             **projection_control_state,
@@ -110,12 +145,14 @@ def publish_runtime_control_current_projections(
         },
         generated_at_utc=generated,
     )
+    daily_table = adapt_daily_table(daily_table, bundle=current_truth_bundle)
     goal_status = build_goal_status_artifact_from_control_state(
         # Rebuild from the same base state as candidate_pool. Feeding the
         # newly materialized readiness rows back into this builder can mix
         # current action-time outcomes with the previous projection version.
         control_state=projection_control_state,
     )
+    goal_status = adapt_goal_status(goal_status, bundle=current_truth_bundle)
     _validate_projection_blocker_consistency(
         candidate_pool=candidate_pool,
         daily_table=daily_table,
@@ -128,6 +165,13 @@ def publish_runtime_control_current_projections(
             owner_projector="pg_candidate_pool_projector",
             started_ms=started_ms,
             input_watermark=_input_watermark(control_state, candidate_pool),
+            target_runtime_head=runtime_head,
+        ),
+        _projection_run(
+            model_type="tradeability_decision",
+            owner_projector="pg_tradeability_projector",
+            started_ms=started_ms,
+            input_watermark=_input_watermark(control_state, tradeability),
             target_runtime_head=runtime_head,
         ),
         _projection_run(
@@ -160,10 +204,21 @@ def publish_runtime_control_current_projections(
             generated_at_ms=started_ms,
         ),
         _snapshot_row(
+            model_type="tradeability_decision",
+            payload=_export_payload_with_lineage(
+                tradeability,
+                projection_run=projector_runs[1],
+                generated_at_ms=started_ms,
+            ),
+            source_watermark=_source_watermark(tradeability),
+            input_watermark=_input_watermark(control_state, tradeability),
+            generated_at_ms=started_ms,
+        ),
+        _snapshot_row(
             model_type="daily_live_enablement_table",
             payload=_export_payload_with_lineage(
                 daily_table,
-                projection_run=projector_runs[1],
+                projection_run=projector_runs[2],
                 generated_at_ms=started_ms,
             ),
             source_watermark=_source_watermark(daily_table),
@@ -174,7 +229,7 @@ def publish_runtime_control_current_projections(
             model_type="goal_status",
             payload=_export_payload_with_lineage(
                 goal_status,
-                projection_run=projector_runs[2],
+                projection_run=projector_runs[3],
                 generated_at_ms=started_ms,
             ),
             source_watermark=_source_watermark(goal_status),
@@ -183,13 +238,13 @@ def publish_runtime_control_current_projections(
         ),
     ]
 
-    _replace_pretrade_readiness_rows(conn, readiness_rows)
+    readiness_write = _replace_pretrade_readiness_rows(conn, readiness_rows)
     for run in projector_runs:
         _upsert_by_pk(conn, "brc_projection_runs", run)
     _upsert_goal_status_current(
         conn,
         goal_status=snapshots[2]["payload"],
-        projection_run_id=projector_runs[-1]["projection_run_id"],
+        projection_run_id=projector_runs[3]["projection_run_id"],
         updated_at_ms=started_ms,
     )
     _insert_current_snapshots(conn, snapshots)
@@ -198,9 +253,13 @@ def publish_runtime_control_current_projections(
         "schema": SCHEMA,
         "status": "current_projections_published",
         "runtime_head": runtime_head,
+        "bundle_run_id": current_truth_bundle.bundle_run_id,
+        "input_watermark_digest": current_truth_bundle.input_watermark_digest,
         "generated_at_utc": generated,
         "published_tables": {
             "brc_pretrade_readiness_rows": len(readiness_rows),
+            "brc_pretrade_readiness_rows_changed": readiness_write["changed"],
+            "brc_pretrade_readiness_rows_removed": readiness_write["removed"],
             "brc_goal_status_current": 1,
             "brc_control_read_model_snapshots_current": len(snapshots),
             "brc_projection_runs": len(projector_runs),
@@ -435,13 +494,15 @@ def _readiness_rows_for_control_state(
         for row in _dict_rows(control_state.get("candidate_scope"))
         if row.get("status") == "active"
     }
-    watermark = _stable_watermark(candidate_pool)
     return [
         _readiness_row(
             row,
             candidate_scope_id=candidate_scope_by_lane.get(_lane_key(row), ""),
             computed_at_ms=computed_at_ms,
-            source_watermark=watermark,
+            source_watermark=_readiness_source_watermark(
+                row,
+                bundle_lineage=_dict(candidate_pool.get("current_truth_bundle")),
+            ),
         )
         for row in _dict_rows(candidate_pool.get("symbol_readiness_rows"))
     ]
@@ -524,6 +585,35 @@ def _first_blocker_detail(row: dict[str, Any]) -> str:
     return str(row.get("first_blocker") or "")
 
 
+def _readiness_source_watermark(
+    row: dict[str, Any],
+    *,
+    bundle_lineage: dict[str, Any],
+) -> str:
+    """Stable per-row semantic lineage; wall-clock publishing is excluded."""
+
+    semantic_row = {
+        key: row.get(key)
+        for key in (
+            "strategy_group_id",
+            "symbol",
+            "side",
+            "detector_state",
+            "watcher_state",
+            "signal_state",
+            "risk_state",
+            "scope_state",
+            "promotion_state",
+            "first_blocker",
+            "next_action",
+            "current_truth_semantic_fingerprint",
+        )
+    }
+    row_digest = _stable_watermark(semantic_row)
+    bundle_digest = str(bundle_lineage.get("input_watermark_digest") or "")
+    return f"current_truth:{bundle_digest}:row:{row_digest}"
+
+
 def _projection_run(
     *,
     model_type: str,
@@ -575,6 +665,7 @@ def _snapshot_row(
 def _snapshot_owner_projector(model_type: str) -> str:
     return {
         "candidate_pool": "pg_candidate_pool_projector",
+        "tradeability_decision": "pg_tradeability_projector",
         "daily_live_enablement_table": "pg_daily_table_projector",
         "goal_status": "pg_goal_status_projector",
     }[model_type]
@@ -619,11 +710,30 @@ def _owner_action_required(goal_status: dict[str, Any]) -> bool:
 def _replace_pretrade_readiness_rows(
     conn: sa.engine.Connection,
     rows: list[dict[str, Any]],
-) -> None:
+) -> dict[str, int]:
+    """Upsert only semantic changes and remove only rows outside current scope."""
+
     table = _table(conn, "brc_pretrade_readiness_rows")
-    conn.execute(table.delete())
-    if rows:
-        conn.execute(table.insert(), rows)
+    pk = table.c.readiness_row_id
+    existing = {
+        str(row["readiness_row_id"]): dict(row)
+        for row in conn.execute(sa.select(table)).mappings()
+    }
+    current_ids = {str(row["readiness_row_id"]) for row in rows}
+    removed = 0
+    stale_ids = sorted(set(existing) - current_ids)
+    if stale_ids:
+        removed = int(
+            conn.execute(table.delete().where(pk.in_(stale_ids))).rowcount or 0
+        )
+    changed = 0
+    for row in rows:
+        row_id = str(row["readiness_row_id"])
+        if existing.get(row_id, {}).get("source_watermark") == row["source_watermark"]:
+            continue
+        _upsert_by_pk(conn, "brc_pretrade_readiness_rows", row)
+        changed += 1
+    return {"changed": changed, "removed": removed}
 
 
 def _insert_current_snapshots(
@@ -671,13 +781,20 @@ def _input_watermark(
     control_state: dict[str, Any],
     artifact: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
+    watermark = {
         "control_state_schema": str(control_state.get("schema") or ""),
         "table_counts": _dict(control_state.get("table_counts")),
         "artifact_schema": str(artifact.get("schema") or ""),
         "artifact_status": str(artifact.get("status") or ""),
         "artifact_generated_at_utc": str(artifact.get("generated_at_utc") or ""),
     }
+    bundle = _dict(artifact.get("current_truth_bundle"))
+    if bundle:
+        watermark["bundle_run_id"] = str(bundle.get("bundle_run_id") or "")
+        watermark["bundle_input_watermark_digest"] = str(
+            bundle.get("input_watermark_digest") or ""
+        )
+    return watermark
 
 
 def _source_watermark(artifact: dict[str, Any]) -> dict[str, Any]:

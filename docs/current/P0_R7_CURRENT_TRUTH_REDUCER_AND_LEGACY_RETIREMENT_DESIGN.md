@@ -1,6 +1,6 @@
 ---
 title: P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN
-status: PROPOSED_IMPLEMENTATION_CONFIRMATION_REQUIRED
+status: IMPLEMENTATION_IN_PROGRESS
 authority: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN.md
 program_id: P0-ACH-R7
 parent_design: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md
@@ -10,6 +10,7 @@ schema_change_expected: false
 owner_policy_change: none
 exchange_write_authority: unchanged
 production_deploy: out_of_scope_until_owner_confirmation
+implementation_started_at: 2026-07-20
 ---
 
 # P0-R7 Current Truth Reducer 与历史路径退役设计补充

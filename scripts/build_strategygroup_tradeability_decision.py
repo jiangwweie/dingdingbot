@@ -483,6 +483,7 @@ def build_tradeability_decision_from_control_state(
     control_state: dict[str, Any],
     *,
     generated_at_utc: str | None = None,
+    candidate_pool: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build Tradeability directly from PG Candidate Pool and current lineage.
 
@@ -497,7 +498,7 @@ def build_tradeability_decision_from_control_state(
     if control_state.get("projection_target") != "production_current":
         raise ValueError("Tradeability Decision requires production_current state")
     generated = generated_at_utc or datetime.now(timezone.utc).isoformat()
-    candidate_pool = build_strategy_live_candidate_pool_from_control_state(
+    candidate_pool = candidate_pool or build_strategy_live_candidate_pool_from_control_state(
         control_state,
         generated_at_utc=generated,
     )

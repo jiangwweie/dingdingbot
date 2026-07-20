@@ -346,10 +346,18 @@ def _candidate_pool_inputs_from_control_state(
         control_state,
         fact_surface="pretrade_public",
     )
-    fact_by_lane = _current_fact_snapshot_by_lane(
-        control_state,
-        fact_surface="pretrade_strategy",
-    )
+    # A current strategy-specific detector fact refines the public pre-trade
+    # fact surface; it does not make a complete public fact set disappear.
+    # Older runtime instances legitimately expose only ``pretrade_public``.
+    # Preserve that current fact rather than classifying the lane as an
+    # unattached detector solely because the optional refinement is absent.
+    fact_by_lane = {
+        **public_fact_by_lane,
+        **_current_fact_snapshot_by_lane(
+            control_state,
+            fact_surface="pretrade_strategy",
+        ),
+    }
     action_time_fact_by_lane = _current_fact_snapshot_by_lane(
         control_state,
         fact_surface="action_time",
@@ -391,7 +399,10 @@ def _candidate_pool_inputs_from_control_state(
     _apply_action_time_capability_truth(
         readiness_by_lane,
         capability_truth_by_lane=capability_truth_by_lane,
-        fact_by_lane=fact_by_lane,
+        # Release certification is conditioned on the current public
+        # pre-trade fact set.  ``pretrade_strategy`` is optional detector
+        # detail and must not erase an otherwise valid certification blocker.
+        fact_by_lane=public_fact_by_lane,
     )
 
     return {
@@ -913,9 +924,10 @@ def _pg_replay_live_parity_projection(
         facts = fact_by_lane.get(key, {})
         coverage = coverage_by_lane.get(key, {})
         signal = signal_by_lane.get(key, {})
-        detector_fact = (
-            facts if str(facts.get("fact_surface") or "") == "pretrade_strategy" else {}
-        )
+        # ``pretrade_strategy`` is a refinement, not the only valid detector
+        # evidence.  The registered public pre-trade surface is the canonical
+        # fallback for established lanes that have not emitted a refinement.
+        detector_fact = facts
         computed = bool(
             _is_true(detector_fact.get("computed"))
         )
@@ -1424,6 +1436,7 @@ def _pg_candidate_first_blocker(
     if signal and signal.get("execution_eligible") is not True:
         return EVENT_EXECUTION_CAPABILITY_NOT_CERTIFIED
     readiness = readiness_by_lane.get(key, {})
+    facts = fact_by_lane.get(key, {})
     if readiness.get("first_blocker_class"):
         if (
             str(readiness.get("first_blocker_class")) == "market_wait_validated"
@@ -1431,7 +1444,6 @@ def _pg_candidate_first_blocker(
         ):
             return "detector_not_attached"
         return str(readiness["first_blocker_class"])
-    facts = fact_by_lane.get(key, {})
     if facts and str(facts.get("fact_surface") or "") != "pretrade_strategy":
         return "detector_not_attached"
     if facts:

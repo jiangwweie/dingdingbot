@@ -1525,6 +1525,13 @@ def _action_time_continuation_identity(
     *,
     now_ms: int,
 ) -> dict[str, str]:
+    """Return the sole typed Ticket continuation, or fail closed.
+
+    A continuation is no longer selected from the latest lane or promotion.
+    Those rows are pre-ticket arbitration facts, not an execution identity.
+    More than one current Ticket is an operational incident: choosing the
+    newest row would silently cross-wire independent positions.
+    """
     inspector = sa.inspect(conn)
     metadata = sa.MetaData()
     if inspector.has_table("brc_action_time_tickets"):
@@ -1533,7 +1540,7 @@ def _action_time_continuation_identity(
             metadata,
             autoload_with=conn,
         )
-        ticket = conn.execute(
+        tickets_current = conn.execute(
             sa.select(tickets)
             .where(
                 tickets.c.status.in_(
@@ -1541,60 +1548,13 @@ def _action_time_continuation_identity(
                 ),
                 tickets.c.expires_at_ms > now_ms,
             )
-            .order_by(tickets.c.created_at_ms.desc())
-            .limit(1)
-        ).mappings().first()
-        if ticket is not None:
+            .order_by(tickets.c.created_at_ms.asc(), tickets.c.ticket_id.asc())
+        ).mappings().all()
+        if len(tickets_current) > 1:
+            raise RuntimeError("multiple_current_action_time_ticket_continuations")
+        if tickets_current:
+            ticket = tickets_current[0]
             return _trigger_identity_row(ticket, ticket_id=str(ticket["ticket_id"]))
-
-    if inspector.has_table("brc_action_time_lane_inputs"):
-        lanes = sa.Table(
-            "brc_action_time_lane_inputs",
-            metadata,
-            autoload_with=conn,
-        )
-        lane = conn.execute(
-            sa.select(lanes)
-            .where(
-                lanes.c.lane_scope == "real_submit_candidate",
-                lanes.c.status.in_(
-                    ["opened", "facts_refreshing", "ticket_pending", "ticket_created"]
-                ),
-                lanes.c.expires_at_ms > now_ms,
-                lanes.c.closed_at_ms.is_(None),
-            )
-            .order_by(lanes.c.created_at_ms.desc())
-            .limit(1)
-        ).mappings().first()
-        if lane is not None:
-            return _trigger_identity_row(
-                lane,
-                action_time_lane_input_id=str(lane["action_time_lane_input_id"]),
-            )
-
-    if inspector.has_table("brc_promotion_candidates"):
-        promotions = sa.Table(
-            "brc_promotion_candidates",
-            metadata,
-            autoload_with=conn,
-        )
-        promotion = conn.execute(
-            sa.select(promotions)
-            .where(
-                promotions.c.status.in_(
-                    ["eligible", "arbitration_pending", "arbitration_won"]
-                ),
-                promotions.c.expires_at_ms > now_ms,
-                promotions.c.closed_at_ms.is_(None),
-            )
-            .order_by(promotions.c.created_at_ms.desc())
-            .limit(1)
-        ).mappings().first()
-        if promotion is not None:
-            return _trigger_identity_row(
-                promotion,
-                promotion_candidate_id=str(promotion["promotion_candidate_id"]),
-            )
 
     return {}
 

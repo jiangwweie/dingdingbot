@@ -1,12 +1,13 @@
 ---
 title: P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_IMPLEMENTATION_PLAN
-status: PROPOSED_IMPLEMENTATION_CONFIRMATION_REQUIRED
+status: IMPLEMENTATION_IN_PROGRESS
 authority: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_IMPLEMENTATION_PLAN.md
 program_id: P0-ACH-R7
 design: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN.md
 baseline_commit: 54169ca341a11c56354c9980194a53ff0d51d38b
 target_stop: r7_certified_r8_ready
 production_deploy: out_of_scope_until_owner_confirmation
+implementation_started_at: 2026-07-20
 ---
 
 # P0-R7 Current Truth Reducer 与历史路径退役执行计划
