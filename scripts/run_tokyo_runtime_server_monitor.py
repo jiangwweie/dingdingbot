@@ -384,6 +384,9 @@ def _first_pg_focus_row(candidate_pool: dict[str, Any]) -> dict[str, Any]:
 
 def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
     now_ms = int(control_state.get("read_now_ms") or time.time() * 1000)
+    system_incident = _open_system_incident_event(control_state)
+    if system_incident:
+        return system_incident
     process_failure = _runtime_process_failure_event(control_state)
     if process_failure:
         return process_failure
@@ -515,6 +518,31 @@ def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
                 "reasons": ["fresh_signal_detected", str(signal.get("signal_event_id") or "")],
             }
     return {}
+
+
+def _open_system_incident_event(control_state: dict[str, Any]) -> dict[str, Any]:
+    incidents = [
+        row
+        for row in _pg_rows(control_state.get("runtime_incidents"))
+        if str(row.get("status") or "") in {"open", "investigating", "recovering"}
+        and not str(row.get("strategy_group_id") or "")
+        and not str(row.get("symbol") or "")
+    ]
+    if not incidents:
+        return {}
+    row = max(incidents, key=lambda item: int(item.get("opened_at_ms") or 0))
+    blocker = str(row.get("blocker_class") or "runtime_system_incident")
+    return {
+        "event_type": "runtime_system_incident",
+        "notify": True,
+        "decision_status": "temporarily_unavailable",
+        "strategy_group_id": "runtime",
+        "symbol": "all",
+        "checkpoint": str(row.get("incident_type") or "runtime_incident"),
+        "blocker_class": blocker,
+        "reasons": ["runtime_system_incident", blocker, str(row.get("incident_id") or "")],
+        "owner_message": "运行链路出现工程阻断，系统正在自动恢复。",
+    }
 
 
 def _runtime_process_failure_event(

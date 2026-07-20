@@ -114,6 +114,36 @@ def test_overdue_unknown_exchange_command_notifies_owner():
     assert decision["blocker_class"] == "exchange_command_outcome_unknown"
 
 
+def test_open_system_incident_is_monitor_current_truth_not_legacy_process_outcome():
+    module = _load_module()
+    decision = module._decision_from_pg_sources(
+        control_state={
+            "read_now_ms": PG_TEST_NOW_MS,
+            "runtime_incidents": [
+                {
+                    "incident_id": "incident:system:action-time-facts",
+                    "incident_type": "action_time_fact_snapshots_batch",
+                    "status": "open",
+                    "blocker_class": "required_fact_missing:opening_range",
+                    "opened_at_ms": PG_TEST_NOW_MS,
+                }
+            ],
+            "runtime_process_outcomes": [],
+            "ticket_bound_order_lifecycle_runs": [],
+            "ticket_bound_exchange_commands": [],
+            "action_time_tickets": [],
+            "ticket_bound_protected_submit_attempts": [],
+        },
+        goal_status={"status": "waiting_for_signal", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["event_type"] == "runtime_system_incident"
+    assert decision["notify"] is True
+    assert decision["checkpoint"] == "action_time_fact_snapshots_batch"
+
+
 def test_retryable_process_failure_is_temporarily_unavailable_and_notified():
     module = _load_module()
     control_state = {

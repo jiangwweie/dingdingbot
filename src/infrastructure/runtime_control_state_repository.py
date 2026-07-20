@@ -79,6 +79,7 @@ CONTROL_STATE_TABLES: dict[str, str] = {
     "control_read_model_snapshots": "brc_control_read_model_snapshots",
     "server_monitor_runs": "brc_server_monitor_runs",
     "server_monitor_notifications": "brc_server_monitor_notifications",
+    "runtime_incidents": "brc_runtime_incidents",
     "runtime_process_outcomes": "brc_runtime_process_outcomes",
     "strategy_semantic_admissions": "brc_strategy_semantic_admissions",
     "allocation_decisions": "brc_allocation_decisions",
@@ -2651,6 +2652,10 @@ def _monitor_bounded_statement(
         return statement.order_by(columns.created_at_ms.desc()).limit(200)
     if logical_key == "server_monitor_notifications" and "updated_at_ms" in columns:
         return statement.order_by(columns.updated_at_ms.desc()).limit(1000)
+    if logical_key == "runtime_incidents" and "opened_at_ms" in columns:
+        return statement.where(
+            columns.status.in_(["open", "investigating", "recovering"])
+        ).order_by(columns.opened_at_ms.desc()).limit(200)
     if logical_key == "ticket_bound_protected_submit_attempts" and "created_at_ms" in columns:
         return statement.where(
             columns.status.in_(
