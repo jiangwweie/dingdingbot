@@ -2298,6 +2298,98 @@ def test_write_runtime_detector_decisions_persists_computed_false_fact(tmp_path)
         engine.dispose()
 
 
+def test_typed_detector_decision_is_immutable_and_repeat_is_a_noop(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'typed-detector-decisions.db'}"
+    engine = sa.create_engine(database_url)
+    artifact = {
+        "runtime_summaries": [
+            {
+                "lane_identity": _typed_coverage_identity(
+                    strategy_group_id="MPG-001",
+                    symbol="OPUSDT",
+                    side="long",
+                    runtime_profile_id="runtime-profile:mpg",
+                    runtime_instance_id="runtime:mpg:op:long",
+                ),
+                "signal_summary": {
+                    "evaluation_status": "computed_not_satisfied",
+                    "evaluated_at_ms": 1000,
+                    "valid_until_ms": 2000,
+                    "trigger_candle_close_time_ms": 900,
+                    "reason_codes": ["momentum_floor_not_met"],
+                    "fact_observations": [],
+                    "evaluator_id": "mpg-v1",
+                },
+            }
+        ]
+    }
+    try:
+        with engine.begin() as conn:
+            _create_live_signal_writer_schema(conn)
+            for column in (
+                "lane_identity_key TEXT",
+                "event_spec_id TEXT",
+                "event_spec_version TEXT",
+                "detector_key TEXT",
+                "decision_identity INTEGER",
+                "source_watermark TEXT",
+                "producer_runtime_head TEXT",
+            ):
+                conn.execute(
+                    sa.text(
+                        "ALTER TABLE brc_runtime_fact_snapshots ADD COLUMN " + column
+                    )
+                )
+            conn.execute(
+                sa.text(
+                    "CREATE UNIQUE INDEX uq_test_detector_decision_identity "
+                    "ON brc_runtime_fact_snapshots "
+                    "(lane_identity_key, event_spec_id, event_spec_version, "
+                    "detector_key, decision_identity) "
+                    "WHERE fact_surface = 'pretrade_strategy'"
+                )
+            )
+
+        first = runtime_active_observation_monitor.write_runtime_detector_decisions_to_pg(
+            artifact,
+            database_url=database_url,
+            allow_non_postgres_for_test=True,
+            now_ms=1100,
+        )
+        second = runtime_active_observation_monitor.write_runtime_detector_decisions_to_pg(
+            artifact,
+            database_url=database_url,
+            allow_non_postgres_for_test=True,
+            now_ms=1101,
+        )
+        assert first["written_count"] == second["written_count"] == 1
+        with engine.connect() as conn:
+            assert conn.execute(
+                sa.text("SELECT count(*) FROM brc_runtime_fact_snapshots")
+            ).scalar_one() == 1
+
+        drifted = {
+            "runtime_summaries": [
+                {
+                    **artifact["runtime_summaries"][0],
+                    "signal_summary": {
+                        **artifact["runtime_summaries"][0]["signal_summary"],
+                        "reason_codes": ["different_fact_result"],
+                    },
+                }
+            ]
+        }
+        with pytest.raises(RuntimeError, match="detector_decision_payload_drift"):
+            runtime_active_observation_monitor.write_runtime_detector_decisions_to_pg(
+                drifted,
+                database_url=database_url,
+                allow_non_postgres_for_test=True,
+                now_ms=1102,
+            )
+    finally:
+        engine.dispose()
+
+
 def test_write_runtime_signal_summaries_to_pg_blocks_evaluator_authority_upgrade(
     tmp_path,
 ):

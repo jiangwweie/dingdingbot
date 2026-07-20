@@ -47,6 +47,10 @@ from src.application.runtime_process_outcome import (  # noqa: E402
     classify_process_outcome,
     materialize_runtime_process_outcome,
 )
+from src.domain.action_time_deadline import (  # noqa: E402
+    ActionTimeDeadline,
+    SYSTEM_ACTION_TIME_BUDGET_MS,
+)
 
 DEFAULT_PYTHON = "/home/ubuntu/brc-deploy/venvs/brc-bnb-prelive-20260601/bin/python"
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
@@ -145,12 +149,13 @@ def run_server_product_state_refresh_sequence(
     if mode not in REFRESH_MODES:
         raise ValueError(f"unsupported refresh mode: {mode}")
     command_env = _command_env_with_sync_pg_dsn(os.environ)
-    command_runner = runner or (lambda command: _run_command(command, env=command_env))
     started = datetime.now(timezone.utc).isoformat()
     effective_mode = mode
     action_time_sequence_now_ms: int | None = None
     trigger_state: dict[str, Any] | None = None
     action_time_invocation: dict[str, Any] | None = None
+    action_time_deadline: ActionTimeDeadline | None = None
+    action_time_started_monotonic_ms: int | None = None
     if mode == "action_time_if_needed":
         trigger_state = (
             action_time_trigger_state
@@ -180,6 +185,15 @@ def run_server_product_state_refresh_sequence(
     elif mode == "action_time":
         action_time_sequence_now_ms = _now_ms()
         trigger_state = action_time_trigger_state
+    if effective_mode == "action_time":
+        deadline_opened_at_ms = int(action_time_sequence_now_ms or _now_ms())
+        action_time_started_monotonic_ms = _monotonic_ms()
+        action_time_deadline = ActionTimeDeadline.start(
+            opened_wall_ms=deadline_opened_at_ms,
+            opened_monotonic_ms=action_time_started_monotonic_ms,
+            expiry_candidates_ms=_trigger_expiry_candidates(trigger_state),
+            system_budget_ms=ACTION_TIME_LATENCY_BUDGET_MS,
+        )
     if effective_mode == "action_time" and trigger_state is not None:
         existing_invocation_id = _trigger_action_time_invocation_id(trigger_state)
         if existing_invocation_id:
@@ -237,13 +251,21 @@ def run_server_product_state_refresh_sequence(
     step_results: list[dict[str, Any]] = []
     blocked_by_required_step = ""
     required_stop_kind = ""
+    logical_elapsed_ms = 0
     for step in steps:
         allow_projection_after_business_block = (
             required_stop_kind == "business_blocked"
             and step.name
             == "publish_runtime_control_current_projections_after_action_time"
         )
-        if blocked_by_required_step and not allow_projection_after_business_block:
+        allow_projection_after_deadline = (
+            required_stop_kind == "deadline"
+            and step.name
+            == "publish_runtime_control_current_projections_after_action_time"
+        )
+        if blocked_by_required_step and not (
+            allow_projection_after_business_block or allow_projection_after_deadline
+        ):
             step_results.append(
                 {
                     "name": step.name,
@@ -252,6 +274,8 @@ def run_server_product_state_refresh_sequence(
                     "status": (
                         "skipped_after_business_blocked"
                         if required_stop_kind == "business_blocked"
+                        else "skipped_after_action_time_deadline"
+                        if required_stop_kind == "deadline"
                         else "skipped_after_required_failure"
                     ),
                     "blocked_by": blocked_by_required_step,
@@ -261,7 +285,54 @@ def run_server_product_state_refresh_sequence(
                 }
             )
             continue
-        result = command_runner(step.command)
+        remaining_budget_ms: int | None = None
+        if action_time_deadline is not None and action_time_started_monotonic_ms is not None:
+            elapsed_ms = max(
+                _monotonic_ms() - action_time_started_monotonic_ms,
+                logical_elapsed_ms,
+            )
+            remaining_budget_ms = action_time_deadline.remaining_ms(
+                monotonic_now_ms=action_time_started_monotonic_ms + elapsed_ms
+            )
+            if remaining_budget_ms <= 0:
+                if required_stop_kind != "deadline":
+                    blocked_by_required_step = step.name
+                    required_stop_kind = "deadline"
+                step_results.append(
+                    {
+                        "name": step.name,
+                        "required": step.required,
+                        "returncode": None,
+                        "status": "skipped_after_action_time_deadline",
+                        "blocked_by": blocked_by_required_step,
+                        "command": list(step.command),
+                        "stdout_tail": "",
+                        "stderr_tail": "",
+                        "remaining_budget_ms": 0,
+                    }
+                )
+                continue
+        result = (
+            runner(step.command)
+            if runner is not None
+            else _run_command(
+                step.command,
+                env=command_env,
+                timeout_seconds=(
+                    min(
+                        DEFAULT_STEP_TIMEOUT_SECONDS,
+                        max(0.05, float(remaining_budget_ms) / 1000),
+                    )
+                    if remaining_budget_ms is not None
+                    else DEFAULT_STEP_TIMEOUT_SECONDS
+                ),
+            )
+        )
+        logical_elapsed_ms += int(result.duration_ms)
+        if action_time_deadline is not None:
+            action_time_deadline = action_time_deadline.shorten(
+                expiry_candidates_ms=_child_expiry_candidates(result.stdout)
+            )
         child_process_outcome = _structured_child_process_outcome(result.stdout)
         child_business_blocked = (
             result.returncode == 0
@@ -284,6 +355,7 @@ def run_server_product_state_refresh_sequence(
                 "stdout_tail": _tail(result.stdout),
                 "stderr_tail": _tail(result.stderr),
                 "duration_ms": int(result.duration_ms),
+                "remaining_budget_ms": remaining_budget_ms,
                 "child_process_outcome": child_process_outcome,
             }
         )
@@ -345,7 +417,9 @@ def run_server_product_state_refresh_sequence(
         "schema": "brc.server_product_state_refresh_sequence.v1",
         "scope": "server_product_state_refresh_sequence_non_authority",
         "status": (
-            "server_product_state_refresh_sequence_ready"
+            "server_product_state_refresh_sequence_business_blocked"
+            if required_stop_kind == "deadline"
+            else "server_product_state_refresh_sequence_ready"
             if not failed_required and not business_blocked_required
             else "server_product_state_refresh_sequence_business_blocked"
             if business_blocked_required and not failed_required
@@ -356,6 +430,23 @@ def run_server_product_state_refresh_sequence(
         "action_time_sequence_now_ms": action_time_sequence_now_ms,
         "action_time_trigger": trigger_state,
         "action_time_invocation": action_time_invocation,
+        "action_time_deadline": (
+            {
+                "global_deadline_ms": action_time_deadline.global_deadline_ms,
+                "remaining_budget_ms": action_time_deadline.remaining_ms(
+                    monotonic_now_ms=(
+                        action_time_started_monotonic_ms
+                        + max(
+                            _monotonic_ms() - action_time_started_monotonic_ms,
+                            logical_elapsed_ms,
+                        )
+                    )
+                ),
+            }
+            if action_time_deadline is not None
+            and action_time_started_monotonic_ms is not None
+            else None
+        ),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "started_at_utc": started,
         "summary": {
@@ -376,6 +467,11 @@ def run_server_product_state_refresh_sequence(
                 not current_projection_publish_attempted
             ),
             "blocked_by_required_step": blocked_by_required_step,
+            "action_time_deadline_blocker": (
+                f"action_time_deadline_insufficient:{blocked_by_required_step}"
+                if required_stop_kind == "deadline"
+                else ""
+            ),
             "business_blocked_by_required_step": (
                 blocked_by_required_step
                 if required_stop_kind == "business_blocked"
@@ -419,6 +515,8 @@ def run_server_product_state_refresh_sequence(
                     for result in step_results
                     if result["returncode"] is not None
                 ) <= ACTION_TIME_LATENCY_BUDGET_MS
+                else "deadline_exhausted"
+                if effective_mode == "action_time" and required_stop_kind == "deadline"
                 else "exceeded"
                 if effective_mode == "action_time"
                 else "not_applicable"
@@ -539,7 +637,11 @@ def _action_time_refresh_process_outcome_payload(
     business_blocked_step = str(
         summary.get("business_blocked_by_required_step") or ""
     ).strip()
-    if business_blocked_step:
+    deadline_blocker = str(summary.get("action_time_deadline_blocker") or "").strip()
+    if deadline_blocker:
+        blockers = [deadline_blocker]
+        result_status = "action_time_refresh_sequence_business_blocked"
+    elif business_blocked_step:
         blockers = [
             str(summary.get("business_blocked_first_blocker") or "").strip()
             or "action_time_refresh_sequence_business_blocked"
@@ -900,6 +1002,10 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
             expiry_counts = _expire_stale_action_time_objects(conn, now_ms=now_ms)
             counts = _action_time_trigger_counts(conn, now_ms=now_ms)
             trigger_identity = _action_time_trigger_identity(conn, now_ms=now_ms)
+            expiry_candidates_ms = _action_time_trigger_expiry_candidates(
+                conn,
+                trigger_identity=trigger_identity,
+            )
     except Exception as exc:  # noqa: BLE001 - fail closed on PG current read errors.
         return {
             "status": "blocked",
@@ -920,6 +1026,7 @@ def _action_time_trigger_state(env: Mapping[str, str]) -> dict[str, Any]:
         "counts": counts,
         "expiry_counts": expiry_counts,
         "trigger_identity": trigger_identity,
+        "expiry_candidates_ms": list(expiry_candidates_ms),
     }
 
 
@@ -1336,6 +1443,36 @@ def _action_time_trigger_identity(
     return {}
 
 
+def _action_time_trigger_expiry_candidates(
+    conn: sa.engine.Connection,
+    *,
+    trigger_identity: Mapping[str, str],
+) -> tuple[int, ...]:
+    """Return only durable source expiries known before Action-Time starts."""
+
+    table_keys = (
+        ("brc_action_time_tickets", "ticket_id"),
+        ("brc_action_time_lane_inputs", "action_time_lane_input_id"),
+        ("brc_promotion_candidates", "promotion_candidate_id"),
+        ("brc_live_signal_events", "signal_event_id"),
+    )
+    inspector = sa.inspect(conn)
+    values: list[int] = []
+    for table_name, identity_key in table_keys:
+        identity = str(trigger_identity.get(identity_key) or "").strip()
+        if not identity or not inspector.has_table(table_name):
+            continue
+        table = sa.Table(table_name, sa.MetaData(), autoload_with=conn)
+        if "expires_at_ms" not in table.c or identity_key not in table.c:
+            continue
+        value = conn.execute(
+            sa.select(table.c.expires_at_ms).where(table.c[identity_key] == identity)
+        ).scalar_one_or_none()
+        if (expiry := _positive_int(value)) is not None:
+            values.append(expiry)
+    return tuple(values)
+
+
 def _trigger_identity_row(
     row: Mapping[str, Any],
     **overrides: str,
@@ -1542,6 +1679,7 @@ def _run_command(
     command: tuple[str, ...],
     *,
     env: dict[str, str] | None = None,
+    timeout_seconds: float = DEFAULT_STEP_TIMEOUT_SECONDS,
 ) -> CommandResult:
     started = time.perf_counter()
     try:
@@ -1552,14 +1690,14 @@ def _run_command(
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=DEFAULT_STEP_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         )
     except subprocess.TimeoutExpired as exc:
         return CommandResult(
             returncode=124,
             stdout=str(exc.stdout or ""),
             stderr=(
-                f"step_timeout_after_{DEFAULT_STEP_TIMEOUT_SECONDS}s:"
+                f"step_timeout_after_{timeout_seconds}s:"
                 f"{command[1] if len(command) > 1 else command[0]}"
             ),
             duration_ms=int((time.perf_counter() - started) * 1000),
@@ -1575,6 +1713,60 @@ def _run_command(
 def _tail(text: str, *, max_chars: int = 500) -> str:
     stripped = text.strip()
     return stripped if len(stripped) <= max_chars else stripped[-max_chars:]
+
+
+def _monotonic_ms() -> int:
+    return int(time.monotonic() * 1000)
+
+
+def _trigger_expiry_candidates(trigger_state: Mapping[str, Any] | None) -> tuple[int, ...]:
+    if not isinstance(trigger_state, Mapping):
+        return ()
+    identity = trigger_state.get("trigger_identity")
+    candidates = [trigger_state]
+    if isinstance(identity, Mapping):
+        candidates.append(identity)
+    explicit = trigger_state.get("expiry_candidates_ms")
+    explicit_values = explicit if isinstance(explicit, list) else []
+    candidates.extend({"expires_at_ms": value} for value in explicit_values)
+    return tuple(
+        value
+        for row in candidates
+        for key in ("expires_at_ms", "signal_expires_at_ms", "ticket_expires_at_ms")
+        if (value := _positive_int(row.get(key))) is not None
+    )
+
+
+def _child_expiry_candidates(stdout: str) -> tuple[int, ...]:
+    values: list[int] = []
+    for line in str(stdout or "").splitlines():
+        try:
+            payload = json.loads(line)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        values.extend(_expiry_values_from_payload(payload))
+    return tuple(values)
+
+
+def _expiry_values_from_payload(payload: Any) -> list[int]:
+    if isinstance(payload, Mapping):
+        direct = [
+            value
+            for key in ("expires_at_ms", "valid_until_ms")
+            if (value := _positive_int(payload.get(key))) is not None
+        ]
+        return [*direct, *[item for value in payload.values() for item in _expiry_values_from_payload(value)]]
+    if isinstance(payload, list):
+        return [item for value in payload for item in _expiry_values_from_payload(value)]
+    return []
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized > 0 else None
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

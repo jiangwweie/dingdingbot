@@ -29,6 +29,9 @@ _DSN = os.getenv("BRC_LOCAL_TEST_POSTGRES_DSN", "")
 pytestmark = pytest.mark.skipif(not _DSN, reason="requires disposable PostgreSQL")
 NOW_MS = 1_752_480_000_000
 ROOT = Path(__file__).resolve().parents[2]
+SCHEMA_TRUTH_BUNDLE_PATH = (
+    ROOT / "migrations/versions/2026-07-20-141_schema_truth_capability_bundle.py"
+)
 
 
 @pytest.fixture()
@@ -114,9 +117,143 @@ def test_terminal_absent_releases_only_reservation_only_slot_and_is_idempotent(c
     assert connection.execute(sa.text("SELECT count(*) FROM brc_ticket_bound_lifecycle_events")).scalar_one() == 1
 
 
+def test_schema_truth_bundle_enforces_current_identity_and_converges_netting_keys(
+    connection,
+):
+    connection.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_account_budget_current (
+              account_budget_current_id text primary key,
+              account_id text not null,
+              runtime_profile_id text not null,
+              risk_policy_version text not null,
+              CONSTRAINT uq_brc_account_budget_current_scope
+                UNIQUE (account_id, runtime_profile_id, risk_policy_version)
+            )
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO brc_account_budget_current VALUES
+              ('budget-1', 'account-1', 'profile-1', 'policy-v1')
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
+            CREATE TABLE brc_runtime_fact_snapshots (
+              fact_snapshot_id text primary key,
+              fact_surface text not null
+            )
+            """
+        )
+    )
+    for table_name, state_column in (
+        ("brc_account_exposure_current", "exposure_state"),
+        ("brc_ticket_bound_exchange_commands", "command_state"),
+        ("brc_ticket_bound_scope_freezes", "status"),
+    ):
+        connection.execute(
+            sa.text(
+                f"""
+                CREATE TABLE {table_name} (
+                  account_id text not null,
+                  exchange_instrument_id text not null,
+                  position_mode text not null,
+                  position_bucket text not null,
+                  netting_domain_key text not null,
+                  {state_column} text not null,
+                  source_kind text,
+                  source_id text
+                )
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                f"""
+                INSERT INTO {table_name} (
+                  account_id, exchange_instrument_id, position_mode,
+                  position_bucket, netting_domain_key, {state_column},
+                  source_kind, source_id
+                ) VALUES (
+                  'account-1', 'binance_usdm:ETHUSDT', 'one_way', 'BOTH',
+                  'legacy-drifted-key', 'active', 'source', '{table_name}'
+                )
+                """
+            )
+        )
+
+    _upgrade_141(connection)
+
+    savepoint = connection.begin_nested()
+    try:
+        with pytest.raises(sa.exc.IntegrityError):
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_account_budget_current VALUES
+                      ('budget-2', 'account-1', 'profile-1', 'policy-v2')
+                    """
+                )
+            )
+    finally:
+        savepoint.rollback()
+
+    expected = "account-1|binance_usdm:ETHUSDT|one_way|BOTH"
+    for table_name in (
+        "brc_account_exposure_current",
+        "brc_ticket_bound_exchange_commands",
+        "brc_ticket_bound_scope_freezes",
+    ):
+        assert connection.execute(
+            sa.text(f"SELECT netting_domain_key FROM {table_name}")
+        ).scalar_one() == expected
+    typed_columns = {
+        row["column_name"]
+        for row in connection.execute(
+            sa.text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'brc_runtime_fact_snapshots'
+                """
+            )
+        ).mappings()
+    }
+    assert {
+        "lane_identity_key",
+        "event_spec_id",
+        "event_spec_version",
+        "detector_key",
+        "decision_identity",
+        "source_watermark",
+        "producer_runtime_head",
+    } <= typed_columns
+
+
 def _upgrade_140(conn) -> None:
     path = ROOT / "migrations/versions/2026-07-20-140_account_truth_convergence.py"
     spec = importlib.util.spec_from_file_location("migration_140_atc", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    old = module.op
+    module.op = Operations(MigrationContext.configure(conn))
+    try:
+        module.upgrade()
+    finally:
+        module.op = old
+
+
+def _upgrade_141(conn) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "migration_141_schema_truth_bundle", SCHEMA_TRUTH_BUNDLE_PATH
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

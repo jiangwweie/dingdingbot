@@ -635,7 +635,7 @@ def account_capacity_current_blockers(
     projection = conn.execute(
         sa.text(
             """
-            SELECT projection_version, total_wallet_balance, available_balance,
+            SELECT risk_policy_version, projection_version, total_wallet_balance, available_balance,
                    portfolio_held_risk, unreflected_pending_margin,
                    exchange_total_initial_margin,
                    claimed_position_slots, valid_until_ms,
@@ -643,7 +643,6 @@ def account_capacity_current_blockers(
             FROM brc_account_budget_current
             WHERE account_id = :account_id
               AND runtime_profile_id = :runtime_profile_id
-              AND risk_policy_version = :risk_policy_version
             ORDER BY account_budget_current_id
             LIMIT 2
             """
@@ -651,11 +650,12 @@ def account_capacity_current_blockers(
         {
             "account_id": claim.payload.account_id,
             "runtime_profile_id": claim.payload.runtime_profile_id,
-            "risk_policy_version": policy_version,
         },
     ).mappings().one_or_none()
     if projection is None:
         return ["account_budget_current_missing"], True
+    if str(projection.get("risk_policy_version") or "") != policy_version:
+        return ["account_risk_policy_missing_or_changed"], True
     if int(projection.get("projection_version") or 0) != int(
         budget.get("account_capacity_projection_version") or 0
     ):

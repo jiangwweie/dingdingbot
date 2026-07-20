@@ -62,6 +62,13 @@ def test_tp1_command_rejects_market_or_missing_limit_contract():
         TicketBoundExchangeCommand.model_validate(invalid_gtc)
 
 
+def test_command_rejects_drifted_netting_domain_identity():
+    with pytest.raises(ValueError, match="ticket_command_netting_domain_identity_mismatch"):
+        TicketBoundExchangeCommand.model_validate(
+            _tp1_command(netting_domain_key="account-1|ETHUSDT|one_way|BOTH")
+        )
+
+
 def test_tp1_command_accepts_typed_passive_limit_gtx_only():
     command = TicketBoundExchangeCommand.model_validate(
         _tp1_command(
@@ -143,7 +150,9 @@ def _tp1_command(**overrides):
         "position_mode": "one_way",
         "position_side": None,
         "position_bucket": "BOTH",
-        "netting_domain_key": "account-1|binance_usdm|ETHUSDT|BOTH",
+        "netting_domain_key": (
+            "account-1|binance_usdm:ETH/USDT:USDT|one_way|BOTH"
+        ),
         "command_kind": "place_order",
         "command_source": "protected_submit",
         "source_command_id": "attempt-1",

@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from src.domain.account_capacity_claim import (
     AccountCapacityClaimPayload,
     capacity_claim_hash,
+    canonicalize_capacity_claim_payload,
     load_capacity_claim_payload,
     reservation_idempotency_key,
 )
@@ -32,6 +33,7 @@ def insert_or_get_account_capacity_claim(
     *,
     payload: AccountCapacityClaimPayload,
 ) -> PersistedAccountCapacityClaim:
+    payload = canonicalize_capacity_claim_payload(payload)
     claim_hash = capacity_claim_hash(payload)
     idempotency_key = reservation_idempotency_key(payload)
     existing = _claim_by_invocation_id(conn, payload.action_time_invocation_id)
@@ -216,7 +218,7 @@ def _claim_by_invocation_id(
             "risk_calculation_kind": row["rule_risk_calculation_kind"],
             "semantic_hash": row["rule_semantic_hash"],
         })
-    payload = load_capacity_claim_payload({
+    payload = canonicalize_capacity_claim_payload(load_capacity_claim_payload({
         "capacity_claim_schema_version": str(row["capacity_claim_schema_version"]),
         "reservation_id": str(row["budget_reservation_id"]),
         "ticket_id": str(row["ticket_id"]),
@@ -270,7 +272,7 @@ def _claim_by_invocation_id(
         "selected_leverage": int(row["selected_leverage"]),
         "reserved_at_ms": int(row["reserved_at_ms"]),
         "expires_at_ms": int(row["expires_at_ms"]),
-    })
+    }))
     return PersistedAccountCapacityClaim(
         payload=payload,
         capacity_claim_hash=str(row["capacity_claim_hash"]),

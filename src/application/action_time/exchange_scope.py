@@ -15,6 +15,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 import sqlalchemy as sa
 
+from src.domain.netting_domain import build_netting_domain_key
+
 
 PositionMode = Literal["one_way", "hedge"]
 PositionBucket = Literal["BOTH", "LONG", "SHORT"]
@@ -220,8 +222,11 @@ def resolve_ticket_bound_exchange_scope(
         position_mode=frozen_mode,
         position_side=position_side,
         position_bucket=position_bucket,
-        netting_domain_key=(
-            f"{account_id}|{instrument_id}|{frozen_mode}|{position_bucket}"
+        netting_domain_key=build_netting_domain_key(
+            account_id=account_id,
+            exchange_instrument_id=instrument_id,
+            position_mode=frozen_mode,
+            position_bucket=position_bucket,
         ),
         account_mode_snapshot_id=frozen_fact_id,
         current_account_mode_snapshot_id=str(

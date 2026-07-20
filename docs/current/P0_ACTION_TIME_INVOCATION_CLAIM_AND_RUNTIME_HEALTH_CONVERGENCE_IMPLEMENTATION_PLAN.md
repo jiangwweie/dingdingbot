@@ -11,7 +11,7 @@ baseline_branch: codex/budget-model-review-20260714
 baseline_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
 production_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
 production_migration_head: 140
-planned_migration_set: TBD_AFTER_SCHEMA_TRUTH_GATE
+planned_migration_set: 141_schema_truth_capability_bundle_candidate_pending_postgresql_certification
 owner_policy_change: none
 exchange_write_authority: unchanged
 real_multi_position_calibration: out_of_scope
@@ -1031,9 +1031,45 @@ python3 scripts/validate_current_docs_authority.py
 
 ## 23. Completion Record
 
-当前状态：**设计与执行计划已完成；代码、schema、shadow restore 和 Tokyo canary 尚未开始。**
+当前状态：**T01–T02、T04、T06 的首批代码收敛与 T05C deadline fence 已完成本地验证；真实 PostgreSQL certification、shadow restore、Tokyo role topology 和 no-write canary 尚未执行。**
 
-### 23.1 规划文档校验基线
+### 23.1 已完成的本地实现记录（部署前）
+
+| 项目 | 结果 | 仍需的 Gate |
+| --- | --- | --- |
+| **Schema Authority** | Alembic 同时加载 `Base.metadata` 与 `PGCoreBase.metadata`；PG runtime `create_all()` 已移除，启动改为 head/capability fail-closed | disposable PostgreSQL `001 → 141` 与 `140 → 141` fingerprint 认证；Tokyo role topology readonly audit |
+| **Capability Bundle** | **`141_schema_truth_capability_bundle`** 已作为最小候选：Budget Current account/profile 唯一性、immutable typed detector identity、Exposure/Command/Hold canonical NettingDomainKey backfill | 实际 PG upgrade；duplicate/current collision negative；production backup/shadow restore |
+| **Decimal / Claim** | `Numeric(36,18)` canonicalization 已用于 hash、insert 与 reload compare；FinalGate 查询保持 policy version field | PostgreSQL roundtrip 和并发 Claim matrix |
+| **Action-Time Deadline** | 以 monotonic elapsed 计算 30 秒及 source expiry 的最短 deadline；deadline 后不再启动 Ticket、FinalGate 或 handoff child step | child PG timeout/statement timeout 从 remaining budget 派生；真实 PG side-effect=0 matrix |
+| **Detector Decision** | full typed identity 下重复 candle no-op，payload drift fail-closed；旧 `ON CONFLICT DO UPDATE` 已删除 | detector/Signal 同事务或 durable outbox，22-lane PG proof |
+| **Netting Domain** | Exposure、Ticket Command、Hold 使用同一 `account|instrument|position_mode|bucket` identity；domain command mismatch fail-closed | production historical row dry-run 与 dual-position lifecycle matrix |
+
+本地已通过的 focused tests：
+
+```text
+tests/unit/test_pg_migration_identifier_names.py
+tests/unit/test_account_capacity_claim.py
+tests/unit/test_account_capacity_claim_persistence.py
+tests/unit/test_account_budget_current.py
+tests/unit/test_account_exposure_current.py
+tests/unit/test_ticket_bound_exchange_snapshot_provider.py
+tests/unit/test_ticket_bound_exchange_command.py
+tests/unit/test_runtime_active_observation_monitor.py
+tests/unit/test_action_time_deadline.py
+tests/unit/test_server_product_state_refresh_sequence.py
+```
+
+已在一次性本地 **PostgreSQL 16** 容器完成以下 disposable certification，容器已删除：
+
+```text
+tests/integration/test_account_truth_convergence_postgres.py  3 passed
+tests/integration/test_account_capacity_postgres.py           3 passed
+tests/integration/test_runtime_causal_integrity_postgres.py -k current_head  1 passed
+```
+
+其中完整认证 harness 使用官方 `001 → 106 → deterministic foundation seed → 141` 路径，并动态读取 Alembic current head；`init_pg_core_db()` capability startup 也已在 PostgreSQL 上通过。直接对绝对空库执行 `alembic upgrade head` 会在冻结历史 **revision 107** 停止，因为其错误地依赖 CPM authority seed；这是已知的 historical DDL/seed 混合债务，不修改 `001–140`。当前认证基线必须显式使用上述 deterministic seed path，P0-ACH 稳定后再生成认证 template/baseline。东京生产、migration apply、role/grant 变更和 Writer Fence 解除均未执行。
+
+### 23.2 规划文档校验基线
 
 | 校验 | 当前结果 |
 | --- | --- |

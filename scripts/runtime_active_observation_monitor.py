@@ -20,7 +20,7 @@ from pathlib import Path
 import shlex
 import sys
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import sqlalchemy as sa
 
@@ -970,6 +970,22 @@ def _write_runtime_detector_decisions(
 ) -> list[str]:
     if not sa.inspect(conn).has_table("brc_runtime_fact_snapshots"):
         return []
+    available_columns = {
+        str(column["name"])
+        for column in sa.inspect(conn).get_columns("brc_runtime_fact_snapshots")
+    }
+    typed_columns = {
+        "lane_identity_key",
+        "event_spec_id",
+        "event_spec_version",
+        "detector_key",
+        "decision_identity",
+        "source_watermark",
+        "producer_runtime_head",
+    }
+    typed_identity_available = typed_columns <= available_columns
+    if conn.dialect.name == "postgresql" and not typed_identity_available:
+        raise RuntimeError("detector_decision_identity_schema_missing")
     written: list[str] = []
     for row in summaries:
         raw_identity = row.get("lane_identity")
@@ -994,11 +1010,26 @@ def _write_runtime_detector_decisions(
             continue
         trigger_candle_close_time_ms = _int_or_zero(signal.get("trigger_candle_close_time_ms"))
         decision_identity = trigger_candle_close_time_ms or evaluated_at_ms
-        fact_snapshot_id = (
-            "fact:"
-            f"{identity.strategy_group_id}:{identity.symbol}:{identity.side}:"
-            f"pretrade_strategy:{identity.strategy_group_version_id}:{decision_identity}"
+        detector_key = str(signal.get("evaluator_id") or "runtime_lane_evaluator")
+        # The typed uniqueness key includes the event-spec version and evaluator.
+        # Derive the compact lineage token from that complete key as well: a raw
+        # ``lane:candle`` value would collide when an event release or evaluator
+        # changes while a previous decision remains immutable.
+        source_identity = "|".join(
+            (
+                identity.identity_key,
+                identity.event_spec_id,
+                identity.event_spec_version,
+                detector_key,
+                str(decision_identity),
+            )
         )
+        source_watermark = "detector-decision:" + hashlib.sha256(
+            source_identity.encode("utf-8")
+        ).hexdigest()
+        fact_snapshot_id = "detector:" + hashlib.sha256(
+            source_watermark.encode("utf-8")
+        ).hexdigest()[:40]
         satisfied = evaluation_status == "event_satisfied"
         failed_facts = [] if satisfied else [
             str(item) for item in signal.get("reason_codes") or [] if str(item)
@@ -1014,48 +1045,114 @@ def _write_runtime_detector_decisions(
             "signal_snapshot": signal.get("signal_snapshot") or {},
             "action_time_fact_values": signal.get("action_time_fact_values") or {},
         }
-        conn.execute(
-            sa.text(
-                """
-                INSERT INTO brc_runtime_fact_snapshots (
-                  fact_snapshot_id, strategy_group_id, symbol, side,
-                  runtime_profile_id, fact_surface, source_kind, source_ref,
-                  computed, satisfied, freshness_state, failed_facts, fact_values,
-                  blocker_class, observed_at_ms, valid_until_ms, created_at_ms
-                ) VALUES (
-                  :fact_snapshot_id, :strategy_group_id, :symbol, :side,
-                  :runtime_profile_id, 'pretrade_strategy', 'live_market', :source_ref,
-                  true, :satisfied, 'fresh', :failed_facts, :fact_values,
-                  :blocker_class, :observed_at_ms, :valid_until_ms, :created_at_ms
-                ) ON CONFLICT (fact_snapshot_id) DO UPDATE SET
-                  satisfied = excluded.satisfied,
-                  freshness_state = excluded.freshness_state,
-                  failed_facts = excluded.failed_facts,
-                  fact_values = excluded.fact_values,
-                  blocker_class = excluded.blocker_class,
-                  observed_at_ms = excluded.observed_at_ms,
-                  valid_until_ms = excluded.valid_until_ms,
-                  created_at_ms = excluded.created_at_ms
-                """
-            ),
-            {
-                "fact_snapshot_id": fact_snapshot_id,
-                "strategy_group_id": identity.strategy_group_id,
-                "symbol": identity.symbol,
-                "side": identity.side,
-                "runtime_profile_id": identity.runtime_profile_id,
-                "source_ref": f"runtime_instance:{identity.runtime_instance_id}",
-                "satisfied": satisfied,
-                "failed_facts": json.dumps(failed_facts),
-                "fact_values": json.dumps(fact_values, default=str),
-                "blocker_class": None if satisfied else "computed_not_satisfied",
-                "observed_at_ms": evaluated_at_ms,
-                "valid_until_ms": valid_until_ms,
-                "created_at_ms": observed_ms,
-            },
-        )
+        values = {
+            "fact_snapshot_id": fact_snapshot_id,
+            "strategy_group_id": identity.strategy_group_id,
+            "symbol": identity.symbol,
+            "side": identity.side,
+            "runtime_profile_id": identity.runtime_profile_id,
+            "source_ref": f"runtime_instance:{identity.runtime_instance_id}",
+            "satisfied": satisfied,
+            "failed_facts": json.dumps(failed_facts),
+            "fact_values": json.dumps(fact_values, default=str),
+            "blocker_class": None if satisfied else "computed_not_satisfied",
+            "observed_at_ms": evaluated_at_ms,
+            "valid_until_ms": valid_until_ms,
+            "created_at_ms": observed_ms,
+            "lane_identity_key": identity.identity_key,
+            "event_spec_id": identity.event_spec_id,
+            "event_spec_version": identity.event_spec_version,
+            "detector_key": detector_key,
+            "decision_identity": decision_identity,
+            "source_watermark": source_watermark,
+            "producer_runtime_head": os.getenv("BRC_RUNTIME_HEAD", "unknown"),
+        }
+        if typed_identity_available:
+            result = conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_runtime_fact_snapshots (
+                      fact_snapshot_id, strategy_group_id, symbol, side,
+                      runtime_profile_id, fact_surface, source_kind, source_ref,
+                      computed, satisfied, freshness_state, failed_facts, fact_values,
+                      blocker_class, observed_at_ms, valid_until_ms, created_at_ms,
+                      lane_identity_key, event_spec_id, event_spec_version,
+                      detector_key, decision_identity, source_watermark,
+                      producer_runtime_head
+                    ) VALUES (
+                      :fact_snapshot_id, :strategy_group_id, :symbol, :side,
+                      :runtime_profile_id, 'pretrade_strategy', 'live_market', :source_ref,
+                      true, :satisfied, 'fresh', :failed_facts, :fact_values,
+                      :blocker_class, :observed_at_ms, :valid_until_ms, :created_at_ms,
+                      :lane_identity_key, :event_spec_id, :event_spec_version,
+                      :detector_key, :decision_identity, :source_watermark,
+                      :producer_runtime_head
+                    ) ON CONFLICT (lane_identity_key, event_spec_id, event_spec_version,
+                      detector_key, decision_identity)
+                    WHERE fact_surface = 'pretrade_strategy'
+                    DO NOTHING
+                    """
+                ),
+                values,
+            )
+            if int(result.rowcount or 0) == 0:
+                existing = conn.execute(
+                    sa.text(
+                        """
+                        SELECT satisfied, failed_facts, fact_values, valid_until_ms
+                        FROM brc_runtime_fact_snapshots
+                        WHERE fact_surface = 'pretrade_strategy'
+                          AND lane_identity_key = :lane_identity_key
+                          AND event_spec_id = :event_spec_id
+                          AND event_spec_version = :event_spec_version
+                          AND detector_key = :detector_key
+                          AND decision_identity = :decision_identity
+                        """
+                    ),
+                    values,
+                ).mappings().one()
+                if not _detector_decision_matches(existing, values):
+                    raise RuntimeError("detector_decision_payload_drift")
+        else:
+            # SQLite-only fixture compatibility.  Production PostgreSQL never
+            # takes this path because typed identity is a required capability.
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_runtime_fact_snapshots (
+                      fact_snapshot_id, strategy_group_id, symbol, side,
+                      runtime_profile_id, fact_surface, source_kind, source_ref,
+                      computed, satisfied, freshness_state, failed_facts, fact_values,
+                      blocker_class, observed_at_ms, valid_until_ms, created_at_ms
+                    ) VALUES (
+                      :fact_snapshot_id, :strategy_group_id, :symbol, :side,
+                      :runtime_profile_id, 'pretrade_strategy', 'live_market', :source_ref,
+                      true, :satisfied, 'fresh', :failed_facts, :fact_values,
+                      :blocker_class, :observed_at_ms, :valid_until_ms, :created_at_ms
+                    ) ON CONFLICT (fact_snapshot_id) DO NOTHING
+                    """
+                ),
+                values,
+            )
         written.append(fact_snapshot_id)
     return written
+
+
+def _detector_decision_matches(
+    existing: Mapping[str, Any], values: Mapping[str, Any]
+) -> bool:
+    return (
+        bool(existing.get("satisfied")) == bool(values["satisfied"])
+        and int(existing.get("valid_until_ms") or 0) == int(values["valid_until_ms"])
+        and _json_value(existing.get("failed_facts")) == _json_value(values["failed_facts"])
+        and _json_value(existing.get("fact_values")) == _json_value(values["fact_values"])
+    )
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
 
 
 def _pg_live_signal_events_result(

@@ -15,6 +15,7 @@ from src.application.action_time.account_exchange_ownership import (
     AccountPositionClassification,
 )
 from src.domain.account_risk import compute_directional_risk
+from src.domain.netting_domain import build_netting_domain_key
 from src.infrastructure.binance_usdm_account_risk_snapshot import (
     ExchangeOpenOrderRow,
     ExchangePositionRow,
@@ -744,7 +745,12 @@ def _row_values(
 ) -> dict[str, object]:
     return {
         **row.model_dump(),
-        "netting_domain_key": f"{row.account_id}:{row.exchange_instrument_id}:{row.position_bucket}",
+        "netting_domain_key": build_netting_domain_key(
+            account_id=row.account_id,
+            exchange_instrument_id=row.exchange_instrument_id,
+            position_mode=row.position_mode,
+            position_bucket=row.position_bucket,
+        ),
         "exchange_initial_margin": _ZERO,
         "unreflected_pending_margin": _ZERO,
         "tp1_open_qty": _ZERO,

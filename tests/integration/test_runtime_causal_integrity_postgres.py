@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 import multiprocessing
+from pathlib import Path
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 from src.application.action_time import finalgate_preflight as finalgate
@@ -106,7 +109,7 @@ def _preserve_release_b_baseline_for_legacy_rci_scenarios(
     yield
 
 
-def test_rci_harness_uses_postgresql_revision_138(
+def test_rci_harness_uses_postgresql_current_head(
     postgres_certification_engine,
 ):
     assert postgres_certification_engine.dialect.name == "postgresql"
@@ -120,7 +123,11 @@ def test_rci_harness_uses_postgresql_revision_138(
             )
         ).scalar_one()
 
-    assert revision == "138"
+    config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    config.set_main_option(
+        "script_location", str(Path(__file__).resolve().parents[2] / "migrations")
+    )
+    assert revision == ScriptDirectory.from_config(config).get_current_head()
     assert invocation_table == "brc_action_time_invocations"
 
 

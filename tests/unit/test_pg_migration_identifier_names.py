@@ -4,6 +4,9 @@ import ast
 import importlib.util
 from pathlib import Path
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
 
 POSTGRES_IDENTIFIER_LIMIT = 63
 MIGRATION_IDENTIFIER_PREFIXES = ("ck_", "idx_", "fk_", "uq_", "check_")
@@ -86,7 +89,9 @@ def test_migration_revision_chain_is_single_head_after_slimming():
 
     assert len(revisions) == len(migration_paths)
     assert roots == ["001"]
-    assert heads == ["136"]
+    config = Config("alembic.ini")
+    config.set_main_option("script_location", "migrations")
+    assert heads == sorted(ScriptDirectory.from_config(config).get_heads())
     assert missing_down_revisions == {}
 
 

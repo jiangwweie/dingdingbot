@@ -10,7 +10,7 @@ baseline_branch: codex/budget-model-review-20260714
 baseline_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
 production_head: 386cc3d761f17231a6c35d2bc96b347153cbd907
 production_migration_head: 140
-planned_migration_set: TBD_AFTER_SCHEMA_TRUTH_GATE
+planned_migration_set: 141_schema_truth_capability_bundle_candidate_pending_postgresql_certification
 owner_policy_change: none
 exchange_write_authority: unchanged
 real_multi_position_calibration: out_of_scope

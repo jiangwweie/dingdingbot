@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from src.domain.persisted_decimal import canonical_persisted_decimal
+
 from src.domain.instrument_risk_identity import (
     InstrumentRiskIdentity,
     InstrumentRuleSnapshotRef,
@@ -104,9 +106,42 @@ def _canonical(value: object) -> object:
     return value
 
 
+def _canonicalize_tree(value: object) -> object:
+    if isinstance(value, Decimal):
+        return canonical_persisted_decimal(value, semantic="exact")
+    if isinstance(value, dict):
+        return {key: _canonicalize_tree(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonicalize_tree(item) for item in value]
+    return value
+
+
+def canonicalize_capacity_claim_payload(
+    payload: AccountCapacityClaimPayload,
+) -> AccountCapacityClaimPayload:
+    """Freeze one Claim payload before hashing, INSERT and PG reload compare."""
+
+    values = _canonicalize_tree(payload.model_dump(mode="python"))
+    assert isinstance(values, dict)
+    for field in ("allowed_risk_budget",):
+        values[field] = canonical_persisted_decimal(
+            Decimal(values[field]), semantic="allowance"
+        )
+    for field in (
+        "target_notional",
+        "planned_stop_risk",
+        "reserved_margin",
+    ):
+        values[field] = canonical_persisted_decimal(
+            Decimal(values[field]), semantic="consumption"
+        )
+    return type(payload).model_validate(values)
+
+
 def capacity_claim_hash(payload: AccountCapacityClaimPayload) -> str:
     """Hash every immutable semantic fact that describes the claimed capacity."""
 
+    payload = canonicalize_capacity_claim_payload(payload)
     encoded = json.dumps(
         _canonical(payload.model_dump(mode="python")),
         sort_keys=True,

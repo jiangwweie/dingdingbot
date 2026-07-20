@@ -153,7 +153,7 @@ def project_account_budget_current(
         capacity_blocker = "portfolio_margin_limit_reached"
     entry_blockers = [*ordered_blockers, *([capacity_blocker] if capacity_blocker else [])]
     new_entry_allowed = not entry_blockers
-    existing = _existing(conn, snapshot.account_id, runtime_profile_id, policy.risk_policy_version)
+    existing = _existing(conn, snapshot.account_id, runtime_profile_id)
     semantic_values = {
         "risk_policy_version": policy.risk_policy_version,
         "total_wallet_balance": snapshot.total_wallet_balance,
@@ -191,7 +191,7 @@ def project_account_budget_current(
     return result
 
 
-def _existing(conn: sa.Connection, account_id: str, profile: str, policy: str) -> dict[str, object] | None:
+def _existing(conn: sa.Connection, account_id: str, profile: str) -> dict[str, object] | None:
     row = conn.execute(sa.text("""
       SELECT account_budget_current_id, risk_policy_version,
              total_wallet_balance, available_balance,
@@ -204,12 +204,10 @@ def _existing(conn: sa.Connection, account_id: str, profile: str, policy: str) -
       FROM brc_account_budget_current
       WHERE account_id = :account_id
         AND runtime_profile_id = :runtime_profile_id
-        AND risk_policy_version = :risk_policy_version
       LIMIT 2
     """), {
         "account_id": account_id,
         "runtime_profile_id": profile,
-        "risk_policy_version": policy,
     }).mappings().one_or_none()
     return dict(row) if row else None
 
@@ -217,7 +215,7 @@ def _existing(conn: sa.Connection, account_id: str, profile: str, policy: str) -
 def _persist(conn: sa.Connection, result: AccountBudgetCurrent, snapshot: FullAccountRiskSnapshot, policy: AccountRiskPolicy, margin_limit: Decimal, risk_limit: Decimal, now_ms: int, existing: dict[str, object] | None) -> None:
     margin_used = snapshot.exchange_total_initial_margin
     values = {
-        "account_budget_current_id": existing["account_budget_current_id"] if existing else _stable_id("account_budget", result.account_id, result.runtime_profile_id, result.risk_policy_version),
+        "account_budget_current_id": existing["account_budget_current_id"] if existing else _stable_id("account_budget", result.account_id, result.runtime_profile_id),
         **result.model_dump(), "total_wallet_balance": snapshot.total_wallet_balance, "available_balance": snapshot.available_balance,
         "exchange_total_initial_margin": snapshot.exchange_total_initial_margin,
         "working_entry_risk": result.working_entry_risk,

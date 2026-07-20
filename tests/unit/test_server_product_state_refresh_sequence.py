@@ -287,6 +287,44 @@ def test_action_time_refresh_reports_step_and_total_latency_budget(tmp_path: Pat
     ]
 
 
+def test_action_time_deadline_prevents_later_ticket_and_handoff_steps(tmp_path: Path):
+    module = _load_module()
+    calls: list[str] = []
+    durations = iter([1_000, 2_000])
+
+    def runner(command: tuple[str, ...]):
+        calls.append(command[1])
+        return module.CommandResult(
+            returncode=0,
+            stdout="ok",
+            stderr="",
+            duration_ms=next(durations),
+        )
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time_if_needed",
+        action_time_trigger_state={
+            **_fresh_signal_trigger(now_ms=1_000),
+            "expiry_candidates_ms": [2_500],
+        },
+        action_time_invocation_starter=_unit_invocation_starter,
+        runner=runner,
+        process_outcome_writer=lambda _payload: None,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_business_blocked"
+    assert report["summary"]["action_time_deadline_blocker"] == (
+        "action_time_deadline_insufficient:materialize_action_time_finalgate_preflight"
+    )
+    assert calls == [
+        "scripts/build_runtime_account_safe_facts.py",
+        "scripts/materialize_action_time_ticket_sequence.py",
+    ]
+    assert report["safety_invariants"]["calls_ticket_bound_operation_layer_handoff"] is False
+
+
 def test_action_time_refresh_conserves_required_step_timeout_with_lane_lineage(
     tmp_path: Path,
 ):

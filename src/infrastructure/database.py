@@ -7,6 +7,10 @@ v3.0 数据库基础设施
 - PG 核心链路新增实现（双轨迁移）
 """
 
+from pathlib import Path
+
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -19,6 +23,20 @@ import os
 class Base(DeclarativeBase):
     """SQLAlchemy 模型基类"""
     pass
+
+
+class PGSchemaCapabilityError(RuntimeError):
+    """Raised when a PG runtime starts against an un-migrated schema."""
+
+
+PG_REQUIRED_SCHEMA_TABLES = (
+    "brc_action_time_invocations",
+    "brc_live_signal_events",
+    "brc_runtime_fact_snapshots",
+    "brc_account_budget_current",
+    "brc_account_exposure_current",
+    "brc_budget_reservations",
+)
 
 
 # 数据库 URL 配置
@@ -62,7 +80,7 @@ def _get_positive_int_env(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-def _build_pg_engine_kwargs() -> dict:
+def _build_pg_engine_kwargs(db_url: str = "") -> dict:
     """构建 PostgreSQL engine 配置。
 
     单实例执行主链的主要目标是避免：
@@ -75,12 +93,16 @@ def _build_pg_engine_kwargs() -> dict:
     idle_tx_timeout_ms = _get_positive_int_env("PG_IDLE_TX_TIMEOUT_MS", 15000)
     pool_timeout_seconds = _get_positive_int_env("PG_POOL_TIMEOUT_SECONDS", 10)
 
-    return {
+    common = {
         "echo": os.getenv("SQL_ECHO", "false").lower() == "true",
         "pool_pre_ping": True,
         "pool_recycle": 1800,
         "pool_timeout": pool_timeout_seconds,
-        "connect_args": {
+    }
+    if "+asyncpg" in str(db_url):
+        return {
+            **common,
+            "connect_args": {
             "command_timeout": command_timeout_seconds,
             "ssl": None if os.getenv("PG_SSL_DISABLED", "false").lower() == "true" else "prefer",
             "server_settings": {
@@ -88,6 +110,25 @@ def _build_pg_engine_kwargs() -> dict:
                 "lock_timeout": str(lock_timeout_ms),
                 "idle_in_transaction_session_timeout": str(idle_tx_timeout_ms),
             },
+            },
+        }
+    # psycopg uses libpq-compatible parameters.  Passing asyncpg's
+    # ``command_timeout`` / ``server_settings`` through this path makes even
+    # a capability-only startup fail before it can validate the schema.
+    return {
+        **common,
+        "connect_args": {
+            "connect_timeout": command_timeout_seconds,
+            "sslmode": (
+                "disable"
+                if os.getenv("PG_SSL_DISABLED", "false").lower() == "true"
+                else "prefer"
+            ),
+            "options": (
+                f"-c statement_timeout={statement_timeout_ms} "
+                f"-c lock_timeout={lock_timeout_ms} "
+                f"-c idle_in_transaction_session_timeout={idle_tx_timeout_ms}"
+            ),
         },
     }
 
@@ -121,7 +162,7 @@ def create_engine(db_url: Optional[str] = None) -> AsyncEngine:
             db_url,
             pool_size=20,
             max_overflow=40,
-            **_build_pg_engine_kwargs(),
+            **_build_pg_engine_kwargs(db_url),
         )
 
 
@@ -153,7 +194,7 @@ def create_pg_engine(db_url: Optional[str] = None) -> AsyncEngine:
         resolved_url,
         pool_size=10,
         max_overflow=20,
-        **_build_pg_engine_kwargs(),
+        **_build_pg_engine_kwargs(resolved_url),
     )
 
 
@@ -300,23 +341,66 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db():
-    """初始化数据库（创建所有表）"""
-    from src.infrastructure.database import Base
+    """Initialize the legacy local SQLite database only.
+
+    PostgreSQL runtime schema is Alembic-owned.  A production caller must use
+    ``init_pg_core_db`` which validates capability instead of issuing DDL.
+    """
     engine = get_engine()
+    if engine.url.get_backend_name().startswith("postgresql"):
+        raise PGSchemaCapabilityError("runtime_schema_creation_forbidden")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 
 async def init_pg_core_db() -> None:
-    """初始化 PG 核心表。
+    """Verify that Alembic has prepared the required PG runtime schema.
 
-    仅创建迁移阶段新增 PG 真源需要的核心表。
+    The historical function name is retained for repository compatibility, but
+    production startup must never create or alter tables.  Missing capability
+    fails closed with a typed, secret-free reason.
     """
-    from src.infrastructure.pg_models import PGCoreBase
-
     engine = get_pg_engine()
     async with engine.begin() as conn:
-        await conn.run_sync(PGCoreBase.metadata.create_all)
+        await conn.run_sync(_verify_pg_schema_capability)
+
+
+def _verify_pg_schema_capability(conn) -> None:
+    inspector_rows = conn.execute(
+        text(
+            "SELECT tablename FROM pg_tables "
+            "WHERE schemaname = current_schema()"
+        )
+    ).scalars()
+    tables = {str(name) for name in inspector_rows}
+    missing = sorted(set(PG_REQUIRED_SCHEMA_TABLES) - tables)
+    if "alembic_version" not in tables:
+        missing.insert(0, "alembic_version")
+    if missing:
+        raise PGSchemaCapabilityError(
+            "runtime_schema_capability_missing:" + ",".join(missing)
+        )
+    actual_heads = {
+        str(value)
+        for value in conn.execute(text("SELECT version_num FROM alembic_version"))
+        .scalars()
+        .all()
+        if value
+    }
+    expected_heads = _expected_alembic_heads()
+    if actual_heads != expected_heads:
+        raise PGSchemaCapabilityError(
+            "runtime_schema_head_mismatch:"
+            f"expected={','.join(sorted(expected_heads))};"
+            f"actual={','.join(sorted(actual_heads))}"
+        )
+
+
+def _expected_alembic_heads() -> set[str]:
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "migrations"))
+    return {str(head) for head in ScriptDirectory.from_config(config).get_heads()}
 
 
 def get_pg_session_maker() -> async_sessionmaker[AsyncSession]:

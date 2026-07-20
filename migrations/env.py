@@ -7,9 +7,11 @@ import asyncio
 import os
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-# 导入 Base 以获取 metadata
-# 注意：这里需要导入所有模型文件，确保 metadata 包含所有表
+# Import both legacy and PG mappings.  Alembic remains the only production
+# schema writer; these metadata objects are used for mapping/drift inspection,
+# never by runtime create_all calls.
 from src.infrastructure.database import Base
+from src.infrastructure.pg_models import PGCoreBase
 
 # 导入模型（确保 metadata 包含所有表）
 # from src.domain.models import Account, Signal, Order, Position
@@ -25,8 +27,10 @@ if runtime_database_url:
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# 设置 target_metadata（用于自动生成迁移）
-target_metadata = Base.metadata
+# Keep both declarative registries visible to Alembic.  Migration-only objects
+# are intentionally handled by the schema capability registry rather than
+# being silently created by the application at startup.
+target_metadata = (Base.metadata, PGCoreBase.metadata)
 
 
 def run_migrations_offline() -> None:

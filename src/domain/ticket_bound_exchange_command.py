@@ -14,6 +14,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.domain.netting_domain import build_netting_domain_key
+
 
 class ExchangeCommandModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -197,6 +199,14 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
             or self.position_bucket != self.position_side
         ):
             raise ValueError("hedge command requires matching positionSide bucket")
+        expected_netting_domain_key = build_netting_domain_key(
+            account_id=self.account_id,
+            exchange_instrument_id=self.exchange_instrument_id,
+            position_mode=self.position_mode,
+            position_bucket=self.position_bucket,
+        )
+        if self.netting_domain_key != expected_netting_domain_key:
+            raise ValueError("ticket_command_netting_domain_identity_mismatch")
         if self.reduce_intent == "open_position" and self.order_role != "ENTRY":
             raise ValueError("only ENTRY may open position")
         if self.reduce_intent == "reduce_position" and self.order_role == "ENTRY":
