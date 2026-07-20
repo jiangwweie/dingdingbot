@@ -424,11 +424,10 @@ def test_noops_without_fresh_signal(pg_control_connection):
     assert _count(pg_control_connection, "brc_action_time_lane_inputs") == 0
     assert _count(pg_control_connection, "brc_budget_reservations") == 0
     assert _count(pg_control_connection, "brc_protection_references") == 0
-    process = pg_control_connection.execute(
-        text("SELECT process_state, business_state FROM brc_runtime_process_outcomes")
-    ).mappings().one()
-    assert process["process_state"] == "noop"
-    assert process["business_state"] == "waiting_for_opportunity"
+    assert pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_runtime_process_outcomes")
+    ).scalar_one() == 0
+    assert "system_incident" not in payload
     active_scope_count = pg_control_connection.execute(
         text(
             "SELECT COUNT(*) FROM brc_strategy_group_candidate_scope "

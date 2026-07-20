@@ -90,8 +90,10 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     is_current_live_signal,
 )
 from src.application.runtime_process_outcome import (  # noqa: E402
-    materialize_runtime_process_outcome,
     runtime_process_exit_code,
+)
+from src.application.runtime_incident_projector import (  # noqa: E402
+    upsert_system_runtime_incident,
 )
 from src.application.strategy_semantic_admission import (  # noqa: E402
     materialize_active_strategy_semantic_admissions,
@@ -230,29 +232,23 @@ def materialize_pg_promotion_action_time_lane(
 
     def result(status: str, **kwargs: Any) -> dict[str, Any]:
         payload = _result(status, **kwargs)
-        signal_table = sa.Table(
-            "brc_live_signal_events",
-            sa.MetaData(),
-            autoload_with=conn,
-        )
-        signal_count = int(
-            conn.execute(sa.select(sa.func.count()).select_from(signal_table)).scalar_one()
-        )
-        if not sa.inspect(conn).has_table("brc_runtime_process_outcomes"):
-            return payload
-        process_row = materialize_runtime_process_outcome(
-            conn,
-            process_name="promotion_action_time_lane_batch",
-            scope_key="global",
-            run_id=_stable_id("promotion_process_run", str(now_ms), status),
-            result_status=status,
-            blockers=list(kwargs.get("blockers") or []),
-            started_at_ms=started_at_ms,
-            completed_at_ms=now_ms,
-            runtime_head=os.getenv("BRC_RUNTIME_HEAD", "runtime-head-unknown"),
-            source_watermark=f"live_signal_events:{signal_count}",
-        )
-        payload["process_outcome"] = process_row
+        blockers = [str(item) for item in kwargs.get("blockers") or [] if str(item)]
+        if blockers:
+            signal_count = int(
+                conn.execute(sa.text("SELECT COUNT(*) FROM brc_live_signal_events")).scalar_one()
+                or 0
+            )
+            payload["system_incident"] = upsert_system_runtime_incident(
+                conn,
+                incident_type="promotion_action_time_lane_batch",
+                blocker=blockers[0],
+                details={
+                    "status": status,
+                    "blockers": blockers,
+                    "source_watermark": f"live_signal_events:{signal_count}",
+                },
+                now_ms=now_ms,
+            )
         return payload
 
     _expire_stale_open_promotions(conn, now_ms=now_ms)
