@@ -90,6 +90,10 @@ def materialize_action_time_ticket_sequence(
     """
 
     invocation_mode = bool(str(action_time_invocation_id or "").strip())
+    if not invocation_mode and conn.dialect.name == "postgresql":
+        raise ValueError(
+            "legacy_batch_ticket_sequence_disabled_use_typed_action_time_invocation"
+        )
     if not invocation_mode and projection_publisher is None:
         raise ValueError("projection_publisher is required outside invocation mode")
     started_at_ms = int(
