@@ -15,7 +15,10 @@ from src.application.action_time.lifecycle_safety_core import (
 )
 
 
-MIGRATION_114_LIFECYCLE_STATUSES = {
+# Migration 140 added this terminal pre-submit reconciliation result.  Keep the
+# contract assertion aligned with the immutable deployed schema rather than
+# freezing the older migration-114 vocabulary in a current reducer test.
+CURRENT_LIFECYCLE_STATUSES = {
     "entry_submit_sent",
     "entry_fill_pending",
     "entry_filled",
@@ -47,11 +50,12 @@ MIGRATION_114_LIFECYCLE_STATUSES = {
     "final_exit_unknown",
     "settlement_blocked",
     "review_blocked",
+    "presubmit_reconciled_absent",
 }
 
 
-def test_every_migration_114_status_has_one_typed_specification():
-    assert set(LIFECYCLE_STATUS_SPECIFICATIONS) == MIGRATION_114_LIFECYCLE_STATUSES
+def test_every_current_persisted_status_has_one_typed_specification():
+    assert set(LIFECYCLE_STATUS_SPECIFICATIONS) == CURRENT_LIFECYCLE_STATUSES
 
 
 @pytest.mark.parametrize(

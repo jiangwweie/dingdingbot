@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict
 import sqlalchemy as sa
 
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity
+from src.domain.runtime_semantic_kernel import (
+    RuntimeSemanticState,
+    semantic_state_for_process_outcome,
+)
 
 
 class RuntimeProcessOutcome(BaseModel):
@@ -33,6 +37,20 @@ class RuntimeProcessOutcome(BaseModel):
         "completed",
     ]
     first_blocker: str = ""
+
+    @property
+    def semantic_state(self) -> RuntimeSemanticState:
+        """Shared state semantics for current projection consumers.
+
+        This keeps process outcomes from maintaining another implicit notion of
+        terminal/current relevance while aggregate-specific lifecycle state
+        remains owned by the lifecycle reducer.
+        """
+
+        return semantic_state_for_process_outcome(
+            process_state=self.process_state,
+            reason_code=self.first_blocker,
+        )
 
 
 PROCESS_SUCCESS_STATES = {"succeeded", "noop", "business_blocked"}
