@@ -18,6 +18,8 @@ real_multi_position_calibration: out_of_scope
 
 # P0 Schema Truth、Action-Time 与双仓位实盘前置收敛设计
 
+> **Remaining execution override:** commit `60999176` 之后的多信号、双 Ticket、保护、runner、退出、删除和部署前认证，以 `P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md` 为当前详细权威。本文继续约束 Schema Truth、Migration、role topology、restore 和整体 P0-ACH 边界。
+
 ## 1. 决策摘要
 
 ### 1.1 核心判断

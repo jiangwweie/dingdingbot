@@ -19,6 +19,8 @@ real_multi_position_calibration: out_of_scope
 
 # P0 Schema Truth、Action-Time 与双仓位实盘前置收敛执行计划
 
+> **Remaining execution override:** commit `60999176` 之后的开发顺序使用 `P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN.md` 的 R0-R9。本文已完成部分继续作为 Schema/Decimal/Netting/Deadline 基线和 Tokyo certification 上位约束。
+
 ## 1. 执行目标
 
 **本计划把当前系统推进到 `multi_position_pre_live_certified`：代码、Schema、真实 PostgreSQL、并发、恢复、性能和东京 no-exchange-write canary 全部通过，下一步只剩自然信号下的真实多仓位校准。**
