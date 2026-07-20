@@ -4,6 +4,8 @@ status: PROPOSED_IMPLEMENTATION_CONFIRMATION_REQUIRED
 authority: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN.md
 program_id: P0-ACH
 design: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md
+r7_design: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN.md
+r7_plan: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_IMPLEMENTATION_PLAN.md
 baseline_commit: 60999176
 target_stop: deployment_confirmation_gate
 production_deploy: out_of_scope_until_owner_confirmation
@@ -279,6 +281,10 @@ R1 与 R0 结束前不得并行修改 execution core。R5、R6 涉及相同 life
 **Hard Stop:** global latest-row runner 或批量按 symbol 关闭订单。
 
 ## 12. R7 — Current Reducer 与历史债删除
+
+本阶段的详细任务切片、Allowed/Forbidden files、CurrentTruthBundle、Incident、Monitor/Forensics cutover、continuation 收敛与 repair mutator 删除条件，以
+`docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_IMPLEMENTATION_PLAN.md`
+为执行权威。
 
 ### Task Packet
 

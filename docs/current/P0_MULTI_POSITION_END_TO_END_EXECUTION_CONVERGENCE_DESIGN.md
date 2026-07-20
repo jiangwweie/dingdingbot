@@ -5,6 +5,7 @@ authority: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIG
 program_id: P0-ACH
 baseline_commit: 60999176
 target_state: multi_position_pre_live_certified
+r7_supplement: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN.md
 owner_policy_change: none
 exchange_write_authority: unchanged
 ---
@@ -310,6 +311,10 @@ reason_code: extensible typed cause
 Candidate、Goal、Monitor、Ops 和 Forensics 必须使用同一 reducer 和 PG watermark。
 
 ## 14. Current Projection 唯一写入者
+
+R7 的详细 Current/Historical 分界、共享 reducer 输入输出、incident fingerprint、watermark、consumer cutover 和 legacy 删除条件，以
+`docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN.md`
+为执行权威。本节保留顶层 ownership 约束。
 
 | Projection | Sole writer |
 | --- | --- |
