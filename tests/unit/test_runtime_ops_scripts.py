@@ -6,7 +6,7 @@ import sys
 from argparse import Namespace
 
 from scripts.ops import check_tokyo_runtime_ops_health_once
-from scripts import create_runtime_closed_trade_review, recover_runtime_exchange_close_projection
+from scripts import create_runtime_closed_trade_review
 from scripts import runtime_live_position_monitor, runtime_position_exit_plan
 
 
@@ -661,15 +661,11 @@ def test_runtime_exit_plan_env_loader_preserves_non_empty_env(monkeypatch, tmp_p
     assert os.environ["PG_DATABASE_URL"] == "postgresql+asyncpg://already-set"
 
 
-def test_post_close_script_env_loaders_fill_empty_existing_env(monkeypatch, tmp_path):
+def test_closed_trade_review_env_loader_fills_empty_existing_env(monkeypatch, tmp_path):
     env_file = tmp_path / "runtime.env"
     env_file.write_text("PG_DATABASE_URL=postgresql+asyncpg://post-close")
     monkeypatch.setenv("PG_DATABASE_URL", "")
 
-    recover_runtime_exchange_close_projection._load_env_file(str(env_file))
-    assert os.environ["PG_DATABASE_URL"] == "postgresql+asyncpg://post-close"
-
-    monkeypatch.setenv("PG_DATABASE_URL", "")
     create_runtime_closed_trade_review._load_env_file(str(env_file))
     assert os.environ["PG_DATABASE_URL"] == "postgresql+asyncpg://post-close"
 
