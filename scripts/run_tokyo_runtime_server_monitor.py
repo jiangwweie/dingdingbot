@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -1722,13 +1722,6 @@ def build_server_monitor_artifact_from_pg(
     notifier: Notifier | None = None,
     systemd_runner: SystemdRunner | None = None,
 ) -> dict[str, Any]:
-    from src.application.readmodels.strategy_live_candidate_pool import (  # noqa: PLC0415
-        build_strategy_live_candidate_pool_from_control_state,
-    )
-    from src.application.readmodels.strategygroup_runtime_goal_status import (  # noqa: PLC0415
-        build_goal_status_artifact_from_control_state,
-    )
-
     now = _utc_now_from_args(args)
     repository = PgBackedRuntimeControlStateRepository(
         conn,
@@ -1743,10 +1736,29 @@ def build_server_monitor_artifact_from_pg(
     control_state: dict[str, Any] = {}
     try:
         control_state = repository.read_monitor_control_state()
-        candidate_pool = build_strategy_live_candidate_pool_from_control_state(control_state)
-        goal_status = build_goal_status_artifact_from_control_state(
-            control_state=control_state,
-        )
+        candidate_pool = _load_current_projection_payload(conn, "candidate_pool")
+        goal_status = _load_current_projection_payload(conn, "goal_status")
+        if not candidate_pool or not goal_status:
+            # SQLite fixtures intentionally exercise the monitor before the
+            # publisher is installed.  Production has no rebuild fallback:
+            # stale/missing current projections are a refresh incident.
+            if getattr(args, "allow_non_postgres_for_test", False):
+                from src.application.readmodels.strategy_live_candidate_pool import (  # noqa: PLC0415
+                    build_strategy_live_candidate_pool_from_control_state,
+                )
+                from src.application.readmodels.strategygroup_runtime_goal_status import (  # noqa: PLC0415
+                    build_goal_status_artifact_from_control_state,
+                )
+
+                candidate_pool = build_strategy_live_candidate_pool_from_control_state(control_state)
+                goal_status = build_goal_status_artifact_from_control_state(
+                    control_state=control_state,
+                )
+            else:
+                raise RuntimeControlStateRepositoryError(
+                    "current_projection_refresh_needed"
+                )
+        _require_shared_current_bundle(candidate_pool, goal_status)
         decision = _decision_from_pg_sources(
             control_state=control_state,
             goal_status=goal_status,
@@ -1870,6 +1882,50 @@ def build_server_monitor_artifact_from_pg(
         },
     }
     return artifact
+
+
+def _load_current_projection_payload(
+    conn: sa.engine.Connection,
+    model_type: str,
+) -> dict[str, Any]:
+    inspector = sa.inspect(conn)
+    if not inspector.has_table("brc_control_read_model_snapshots"):
+        return {}
+    table = sa.Table(
+        "brc_control_read_model_snapshots",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    payload = conn.execute(
+        sa.select(table.c.payload)
+        .where(table.c.model_type == model_type)
+        .where(table.c.is_current.is_(True))
+        .order_by(table.c.generated_at_ms.desc(), table.c.snapshot_id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
+
+
+def _require_shared_current_bundle(
+    candidate_pool: Mapping[str, Any],
+    goal_status: Mapping[str, Any],
+) -> None:
+    candidate_bundle = _as_dict(candidate_pool.get("current_truth_bundle"))
+    goal_bundle = _as_dict(goal_status.get("current_truth_bundle"))
+    if not candidate_bundle and not goal_bundle:
+        return
+    if not candidate_bundle or not goal_bundle:
+        raise RuntimeControlStateRepositoryError("current_projection_bundle_missing")
+    for key in ("bundle_run_id", "input_watermark_digest"):
+        if str(candidate_bundle.get(key) or "") != str(goal_bundle.get(key) or ""):
+            raise RuntimeControlStateRepositoryError(
+                f"current_projection_bundle_drift:{key}"
+            )
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
