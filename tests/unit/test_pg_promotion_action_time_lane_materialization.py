@@ -3156,6 +3156,14 @@ def _insert_signal(
                     "source_watermark": source_watermark,
                     "signal_summary": {
                         "fact_observations": fact_observations,
+                        # Exit policy binding reads immutable signal evidence,
+                        # not a downstream fixture-only Ticket dictionary.
+                        # Preserve the same producer-owned references carried
+                        # by the production watcher compact projection.
+                        "evidence_payload": _exit_reference_evidence(
+                            row=row,
+                            fact_values=fact_values,
+                        ),
                     },
                 }
             ),
@@ -3245,6 +3253,16 @@ def _fact_values(conn, row) -> dict:
     else:
         result[row["protection_ref_type"]] = "1800"
     return result
+
+
+def _exit_reference_evidence(*, row, fact_values: dict) -> dict:
+    """Provide raw evaluator-owned structural references in full-chain fixtures."""
+
+    evidence = dict(fact_values)
+    if row["strategy_group_id"] == "SOR-001":
+        evidence.setdefault("opening_range_high", "2000")
+        evidence.setdefault("opening_range_low", "1800")
+    return evidence
 
 
 def _production_public_fact_values(*, row, semantic_values: dict) -> dict:
