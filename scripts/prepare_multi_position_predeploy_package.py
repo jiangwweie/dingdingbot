@@ -3,9 +3,9 @@
 
 The manifest deliberately distinguishes facts this command can prove locally
 from deployment evidence that must be collected in a shadow or Tokyo readonly
-surface.  It never writes a manifest, connects to Tokyo, invokes Alembic, or
-changes a database.  When a PostgreSQL DSN is supplied, it opens one explicit
-read-only transaction solely to fingerprint a nominated schema.
+surface.  It never writes a manifest, initiates SSH, invokes Alembic, or
+changes a database.  Supplied PostgreSQL DSNs are used only in explicit
+read-only transactions for the schema fingerprint and role-topology audit.
 """
 
 from __future__ import annotations
@@ -22,6 +22,13 @@ import sys
 from typing import Any, Iterable
 
 import sqlalchemy as sa
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.audit_postgres_role_topology import audit_role_topology
 
 
 SCHEMA_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -50,7 +57,9 @@ def main(argv: list[str] | None = None) -> int:
             previous_lifecycle_status=args.previous_lifecycle_status,
             previous_projection_status=args.previous_projection_status,
             previous_monitor_status=args.previous_monitor_status,
-            role_topology_status=args.role_topology_status,
+            role_topology_database_url=args.role_topology_database_url or None,
+            role_topology_migration_role=args.role_topology_migration_role or None,
+            role_topology_schema=args.role_topology_schema,
         )
     except (PredeployPackageError, sa.exc.SQLAlchemyError, ValueError) as exc:
         print(json.dumps({"status": "blocked", "error": str(exc)}, sort_keys=True))
@@ -69,7 +78,9 @@ def build_predeploy_manifest(
     previous_lifecycle_status: str = "not_run",
     previous_projection_status: str = "not_run",
     previous_monitor_status: str = "not_run",
-    role_topology_status: str = "not_run",
+    role_topology_database_url: str | None = None,
+    role_topology_migration_role: str | None = None,
+    role_topology_schema: str = "public",
 ) -> dict[str, Any]:
     """Build the R9 gate without accepting unverified evidence as success."""
 
@@ -79,7 +90,6 @@ def build_predeploy_manifest(
         previous_lifecycle_status,
         previous_projection_status,
         previous_monitor_status,
-        role_topology_status,
     )
     commit = _git(repo_root, "rev-parse", "HEAD").stdout
     branch = _git(repo_root, "branch", "--show-current").stdout or "DETACHED"
@@ -87,6 +97,11 @@ def build_predeploy_manifest(
     tracked_dirty = _tracked_dirty(repo_root)
     migration_graph = migration_graph_fingerprint(repo_root / "migrations" / "versions")
     schema_fingerprint = schema_fingerprint_from_postgres(postgres_dsn, schema)
+    role_topology = _role_topology_from_audit(
+        role_topology_database_url,
+        migration_role=role_topology_migration_role,
+        target_schema=role_topology_schema,
+    )
 
     previous = {
         "entry": previous_entry_status,
@@ -101,8 +116,8 @@ def build_predeploy_manifest(
         blockers.append("candidate_schema_fingerprint_missing")
     if shadow_restore_status != "passed":
         blockers.append("production_backup_shadow_restore_not_verified")
-    if role_topology_status != "passed":
-        blockers.append("tokyo_role_topology_not_verified")
+    if role_topology["status"] != "passed":
+        blockers.append(str(role_topology["blocker"]))
     failed_previous = [surface for surface, status in previous.items() if status != "passed"]
     if failed_previous:
         blockers.append("previous_writer_compatibility_not_verified")
@@ -134,16 +149,7 @@ def build_predeploy_manifest(
             "surfaces": previous,
             "required_mode": "writer_fence_enabled",
         },
-        "role_topology": {
-            "status": role_topology_status,
-            "required_fields": [
-                "application_identity",
-                "migration_identity",
-                "schema_owner",
-                "membership",
-                "ddl_capability",
-            ],
-        },
+        "role_topology": role_topology,
         "writer_fence_plan": _writer_fence_plan(commit),
         "postdeploy_no_write_canary": {
             "status": "planned_not_executed",
@@ -164,6 +170,47 @@ def build_predeploy_manifest(
             "exchange_write_called": False,
             "report_file_written": False,
         },
+    }
+
+
+def _role_topology_from_audit(
+    database_url: str | None,
+    *,
+    migration_role: str | None,
+    target_schema: str,
+) -> dict[str, Any]:
+    required_fields = [
+        "application_identity",
+        "migration_identity",
+        "schema_owner",
+        "membership",
+        "ddl_capability",
+    ]
+    if not database_url:
+        return {
+            "status": "not_run",
+            "blocker": "tokyo_role_topology_not_verified",
+            "required_fields": required_fields,
+        }
+    audit = audit_role_topology(
+        database_url,
+        migration_role=migration_role,
+        target_schema=target_schema,
+    )
+    decision = str(audit["role_topology_decision"])
+    if decision == "existing_roles_sufficient":
+        status, blocker = "passed", None
+    elif decision == "grant_owner_convergence_without_secret_change":
+        status, blocker = "blocked", "tokyo_role_topology_convergence_not_applied"
+    elif decision == "credential_or_secret_change_required":
+        status, blocker = "blocked", "tokyo_role_topology_credential_change_required"
+    else:
+        status, blocker = "blocked", "tokyo_role_topology_unknown"
+    return {
+        "status": status,
+        "blocker": blocker,
+        "required_fields": required_fields,
+        "audit": audit,
     }
 
 
@@ -365,7 +412,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--previous-lifecycle-status", choices=sorted(STATUS_VALUES), default="not_run")
     parser.add_argument("--previous-projection-status", choices=sorted(STATUS_VALUES), default="not_run")
     parser.add_argument("--previous-monitor-status", choices=sorted(STATUS_VALUES), default="not_run")
-    parser.add_argument("--role-topology-status", choices=sorted(STATUS_VALUES), default="not_run")
+    parser.add_argument("--role-topology-database-url", default="")
+    parser.add_argument("--role-topology-migration-role", default="")
+    parser.add_argument("--role-topology-schema", default="public")
     return parser.parse_args(argv)
 
 

@@ -66,6 +66,11 @@ def test_manifest_is_ready_only_with_all_explicit_evidence(tmp_path: Path, monke
         "schema_fingerprint_from_postgres",
         lambda _dsn, _schema: {"status": "passed", "value": "fingerprint"},
     )
+    monkeypatch.setattr(
+        module,
+        "audit_role_topology",
+        lambda *_args, **_kwargs: {"role_topology_decision": "existing_roles_sufficient"},
+    )
     report = module.build_predeploy_manifest(
         repo_root=_repo(tmp_path),
         shadow_restore_status="passed",
@@ -73,7 +78,7 @@ def test_manifest_is_ready_only_with_all_explicit_evidence(tmp_path: Path, monke
         previous_lifecycle_status="passed",
         previous_projection_status="passed",
         previous_monitor_status="passed",
-        role_topology_status="passed",
+        role_topology_database_url="postgresql://role-audit",
     )
 
     assert report["status"] == "ready_for_owner_deploy_confirmation"
@@ -81,6 +86,29 @@ def test_manifest_is_ready_only_with_all_explicit_evidence(tmp_path: Path, monke
         "previous_code_write_compatible"
     )
     assert report["writer_fence_plan"]["release_forbidden_in_r9"] is True
+
+
+def test_manifest_refuses_manual_pass_when_catalog_requires_credential_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _module()
+    monkeypatch.setattr(
+        module,
+        "audit_role_topology",
+        lambda *_args, **_kwargs: {
+            "role_topology_decision": "credential_or_secret_change_required"
+        },
+    )
+    report = module.build_predeploy_manifest(
+        repo_root=_repo(tmp_path),
+        role_topology_database_url="postgresql://role-audit",
+    )
+
+    assert report["role_topology"]["status"] == "blocked"
+    assert report["role_topology"]["blocker"] == (
+        "tokyo_role_topology_credential_change_required"
+    )
+    assert "tokyo_role_topology_credential_change_required" in report["blockers"]
 
 
 def test_migration_graph_rejects_multiple_heads(tmp_path: Path):
@@ -142,3 +170,17 @@ def test_empty_schema_is_not_accepted_as_a_candidate_fingerprint(
         "schema": "shadow",
         "reason": "schema_has_no_tables",
     }
+
+
+def test_cli_runs_directly_from_the_scripts_path_without_import_error():
+    completed = subprocess.run(
+        (sys.executable, str(SCRIPT), "--help"),
+        cwd=REPO_ROOT,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert completed.returncode == 0
+    assert "--role-topology-database-url" in completed.stdout
