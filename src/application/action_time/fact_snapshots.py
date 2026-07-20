@@ -44,10 +44,7 @@ from src.application.action_time.action_time_invocation import (  # noqa: E402
     load_action_time_invocation_evidence,
     load_action_time_invocation_signal,
 )
-from src.application.runtime_process_outcome import (  # noqa: E402
-    materialize_runtime_process_outcome,
-    runtime_process_exit_code,
-)
+from src.application.runtime_process_outcome import runtime_process_exit_code  # noqa: E402
 
 
 ACTION_TIME_FACT_SURFACE = "action_time"
@@ -78,27 +75,23 @@ def materialize_action_time_fact_snapshots(
 
     def result(status: str, **kwargs: Any) -> dict[str, Any]:
         payload = _result(status, **kwargs)
-        if not sa.inspect(conn).has_table("brc_runtime_process_outcomes"):
-            return payload
-        signal_count = int(
-            conn.execute(
-                sa.text("SELECT COUNT(*) FROM brc_live_signal_events")
-            ).scalar_one()
-            or 0
-        )
-        process_row = materialize_runtime_process_outcome(
-            conn,
-            process_name="action_time_fact_snapshots_batch",
-            scope_key="global",
-            run_id=_stable_id("action_time_fact_process_run", str(now), status),
-            result_status=status,
-            blockers=list(kwargs.get("blockers") or []),
-            started_at_ms=started_at_ms,
-            completed_at_ms=now,
-            runtime_head=os.getenv("BRC_RUNTIME_HEAD", "runtime-head-unknown"),
-            source_watermark=f"live_signal_events:{signal_count}",
-        )
-        payload["process_outcome"] = process_row
+        blockers = [str(item) for item in kwargs.get("blockers") or [] if str(item)]
+        # A batch has no exact lane identity.  Recording it as a current
+        # process outcome would create a new ``legacy_unscoped`` fact.  Quiet
+        # no-signal cycles remain silent; a real batch failure is a system
+        # incident consumed by Monitor, never a fake lane outcome.
+        if blockers:
+            payload["system_incident"] = _upsert_system_incident(
+                conn,
+                incident_type="action_time_fact_snapshots_batch",
+                blocker=blockers[0],
+                details={
+                    "status": status,
+                    "blockers": blockers,
+                    "source_watermark": _fact_batch_source_watermark(conn),
+                },
+                now_ms=now,
+            )
         return payload
 
     signals = _current_fresh_live_signals(conn, now_ms=now)
@@ -143,6 +136,63 @@ def materialize_action_time_fact_snapshots(
             else "repair_live_signal_action_time_fact_source"
         ),
     )
+
+
+def _fact_batch_source_watermark(conn: sa.engine.Connection) -> str:
+    signal_count = int(
+        conn.execute(sa.text("SELECT COUNT(*) FROM brc_live_signal_events")).scalar_one()
+        or 0
+    )
+    return f"live_signal_events:{signal_count}"
+
+
+def _upsert_system_incident(
+    conn: sa.engine.Connection,
+    *,
+    incident_type: str,
+    blocker: str,
+    details: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    if not sa.inspect(conn).has_table("brc_runtime_incidents"):
+        return {"status": "incident_table_missing", "incident_id": ""}
+    table = sa.Table("brc_runtime_incidents", sa.MetaData(), autoload_with=conn)
+    fingerprint = hashlib.sha256(
+        f"system:{incident_type}:{blocker}".encode("utf-8")
+    ).hexdigest()[:48]
+    incident_id = f"incident:system:{fingerprint}"
+    values = {
+        "incident_id": incident_id,
+        "incident_type": incident_type,
+        "severity": "blocking",
+        "status": "open",
+        "strategy_group_id": None,
+        "symbol": None,
+        "side": None,
+        "blocker_class": blocker,
+        "trigger_ref": str(details.get("source_watermark") or ""),
+        "details": details,
+        "opened_at_ms": now_ms,
+        "closed_at_ms": None,
+    }
+    existing = conn.execute(
+        sa.select(table.c.incident_id).where(table.c.incident_id == incident_id)
+    ).scalar_one_or_none()
+    if existing is None:
+        conn.execute(table.insert().values(**values))
+    else:
+        conn.execute(
+            table.update()
+            .where(table.c.incident_id == incident_id)
+            .values(
+                status="open",
+                blocker_class=blocker,
+                trigger_ref=values["trigger_ref"],
+                details=details,
+                closed_at_ms=None,
+            )
+        )
+    return {"status": "open", "incident_id": incident_id}
 
 
 def materialize_action_time_invocation_fact_snapshots(
