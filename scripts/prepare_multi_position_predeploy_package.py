@@ -19,7 +19,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import sqlalchemy as sa
 
@@ -60,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             role_topology_database_url=args.role_topology_database_url or None,
             role_topology_migration_role=args.role_topology_migration_role or None,
             role_topology_schema=args.role_topology_schema,
+            role_topology_audit=_parse_role_topology_audit(args.role_topology_audit_json),
         )
     except (PredeployPackageError, sa.exc.SQLAlchemyError, ValueError) as exc:
         print(json.dumps({"status": "blocked", "error": str(exc)}, sort_keys=True))
@@ -81,6 +82,7 @@ def build_predeploy_manifest(
     role_topology_database_url: str | None = None,
     role_topology_migration_role: str | None = None,
     role_topology_schema: str = "public",
+    role_topology_audit: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the R9 gate without accepting unverified evidence as success."""
 
@@ -101,6 +103,7 @@ def build_predeploy_manifest(
         role_topology_database_url,
         migration_role=role_topology_migration_role,
         target_schema=role_topology_schema,
+        audit_receipt=role_topology_audit,
     )
 
     previous = {
@@ -178,6 +181,7 @@ def _role_topology_from_audit(
     *,
     migration_role: str | None,
     target_schema: str,
+    audit_receipt: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     required_fields = [
         "application_identity",
@@ -186,17 +190,22 @@ def _role_topology_from_audit(
         "membership",
         "ddl_capability",
     ]
-    if not database_url:
+    if audit_receipt is not None and database_url:
+        raise ValueError("role_topology_audit_receipt_and_database_url_conflict")
+    if audit_receipt is not None:
+        audit = _validated_role_topology_audit(audit_receipt)
+    elif database_url:
+        audit = audit_role_topology(
+            database_url,
+            migration_role=migration_role,
+            target_schema=target_schema,
+        )
+    else:
         return {
             "status": "not_run",
             "blocker": "tokyo_role_topology_not_verified",
             "required_fields": required_fields,
         }
-    audit = audit_role_topology(
-        database_url,
-        migration_role=migration_role,
-        target_schema=target_schema,
-    )
     decision = str(audit["role_topology_decision"])
     if decision == "existing_roles_sufficient":
         status, blocker = "passed", None
@@ -212,6 +221,38 @@ def _role_topology_from_audit(
         "required_fields": required_fields,
         "audit": audit,
     }
+
+
+def _validated_role_topology_audit(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    audit = dict(receipt)
+    required = {
+        "status": "role_topology_audited",
+        "application_role_id": "brc_runtime_app",
+        "migration_role_id": "brc_runtime_migrator",
+        "credential_or_secret_change_required": False,
+        "role_topology_decision": "existing_roles_sufficient",
+        "application_can_create": False,
+        "application_can_alter": False,
+        "application_can_drop": False,
+    }
+    if any(audit.get(key) != value for key, value in required.items()):
+        raise ValueError("role_topology_audit_receipt_invalid")
+    forbidden = audit.get("forbidden_effects")
+    if not isinstance(forbidden, Mapping) or any(value is not False for value in forbidden.values()):
+        raise ValueError("role_topology_audit_receipt_forbidden_effect_invalid")
+    return audit
+
+
+def _parse_role_topology_audit(value: str) -> Mapping[str, Any] | None:
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("role_topology_audit_receipt_json_invalid") from exc
+    if not isinstance(parsed, Mapping):
+        raise ValueError("role_topology_audit_receipt_json_invalid")
+    return parsed
 
 
 def migration_graph_fingerprint(migrations_dir: Path) -> dict[str, Any]:
@@ -415,6 +456,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--role-topology-database-url", default="")
     parser.add_argument("--role-topology-migration-role", default="")
     parser.add_argument("--role-topology-schema", default="public")
+    parser.add_argument("--role-topology-audit-json", default="")
     return parser.parse_args(argv)
 
 

@@ -111,6 +111,63 @@ def test_manifest_refuses_manual_pass_when_catalog_requires_credential_change(
     assert "tokyo_role_topology_credential_change_required" in report["blockers"]
 
 
+def test_manifest_accepts_only_structurally_valid_readonly_role_audit_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = _module()
+    monkeypatch.setattr(
+        module,
+        "schema_fingerprint_from_postgres",
+        lambda _dsn, _schema: {"status": "passed", "value": "fingerprint"},
+    )
+    receipt = {
+        "status": "role_topology_audited",
+        "application_role_id": "brc_runtime_app",
+        "migration_role_id": "brc_runtime_migrator",
+        "credential_or_secret_change_required": False,
+        "role_topology_decision": "existing_roles_sufficient",
+        "application_can_create": False,
+        "application_can_alter": False,
+        "application_can_drop": False,
+        "forbidden_effects": {"database_write_executed": False},
+    }
+    report = module.build_predeploy_manifest(
+        repo_root=_repo(tmp_path),
+        postgres_dsn="postgresql://shadow",
+        schema="public",
+        shadow_restore_status="passed",
+        previous_entry_status="passed",
+        previous_lifecycle_status="passed",
+        previous_projection_status="passed",
+        previous_monitor_status="passed",
+        role_topology_audit=receipt,
+    )
+
+    assert report["status"] == "ready_for_owner_deploy_confirmation"
+    assert report["role_topology"]["status"] == "passed"
+
+
+def test_manifest_rejects_role_audit_receipt_with_nonzero_forbidden_effect(
+    tmp_path: Path,
+):
+    module = _module()
+    with pytest.raises(ValueError, match="forbidden_effect"):
+        module.build_predeploy_manifest(
+            repo_root=_repo(tmp_path),
+            role_topology_audit={
+                "status": "role_topology_audited",
+                "application_role_id": "brc_runtime_app",
+                "migration_role_id": "brc_runtime_migrator",
+                "credential_or_secret_change_required": False,
+                "role_topology_decision": "existing_roles_sufficient",
+                "application_can_create": False,
+                "application_can_alter": False,
+                "application_can_drop": False,
+                "forbidden_effects": {"database_write_executed": True},
+            },
+        )
+
+
 def test_migration_graph_rejects_multiple_heads(tmp_path: Path):
     module = _module()
     migrations = tmp_path / "migrations"
