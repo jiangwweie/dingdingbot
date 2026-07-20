@@ -10,6 +10,8 @@ from typing import Any, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.application.runtime_process_outcome import RUNTIME_LANE_PROCESS_NAMES
+
 
 @dataclass(frozen=True)
 class CanarySentinelSpec:
@@ -191,10 +193,21 @@ CANARY_PROJECTION_RUN_COLUMNS_V1 = (
 )
 
 
+CANARY_LANE_IDENTITY_LIMIT = 22
+CANARY_PROCESS_CURRENT_ROW_LIMIT = (
+    CANARY_LANE_IDENTITY_LIMIT * len(RUNTIME_LANE_PROCESS_NAMES)
+) + 1
+
+
 CANARY_SENTINEL_SPECS_V1 = (
     CanarySentinelSpec("facts", "brc_runtime_fact_snapshots", 128, CANARY_FACT_COLUMNS_V1),
     CanarySentinelSpec("signals", "brc_live_signal_events", 22, CANARY_SIGNAL_COLUMNS_V1),
-    CanarySentinelSpec("process_current", "brc_runtime_process_outcomes", 111, CANARY_PROCESS_OUTCOME_COLUMNS_V1),
+    CanarySentinelSpec(
+        "process_current",
+        "brc_runtime_process_outcomes",
+        CANARY_PROCESS_CURRENT_ROW_LIMIT,
+        CANARY_PROCESS_OUTCOME_COLUMNS_V1,
+    ),
     CanarySentinelSpec("process_window", "brc_runtime_process_outcomes", 256, CANARY_PROCESS_OUTCOME_COLUMNS_V1),
     CanarySentinelSpec("lanes", "brc_action_time_lane_inputs", 22, CANARY_LANE_COLUMNS_V1),
     CanarySentinelSpec("tickets", "brc_action_time_tickets", 22, CANARY_TICKET_COLUMNS_V1),

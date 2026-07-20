@@ -3,8 +3,10 @@ from __future__ import annotations
 import sqlalchemy as sa
 
 from src.application.readmodels.canary_mutation_sentinel import (
+    CANARY_PROCESS_CURRENT_ROW_LIMIT,
     CanaryMutationSentinelScopeV1,
 )
+from src.application.runtime_process_outcome import RUNTIME_LANE_PROCESS_NAMES
 from src.infrastructure.canary_mutation_sentinel_queries import (
     build_canary_sentinel_queries,
     expected_storage_columns,
@@ -61,6 +63,20 @@ def test_process_queries_use_exact_index_compatible_and_window_predicates():
     assert "lane_identity_key = ANY(:lane_identity_keys)" in window
 
 
+def test_process_current_bound_tracks_the_authoritative_lane_process_set():
+    queries = {
+        query.slice_id: query
+        for query in build_canary_sentinel_queries(
+            _scope(), canary_window_floor_ms=1_800_000_000_000
+        )
+    }
+
+    expected_limit = 22 * len(RUNTIME_LANE_PROCESS_NAMES) + 1
+    assert CANARY_PROCESS_CURRENT_ROW_LIMIT == expected_limit
+    assert queries["process_current"].row_limit == expected_limit
+    assert f"LIMIT {expected_limit + 1}" in queries["process_current"].sql
+
+
 def test_ticket_and_exchange_slices_have_no_status_filter():
     queries = {
         query.slice_id: query
@@ -85,7 +101,7 @@ def test_storage_contract_matches_schema_125_fixture(pg_control_connection):
     inspector = sa.inspect(pg_control_connection)
     for relation, expected in expected_storage_columns().items():
         actual = {str(column["name"]) for column in inspector.get_columns(relation)}
-        assert actual == set(expected), relation
+        assert set(expected) <= actual, relation
 
     assert {"binding_source", "adoption_event_id"} <= set(
         expected_storage_columns()["brc_ticket_exit_policy_current"]

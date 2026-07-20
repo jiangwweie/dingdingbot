@@ -752,6 +752,21 @@ def pg_control_connection():
             "ALTER TABLE brc_ticket_exit_policy_current "
             "ADD COLUMN adoption_event_id VARCHAR(192)"
         )
+        # The sentinel reads the post-134 capacity and Ticket hash identity
+        # columns. This SQLite fixture mirrors those additive storage columns;
+        # migration-specific tests own the PostgreSQL backfill semantics.
+        conn.exec_driver_sql(
+            "ALTER TABLE brc_action_time_lane_inputs "
+            "ADD COLUMN account_capacity_base_fact_snapshot_id VARCHAR(256)"
+        )
+        conn.exec_driver_sql(
+            "ALTER TABLE brc_action_time_tickets "
+            "ADD COLUMN account_capacity_base_fact_snapshot_id VARCHAR(256)"
+        )
+        conn.exec_driver_sql(
+            "ALTER TABLE brc_action_time_tickets "
+            "ADD COLUMN ticket_hash_schema_version VARCHAR(64)"
+        )
         action_time_reference = ActionTimeCertificationReferenceV2(
             stage="post_canary",
             target_runtime_head="a" * 40,

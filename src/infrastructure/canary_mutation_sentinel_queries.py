@@ -31,8 +31,8 @@ def build_canary_sentinel_queries(
         raise ValueError("canary_window_floor_invalid")
     spec = {item.slice_id: item for item in CANARY_SENTINEL_SPECS_V1}
     process_names = tuple(sorted(RUNTIME_LANE_PROCESS_NAMES))
-    if len(process_names) != 5:
-        raise ValueError("canary_lane_process_name_set_invalid")
+    if not process_names:
+        raise ValueError("canary_lane_process_name_set_empty")
 
     predicates: dict[str, tuple[str, dict[str, Any]]] = {
         "facts": ("fact_snapshot_id = ANY(:fact_snapshot_ids)", {"fact_snapshot_ids": list(scope.fact_snapshot_ids)}),
@@ -84,7 +84,8 @@ def build_canary_sentinel_queries(
                 "outcome.updated_at_ms DESC,outcome.process_outcome_id DESC LIMIT 1) selected) "
                 "SELECT * FROM latest UNION ALL SELECT " + process_columns +
                 " FROM brc_runtime_process_outcomes AS outcome WHERE "
-                "outcome.process_outcome_id=:release_activation_id LIMIT 111"
+                "outcome.process_outcome_id=:release_activation_id LIMIT "
+                + str(current.row_limit + 1)
             ),
             params={
                 "lane_identity_keys": list(scope.lane_identity_keys),
