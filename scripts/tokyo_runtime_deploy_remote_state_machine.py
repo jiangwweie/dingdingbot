@@ -44,6 +44,7 @@ DEPLOY_PHASES = (
     "immutable_venv_ready",
     "previous_release_venv_compatible",
     "production_writers_fenced",
+    "runtime_application_env_activated",
     "pre_migration",
     "migration_in_progress",
     "schema_migrated",
@@ -73,6 +74,9 @@ PRODUCTION_WRITER_UNITS = (
     "brc-ticket-lifecycle-maintenance.service",
     "brc-ticket-lifecycle-maintenance.timer",
 )
+RUNTIME_MIGRATION_ENV_NAME = "brc_runtime_migrator.pending.env"
+RUNTIME_APPLICATION_PENDING_ENV_NAME = "brc_runtime_app.pending.env"
+RUNTIME_APPLICATION_ACTIVE_ENV_NAME = "runtime-application.active.env"
 TIMER_OWNED_SERVICES = {
     "brc-runtime-monitor.timer": "brc-runtime-monitor.service",
     "brc-ticket-lifecycle-maintenance.timer": (
@@ -90,19 +94,23 @@ REPOSITORY_SYSTEMD_FILES = (
     Path("deploy/systemd/brc-owner-console-backend.service.d/40-runtime-stability.conf"),
     Path("deploy/systemd/brc-owner-console-backend.service.d/45-persistent-config-path.conf"),
     Path("deploy/systemd/brc-owner-console-backend.service.d/50-runtime-release-identity.conf"),
+    Path("deploy/systemd/brc-owner-console-backend.service.d/60-runtime-db-application.conf"),
     Path("deploy/systemd/brc-owner-console-canary-readonly.service"),
     Path("deploy/systemd/brc-runtime-monitor.service"),
     Path("deploy/systemd/brc-runtime-monitor.service.d/50-runtime-release-identity.conf"),
+    Path("deploy/systemd/brc-runtime-monitor.service.d/60-runtime-db-application.conf"),
     Path("deploy/systemd/brc-runtime-monitor.timer"),
     Path("deploy/systemd/brc-runtime-signal-watcher-canary.service"),
     Path("deploy/systemd/brc-runtime-signal-watcher.service"),
     Path("deploy/systemd/brc-runtime-signal-watcher.service.d/50-runtime-release-identity.conf"),
+    Path("deploy/systemd/brc-runtime-signal-watcher.service.d/60-runtime-db-application.conf"),
     Path("deploy/systemd/brc-runtime-signal-watcher.service.d/80-product-state-refresh.conf"),
     Path("deploy/systemd/brc-runtime-signal-watcher.service.d/85-action-time-refresh-if-needed.conf"),
     Path("deploy/systemd/brc-runtime-signal-watcher.service.d/90-resume-dispatcher-after-refresh.conf"),
     Path("deploy/systemd/brc-runtime-signal-watcher.timer"),
     Path("deploy/systemd/brc-ticket-lifecycle-maintenance.service"),
     Path("deploy/systemd/brc-ticket-lifecycle-maintenance.service.d/50-runtime-release-identity.conf"),
+    Path("deploy/systemd/brc-ticket-lifecycle-maintenance.service.d/60-runtime-db-application.conf"),
     Path("deploy/systemd/brc-ticket-lifecycle-maintenance.timer"),
 )
 
@@ -976,6 +984,93 @@ def load_runtime_environment(path: Path) -> dict[str, str]:
     return environment
 
 
+def activate_runtime_application_environment(
+    *,
+    base_env_path: Path,
+    pending_application_env_path: Path,
+    active_env_path: Path,
+) -> dict[str, Any]:
+    """Atomically build the candidate runtime environment after Writer Fence.
+
+    The base environment remains the authority for exchange and notification
+    settings.  Only ``PG_DATABASE_URL`` is replaced from the separately
+    provisioned application credential.  Neither the result nor exceptions
+    include any environment value.
+    """
+
+    base = Path(base_env_path)
+    pending = Path(pending_application_env_path)
+    active = Path(active_env_path)
+    base_info = _safe_runtime_env_file(base, "runtime_application_base_env")
+    _safe_runtime_env_file(pending, "runtime_application_pending_env")
+    pending_values = load_runtime_environment(pending)
+    database_url = str(pending_values.get("PG_DATABASE_URL") or "").strip()
+    if not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+        raise ValueError("runtime_application_database_url_invalid")
+    if "\n" in database_url or "\r" in database_url:
+        raise ValueError("runtime_application_database_url_invalid")
+    rendered = _render_runtime_application_environment(
+        base.read_text(encoding="utf-8"), database_url
+    )
+    if active.exists():
+        active_info = _safe_runtime_env_file(active, "runtime_application_active_env")
+        if active.read_bytes() != rendered:
+            raise ValueError("runtime_application_active_env_lineage_mismatch")
+        return {
+            "status": "runtime_application_env_active",
+            "idempotent": True,
+            "path": str(active),
+            "mode": oct(stat.S_IMODE(active_info.st_mode)),
+            "replaced_keys": ["PG_DATABASE_URL", "DATABASE_URL"],
+        }
+    active.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _atomic_bytes_write(active, rendered, mode=0o600)
+    os.chown(active, base_info.st_uid, base_info.st_gid)
+    active_info = _safe_runtime_env_file(active, "runtime_application_active_env")
+    return {
+        "status": "runtime_application_env_active",
+        "idempotent": False,
+        "path": str(active),
+        "mode": oct(stat.S_IMODE(active_info.st_mode)),
+        "replaced_keys": ["PG_DATABASE_URL", "DATABASE_URL"],
+    }
+
+
+def _safe_runtime_env_file(path: Path, label: str) -> os.stat_result:
+    try:
+        info = Path(path).lstat()
+    except FileNotFoundError as exc:
+        raise ValueError(label + "_missing") from exc
+    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077:
+        raise ValueError(label + "_unsafe")
+    return info
+
+
+def _render_runtime_application_environment(base_raw: str, database_url: str) -> bytes:
+    retained: list[str] = []
+    for raw_line in base_raw.splitlines():
+        key = _runtime_env_assignment_key(raw_line)
+        if key in {"PG_DATABASE_URL", "DATABASE_URL"}:
+            continue
+        retained.append(raw_line)
+    while retained and not retained[-1].strip():
+        retained.pop()
+    retained.append("PG_DATABASE_URL=" + shlex.quote(database_url))
+    return ("\n".join(retained) + "\n").encode("utf-8")
+
+
+def _runtime_env_assignment_key(raw_line: str) -> str | None:
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        return None
+    if line.startswith("export "):
+        line = line[7:].lstrip()
+    if "=" not in line:
+        return None
+    key = line.split("=", 1)[0].strip()
+    return key or None
+
+
 def run_fenced_schema_migration(
     *,
     release_path: Path,
@@ -1038,7 +1133,7 @@ def run_fenced_schema_migration(
     role_payload = _json_receipt(role_preflight, "canary_role_preflight_receipt_invalid")
     if (
         role_payload.get("status") != "canary_readonly_role_preflight_passed"
-        or role_payload.get("current_user") != "pg_read_all_data"
+        or role_payload.get("current_user") != "brc_runtime_app"
         or role_payload.get("exchange_write_called") is not False
     ):
         raise RuntimeError("canary_role_preflight_receipt_mismatch")
@@ -2587,6 +2682,13 @@ def execute_deploy_transaction(
     release = deploy_root / "releases" / release_name
     app_current = deploy_root / "app/current"
     env_path = Path(str(config.get("env_path") or deploy_root / "env/live-readonly.env"))
+    migration_env_path = env_path.parent / RUNTIME_MIGRATION_ENV_NAME
+    pending_application_env_path = (
+        env_path.parent / RUNTIME_APPLICATION_PENDING_ENV_NAME
+    )
+    runtime_application_env_path = (
+        env_path.parent / RUNTIME_APPLICATION_ACTIVE_ENV_NAME
+    )
     previous_release = Path(_required(
         str(config.get("previous_release_path") or ""), "previous_release_path"
     ))
@@ -2756,11 +2858,16 @@ def execute_deploy_transaction(
         }
 
     fenced = phase("production_writers_fenced", fence_action)
+    phase("runtime_application_env_activated", lambda: activate_runtime_application_environment(
+        base_env_path=env_path,
+        pending_application_env_path=pending_application_env_path,
+        active_env_path=runtime_application_env_path,
+    ))
     phase("pre_migration", lambda: {
         "status": "pre_migration",
         "actual_revision": read_candidate_schema_revision(
             release_path=release,
-            env_path=env_path,
+            env_path=migration_env_path,
             lock_handle=lock_handle,
             canonical_lock_path=canonical_lock,
             require_root_owner=require_root,
@@ -2772,7 +2879,7 @@ def execute_deploy_transaction(
     })
     migrated = phase("schema_migrated", lambda: run_fenced_schema_migration(
         release_path=release,
-        env_path=env_path,
+        env_path=migration_env_path,
         transaction_id=transaction_id,
         expected_revision=expected_revision,
         lock_handle=lock_handle,
@@ -2802,7 +2909,7 @@ def execute_deploy_transaction(
     phase("pointer_active", pointer_action)
     phase("release_activation_recorded", lambda: record_candidate_release_activation(
         release_path=release,
-        env_path=env_path,
+        env_path=runtime_application_env_path,
         target_sha=target_sha,
         release_name=release_name,
         transaction_id=transaction_id,
@@ -2812,14 +2919,14 @@ def execute_deploy_transaction(
     ))
     pre_facts = phase("pre_canary_facts", lambda: refresh_candidate_account_facts(
         release_path=release,
-        env_path=env_path,
+        env_path=runtime_application_env_path,
         lock_handle=lock_handle,
         canonical_lock_path=canonical_lock,
         require_root_owner=require_root,
     ))
     pre_cert = phase("pre_canary_certified", lambda: certify_candidate_action_time(
         release_path=release,
-        env_path=env_path,
+        env_path=runtime_application_env_path,
         target_sha=target_sha,
         stage="pre_canary",
         deploy_nonce=deploy_nonce,
@@ -2830,7 +2937,7 @@ def execute_deploy_transaction(
     ))
     phase("pre_canary_projection", lambda: publish_candidate_current_projections(
         release_path=release,
-        env_path=env_path,
+        env_path=runtime_application_env_path,
         target_sha=target_sha,
         lock_handle=lock_handle,
         canonical_lock_path=canonical_lock,
@@ -2838,7 +2945,7 @@ def execute_deploy_transaction(
     ))
     pre_sentinel = phase("pre_canary_sentinel", lambda: capture_candidate_mutation_sentinel(
         release_path=release,
-        env_path=env_path,
+        env_path=runtime_application_env_path,
         target_sha=target_sha,
         lock_handle=lock_handle,
         canonical_lock_path=canonical_lock,
@@ -2846,7 +2953,7 @@ def execute_deploy_transaction(
     ))
     phase("readonly_canary_complete", lambda: run_five_readonly_canaries(
         release_path=release,
-        env_path=env_path,
+        env_path=runtime_application_env_path,
         lock_handle=lock_handle,
         canonical_lock_path=canonical_lock,
         require_root_owner=require_root,
@@ -2855,7 +2962,7 @@ def execute_deploy_transaction(
     def post_sentinel_action() -> Mapping[str, Any]:
         post = capture_candidate_mutation_sentinel(
             release_path=release,
-            env_path=env_path,
+            env_path=runtime_application_env_path,
             target_sha=target_sha,
             scope=pre_sentinel["scope"],
             canary_window_floor_ms=int(pre_sentinel["canary_window_floor_ms"]),
@@ -2876,14 +2983,14 @@ def execute_deploy_transaction(
     def post_fact_action() -> Mapping[str, Any]:
         refreshed = refresh_candidate_account_facts(
             release_path=release,
-            env_path=env_path,
+            env_path=runtime_application_env_path,
             lock_handle=lock_handle,
             canonical_lock_path=canonical_lock,
             require_root_owner=require_root,
         )
         readiness = verify_candidate_phase_two_ready(
             release_path=release,
-            env_path=env_path,
+            env_path=runtime_application_env_path,
             lock_handle=lock_handle,
             canonical_lock_path=canonical_lock,
             require_root_owner=require_root,
@@ -2893,7 +3000,7 @@ def execute_deploy_transaction(
     post_facts = phase("post_canary_facts", post_fact_action)
     post_cert = phase("post_canary_certified", lambda: certify_candidate_action_time(
         release_path=release,
-        env_path=env_path,
+        env_path=runtime_application_env_path,
         target_sha=target_sha,
         stage="post_canary",
         deploy_nonce=deploy_nonce,
@@ -2906,7 +3013,7 @@ def execute_deploy_transaction(
     def post_projection_action() -> Mapping[str, Any]:
         published = publish_candidate_current_projections(
             release_path=release,
-            env_path=env_path,
+            env_path=runtime_application_env_path,
             target_sha=target_sha,
             lock_handle=lock_handle,
             canonical_lock_path=canonical_lock,
@@ -2914,7 +3021,7 @@ def execute_deploy_transaction(
         )
         sentinel = capture_candidate_mutation_sentinel(
             release_path=release,
-            env_path=env_path,
+            env_path=runtime_application_env_path,
             target_sha=target_sha,
             lock_handle=lock_handle,
             canonical_lock_path=canonical_lock,
@@ -2927,7 +3034,7 @@ def execute_deploy_transaction(
         "activation_machine_facts_verified",
         lambda: collect_activation_machine_facts(
             release_path=release,
-            env_path=env_path,
+            env_path=runtime_application_env_path,
             target_sha=target_sha,
             expected_revision=expected_revision,
             bootstrap_sha256=bootstrap_sha256,
@@ -2955,7 +3062,7 @@ def execute_deploy_transaction(
         if int(reference.get("fact_min_valid_until_ms") or 0) - now_ms < 30_000:
             renewed_facts = refresh_candidate_account_facts(
                 release_path=release,
-                env_path=env_path,
+                env_path=runtime_application_env_path,
                 lock_handle=lock_handle,
                 canonical_lock_path=canonical_lock,
                 require_root_owner=require_root,
@@ -2964,7 +3071,7 @@ def execute_deploy_transaction(
             if machine_facts.get("recovery_bootstrap_used") is True:
                 _apply_legacy_global_fact_identity_bridge(
                     release_path=release,
-                    env_path=env_path,
+                    env_path=runtime_application_env_path,
                     fact_snapshot_ids=renewed_fact_ids,
                     transaction_id=transaction_id,
                     lock_handle=lock_handle,
@@ -2973,7 +3080,7 @@ def execute_deploy_transaction(
                 )
             renewed_cert = certify_candidate_action_time(
                 release_path=release,
-                env_path=env_path,
+                env_path=runtime_application_env_path,
                 target_sha=target_sha,
                 stage="post_canary",
                 deploy_nonce=deploy_nonce,
@@ -3001,7 +3108,7 @@ def execute_deploy_transaction(
                 raise RuntimeError("final_fact_freshness_remaining_insufficient")
         return restore_lifecycle_mutation_policy(
             release_path=release,
-            env_path=env_path,
+            env_path=runtime_application_env_path,
             target_sha=target_sha,
             enable_after_certification=bool(
                 migrated["lifecycle_capability_was_enabled"]
@@ -3081,7 +3188,7 @@ def execute_deploy_transaction(
         raise RuntimeError("certification_generation_activation_mismatch")
     phase("policy_applied", lambda: apply_committed_activation(
         release_path=release,
-        env_path=env_path,
+        env_path=runtime_application_env_path,
         activation_commit=activation_commit,
         unit_prepolicy=fenced["unit_prepolicy"],
         lock_handle=lock_handle,

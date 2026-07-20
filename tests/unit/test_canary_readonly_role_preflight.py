@@ -12,7 +12,8 @@ def test_role_preflight_probes_all_dml_classes_without_privilege_mutation():
     assert {statement.split(None, 1)[0] for statement in FORBIDDEN_STATEMENTS} == {
         "INSERT", "UPDATE", "DELETE", "TRUNCATE"
     }
-    assert "SET LOCAL ROLE pg_read_all_data" in source
+    assert "SET LOCAL ROLE" not in source
     assert "SET TRANSACTION READ ONLY" in source
+    assert 'APPLICATION_ROLE = "brc_runtime_app"' in source
     for forbidden in ("CREATE ROLE", "ALTER ROLE", "GRANT ", "PASSWORD"):
         assert forbidden not in source

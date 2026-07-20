@@ -402,6 +402,18 @@ configuration。active runtime env 必须在 deployment window 内由 server-sid
 任何 rollback 在 pointer switch 前只删除未激活 active env；pointer switch 后遵循
 Writer Fence + forward-fix，不回退 schema 或重新启用旧 superuser runtime path。
 
+候选代码将该顺序固化为 deploy journal 的
+`runtime_application_env_activated` phase：它从 base env 仅移除
+`PG_DATABASE_URL`/`DATABASE_URL`，追加 application DSN 后以 `0600` 原子写入 active
+env。`pre_migration`/`schema_migrated` 只使用 migration env；pointer 之后的
+projection、facts、canary、lifecycle 与 systemd runtime 使用 active application env。
+若 active env 已存在但内容与本次 merge 不一致，transaction fail closed。
+
+no-write canary 不再通过旧超级用户 `SET ROLE pg_read_all_data` 伪造只读身份；它必须
+直接连接 `brc_runtime_app`，验证非 superuser、无 schema CREATE，并在
+`SET TRANSACTION READ ONLY` 内使全部 DML probe 被拒绝。该变化保证 canary 同时验证
+真实 runtime credential 与 no-write boundary。
+
 ### Task Packet
 
 **Task ID:** `P0-MP-R9`

@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 
 
-CANARY_ROLE = "pg_read_all_data"
+APPLICATION_ROLE = "brc_runtime_app"
 PROBE_TABLE = "brc_runtime_capabilities_current"
 FORBIDDEN_STATEMENTS = (
     "INSERT INTO brc_runtime_capabilities_current "
@@ -42,26 +42,31 @@ def verify_role_preflight(database_url: str) -> dict[str, object]:
         with engine.connect() as conn:
             with conn.begin():
                 conn.execute(sa.text("SET LOCAL statement_timeout = '5s'"))
-                conn.execute(sa.text("SET LOCAL ROLE pg_read_all_data"))
                 conn.execute(sa.text("SET TRANSACTION READ ONLY"))
                 row = conn.execute(
                     sa.text(
                         "SELECT current_user, current_setting('transaction_read_only') AS read_only, "
+                        "r.rolsuper AS is_superuser, "
+                        "has_schema_privilege(current_user,'public','CREATE') AS can_create_schema, "
                         "has_table_privilege(current_user,:table,'SELECT') AS can_select, "
                         "has_table_privilege(current_user,:table,'INSERT') AS can_insert, "
                         "has_table_privilege(current_user,:table,'UPDATE') AS can_update, "
                         "has_table_privilege(current_user,:table,'DELETE') AS can_delete, "
-                        "has_table_privilege(current_user,:table,'TRUNCATE') AS can_truncate"
+                        "has_table_privilege(current_user,:table,'TRUNCATE') AS can_truncate "
+                        "FROM pg_roles r WHERE r.rolname=current_user"
                     ),
                     {"table": PROBE_TABLE},
                 ).mappings().one()
                 if (
-                    row["current_user"] != CANARY_ROLE
+                    row["current_user"] != APPLICATION_ROLE
                     or row["read_only"] != "on"
+                    or row["is_superuser"] is not False
+                    or row["can_create_schema"] is not False
                     or row["can_select"] is not True
-                    or any(row[name] is not False for name in (
-                        "can_insert", "can_update", "can_delete", "can_truncate"
+                    or any(row[name] is not True for name in (
+                        "can_insert", "can_update", "can_delete"
                     ))
+                    or row["can_truncate"] is not False
                 ):
                     raise RuntimeError("canary_role_privilege_shape_invalid")
                 for statement in FORBIDDEN_STATEMENTS:
@@ -81,8 +86,8 @@ def verify_role_preflight(database_url: str) -> dict[str, object]:
         engine.dispose()
     return {
         "status": "canary_readonly_role_preflight_passed",
-        "current_user": CANARY_ROLE,
-        "membership_mode": "SET_LOCAL_ROLE",
+        "current_user": APPLICATION_ROLE,
+        "membership_mode": "none",
         "transaction_read_only": True,
         "rejected_statements": rejected,
         "exchange_write_called": False,

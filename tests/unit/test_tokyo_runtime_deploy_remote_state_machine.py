@@ -601,13 +601,15 @@ def _write_migration_in_progress_predecessor_journal(
         unit: {"active": unit.endswith("watcher.timer")}
         for unit in machine.PRODUCTION_WRITER_UNITS
     }
-    for phase in machine.DEPLOY_PHASES[:7]:
+    for phase in machine.DEPLOY_PHASES:
         result: dict[str, object] = {"status": phase}
         if phase == "production_writers_fenced":
             result["unit_prepolicy"] = prepolicy
         if phase == "pre_migration":
             result["actual_revision"] = "125"
         journal.append(phase, {"result": result})
+        if phase == "migration_in_progress":
+            break
     return prepolicy
 
 
@@ -703,7 +705,9 @@ def test_forward_fix_fence_supersession_allows_post_migration_pre_activation_onl
         journal_path, old_sha=old_sha, target_sha=predecessor_sha
     )
     journal = machine.DeployJournal.load(journal_path)
-    for phase in machine.DEPLOY_PHASES[7:13]:
+    schema_index = machine.DEPLOY_PHASES.index("schema_migrated")
+    projection_index = machine.DEPLOY_PHASES.index("pre_canary_projection")
+    for phase in machine.DEPLOY_PHASES[schema_index:projection_index + 1]:
         result = {"status": phase}
         if phase == "schema_migrated":
             result["revision"] = "136"
@@ -886,7 +890,7 @@ def test_fenced_migration_uses_only_candidate_python_and_reaches_exact_revision(
                 stdout=json.dumps(
                     {
                         "status": "canary_readonly_role_preflight_passed",
-                        "current_user": "pg_read_all_data",
+                        "current_user": "brc_runtime_app",
                         "exchange_write_called": False,
                     }
                 ),
@@ -994,7 +998,7 @@ def test_fenced_migration_reports_only_bounded_terminal_stderr_line(tmp_path):
                 stdout=json.dumps(
                     {
                         "status": "canary_readonly_role_preflight_passed",
-                        "current_user": "pg_read_all_data",
+                        "current_user": "brc_runtime_app",
                         "exchange_write_called": False,
                     }
                 ),
@@ -1042,7 +1046,7 @@ def test_fenced_migration_omits_sqlalchemy_context_link_from_failure_summary(tmp
                 stdout=json.dumps(
                     {
                         "status": "canary_readonly_role_preflight_passed",
-                        "current_user": "pg_read_all_data",
+                        "current_user": "brc_runtime_app",
                         "exchange_write_called": False,
                     }
                 ),
@@ -1090,7 +1094,7 @@ def test_fenced_migration_prefers_database_error_to_sql_statement(tmp_path):
                 stdout=json.dumps(
                     {
                         "status": "canary_readonly_role_preflight_passed",
-                        "current_user": "pg_read_all_data",
+                        "current_user": "brc_runtime_app",
                         "exchange_write_called": False,
                     }
                 ),
@@ -1677,7 +1681,22 @@ def test_deploy_transaction_bootstraps_lifecycle_only_with_explicit_intent_and_i
     (legacy / "bin/python").write_text("", encoding="utf-8")
     env_file = deploy_root / "env/live-readonly.env"
     env_file.parent.mkdir(parents=True)
-    env_file.write_text("PG_DATABASE_URL='postgresql://example.invalid/db'\n", encoding="utf-8")
+    env_file.write_text(
+        "EXCHANGE_API_KEY='test-key'\n"
+        "PG_DATABASE_URL='postgresql://example.invalid/db'\n",
+        encoding="utf-8",
+    )
+    env_file.chmod(0o600)
+    (env_file.parent / machine.RUNTIME_MIGRATION_ENV_NAME).write_text(
+        "PG_DATABASE_URL='postgresql://migration.invalid/db'\n",
+        encoding="utf-8",
+    )
+    (env_file.parent / machine.RUNTIME_APPLICATION_PENDING_ENV_NAME).write_text(
+        "PG_DATABASE_URL='postgresql://application.invalid/db'\n",
+        encoding="utf-8",
+    )
+    (env_file.parent / machine.RUNTIME_MIGRATION_ENV_NAME).chmod(0o600)
+    (env_file.parent / machine.RUNTIME_APPLICATION_PENDING_ENV_NAME).chmod(0o600)
     lock_path = tmp_path / "deploy-state/tokyo-runtime-deploy.lock"
     lock = machine.acquire_deploy_lock(lock_path, require_root_owner=False)
     assert lock is not None
@@ -1699,7 +1718,13 @@ def test_deploy_transaction_bootstraps_lifecycle_only_with_explicit_intent_and_i
     monkeypatch.setattr(machine, "capture_production_unit_prepolicy", lambda **kwargs: {unit: {"active": False} for unit in machine.PRODUCTION_WRITER_UNITS})
     monkeypatch.setattr(machine, "engage_production_writer_fence", lambda **kwargs: {"status": "production_writers_fenced", "fence_inode": 77})
     monkeypatch.setattr(machine, "read_candidate_schema_revision", lambda **kwargs: "120")
-    monkeypatch.setattr(machine, "run_fenced_schema_migration", lambda **kwargs: {"status": "schema_migrated", "revision": "124", "lifecycle_capability_was_enabled": False})
+    migration_env_paths = []
+
+    def migration(**kwargs):
+        migration_env_paths.append(kwargs["env_path"])
+        return {"status": "schema_migrated", "revision": "124", "lifecycle_capability_was_enabled": False}
+
+    monkeypatch.setattr(machine, "run_fenced_schema_migration", migration)
     monkeypatch.setattr(machine, "install_candidate_units_and_switch_pointer", lambda **kwargs: {"status": "candidate_pointer_active"})
     monkeypatch.setattr(machine, "record_candidate_release_activation", lambda **kwargs: {"status": "runtime_release_activation_completed"})
     monkeypatch.setattr(machine, "refresh_candidate_account_facts", lambda **kwargs: {"status": "candidate_account_facts_refreshed", "fact_snapshot_ids": ("fact:1",)})
@@ -1787,6 +1812,49 @@ def test_deploy_transaction_bootstraps_lifecycle_only_with_explicit_intent_and_i
     assert second["lifecycle_policy_enabled"] is True
     assert [entry["phase"] for entry in journal.entries] == list(machine.DEPLOY_PHASES)
     assert calls == ["stage", "stage", "stage"]
+    assert migration_env_paths == [env_file.parent / machine.RUNTIME_MIGRATION_ENV_NAME]
+    active_env = env_file.parent / machine.RUNTIME_APPLICATION_ACTIVE_ENV_NAME
+    assert active_env.stat().st_mode & 0o777 == 0o600
+    active_values = machine.load_runtime_environment(active_env)
+    assert active_values["EXCHANGE_API_KEY"] == "test-key"
+    assert active_values["PG_DATABASE_URL"] == "postgresql://application.invalid/db"
+
+
+def test_runtime_application_environment_only_replaces_database_url(tmp_path):
+    base = tmp_path / "live.env"
+    pending = tmp_path / "application.pending.env"
+    active = tmp_path / "application.active.env"
+    base.write_text(
+        "EXCHANGE_API_KEY='kept-secret'\n"
+        "DATABASE_URL='postgresql://old.invalid/legacy'\n"
+        "PG_DATABASE_URL='postgresql://old.invalid/db'\n",
+        encoding="utf-8",
+    )
+    pending.write_text(
+        "PG_DATABASE_URL='postgresql://app.invalid/db'\n", encoding="utf-8"
+    )
+    base.chmod(0o600)
+    pending.chmod(0o600)
+
+    first = machine.activate_runtime_application_environment(
+        base_env_path=base,
+        pending_application_env_path=pending,
+        active_env_path=active,
+    )
+    second = machine.activate_runtime_application_environment(
+        base_env_path=base,
+        pending_application_env_path=pending,
+        active_env_path=active,
+    )
+
+    values = machine.load_runtime_environment(active)
+    assert first["idempotent"] is False
+    assert second["idempotent"] is True
+    assert active.stat().st_mode & 0o777 == 0o600
+    assert values["EXCHANGE_API_KEY"] == "kept-secret"
+    assert values["PG_DATABASE_URL"] == "postgresql://app.invalid/db"
+    assert "DATABASE_URL" not in values
+    assert "app.invalid" not in str(first)
 
 
 @pytest.mark.parametrize(

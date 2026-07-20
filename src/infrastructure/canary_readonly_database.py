@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from sqlalchemy.pool import NullPool
 
 
-CANARY_ROLE = "pg_read_all_data"
+APPLICATION_ROLE = "brc_runtime_app"
 RUNTIME_TABLE = "strategy_runtime_instances"
 
 
@@ -43,7 +43,6 @@ class CanaryReadonlyDatabase:
     async def connection(self) -> AsyncIterator[AsyncConnection]:
         async with self._engine.connect() as conn:
             async with conn.begin():
-                await conn.execute(text("SET LOCAL ROLE pg_read_all_data"))
                 await conn.execute(text("SET TRANSACTION READ ONLY"))
                 await self._verify(conn)
                 yield conn
@@ -55,29 +54,26 @@ class CanaryReadonlyDatabase:
                     """
                     SELECT current_user AS current_user,
                            current_setting('transaction_read_only') AS transaction_read_only,
+                           r.rolsuper AS is_superuser,
+                           has_schema_privilege(current_user, 'public', 'CREATE') AS can_create_schema,
                            has_table_privilege(current_user, :table_name, 'SELECT') AS can_select,
                            has_table_privilege(current_user, :table_name, 'INSERT') AS can_insert,
                            has_table_privilege(current_user, :table_name, 'UPDATE') AS can_update,
                            has_table_privilege(current_user, :table_name, 'DELETE') AS can_delete,
                            has_table_privilege(current_user, :table_name, 'TRUNCATE') AS can_truncate
-                    """
+                    """ + " FROM pg_roles r WHERE r.rolname = current_user"
                 ),
                 {"table_name": RUNTIME_TABLE},
             )
         ).mappings().one()
         if (
-            row["current_user"] != CANARY_ROLE
+            row["current_user"] != APPLICATION_ROLE
             or row["transaction_read_only"] != "on"
+            or row["is_superuser"] is not False
+            or row["can_create_schema"] is not False
             or row["can_select"] is not True
-            or any(
-                row[key] is not False
-                for key in (
-                    "can_insert",
-                    "can_update",
-                    "can_delete",
-                    "can_truncate",
-                )
-            )
+            or any(row[key] is not True for key in ("can_insert", "can_update", "can_delete"))
+            or row["can_truncate"] is not False
         ):
             raise RuntimeError("canary_readonly_privilege_verification_failed")
         return dict(row)
@@ -88,4 +84,3 @@ class CanaryReadonlyDatabase:
 
     async def close(self) -> None:
         await self._engine.dispose()
-

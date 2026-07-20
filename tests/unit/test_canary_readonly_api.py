@@ -119,5 +119,6 @@ def test_canary_database_has_no_global_engine_or_write_capability():
     assert "get_engine" not in database_source
     assert "RESET ROLE" not in database_source
     assert "SET TRANSACTION READ WRITE" not in database_source
-    assert database_source.count("SET LOCAL ROLE pg_read_all_data") == 1
+    assert "SET LOCAL ROLE" not in database_source
+    assert 'APPLICATION_ROLE = "brc_runtime_app"' in database_source
     assert "SET TRANSACTION READ ONLY" in database_source
