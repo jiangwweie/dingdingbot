@@ -460,6 +460,14 @@ def _plan_phases(
         'test -n "${BRC_RUNTIME_EXCHANGE_ACCOUNT_ID:-}"; '
         'test "${BRC_RUNTIME_EXCHANGE_ID:-}" = binance_usdm'
     )
+    runtime_database_identity_preflight_command = (
+        "set -eu; "
+        f"for path in {q(deploy_root.rstrip('/') + '/env/brc_runtime_migrator.pending.env')} "
+        f"{q(deploy_root.rstrip('/') + '/env/brc_runtime_app.pending.env')}; do "
+        'test -f "$path"; test -O "$path"; '
+        'test "$(stat -c %a "$path")" = 600; '
+        "done"
+    )
     remote_export_command = (
         f"set -eu; mkdir -p {q(source_root)}; "
         f"if [ ! -d {q(source_repo_path)}/.git ]; then "
@@ -572,6 +580,7 @@ def _plan_phases(
                 f"--expected-latest-migration {q(expected_remote_latest_migration)}",
                 _ssh(host, remote_ref_probe_command),
                 _ssh(host, runtime_gateway_identity_preflight_command),
+                _ssh(host, runtime_database_identity_preflight_command),
             ],
             "stop_if": [
                 "remote current head differs from expected baseline",
@@ -579,6 +588,7 @@ def _plan_phases(
                 "Tokyo cannot reach the GitHub branch head",
                 "Tokyo branch head differs from the target commit",
                 "runtime gateway account or exchange identity is missing",
+                "runtime migration/application pending credential files are missing or unsafe",
                 "health live_ready is true",
             ],
         },
