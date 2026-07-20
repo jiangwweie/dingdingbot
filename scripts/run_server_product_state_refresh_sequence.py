@@ -251,12 +251,18 @@ def run_server_product_state_refresh_sequence(
         if action_time_invocation is not None
         else ""
     )
-    if (
-        effective_mode == "action_time"
-        and typed_invocation_id
-        and runner is None
-        and action_time_deadline is not None
-    ):
+    if effective_mode == "action_time" and runner is None:
+        # The production entrypoint has no injected runner.  Its critical path
+        # must therefore be the typed coordinator exclusively; an incomplete
+        # continuation identity is a fail-closed data-integrity incident, not
+        # permission to fall back to subprocess/stdout business semantics.
+        if not typed_invocation_id or action_time_deadline is None:
+            return _action_time_invocation_start_failure_report(
+                mode=mode,
+                started_at_utc=started,
+                trigger_state=trigger_state or {},
+                blocker="action_time_typed_invocation_required",
+            )
         return _run_typed_action_time_refresh(
             mode=mode,
             started_at_utc=started,

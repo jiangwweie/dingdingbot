@@ -163,6 +163,37 @@ def test_server_product_state_refresh_sequence_uses_pg_control_builders(
     )
 
 
+def test_production_action_time_never_falls_back_to_stdout_without_invocation(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    trigger = {
+        "status": "triggered",
+        "triggered": True,
+        "now_ms": 1_000_000,
+        "counts": {"open_action_time_tickets": 1},
+        "trigger_identity": {
+            "strategy_group_id": "SOR-001",
+            "symbol": "BTCUSDT",
+            "side": "long",
+            "ticket_id": "ticket:missing-invocation",
+        },
+    }
+
+    report = module.run_server_product_state_refresh_sequence(
+        python=sys.executable,
+        env_file=tmp_path / "live-readonly.env",
+        mode="action_time_if_needed",
+        action_time_trigger_state=trigger,
+    )
+
+    assert report["status"] == "server_product_state_refresh_sequence_failed"
+    assert report["action_time_trigger"]["blocker"] == (
+        "action_time_typed_invocation_required"
+    )
+    assert report["step_results"][0]["command"] == []
+
+
 def test_server_product_state_refresh_sequence_watcher_tick_summary_is_lightweight(
     tmp_path: Path,
 ):
