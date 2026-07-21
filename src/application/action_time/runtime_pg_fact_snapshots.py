@@ -327,7 +327,7 @@ def write_account_safe_fact_snapshots(
             "failed": (
                 []
                 if capacity_ready
-                else ["account_capacity_base_not_ready"]
+                else _account_capacity_failed_facts(capacity_values)
             ),
             "satisfied": capacity_ready,
             "blocker": None if capacity_ready else "hard_safety_stop",
@@ -663,6 +663,15 @@ def _account_safe_failed_facts(artifact: dict[str, Any]) -> list[str]:
         "action_time_available_balance",
     )
     return [key for key in expected_true if checks.get(key) is not True]
+
+
+def _account_capacity_failed_facts(values: dict[str, Any]) -> list[str]:
+    """Preserve an exchange-read failure without turning it into free text."""
+
+    failure_code = str(values.get("failure_code") or "").strip()
+    if failure_code and failure_code.replace("_", "").isalnum():
+        return [f"account_capacity_base_not_ready:{failure_code}"]
+    return ["account_capacity_base_not_ready"]
 
 
 def _account_mode_is_safe(

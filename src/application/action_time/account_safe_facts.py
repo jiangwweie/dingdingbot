@@ -100,6 +100,12 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.dispose()
     account_safe_ready = artifact["checks"]["account_safe_facts_ready"] is True
+    action_time_check = artifact["checks"].get("action_time_account_facts_ready")
+    action_time_account_facts_ready = (
+        account_safe_ready
+        if action_time_check is None
+        else action_time_check is True
+    )
     business_blocker = artifact.get("business_blocker")
     fact_snapshot_ids = artifact["pg_fact_snapshot_ids"]
     print(
@@ -107,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "status": artifact["status"],
                 "account_safe_facts_ready": account_safe_ready,
+                "action_time_account_facts_ready": action_time_account_facts_ready,
                 "action_time_invocation_id": args.action_time_invocation_id,
                 "pg_fact_snapshot_ids": sorted(fact_snapshot_ids),
                 "process_outcome": (
@@ -130,7 +137,11 @@ def main(argv: list[str] | None = None) -> int:
     return (
         0
         if (
-            account_safe_ready
+            (
+                action_time_account_facts_ready
+                if args.action_time_invocation_id
+                else account_safe_ready
+            )
             or business_blocker is not None
             or args.allow_blocked_current_projection
         )
@@ -166,16 +177,33 @@ def materialize_account_safe_facts(
     )
     artifact = build_runtime_account_safe_facts(live_facts=live_facts)
     account_safe_ready = artifact["checks"]["account_safe_facts_ready"] is True
+    has_action_time_account_fact_shape = (
+        "action_time_account_facts_ready" in artifact["checks"]
+    )
+    action_time_account_facts_ready = artifact["checks"].get(
+        "action_time_account_facts_ready"
+    )
+    if action_time_account_facts_ready is None:
+        # Existing test/diagnostic callers may carry only the pre-R10 fact
+        # shape.  They retain the old fail-closed semantics; production
+        # collectors always emit the capacity-aware field below.
+        action_time_account_facts_ready = account_safe_ready
+    else:
+        action_time_account_facts_ready = action_time_account_facts_ready is True
     business_blocker = None
     fact_binding_invocation_id = action_time_invocation_id
-    if action_time_invocation_id and not account_safe_ready:
-        business_blocker = str(
-            (artifact.get("blockers") or [
-                "action_time_account_safe_facts_not_satisfied"
-            ])[0]
+    if action_time_invocation_id and not action_time_account_facts_ready:
+        business_blocker = (
+            _action_time_account_fact_blocker(artifact)
+            if has_action_time_account_fact_shape
+            else str(
+                (artifact.get("blockers") or [
+                    "action_time_account_safe_facts_not_satisfied"
+                ])[0]
+            )
         )
-        # Persist the fail-closed facts, but never bind an unsatisfied fact set
-        # into the Action-Time invocation.
+        # Persist the fail-closed facts, but never bind an account fact set
+        # that cannot satisfy the Invocation-bound capacity boundary.
         fact_binding_invocation_id = None
     with engine.begin() as conn:
         fact_snapshot_ids = write_account_safe_fact_snapshots(
@@ -187,6 +215,7 @@ def materialize_account_safe_facts(
     return {
         **artifact,
         "business_blocker": business_blocker,
+        "action_time_account_facts_ready": action_time_account_facts_ready,
         "source_mode": "db_backed",
         "projection_target": "production_current",
         "collector_source_mode": "pg_scope_direct_readonly_exchange",
@@ -572,6 +601,9 @@ def build_runtime_account_safe_facts(
         account_mode=account_mode,
         generated_at_utc=effective_generated_at_utc,
     )
+    action_time_account_facts_ready = (
+        account_capacity_base_safe and account_capacity_base["ready"]
+    )
     ready = (
         all(
             value is True
@@ -612,6 +644,11 @@ def build_runtime_account_safe_facts(
             "account_safe": ready,
             "account_capacity_base_safe": account_capacity_base_safe,
             "account_capacity_base_ready": account_capacity_base["ready"],
+            # The Action-Time path is capacity-aware: a valid 1/2 account can
+            # continue to exact NettingDomain checks in the Ticket transaction.
+            # The flat-only account_safe_facts_ready remains a legacy broad
+            # projection and must not veto a different-instrument second Ticket.
+            "action_time_account_facts_ready": action_time_account_facts_ready,
             "private_action_time_facts_ready": ready,
             "active_position_or_open_order_clear": (
                 checks["active_position_clear"] and checks["open_orders_clear"]
@@ -712,6 +749,11 @@ def _account_capacity_base_fact(
         "runtime_profile_id": runtime_profile_id or None,
         "account_capacity_source_snapshot_id": source_snapshot_id or None,
         "snapshot_complete": snapshot.get("snapshot_ready") is True,
+        # The provider makes full-account collection fail closed.  Preserve its
+        # typed reason through the account-capacity surface so the Action-Time
+        # outcome names the failed exchange-read boundary instead of reporting
+        # only a generic capacity fact.
+        "failure_code": _snapshot_failure_code(snapshot),
         "can_trade": snapshot.get("can_trade") is True,
         "position_mode": position_mode if position_mode in {"one_way", "hedge"} else None,
         "total_wallet_balance": snapshot.get("total_wallet_balance"),
@@ -724,6 +766,31 @@ def _account_capacity_base_fact(
         "position_count": len(snapshot.get("positions") or []),
     }
     return {"ready": ready, "values": values}
+
+
+def _action_time_account_fact_blocker(artifact: dict[str, Any]) -> str:
+    """Return the capacity-owned blocker used before Invocation fact binding."""
+
+    checks = _as_dict(artifact.get("checks"))
+    if checks.get("account_capacity_base_safe") is not True:
+        return "account_capacity_base_fact_not_safe"
+    if checks.get("account_capacity_base_ready") is not True:
+        facts = _as_dict(artifact.get("facts"))
+        capacity = _as_dict(facts.get("account_capacity_base"))
+        failure_code = _snapshot_failure_code(capacity)
+        if failure_code:
+            return f"account_capacity_base_fact_not_ready:{failure_code}"
+        return "account_capacity_base_fact_not_ready"
+    return "action_time_account_facts_not_satisfied"
+
+
+def _snapshot_failure_code(values: dict[str, Any]) -> str | None:
+    """Return a bounded provider failure identifier suitable for a blocker."""
+
+    value = str(values.get("failure_code") or "").strip()
+    if not value:
+        return None
+    return value if value.replace("_", "").isalnum() else None
 
 
 def _integer_or_none(value: Any) -> int | None:

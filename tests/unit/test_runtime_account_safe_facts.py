@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 
 from scripts import build_runtime_account_safe_facts as module
 
@@ -127,6 +129,7 @@ def test_runtime_account_capacity_base_uses_complete_full_account_snapshot_not_f
         "runtime_profile_id": "owner-runtime-console-v1",
         "account_capacity_source_snapshot_id": "account-risk-snapshot-1",
         "snapshot_complete": True,
+        "failure_code": None,
         "can_trade": True,
         "position_mode": "hedge",
         "total_wallet_balance": "123.45",
@@ -138,6 +141,119 @@ def test_runtime_account_capacity_base_uses_complete_full_account_snapshot_not_f
         "algo_open_order_count": 0,
         "position_count": 1,
     }
+
+
+def test_action_time_reports_the_full_account_snapshot_failure_reason(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A failed full snapshot must not collapse into a generic capacity blocker."""
+
+    live_facts = _live_facts()
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    live_facts["account_mode"]["observed_at"] = datetime.now(timezone.utc).isoformat()
+    live_facts["account_risk_snapshot"] = {
+        "snapshot_ready": False,
+        "failure_code": "account_risk_snapshot_fetch_failed",
+        "account_id": "owner-subaccount-runtime-v0",
+        "exchange_id": "binance_usdm",
+        "source_snapshot_id": "account-risk-snapshot-failed",
+        "observed_at_ms": now_ms,
+        "valid_until_ms": now_ms + 60_000,
+    }
+    monkeypatch.setattr(
+        module._impl,
+        "_pg_account_safe_scope_summary",
+        lambda _conn: {"symbols": [], "identity_errors": []},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "collect_account_safe_live_facts_from_scope",
+        lambda *_args, **_kwargs: live_facts,
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "write_account_safe_fact_snapshots",
+        lambda *_args, **_kwargs: [],
+    )
+    engine = sa.create_engine("sqlite://")
+    try:
+        artifact = module.materialize_account_safe_facts(
+            engine,
+            action_time_invocation_id="action_time_invocation:failed-snapshot",
+            env_file=None,
+        )
+    finally:
+        engine.dispose()
+
+    assert artifact["business_blocker"] == (
+        "account_capacity_base_fact_not_ready:"
+        "account_risk_snapshot_fetch_failed"
+    )
+    assert artifact["facts"]["account_capacity_base"]["failure_code"] == (
+        "account_risk_snapshot_fetch_failed"
+    )
+
+
+def test_action_time_binds_capacity_fact_when_one_different_instrument_position_exists(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A valid 1/2 account must reach Ticket facts instead of the flat-only gate."""
+
+    live_facts = _live_facts()
+    live_facts["active_position"] = {"status": "active_position_present"}
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    live_facts["account_risk_snapshot"] = {
+        "snapshot_ready": True,
+        "account_id": "owner-subaccount-runtime-v0",
+        "exchange_id": "binance_usdm",
+        "total_wallet_balance": "123.45",
+        "available_balance": "100.00",
+        "exchange_total_initial_margin": "20.00",
+        "can_trade": True,
+        "position_mode": "one_way",
+        "positions": [{"exchange_symbol": "BTCUSDT"}],
+        "regular_open_orders": [],
+        "algo_open_orders": [],
+        "source_snapshot_id": "account-risk-snapshot-1",
+        "observed_at_ms": now_ms,
+        "valid_until_ms": now_ms + 60_000,
+    }
+    live_facts["account_mode"]["observed_at"] = datetime.now(
+        timezone.utc
+    ).isoformat()
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        module._impl,
+        "_pg_account_safe_scope_summary",
+        lambda _conn: {"symbols": [], "identity_errors": []},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "collect_account_safe_live_facts_from_scope",
+        lambda *_args, **_kwargs: live_facts,
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "write_account_safe_fact_snapshots",
+        lambda *_args, **kwargs: (
+            captured.update(kwargs)
+            or ["fact:account-capacity", "fact:account-mode"]
+        ),
+    )
+    engine = sa.create_engine("sqlite://")
+    try:
+        artifact = module.materialize_account_safe_facts(
+            engine,
+            action_time_invocation_id="action_time_invocation:one-of-two",
+            env_file=None,
+        )
+    finally:
+        engine.dispose()
+
+    assert artifact["business_blocker"] is None
+    assert captured["action_time_invocation_id"] == (
+        "action_time_invocation:one-of-two"
+    )
 
 
 @pytest.mark.parametrize(
