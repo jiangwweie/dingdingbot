@@ -201,6 +201,8 @@ def _pg_ticket_identity_db(
     expired_lane: bool = False,
     closed_lane: bool = False,
     expired_ticket: bool = False,
+    current_invocation_blocker: str | None = None,
+    later_invocation_success: bool = False,
 ) -> str:
     db_path = tmp_path / "runtime-control-state.db"
     engine = sa.create_engine(f"sqlite:///{db_path}")
@@ -222,6 +224,21 @@ def _pg_ticket_identity_db(
                         expires_at_ms INTEGER,
                         closed_at_ms INTEGER,
                         created_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_runtime_process_outcomes (
+                        process_outcome_id TEXT PRIMARY KEY,
+                        process_name TEXT,
+                        scope_key TEXT,
+                        process_state TEXT,
+                        first_blocker TEXT,
+                        source_watermark TEXT,
+                        updated_at_ms INTEGER
                     )
                     """
                 )
@@ -329,6 +346,55 @@ def _pg_ticket_identity_db(
                         "expires_at_ms": 1 if expired_ticket else 4_102_444_800_000,
                         "created_at_ms": 2000 + suffix,
                     },
+                )
+            if current_invocation_blocker:
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_runtime_process_outcomes (
+                            process_outcome_id,
+                            process_name,
+                            scope_key,
+                            process_state,
+                            first_blocker,
+                            source_watermark,
+                            updated_at_ms
+                        ) VALUES (
+                            'outcome-current-invocation',
+                            'action_time_refresh_sequence',
+                            'lane:SOR-001:ETHUSDT:long',
+                            'business_blocked',
+                            :first_blocker,
+                            'signal:unit-current',
+                            3000
+                        )
+                        """
+                    ),
+                    {"first_blocker": current_invocation_blocker},
+                )
+            if later_invocation_success:
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_runtime_process_outcomes (
+                            process_outcome_id,
+                            process_name,
+                            scope_key,
+                            process_state,
+                            first_blocker,
+                            source_watermark,
+                            updated_at_ms
+                        ) VALUES (
+                            'outcome-later-success',
+                            'action_time_refresh_sequence',
+                            'lane:SOR-001:ETHUSDT:long',
+                            'succeeded',
+                            NULL,
+                            'signal:unit-later',
+                            4000
+                        )
+                        """
+                    )
                 )
     finally:
         engine.dispose()
@@ -1548,6 +1614,53 @@ def test_dispatcher_pg_ticket_identity_missing_is_neutral_when_no_open_lane(tmp_
     assert resume_pack["blockers"] == []
     assert resume_pack["owner_state"]["owner_action_required"] is False
     assert resume_pack["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_conserves_current_invocation_blocker_when_ticket_is_absent(
+    tmp_path,
+):
+    database_url = _pg_ticket_identity_db(
+        tmp_path,
+        lane_count=0,
+        ticket_count=0,
+        current_invocation_blocker="account_capacity_base_fact_not_ready:account_risk_snapshot_fetch_failed",
+    )
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["status"] == "blocked"
+    assert resume_pack["pg_ticket_identity_dispatch_status"] == (
+        "blocked_by_current_action_time_invocation"
+    )
+    assert resume_pack["blockers"] == [
+        "account_capacity_base_fact_not_ready:account_risk_snapshot_fetch_failed"
+    ]
+    assert resume_pack["owner_state"]["status"] == "temporarily_unavailable"
+    assert resume_pack["owner_state"]["blocker_class"] == (
+        "action_time_boundary_not_reproduced"
+    )
+    assert resume_pack["safety_invariants"]["exchange_write_called"] is False
+
+
+def test_dispatcher_does_not_retain_a_superseded_invocation_blocker(tmp_path):
+    database_url = _pg_ticket_identity_db(
+        tmp_path,
+        lane_count=0,
+        ticket_count=0,
+        current_invocation_blocker="account_capacity_base_fact_not_ready:account_risk_snapshot_fetch_failed",
+        later_invocation_success=True,
+    )
+
+    resume_pack, _source_path = dispatcher._pg_ticket_resume_pack(
+        database_url=database_url,
+        api_base="http://127.0.0.1:18080",
+    )
+
+    assert resume_pack["status"] == "no_actionable_pg_ticket"
+    assert resume_pack["blockers"] == []
 
 
 def test_dispatcher_pg_ticket_identity_missing_ticket_for_open_lane_fails_closed(

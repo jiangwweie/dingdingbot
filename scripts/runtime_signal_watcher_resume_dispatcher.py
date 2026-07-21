@@ -30,6 +30,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
+from src.application.action_time.process_outcome_relevance import (  # noqa: E402
+    process_outcome_has_current_blocking_authority,
+)
 from src.application.readmodels.owner_projection import (
     owner_non_authority_checkpoint,
     owner_state_without_legacy_input_recovery_action,
@@ -43,6 +46,11 @@ from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
 DEFAULT_API_BASE = "http://127.0.0.1:18080"
 OPEN_PG_TICKET_STATUSES = {"created", "preflight_pending", "finalgate_ready"}
 OPEN_PG_LANE_STATUSES = {"opened", "facts_refreshing", "ticket_pending", "ticket_created"}
+ACTION_TIME_OUTCOME_PROCESS_NAMES = {
+    "action_time_ticket_sequence",
+    "action_time_ticket_sequence_batch",
+    "action_time_refresh_sequence",
+}
 READY_STATUS = "ready_for_action_time_final_gate"
 FINALGATE_READY_STATUS = "finalgate_ready"
 WAITING_STATUS = "waiting_for_market"
@@ -111,11 +119,16 @@ def _pg_ticket_resume_pack(
             now_ms = int(time.time() * 1000)
             rows = _open_pg_ticket_identity_rows(conn, now_ms=now_ms)
             lane_rows = _open_pg_lane_identity_rows(conn, now_ms=now_ms)
+            invocation_blockers = _current_pg_invocation_blockers(conn)
     finally:
         engine.dispose()
     source_path = Path("pg://runtime-control-state/action-time-ticket")
     if not rows:
         if not lane_rows:
+            if invocation_blockers:
+                return _current_invocation_blocked_resume_pack(
+                    invocation_blockers[0]
+                ), source_path
             return _waiting_pg_ticket_resume_pack(), source_path
         return _blocked_pg_ticket_resume_pack(
             "blocked_by_missing_pg_ticket_identity",
@@ -306,6 +319,65 @@ def _open_pg_lane_identity_rows(
     ]
 
 
+def _current_pg_invocation_blockers(
+    conn: sa.engine.Connection,
+) -> list[dict[str, Any]]:
+    """Return unresolved Action-Time producer outcomes without inferring a Ticket.
+
+    A Ticket consumer may be idle because no Ticket was safely materialized.
+    That is neutral only when PG has no current producer failure.  Reuse the
+    shared current-authority reducer so a later same-lane success clears the
+    old outcome instead of giving the dispatcher its own TTL semantics.
+    """
+
+    if not sa.inspect(conn).has_table("brc_runtime_process_outcomes"):
+        return []
+    outcomes = sa.Table(
+        "brc_runtime_process_outcomes",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    required = {
+        "process_outcome_id",
+        "process_name",
+        "scope_key",
+        "process_state",
+        "first_blocker",
+        "updated_at_ms",
+    }
+    if not required.issubset(outcomes.c.keys()):
+        return []
+    rank = sa.func.row_number().over(
+        partition_by=(outcomes.c.process_name, outcomes.c.scope_key),
+        order_by=(outcomes.c.updated_at_ms.desc(), outcomes.c.process_outcome_id.desc()),
+    ).label("current_rank")
+    ranked = (
+        sa.select(outcomes, rank)
+        .where(outcomes.c.process_name.in_(sorted(ACTION_TIME_OUTCOME_PROCESS_NAMES)))
+        .where(outcomes.c.scope_key.like("lane:%"))
+        .subquery()
+    )
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            sa.select(ranked).where(ranked.c.current_rank == 1)
+        ).mappings()
+    ]
+    control_state = {"runtime_process_outcomes": rows}
+    current = [
+        row
+        for row in rows
+        if process_outcome_has_current_blocking_authority(control_state, row)
+    ]
+    return sorted(
+        current,
+        key=lambda row: (
+            -int(row.get("updated_at_ms") or 0),
+            str(row.get("process_outcome_id") or ""),
+        ),
+    )
+
+
 def _joined_ticket_and_lane_are_current(
     row: dict[str, Any],
     *,
@@ -383,6 +455,53 @@ def _waiting_pg_ticket_resume_pack() -> dict[str, Any]:
         "blockers": [],
         "warnings": [],
         "pg_ticket_identity_dispatch_status": "no_actionable_pg_ticket",
+    }
+
+
+def _current_invocation_blocked_resume_pack(
+    outcome: dict[str, Any],
+) -> dict[str, Any]:
+    """Conserve an upstream selected-Invocation failure at a no-Ticket tick."""
+
+    blocker = str(outcome.get("first_blocker") or "").strip()
+    return {
+        "scope": "pg_ticket_bound_resume_identity",
+        "source_mode": "db_backed",
+        "projection_target": "production_current",
+        "status": "blocked",
+        "action_time_invocation_id": outcome.get("action_time_invocation_id"),
+        "source_watermark": outcome.get("source_watermark"),
+        "action_time_resume": {
+            "status": "blocked",
+            "allowed_auto_actions": [],
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "withdrawal_or_transfer_requested": False,
+        },
+        "owner_state": {
+            "status": "temporarily_unavailable",
+            "blocker_class": "action_time_boundary_not_reproduced",
+            "blocked_at": "current_action_time_invocation",
+            "blocked_reason": blocker,
+            "non_authority_checkpoint": "materialize_action_time_ticket",
+            "authority_mode": "continue_watcher_observation_no_submit",
+            "owner_action_required": False,
+        },
+        "safety_invariants": {
+            "places_order": False,
+            "calls_order_lifecycle": False,
+            "exchange_write_called": False,
+            "mutates_pg": False,
+            "runtime_budget_mutated": False,
+            "withdrawal_or_transfer_created": False,
+            "forbidden_effect_flags": [],
+        },
+        "blockers": [blocker] if blocker else [],
+        "warnings": [],
+        "pg_ticket_identity_dispatch_status": (
+            "blocked_by_current_action_time_invocation"
+        ),
     }
 
 
