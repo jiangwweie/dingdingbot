@@ -241,6 +241,7 @@ async def _run_one_ticket_bound_exchange_command(
     phase_decision: ExchangePhaseDeadlineDecision | None = None
     claim_started_at = time.monotonic() if deadline_budget is not None else None
     dispatch_started_at: float | None = None
+    deadline_role: str | None = None
     command_blockers: list[str] = []
     try:
         with engine.begin() as conn:
@@ -269,16 +270,15 @@ async def _run_one_ticket_bound_exchange_command(
                     command, gateway
                 ) + _execution_contract_blockers(command)
             if command and deadline_budget is not None:
-                role = _deadline_role(str(command.get("order_role") or ""))
-                dispatch_started_at = time.monotonic()
+                deadline_role = _deadline_role(str(command.get("order_role") or ""))
                 phase_decision = decide_exchange_phase_budget(
                     deadline_budget,
-                    role=role,
-                    monotonic_now=dispatch_started_at,
+                    role=deadline_role,
+                    monotonic_now=time.monotonic(),
                     lease_ms=lease_ms,
                     legacy_timeout_cap_seconds=dispatch_timeout_seconds,
                     require_pre_entry_reserve=(
-                        role == "ENTRY"
+                        deadline_role == "ENTRY"
                         and str(command.get("command_source") or "")
                         == "protected_submit"
                     ),
@@ -317,6 +317,30 @@ async def _run_one_ticket_bound_exchange_command(
                 ["exchange_command_outcome_unknown"] if expired else capability_blockers
             ),
         }
+
+    if deadline_budget is not None and deadline_role is not None:
+        dispatch_started_at = time.monotonic()
+        phase_decision = decide_exchange_phase_budget(
+            deadline_budget,
+            role=deadline_role,
+            monotonic_now=dispatch_started_at,
+            lease_ms=lease_ms,
+            legacy_timeout_cap_seconds=dispatch_timeout_seconds,
+            require_pre_entry_reserve=(
+                deadline_role == "ENTRY"
+                and str(command.get("command_source") or "")
+                == "protected_submit"
+            ),
+        )
+        if not phase_decision.allowed:
+            return _postclaim_deadline_blocked_result(
+                engine,
+                command=command,
+                decision=phase_decision,
+                claim_started_at=claim_started_at,
+                dispatch_started_at=dispatch_started_at,
+                now_ms=now_ms,
+            )
 
     effective_timeout_seconds = (
         phase_decision.effective_timeout_seconds
@@ -885,6 +909,107 @@ def _deadline_blocked_result(
         exchange_request_count=0,
         result_commit_latency_ms=0,
     )
+
+
+def _postclaim_deadline_blocked_result(
+    engine: sa.Engine,
+    *,
+    command: dict[str, Any],
+    decision: ExchangePhaseDeadlineDecision,
+    claim_started_at: float | None,
+    dispatch_started_at: float,
+    now_ms: int,
+) -> dict[str, Any]:
+    release = _release_claim_after_deadline_block(
+        engine,
+        command=command,
+        now_ms=now_ms,
+    )
+    released = release["released"] is True
+    if released:
+        blocker = decision.blocker or "exchange_command_deadline_blocked"
+    else:
+        blocker = "exchange_command_deadline_claim_release_conflict"
+    blockers = [blocker]
+    if not released and decision.blocker:
+        blockers.append(decision.blocker)
+    current_command = dict(release.get("command") or command)
+    payload = _result(
+        "hard_safety_stop",
+        current_command,
+        blockers=blockers,
+        exchange_write_called=False,
+    )
+    return _attach_phase_result(
+        payload,
+        command=current_command,
+        phase_decision=decision,
+        claim_started_at=claim_started_at,
+        effective_timeout_seconds=decision.effective_timeout_seconds,
+        dispatch_started_at=dispatch_started_at,
+        result_committed_at=None,
+        exchange_request_count=0,
+        result_commit_latency_ms=0,
+    )
+
+
+def _release_claim_after_deadline_block(
+    engine: sa.Engine,
+    *,
+    command: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    """Guardedly restore a no-I/O claim to its exact pre-claim state."""
+
+    command_id = str(command.get("exchange_command_id") or "")
+    claim_token = str(command.get("claim_token") or "")
+    claimed_attempt_count = int(command.get("execution_attempt_count") or 0)
+    if not command_id or not claim_token or claimed_attempt_count <= 0:
+        return {"released": False, "command": command}
+    preclaim_attempt_count = claimed_attempt_count - 1
+    with engine.begin() as conn:
+        table = sa.Table(
+            "brc_ticket_bound_exchange_commands",
+            sa.MetaData(),
+            autoload_with=conn,
+        )
+        released = (
+            conn.execute(
+                table.update()
+                .where(
+                    table.c.exchange_command_id == command_id,
+                    table.c.command_state == ExchangeCommandState.DISPATCHING.value,
+                    table.c.claim_token == claim_token,
+                    table.c.execution_attempt_count == claimed_attempt_count,
+                )
+                .values(
+                    command_state=ExchangeCommandState.PREPARED.value,
+                    claim_owner=None,
+                    claim_token=None,
+                    claim_started_at_ms=None,
+                    claim_expires_at_ms=None,
+                    dispatch_started_at_ms=None,
+                    execution_attempt_count=preclaim_attempt_count,
+                    updated_at_ms=now_ms,
+                )
+                .returning(*table.c)
+            )
+            .mappings()
+            .first()
+        )
+        if released is not None:
+            return {"released": True, "command": dict(released)}
+        current = (
+            conn.execute(
+                sa.select(table).where(table.c.exchange_command_id == command_id)
+            )
+            .mappings()
+            .first()
+        )
+    return {
+        "released": False,
+        "command": dict(current) if current is not None else command,
+    }
 
 
 def _attach_phase_result(

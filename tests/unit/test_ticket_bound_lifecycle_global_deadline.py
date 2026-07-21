@@ -389,41 +389,169 @@ async def test_worker_rechecks_deadline_after_claim_before_gateway_io(
         command_sources=("protected_submit",),
         allowed_roles=("ENTRY",),
     )
-    clock = {"calls": 0}
+    clock = {"now": 100.0, "claim_committed": False}
 
-    def monotonic() -> float:
-        clock["calls"] += 1
-        return 100.0 if clock["calls"] == 1 else 106.0
+    def advance_after_claim_commit(_connection) -> None:
+        if not clock["claim_committed"]:
+            clock["claim_committed"] = True
+            clock["now"] = 106.0
 
-    monkeypatch.setattr(exchange_command_worker.time, "monotonic", monotonic)
-    gateway = _DeadlineGateway()
-    result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
-        pg_control_connection.engine,
-        gateway=gateway,
-        worker_id="deadline-recheck-stop",
-        now_ms=NOW_MS + 5001,
-        lease_ms=35_000,
-        command_sources=("protected_submit",),
-        source_command_id=prepared["protected_submit_attempt_id"],
-        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
-        allowed_roles=("SL",),
-        absolute_deadline_at=111.0,
+    monkeypatch.setattr(
+        exchange_command_worker.time,
+        "monotonic",
+        lambda: clock["now"],
     )
+    from sqlalchemy import event
 
-    assert clock["calls"] >= 2
+    event.listen(
+        pg_control_connection.engine,
+        "commit",
+        advance_after_claim_commit,
+    )
+    gateway = _DeadlineGateway()
+    try:
+        result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
+            pg_control_connection.engine,
+            gateway=gateway,
+            worker_id="deadline-recheck-stop",
+            now_ms=NOW_MS + 5001,
+            lease_ms=35_000,
+            command_sources=("protected_submit",),
+            source_command_id=prepared["protected_submit_attempt_id"],
+            protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+            allowed_roles=("SL",),
+            absolute_deadline_at=111.0,
+        )
+    finally:
+        event.remove(
+            pg_control_connection.engine,
+            "commit",
+            advance_after_claim_commit,
+        )
+
+    assert clock["claim_committed"] is True
     assert gateway.calls == []
     assert result["first_blocker"] == (
         "exchange_command_deadline_budget_exhausted_before_io"
     )
     assert pg_control_connection.execute(
         text(
-            "SELECT command_state, execution_attempt_count FROM "
+            "SELECT command_state, execution_attempt_count, claim_owner, "
+            "claim_token, claim_started_at_ms, claim_expires_at_ms, "
+            "dispatch_started_at_ms FROM "
             "brc_ticket_bound_exchange_commands WHERE order_role = 'SL'"
         )
     ).mappings().one() == {
         "command_state": "prepared",
         "execution_attempt_count": 0,
+        "claim_owner": None,
+        "claim_token": None,
+        "claim_started_at_ms": None,
+        "claim_expires_at_ms": None,
+        "dispatch_started_at_ms": None,
     }
+    phase = result["exchange_telemetry"]["phases"][0]
+    assert phase["claim_started_at_monotonic"] == 100.0
+    assert phase["dispatch_started_at_monotonic"] == 106.0
+    assert phase["exchange_request_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_postcommit_deadline_claim_release_conflict_fails_closed(
+    monkeypatch,
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_DeadlineGateway(),
+        worker_id="deadline-release-conflict-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    clock = {"now": 100.0, "claim_committed": False}
+
+    def advance_after_claim_commit(_connection) -> None:
+        if not clock["claim_committed"]:
+            clock["claim_committed"] = True
+            clock["now"] = 106.0
+
+    monkeypatch.setattr(
+        exchange_command_worker.time,
+        "monotonic",
+        lambda: clock["now"],
+    )
+    original_release = exchange_command_worker._release_claim_after_deadline_block
+
+    def conflicting_release(*args, **kwargs):
+        command = kwargs["command"]
+        with pg_control_connection.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE brc_ticket_bound_exchange_commands "
+                    "SET claim_token = 'concurrent-claim-token' "
+                    "WHERE exchange_command_id = :exchange_command_id"
+                ),
+                {"exchange_command_id": command["exchange_command_id"]},
+            )
+        return original_release(*args, **kwargs)
+
+    monkeypatch.setattr(
+        exchange_command_worker,
+        "_release_claim_after_deadline_block",
+        conflicting_release,
+    )
+    from sqlalchemy import event
+
+    event.listen(
+        pg_control_connection.engine,
+        "commit",
+        advance_after_claim_commit,
+    )
+    gateway = _DeadlineGateway()
+    try:
+        result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
+            pg_control_connection.engine,
+            gateway=gateway,
+            worker_id="deadline-release-conflict-stop",
+            now_ms=NOW_MS + 5001,
+            lease_ms=35_000,
+            command_sources=("protected_submit",),
+            source_command_id=prepared["protected_submit_attempt_id"],
+            protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+            allowed_roles=("SL",),
+            absolute_deadline_at=111.0,
+        )
+    finally:
+        event.remove(
+            pg_control_connection.engine,
+            "commit",
+            advance_after_claim_commit,
+        )
+
+    assert gateway.calls == []
+    assert result["status"] == "hard_safety_stop"
+    assert result["first_blocker"] == (
+        "exchange_command_deadline_claim_release_conflict"
+    )
+    assert result["command_state"] == "dispatching"
+    row = pg_control_connection.execute(
+        text(
+            "SELECT command_state, execution_attempt_count, claim_token "
+            "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'SL'"
+        )
+    ).mappings().one()
+    assert row == {
+        "command_state": "dispatching",
+        "execution_attempt_count": 1,
+        "claim_token": "concurrent-claim-token",
+    }
+    assert result["exchange_telemetry"]["phases"][0][
+        "dispatch_started_at_monotonic"
+    ] == 106.0
 
 
 @pytest.mark.asyncio
