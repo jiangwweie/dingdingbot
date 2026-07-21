@@ -85,6 +85,32 @@ def test_migration_145_adds_typed_entry_effect_constraints_and_fill_pending_even
                         "protected_submit_attempt_id, exchange_write_called, "
                         "updated_at_ms, entry_effect_state, "
                         "entry_effect_observed_at_ms, protection_barrier_state, "
+                        "initial_stop_confirmed_at_ms, protection_quantity) VALUES ("
+                        "'zero-confirmed-stop', true, 1, 'accepted_zero_fill', 1, "
+                        "'initial_stop_confirmed', 2, NULL)"
+                    )
+                )
+        with pytest.raises(sa.exc.IntegrityError):
+            with conn.begin_nested():
+                conn.execute(
+                    sa.text(
+                        "INSERT INTO brc_ticket_bound_protected_submit_attempts ("
+                        "protected_submit_attempt_id, exchange_write_called, "
+                        "updated_at_ms, entry_effect_state, "
+                        "entry_effect_observed_at_ms, protection_barrier_state, "
+                        "initial_stop_confirmed_at_ms, protection_quantity) VALUES ("
+                        "'confirmed-before-effect', true, 1, 'accepted_filled', 5, "
+                        "'initial_stop_confirmed', 2, 1)"
+                    )
+                )
+        with pytest.raises(sa.exc.IntegrityError):
+            with conn.begin_nested():
+                conn.execute(
+                    sa.text(
+                        "INSERT INTO brc_ticket_bound_protected_submit_attempts ("
+                        "protected_submit_attempt_id, exchange_write_called, "
+                        "updated_at_ms, entry_effect_state, "
+                        "entry_effect_observed_at_ms, protection_barrier_state, "
                         "protection_quantity) VALUES ("
                         "'unknown-guessed-qty', true, 1, 'outcome_unknown', 1, "
                         "'hard_stopped', 1)"

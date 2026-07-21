@@ -844,6 +844,96 @@ async def test_entry_rejection_terminalizes_undispatched_protection_siblings(
             "WHERE transition_reason = 'entry_authoritatively_rejected'"
         )
     ).scalar_one() == 1
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_operation_layer_handoffs")
+    ).scalar_one() == "invalidated"
+
+
+@pytest.mark.asyncio
+async def test_entry_rejection_repairs_expired_ticket_and_invalidates_handoff(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+
+    class ExpiredRejectingGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            with pg_control_connection.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "UPDATE brc_action_time_tickets SET status = 'expired' "
+                        "WHERE ticket_id = :ticket_id"
+                    ),
+                    {"ticket_id": ids["ticket_id"]},
+                )
+            raise InvalidOrderError("entry_rejected", "ENTRY-REJECTED")
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=ExpiredRejectingGateway(),
+        worker_id="expired-entry-rejection-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+
+    assert result["status"] == "command_rejected"
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_action_time_tickets")
+    ).scalar_one() == "invalidated"
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_operation_layer_handoffs")
+    ).scalar_one() == "invalidated"
+    event = pg_control_connection.execute(
+        text(
+            "SELECT from_status, to_status FROM brc_action_time_ticket_events "
+            "WHERE transition_reason = 'entry_authoritatively_rejected'"
+        )
+    ).mappings().one()
+    assert event == {"from_status": "expired", "to_status": "invalidated"}
+
+
+@pytest.mark.asyncio
+async def test_entry_replay_does_not_regress_degraded_protection_barrier(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id="degraded-barrier-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+    with pg_control_connection.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_protected_submit_attempts "
+                "SET protection_barrier_state = 'degraded'"
+            )
+        )
+        command = conn.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_exchange_commands "
+                "WHERE exchange_command_id = :command_id"
+            ),
+            {"command_id": result["exchange_command_id"]},
+        ).mappings().one()
+        project_entry_effect(
+            conn,
+            command=dict(command),
+            now_ms=NOW_MS + 6000,
+        )
+    barrier = pg_control_connection.execute(
+        text(
+            "SELECT protection_barrier_state, protection_quantity "
+            "FROM brc_ticket_bound_protected_submit_attempts"
+        )
+    ).mappings().one()
+    assert barrier["protection_barrier_state"] == "degraded"
+    assert Decimal(str(barrier["protection_quantity"])) == Decimal("0.01")
 
 
 @pytest.mark.asyncio

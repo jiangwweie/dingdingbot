@@ -20,6 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 ATTEMPT_TABLE = "brc_ticket_bound_protected_submit_attempts"
 EVENT_TABLE = "brc_ticket_bound_lifecycle_events"
+TICKET_EVENT_TABLE = "brc_action_time_ticket_events"
 
 LIFECYCLE_EVENTS = (
     "event_type IN ('entry_submitted', 'entry_fill_pending', 'entry_filled', "
@@ -36,6 +37,24 @@ LIFECYCLE_EVENTS = (
     "'runner_mutation_failed', 'runner_reconciliation_mismatch', "
     "'position_closed_protection_live', 'final_exit_unknown', "
     "'settlement_blocked', 'review_blocked', 'presubmit_reconciled_absent')"
+)
+TICKET_EVENT_TRANSITIONS = (
+    "(from_status IS NULL AND to_status = 'created') OR "
+    "(from_status = 'created' AND to_status IN "
+    "('preflight_pending', 'expired', 'superseded', 'invalidated')) OR "
+    "(from_status = 'preflight_pending' AND to_status IN "
+    "('finalgate_ready', 'finalgate_rejected', 'expired', "
+    "'superseded', 'invalidated')) OR "
+    "(from_status = 'finalgate_ready' AND to_status IN "
+    "('submitted', 'expired', 'superseded', 'invalidated')) OR "
+    "(from_status = 'expired' AND to_status = 'submitted' AND "
+    "transition_reason IN ('entry_effect_migration_repair', "
+    "'entry_exchange_effect_committed', "
+    "'entry_effect_prevents_ticket_expiration')) OR "
+    "(from_status = 'expired' AND to_status = 'invalidated' AND "
+    "transition_reason IN ('entry_authoritatively_rejected', "
+    "'entry_rejection_migration_repair')) OR "
+    "(from_status = 'submitted' AND to_status = 'closed')"
 )
 
 
@@ -83,6 +102,16 @@ def upgrade() -> None:
                 )
                 batch_op.create_check_constraint(
                     "ck_brc_lifecycle_event_type", LIFECYCLE_EVENTS
+                )
+        if inspector.has_table(TICKET_EVENT_TABLE):
+            with op.batch_alter_table(
+                TICKET_EVENT_TABLE, recreate="always"
+            ) as batch_op:
+                batch_op.drop_constraint(
+                    "ck_brc_ticket_event_transition", type_="check"
+                )
+                batch_op.create_check_constraint(
+                    "ck_brc_ticket_event_transition", TICKET_EVENT_TRANSITIONS
                 )
         return
     _backfill_entry_effect()
@@ -196,20 +225,9 @@ def _repair_effect_active_current_truth(inspector: sa.Inspector) -> None:
     op.create_check_constraint(
         "ck_brc_ticket_event_transition",
         "brc_action_time_ticket_events",
-        "(from_status IS NULL AND to_status = 'created') OR "
-        "(from_status = 'created' AND to_status IN "
-        "('preflight_pending', 'expired', 'superseded', 'invalidated')) OR "
-        "(from_status = 'preflight_pending' AND to_status IN "
-        "('finalgate_ready', 'finalgate_rejected', 'expired', "
-        "'superseded', 'invalidated')) OR "
-        "(from_status = 'finalgate_ready' AND to_status IN "
-        "('submitted', 'expired', 'superseded', 'invalidated')) OR "
-        "(from_status = 'expired' AND to_status = 'submitted' AND "
-        "transition_reason IN ('entry_effect_migration_repair', "
-        "'entry_exchange_effect_committed', "
-        "'entry_effect_prevents_ticket_expiration')) OR "
-        "(from_status = 'submitted' AND to_status = 'closed')",
+        TICKET_EVENT_TRANSITIONS,
     )
+    _repair_historical_rejections()
     op.execute(
         """
         INSERT INTO brc_action_time_ticket_events (
@@ -296,10 +314,15 @@ def _repair_effect_active_current_truth(inspector: sa.Inspector) -> None:
           'entry_effect_projection; migration_145_repair',
           attempt.created_at_ms, attempt.entry_effect_observed_at_ms
         FROM brc_ticket_bound_protected_submit_attempts AS attempt
-        JOIN brc_ticket_bound_exchange_commands AS command
-          ON command.protected_submit_attempt_id =
-             attempt.protected_submit_attempt_id
-         AND command.order_role = 'ENTRY'
+        LEFT JOIN LATERAL (
+          SELECT entry_command.*
+          FROM brc_ticket_bound_exchange_commands AS entry_command
+          WHERE entry_command.protected_submit_attempt_id =
+                attempt.protected_submit_attempt_id
+            AND entry_command.order_role = 'ENTRY'
+          ORDER BY entry_command.command_generation DESC
+          LIMIT 1
+        ) AS command ON true
         WHERE attempt.entry_effect_state IN (
           'accepted_zero_fill', 'accepted_filled', 'outcome_unknown'
         )
@@ -397,6 +420,111 @@ def _repair_effect_active_current_truth(inspector: sa.Inspector) -> None:
         )
 
 
+def _repair_historical_rejections() -> None:
+    op.execute(
+        """
+        UPDATE brc_ticket_bound_exchange_commands AS sibling
+        SET command_state = 'reconciled_absent',
+            outcome_class = 'reconciled_absence',
+            exchange_error_code = 'entry_authoritatively_rejected',
+            exchange_error_message =
+              'ENTRY rejected before this protection command was dispatched',
+            exchange_result = jsonb_build_object(
+              'exchange_write_called', false,
+              'repair', 'migration_145_entry_rejection'
+            ),
+            resolved_at_ms = entry.resolved_at_ms,
+            updated_at_ms = GREATEST(sibling.updated_at_ms, entry.updated_at_ms)
+        FROM brc_ticket_bound_exchange_commands AS entry
+        WHERE sibling.protected_submit_attempt_id =
+              entry.protected_submit_attempt_id
+          AND entry.order_role = 'ENTRY'
+          AND entry.command_state = 'confirmed_rejected'
+          AND entry.outcome_class = 'authoritative_rejection'
+          AND sibling.order_role IN ('SL', 'TP1')
+          AND sibling.command_state = 'prepared'
+          AND sibling.dispatch_started_at_ms IS NULL
+          AND sibling.execution_attempt_count = 0
+          AND sibling.exchange_order_id IS NULL
+        """
+    )
+    op.execute(
+        """
+        UPDATE brc_ticket_bound_protected_submit_attempts AS attempt
+        SET status = 'submit_failed',
+            exchange_write_called = true,
+            blockers = CASE
+              WHEN attempt.blockers @> '["entry_authoritatively_rejected"]'::jsonb
+              THEN attempt.blockers
+              ELSE attempt.blockers || '["entry_authoritatively_rejected"]'::jsonb
+            END,
+            updated_at_ms = GREATEST(attempt.updated_at_ms, entry.updated_at_ms)
+        FROM brc_ticket_bound_exchange_commands AS entry
+        WHERE entry.protected_submit_attempt_id =
+              attempt.protected_submit_attempt_id
+          AND entry.order_role = 'ENTRY'
+          AND entry.command_state = 'confirmed_rejected'
+          AND entry.outcome_class = 'authoritative_rejection'
+        """
+    )
+    op.execute(
+        """
+        INSERT INTO brc_action_time_ticket_events (
+          ticket_event_id, ticket_id, action_time_lane_input_id, from_status,
+          to_status, transition_reason, trigger_ref, writer, event_payload,
+          occurred_at_ms, created_at_ms
+        )
+        SELECT
+          'ticket_event:entry_rejection_repair:' ||
+            md5(ticket.ticket_id || ':' || entry.exchange_command_id),
+          ticket.ticket_id, ticket.action_time_lane_input_id, ticket.status,
+          'invalidated', 'entry_rejection_migration_repair',
+          entry.exchange_command_id, 'migration_145',
+          jsonb_build_object(
+            'protected_submit_attempt_id', attempt.protected_submit_attempt_id,
+            'entry_effect_state', 'rejected'
+          ),
+          COALESCE(entry.exchange_observed_at_ms, entry.updated_at_ms),
+          COALESCE(entry.exchange_observed_at_ms, entry.updated_at_ms)
+        FROM brc_action_time_tickets AS ticket
+        JOIN brc_ticket_bound_protected_submit_attempts AS attempt
+          ON attempt.ticket_id = ticket.ticket_id
+        JOIN brc_ticket_bound_exchange_commands AS entry
+          ON entry.protected_submit_attempt_id =
+             attempt.protected_submit_attempt_id
+         AND entry.order_role = 'ENTRY'
+         AND entry.command_state = 'confirmed_rejected'
+         AND entry.outcome_class = 'authoritative_rejection'
+        WHERE ticket.status IN ('finalgate_ready', 'expired')
+        ON CONFLICT (ticket_event_id) DO NOTHING
+        """
+    )
+    op.execute(
+        """
+        UPDATE brc_action_time_tickets AS ticket
+        SET status = 'invalidated'
+        FROM brc_ticket_bound_protected_submit_attempts AS attempt
+        WHERE attempt.ticket_id = ticket.ticket_id
+          AND attempt.entry_effect_state = 'rejected'
+          AND ticket.status IN ('finalgate_ready', 'expired')
+        """
+    )
+    op.execute(
+        """
+        UPDATE brc_operation_layer_handoffs AS handoff
+        SET status = 'invalidated',
+            updated_at_ms = GREATEST(
+              handoff.updated_at_ms, attempt.entry_effect_observed_at_ms
+            )
+        FROM brc_ticket_bound_protected_submit_attempts AS attempt
+        WHERE attempt.operation_layer_handoff_id =
+              handoff.operation_layer_handoff_id
+          AND attempt.entry_effect_state = 'rejected'
+          AND handoff.status IN ('handoff_ready', 'expired')
+        """
+    )
+
+
 def _replace_attempt_checks() -> None:
     for name, expression in _attempt_checks().items():
         op.execute(f"ALTER TABLE {ATTEMPT_TABLE} DROP CONSTRAINT IF EXISTS {name}")
@@ -434,7 +562,19 @@ def _attempt_checks() -> dict[str, str]:
         ),
         "ck_brc_ticket_submit_initial_stop_confirmed_truth": (
             "protection_barrier_state <> 'initial_stop_confirmed' OR "
-            "initial_stop_confirmed_at_ms IS NOT NULL"
+            "(entry_effect_state = 'accepted_filled' AND "
+            "protection_quantity > 0 AND "
+            "initial_stop_confirmed_at_ms IS NOT NULL)"
+        ),
+        "ck_brc_ticket_submit_initial_stop_deadline_order": (
+            "initial_stop_deadline_at_ms IS NULL OR "
+            "(entry_effect_observed_at_ms IS NOT NULL AND "
+            "initial_stop_deadline_at_ms >= entry_effect_observed_at_ms)"
+        ),
+        "ck_brc_ticket_submit_initial_stop_confirmed_order": (
+            "initial_stop_confirmed_at_ms IS NULL OR "
+            "(entry_effect_observed_at_ms IS NOT NULL AND "
+            "initial_stop_confirmed_at_ms >= entry_effect_observed_at_ms)"
         ),
         "ck_brc_ticket_submit_entry_effect_observed": (
             "entry_effect_state = 'not_called' OR "

@@ -31,6 +31,10 @@ EXECUTION_ELIGIBILITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-10-104_add_execution_eligibility_authority.py"
 )
+EXCHANGE_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-10-105_create_ticket_bound_exchange_commands.py"
+)
 DYNAMIC_RISK_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
@@ -42,6 +46,14 @@ ACCOUNT_RISK_CURRENT_MIGRATION_PATH = (
 ASSET_NEUTRAL_EXPAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-17-131_expand_asset_neutral_account_risk_identity.py"
+)
+EXCHANGE_RESULT_FACTS_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-21-144_add_exchange_command_result_facts.py"
+)
+ENTRY_EFFECT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 NOW_MS = 1770001000000
@@ -67,6 +79,10 @@ def pg_control_connection():
     execution_eligibility_migration = _load_module(
         EXECUTION_ELIGIBILITY_MIGRATION_PATH,
         "migration_104_action_time_ticket",
+    )
+    exchange_command_migration = _load_module(
+        EXCHANGE_COMMAND_MIGRATION_PATH,
+        "migration_105_action_time_ticket",
     )
     dynamic_risk_migration = _load_module(
         DYNAMIC_RISK_MIGRATION_PATH,
@@ -95,6 +111,12 @@ def pg_control_connection():
                 execution_eligibility_migration.op = migration.op
                 try:
                     execution_eligibility_migration.upgrade()
+                    old_exchange_command_op = exchange_command_migration.op
+                    exchange_command_migration.op = migration.op
+                    try:
+                        exchange_command_migration.upgrade()
+                    finally:
+                        exchange_command_migration.op = old_exchange_command_op
                     old_dynamic_risk_op = dynamic_risk_migration.op
                     dynamic_risk_migration.op = migration.op
                     try:
@@ -127,6 +149,17 @@ def pg_control_connection():
             asset_neutral_expand_migration.upgrade()
         finally:
             asset_neutral_expand_migration.op = old_expand_op
+        for path, name in (
+            (EXCHANGE_RESULT_FACTS_MIGRATION_PATH, "migration_144_action_time_ticket"),
+            (ENTRY_EFFECT_MIGRATION_PATH, "migration_145_action_time_ticket"),
+        ):
+            current_migration = _load_module(path, name)
+            old_current_op = current_migration.op
+            current_migration.op = Operations(MigrationContext.configure(conn))
+            try:
+                current_migration.upgrade()
+            finally:
+                current_migration.op = old_current_op
         # The sequence helper models current V2 instrument-risk facts.  This
         # SQLite fixture intentionally stops before the PostgreSQL-only 136
         # migration path, so it supplies the two V2 columns explicitly.

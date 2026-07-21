@@ -78,6 +78,12 @@ def project_entry_effect(
         decision=decision,
         now_ms=now_ms,
     )
+    _restore_effect_capacity_if_expiration_won(
+        conn,
+        attempt=attempt_row,
+        command=command,
+        now_ms=now_ms,
+    )
     _project_lifecycle(
         conn,
         attempt=attempt_row,
@@ -86,6 +92,67 @@ def project_entry_effect(
         now_ms=now_ms,
     )
     return decision
+
+
+def _restore_effect_capacity_if_expiration_won(
+    conn: sa.engine.Connection,
+    *,
+    attempt: dict[str, Any],
+    command: dict[str, Any],
+    now_ms: int,
+) -> None:
+    reservations = _table(conn, "brc_budget_reservations")
+    reservation = conn.execute(
+        sa.select(reservations).where(
+            reservations.c.ticket_id == attempt["ticket_id"]
+        )
+    ).mappings().one_or_none()
+    if reservation is None or str(reservation["status"]) != "released":
+        return
+    reservation_id = str(reservation["budget_reservation_id"])
+    updated = conn.execute(
+        reservations.update()
+        .where(
+            reservations.c.budget_reservation_id == reservation_id,
+            reservations.c.status == "released",
+        )
+        .values(
+            status="consumed",
+            release_reason=None,
+            released_at_ms=None,
+            reconciliation_state="pending",
+            current_first_blocker=(
+                "entry_effect_capacity_revalidation_required"
+            ),
+        )
+        .returning(reservations.c.budget_reservation_id)
+    ).first()
+    if updated is None:
+        return
+    events = _table(conn, "brc_budget_reservation_events")
+    event_id = _stable_id(
+        "budget_reservation_event",
+        reservation_id,
+        "entry_effect_capacity_repair",
+        str(command["exchange_command_id"]),
+    )
+    if conn.execute(
+        sa.select(events.c.budget_reservation_event_id).where(
+            events.c.budget_reservation_event_id == event_id
+        )
+    ).first():
+        return
+    conn.execute(
+        events.insert().values(
+            budget_reservation_event_id=event_id,
+            budget_reservation_id=reservation_id,
+            from_status="released",
+            to_status="consumed",
+            reason="entry_effect_after_expiration_capacity_repair",
+            evidence_ref=str(command["exchange_command_id"]),
+            created_at_ms=now_ms,
+        )
+    )
 
 
 def _project_authoritative_rejection(
@@ -118,12 +185,12 @@ def _project_authoritative_rejection(
         sa.select(ticket_table).where(ticket_table.c.ticket_id == attempt["ticket_id"])
     ).mappings().one()
     prior_status = str(ticket["status"])
-    if prior_status == "finalgate_ready":
+    if prior_status in {"finalgate_ready", "expired"}:
         conn.execute(
             ticket_table.update()
             .where(
                 ticket_table.c.ticket_id == attempt["ticket_id"],
-                ticket_table.c.status == "finalgate_ready",
+                ticket_table.c.status == prior_status,
             )
             .values(status="invalidated")
         )
@@ -131,6 +198,15 @@ def _project_authoritative_rejection(
         raise EntryEffectProjectionError(
             f"entry_rejection_ticket_state_invalid:{prior_status}"
         )
+    handoff_table = _table(conn, "brc_operation_layer_handoffs")
+    conn.execute(
+        handoff_table.update()
+        .where(
+            handoff_table.c.operation_layer_handoff_id
+            == attempt["operation_layer_handoff_id"]
+        )
+        .values(status="invalidated", updated_at_ms=now_ms)
+    )
     event_table = _table(conn, "brc_action_time_ticket_events")
     event_id = _stable_id(
         "entry_rejection_ticket_event",
@@ -142,6 +218,8 @@ def _project_authoritative_rejection(
             event_table.c.ticket_event_id == event_id
         )
     ).first():
+        return
+    if prior_status == "invalidated":
         return
     conn.execute(
         event_table.insert().values(
@@ -193,7 +271,6 @@ def _update_attempt(
         "not_started",
         "fill_pending",
         "initial_stop_pending",
-        "degraded",
     }:
         values["protection_barrier_state"] = (
             decision.protection_barrier_state.value

@@ -137,6 +137,14 @@ ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-17-132_backfill_asset_neutral_account_risk_identity.py"
 )
+EXCHANGE_RESULT_FACTS_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-21-144_add_exchange_command_result_facts.py"
+)
+ENTRY_EFFECT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -472,6 +480,20 @@ def pg_control_connection():
         _upgrade_module(conn, asset_neutral_expand_migration)
         seed.seed_runtime_control_state_foundation(conn)
         _upgrade_module(conn, asset_neutral_backfill_migration)
+        _upgrade_module(
+            conn,
+            _load_module(
+                EXCHANGE_RESULT_FACTS_MIGRATION_PATH,
+                "migration_144_runtime_safety",
+            ),
+        )
+        _upgrade_module(
+            conn,
+            _load_module(
+                ENTRY_EFFECT_MIGRATION_PATH,
+                "migration_145_runtime_safety",
+            ),
+        )
         conn.execute(
             text(
                 "ALTER TABLE brc_runtime_capabilities_current "

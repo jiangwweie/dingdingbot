@@ -23,6 +23,8 @@ from src.application.action_time.action_time_invocation import (
     load_action_time_invocation,
     start_action_time_invocation,
 )
+from src.application.action_time.action_time_ticket import _expire_stale_active_tickets
+from src.application.action_time.entry_effect_projection import project_entry_effect
 from src.application.action_time.account_capacity_materialization import (
     refresh_account_capacity_post_claim,
 )
@@ -433,6 +435,292 @@ async def test_migration_145_repairs_expired_effect_lineage_and_preserves_termin
             ),
             {"ticket_id": ids["ticket_id"]},
         ).scalar_one() == "lifecycle_closed"
+
+
+def _run_migration_145_repair(conn) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "migration_145_pg_review_repair",
+        ENTRY_EFFECT_MIGRATION_PATH,
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    migration.op = Operations(MigrationContext.configure(conn))
+    migration._backfill_entry_effect()
+    migration._repair_effect_active_current_truth(sa.inspect(conn))
+
+
+def test_expiration_then_effect_projection_records_real_transitions(
+    postgres_certification_engine,
+):
+    with postgres_certification_engine.begin() as conn:
+        ids, _prepared = _prepare_exchange_commands_on_connection(conn)
+        conn.execute(
+            text(
+                "UPDATE brc_action_time_tickets SET expires_at_ms = :expired_at "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"expired_at": NOW_MS + 4_000, "ticket_id": ids["ticket_id"]},
+        )
+    with (
+        postgres_certification_engine.connect() as expiration_conn,
+        postgres_certification_engine.connect() as worker_conn,
+    ):
+        expiration_tx = expiration_conn.begin()
+        worker_tx = worker_conn.begin()
+        assert _expire_stale_active_tickets(
+            expiration_conn,
+            now_ms=NOW_MS + 5_000,
+        ) == 1
+        expiration_conn.execute(
+            text(
+                "UPDATE brc_budget_reservations SET status = 'released', "
+                "release_reason = 'expiration_won_review_race', "
+                "released_at_ms = :released_at "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"], "released_at": NOW_MS + 5_000},
+        )
+        expiration_tx.commit()
+        entry = worker_conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_exchange_commands SET "
+                "command_state = 'confirmed_submitted', "
+                "outcome_class = 'exchange_accepted', "
+                "exchange_order_id = 'review-race-entry', "
+                "exchange_order_status = 'FILLED', executed_qty = amount, "
+                "average_exec_price = 2000, "
+                "exchange_observed_at_ms = :observed_at, "
+                "result_facts_complete = true, resolved_at_ms = :observed_at, "
+                "updated_at_ms = :observed_at "
+                "WHERE ticket_id = :ticket_id AND order_role = 'ENTRY' "
+                "RETURNING *"
+            ),
+            {"ticket_id": ids["ticket_id"], "observed_at": NOW_MS + 5_001},
+        ).mappings().one()
+        project_entry_effect(
+            worker_conn,
+            command=dict(entry),
+            now_ms=NOW_MS + 5_001,
+        )
+        worker_tx.commit()
+    with postgres_certification_engine.connect() as conn:
+        assert conn.execute(
+            text(
+                "SELECT status FROM brc_action_time_tickets "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).scalar_one() == "submitted"
+        events = conn.execute(
+            text(
+                "SELECT from_status, to_status, transition_reason "
+                "FROM brc_action_time_ticket_events "
+                "WHERE ticket_id = :ticket_id "
+                "AND transition_reason IN ("
+                "'action_time_ticket_expired_before_materialization', "
+                "'entry_exchange_effect_committed') "
+                "ORDER BY occurred_at_ms"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).mappings().all()
+        reservation = conn.execute(
+            text(
+                "SELECT status, release_reason, released_at_ms, current_first_blocker "
+                "FROM brc_budget_reservations WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).mappings().one()
+    assert [(row["from_status"], row["to_status"]) for row in events] == [
+        ("finalgate_ready", "expired"),
+        ("expired", "submitted"),
+    ]
+    assert reservation["status"] == "consumed"
+    assert reservation["release_reason"] is None
+    assert reservation["released_at_ms"] is None
+    assert reservation["current_first_blocker"] == (
+        "entry_effect_capacity_revalidation_required"
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_commit_before_expiration_never_records_expired_event(
+    postgres_certification_engine,
+):
+    with postgres_certification_engine.begin() as conn:
+        ids, _prepared = _prepare_exchange_commands_on_connection(conn)
+    with postgres_certification_engine.connect() as expiration_conn:
+        expiration_tx = expiration_conn.begin()
+        result = await run_one_ticket_bound_exchange_command(
+            postgres_certification_engine,
+            gateway=FakeExchangeLedgerGateway(
+                postgres_certification_engine.url.render_as_string(
+                    hide_password=False
+                ),
+                caller_label="worker-before-expiration",
+            ),
+            worker_id="worker-before-expiration",
+            now_ms=NOW_MS + 5_000,
+            command_sources=("protected_submit",),
+        )
+        assert result["status"] == "command_confirmed"
+        expiration_conn.execute(
+            text(
+                "UPDATE brc_action_time_tickets SET expires_at_ms = :expired_at "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"expired_at": NOW_MS + 4_000, "ticket_id": ids["ticket_id"]},
+        )
+        assert _expire_stale_active_tickets(
+            expiration_conn,
+            now_ms=NOW_MS + 6_000,
+        ) == 0
+        assert expiration_conn.execute(
+            text(
+                "SELECT COUNT(*) FROM brc_action_time_ticket_events "
+                "WHERE ticket_id = :ticket_id AND to_status = 'expired'"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).scalar_one() == 0
+        expiration_tx.commit()
+
+
+def test_migration_145_repairs_historical_rejection_and_undispatched_siblings(
+    postgres_certification_engine,
+):
+    with postgres_certification_engine.begin() as conn:
+        ids, prepared = _prepare_exchange_commands_on_connection(conn)
+        conn.execute(
+            text(
+                "UPDATE brc_action_time_tickets SET status = 'expired' "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        )
+        conn.execute(
+            text(
+                "UPDATE brc_operation_layer_handoffs SET status = 'expired' "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        )
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_exchange_commands SET "
+                "command_state = 'confirmed_rejected', "
+                "outcome_class = 'authoritative_rejection', "
+                "dispatch_started_at_ms = :observed_at, "
+                "resolved_at_ms = :observed_at, updated_at_ms = :observed_at, "
+                "exchange_observed_at_ms = :observed_at "
+                "WHERE protected_submit_attempt_id = :attempt_id "
+                "AND order_role = 'ENTRY'"
+            ),
+            {
+                "attempt_id": prepared["protected_submit_attempt_id"],
+                "observed_at": NOW_MS + 5_000,
+            },
+        )
+        _run_migration_145_repair(conn)
+        truth = conn.execute(
+            text(
+                "SELECT ticket.status AS ticket_status, handoff.status AS handoff_status, "
+                "attempt.status AS attempt_status, attempt.entry_effect_state "
+                "FROM brc_action_time_tickets AS ticket "
+                "JOIN brc_operation_layer_handoffs AS handoff "
+                "ON handoff.ticket_id = ticket.ticket_id "
+                "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
+                "ON attempt.ticket_id = ticket.ticket_id "
+                "WHERE ticket.ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).mappings().one()
+        siblings = conn.execute(
+            text(
+                "SELECT order_role, command_state, exchange_result "
+                "FROM brc_ticket_bound_exchange_commands "
+                "WHERE ticket_id = :ticket_id AND order_role IN ('SL', 'TP1')"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).mappings().all()
+        event = conn.execute(
+            text(
+                "SELECT from_status, to_status FROM brc_action_time_ticket_events "
+                "WHERE ticket_id = :ticket_id "
+                "AND transition_reason = 'entry_rejection_migration_repair'"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).mappings().one()
+    assert truth == {
+        "ticket_status": "invalidated",
+        "handoff_status": "invalidated",
+        "attempt_status": "submit_failed",
+        "entry_effect_state": "rejected",
+    }
+    assert {row["command_state"] for row in siblings} == {"reconciled_absent"}
+    assert all(row["exchange_result"]["exchange_write_called"] is False for row in siblings)
+    assert event == {"from_status": "expired", "to_status": "invalidated"}
+
+
+def test_migration_145_missing_entry_command_projects_unknown_lifecycle(
+    postgres_certification_engine,
+):
+    with postgres_certification_engine.begin() as conn:
+        ids, prepared = _prepare_exchange_commands_on_connection(conn)
+        conn.execute(
+            text(
+                "DELETE FROM brc_ticket_bound_exchange_commands "
+                "WHERE protected_submit_attempt_id = :attempt_id "
+                "AND order_role = 'ENTRY'"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        )
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_protected_submit_attempts SET "
+                "exchange_write_called = true WHERE protected_submit_attempt_id = :attempt_id"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        )
+        conn.execute(
+            text(
+                "UPDATE brc_action_time_tickets SET status = 'expired' "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        )
+        _run_migration_145_repair(conn)
+        truth = conn.execute(
+            text(
+                "SELECT ticket.status AS ticket_status, handoff.status AS handoff_status, "
+                "attempt.entry_effect_state, attempt.protection_barrier_state, "
+                "lifecycle.status AS lifecycle_status, lifecycle.entry_local_order_id, "
+                "lifecycle.entry_exchange_order_id, lifecycle.entry_filled_qty, "
+                "lifecycle.entry_avg_price "
+                "FROM brc_action_time_tickets AS ticket "
+                "JOIN brc_operation_layer_handoffs AS handoff "
+                "ON handoff.ticket_id = ticket.ticket_id "
+                "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
+                "ON attempt.ticket_id = ticket.ticket_id "
+                "JOIN brc_ticket_bound_order_lifecycle_runs AS lifecycle "
+                "ON lifecycle.ticket_id = ticket.ticket_id "
+                "WHERE ticket.ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).mappings().one()
+    assert truth["ticket_status"] == "submitted"
+    assert truth["handoff_status"] == "submitted"
+    assert truth["entry_effect_state"] == "outcome_unknown"
+    assert truth["protection_barrier_state"] == "hard_stopped"
+    assert truth["lifecycle_status"] == "entry_unknown"
+    assert all(
+        truth[key] is None
+        for key in (
+            "entry_local_order_id",
+            "entry_exchange_order_id",
+            "entry_filled_qty",
+            "entry_avg_price",
+        )
+    )
 
 
 def _materialize_rci_account_capacity_current(

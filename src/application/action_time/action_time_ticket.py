@@ -264,44 +264,66 @@ def _expire_stale_active_tickets(
     *,
     now_ms: int,
 ) -> int:
-    effect_guard = _entry_effect_expiration_guard(conn)
-    if effect_guard:
-        _repair_effect_active_tickets(conn, now_ms=now_ms)
+    _repair_effect_active_tickets(conn, now_ms=now_ms)
     expired_rows = [
         dict(row)
         for row in conn.execute(
             text(
                 """
-                SELECT ticket_id, action_time_lane_input_id, status
-                FROM brc_action_time_tickets
-                WHERE status IN ('created', 'preflight_pending', 'finalgate_ready')
-                  AND expires_at_ms IS NOT NULL
-                  AND expires_at_ms <= :now_ms
-                  {effect_guard}
-                """.format(effect_guard=effect_guard)
+                WITH eligible AS MATERIALIZED (
+                  SELECT ticket.ticket_id, ticket.action_time_lane_input_id,
+                         ticket.status AS from_status
+                  FROM brc_action_time_tickets AS ticket
+                  WHERE ticket.status IN (
+                    'created', 'preflight_pending', 'finalgate_ready'
+                  )
+                    AND ticket.expires_at_ms IS NOT NULL
+                    AND ticket.expires_at_ms <= :now_ms
+                    AND NOT EXISTS (
+                      SELECT 1
+                      FROM brc_ticket_bound_protected_submit_attempts AS attempt
+                      WHERE attempt.ticket_id = ticket.ticket_id
+                        AND attempt.entry_effect_state IN (
+                          'accepted_zero_fill', 'accepted_filled', 'outcome_unknown'
+                        )
+                    )
+                    AND NOT EXISTS (
+                      SELECT 1
+                      FROM brc_ticket_bound_exchange_commands AS command
+                      JOIN brc_ticket_bound_protected_submit_attempts AS attempt
+                        ON attempt.protected_submit_attempt_id =
+                           command.protected_submit_attempt_id
+                      WHERE attempt.ticket_id = ticket.ticket_id
+                        AND command.order_role = 'ENTRY'
+                        AND command.command_state IN (
+                          'dispatching', 'outcome_unknown', 'confirmed_submitted'
+                        )
+                    )
+                )
+                UPDATE brc_action_time_tickets
+                SET status = 'expired'
+                WHERE brc_action_time_tickets.ticket_id IN (
+                    SELECT ticket_id FROM eligible
+                  )
+                  AND brc_action_time_tickets.status IN (
+                    'created', 'preflight_pending', 'finalgate_ready'
+                  )
+                RETURNING brc_action_time_tickets.ticket_id,
+                  brc_action_time_tickets.action_time_lane_input_id,
+                  (SELECT eligible.from_status FROM eligible
+                   WHERE eligible.ticket_id =
+                         brc_action_time_tickets.ticket_id) AS from_status
+                """
             ),
             {"now_ms": now_ms},
         ).mappings()
     ]
     if not expired_rows:
         return 0
-    conn.execute(
-        text(
-            """
-            UPDATE brc_action_time_tickets
-            SET status = 'expired'
-            WHERE status IN ('created', 'preflight_pending', 'finalgate_ready')
-              AND expires_at_ms IS NOT NULL
-              AND expires_at_ms <= :now_ms
-              {effect_guard}
-            """.format(effect_guard=effect_guard)
-        ),
-        {"now_ms": now_ms},
-    )
     for row in expired_rows:
         ticket_id = str(row["ticket_id"])
         lane_id = str(row["action_time_lane_input_id"])
-        from_status = str(row["status"])
+        from_status = str(row["from_status"])
         _insert_state_transition_event(
             conn,
             state_table="brc_action_time_tickets",
@@ -358,32 +380,6 @@ def _expire_stale_active_tickets(
     return len(expired_rows)
 
 
-def _entry_effect_expiration_guard(conn: sa.engine.Connection) -> str:
-    table_name = "brc_ticket_bound_protected_submit_attempts"
-    inspector = sa.inspect(conn)
-    if not inspector.has_table(table_name):
-        return ""
-    columns = {column["name"] for column in inspector.get_columns(table_name)}
-    if "entry_effect_state" not in columns:
-        return ""
-    return (
-        "AND NOT EXISTS ("
-        "SELECT 1 FROM brc_ticket_bound_protected_submit_attempts AS effect_attempt "
-        "WHERE effect_attempt.ticket_id = brc_action_time_tickets.ticket_id "
-        "AND effect_attempt.entry_effect_state IN ("
-        "'accepted_zero_fill', 'accepted_filled', 'outcome_unknown')) "
-        "AND NOT EXISTS ("
-        "SELECT 1 FROM brc_ticket_bound_exchange_commands AS effect_command "
-        "JOIN brc_ticket_bound_protected_submit_attempts AS command_attempt "
-        "ON command_attempt.protected_submit_attempt_id = "
-        "effect_command.protected_submit_attempt_id "
-        "WHERE command_attempt.ticket_id = brc_action_time_tickets.ticket_id "
-        "AND effect_command.order_role = 'ENTRY' "
-        "AND effect_command.command_state IN ("
-        "'dispatching', 'outcome_unknown', 'confirmed_submitted'))"
-    )
-
-
 def _repair_effect_active_tickets(
     conn: sa.engine.Connection,
     *,
@@ -393,36 +389,48 @@ def _repair_effect_active_tickets(
         conn.execute(
             text(
                 """
-                SELECT ticket.ticket_id, ticket.action_time_lane_input_id,
-                       attempt.protected_submit_attempt_id,
-                       attempt.entry_effect_state
-                FROM brc_action_time_tickets AS ticket
-                JOIN brc_ticket_bound_protected_submit_attempts AS attempt
-                  ON attempt.ticket_id = ticket.ticket_id
-                WHERE ticket.status = 'finalgate_ready'
-                  AND ticket.expires_at_ms IS NOT NULL
-                  AND ticket.expires_at_ms <= :now_ms
-                  AND attempt.entry_effect_state IN (
-                    'accepted_zero_fill', 'accepted_filled', 'outcome_unknown'
+                UPDATE brc_action_time_tickets
+                SET status = 'submitted'
+                WHERE brc_action_time_tickets.status = 'finalgate_ready'
+                  AND brc_action_time_tickets.expires_at_ms IS NOT NULL
+                  AND brc_action_time_tickets.expires_at_ms <= :now_ms
+                  AND EXISTS (
+                    SELECT 1
+                    FROM brc_ticket_bound_protected_submit_attempts AS attempt
+                    WHERE attempt.ticket_id =
+                          brc_action_time_tickets.ticket_id
+                      AND attempt.entry_effect_state IN (
+                        'accepted_zero_fill', 'accepted_filled', 'outcome_unknown'
+                      )
                   )
+                RETURNING brc_action_time_tickets.ticket_id,
+                          brc_action_time_tickets.action_time_lane_input_id
                 """
             ),
             {"now_ms": now_ms},
         ).mappings()
     )
     for row in rows:
-        conn.execute(
+        effect = conn.execute(
             text(
-                "UPDATE brc_action_time_tickets SET status = 'submitted' "
-                "WHERE ticket_id = :ticket_id AND status = 'finalgate_ready'"
+                """
+                SELECT protected_submit_attempt_id, entry_effect_state
+                FROM brc_ticket_bound_protected_submit_attempts
+                WHERE ticket_id = :ticket_id
+                  AND entry_effect_state IN (
+                    'accepted_zero_fill', 'accepted_filled', 'outcome_unknown'
+                  )
+                ORDER BY protected_submit_attempt_id
+                LIMIT 1
+                """
             ),
             {"ticket_id": row["ticket_id"]},
-        )
+        ).mappings().one()
         event_id = _stable_id(
             "ticket_event",
             str(row["ticket_id"]),
             "entry_effect_expiry_repair",
-            str(row["protected_submit_attempt_id"]),
+            str(effect["protected_submit_attempt_id"]),
         )
         conn.execute(
             text(
@@ -444,9 +452,9 @@ def _repair_effect_active_tickets(
                 "ticket_event_id": event_id,
                 "ticket_id": row["ticket_id"],
                 "action_time_lane_input_id": row["action_time_lane_input_id"],
-                "trigger_ref": row["protected_submit_attempt_id"],
+                "trigger_ref": effect["protected_submit_attempt_id"],
                 "event_payload": json.dumps(
-                    {"entry_effect_state": row["entry_effect_state"]},
+                    {"entry_effect_state": effect["entry_effect_state"]},
                     sort_keys=True,
                 ),
                 "occurred_at_ms": now_ms,
