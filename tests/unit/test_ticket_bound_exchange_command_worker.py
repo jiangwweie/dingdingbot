@@ -7,6 +7,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import event, text
 
 from src.application.action_time.exchange_command import (
@@ -622,6 +623,286 @@ async def test_worker_binds_partial_entry_fill_before_initial_stop_dispatch(
         if call.get("order_type") == "stop_market"
     )
     assert Decimal(str(initial_stop["amount"])) == Decimal("0.005")
+
+
+@pytest.mark.asyncio
+async def test_entry_effect_crossing_ticket_ttl_submits_ticket_and_drains_its_initial_stop(
+    pg_control_connection,
+):
+    """An ENTRY effect keeps its same-source initial stop claimable past TTL."""
+
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+
+    class ExpiringEntryGateway(_WorkerGateway):
+        def __init__(self, engine) -> None:
+            super().__init__()
+            self.engine = engine
+
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            if kwargs["order_type"] == "market":
+                with self.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            "UPDATE brc_action_time_tickets "
+                            "SET expires_at_ms = :expires_at_ms "
+                            "WHERE ticket_id = :ticket_id"
+                        ),
+                        {
+                            "expires_at_ms": NOW_MS + 5000,
+                            "ticket_id": ids["ticket_id"],
+                        },
+                    )
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                filled_qty=kwargs["amount"],
+                average_exec_price=Decimal("2000"),
+                exchange_order_status="FILLED",
+            )
+
+    gateway = ExpiringEntryGateway(pg_control_connection.engine)
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="entry-expiry-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        drain_initial_protection=True,
+    )
+
+    assert result["initial_protection_complete"] is True
+    assert [call["order_type"] for call in gateway.calls[:2]] == [
+        "market",
+        "stop_market",
+    ]
+    rows = {
+        row["order_role"]: row
+        for row in pg_control_connection.execute(
+            text(
+                "SELECT order_role, command_state, source_command_id, "
+                "protected_submit_attempt_id "
+                "FROM brc_ticket_bound_exchange_commands "
+                "WHERE protected_submit_attempt_id = :attempt_id"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        ).mappings()
+    }
+    assert rows["ENTRY"]["command_state"] == "confirmed_submitted"
+    assert rows["SL"]["command_state"] == "confirmed_submitted"
+    assert rows["SL"]["source_command_id"] == prepared[
+        "protected_submit_attempt_id"
+    ]
+    assert rows["SL"]["protected_submit_attempt_id"] == prepared[
+        "protected_submit_attempt_id"
+    ]
+    assert pg_control_connection.execute(
+        text(
+            "SELECT status FROM brc_action_time_tickets "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ids["ticket_id"]},
+    ).scalar_one() == "submitted"
+
+
+@pytest.mark.asyncio
+async def test_initial_protection_drain_is_pinned_to_the_primary_attempt_source(
+    pg_control_connection,
+):
+    """A foreign eligible SL cannot consume the primary ENTRY drain slot."""
+
+    ids = _create_ready_protected_submit(pg_control_connection)
+    primary = _prepare_real_submit(pg_control_connection, ids)
+    foreign_ticket_id = "ticket:r12:foreign-source"
+    foreign_attempt_id = "protected-submit:r12:foreign-source"
+    foreign_operation_command_id = "operation-submit:r12:foreign-source"
+    metadata = sa.MetaData()
+    tickets = sa.Table("brc_action_time_tickets", metadata, autoload_with=pg_control_connection)
+    attempts = sa.Table(
+        "brc_ticket_bound_protected_submit_attempts",
+        metadata,
+        autoload_with=pg_control_connection,
+    )
+    commands = sa.Table(
+        "brc_ticket_bound_exchange_commands",
+        metadata,
+        autoload_with=pg_control_connection,
+    )
+
+    primary_ticket = dict(
+        pg_control_connection.execute(
+            sa.select(tickets).where(tickets.c.ticket_id == ids["ticket_id"])
+        ).mappings().one()
+    )
+    pg_control_connection.execute(
+        tickets.insert().values(
+            **{
+                **primary_ticket,
+                "ticket_id": foreign_ticket_id,
+                "action_time_lane_input_id": "lane:r12:foreign-source",
+                "ticket_hash": "ticket-hash:r12:foreign-source",
+                "exposure_episode_id": "exposure:r12:foreign-source",
+            }
+        )
+    )
+    primary_attempt = dict(
+        pg_control_connection.execute(
+            sa.select(attempts).where(
+                attempts.c.protected_submit_attempt_id
+                == primary["protected_submit_attempt_id"]
+            )
+        ).mappings().one()
+    )
+    pg_control_connection.execute(
+        attempts.insert().values(
+            **{
+                **primary_attempt,
+                "protected_submit_attempt_id": foreign_attempt_id,
+                "ticket_id": foreign_ticket_id,
+                "operation_submit_command_id": foreign_operation_command_id,
+                "action_time_lane_input_id": "lane:r12:foreign-source",
+            }
+        )
+    )
+    primary_commands = list(
+        pg_control_connection.execute(
+            sa.select(commands).where(
+                commands.c.protected_submit_attempt_id
+                == primary["protected_submit_attempt_id"]
+            )
+        ).mappings()
+    )
+    for command in primary_commands:
+        role = str(command["order_role"])
+        copied = {
+            **dict(command),
+            "exchange_command_id": f"exchange-command:r12:foreign:{role.lower()}",
+            "protected_submit_attempt_id": foreign_attempt_id,
+            "ticket_id": foreign_ticket_id,
+            "operation_submit_command_id": foreign_operation_command_id,
+            "source_command_id": foreign_attempt_id,
+            "local_order_id": f"local-order:r12:foreign:{role.lower()}",
+            "client_order_id": f"r12-foreign-{role.lower()}",
+            "netting_domain_key": f"{command['netting_domain_key']}|r12-foreign",
+            "exposure_episode_id": "exposure:r12:foreign-source",
+        }
+        if role == "ENTRY":
+            copied.update(
+                command_state="confirmed_submitted",
+                outcome_class="exchange_accepted",
+                exchange_order_id="exchange-r12-foreign-entry",
+                exchange_result={
+                    "exchange_order_id": "exchange-r12-foreign-entry",
+                    "filled_qty": str(command["amount"]),
+                    "average_exec_price": "2000",
+                    "exchange_order_status": "FILLED",
+                },
+                resolved_at_ms=NOW_MS + 4000,
+            )
+        elif role == "SL":
+            copied["prepared_at_ms"] = NOW_MS + 3999
+        pg_control_connection.execute(commands.insert().values(**copied))
+    pg_control_connection.commit()
+
+    gateway = _WorkerGateway()
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="primary-source-drain-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        source_command_id=primary["protected_submit_attempt_id"],
+        protected_submit_attempt_id=primary["protected_submit_attempt_id"],
+        allowed_roles=("ENTRY", "SL"),
+        drain_initial_protection=True,
+    )
+
+    assert result["initial_protection_complete"] is True
+    assert [call["order_type"] for call in gateway.calls] == [
+        "market",
+        "stop_market",
+    ]
+    primary_sl_state = pg_control_connection.execute(
+        text(
+            "SELECT command_state FROM brc_ticket_bound_exchange_commands "
+            "WHERE protected_submit_attempt_id = :attempt_id "
+            "AND order_role = 'SL'"
+        ),
+        {"attempt_id": primary["protected_submit_attempt_id"]},
+    ).scalar_one()
+    foreign_sl_state = pg_control_connection.execute(
+        text(
+            "SELECT command_state FROM brc_ticket_bound_exchange_commands "
+            "WHERE protected_submit_attempt_id = :attempt_id "
+            "AND order_role = 'SL'"
+        ),
+        {"attempt_id": foreign_attempt_id},
+    ).scalar_one()
+    assert primary_sl_state == "confirmed_submitted"
+    assert foreign_sl_state == "prepared"
+
+
+@pytest.mark.asyncio
+async def test_restart_after_entry_result_commit_recovers_same_source_initial_stop(
+    pg_control_connection,
+):
+    """The next worker resumes committed ENTRY protection after process loss."""
+
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    entry_gateway = _WorkerGateway()
+    entry = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=entry_gateway,
+        worker_id="entry-before-process-loss",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+    assert entry["status"] == "command_confirmed"
+    assert entry["order_role"] == "ENTRY"
+    assert entry_gateway.calls[0]["order_type"] == "market"
+    with pg_control_connection.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_action_time_tickets "
+                "SET status = 'expired', expires_at_ms = :expires_at_ms "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"expires_at_ms": NOW_MS + 5000, "ticket_id": ids["ticket_id"]},
+        )
+
+    pg_control_connection.close()
+    restart_gateway = _WorkerGateway()
+    recovered = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=restart_gateway,
+        worker_id="restart-after-entry-result-commit",
+        now_ms=NOW_MS + 5001,
+        command_sources=("protected_submit",),
+    )
+
+    assert recovered["status"] == "command_confirmed"
+    assert recovered["order_role"] == "SL"
+    assert recovered["source_command_id"] == prepared["protected_submit_attempt_id"]
+    assert [call["order_type"] for call in restart_gateway.calls] == ["stop_market"]
+    with pg_control_connection.engine.connect() as conn:
+        rows = {
+            row["order_role"]: row
+            for row in conn.execute(
+                text(
+                    "SELECT order_role, command_state, source_command_id "
+                    "FROM brc_ticket_bound_exchange_commands "
+                    "WHERE protected_submit_attempt_id = :attempt_id"
+                ),
+                {"attempt_id": prepared["protected_submit_attempt_id"]},
+            ).mappings()
+        }
+    assert rows["ENTRY"]["command_state"] == "confirmed_submitted"
+    assert rows["SL"]["command_state"] == "confirmed_submitted"
+    assert rows["SL"]["source_command_id"] == entry["source_command_id"]
 
 
 @pytest.mark.asyncio

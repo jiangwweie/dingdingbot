@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: F401, F811
+
 import asyncio
 from decimal import Decimal
 from pathlib import Path
@@ -9,7 +11,9 @@ import pytest
 from sqlalchemy import text
 
 from scripts import run_ticket_bound_lifecycle_maintenance_once as lifecycle_cli
+from src.application.action_time import exchange_command_worker
 from src.infrastructure.binance_usdm_account_risk_snapshot import FullAccountRiskSnapshot
+from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
     _prepare_real_submit,
@@ -49,6 +53,65 @@ async def test_awaitable_is_cancelled_when_global_deadline_expires(monkeypatch):
             )
     finally:
         coroutine.close()
+
+
+@pytest.mark.asyncio
+async def test_entry_drain_uses_the_invocation_absolute_deadline_without_resetting_budget(
+    monkeypatch,
+    pg_control_connection,
+):
+    """ENTRY can consume the invocation budget; the SL drain cannot renew it."""
+
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    clock = {"now": 100.0}
+
+    class DeadlineConsumingGateway:
+        runtime_account_id = "owner-subaccount-runtime-v0"
+        runtime_exchange_id = "binance_usdm"
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            if kwargs["order_type"] == "market":
+                clock["now"] = 109.999
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                filled_qty=kwargs["amount"],
+                average_exec_price=Decimal("2000"),
+                exchange_order_status="FILLED",
+            )
+
+    monkeypatch.setattr(
+        exchange_command_worker.time,
+        "monotonic",
+        lambda: clock["now"],
+    )
+    gateway = DeadlineConsumingGateway()
+    result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="absolute-deadline-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        dispatch_timeout_seconds=10.0,
+        absolute_deadline_at=110.0,
+        drain_initial_protection=True,
+    )
+
+    assert result["order_role"] == "ENTRY"
+    assert result["initial_protection_complete"] is False
+    assert [call["order_type"] for call in gateway.calls] == ["market"]
+    assert pg_control_connection.execute(
+        text(
+            "SELECT command_state FROM brc_ticket_bound_exchange_commands "
+            "WHERE order_role = 'SL'"
+        )
+    ).scalar_one() == "prepared"
 
 
 def test_gateway_probe_owns_durable_protected_submit_command_source(
