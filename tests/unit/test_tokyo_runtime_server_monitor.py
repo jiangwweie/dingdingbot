@@ -84,6 +84,138 @@ def test_recent_dispatching_exchange_command_is_processing_quiet():
     assert decision["checkpoint"] == "ticket_bound_exchange_command"
 
 
+def test_confirmed_entry_with_failed_initial_stop_is_needs_intervention():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "ticket_bound_exchange_commands": [
+            {
+                "exchange_command_id": "entry-1",
+                "protected_submit_attempt_id": "attempt-1",
+                "ticket_id": "ticket-1",
+                "order_role": "ENTRY",
+                "command_state": "confirmed_submitted",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "updated_at_ms": PG_TEST_NOW_MS - 2_000,
+            },
+            {
+                "exchange_command_id": "sl-1",
+                "protected_submit_attempt_id": "attempt-1",
+                "ticket_id": "ticket-1",
+                "order_role": "SL",
+                "command_state": "confirmed_rejected",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            },
+        ],
+        "action_time_tickets": [{"ticket_id": "ticket-1", "status": "submitted"}],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "fresh_signal_processing", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "needs_intervention"
+    assert decision["notify"] is True
+    assert decision["blocker_class"] == "submitted_position_unprotected"
+
+
+def test_confirmed_entry_with_fresh_prepared_initial_stop_is_processing_quiet():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "ticket_bound_exchange_commands": [
+            {
+                "exchange_command_id": "entry-1",
+                "protected_submit_attempt_id": "attempt-1",
+                "ticket_id": "ticket-1",
+                "order_role": "ENTRY",
+                "command_state": "confirmed_submitted",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "updated_at_ms": PG_TEST_NOW_MS - 2_000,
+            },
+            {
+                "exchange_command_id": "sl-1",
+                "protected_submit_attempt_id": "attempt-1",
+                "ticket_id": "ticket-1",
+                "order_role": "SL",
+                "command_state": "prepared",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            },
+        ],
+        "action_time_tickets": [{"ticket_id": "ticket-1", "status": "submitted"}],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "fresh_signal_processing", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "processing"
+    assert decision["notify"] is False
+    assert decision["blocker_class"] == "initial_protection_pending"
+
+
+def test_confirmed_entry_with_overdue_prepared_initial_stop_needs_intervention():
+    module = _load_module()
+    control_state = {
+        "read_now_ms": PG_TEST_NOW_MS,
+        "ticket_bound_exchange_commands": [
+            {
+                "exchange_command_id": "entry-1",
+                "protected_submit_attempt_id": "attempt-1",
+                "ticket_id": "ticket-1",
+                "order_role": "ENTRY",
+                "command_state": "confirmed_submitted",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "updated_at_ms": PG_TEST_NOW_MS - 15_001,
+            },
+            {
+                "exchange_command_id": "sl-1",
+                "protected_submit_attempt_id": "attempt-1",
+                "ticket_id": "ticket-1",
+                "order_role": "SL",
+                "command_state": "prepared",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "updated_at_ms": PG_TEST_NOW_MS - 1_000,
+            },
+        ],
+        "action_time_tickets": [{"ticket_id": "ticket-1", "status": "submitted"}],
+        "ticket_bound_protected_submit_attempts": [],
+    }
+
+    decision = module._decision_from_pg_sources(
+        control_state=control_state,
+        goal_status={"status": "fresh_signal_processing", "checks": {}},
+        candidate_pool={},
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["status"] == "needs_intervention"
+    assert decision["notify"] is True
+    assert decision["blocker_class"] == "submitted_position_unprotected"
+
+
 def test_overdue_unknown_exchange_command_notifies_owner():
     module = _load_module()
     control_state = {
@@ -697,7 +829,7 @@ def _seed_pg_engine():
         RISK_RESERVATION_MIGRATION_PATH,
         "migration_103_server_monitor",
     )
-    seed = _load_file_module(SEED_PATH, "seed_runtime_control_state_server_monitor")
+    _load_file_module(SEED_PATH, "seed_runtime_control_state_server_monitor")
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},

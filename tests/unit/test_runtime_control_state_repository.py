@@ -923,6 +923,48 @@ def test_repository_action_time_read_exposes_account_risk_current_projections(
     assert state["table_counts"]["account_budget_current"] == 0
 
 
+def test_repository_exact_ticket_bundle_avoids_unrelated_control_state_scans(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    pg_control_connection.commit()
+    statements: list[str] = []
+
+    def capture_sql(_conn, _cursor, statement, _parameters, _context, _many):
+        statements.append(" ".join(statement.split()))
+
+    sa.event.listen(
+        pg_control_connection.engine,
+        "before_cursor_execute",
+        capture_sql,
+    )
+    try:
+        state = PgBackedRuntimeControlStateRepository(
+            pg_control_connection,
+            now_ms=NOW_MS + 5000,
+        ).read_action_time_control_state(ticket_id=ids["ticket_id"])
+    finally:
+        sa.event.remove(
+            pg_control_connection.engine,
+            "before_cursor_execute",
+            capture_sql,
+        )
+
+    row_queries = [
+        statement
+        for statement in statements
+        if statement.startswith("SELECT ") and " FROM brc_" in statement
+    ]
+    assert state["read_profile"] == "action_time_exact_ticket_bundle"
+    assert state["action_time_ticket_bundle_id"] == ids["ticket_id"]
+    assert len(row_queries) <= 20
+    assert not any("brc_server_monitor_runs" in statement for statement in row_queries)
+    assert not any(
+        "brc_control_read_model_snapshots" in statement
+        for statement in row_queries
+    )
+
+
 def test_repository_monitor_read_profile_retains_protected_submit_lineage(
     pg_control_connection,
 ):

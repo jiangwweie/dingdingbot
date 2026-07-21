@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+# ruff: noqa: F401, F811
+
 import asyncio
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -50,6 +53,9 @@ class _WorkerGateway:
         return SimpleNamespace(
             is_success=True,
             exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+            filled_qty=kwargs["amount"],
+            average_exec_price=Decimal("2000"),
+            exchange_order_status="FILLED",
             selected_leverage=kwargs.get("desired_leverage"),
             exchange_configured_initial_leverage=kwargs.get("desired_leverage"),
             leverage_verified_at_ms=(
@@ -237,6 +243,9 @@ async def test_worker_classifies_gtx_post_only_rejection_without_market_retry(
             return SimpleNamespace(
                 is_success=True,
                 exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                filled_qty=kwargs["amount"],
+                average_exec_price=Decimal("2000"),
+                exchange_order_status="FILLED",
             )
 
     gateway = _PostOnlyRejectingGateway()
@@ -522,6 +531,388 @@ async def test_two_concurrent_workers_cannot_dispatch_a_second_command(
 
 
 @pytest.mark.asyncio
+async def test_entry_rejection_terminalizes_undispatched_protection_siblings(
+    pg_control_connection,
+):
+    """An authoritative ENTRY rejection must not strand SL/TP1 or the Attempt."""
+
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+
+    class EntryRejectingGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            raise InvalidOrderError("entry_rejected", "ENTRY-REJECTED")
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=EntryRejectingGateway(),
+        worker_id="entry-rejection-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+
+    assert result["status"] == "command_rejected"
+    commands = list(
+        pg_control_connection.execute(
+            text(
+                "SELECT order_role, command_state "
+                "FROM brc_ticket_bound_exchange_commands "
+                "WHERE protected_submit_attempt_id = :attempt_id "
+                "ORDER BY order_role"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        ).mappings()
+    )
+    assert {row["order_role"]: row["command_state"] for row in commands} == {
+        "ENTRY": "confirmed_rejected",
+        "SL": "reconciled_absent",
+        "TP1": "reconciled_absent",
+    }
+    attempt = pg_control_connection.execute(
+        text(
+            "SELECT status, blockers FROM brc_ticket_bound_protected_submit_attempts "
+            "WHERE protected_submit_attempt_id = :attempt_id"
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).mappings().one()
+    assert attempt["status"] == "submit_failed"
+    assert "entry_rejected" in str(attempt["blockers"])
+
+
+@pytest.mark.asyncio
+async def test_worker_binds_partial_entry_fill_before_initial_stop_dispatch(
+    pg_control_connection,
+):
+    """A partial ENTRY fill must resize SL before the worker sends that SL."""
+
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.execute(
+        text("UPDATE brc_exchange_instruments SET quantity_step = 0.001")
+    )
+    pg_control_connection.commit()
+
+    class PartialFillGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                filled_qty=Decimal(str(kwargs["amount"])) / Decimal("2"),
+                average_exec_price=Decimal("2000"),
+            )
+
+    gateway = PartialFillGateway()
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="partial-fill-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        dispatch_timeout_seconds=1,
+        drain_initial_protection=True,
+    )
+
+    assert len(gateway.calls) >= 2, repr(result)
+    initial_stop = next(
+        call
+        for call in gateway.calls
+        if call.get("order_type") == "stop_market"
+    )
+    assert Decimal(str(initial_stop["amount"])) == Decimal("0.005")
+
+
+@pytest.mark.asyncio
+async def test_worker_rejects_lease_shorter_than_dispatch_timeout_and_commit_margin(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+
+    with pytest.raises(ValueError, match="exchange_command_lease_timeout_budget_invalid"):
+        await run_one_ticket_bound_exchange_command(
+            pg_control_connection.engine,
+            gateway=_WorkerGateway(),
+            worker_id="invalid-lease-worker",
+            now_ms=NOW_MS + 5000,
+            lease_ms=15_000,
+            command_sources=("protected_submit",),
+            dispatch_timeout_seconds=15,
+        )
+
+
+@pytest.mark.asyncio
+async def test_worker_persists_typed_entry_fill_facts_when_schema_is_available(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    for statement in (
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_order_status TEXT",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN executed_qty NUMERIC",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN average_exec_price NUMERIC",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_observed_at_ms BIGINT",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN result_facts_complete BOOLEAN NOT NULL DEFAULT false",
+    ):
+        pg_control_connection.execute(text(statement))
+    pg_control_connection.commit()
+
+    class FilledGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                filled_qty=Decimal("0.005"),
+                average_exec_price=Decimal("2000"),
+                exchange_order_status="PARTIALLY_FILLED",
+            )
+
+    await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=FilledGateway(),
+        worker_id="typed-result-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+
+    row = pg_control_connection.execute(
+        text(
+            "SELECT executed_qty, average_exec_price, exchange_order_status, "
+            "exchange_observed_at_ms, result_facts_complete "
+            "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+        )
+    ).mappings().one()
+    assert Decimal(str(row["executed_qty"])) == Decimal("0.005")
+    assert Decimal(str(row["average_exec_price"])) == Decimal("2000")
+    assert row["exchange_order_status"] == "PARTIALLY_FILLED"
+    assert row["exchange_observed_at_ms"] == NOW_MS + 5000
+    assert row["result_facts_complete"] in {True, 1}
+
+
+@pytest.mark.asyncio
+async def test_worker_accepts_exact_zero_entry_fill_without_dispatching_protection(
+    pg_control_connection,
+):
+    """An exact zero ENTRY fill is not missing truth and must not send SL/TP1."""
+
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    for statement in (
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_order_status TEXT",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN executed_qty NUMERIC",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN average_exec_price NUMERIC",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_observed_at_ms BIGINT",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN result_facts_complete BOOLEAN NOT NULL DEFAULT false",
+    ):
+        pg_control_connection.execute(text(statement))
+    pg_control_connection.commit()
+
+    class ZeroFillGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                filled_qty=Decimal("0"),
+                exchange_order_status="NEW",
+            )
+
+    gateway = ZeroFillGateway()
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="zero-fill-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        drain_initial_protection=True,
+    )
+
+    assert result["status"] == "command_confirmed"
+    assert result["initial_protection_complete"] is False
+    assert [call["order_type"] for call in gateway.calls] == ["market"]
+    commands = {
+        row["order_role"]: row
+        for row in pg_control_connection.execute(
+            text(
+                "SELECT order_role, command_state, exchange_error_code, "
+                "executed_qty, average_exec_price, result_facts_complete "
+                "FROM brc_ticket_bound_exchange_commands "
+                "WHERE protected_submit_attempt_id = :attempt_id"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        ).mappings()
+    }
+    assert commands["ENTRY"]["command_state"] == "confirmed_submitted"
+    assert Decimal(str(commands["ENTRY"]["executed_qty"])) == Decimal("0")
+    assert commands["ENTRY"]["average_exec_price"] is None
+    assert commands["ENTRY"]["result_facts_complete"] in {True, 1}
+    assert {
+        role: commands[role]["command_state"] for role in ("SL", "TP1")
+    } == {"SL": "reconciled_absent", "TP1": "reconciled_absent"}
+    assert {
+        commands[role]["exchange_error_code"] for role in ("SL", "TP1")
+    } == {"entry_filled_qty_zero_no_protection_dispatch"}
+    attempt = pg_control_connection.execute(
+        text(
+            "SELECT status, exchange_write_called "
+            "FROM brc_ticket_bound_protected_submit_attempts "
+            "WHERE protected_submit_attempt_id = :attempt_id"
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).mappings().one()
+    assert attempt["status"] == "submit_prepared"
+    assert attempt["exchange_write_called"] in {True, 1}
+
+
+@pytest.mark.asyncio
+async def test_worker_persists_unknown_when_entry_fill_exceeds_requested_amount(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    for statement in (
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_order_status TEXT",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN executed_qty NUMERIC",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN average_exec_price NUMERIC",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_observed_at_ms BIGINT",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN result_facts_complete BOOLEAN NOT NULL DEFAULT false",
+    ):
+        pg_control_connection.execute(text(statement))
+    pg_control_connection.commit()
+
+    class ContradictoryFillGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                filled_qty=Decimal(str(kwargs["amount"])) * Decimal("2"),
+                average_exec_price=Decimal("2000"),
+                exchange_order_status="FILLED",
+            )
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=ContradictoryFillGateway(),
+        worker_id="contradictory-fill-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+
+    assert result["status"] == "command_outcome_unknown"
+    row = pg_control_connection.execute(
+        text(
+            "SELECT command_state, outcome_class, exchange_error_code "
+            "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+        )
+    ).mappings().one()
+    assert row["command_state"] == "outcome_unknown"
+    assert row["outcome_class"] == "incomplete_response"
+    assert row["exchange_error_code"] == "exchange_command_executed_qty_exceeds_amount"
+
+
+@pytest.mark.asyncio
+async def test_worker_persists_unknown_when_entry_average_fill_price_is_not_positive(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    for statement in (
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_order_status TEXT",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN executed_qty NUMERIC",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN average_exec_price NUMERIC",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_observed_at_ms BIGINT",
+        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN result_facts_complete BOOLEAN NOT NULL DEFAULT false",
+    ):
+        pg_control_connection.execute(text(statement))
+    pg_control_connection.commit()
+
+    class InvalidAveragePriceGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                filled_qty=kwargs["amount"],
+                average_exec_price=Decimal("-1"),
+                exchange_order_status="FILLED",
+            )
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=InvalidAveragePriceGateway(),
+        worker_id="invalid-average-price-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+
+    assert result["status"] == "command_outcome_unknown"
+    row = pg_control_connection.execute(
+        text(
+            "SELECT command_state, exchange_error_code "
+            "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+        )
+    ).mappings().one()
+    assert row["command_state"] == "outcome_unknown"
+    assert row["exchange_error_code"] == "exchange_command_optional_decimal_invalid"
+
+
+@pytest.mark.asyncio
+async def test_missing_entry_fill_truth_hard_stops_initial_protection_source(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+
+    class AcceptedWithoutFillGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+            )
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=AcceptedWithoutFillGateway(),
+        worker_id="missing-fill-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        drain_initial_protection=True,
+    )
+
+    assert result["initial_protection_complete"] is False
+    states = {
+        row["order_role"]: row["command_state"]
+        for row in pg_control_connection.execute(
+            text(
+                "SELECT order_role, command_state "
+                "FROM brc_ticket_bound_exchange_commands "
+                "WHERE protected_submit_attempt_id = :attempt_id"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        ).mappings()
+    }
+    assert states["ENTRY"] == "confirmed_submitted"
+    assert states["SL"] == "hard_stopped"
+    assert states["TP1"] == "reconciled_absent"
+    attempt = pg_control_connection.execute(
+        text(
+            "SELECT status, blockers FROM brc_ticket_bound_protected_submit_attempts "
+            "WHERE protected_submit_attempt_id = :attempt_id"
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).mappings().one()
+    assert attempt["status"] in {"submit_failed", "hard_stopped"}
+    assert "entry_filled_qty" in str(attempt["blockers"])
+
+
+@pytest.mark.asyncio
 async def test_partial_cleanup_resumes_from_committed_command_without_repeating_cancel(
     pg_control_connection,
 ):
@@ -603,7 +994,8 @@ def test_terminal_command_blocks_only_its_netting_domain(pg_control_connection):
     pg_control_connection.execute(
         text(
             "UPDATE brc_ticket_bound_exchange_commands "
-            "SET netting_domain_key = :isolated_domain "
+            "SET netting_domain_key = :isolated_domain, "
+            "    command_source = 'orphan_cleanup' "
             "WHERE exchange_command_id = :command_id"
         ),
         {
@@ -616,7 +1008,7 @@ def test_terminal_command_blocks_only_its_netting_domain(pg_control_connection):
         pg_control_connection,
         claim_owner="isolated-domain-worker",
         now_ms=NOW_MS + 5000,
-        command_sources=("protected_submit",),
+        command_sources=("orphan_cleanup",),
     )
 
     assert claimed["exchange_command_id"] == sl["exchange_command_id"]

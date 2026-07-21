@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.exchange_command import (
+    record_exchange_command_outcome,
+)
+from src.domain.ticket_bound_exchange_command import (
+    ExchangeCommandOutcomeClass,
+    ExchangeCommandState,
+)
 from src.application.action_time.exit_protection_materializer import (
     materialize_ticket_bound_exit_protection_set,
 )
@@ -55,9 +61,27 @@ def apply_completed_lifecycle_exchange_sources(
     results: list[dict[str, Any]] = []
     for (source, source_id), commands in grouped.items():
         states = {str(row.get("command_state") or "") for row in commands}
-        if states & UNRESOLVED:
-            continue
         if states & BLOCKED:
+            if source == "protected_submit":
+                _terminalize_undispatched_protected_submit_siblings(
+                    conn,
+                    commands=commands,
+                    now_ms=now_ms,
+                )
+                commands = [
+                    dict(row)
+                    for row in conn.execute(
+                        sa.select(table).where(
+                            table.c.command_source == source,
+                            table.c.source_command_id == source_id,
+                        )
+                    ).mappings()
+                ]
+                states = {
+                    str(row.get("command_state") or "") for row in commands
+                }
+            if states & UNRESOLVED:
+                continue
             if source == "protected_submit":
                 results.append(
                     _record_protected_submit_terminal_outcome(
@@ -75,6 +99,8 @@ def apply_completed_lifecycle_exchange_sources(
                     "blockers": sorted(states & BLOCKED),
                 }
             )
+            continue
+        if states & UNRESOLVED:
             continue
         if not states or not states <= CONFIRMED:
             continue
@@ -188,6 +214,46 @@ def apply_completed_lifecycle_exchange_sources(
                 }
             )
     return results
+
+
+def _terminalize_undispatched_protected_submit_siblings(
+    conn: sa.Connection,
+    *,
+    commands: list[dict[str, Any]],
+    now_ms: int,
+) -> None:
+    """Conserve a failed source without inventing an exchange absence.
+
+    Only commands that remained ``prepared`` are terminalized here: they were
+    never leased or dispatched, so recording a reconciled absence is exact.
+    A dispatching/unknown sibling remains under the normal exchange-truth
+    reconciliation path and keeps the aggregate nonterminal.
+    """
+
+    terminal = [
+        row
+        for row in commands
+        if str(row.get("command_state") or "") in BLOCKED
+    ]
+    blockers = _failed_command_blockers(terminal)
+    first_blocker = blockers[0] if blockers else "protected_submit_terminal"
+    for command in commands:
+        if str(command.get("command_state") or "") != "prepared":
+            continue
+        record_exchange_command_outcome(
+            conn,
+            exchange_command_id=str(command["exchange_command_id"]),
+            target_state=ExchangeCommandState.RECONCILED_ABSENT,
+            outcome_class=ExchangeCommandOutcomeClass.RECONCILED_ABSENCE,
+            exchange_result={
+                "error_code": first_blocker,
+                "error_message": (
+                    "source terminalized before this command was dispatched"
+                ),
+                "exchange_write_called": False,
+            },
+            now_ms=now_ms,
+        )
 
 
 def _record_protected_submit_terminal_outcome(

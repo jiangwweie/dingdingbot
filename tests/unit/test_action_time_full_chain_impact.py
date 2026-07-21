@@ -61,7 +61,6 @@ from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
 )
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity
-from src.interfaces import api as trading_api_module
 from src.interfaces import api_trading_console
 from tests.unit.test_pg_promotion_action_time_lane_materialization import (
     NOW_MS,
@@ -1064,6 +1063,9 @@ async def test_runtime_safety_dispatch_command_reaches_durable_entry_commands_wi
             return SimpleNamespace(
                 is_success=True,
                 exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                filled_qty=kwargs["amount"],
+                average_exec_price=Decimal(str(last_price)),
+                exchange_order_status="FILLED",
                 selected_leverage=kwargs.get("desired_leverage"),
                 exchange_configured_initial_leverage=kwargs.get("desired_leverage"),
             )
@@ -1373,6 +1375,22 @@ async def test_raw_pg_input_reaches_real_gateway_submit_boundary(
             "last_price": "18",
         },
     )
+    from src.infrastructure.runtime_control_state_repository import (
+        PgBackedRuntimeControlStateRepository,
+    )
+
+    exact_state = PgBackedRuntimeControlStateRepository(
+        pg_control_connection,
+        now_ms=NOW_MS + 6,
+    ).read_action_time_control_state(ticket_id=str(payloads["ticket"]["ticket_id"]))
+    exact_action_time_fact = next(
+        row
+        for row in exact_state["runtime_fact_snapshots"]
+        if row.get("fact_surface") == "action_time"
+    )
+    assert exact_action_time_fact["fact_values"]["execution_pricing"][
+        "entry_reference_price"
+    ] == "18"
 
     submit_mode_decision = protected_submit.materialize_ticket_bound_submit_mode_decision(
         pg_control_connection,
@@ -1414,38 +1432,14 @@ async def test_raw_pg_input_reaches_real_gateway_submit_boundary(
     assert submit_orders[2]["gateway_side"] == "buy"
     assert submit_orders[2]["reduce_only"] is True
 
-    gateway = _ExchangeWriteBoundaryGateway()
-    order_repository = _InMemoryOrderRepository()
-    monkeypatch.setattr(
-        trading_api_module,
-        "_runtime_exchange_submit_gateway",
-        gateway,
-        raising=False,
+    assert not hasattr(
+        api_trading_console,
+        "_execute_ticket_bound_real_gateway_submit",
     )
-    monkeypatch.setattr(
-        trading_api_module,
-        "_trading_console_pg_order_repo",
-        order_repository,
-        raising=False,
+    assert not hasattr(
+        api_trading_console,
+        "_execute_one_ticket_bound_exchange_command",
     )
-
-    gateway_binding = await api_trading_console._runtime_exchange_submit_gateway_binding(
-        trading_api_module
-    )
-    assert gateway_binding["status"] == "ready"
-    assert gateway_binding["blockers"] == []
-
-    pg_control_connection.commit()
-    with pytest.raises(
-        RuntimeError,
-        match="direct_ticket_bound_real_submit_retired_use_durable_dispatch_command",
-    ):
-        await api_trading_console._execute_ticket_bound_real_gateway_submit(
-            prepared_submit,
-            engine=pg_control_connection.engine,
-        )
-    assert gateway.calls == []
-    assert list(order_repository.orders) == []
 
 
 @pytest.mark.parametrize(

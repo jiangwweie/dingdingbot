@@ -7,6 +7,7 @@ archive provenance and must not be exposed through this current repository.
 from __future__ import annotations
 
 from decimal import Decimal
+import json
 import time
 from typing import Any
 
@@ -107,6 +108,29 @@ OPTIONAL_CONTROL_STATE_TABLES = {
     "account_risk_policy_current",
     "account_exposure_current",
     "account_budget_current",
+}
+
+EXACT_BUNDLE_BOOLEAN_FIELDS = {
+    "computed",
+    "satisfied",
+    "selected_strategygroup_scope",
+    "symbol_side_scope_closed",
+    "notional_leverage_scope_closed",
+    "server_runtime_coverage_required",
+    "live_submit_allowed",
+    "execution_eligible",
+    "submit_allowed",
+    "exchange_write_called",
+    "operation_layer_called",
+    "order_created",
+    "order_lifecycle_called",
+    "finalgate_ready",
+    "operation_layer_ready",
+    "protection_ready",
+    "active_position_conflict",
+    "facts_fresh",
+    "trusted_fact_refs_complete",
+    "lifecycle_mutation_capability_ready",
 }
 
 REQUIRED_PRODUCTION_PROJECTIONS = {
@@ -1082,6 +1106,8 @@ class PgBackedRuntimeControlStateRepository:
         consumers require current truth plus retained terminal ticket lineage,
         but the distinct profile name makes production telemetry auditable.
         """
+        if ticket_id:
+            return self._read_action_time_exact_ticket_bundle(ticket_id=ticket_id)
         return self._read_bounded_current_state(
             read_profile="action_time_hot_path_current",
             requested_lineage={
@@ -1091,6 +1117,185 @@ class PgBackedRuntimeControlStateRepository:
                 "operation_layer_handoff_id": operation_layer_handoff_id,
             },
         )
+
+    def _read_action_time_exact_ticket_bundle(
+        self,
+        *,
+        ticket_id: str,
+    ) -> dict[str, Any]:
+        """Read one Ticket's execution graph without monitor/history scans.
+
+        The identifiers below are controlled table/column names.  Raw bounded
+        SQL avoids per-table reflection in the action-time latency path while
+        keeping all values in the same PostgreSQL current-state authority.
+        """
+
+        rows = {key: [] for key in CONTROL_STATE_TABLES}
+        ticket_rows = self._read_exact_rows(
+            CONTROL_STATE_TABLES["action_time_tickets"],
+            "ticket_id",
+            ticket_id,
+        )
+        rows["action_time_tickets"] = ticket_rows
+        if not ticket_rows:
+            return self._action_time_bundle_payload(rows, ticket_id=ticket_id)
+
+        ticket = ticket_rows[0]
+        rows["operation_layer_handoffs"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["operation_layer_handoffs"],
+            "ticket_id",
+            ticket_id,
+        )
+        operation_submit_command_id = str(
+            ticket.get("operation_submit_command_id")
+            or (rows["operation_layer_handoffs"] or [{}])[0].get(
+                "operation_submit_command_id"
+            )
+            or ""
+        )
+        rows["action_time_ticket_events"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["action_time_ticket_events"],
+            "ticket_id",
+            ticket_id,
+        )
+        rows["ticket_bound_protected_submit_attempts"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["ticket_bound_protected_submit_attempts"],
+            "ticket_id",
+            ticket_id,
+        )
+        rows["action_time_lane_inputs"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["action_time_lane_inputs"],
+            "action_time_lane_input_id",
+            str(ticket.get("action_time_lane_input_id") or ""),
+        )
+        rows["runtime_scope_bindings"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["runtime_scope_bindings"],
+            "runtime_scope_binding_id",
+            str(ticket.get("runtime_scope_binding_id") or ""),
+        )
+        rows["owner_policy_current"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["owner_policy_current"],
+            "policy_current_id",
+            str(
+                (rows["runtime_scope_bindings"] or [{}])[0].get(
+                    "policy_current_id"
+                )
+                or ""
+            ),
+        )
+        runtime_safety_snapshot_id = str(
+            ticket.get("runtime_safety_snapshot_id")
+            or (rows["action_time_lane_inputs"] or [{}])[0].get(
+                "runtime_safety_snapshot_id"
+            )
+            or ""
+        )
+        rows["runtime_safety_state"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["runtime_safety_state"],
+            "runtime_safety_snapshot_id",
+            runtime_safety_snapshot_id,
+        )
+        rows["promotion_candidates"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["promotion_candidates"],
+            "promotion_candidate_id",
+            str(ticket.get("promotion_candidate_id") or ""),
+        )
+        rows["live_signal_events"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["live_signal_events"],
+            "signal_event_id",
+            str(ticket.get("signal_event_id") or ""),
+        )
+        rows["protection_references"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["protection_references"],
+            "protection_ref_id",
+            str(ticket.get("protection_ref_id") or ""),
+        )
+        rows["budget_reservations"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["budget_reservations"],
+            "budget_reservation_id",
+            str(ticket.get("budget_reservation_id") or ""),
+        )
+        rows["execution_policies"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["execution_policies"],
+            "execution_policy_id",
+            str(ticket.get("execution_policy_id") or ""),
+        )
+        for fact_snapshot_id in (
+            ticket.get("public_fact_snapshot_id"),
+            ticket.get("action_time_fact_snapshot_id"),
+            ticket.get("account_safe_fact_snapshot_id"),
+            ticket.get("account_capacity_fact_snapshot_id"),
+            ticket.get("account_mode_snapshot_id"),
+        ):
+            rows["runtime_fact_snapshots"].extend(
+                self._read_exact_rows(
+                    CONTROL_STATE_TABLES["runtime_fact_snapshots"],
+                    "fact_snapshot_id",
+                    str(fact_snapshot_id or ""),
+                )
+            )
+        rows["strategy_side_event_specs"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["strategy_side_event_specs"],
+            "event_spec_id",
+            str(ticket.get("event_spec_id") or ""),
+        )
+        rows["exchange_instruments"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["exchange_instruments"],
+            "exchange_instrument_id",
+            str(ticket.get("exchange_instrument_id") or ""),
+        )
+        rows["ticket_bound_submit_mode_decisions"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["ticket_bound_submit_mode_decisions"],
+            "operation_submit_command_id",
+            operation_submit_command_id,
+        )
+        for attempt in rows["ticket_bound_protected_submit_attempts"]:
+            attempt_id = str(attempt.get("protected_submit_attempt_id") or "")
+            if attempt_id:
+                rows["ticket_bound_exchange_commands"].extend(
+                    self._read_exact_rows(
+                        CONTROL_STATE_TABLES["ticket_bound_exchange_commands"],
+                        "protected_submit_attempt_id",
+                        attempt_id,
+                    )
+                )
+        return self._action_time_bundle_payload(rows, ticket_id=ticket_id)
+
+    def _read_exact_rows(
+        self,
+        table_name: str,
+        column_name: str,
+        value: str,
+    ) -> list[dict[str, Any]]:
+        if not value:
+            return []
+        statement = sa.text(
+            f"SELECT * FROM {table_name} WHERE {column_name} = :value"
+        )
+        return [
+            {
+                key: _exact_bundle_value(key, item)
+                for key, item in row.items()
+            }
+            for row in self.conn.execute(statement, {"value": value}).mappings()
+        ]
+
+    def _action_time_bundle_payload(
+        self,
+        rows: dict[str, list[dict[str, Any]]],
+        *,
+        ticket_id: str,
+    ) -> dict[str, Any]:
+        return {
+            "schema": "brc.runtime_control_state_repository.v1",
+            "source_mode": self.source_mode,
+            "projection_target": self.projection_target,
+            "read_profile": "action_time_exact_ticket_bundle",
+            "read_now_ms": self.now_ms,
+            "action_time_ticket_bundle_id": ticket_id,
+            "table_counts": {key: len(value) for key, value in rows.items()},
+            **rows,
+        }
 
     def _read_bounded_current_state(
         self,
@@ -2513,6 +2718,23 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
     return value
+
+
+def _exact_bundle_value(key: str, value: Any) -> Any:
+    if key in EXACT_BUNDLE_BOOLEAN_FIELDS and value in {0, 1, False, True}:
+        return bool(value)
+    if isinstance(value, str) and value[:1] in {"{", "[", '"'}:
+        original = value
+        parsed: Any = value
+        try:
+            parsed = json.loads(parsed)
+            if isinstance(parsed, str) and parsed[:1] in {"{", "["}:
+                parsed = json.loads(parsed)
+        except json.JSONDecodeError:
+            return original
+        if isinstance(parsed, (dict, list)):
+            return _json_safe(parsed)
+    return _json_safe(value)
 
 
 def _preserve_typed_value(value: Any) -> Any:

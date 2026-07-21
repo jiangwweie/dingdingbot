@@ -164,6 +164,11 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
     exchange_order_id: Optional[str] = Field(default=None, max_length=192)
     exchange_error_code: Optional[str] = Field(default=None, max_length=128)
     exchange_error_message: Optional[str] = Field(default=None, max_length=1000)
+    exchange_order_status: Optional[str] = Field(default=None, max_length=64)
+    executed_qty: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    average_exec_price: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
+    exchange_observed_at_ms: Optional[int] = Field(default=None, ge=0)
+    result_facts_complete: bool = False
     prepared_at_ms: int = Field(ge=0)
     dispatch_started_at_ms: Optional[int] = Field(default=None, ge=0)
     resolved_at_ms: Optional[int] = Field(default=None, ge=0)
@@ -190,6 +195,16 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
             raise ValueError(
                 "confirmed rejection requires authoritative rejection"
             )
+        if self.executed_qty is not None and self.executed_qty > self.amount:
+            raise ValueError("executed quantity exceeds command amount")
+        if self.executed_qty is not None and self.executed_qty > 0 and (
+            self.average_exec_price is None
+        ):
+            raise ValueError("executed quantity requires average execution price")
+        if self.result_facts_complete and (
+            not self.exchange_order_status or self.exchange_observed_at_ms is None
+        ):
+            raise ValueError("complete result facts require status and observation time")
         if self.position_mode == "one_way" and (
             self.position_side is not None or self.position_bucket != "BOTH"
         ):
@@ -259,6 +274,7 @@ _ALLOWED_TRANSITIONS: dict[
     ExchangeCommandState.PREPARED: {
         ExchangeCommandState.DISPATCHING,
         ExchangeCommandState.RECONCILED_ABSENT,
+        ExchangeCommandState.HARD_STOPPED,
     },
     ExchangeCommandState.DISPATCHING: {
         ExchangeCommandState.CONFIRMED_SUBMITTED,

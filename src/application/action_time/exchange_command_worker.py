@@ -32,7 +32,95 @@ from src.domain.ticket_bound_exchange_command import (
 )
 
 
+MIN_EXCHANGE_COMMAND_COMMIT_MARGIN_MS = 5_000
+
+
 async def run_one_ticket_bound_exchange_command(
+    engine: sa.Engine,
+    *,
+    gateway: Any,
+    worker_id: str,
+    lease_ms: int = 15_000,
+    now_ms: int | None = None,
+    command_sources: tuple[str, ...],
+    dispatch_timeout_seconds: float | None = None,
+    drain_initial_protection: bool = False,
+) -> dict[str, Any]:
+    """Run one durable command and optionally drain Entry -> Initial Stop.
+
+    The default preserves the bounded generic-worker contract.  The official
+    protected-submit runtime enables ``drain_initial_protection`` so a confirmed
+    Entry does not wait for the next lifecycle timer before its initial stop.
+    Each exchange I/O still has its own committed claim/result transaction.
+    """
+
+    _validate_lease_timeout_budget(
+        lease_ms=lease_ms,
+        dispatch_timeout_seconds=dispatch_timeout_seconds,
+    )
+    primary = await _run_one_ticket_bound_exchange_command(
+        engine,
+        gateway=gateway,
+        worker_id=worker_id,
+        lease_ms=lease_ms,
+        now_ms=now_ms,
+        command_sources=command_sources,
+        dispatch_timeout_seconds=dispatch_timeout_seconds,
+    )
+    if not (
+        drain_initial_protection
+        and primary.get("status") == "command_confirmed"
+        and primary.get("command_source") == "protected_submit"
+        and primary.get("order_role") == "ENTRY"
+    ):
+        return primary
+
+    drained: list[dict[str, Any]] = []
+    deadline_at = (
+        time.monotonic() + dispatch_timeout_seconds
+        if dispatch_timeout_seconds is not None
+        else None
+    )
+    for index in range(2):
+        timeout = dispatch_timeout_seconds
+        if deadline_at is not None:
+            timeout = max(0.001, deadline_at - time.monotonic())
+        next_result = await _run_one_ticket_bound_exchange_command(
+            engine,
+            gateway=gateway,
+            worker_id=f"{worker_id}:initial-protection:{index}",
+            lease_ms=lease_ms,
+            now_ms=(now_ms + index + 1) if now_ms is not None else None,
+            command_sources=("protected_submit",),
+            dispatch_timeout_seconds=timeout,
+        )
+        if next_result.get("status") == "no_prepared_command":
+            with engine.begin() as conn:
+                completion = apply_completed_lifecycle_exchange_sources(
+                    conn,
+                    now_ms=(now_ms + index + 1) if now_ms is not None else int(
+                        time.time() * 1000
+                    ),
+                    source_command_id=str(primary.get("source_command_id") or ""),
+                )
+            if completion:
+                drained.extend(completion)
+            break
+        drained.append(next_result)
+        if next_result.get("status") != "command_confirmed":
+            break
+    return {
+        **primary,
+        "initial_protection_drain": drained,
+        "initial_protection_complete": any(
+            item.get("order_role") == "SL"
+            and item.get("status") == "command_confirmed"
+            for item in drained
+        ),
+    }
+
+
+async def _run_one_ticket_bound_exchange_command(
     engine: sa.Engine,
     *,
     gateway: Any,
@@ -48,6 +136,7 @@ async def run_one_ticket_bound_exchange_command(
     remains open while the gateway is awaited.
     """
 
+    requested_now_ms = now_ms
     now_ms = int(now_ms or time.time() * 1000)
     with engine.begin() as conn:
         expired = expire_stale_exchange_command_claims(conn, now_ms=now_ms)
@@ -141,6 +230,7 @@ async def run_one_ticket_bound_exchange_command(
             else await _dispatch(command, gateway)
         )
     except (InvalidOrderError, InsufficientMarginError) as exc:
+        now_ms = _completion_now_ms(requested_now_ms)
         blocker = str(exc)
         with engine.begin() as conn:
             recorded = record_claimed_exchange_command_outcome(
@@ -176,6 +266,7 @@ async def run_one_ticket_bound_exchange_command(
             result_payload["lifecycle_completion"] = [failure_completion]
         return result_payload
     except Exception as exc:
+        now_ms = _completion_now_ms(requested_now_ms)
         with engine.begin() as conn:
             recorded = record_claimed_exchange_command_outcome(
                 conn,
@@ -207,29 +298,41 @@ async def run_one_ticket_bound_exchange_command(
         exchange_result,
     )
     placement_facts = _placement_result_facts(exchange_result)
-    with engine.begin() as conn:
-        recorded = record_claimed_exchange_command_outcome(
-            conn,
-            exchange_command_id=str(command["exchange_command_id"]),
-            claim_token=str(command["claim_token"]),
-            target_state=(
-                ExchangeCommandState.CONFIRMED_SUBMITTED
-                if accepted
-                else ExchangeCommandState.CONFIRMED_REJECTED
-            ),
-            outcome_class=(
-                ExchangeCommandOutcomeClass.EXCHANGE_ACCEPTED
-                if accepted
-                else ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION
-            ),
-            exchange_result={
-                "exchange_order_id": exchange_order_id,
-                "error_code": None if accepted else "exchange_rejected",
-                "error_message": error,
-                **placement_facts,
-            },
+    now_ms = _completion_now_ms(requested_now_ms)
+    try:
+        with engine.begin() as conn:
+            recorded = record_claimed_exchange_command_outcome(
+                conn,
+                exchange_command_id=str(command["exchange_command_id"]),
+                claim_token=str(command["claim_token"]),
+                target_state=(
+                    ExchangeCommandState.CONFIRMED_SUBMITTED
+                    if accepted
+                    else ExchangeCommandState.CONFIRMED_REJECTED
+                ),
+                outcome_class=(
+                    ExchangeCommandOutcomeClass.EXCHANGE_ACCEPTED
+                    if accepted
+                    else ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION
+                ),
+                exchange_result={
+                    "exchange_order_id": exchange_order_id,
+                    "error_code": None if accepted else "exchange_rejected",
+                    "error_message": error,
+                    **placement_facts,
+                },
+                now_ms=now_ms,
+            )
+    except ValueError as exc:
+        return _record_contradictory_exchange_result(
+            engine,
+            command=command,
+            exchange_order_id=exchange_order_id,
+            placement_facts=placement_facts,
+            error=exc,
             now_ms=now_ms,
         )
+    with engine.begin() as conn:
         if not accepted:
             upsert_exchange_command_domain_hold(
                 conn,
@@ -244,6 +347,14 @@ async def run_one_ticket_bound_exchange_command(
             )
         else:
             failure_completion = {}
+            if str(recorded.get("order_role") or "") == "ENTRY":
+                _mark_entry_exchange_effect(
+                    conn,
+                    protected_submit_attempt_id=str(
+                        recorded.get("protected_submit_attempt_id") or ""
+                    ),
+                    now_ms=now_ms,
+                )
         completion = (
             apply_completed_lifecycle_exchange_sources(
                 conn,
@@ -263,6 +374,58 @@ async def run_one_ticket_bound_exchange_command(
     if failure_completion:
         result_payload["lifecycle_completion"] = [failure_completion]
     return result_payload
+
+
+def _record_contradictory_exchange_result(
+    engine: sa.Engine,
+    *,
+    command: dict[str, Any],
+    exchange_order_id: str,
+    placement_facts: dict[str, Any],
+    error: ValueError,
+    now_ms: int,
+) -> dict[str, Any]:
+    """Persist an exchange response that cannot satisfy typed result truth."""
+
+    blocker = str(error)
+    with engine.begin() as conn:
+        recorded = record_claimed_exchange_command_outcome(
+            conn,
+            exchange_command_id=str(command["exchange_command_id"]),
+            claim_token=str(command["claim_token"]),
+            target_state=ExchangeCommandState.OUTCOME_UNKNOWN,
+            outcome_class=ExchangeCommandOutcomeClass.INCOMPLETE_RESPONSE,
+            exchange_result={
+                "exchange_order_id": exchange_order_id,
+                "exchange_order_status": placement_facts.get(
+                    "exchange_order_status"
+                ),
+                "error_code": blocker,
+                "error_message": blocker,
+                "contradictory_exchange_result": placement_facts,
+            },
+            now_ms=now_ms,
+        )
+        upsert_exchange_command_domain_hold(
+            conn,
+            command=recorded,
+            blockers=[blocker],
+            now_ms=now_ms,
+        )
+        if str(recorded.get("order_role") or "") == "ENTRY":
+            _mark_entry_exchange_effect(
+                conn,
+                protected_submit_attempt_id=str(
+                    recorded.get("protected_submit_attempt_id") or ""
+                ),
+                now_ms=now_ms,
+            )
+    return _result(
+        "command_outcome_unknown",
+        recorded,
+        blockers=[blocker],
+        exchange_write_called=True,
+    )
 
 
 def _apply_terminal_source_failure(
@@ -423,6 +586,9 @@ def _placement_result_facts(result: Any) -> dict[str, Any]:
         "selected_leverage",
         "exchange_configured_initial_leverage",
         "leverage_verified_at_ms",
+        "filled_qty",
+        "average_exec_price",
+        "exchange_order_status",
     ):
         value = (
             result.get(key)
@@ -447,6 +613,7 @@ def _result(
         "exchange_command_id": command.get("exchange_command_id"),
         "command_state": command.get("command_state"),
         "command_kind": command.get("command_kind"),
+        "order_role": command.get("order_role"),
         "command_source": command.get("command_source"),
         "source_command_id": command.get("source_command_id"),
         "netting_domain_key": command.get("netting_domain_key"),
@@ -454,3 +621,48 @@ def _result(
         "first_blocker": blockers[0] if blockers else None,
         "blockers": blockers,
     }
+
+
+def _validate_lease_timeout_budget(
+    *,
+    lease_ms: int,
+    dispatch_timeout_seconds: float | None,
+) -> None:
+    if lease_ms <= 0:
+        raise ValueError("exchange_command_claim_lease_invalid")
+    if dispatch_timeout_seconds is None:
+        return
+    required_lease_ms = int(dispatch_timeout_seconds * 1000) + (
+        MIN_EXCHANGE_COMMAND_COMMIT_MARGIN_MS
+    )
+    if lease_ms < required_lease_ms:
+        raise ValueError("exchange_command_lease_timeout_budget_invalid")
+
+
+def _completion_now_ms(requested_now_ms: int | None) -> int:
+    """Use fresh wall time in production while retaining deterministic tests."""
+
+    return int(requested_now_ms or time.time() * 1000)
+
+
+def _mark_entry_exchange_effect(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+    now_ms: int,
+) -> None:
+    if not protected_submit_attempt_id:
+        return
+    table = sa.Table(
+        "brc_ticket_bound_protected_submit_attempts",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    conn.execute(
+        table.update()
+        .where(
+            table.c.protected_submit_attempt_id == protected_submit_attempt_id,
+            table.c.exchange_write_called.is_(False),
+        )
+        .values(exchange_write_called=True, updated_at_ms=now_ms)
+    )

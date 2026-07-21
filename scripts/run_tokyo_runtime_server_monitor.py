@@ -88,6 +88,7 @@ FEISHU_WEBHOOK_SECRET_ENV_NAMES = (
     "BRC_SIGNAL_WATCHER_FEISHU_WEBHOOK_SECRET",
     "FEISHU_WEBHOOK_SECRET",
 )
+INITIAL_PROTECTION_HARD_DEADLINE_MS = 15_000
 
 
 Notifier = Callable[[str, str | None, dict[str, Any], float], dict[str, Any]]
@@ -398,6 +399,11 @@ def _recent_pg_chain_event(control_state: dict[str, Any]) -> dict[str, Any]:
         return lifecycle_event
     exchange_command_event = _exchange_command_chain_event(
         _pg_rows(control_state.get("ticket_bound_exchange_commands")),
+        current_ticket_ids={
+            str(row.get("ticket_id") or "")
+            for row in _pg_rows(control_state.get("action_time_tickets"))
+            if _is_current_monitor_ticket(row, now_ms)
+        },
         now_ms=now_ms,
     )
     if exchange_command_event:
@@ -708,8 +714,96 @@ def _lifecycle_safety_event(
 def _exchange_command_chain_event(
     commands: list[dict[str, Any]],
     *,
+    current_ticket_ids: set[str],
     now_ms: int,
 ) -> dict[str, Any]:
+    entries_by_attempt = {
+        str(row.get("protected_submit_attempt_id") or ""): row
+        for row in commands
+        if str(row.get("order_role") or "") == "ENTRY"
+        and str(row.get("command_state") or "")
+        in {"confirmed_submitted", "reconciled_submitted"}
+        and str(row.get("ticket_id") or "") in current_ticket_ids
+    }
+    prepared_initial_stops = [
+        row
+        for row in commands
+        if str(row.get("order_role") or "") == "SL"
+        and str(row.get("protected_submit_attempt_id") or "")
+        in entries_by_attempt
+        and str(row.get("command_state") or "") == "prepared"
+    ]
+    overdue_prepared_initial_stops = [
+        row
+        for row in prepared_initial_stops
+        if now_ms
+        - int(
+            entries_by_attempt[
+                str(row.get("protected_submit_attempt_id") or "")
+            ].get("updated_at_ms")
+            or 0
+        )
+        >= INITIAL_PROTECTION_HARD_DEADLINE_MS
+    ]
+    unsafe_initial_stops = [
+        row
+        for row in commands
+        if str(row.get("order_role") or "") == "SL"
+        and str(row.get("protected_submit_attempt_id") or "")
+        in entries_by_attempt
+        and str(row.get("command_state") or "")
+        in {"confirmed_rejected", "outcome_unknown", "hard_stopped"}
+    ]
+    unsafe_initial_stops.extend(overdue_prepared_initial_stops)
+    if unsafe_initial_stops:
+        row = max(
+            unsafe_initial_stops,
+            key=lambda item: int(item.get("updated_at_ms") or 0),
+        )
+        entry = entries_by_attempt[
+            str(row.get("protected_submit_attempt_id") or "")
+        ]
+        return {
+            "event_type": "submitted_position_unprotected",
+            "notify": True,
+            "decision_status": "needs_intervention",
+            "strategy_group_id": row.get("strategy_group_id"),
+            "symbol": row.get("symbol"),
+            "side": row.get("side"),
+            "checkpoint": "ticket_bound_exchange_command",
+            "blocker_class": "submitted_position_unprotected",
+            "reasons": [
+                "submitted_position_unprotected",
+                str(entry.get("exchange_command_id") or ""),
+                str(row.get("exchange_command_id") or ""),
+                str(row.get("command_state") or ""),
+            ],
+            "owner_message": "已提交仓位缺少已验证保护，需要介入",
+        }
+    if prepared_initial_stops:
+        row = max(
+            prepared_initial_stops,
+            key=lambda item: int(item.get("updated_at_ms") or 0),
+        )
+        entry = entries_by_attempt[
+            str(row.get("protected_submit_attempt_id") or "")
+        ]
+        return {
+            "event_type": "initial_protection_pending",
+            "notify": False,
+            "decision_status": "processing",
+            "strategy_group_id": row.get("strategy_group_id"),
+            "symbol": row.get("symbol"),
+            "side": row.get("side"),
+            "checkpoint": "ticket_bound_exchange_command",
+            "blocker_class": "initial_protection_pending",
+            "reasons": [
+                "initial_protection_pending",
+                str(entry.get("exchange_command_id") or ""),
+                str(row.get("exchange_command_id") or ""),
+            ],
+            "owner_message": "已提交仓位正在建立保护，无需操作",
+        }
     unresolved = [
         row
         for row in commands

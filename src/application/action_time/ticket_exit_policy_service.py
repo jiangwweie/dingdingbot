@@ -44,6 +44,7 @@ from src.domain.ticket_exit_policy import (
     evaluate_exit_policy,
 )
 from src.application.action_time.ticket_exit_policy_binding import (
+    canonical_payload_hash,
     resolve_effective_ticket_exit_policy_binding,
 )
 from src.application.action_time.ticket_instrument_rule import (
@@ -1086,7 +1087,6 @@ def _prepare_runner_close(
     now_ms: int,
 ) -> dict[str, Any]:
     scope: TicketBoundExchangeScope = loaded["scope"]
-    projection = loaded["projection"]
     qty = _required_decimal(decision.close_qty, "runner_close_quantity")
     source_id = _stable_id(
         "exit-policy-close",
@@ -1229,8 +1229,9 @@ def _ensure_final_exit_order(
         "created_at_ms": now_ms,
         "updated_at_ms": now_ms,
     }
-    conn.execute(table.insert().values(**row))
-    return row
+    persisted_row = {key: value for key, value in row.items() if key in table.c}
+    conn.execute(table.insert().values(**persisted_row))
+    return persisted_row
 
 
 def _final_exit_role_enabled(conn: sa.engine.Connection) -> bool:
@@ -1356,8 +1357,9 @@ def _materialize_policy_command(
         if str(existing.get("request_fingerprint") or "") != fingerprint:
             raise ValueError("exit_policy_command_fingerprint_mismatch")
         return dict(existing)
-    conn.execute(table.insert().values(**row))
-    return row
+    persisted_row = {key: value for key, value in row.items() if key in table.c}
+    conn.execute(table.insert().values(**persisted_row))
+    return persisted_row
 
 
 def _ensure_tp1_reprice_order(

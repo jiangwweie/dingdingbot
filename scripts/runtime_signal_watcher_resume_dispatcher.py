@@ -33,7 +33,7 @@ from scripts.pg_dsn import normalize_sync_postgres_dsn  # noqa: E402
 from src.application.action_time.process_outcome_relevance import (  # noqa: E402
     process_outcome_has_current_blocking_authority,
 )
-from src.application.readmodels.owner_projection import (
+from src.application.readmodels.owner_projection import (  # noqa: E402
     owner_non_authority_checkpoint,
     owner_state_without_legacy_input_recovery_action,
 )

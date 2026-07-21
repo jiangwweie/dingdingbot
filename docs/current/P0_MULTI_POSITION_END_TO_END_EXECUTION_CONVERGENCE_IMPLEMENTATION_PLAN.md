@@ -1,6 +1,6 @@
 ---
 title: P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN
-status: R10_IMPLEMENTATION_IN_PROGRESS
+status: R10_DEPLOYED_COMPONENT_BASELINE_R11_SUPERSEDED
 authority: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN.md
 program_id: P0-ACH
 design: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md
@@ -8,22 +8,31 @@ r7_design: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN
 r7_plan: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_IMPLEMENTATION_PLAN.md
 baseline_commit: 60999176
 current_certified_commit: 1fd49cc09efdb9653d5e1df4da8b8bb2b5fe86f1
-current_runtime_commit: 2548318018f1e67b8dfe820556b0e71103b4580f
-current_schema_revision: 142
+current_runtime_commit: 8c61a208062520a5c426e2151e4692e256fec5dd
+current_schema_revision: 143
 last_verified: 2026-07-21
 target_stop: deployed_natural_signal_ticket_to_trade_acceptance
-production_deploy: bounded_apply_allowed_after_r10_gates_under_standing_authorization
+production_deploy: superseded_by_r11_owner_confirmation_gate
+post_ticket_successor: docs/current/P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_IMPLEMENTATION_PLAN.md
 ---
 
 # P0 多仓位端到端执行收敛执行计划
+
+## Current Post-Ticket Execution Authority Notice
+
+**R10 已形成当前 Ticket 与 durable dispatch 组件基线。** Ticket 创建后的修复执行顺序、
+测试矩阵、部署门和 natural-event acceptance 已由
+`P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_IMPLEMENTATION_PLAN.md`
+中的 **R11-T00～T09** 接管。旧 R10 内容仅作为 Signal-to-Ticket 与多仓位收敛的组件记录，
+不得覆盖 R11 的 exact fill、Initial Stop、failure terminalization 或 Owner 部署确认门。
 
 ## 0. 2026-07-21 R10 当前执行覆盖
 
 ### 0.1 覆盖声明
 
-**R0-R9 已作为 `25483180` / schema `142` 的部署组件基线存在。**
-本节定义自然信号暴露后的当前执行主线。当本节与后文“等待 Owner 实施/部署确认”、
-`60999176` first blocker 或旧部署前停止点冲突时，以本节为准。
+**R0-R10 已作为 `8c61a208` / schema `143` 的部署组件基线存在。**
+本节保留自然信号暴露后的 R10 执行来源，但不再定义当前执行主线。当本节与 R11
+successor、当前 runtime evidence 或 R11 Owner 部署确认门冲突时，以 R11 successor 为准。
 
 本轮不改变 StrategyGroup、symbol/side、2.5% Stop risk、max 2 positions、
 max 1 new Action-Time lane、notional、leverage、FinalGate 或 Operation Layer 权限。

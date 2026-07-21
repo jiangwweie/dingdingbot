@@ -52,6 +52,28 @@ def test_tp1_command_requires_explicit_limit_gtc_contract():
     assert command.market_fallback_allowed is False
 
 
+def test_command_models_typed_exchange_result_facts_and_rejects_oversized_fill():
+    payload = _tp1_command(
+        command_state="confirmed_submitted",
+        outcome_class="exchange_accepted",
+        exchange_order_id="exchange-tp1-1",
+        exchange_order_status="FILLED",
+        executed_qty="0.25",
+        average_exec_price="2100",
+        exchange_observed_at_ms=2,
+        result_facts_complete=True,
+    )
+
+    command = TicketBoundExchangeCommand.model_validate(payload)
+
+    assert str(command.executed_qty) == "0.25"
+    assert str(command.average_exec_price) == "2100"
+    with pytest.raises(ValueError, match="executed quantity exceeds command amount"):
+        TicketBoundExchangeCommand.model_validate(
+            {**payload, "executed_qty": "0.26"}
+        )
+
+
 def test_tp1_command_rejects_market_or_missing_limit_contract():
     market = _tp1_command(order_type="market", price=None)
     with pytest.raises(ValueError, match="tp1_requires_limit_price"):

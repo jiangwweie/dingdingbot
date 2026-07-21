@@ -223,8 +223,9 @@ def materialize_ticket_bound_exchange_commands(
                     raise ValueError(f"exchange_command_identity_mismatch:{key}")
             materialized.append(_json_safe(existing_row))
             continue
-        conn.execute(table.insert().values(**row))
-        materialized.append(row)
+        persisted_row = {key: value for key, value in row.items() if key in table.c}
+        conn.execute(table.insert().values(**persisted_row))
+        materialized.append(_json_safe(persisted_row))
     return materialized
 
 
@@ -308,6 +309,71 @@ def resize_prepared_protection_command_to_entry_fill(
         )
     )
     return _json_safe(updated)
+
+
+def reconcile_zero_fill_prepared_protection_commands(
+    conn: sa.engine.Connection,
+    *,
+    exchange_command_id: str,
+    now_ms: int,
+) -> bool:
+    """Suppress undispatched SL/TP1 only when ENTRY has exact zero fill truth.
+
+    A zero fill is materially different from a missing fill: it proves that no
+    quantity-based protection can be submitted *at this observation*.  The
+    accepted ENTRY remains observable to the reconciliation loop, which owns
+    any later exchange/position change; this helper only records that the
+    original prepared protections were never sent.
+    """
+
+    table = _table(conn)
+    command = _row(conn, exchange_command_id)
+    if (
+        str(command.get("command_source") or "") != "protected_submit"
+        or str(command.get("order_role") or "") not in {"SL", "TP1"}
+    ):
+        return False
+    attempt_id = str(command.get("protected_submit_attempt_id") or "")
+    entry = conn.execute(
+        sa.select(table).where(
+            table.c.protected_submit_attempt_id == attempt_id,
+            table.c.order_role == "ENTRY",
+        )
+    ).mappings().first()
+    if not entry or str(entry.get("command_state") or "") not in {
+        "confirmed_submitted",
+        "reconciled_submitted",
+    }:
+        return False
+    filled_qty = _optional_nonnegative_decimal(
+        _mapping(entry.get("exchange_result")).get("filled_qty")
+    )
+    if filled_qty != Decimal("0"):
+        return False
+    siblings = conn.execute(
+        sa.select(table).where(
+            table.c.protected_submit_attempt_id == attempt_id,
+            table.c.order_role.in_(("SL", "TP1")),
+            table.c.command_state == ExchangeCommandState.PREPARED.value,
+        )
+    ).mappings().all()
+    for sibling in siblings:
+        record_exchange_command_outcome(
+            conn,
+            exchange_command_id=str(sibling["exchange_command_id"]),
+            target_state=ExchangeCommandState.RECONCILED_ABSENT,
+            outcome_class=ExchangeCommandOutcomeClass.RECONCILED_ABSENCE,
+            exchange_result={
+                "error_code": "entry_filled_qty_zero_no_protection_dispatch",
+                "error_message": (
+                    "exact zero ENTRY fill leaves no quantity for initial "
+                    "protection dispatch"
+                ),
+                "exchange_write_called": False,
+            },
+            now_ms=now_ms,
+        )
+    return True
 
 
 def mark_exchange_command_dispatching(
@@ -406,6 +472,45 @@ def claim_next_exchange_command(
     row = conn.execute(query).mappings().first()
     if row is None:
         return {}
+    if (
+        str(row.get("command_source") or "") == "protected_submit"
+        and str(row.get("order_role") or "") in {"SL", "TP1"}
+    ):
+        if reconcile_zero_fill_prepared_protection_commands(
+            conn,
+            exchange_command_id=str(row["exchange_command_id"]),
+            now_ms=now_ms,
+        ):
+            return {}
+        try:
+            resize_prepared_protection_command_to_entry_fill(
+                conn,
+                exchange_command_id=str(row["exchange_command_id"]),
+                now_ms=now_ms,
+            )
+        except ValueError as exc:
+            # Missing or contradictory Entry fill truth is a protection barrier:
+            # do not lease a reduce-only command against a guessed quantity.  The
+            # source must become observable to its aggregate owner instead of
+            # silently returning an unclaimable prepared sibling forever.
+            record_exchange_command_outcome(
+                conn,
+                exchange_command_id=str(row["exchange_command_id"]),
+                target_state=ExchangeCommandState.HARD_STOPPED,
+                outcome_class=ExchangeCommandOutcomeClass.CONTRADICTORY_TRUTH,
+                exchange_result={
+                    "error_code": str(exc),
+                    "error_message": str(exc),
+                    "exchange_write_called": False,
+                },
+                now_ms=now_ms,
+            )
+            return {}
+        row = conn.execute(
+            sa.select(table).where(
+                table.c.exchange_command_id == str(row["exchange_command_id"])
+            )
+        ).mappings().one()
     command_id = str(row["exchange_command_id"])
     claim_token = _stable_id(
         "exchange_command_claim",
@@ -460,7 +565,10 @@ def _protected_submit_source_is_current(
             == command_table.c.protected_submit_attempt_id,
             attempts.c.status == "submit_prepared",
             attempts.c.submit_allowed.is_(True),
-            attempts.c.exchange_write_called.is_(False),
+            sa.or_(
+                attempts.c.exchange_write_called.is_(False),
+                command_table.c.order_role.in_(("SL", "TP1")),
+            ),
             tickets.c.ticket_id == command_table.c.ticket_id,
             tickets.c.expires_at_ms > now_ms,
             tickets.c.status.not_in(("expired", "invalidated", "superseded", "closed")),
@@ -539,6 +647,10 @@ def record_exchange_command_outcome(
     exchange_result: dict[str, Any],
     now_ms: int,
 ) -> dict[str, Any]:
+    table = _table(conn)
+    existing = conn.execute(
+        sa.select(table).where(table.c.exchange_command_id == exchange_command_id)
+    ).mappings().one()
     updates = {
         "exchange_result": _json_safe(exchange_result),
         "exchange_order_id": _optional_text(
@@ -554,6 +666,15 @@ def record_exchange_command_outcome(
         else None,
         "updated_at_ms": now_ms,
     }
+    updates.update(
+        _typed_exchange_result_updates(
+            table=table,
+            command=dict(existing),
+            exchange_result=exchange_result,
+            target_state=target_state,
+            now_ms=now_ms,
+        )
+    )
     return _transition(
         conn,
         exchange_command_id=exchange_command_id,
@@ -561,6 +682,60 @@ def record_exchange_command_outcome(
         outcome_class=outcome_class,
         updates=updates,
     )
+
+
+def _typed_exchange_result_updates(
+    *,
+    table: sa.Table,
+    command: dict[str, Any],
+    exchange_result: dict[str, Any],
+    target_state: ExchangeCommandState,
+    now_ms: int,
+) -> dict[str, Any]:
+    """Persist exact result facts only when the schema can represent them."""
+
+    columns = set(table.c.keys())
+    if not {
+        "exchange_order_status",
+        "executed_qty",
+        "average_exec_price",
+        "exchange_observed_at_ms",
+        "result_facts_complete",
+    } <= columns:
+        return {}
+
+    executed_qty = _optional_nonnegative_decimal(
+        exchange_result.get("filled_qty")
+    )
+    average_exec_price = _optional_decimal(
+        exchange_result.get("average_exec_price")
+    )
+    if executed_qty is not None:
+        requested_qty = _required_decimal(command.get("amount"), "amount")
+        if executed_qty > requested_qty:
+            raise ValueError("exchange_command_executed_qty_exceeds_amount")
+    exchange_order_status = _optional_text(
+        exchange_result.get("exchange_order_status")
+    ) or target_state.value
+    observed_at_ms = exchange_result.get("exchange_observed_at_ms") or now_ms
+    try:
+        observed_at_ms = int(observed_at_ms)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("exchange_command_observed_at_invalid") from exc
+    entry_result_complete = (
+        str(command.get("order_role") or "") != "ENTRY"
+        or (
+            executed_qty is not None
+            and (executed_qty == 0 or average_exec_price is not None)
+        )
+    )
+    return {
+        "exchange_order_status": exchange_order_status,
+        "executed_qty": executed_qty,
+        "average_exec_price": average_exec_price,
+        "exchange_observed_at_ms": observed_at_ms,
+        "result_facts_complete": entry_result_complete,
+    }
 
 
 def command_request_fingerprint(order: dict[str, Any]) -> str:
@@ -695,6 +870,18 @@ def _optional_decimal(value: Any) -> Decimal | None:
     if value in {None, ""}:
         return None
     return _required_decimal(value, "optional_decimal")
+
+
+def _optional_nonnegative_decimal(value: Any) -> Decimal | None:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("exchange_command_nonnegative_decimal_invalid") from exc
+    if parsed < 0:
+        raise ValueError("exchange_command_nonnegative_decimal_invalid")
+    return parsed
 
 
 def _decimal_text(value: Any) -> str:

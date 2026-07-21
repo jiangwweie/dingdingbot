@@ -320,8 +320,9 @@ def _insert_or_verify(
         if str(existing.get("request_fingerprint") or "") != fingerprint:
             raise ValueError("lifecycle_exchange_command_fingerprint_mismatch")
         return dict(existing)
-    conn.execute(table.insert().values(**row))
-    return row
+    persisted_row = {key: value for key, value in row.items() if key in table.c}
+    conn.execute(table.insert().values(**persisted_row))
+    return persisted_row
 
 
 def _row_by_id(

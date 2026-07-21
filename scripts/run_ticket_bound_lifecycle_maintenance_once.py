@@ -244,6 +244,7 @@ async def _amain(argv: list[str] | None = None) -> int:
                     lease_ms=args.command_lease_ms,
                     command_sources=LIFECYCLE_MUTATION_COMMAND_SOURCES,
                     dispatch_timeout_seconds=dispatch_timeout,
+                    drain_initial_protection=True,
                 )
             _remaining_seconds(deadline_at, "durable_exchange_command_result")
 
@@ -748,7 +749,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--account-risk-base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--account-risk-timeout-seconds", type=float, default=12.0)
-    parser.add_argument("--command-lease-ms", type=int, default=15_000)
+    parser.add_argument("--command-lease-ms", type=int, default=35_000)
     parser.add_argument("--global-deadline-seconds", type=float, default=28.0)
     args = parser.parse_args(argv)
     if args.global_deadline_seconds <= 0:

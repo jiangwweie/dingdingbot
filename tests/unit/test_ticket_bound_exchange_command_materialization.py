@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+# ruff: noqa: F401, F811
+
 from copy import deepcopy
 
 import pytest
 from sqlalchemy import text
 
-from scripts import materialize_ticket_bound_protected_submit_attempt as submit
 from src.application.action_time.exchange_command import (
     materialize_ticket_bound_exchange_commands,
 )
@@ -37,10 +38,16 @@ def test_real_submit_prepare_commits_entry_sl_tp1_commands(
         row["account_id"] == "owner-subaccount-runtime-v0"
         for row in commands
     )
-    assert all(
-        row["exchange_instrument_id"] == "binance_usdm:ETH/USDT:USDT"
-        for row in commands
-    )
+    ticket_exchange_instrument_id = pg_control_connection.execute(
+        text(
+            "SELECT exchange_instrument_id FROM brc_action_time_tickets "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": prepared["ticket_id"]},
+    ).scalar_one()
+    assert {
+        row["exchange_instrument_id"] for row in commands
+    } == {ticket_exchange_instrument_id}
     assert {row["exposure_episode_id"] for row in commands} == {"episode-test-1"}
     assert all(row["gateway_symbol"] == "ETH/USDT:USDT" for row in commands)
     tp1 = next(row for row in commands if row["order_role"] == "TP1")

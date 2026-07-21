@@ -1,26 +1,36 @@
 ---
 title: P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN
-status: ACTIVE_PRODUCTION_REMEDIATION_DESIGN
+status: DEPLOYED_SIGNAL_TO_TICKET_COMPONENT_BASELINE
 authority: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md
 program_id: P0-ACH
 baseline_commit: 60999176
-current_runtime_commit: 2548318018f1e67b8dfe820556b0e71103b4580f
-current_schema_revision: 142
+current_runtime_commit: 8c61a208062520a5c426e2151e4692e256fec5dd
+current_schema_revision: 143
 last_verified: 2026-07-21
 target_state: natural_signal_ticket_to_trade_certified
 r7_supplement: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN.md
+post_ticket_successor: docs/current/P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_DESIGN.md
 owner_policy_change: none
 exchange_write_authority: unchanged
 ---
 
 # P0 多仓位端到端执行收敛设计
 
+## Current Post-Ticket Authority Notice
+
+本设计继续作为 **Signal-to-Ticket、双仓位隔离与端到端身份收敛** 的当前组件设计。
+对于 Ticket 已创建后的 durable command、early failure、exact fill、Initial Stop、lease、
+monitor 和 hot-path 性能，当前权威已由
+`P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_DESIGN.md`
+接管；冲突时以后者为准。
+
 ## 0. 2026-07-21 自然信号生产复盘覆盖
 
 ### 0.1 覆盖关系
 
-本节是 **2026-07-21 当前生产证据覆盖**。当本节与后文基于
-`60999176` 的阶段判断、Owner 确认门或旧 first blocker 冲突时，以本节为准。
+本节是 **2026-07-21 R10 生产事件的历史输入证据**。它解释 R10 的来源，但不再是
+当前 runtime/head、post-Ticket first blocker 或部署门的权威。当前 runtime 与
+Ticket-to-`open_protected` 结论以本文件顶部 successor 和当前 PG/runtime evidence 为准；
 后文的 Signal-to-exit 不变量、删除优先原则和 R0-R9 设计继续有效。
 
 当前工程结论为：**Ticket issuer 已接入生产编排，但自然信号链仍未闭合**。
