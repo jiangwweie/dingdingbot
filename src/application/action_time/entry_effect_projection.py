@@ -8,7 +8,14 @@ from typing import Any
 
 import sqlalchemy as sa
 
+from src.application.action_time.exchange_command import (
+    record_exchange_command_outcome,
+)
 from src.domain.entry_effect import EntryEffectDecision, classify_entry_effect
+from src.domain.ticket_bound_exchange_command import (
+    ExchangeCommandOutcomeClass,
+    ExchangeCommandState,
+)
 
 
 AUTHORITY_BOUNDARY = (
@@ -49,16 +56,26 @@ def project_entry_effect(
             "entry_effect_protected_submit_attempt_id_missing"
         )
     attempt_table = _table(conn, "brc_ticket_bound_protected_submit_attempts")
-    attempt = conn.execute(
-        sa.select(attempt_table).where(
-            attempt_table.c.protected_submit_attempt_id == attempt_id
+    attempt = (
+        conn.execute(
+            sa.select(attempt_table).where(
+                attempt_table.c.protected_submit_attempt_id == attempt_id
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     attempt_row = dict(attempt)
     _update_attempt(
         conn,
         table=attempt_table,
         attempt=attempt_row,
+        decision=decision,
+        now_ms=now_ms,
+    )
+    _terminalize_non_filled_protection_siblings(
+        conn,
+        command=command,
         decision=decision,
         now_ms=now_ms,
     )
@@ -94,6 +111,273 @@ def project_entry_effect(
     return decision
 
 
+def _terminalize_non_filled_protection_siblings(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+    decision: EntryEffectDecision,
+    now_ms: int,
+) -> None:
+    state = decision.entry_effect_state.value
+    if state not in {"accepted_zero_fill", "outcome_unknown"}:
+        return
+    commands = _table(conn, "brc_ticket_bound_exchange_commands")
+    siblings = (
+        conn.execute(
+            sa.select(commands).where(
+                commands.c.protected_submit_attempt_id
+                == command.get("protected_submit_attempt_id"),
+                commands.c.order_role.in_(("SL", "TP1")),
+                commands.c.command_state == "prepared",
+            )
+        )
+        .mappings()
+        .all()
+    )
+    for sibling in siblings:
+        role = str(sibling["order_role"])
+        hard_stop = state == "outcome_unknown" and role == "SL"
+        reason = (
+            "entry_filled_qty_missing_or_unknown_blocks_initial_protection"
+            if hard_stop
+            else "entry_has_no_confirmed_protection_quantity"
+        )
+        record_exchange_command_outcome(
+            conn,
+            exchange_command_id=str(sibling["exchange_command_id"]),
+            target_state=(
+                ExchangeCommandState.HARD_STOPPED
+                if hard_stop
+                else ExchangeCommandState.RECONCILED_ABSENT
+            ),
+            outcome_class=(
+                ExchangeCommandOutcomeClass.CONTRADICTORY_TRUTH
+                if hard_stop
+                else ExchangeCommandOutcomeClass.RECONCILED_ABSENCE
+            ),
+            exchange_result={
+                "error_code": (
+                    "entry_filled_qty_zero_no_protection_dispatch"
+                    if state == "accepted_zero_fill"
+                    else reason
+                ),
+                "error_message": reason,
+                "exchange_write_called": False,
+            },
+            now_ms=now_ms,
+        )
+
+
+def project_protection_result(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+    now_ms: int,
+) -> None:
+    """Project exact-source initial-stop truth in the result transaction."""
+
+    if (
+        str(command.get("command_source") or "") != "protected_submit"
+        or str(command.get("order_role") or "").upper() != "SL"
+    ):
+        return
+    attempt_id = str(command.get("protected_submit_attempt_id") or "")
+    table = _table(conn, "brc_ticket_bound_protected_submit_attempts")
+    attempt = (
+        conn.execute(
+            sa.select(table).where(table.c.protected_submit_attempt_id == attempt_id)
+        )
+        .mappings()
+        .one()
+    )
+    _restore_submitted_ticket_for_effect_active_attempt(
+        conn,
+        attempt=dict(attempt),
+        command=command,
+        now_ms=now_ms,
+    )
+    current_barrier = str(attempt.get("protection_barrier_state") or "not_started")
+    state = str(command.get("command_state") or "")
+    submitted = state in {"confirmed_submitted", "reconciled_submitted"}
+    if submitted:
+        commands = _table(conn, "brc_ticket_bound_exchange_commands")
+        entry = (
+            conn.execute(
+                sa.select(commands).where(
+                    commands.c.protected_submit_attempt_id == attempt_id,
+                    commands.c.order_role == "ENTRY",
+                )
+            )
+            .mappings()
+            .one()
+        )
+        blockers = _initial_stop_confirmation_blockers(
+            command=command,
+            attempt=dict(attempt),
+            entry=dict(entry),
+        )
+        if blockers:
+            raise EntryEffectProjectionError(blockers[0])
+        if current_barrier == "initial_stop_pending":
+            conn.execute(
+                table.update()
+                .where(table.c.protected_submit_attempt_id == attempt_id)
+                .values(
+                    protection_barrier_state="initial_stop_confirmed",
+                    initial_stop_confirmed_at_ms=(
+                        attempt.get("initial_stop_confirmed_at_ms") or now_ms
+                    ),
+                    updated_at_ms=max(
+                        int(attempt.get("updated_at_ms") or 0),
+                        now_ms,
+                    ),
+                )
+            )
+        return
+    if state in {"confirmed_rejected", "outcome_unknown", "hard_stopped"} and (
+        current_barrier in {"not_started", "fill_pending", "initial_stop_pending"}
+    ):
+        conn.execute(
+            table.update()
+            .where(table.c.protected_submit_attempt_id == attempt_id)
+            .values(
+                protection_barrier_state="hard_stopped",
+                updated_at_ms=max(
+                    int(attempt.get("updated_at_ms") or 0),
+                    now_ms,
+                ),
+            )
+        )
+
+
+def _restore_submitted_ticket_for_effect_active_attempt(
+    conn: sa.engine.Connection,
+    *,
+    attempt: dict[str, Any],
+    command: dict[str, Any],
+    now_ms: int,
+) -> None:
+    """Repair an expired pre-submit projection after ENTRY effect is durable."""
+
+    if str(attempt.get("entry_effect_state") or "") not in {
+        "accepted_filled",
+        "accepted_zero_fill",
+        "outcome_unknown",
+    }:
+        return
+    tickets = _table(conn, "brc_action_time_tickets")
+    ticket = (
+        conn.execute(
+            sa.select(tickets).where(tickets.c.ticket_id == attempt["ticket_id"])
+        )
+        .mappings()
+        .one()
+    )
+    if str(ticket["status"]) != "expired":
+        return
+    conn.execute(
+        tickets.update()
+        .where(
+            tickets.c.ticket_id == attempt["ticket_id"],
+            tickets.c.status == "expired",
+        )
+        .values(status="submitted")
+    )
+    events = _table(conn, "brc_action_time_ticket_events")
+    event_id = _stable_id(
+        "entry_effect_ticket_repair_event",
+        str(attempt["ticket_id"]),
+        str(command["exchange_command_id"]),
+    )
+    if conn.execute(
+        sa.select(events.c.ticket_event_id).where(events.c.ticket_event_id == event_id)
+    ).first():
+        return
+    conn.execute(
+        events.insert().values(
+            ticket_event_id=event_id,
+            ticket_id=attempt["ticket_id"],
+            action_time_lane_input_id=attempt["action_time_lane_input_id"],
+            from_status="expired",
+            to_status="submitted",
+            transition_reason="entry_effect_prevents_ticket_expiration",
+            trigger_ref=str(command["exchange_command_id"]),
+            writer="entry_effect_projection",
+            event_payload={
+                "protected_submit_attempt_id": attempt["protected_submit_attempt_id"],
+                "entry_effect_state": attempt["entry_effect_state"],
+            },
+            occurred_at_ms=now_ms,
+            created_at_ms=now_ms,
+        )
+    )
+
+
+def _initial_stop_confirmation_blockers(
+    *,
+    command: dict[str, Any],
+    attempt: dict[str, Any],
+    entry: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    attempt_id = str(attempt.get("protected_submit_attempt_id") or "")
+    if str(command.get("source_command_id") or "") != attempt_id:
+        blockers.append("initial_stop_source_attempt_mismatch")
+    if (
+        str(entry.get("source_command_id") or "") != attempt_id
+        or str(entry.get("protected_submit_attempt_id") or "") != attempt_id
+        or str(entry.get("command_state") or "")
+        not in {"confirmed_submitted", "reconciled_submitted"}
+        or entry.get("result_facts_complete") not in {True, 1}
+    ):
+        blockers.append("initial_stop_entry_predecessor_invalid")
+    if str(command.get("outcome_class") or "") not in {
+        "exchange_accepted",
+        "reconciled_exchange_truth",
+    } or not str(command.get("exchange_order_id") or ""):
+        blockers.append("initial_stop_exchange_acceptance_invalid")
+    if str(attempt.get("entry_effect_state") or "") != "accepted_filled":
+        blockers.append("initial_stop_entry_effect_not_filled")
+    if str(attempt.get("protection_barrier_state") or "") not in {
+        "initial_stop_pending",
+        "initial_stop_confirmed",
+        "degraded",
+        "hard_stopped",
+        "closed",
+    }:
+        blockers.append("initial_stop_barrier_phase_invalid")
+    if str(command.get("command_kind") or "") != "place_order":
+        blockers.append("initial_stop_command_kind_invalid")
+    if (
+        command.get("reduce_only") not in {True, 1}
+        or str(command.get("reduce_intent") or "") != "reduce_position"
+    ):
+        blockers.append("initial_stop_reduce_intent_invalid")
+    expected = _decimal_or_none(attempt.get("protection_quantity"))
+    actual = _decimal_or_none(command.get("amount"))
+    if expected is None or expected <= 0 or actual != expected:
+        blockers.append("initial_stop_protection_quantity_mismatch")
+    entry_quantity = _decimal_or_none(entry.get("executed_qty"))
+    if entry_quantity != expected:
+        blockers.append("initial_stop_entry_quantity_mismatch")
+    for field in (
+        "ticket_id",
+        "account_id",
+        "exchange_id",
+        "exchange_instrument_id",
+        "exposure_episode_id",
+        "gateway_symbol",
+        "side",
+        "position_mode",
+        "position_side",
+        "position_bucket",
+        "netting_domain_key",
+    ):
+        if entry.get(field) != command.get(field):
+            blockers.append(f"initial_stop_entry_identity_mismatch:{field}")
+    return blockers
+
+
 def _restore_effect_capacity_if_expiration_won(
     conn: sa.engine.Connection,
     *,
@@ -102,11 +386,15 @@ def _restore_effect_capacity_if_expiration_won(
     now_ms: int,
 ) -> None:
     reservations = _table(conn, "brc_budget_reservations")
-    reservation = conn.execute(
-        sa.select(reservations).where(
-            reservations.c.ticket_id == attempt["ticket_id"]
+    reservation = (
+        conn.execute(
+            sa.select(reservations).where(
+                reservations.c.ticket_id == attempt["ticket_id"]
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if reservation is None or str(reservation["status"]) != "released":
         return
     reservation_id = str(reservation["budget_reservation_id"])
@@ -121,9 +409,7 @@ def _restore_effect_capacity_if_expiration_won(
             release_reason=None,
             released_at_ms=None,
             reconciliation_state="pending",
-            current_first_blocker=(
-                "entry_effect_capacity_revalidation_required"
-            ),
+            current_first_blocker=("entry_effect_capacity_revalidation_required"),
         )
         .returning(reservations.c.budget_reservation_id)
     ).first()
@@ -181,9 +467,15 @@ def _project_authoritative_rejection(
         )
     )
     ticket_table = _table(conn, "brc_action_time_tickets")
-    ticket = conn.execute(
-        sa.select(ticket_table).where(ticket_table.c.ticket_id == attempt["ticket_id"])
-    ).mappings().one()
+    ticket = (
+        conn.execute(
+            sa.select(ticket_table).where(
+                ticket_table.c.ticket_id == attempt["ticket_id"]
+            )
+        )
+        .mappings()
+        .one()
+    )
     prior_status = str(ticket["status"])
     if prior_status in {"finalgate_ready", "expired"}:
         conn.execute(
@@ -232,9 +524,7 @@ def _project_authoritative_rejection(
             trigger_ref=str(command["exchange_command_id"]),
             writer="entry_effect_projection",
             event_payload={
-                "protected_submit_attempt_id": attempt[
-                    "protected_submit_attempt_id"
-                ],
+                "protected_submit_attempt_id": attempt["protected_submit_attempt_id"],
                 "entry_effect_state": "rejected",
             },
             occurred_at_ms=now_ms,
@@ -264,21 +554,20 @@ def _update_attempt(
         "exchange_write_called": True,
         "updated_at_ms": max(int(attempt.get("updated_at_ms") or 0), now_ms),
     }
-    current_barrier = str(
-        attempt.get("protection_barrier_state") or "not_started"
-    )
+    current_barrier = str(attempt.get("protection_barrier_state") or "not_started")
     if current_barrier in {
         "not_started",
         "fill_pending",
         "initial_stop_pending",
     }:
-        values["protection_barrier_state"] = (
-            decision.protection_barrier_state.value
-        )
+        values["protection_barrier_state"] = decision.protection_barrier_state.value
         values["protection_quantity"] = decision.protection_quantity
     conn.execute(
         table.update()
-        .where(table.c.protected_submit_attempt_id == attempt["protected_submit_attempt_id"])
+        .where(
+            table.c.protected_submit_attempt_id
+            == attempt["protected_submit_attempt_id"]
+        )
         .values(**values)
     )
 
@@ -292,9 +581,15 @@ def _project_ticket_and_handoff(
     now_ms: int,
 ) -> None:
     ticket_table = _table(conn, "brc_action_time_tickets")
-    ticket = conn.execute(
-        sa.select(ticket_table).where(ticket_table.c.ticket_id == attempt["ticket_id"])
-    ).mappings().one()
+    ticket = (
+        conn.execute(
+            sa.select(ticket_table).where(
+                ticket_table.c.ticket_id == attempt["ticket_id"]
+            )
+        )
+        .mappings()
+        .one()
+    )
     prior_status = str(ticket["status"])
     if prior_status not in {"finalgate_ready", "expired", "submitted"}:
         raise EntryEffectProjectionError(
@@ -341,9 +636,7 @@ def _project_ticket_and_handoff(
             trigger_ref=str(command["exchange_command_id"]),
             writer="entry_effect_projection",
             event_payload={
-                "protected_submit_attempt_id": attempt[
-                    "protected_submit_attempt_id"
-                ],
+                "protected_submit_attempt_id": attempt["protected_submit_attempt_id"],
                 "entry_effect_state": decision.entry_effect_state.value,
             },
             occurred_at_ms=now_ms,
@@ -364,9 +657,11 @@ def _project_lifecycle(
         return
     table = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
     run_id = _stable_id("ticket_order_lifecycle", str(attempt["ticket_id"]))
-    existing = conn.execute(
-        sa.select(table).where(table.c.lifecycle_run_id == run_id)
-    ).mappings().first()
+    existing = (
+        conn.execute(sa.select(table).where(table.c.lifecycle_run_id == run_id))
+        .mappings()
+        .first()
+    )
     row = {
         "lifecycle_run_id": run_id,
         "ticket_id": str(attempt["ticket_id"]),
@@ -407,7 +702,9 @@ def _project_lifecycle(
         conn.execute(
             table.update()
             .where(table.c.lifecycle_run_id == run_id)
-            .values(**{key: value for key, value in row.items() if key != "created_at_ms"})
+            .values(
+                **{key: value for key, value in row.items() if key != "created_at_ms"}
+            )
         )
     event_table = _table(conn, "brc_ticket_bound_lifecycle_events")
     event_id = _stable_id(

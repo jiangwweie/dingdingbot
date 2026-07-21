@@ -21,6 +21,47 @@ class ExchangeCommandModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ExchangeCommandClaimScope(ExchangeCommandModel):
+    """Typed boundary for selecting one durable exchange command.
+
+    A claim scope is an authority input, not an unstructured scheduler hint.
+    Exact protection continuation therefore carries its source, Attempt, phase,
+    command kind, and optional netting domain as one immutable value.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    command_sources: tuple[
+        Literal[
+            "protected_submit",
+            "protection_recovery",
+            "runner_mutation",
+            "orphan_cleanup",
+            "exit_policy_runner",
+            "exit_policy_close",
+            "exit_policy_tp1_reprice",
+        ],
+        ...,
+    ] = Field(min_length=1)
+    source_command_id: Optional[str] = Field(default=None, min_length=1, max_length=192)
+    protected_submit_attempt_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=192,
+    )
+    allowed_roles: Optional[
+        tuple[Literal["ENTRY", "SL", "TP1", "RUNNER_SL", "FINAL_EXIT"], ...]
+    ] = Field(default=None, min_length=1)
+    allowed_command_kinds: Optional[
+        tuple[Literal["place_order", "cancel_order"], ...]
+    ] = Field(default=None, min_length=1)
+    netting_domain_key: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=640,
+    )
+
+
 class ExchangeCommandState(str, Enum):
     PREPARED = "prepared"
     DISPATCHING = "dispatching"
@@ -83,7 +124,10 @@ def required_exchange_order_lookup_view(
     order_type = request.order_type.lower()
     if order_role in {"SL", "RUNNER_SL"} and order_type == "stop_market":
         return ExchangeOrderLookupView.CONDITIONAL_ALGO_ORDER
-    if order_role in {"ENTRY", "TP1", "RUNNER_SL", "FINAL_EXIT"} and order_type != "stop_market":
+    if (
+        order_role in {"ENTRY", "TP1", "RUNNER_SL", "FINAL_EXIT"}
+        and order_type != "stop_market"
+    ):
         return ExchangeOrderLookupView.REGULAR_ORDER
     raise ValueError("unsupported Binance command role/type lookup combination")
 
@@ -189,22 +233,23 @@ class TicketBoundExchangeCommand(ExchangeCommandModel):
         if self.command_state in submitted_states and not self.exchange_order_id:
             raise ValueError("submitted command requires exchange_order_id")
         if self.command_state == ExchangeCommandState.CONFIRMED_REJECTED and (
-            self.outcome_class
-            != ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION
+            self.outcome_class != ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION
         ):
-            raise ValueError(
-                "confirmed rejection requires authoritative rejection"
-            )
+            raise ValueError("confirmed rejection requires authoritative rejection")
         if self.executed_qty is not None and self.executed_qty > self.amount:
             raise ValueError("executed quantity exceeds command amount")
-        if self.executed_qty is not None and self.executed_qty > 0 and (
-            self.average_exec_price is None
+        if (
+            self.executed_qty is not None
+            and self.executed_qty > 0
+            and (self.average_exec_price is None)
         ):
             raise ValueError("executed quantity requires average execution price")
         if self.result_facts_complete and (
             not self.exchange_order_status or self.exchange_observed_at_ms is None
         ):
-            raise ValueError("complete result facts require status and observation time")
+            raise ValueError(
+                "complete result facts require status and observation time"
+            )
         if self.position_mode == "one_way" and (
             self.position_side is not None or self.position_bucket != "BOTH"
         ):
@@ -253,9 +298,7 @@ def validate_tp1_execution_contract(
         raise ValueError("tp1_requires_limit_price")
     if market_fallback_allowed:
         raise ValueError("tp1_market_fallback_forbidden")
-    if execution_style == "limit_gtc" and (
-        time_in_force != "GTC" or post_only
-    ):
+    if execution_style == "limit_gtc" and (time_in_force != "GTC" or post_only):
         raise ValueError("tp1_gtc_contract_invalid")
     if execution_style == "passive_limit_gtx" and (
         time_in_force != "GTX" or not post_only
@@ -326,9 +369,7 @@ def command_transition_blockers(
     accepted = required_outcomes.get(target)
     if accepted is not None and outcome_class not in accepted:
         if target == ExchangeCommandState.CONFIRMED_REJECTED:
-            blockers.append(
-                "confirmed_rejected_requires_authoritative_rejection"
-            )
+            blockers.append("confirmed_rejected_requires_authoritative_rejection")
         else:
             blockers.append("exchange_command_outcome_class_mismatch")
     return blockers

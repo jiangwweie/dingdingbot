@@ -1801,7 +1801,8 @@ def test_r12_process_restart_recovers_same_source_sl_after_ticket_expiry(
         recovered_attempt = dict(
             conn.execute(
                 text(
-                    "SELECT protected_submit_attempt_id, ticket_id "
+                    "SELECT protected_submit_attempt_id, ticket_id, "
+                    "protection_barrier_state, initial_stop_confirmed_at_ms "
                     "FROM brc_ticket_bound_protected_submit_attempts "
                     "WHERE protected_submit_attempt_id = :attempt_id"
                 ),
@@ -1809,7 +1810,7 @@ def test_r12_process_restart_recovers_same_source_sl_after_ticket_expiry(
             ).mappings().one()
         )
 
-    assert ticket_status == "expired"
+    assert ticket_status == "submitted"
     assert recovered_rows["ENTRY"]["exchange_command_id"] == entry_identity[
         "exchange_command_id"
     ]
@@ -1821,6 +1822,8 @@ def test_r12_process_restart_recovers_same_source_sl_after_ticket_expiry(
     assert recovered_attempt == {
         "protected_submit_attempt_id": attempt_id,
         "ticket_id": ids["ticket_id"],
+        "protection_barrier_state": "initial_stop_confirmed",
+        "initial_stop_confirmed_at_ms": NOW_MS + 5_001,
     }
     assert recovered_rows["ENTRY"]["execution_attempt_count"] == 1
     assert recovered_rows["SL"]["command_state"] == "confirmed_submitted"

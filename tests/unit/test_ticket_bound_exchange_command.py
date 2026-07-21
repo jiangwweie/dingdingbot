@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -12,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
 from src.domain.ticket_bound_exchange_command import (
+    ExchangeCommandClaimScope,
     ExchangeCommandOutcomeClass,
     ExchangeCommandState,
     TicketBoundExchangeCommand,
@@ -21,6 +23,33 @@ from src.domain.ticket_bound_exchange_command import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_exchange_command_claim_scope_is_typed_and_frozen():
+    scope = ExchangeCommandClaimScope(
+        command_sources=("protected_submit",),
+        source_command_id="attempt-1",
+        protected_submit_attempt_id="attempt-1",
+        allowed_roles=("SL",),
+        allowed_command_kinds=("place_order",),
+        netting_domain_key=("account-1|binance_usdm:ETH/USDT:USDT|one_way|BOTH"),
+    )
+
+    assert scope.allowed_roles == ("SL",)
+    with pytest.raises(ValidationError):
+        scope.allowed_roles = ("TP1",)
+
+
+def test_exchange_command_claim_scope_rejects_loose_or_invalid_phase_values():
+    with pytest.raises(ValueError):
+        ExchangeCommandClaimScope(command_sources=())
+    with pytest.raises(ValueError):
+        ExchangeCommandClaimScope(
+            command_sources=("protected_submit",),
+            allowed_roles=("ENTRY", "UNKNOWN"),
+        )
+
+
 FOUNDATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
@@ -69,9 +98,7 @@ def test_command_models_typed_exchange_result_facts_and_rejects_oversized_fill()
     assert str(command.executed_qty) == "0.25"
     assert str(command.average_exec_price) == "2100"
     with pytest.raises(ValueError, match="executed quantity exceeds command amount"):
-        TicketBoundExchangeCommand.model_validate(
-            {**payload, "executed_qty": "0.26"}
-        )
+        TicketBoundExchangeCommand.model_validate({**payload, "executed_qty": "0.26"})
 
 
 def test_tp1_command_rejects_market_or_missing_limit_contract():
@@ -85,7 +112,9 @@ def test_tp1_command_rejects_market_or_missing_limit_contract():
 
 
 def test_command_rejects_drifted_netting_domain_identity():
-    with pytest.raises(ValueError, match="ticket_command_netting_domain_identity_mismatch"):
+    with pytest.raises(
+        ValueError, match="ticket_command_netting_domain_identity_mismatch"
+    ):
         TicketBoundExchangeCommand.model_validate(
             _tp1_command(netting_domain_key="account-1|ETHUSDT|one_way|BOTH")
         )
@@ -172,9 +201,7 @@ def _tp1_command(**overrides):
         "position_mode": "one_way",
         "position_side": None,
         "position_bucket": "BOTH",
-        "netting_domain_key": (
-            "account-1|binance_usdm:ETH/USDT:USDT|one_way|BOTH"
-        ),
+        "netting_domain_key": ("account-1|binance_usdm:ETH/USDT:USDT|one_way|BOTH"),
         "command_kind": "place_order",
         "command_source": "protected_submit",
         "source_command_id": "attempt-1",
@@ -258,9 +285,7 @@ def test_migration_105_creates_normalized_exchange_command_table():
         inspector = sa.inspect(conn)
         columns = {
             column["name"]
-            for column in inspector.get_columns(
-                "brc_ticket_bound_exchange_commands"
-            )
+            for column in inspector.get_columns("brc_ticket_bound_exchange_commands")
         }
         assert {
             "exchange_command_id",

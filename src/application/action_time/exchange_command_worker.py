@@ -14,7 +14,10 @@ from src.application.action_time.exchange_command import (
     expire_stale_exchange_command_claims,
     record_claimed_exchange_command_outcome,
 )
-from src.application.action_time.entry_effect_projection import project_entry_effect
+from src.application.action_time.entry_effect_projection import (
+    project_entry_effect,
+    project_protection_result,
+)
 from src.application.action_time.lifecycle_exchange_command_completion import (
     apply_completed_lifecycle_exchange_sources,
     apply_failed_lifecycle_exchange_source,
@@ -27,6 +30,7 @@ from src.application.action_time.netting_domain_hold import (
 )
 from src.domain.exceptions import InsufficientMarginError, InvalidOrderError
 from src.domain.ticket_bound_exchange_command import (
+    ExchangeCommandClaimScope,
     ExchangeCommandOutcomeClass,
     ExchangeCommandState,
     validate_tp1_execution_contract,
@@ -44,6 +48,11 @@ async def run_one_ticket_bound_exchange_command(
     lease_ms: int = 15_000,
     now_ms: int | None = None,
     command_sources: tuple[str, ...],
+    source_command_id: str | None = None,
+    protected_submit_attempt_id: str | None = None,
+    allowed_roles: tuple[str, ...] | None = None,
+    allowed_command_kinds: tuple[str, ...] | None = None,
+    netting_domain_key: str | None = None,
     dispatch_timeout_seconds: float | None = None,
     drain_initial_protection: bool = False,
 ) -> dict[str, Any]:
@@ -59,13 +68,21 @@ async def run_one_ticket_bound_exchange_command(
         lease_ms=lease_ms,
         dispatch_timeout_seconds=dispatch_timeout_seconds,
     )
+    claim_scope = ExchangeCommandClaimScope(
+        command_sources=command_sources,
+        source_command_id=source_command_id,
+        protected_submit_attempt_id=protected_submit_attempt_id,
+        allowed_roles=allowed_roles,
+        allowed_command_kinds=allowed_command_kinds,
+        netting_domain_key=netting_domain_key,
+    )
     primary = await _run_one_ticket_bound_exchange_command(
         engine,
         gateway=gateway,
         worker_id=worker_id,
         lease_ms=lease_ms,
         now_ms=now_ms,
-        command_sources=command_sources,
+        claim_scope=claim_scope,
         dispatch_timeout_seconds=dispatch_timeout_seconds,
     )
     if not (
@@ -82,7 +99,12 @@ async def run_one_ticket_bound_exchange_command(
         if dispatch_timeout_seconds is not None
         else None
     )
-    for index in range(2):
+    drain_roles = ["SL"]
+    if allowed_roles is None or "TP1" in allowed_roles:
+        drain_roles.append("TP1")
+    if allowed_roles is not None and "SL" not in allowed_roles:
+        drain_roles = []
+    for index, role in enumerate(drain_roles):
         timeout = dispatch_timeout_seconds
         if deadline_at is not None:
             timeout = max(0.001, deadline_at - time.monotonic())
@@ -92,20 +114,19 @@ async def run_one_ticket_bound_exchange_command(
             worker_id=f"{worker_id}:initial-protection:{index}",
             lease_ms=lease_ms,
             now_ms=(now_ms + index + 1) if now_ms is not None else None,
-            command_sources=("protected_submit",),
+            claim_scope=ExchangeCommandClaimScope(
+                command_sources=("protected_submit",),
+                source_command_id=str(primary.get("source_command_id") or ""),
+                protected_submit_attempt_id=str(
+                    primary.get("protected_submit_attempt_id") or ""
+                ),
+                allowed_roles=(role,),
+                allowed_command_kinds=("place_order",),
+                netting_domain_key=str(primary.get("netting_domain_key") or ""),
+            ),
             dispatch_timeout_seconds=timeout,
         )
         if next_result.get("status") == "no_prepared_command":
-            with engine.begin() as conn:
-                completion = apply_completed_lifecycle_exchange_sources(
-                    conn,
-                    now_ms=(now_ms + index + 1) if now_ms is not None else int(
-                        time.time() * 1000
-                    ),
-                    source_command_id=str(primary.get("source_command_id") or ""),
-                )
-            if completion:
-                drained.extend(completion)
             break
         drained.append(next_result)
         if next_result.get("status") != "command_confirmed":
@@ -114,9 +135,7 @@ async def run_one_ticket_bound_exchange_command(
         **primary,
         "initial_protection_drain": drained,
         "initial_protection_complete": any(
-            item.get("order_role") == "SL"
-            and item.get("status") == "command_confirmed"
-            for item in drained
+            _matches_initial_stop(primary=primary, candidate=item) for item in drained
         ),
     }
 
@@ -128,7 +147,7 @@ async def _run_one_ticket_bound_exchange_command(
     worker_id: str,
     lease_ms: int = 15_000,
     now_ms: int | None = None,
-    command_sources: tuple[str, ...],
+    claim_scope: ExchangeCommandClaimScope,
     dispatch_timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Claim -> commit -> exchange I/O -> commit result.
@@ -156,7 +175,7 @@ async def _run_one_ticket_bound_exchange_command(
                 claim_owner=worker_id,
                 now_ms=now_ms,
                 lease_ms=lease_ms,
-                command_sources=command_sources,
+                claim_scope=claim_scope,
             )
         )
         capability = lifecycle_mutation_capability_decision(conn)
@@ -178,9 +197,7 @@ async def _run_one_ticket_bound_exchange_command(
             ],
             "exchange_write_called": False,
             "blockers": (
-                ["exchange_command_outcome_unknown"]
-                if expired
-                else capability_blockers
+                ["exchange_command_outcome_unknown"] if expired else capability_blockers
             ),
         }
 
@@ -201,6 +218,7 @@ async def _run_one_ticket_bound_exchange_command(
                 },
                 now_ms=now_ms,
             )
+            project_protection_result(conn, command=recorded, now_ms=now_ms)
             upsert_exchange_command_domain_hold(
                 conn,
                 command=recorded,
@@ -247,6 +265,7 @@ async def _run_one_ticket_bound_exchange_command(
                 now_ms=now_ms,
             )
             project_entry_effect(conn, command=recorded, now_ms=now_ms)
+            project_protection_result(conn, command=recorded, now_ms=now_ms)
             upsert_exchange_command_domain_hold(
                 conn,
                 command=recorded,
@@ -283,6 +302,7 @@ async def _run_one_ticket_bound_exchange_command(
                 now_ms=now_ms,
             )
             project_entry_effect(conn, command=recorded, now_ms=now_ms)
+            project_protection_result(conn, command=recorded, now_ms=now_ms)
             upsert_exchange_command_domain_hold(
                 conn,
                 command=recorded,
@@ -327,6 +347,7 @@ async def _run_one_ticket_bound_exchange_command(
                 now_ms=now_ms,
             )
             project_entry_effect(conn, command=recorded, now_ms=now_ms)
+            project_protection_result(conn, command=recorded, now_ms=now_ms)
     except ValueError as exc:
         return _record_contradictory_exchange_result(
             engine,
@@ -393,9 +414,7 @@ def _record_contradictory_exchange_result(
             outcome_class=ExchangeCommandOutcomeClass.INCOMPLETE_RESPONSE,
             exchange_result={
                 "exchange_order_id": exchange_order_id,
-                "exchange_order_status": placement_facts.get(
-                    "exchange_order_status"
-                ),
+                "exchange_order_status": placement_facts.get("exchange_order_status"),
                 "error_code": blocker,
                 "error_message": blocker,
                 "contradictory_exchange_result": placement_facts,
@@ -409,6 +428,7 @@ def _record_contradictory_exchange_result(
             now_ms=now_ms,
         )
         project_entry_effect(conn, command=recorded, now_ms=now_ms)
+        project_protection_result(conn, command=recorded, now_ms=now_ms)
     return _result(
         "command_outcome_unknown",
         recorded,
@@ -453,7 +473,7 @@ def _claim_if_capable(
     claim_owner: str,
     now_ms: int,
     lease_ms: int,
-    command_sources: tuple[str, ...],
+    claim_scope: ExchangeCommandClaimScope,
 ) -> dict[str, Any]:
     if lifecycle_mutation_capability_decision(conn)["blockers"]:
         return {}
@@ -462,7 +482,7 @@ def _claim_if_capable(
         claim_owner=claim_owner,
         now_ms=now_ms,
         lease_ms=lease_ms,
-        command_sources=command_sources,
+        claim_scope=claim_scope,
     )
 
 
@@ -481,9 +501,7 @@ async def _dispatch(command: dict[str, Any], gateway: Any) -> Any:
         "side": str(command["gateway_side"]),
         "amount": Decimal(str(command["amount"])),
         "price": (
-            Decimal(str(command["price"]))
-            if command.get("price") is not None
-            else None
+            Decimal(str(command["price"])) if command.get("price") is not None else None
         ),
         "trigger_price": (
             Decimal(str(command["stop_price"]))
@@ -518,9 +536,7 @@ def _execution_contract_blockers(command: dict[str, Any]) -> list[str]:
             execution_style=command.get("execution_style"),
             time_in_force=command.get("time_in_force"),
             post_only=command.get("post_only") is True,
-            market_fallback_allowed=(
-                command.get("market_fallback_allowed") is True
-            ),
+            market_fallback_allowed=(command.get("market_fallback_allowed") is True),
         )
     except ValueError as exc:
         return [str(exc)]
@@ -580,9 +596,7 @@ def _placement_result_facts(result: Any) -> dict[str, Any]:
         "exchange_order_status",
     ):
         value = (
-            result.get(key)
-            if isinstance(result, dict)
-            else getattr(result, key, None)
+            result.get(key) if isinstance(result, dict) else getattr(result, key, None)
         )
         if value is not None:
             facts[key] = value
@@ -600,16 +614,57 @@ def _result(
         "schema": "brc.ticket_bound_exchange_command_worker.v1",
         "status": status,
         "exchange_command_id": command.get("exchange_command_id"),
+        "protected_submit_attempt_id": command.get("protected_submit_attempt_id"),
+        "ticket_id": command.get("ticket_id"),
+        "exposure_episode_id": command.get("exposure_episode_id"),
         "command_state": command.get("command_state"),
         "command_kind": command.get("command_kind"),
         "order_role": command.get("order_role"),
         "command_source": command.get("command_source"),
         "source_command_id": command.get("source_command_id"),
         "netting_domain_key": command.get("netting_domain_key"),
+        "amount": command.get("amount"),
+        "executed_qty": command.get("executed_qty"),
+        "reduce_only": command.get("reduce_only"),
+        "reduce_intent": command.get("reduce_intent"),
         "exchange_write_called": exchange_write_called,
         "first_blocker": blockers[0] if blockers else None,
         "blockers": blockers,
     }
+
+
+def _matches_initial_stop(
+    *,
+    primary: dict[str, Any],
+    candidate: dict[str, Any],
+) -> bool:
+    """Prove that one accepted SL is this ENTRY's initial-stop barrier."""
+
+    expected_quantity = primary.get("executed_qty")
+    if expected_quantity is None:
+        return False
+    try:
+        quantity_matches = Decimal(str(candidate.get("amount"))) == Decimal(
+            str(expected_quantity)
+        )
+    except (ArithmeticError, TypeError, ValueError):
+        return False
+    return (
+        candidate.get("status") == "command_confirmed"
+        and candidate.get("command_state")
+        in {"confirmed_submitted", "reconciled_submitted"}
+        and candidate.get("order_role") == "SL"
+        and candidate.get("command_kind") == "place_order"
+        and candidate.get("source_command_id") == primary.get("source_command_id")
+        and candidate.get("protected_submit_attempt_id")
+        == primary.get("protected_submit_attempt_id")
+        and candidate.get("ticket_id") == primary.get("ticket_id")
+        and candidate.get("exposure_episode_id") == primary.get("exposure_episode_id")
+        and candidate.get("netting_domain_key") == primary.get("netting_domain_key")
+        and candidate.get("reduce_only") in {True, 1}
+        and candidate.get("reduce_intent") == "reduce_position"
+        and quantity_matches
+    )
 
 
 def _validate_lease_timeout_budget(

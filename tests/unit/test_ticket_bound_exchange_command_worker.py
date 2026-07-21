@@ -18,7 +18,10 @@ from src.application.action_time.action_time_ticket import _expire_stale_active_
 from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
 )
-from src.application.action_time.entry_effect_projection import project_entry_effect
+from src.application.action_time.entry_effect_projection import (
+    project_entry_effect,
+    project_protection_result,
+)
 from src.application.action_time.lifecycle_exchange_command_materializer import (
     materialize_lifecycle_exchange_commands,
 )
@@ -26,6 +29,7 @@ from src.application.action_time.orphan_protection_cleanup_command import (
     prepare_ticket_bound_orphan_protection_cleanup_command,
 )
 from src.domain.exceptions import InvalidOrderError
+from src.domain.ticket_bound_exchange_command import ExchangeCommandClaimScope
 from tests.unit.test_action_time_ticket_materialization import NOW_MS
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
@@ -47,8 +51,7 @@ EXCHANGE_RESULT_FACTS_MIGRATION_PATH = (
     / "migrations/versions/2026-07-21-144_add_exchange_command_result_facts.py"
 )
 ENTRY_EFFECT_MIGRATION_PATH = (
-    REPO_ROOT
-    / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py"
+    REPO_ROOT / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py"
 )
 
 
@@ -150,21 +153,29 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
     assert gateway.calls[0]["position_side"] is None
     assert gateway.calls[0]["desired_leverage"] == 2
     with engine.begin() as conn:
-        row = conn.execute(
-            text(
-                "SELECT order_role, command_state, claim_token, exchange_result "
-                "FROM brc_ticket_bound_exchange_commands "
-                "WHERE exchange_command_id = :command_id"
-            ),
-            {"command_id": result["exchange_command_id"]},
-        ).mappings().one()
-        command = conn.execute(
-            text(
-                "SELECT * FROM brc_ticket_bound_exchange_commands "
-                "WHERE exchange_command_id = :command_id"
-            ),
-            {"command_id": result["exchange_command_id"]},
-        ).mappings().one()
+        row = (
+            conn.execute(
+                text(
+                    "SELECT order_role, command_state, claim_token, exchange_result "
+                    "FROM brc_ticket_bound_exchange_commands "
+                    "WHERE exchange_command_id = :command_id"
+                ),
+                {"command_id": result["exchange_command_id"]},
+            )
+            .mappings()
+            .one()
+        )
+        command = (
+            conn.execute(
+                text(
+                    "SELECT * FROM brc_ticket_bound_exchange_commands "
+                    "WHERE exchange_command_id = :command_id"
+                ),
+                {"command_id": result["exchange_command_id"]},
+            )
+            .mappings()
+            .one()
+        )
         project_entry_effect(
             conn,
             command=dict(command),
@@ -181,20 +192,24 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
     assert exchange_result["selected_leverage"] == 2
     assert exchange_result["exchange_configured_initial_leverage"] == 2
     assert exchange_result["leverage_verified_at_ms"] == NOW_MS + 4999
-    truth = pg_control_connection.execute(
-        text(
-            "SELECT ticket.status AS ticket_status, "
-            "attempt.status AS attempt_status, attempt.entry_effect_state, "
-            "attempt.entry_effect_observed_at_ms, "
-            "attempt.protection_barrier_state, attempt.protection_quantity, "
-            "lifecycle.status AS lifecycle_status, lifecycle.entry_filled_qty "
-            "FROM brc_action_time_tickets AS ticket "
-            "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
-            "ON attempt.ticket_id = ticket.ticket_id "
-            "JOIN brc_ticket_bound_order_lifecycle_runs AS lifecycle "
-            "ON lifecycle.ticket_id = ticket.ticket_id"
+    truth = (
+        pg_control_connection.execute(
+            text(
+                "SELECT ticket.status AS ticket_status, "
+                "attempt.status AS attempt_status, attempt.entry_effect_state, "
+                "attempt.entry_effect_observed_at_ms, "
+                "attempt.protection_barrier_state, attempt.protection_quantity, "
+                "lifecycle.status AS lifecycle_status, lifecycle.entry_filled_qty "
+                "FROM brc_action_time_tickets AS ticket "
+                "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
+                "ON attempt.ticket_id = ticket.ticket_id "
+                "JOIN brc_ticket_bound_order_lifecycle_runs AS lifecycle "
+                "ON lifecycle.ticket_id = ticket.ticket_id"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert truth["ticket_status"] == "submitted"
     assert truth["attempt_status"] == "submit_prepared"
     assert truth["entry_effect_state"] == "accepted_filled"
@@ -203,18 +218,24 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
     assert Decimal(str(truth["protection_quantity"])) == Decimal("0.01")
     assert truth["lifecycle_status"] == "entry_filled"
     assert Decimal(str(truth["entry_filled_qty"])) == Decimal("0.01")
-    assert pg_control_connection.execute(
-        text(
-            "SELECT COUNT(*) FROM brc_action_time_ticket_events "
-            "WHERE transition_reason = 'entry_exchange_effect_committed'"
-        )
-    ).scalar_one() == 1
-    assert pg_control_connection.execute(
-        text(
-            "SELECT COUNT(*) FROM brc_ticket_bound_lifecycle_events "
-            "WHERE event_type = 'entry_filled'"
-        )
-    ).scalar_one() == 1
+    assert (
+        pg_control_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM brc_action_time_ticket_events "
+                "WHERE transition_reason = 'entry_exchange_effect_committed'"
+            )
+        ).scalar_one()
+        == 1
+    )
+    assert (
+        pg_control_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM brc_ticket_bound_lifecycle_events "
+                "WHERE event_type = 'entry_filled'"
+            )
+        ).scalar_one()
+        == 1
+    )
 
 
 @pytest.mark.asyncio
@@ -388,27 +409,35 @@ async def test_worker_persists_ambiguous_outcome_and_blocks_later_commands(
     assert second["status"] == "no_prepared_command"
     assert len(gateway.calls) == 1
     with engine.connect() as conn:
-        hold = conn.execute(
-            text(
-                "SELECT status, source_kind, source_id, netting_domain_key "
-                "FROM brc_ticket_bound_scope_freezes"
+        hold = (
+            conn.execute(
+                text(
+                    "SELECT status, source_kind, source_id, netting_domain_key "
+                    "FROM brc_ticket_bound_scope_freezes"
+                )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
     assert hold["status"] == "active"
     assert hold["source_kind"] == "exchange_command"
     assert hold["source_id"] == first["exchange_command_id"]
     assert hold["netting_domain_key"].endswith("|one_way|BOTH")
-    effect = pg_control_connection.execute(
-        text(
-            "SELECT ticket.status AS ticket_status, attempt.entry_effect_state, "
-            "attempt.protection_barrier_state, lifecycle.status AS lifecycle_status "
-            "FROM brc_action_time_tickets AS ticket "
-            "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
-            "ON attempt.ticket_id = ticket.ticket_id "
-            "JOIN brc_ticket_bound_order_lifecycle_runs AS lifecycle "
-            "ON lifecycle.ticket_id = ticket.ticket_id"
+    effect = (
+        pg_control_connection.execute(
+            text(
+                "SELECT ticket.status AS ticket_status, attempt.entry_effect_state, "
+                "attempt.protection_barrier_state, lifecycle.status AS lifecycle_status "
+                "FROM brc_action_time_tickets AS ticket "
+                "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
+                "ON attempt.ticket_id = ticket.ticket_id "
+                "JOIN brc_ticket_bound_order_lifecycle_runs AS lifecycle "
+                "ON lifecycle.ticket_id = ticket.ticket_id"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert effect == {
         "ticket_status": "submitted",
         "entry_effect_state": "outcome_unknown",
@@ -448,21 +477,31 @@ async def test_entry_projection_failure_rolls_back_command_result_and_all_projec
             "WHERE order_role = 'ENTRY'"
         )
     ).scalar_one()
-    attempt = pg_control_connection.execute(
-        text(
-            "SELECT entry_effect_state, exchange_write_called "
-            "FROM brc_ticket_bound_protected_submit_attempts"
+    attempt = (
+        pg_control_connection.execute(
+            text(
+                "SELECT entry_effect_state, exchange_write_called "
+                "FROM brc_ticket_bound_protected_submit_attempts"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert command_state == "dispatching"
     assert attempt["entry_effect_state"] == "not_called"
     assert attempt["exchange_write_called"] in {False, 0}
-    assert pg_control_connection.execute(
-        text("SELECT status FROM brc_action_time_tickets")
-    ).scalar_one() == "finalgate_ready"
-    assert pg_control_connection.execute(
-        text("SELECT COUNT(*) FROM brc_ticket_bound_order_lifecycle_runs")
-    ).scalar_one() == 0
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_action_time_tickets")
+        ).scalar_one()
+        == "finalgate_ready"
+    )
+    assert (
+        pg_control_connection.execute(
+            text("SELECT COUNT(*) FROM brc_ticket_bound_order_lifecycle_runs")
+        ).scalar_one()
+        == 0
+    )
 
 
 @pytest.mark.asyncio
@@ -493,12 +532,18 @@ async def test_ticket_expiration_repairs_effect_active_lineage_without_reclaimin
         )
 
     assert expired_count == 0
-    assert pg_control_connection.execute(
-        text("SELECT status FROM brc_action_time_tickets")
-    ).scalar_one() == "submitted"
-    assert pg_control_connection.execute(
-        text("SELECT status FROM brc_budget_reservations")
-    ).scalar_one() == "consumed"
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_action_time_tickets")
+        ).scalar_one()
+        == "submitted"
+    )
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_budget_reservations")
+        ).scalar_one()
+        == "consumed"
+    )
 
 
 @pytest.mark.asyncio
@@ -519,10 +564,13 @@ async def test_ticket_expiration_cannot_reclaim_while_entry_io_is_dispatching(
     class ExpiryRacingGateway(_WorkerGateway):
         async def place_order(self, **kwargs):
             with pg_control_connection.engine.begin() as conn:
-                assert _expire_stale_active_tickets(
-                    conn,
-                    now_ms=NOW_MS + 6000,
-                ) == 0
+                assert (
+                    _expire_stale_active_tickets(
+                        conn,
+                        now_ms=NOW_MS + 6000,
+                    )
+                    == 0
+                )
             return await super().place_order(**kwargs)
 
     result = await run_one_ticket_bound_exchange_command(
@@ -534,12 +582,18 @@ async def test_ticket_expiration_cannot_reclaim_while_entry_io_is_dispatching(
     )
 
     assert result["status"] == "command_confirmed"
-    assert pg_control_connection.execute(
-        text("SELECT status FROM brc_action_time_tickets")
-    ).scalar_one() == "submitted"
-    assert pg_control_connection.execute(
-        text("SELECT status FROM brc_budget_reservations")
-    ).scalar_one() == "consumed"
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_action_time_tickets")
+        ).scalar_one()
+        == "submitted"
+    )
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_budget_reservations")
+        ).scalar_one()
+        == "consumed"
+    )
 
 
 @pytest.mark.asyncio
@@ -660,12 +714,15 @@ async def test_worker_does_not_claim_or_call_gateway_when_capability_disabled(
     assert result["blockers"] == ["lifecycle_mutation_capability_not_ready"]
     assert gateway.calls == []
     with pg_control_connection.engine.connect() as conn:
-        assert conn.execute(
-            text(
-                "SELECT count(*) FROM brc_ticket_bound_exchange_commands "
-                "WHERE command_state = 'dispatching'"
-            )
-        ).scalar_one() == 0
+        assert (
+            conn.execute(
+                text(
+                    "SELECT count(*) FROM brc_ticket_bound_exchange_commands "
+                    "WHERE command_state = 'dispatching'"
+                )
+            ).scalar_one()
+            == 0
+        )
 
 
 @pytest.mark.asyncio
@@ -692,12 +749,16 @@ async def test_lifecycle_worker_never_dispatches_protected_submit_entry(
     assert result["status"] == "no_prepared_command"
     assert gateway.calls == []
     with pg_control_connection.engine.connect() as conn:
-        states = conn.execute(
-            text(
-                "SELECT DISTINCT command_state "
-                "FROM brc_ticket_bound_exchange_commands"
+        states = (
+            conn.execute(
+                text(
+                    "SELECT DISTINCT command_state "
+                    "FROM brc_ticket_bound_exchange_commands"
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert states == ["prepared"]
 
 
@@ -787,6 +848,65 @@ async def test_two_concurrent_workers_cannot_dispatch_a_second_command(
 
 
 @pytest.mark.asyncio
+async def test_two_workers_contend_for_one_exact_source_initial_stop(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id="stop-contention-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingStopGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            started.set()
+            await release.wait()
+            return await super().place_order(**kwargs)
+
+    attempt_id = prepared["protected_submit_attempt_id"]
+    first_gateway = BlockingStopGateway()
+    first_task = asyncio.create_task(
+        run_one_ticket_bound_exchange_command(
+            pg_control_connection.engine,
+            gateway=first_gateway,
+            worker_id="stop-contention-a",
+            now_ms=NOW_MS + 5001,
+            command_sources=("protected_submit",),
+            source_command_id=attempt_id,
+            protected_submit_attempt_id=attempt_id,
+            allowed_roles=("SL",),
+        )
+    )
+    await started.wait()
+    second_gateway = _WorkerGateway()
+    second = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=second_gateway,
+        worker_id="stop-contention-b",
+        now_ms=NOW_MS + 5002,
+        command_sources=("protected_submit",),
+        source_command_id=attempt_id,
+        protected_submit_attempt_id=attempt_id,
+        allowed_roles=("SL",),
+    )
+    release.set()
+    first = await first_task
+
+    assert first["status"] == "command_confirmed"
+    assert second["status"] == "no_prepared_command"
+    assert len(first_gateway.calls) == 1
+    assert second_gateway.calls == []
+
+
+@pytest.mark.asyncio
 async def test_entry_rejection_terminalizes_undispatched_protection_siblings(
     pg_control_connection,
 ):
@@ -826,27 +946,40 @@ async def test_entry_rejection_terminalizes_undispatched_protection_siblings(
         "SL": "reconciled_absent",
         "TP1": "reconciled_absent",
     }
-    attempt = pg_control_connection.execute(
-        text(
-            "SELECT status, blockers FROM brc_ticket_bound_protected_submit_attempts "
-            "WHERE protected_submit_attempt_id = :attempt_id"
-        ),
-        {"attempt_id": prepared["protected_submit_attempt_id"]},
-    ).mappings().one()
+    attempt = (
+        pg_control_connection.execute(
+            text(
+                "SELECT status, blockers FROM brc_ticket_bound_protected_submit_attempts "
+                "WHERE protected_submit_attempt_id = :attempt_id"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        )
+        .mappings()
+        .one()
+    )
     assert attempt["status"] == "submit_failed"
     assert "entry_rejected" in str(attempt["blockers"])
-    assert pg_control_connection.execute(
-        text("SELECT status FROM brc_action_time_tickets")
-    ).scalar_one() == "invalidated"
-    assert pg_control_connection.execute(
-        text(
-            "SELECT COUNT(*) FROM brc_action_time_ticket_events "
-            "WHERE transition_reason = 'entry_authoritatively_rejected'"
-        )
-    ).scalar_one() == 1
-    assert pg_control_connection.execute(
-        text("SELECT status FROM brc_operation_layer_handoffs")
-    ).scalar_one() == "invalidated"
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_action_time_tickets")
+        ).scalar_one()
+        == "invalidated"
+    )
+    assert (
+        pg_control_connection.execute(
+            text(
+                "SELECT COUNT(*) FROM brc_action_time_ticket_events "
+                "WHERE transition_reason = 'entry_authoritatively_rejected'"
+            )
+        ).scalar_one()
+        == 1
+    )
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_operation_layer_handoffs")
+        ).scalar_one()
+        == "invalidated"
+    )
 
 
 @pytest.mark.asyncio
@@ -878,18 +1011,28 @@ async def test_entry_rejection_repairs_expired_ticket_and_invalidates_handoff(
     )
 
     assert result["status"] == "command_rejected"
-    assert pg_control_connection.execute(
-        text("SELECT status FROM brc_action_time_tickets")
-    ).scalar_one() == "invalidated"
-    assert pg_control_connection.execute(
-        text("SELECT status FROM brc_operation_layer_handoffs")
-    ).scalar_one() == "invalidated"
-    event = pg_control_connection.execute(
-        text(
-            "SELECT from_status, to_status FROM brc_action_time_ticket_events "
-            "WHERE transition_reason = 'entry_authoritatively_rejected'"
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_action_time_tickets")
+        ).scalar_one()
+        == "invalidated"
+    )
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_operation_layer_handoffs")
+        ).scalar_one()
+        == "invalidated"
+    )
+    event = (
+        pg_control_connection.execute(
+            text(
+                "SELECT from_status, to_status FROM brc_action_time_ticket_events "
+                "WHERE transition_reason = 'entry_authoritatively_rejected'"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert event == {"from_status": "expired", "to_status": "invalidated"}
 
 
@@ -914,24 +1057,32 @@ async def test_entry_replay_does_not_regress_degraded_protection_barrier(
                 "SET protection_barrier_state = 'degraded'"
             )
         )
-        command = conn.execute(
-            text(
-                "SELECT * FROM brc_ticket_bound_exchange_commands "
-                "WHERE exchange_command_id = :command_id"
-            ),
-            {"command_id": result["exchange_command_id"]},
-        ).mappings().one()
+        command = (
+            conn.execute(
+                text(
+                    "SELECT * FROM brc_ticket_bound_exchange_commands "
+                    "WHERE exchange_command_id = :command_id"
+                ),
+                {"command_id": result["exchange_command_id"]},
+            )
+            .mappings()
+            .one()
+        )
         project_entry_effect(
             conn,
             command=dict(command),
             now_ms=NOW_MS + 6000,
         )
-    barrier = pg_control_connection.execute(
-        text(
-            "SELECT protection_barrier_state, protection_quantity "
-            "FROM brc_ticket_bound_protected_submit_attempts"
+    barrier = (
+        pg_control_connection.execute(
+            text(
+                "SELECT protection_barrier_state, protection_quantity "
+                "FROM brc_ticket_bound_protected_submit_attempts"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert barrier["protection_barrier_state"] == "degraded"
     assert Decimal(str(barrier["protection_quantity"])) == Decimal("0.01")
 
@@ -972,9 +1123,7 @@ async def test_worker_binds_partial_entry_fill_before_initial_stop_dispatch(
 
     assert len(gateway.calls) >= 2, repr(result)
     initial_stop = next(
-        call
-        for call in gateway.calls
-        if call.get("order_type") == "stop_market"
+        call for call in gateway.calls if call.get("order_type") == "stop_market"
     )
     assert Decimal(str(initial_stop["amount"])) == Decimal("0.005")
 
@@ -1027,7 +1176,7 @@ async def test_entry_effect_crossing_ticket_ttl_submits_ticket_and_drains_its_in
         drain_initial_protection=True,
     )
 
-    assert result["initial_protection_complete"] is True
+    assert result["initial_protection_complete"] is True, repr(result)
     assert [call["order_type"] for call in gateway.calls[:2]] == [
         "market",
         "stop_market",
@@ -1046,19 +1195,21 @@ async def test_entry_effect_crossing_ticket_ttl_submits_ticket_and_drains_its_in
     }
     assert rows["ENTRY"]["command_state"] == "confirmed_submitted"
     assert rows["SL"]["command_state"] == "confirmed_submitted"
-    assert rows["SL"]["source_command_id"] == prepared[
-        "protected_submit_attempt_id"
-    ]
-    assert rows["SL"]["protected_submit_attempt_id"] == prepared[
-        "protected_submit_attempt_id"
-    ]
-    assert pg_control_connection.execute(
-        text(
-            "SELECT status FROM brc_action_time_tickets "
-            "WHERE ticket_id = :ticket_id"
-        ),
-        {"ticket_id": ids["ticket_id"]},
-    ).scalar_one() == "submitted"
+    assert rows["SL"]["source_command_id"] == prepared["protected_submit_attempt_id"]
+    assert (
+        rows["SL"]["protected_submit_attempt_id"]
+        == prepared["protected_submit_attempt_id"]
+    )
+    assert (
+        pg_control_connection.execute(
+            text(
+                "SELECT status FROM brc_action_time_tickets "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).scalar_one()
+        == "submitted"
+    )
 
 
 @pytest.mark.asyncio
@@ -1073,7 +1224,9 @@ async def test_initial_protection_drain_is_pinned_to_the_primary_attempt_source(
     foreign_attempt_id = "protected-submit:r12:foreign-source"
     foreign_operation_command_id = "operation-submit:r12:foreign-source"
     metadata = sa.MetaData()
-    tickets = sa.Table("brc_action_time_tickets", metadata, autoload_with=pg_control_connection)
+    tickets = sa.Table(
+        "brc_action_time_tickets", metadata, autoload_with=pg_control_connection
+    )
     attempts = sa.Table(
         "brc_ticket_bound_protected_submit_attempts",
         metadata,
@@ -1088,7 +1241,9 @@ async def test_initial_protection_drain_is_pinned_to_the_primary_attempt_source(
     primary_ticket = dict(
         pg_control_connection.execute(
             sa.select(tickets).where(tickets.c.ticket_id == ids["ticket_id"])
-        ).mappings().one()
+        )
+        .mappings()
+        .one()
     )
     pg_control_connection.execute(
         tickets.insert().values(
@@ -1107,7 +1262,9 @@ async def test_initial_protection_drain_is_pinned_to_the_primary_attempt_source(
                 attempts.c.protected_submit_attempt_id
                 == primary["protected_submit_attempt_id"]
             )
-        ).mappings().one()
+        )
+        .mappings()
+        .one()
     )
     pg_control_connection.execute(
         attempts.insert().values(
@@ -1173,7 +1330,7 @@ async def test_initial_protection_drain_is_pinned_to_the_primary_attempt_source(
         drain_initial_protection=True,
     )
 
-    assert result["initial_protection_complete"] is True
+    assert result["initial_protection_complete"] is True, repr(result)
     assert [call["order_type"] for call in gateway.calls] == [
         "market",
         "stop_market",
@@ -1199,6 +1356,308 @@ async def test_initial_protection_drain_is_pinned_to_the_primary_attempt_source(
 
 
 @pytest.mark.asyncio
+async def test_protection_claim_scope_blocks_foreign_identity_and_tp1_before_sl(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    entry = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id="scope-matrix-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    attempt_id = prepared["protected_submit_attempt_id"]
+    domain = entry["netting_domain_key"]
+    invalid_scopes = (
+        ExchangeCommandClaimScope(
+            command_sources=("protected_submit",),
+            source_command_id="foreign-source",
+            protected_submit_attempt_id=attempt_id,
+            allowed_roles=("SL",),
+        ),
+        ExchangeCommandClaimScope(
+            command_sources=("protected_submit",),
+            source_command_id=attempt_id,
+            protected_submit_attempt_id="foreign-attempt",
+            allowed_roles=("SL",),
+        ),
+        ExchangeCommandClaimScope(
+            command_sources=("protected_submit",),
+            source_command_id=attempt_id,
+            protected_submit_attempt_id=attempt_id,
+            allowed_roles=("TP1",),
+        ),
+        ExchangeCommandClaimScope(
+            command_sources=("protected_submit",),
+            source_command_id=attempt_id,
+            protected_submit_attempt_id=attempt_id,
+            allowed_roles=("SL",),
+            allowed_command_kinds=("cancel_order",),
+        ),
+        ExchangeCommandClaimScope(
+            command_sources=("protected_submit",),
+            source_command_id=attempt_id,
+            protected_submit_attempt_id=attempt_id,
+            allowed_roles=("SL",),
+            netting_domain_key=f"{domain}|foreign",
+        ),
+    )
+    for index, scope in enumerate(invalid_scopes):
+        with pg_control_connection.engine.begin() as conn:
+            claimed = claim_next_exchange_command(
+                conn,
+                claim_owner=f"invalid-scope-{index}",
+                now_ms=NOW_MS + 5001,
+                claim_scope=scope,
+            )
+        assert claimed == {}
+
+    with pg_control_connection.engine.begin() as conn:
+        claimed = claim_next_exchange_command(
+            conn,
+            claim_owner="valid-exact-stop-scope",
+            now_ms=NOW_MS + 5001,
+            claim_scope=ExchangeCommandClaimScope(
+                command_sources=("protected_submit",),
+                source_command_id=attempt_id,
+                protected_submit_attempt_id=attempt_id,
+                allowed_roles=("SL",),
+                allowed_command_kinds=("place_order",),
+                netting_domain_key=domain,
+            ),
+        )
+    assert claimed["order_role"] == "SL"
+    assert claimed["source_command_id"] == attempt_id
+
+
+@pytest.mark.asyncio
+async def test_initial_stop_quantity_mismatch_hard_stops_barrier_before_gateway(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    entry_gateway = _WorkerGateway()
+    await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=entry_gateway,
+        worker_id="quantity-mismatch-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    attempt_id = prepared["protected_submit_attempt_id"]
+    with pg_control_connection.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_exchange_commands SET amount = 0.009 "
+                "WHERE protected_submit_attempt_id = :attempt_id "
+                "AND order_role = 'SL'"
+            ),
+            {"attempt_id": attempt_id},
+        )
+    gateway = _WorkerGateway()
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="quantity-mismatch-stop",
+        now_ms=NOW_MS + 5001,
+        command_sources=("protected_submit",),
+        source_command_id=attempt_id,
+        protected_submit_attempt_id=attempt_id,
+        allowed_roles=("SL",),
+    )
+    assert result["status"] == "no_prepared_command"
+    assert gateway.calls == []
+    row = (
+        pg_control_connection.execute(
+            text(
+                "SELECT c.command_state, a.protection_barrier_state "
+                "FROM brc_ticket_bound_exchange_commands c JOIN "
+                "brc_ticket_bound_protected_submit_attempts a ON "
+                "a.protected_submit_attempt_id = c.protected_submit_attempt_id "
+                "WHERE c.protected_submit_attempt_id = :attempt_id "
+                "AND c.order_role = 'SL'"
+            ),
+            {"attempt_id": attempt_id},
+        )
+        .mappings()
+        .one()
+    )
+    assert row == {
+        "command_state": "hard_stopped",
+        "protection_barrier_state": "hard_stopped",
+    }
+
+
+@pytest.mark.asyncio
+async def test_terminal_lifecycle_blocks_effect_active_protection_claim(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id="terminal-lifecycle-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    attempt_id = prepared["protected_submit_attempt_id"]
+    with pg_control_connection.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_order_lifecycle_runs "
+                "SET status = 'lifecycle_closed'"
+            )
+        )
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id="terminal-lifecycle-stop",
+        now_ms=NOW_MS + 5001,
+        command_sources=("protected_submit",),
+        source_command_id=attempt_id,
+        protected_submit_attempt_id=attempt_id,
+        allowed_roles=("SL",),
+    )
+    assert result["status"] == "no_prepared_command"
+    assert (
+        pg_control_connection.execute(
+            text(
+                "SELECT command_state FROM brc_ticket_bound_exchange_commands "
+                "WHERE order_role = 'SL'"
+            )
+        ).scalar_one()
+        == "prepared"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["rejected", "unknown"])
+async def test_initial_stop_failure_hard_stops_protection_barrier(
+    pg_control_connection,
+    failure_kind,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id=f"{failure_kind}-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+
+    class FailingStopGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            if failure_kind == "rejected":
+                raise InvalidOrderError("initial_stop_rejected", "SL-REJECTED")
+            raise TimeoutError("initial_stop_outcome_unknown")
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=FailingStopGateway(),
+        worker_id=f"{failure_kind}-stop",
+        now_ms=NOW_MS + 5001,
+        command_sources=("protected_submit",),
+        source_command_id=prepared["protected_submit_attempt_id"],
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        allowed_roles=("SL",),
+    )
+    assert result["status"] == (
+        "command_rejected" if failure_kind == "rejected" else "command_outcome_unknown"
+    )
+    assert (
+        pg_control_connection.execute(
+            text(
+                "SELECT protection_barrier_state FROM "
+                "brc_ticket_bound_protected_submit_attempts"
+            )
+        ).scalar_one()
+        == "hard_stopped"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "replayed_barrier",
+    ["initial_stop_confirmed", "degraded", "closed"],
+)
+async def test_initial_stop_confirmation_replay_is_idempotent(
+    pg_control_connection,
+    replayed_barrier,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id="stop-replay-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        drain_initial_protection=True,
+    )
+    assert result["initial_protection_complete"] is True
+    with pg_control_connection.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_protected_submit_attempts "
+                "SET protection_barrier_state = :replayed_barrier"
+            ),
+            {"replayed_barrier": replayed_barrier},
+        )
+        attempt_before = (
+            conn.execute(
+                text(
+                    "SELECT protection_barrier_state, "
+                    "initial_stop_confirmed_at_ms FROM "
+                    "brc_ticket_bound_protected_submit_attempts"
+                )
+            )
+            .mappings()
+            .one()
+        )
+        stop = (
+            conn.execute(
+                text(
+                    "SELECT * FROM brc_ticket_bound_exchange_commands "
+                    "WHERE order_role = 'SL'"
+                )
+            )
+            .mappings()
+            .one()
+        )
+        project_protection_result(
+            conn,
+            command=dict(stop),
+            now_ms=NOW_MS + 9000,
+        )
+        attempt_after = (
+            conn.execute(
+                text(
+                    "SELECT protection_barrier_state, "
+                    "initial_stop_confirmed_at_ms FROM "
+                    "brc_ticket_bound_protected_submit_attempts"
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert attempt_after == attempt_before
+
+
+@pytest.mark.asyncio
 async def test_worker_rejects_lease_shorter_than_dispatch_timeout_and_commit_margin(
     pg_control_connection,
 ):
@@ -1206,7 +1665,9 @@ async def test_worker_rejects_lease_shorter_than_dispatch_timeout_and_commit_mar
     _prepare_real_submit(pg_control_connection, ids)
     pg_control_connection.commit()
 
-    with pytest.raises(ValueError, match="exchange_command_lease_timeout_budget_invalid"):
+    with pytest.raises(
+        ValueError, match="exchange_command_lease_timeout_budget_invalid"
+    ):
         await run_one_ticket_bound_exchange_command(
             pg_control_connection.engine,
             gateway=_WorkerGateway(),
@@ -1245,13 +1706,17 @@ async def test_worker_persists_typed_entry_fill_facts_when_schema_is_available(
         command_sources=("protected_submit",),
     )
 
-    row = pg_control_connection.execute(
-        text(
-            "SELECT executed_qty, average_exec_price, exchange_order_status, "
-            "exchange_observed_at_ms, result_facts_complete "
-            "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+    row = (
+        pg_control_connection.execute(
+            text(
+                "SELECT executed_qty, average_exec_price, exchange_order_status, "
+                "exchange_observed_at_ms, result_facts_complete "
+                "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert Decimal(str(row["executed_qty"])) == Decimal("0.005")
     assert Decimal(str(row["average_exec_price"])) == Decimal("2000")
     assert row["exchange_order_status"] == "PARTIALLY_FILLED"
@@ -1308,21 +1773,26 @@ async def test_worker_accepts_exact_zero_entry_fill_without_dispatching_protecti
     assert Decimal(str(commands["ENTRY"]["executed_qty"])) == Decimal("0")
     assert commands["ENTRY"]["average_exec_price"] is None
     assert commands["ENTRY"]["result_facts_complete"] in {True, 1}
-    assert {
-        role: commands[role]["command_state"] for role in ("SL", "TP1")
-    } == {"SL": "reconciled_absent", "TP1": "reconciled_absent"}
-    assert {
-        commands[role]["exchange_error_code"] for role in ("SL", "TP1")
-    } == {"entry_filled_qty_zero_no_protection_dispatch"}
-    attempt = pg_control_connection.execute(
-        text(
-            "SELECT status, exchange_write_called, entry_effect_state, "
-            "protection_barrier_state, protection_quantity "
-            "FROM brc_ticket_bound_protected_submit_attempts "
-            "WHERE protected_submit_attempt_id = :attempt_id"
-        ),
-        {"attempt_id": prepared["protected_submit_attempt_id"]},
-    ).mappings().one()
+    assert {role: commands[role]["command_state"] for role in ("SL", "TP1")} == {
+        "SL": "reconciled_absent",
+        "TP1": "reconciled_absent",
+    }
+    assert {commands[role]["exchange_error_code"] for role in ("SL", "TP1")} == {
+        "entry_filled_qty_zero_no_protection_dispatch"
+    }
+    attempt = (
+        pg_control_connection.execute(
+            text(
+                "SELECT status, exchange_write_called, entry_effect_state, "
+                "protection_barrier_state, protection_quantity "
+                "FROM brc_ticket_bound_protected_submit_attempts "
+                "WHERE protected_submit_attempt_id = :attempt_id"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        )
+        .mappings()
+        .one()
+    )
     assert attempt["status"] == "submit_prepared"
     assert attempt["exchange_write_called"] in {True, 1}
     assert attempt["entry_effect_state"] == "accepted_zero_fill"
@@ -1331,12 +1801,16 @@ async def test_worker_accepts_exact_zero_entry_fill_without_dispatching_protecti
     ticket_status = pg_control_connection.execute(
         text("SELECT status FROM brc_action_time_tickets")
     ).scalar_one()
-    lifecycle = pg_control_connection.execute(
-        text(
-            "SELECT status, entry_filled_qty "
-            "FROM brc_ticket_bound_order_lifecycle_runs"
+    lifecycle = (
+        pg_control_connection.execute(
+            text(
+                "SELECT status, entry_filled_qty "
+                "FROM brc_ticket_bound_order_lifecycle_runs"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert ticket_status == "submitted"
     assert lifecycle["status"] == "entry_fill_pending"
     assert lifecycle["entry_filled_qty"] is None
@@ -1370,12 +1844,16 @@ async def test_worker_persists_unknown_when_entry_fill_exceeds_requested_amount(
     )
 
     assert result["status"] == "command_outcome_unknown"
-    row = pg_control_connection.execute(
-        text(
-            "SELECT command_state, outcome_class, exchange_error_code "
-            "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+    row = (
+        pg_control_connection.execute(
+            text(
+                "SELECT command_state, outcome_class, exchange_error_code "
+                "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert row["command_state"] == "outcome_unknown"
     assert row["outcome_class"] == "incomplete_response"
     assert row["exchange_error_code"] == "exchange_command_executed_qty_exceeds_amount"
@@ -1409,12 +1887,16 @@ async def test_worker_persists_unknown_when_entry_average_fill_price_is_not_posi
     )
 
     assert result["status"] == "command_outcome_unknown"
-    row = pg_control_connection.execute(
-        text(
-            "SELECT command_state, exchange_error_code "
-            "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+    row = (
+        pg_control_connection.execute(
+            text(
+                "SELECT command_state, exchange_error_code "
+                "FROM brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     assert row["command_state"] == "outcome_unknown"
     assert row["exchange_error_code"] == "exchange_command_optional_decimal_invalid"
 
@@ -1459,13 +1941,17 @@ async def test_missing_entry_fill_truth_hard_stops_initial_protection_source(
     assert states["ENTRY"] == "confirmed_submitted"
     assert states["SL"] == "hard_stopped"
     assert states["TP1"] == "reconciled_absent"
-    attempt = pg_control_connection.execute(
-        text(
-            "SELECT status, blockers FROM brc_ticket_bound_protected_submit_attempts "
-            "WHERE protected_submit_attempt_id = :attempt_id"
-        ),
-        {"attempt_id": prepared["protected_submit_attempt_id"]},
-    ).mappings().one()
+    attempt = (
+        pg_control_connection.execute(
+            text(
+                "SELECT status, blockers FROM brc_ticket_bound_protected_submit_attempts "
+                "WHERE protected_submit_attempt_id = :attempt_id"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        )
+        .mappings()
+        .one()
+    )
     assert attempt["status"] in {"submit_failed", "hard_stopped"}
     assert "entry_filled_qty" in str(attempt["blockers"])
 
@@ -1498,13 +1984,17 @@ async def test_partial_cleanup_resumes_from_committed_command_without_repeating_
         command_sources=("orphan_cleanup",),
     )
     with pg_control_connection.engine.connect() as conn:
-        states_after_first = conn.execute(
-            text(
-                "SELECT command_state FROM brc_ticket_bound_exchange_commands "
-                "WHERE source_command_id = :source_id ORDER BY command_generation"
-            ),
-            {"source_id": source_id},
-        ).scalars().all()
+        states_after_first = (
+            conn.execute(
+                text(
+                    "SELECT command_state FROM brc_ticket_bound_exchange_commands "
+                    "WHERE source_command_id = :source_id ORDER BY command_generation"
+                ),
+                {"source_id": source_id},
+            )
+            .scalars()
+            .all()
+        )
     second = await run_one_ticket_bound_exchange_command(
         pg_control_connection.engine,
         gateway=gateway,
@@ -1519,13 +2009,16 @@ async def test_partial_cleanup_resumes_from_committed_command_without_repeating_
     assert len(gateway.calls) == 2
     assert len({call["exchange_order_id"] for call in gateway.calls}) == 2
     with pg_control_connection.engine.connect() as conn:
-        assert conn.execute(
-            text(
-                "SELECT status FROM brc_ticket_bound_orphan_protection_cleanup_commands "
-                "WHERE orphan_protection_cleanup_command_id = :source_id"
-            ),
-            {"source_id": source_id},
-        ).scalar_one() == "result_recorded"
+        assert (
+            conn.execute(
+                text(
+                    "SELECT status FROM brc_ticket_bound_orphan_protection_cleanup_commands "
+                    "WHERE orphan_protection_cleanup_command_id = :source_id"
+                ),
+                {"source_id": source_id},
+            ).scalar_one()
+            == "result_recorded"
+        )
 
 
 def test_terminal_command_blocks_only_its_netting_domain(pg_control_connection):
