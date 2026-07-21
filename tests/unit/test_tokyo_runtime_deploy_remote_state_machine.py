@@ -1762,6 +1762,22 @@ def test_activation_restore_failure_reengages_fence_and_disables_lifecycle(
     assert set(machine.DEPLOY_STOP_UNITS).issubset(stopped)
 
 
+def test_rebind_activation_commit_uses_containment_fence_inode():
+    activation_commit = {
+        "schema": "brc.runtime_activation_commit.v1",
+        "status": "runtime_activation_committed",
+        "fence_inode": 41,
+    }
+
+    rebound = machine.rebind_activation_commit_fence(
+        activation_commit=activation_commit,
+        fence_inode=77,
+    )
+
+    assert activation_commit["fence_inode"] == 41
+    assert rebound["fence_inode"] == 77
+
+
 def test_deploy_transaction_bootstraps_lifecycle_only_with_explicit_intent_and_is_resumable(
     tmp_path, monkeypatch
 ):

@@ -2441,6 +2441,18 @@ def _contain_failed_activation_restore(
     }
 
 
+def rebind_activation_commit_fence(
+    *,
+    activation_commit: Mapping[str, Any],
+    fence_inode: int,
+) -> dict[str, Any]:
+    """Bind a resumed activation attempt to its replacement containment fence."""
+
+    if fence_inode <= 0:
+        raise ValueError("activation_commit_fence_inode_invalid")
+    return {**dict(activation_commit), "fence_inode": fence_inode}
+
+
 def _wait_for_immediate_timer_service(
     *,
     release: Path,
@@ -3230,6 +3242,29 @@ def execute_deploy_transaction(
         or activation_commit.get("lifecycle_proof_ref") != lifecycle.get("lifecycle_proof_ref")
     ):
         raise RuntimeError("certification_generation_activation_mismatch")
+    if policy_not_durable:
+        current_fence = engage_production_writer_fence(
+            release_path=release,
+            transaction_id=transaction_id,
+            deploy_nonce=deploy_nonce,
+            target_sha=target_sha,
+            lock_handle=lock_handle,
+            canonical_lock_path=canonical_lock,
+            require_root_owner=require_root,
+        )
+        rebound_commit = rebind_activation_commit_fence(
+            activation_commit=activation_commit,
+            fence_inode=int(current_fence["fence_inode"]),
+        )
+        if rebound_commit != activation_commit:
+            cert_pair["generation"] = len(generation_journal.entries) + 1
+            rebound_commit["certification_generation"] = cert_pair["generation"]
+            activation_commit = rebound_commit
+            generation_journal.append(
+                cert_pair=cert_pair,
+                lifecycle=lifecycle,
+                activation_commit=activation_commit,
+            )
     phase("policy_applied", lambda: apply_committed_activation(
         release_path=release,
         env_path=runtime_application_env_path,
