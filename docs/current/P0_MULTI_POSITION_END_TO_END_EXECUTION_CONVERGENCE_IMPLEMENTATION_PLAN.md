@@ -1,6 +1,6 @@
 ---
 title: P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN
-status: READY_FOR_R10_IMPLEMENTATION
+status: R10_IMPLEMENTATION_IN_PROGRESS
 authority: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN.md
 program_id: P0-ACH
 design: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md
@@ -38,7 +38,7 @@ Live Enablement Before:
   -> no Ticket
   -> dispatcher reported no_actionable_pg_ticket
 
-Live Enablement After R10:
+R10 target state (not yet production-certified):
   fresh live Signal persisted
   -> exact Invocation FactBundle
   -> atomic Claim/Promotion/Lane/Ticket or exact blocker
@@ -51,6 +51,23 @@ Live Enablement After R10:
 **当前 first blocker:** `action_time_boundary_not_reproduced`，具体阶段为
 `materialize_account_safe_facts`。精确 business blocker code 必须从 PG audit/process
 outcome 读取；在无法补查时禁止推断为策略未满足或 Owner 未授权。
+
+### 0.2.1 2026-07-21 本地执行记录与未闭合边界
+
+| 切片 | 本地实现/证据 | 状态 | 对 production 的含义 |
+| --- | --- | --- | --- |
+| R10-T00 | Tokyo SSH 连续超时；最后已知 runtime 为 `25483180` / schema `142`；没有以推断代替 PG exact blocker | **待远端恢复后复核** | 禁止据此 restart、deploy 或声称 natural-event 已验收 |
+| R10-T01/T02 | account capacity 可在 `0/2`、合法 `1/2` 进入 action-time；full account snapshot 成为 account/position/order/mode 的单一事实源 | **本地完成** | 消除 flat-only / 多次 snapshot 的已知工程阻塞，仍需真实 PG 验收 |
+| R10-T03 | typed coordinator 已单次 materialize Ticket、FinalGate、handoff、Runtime Safety；共享 Invocation deadline | **本地已有，需全链补证** | dispatcher 不得再重放这些步骤 |
+| R10-T04 | 当前 `runtime_signal_watcher_resume_dispatcher.py` 仍按最新 Ticket 经 Console HTTP/session 重跑 FinalGate、handoff、protected submit；lifecycle worker 未接入 `protected_submit` command source | **未完成，工程阻塞** | 自动 submit 不得视为 durable-command worker 已验收；不是 Owner 授权问题 |
+| R10-T05 | Invocation blocker conservation 与 fresh current-truth lane classification 已补齐，161 个 focused tests 通过 | **本地完成** | `no Ticket` 不再抹去 selected Invocation 的真实 blocker |
+| R10-T06 | historical Ticket 已走到 durable pre-exchange boundary；无完整 dispatcher-claim/fake-exchange restart proof | **部分完成** | 不得声称 Ticket-to-trade full-chain certification 已完成 |
+
+**R10-T04 的唯一可接受收敛：** typed coordinator 在 Runtime Safety ready 后写入一个
+持久 `dispatch_command_id`；dispatcher 只 claim 该 ID，并以 typed application port 物化
+submit attempt / Entry Exchange Command；exchange worker 再以 lease 领取已提交的 Entry command。
+因此移除 Console session 依赖不能仅靠删除 systemd 参数，必须同时补上 command 存储、claim、
+crash/replay outcome projection 和 fake-exchange two-worker proof。
 
 ### 0.3 串行执行顺序
 
