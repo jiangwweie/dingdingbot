@@ -117,6 +117,39 @@ def test_terminal_absent_releases_only_reservation_only_slot_and_is_idempotent(c
     assert connection.execute(sa.text("SELECT count(*) FROM brc_ticket_bound_lifecycle_events")).scalar_one() == 1
 
 
+def test_expired_ticket_without_submit_attempt_releases_proven_absent_reservation(connection):
+    _create_reclaim_tables(connection)
+    connection.execute(sa.text("""
+      INSERT INTO brc_budget_reservations VALUES ('reservation-1', 'consumed', 'ticket-1', NULL);
+      INSERT INTO brc_action_time_tickets VALUES ('ticket-1', 'expired');
+      INSERT INTO brc_account_exposure_current VALUES ('ticket-1', true, 'reserved', 0, 0);
+    """))
+
+    assert reclaim_terminal_presubmit_reservations(
+        connection, now_ms=NOW_MS, evidence_ref_prefix="test", snapshot=_snapshot()
+    ) == 1
+    assert connection.execute(
+        sa.text("SELECT status FROM brc_budget_reservations")
+    ).scalar_one() == "released"
+
+
+def test_expired_ticket_without_attempt_keeps_reservation_when_command_was_dispatched(connection):
+    _create_reclaim_tables(connection)
+    connection.execute(sa.text("""
+      INSERT INTO brc_budget_reservations VALUES ('reservation-1', 'consumed', 'ticket-1', NULL);
+      INSERT INTO brc_action_time_tickets VALUES ('ticket-1', 'expired');
+      INSERT INTO brc_ticket_bound_exchange_commands VALUES ('command-1', 'ticket-1', 'submitted', 1, NULL, 'BTCUSDT', 'client-1');
+      INSERT INTO brc_account_exposure_current VALUES ('ticket-1', true, 'reserved', 0, 0);
+    """))
+
+    assert reclaim_terminal_presubmit_reservations(
+        connection, now_ms=NOW_MS, evidence_ref_prefix="test", snapshot=_snapshot()
+    ) == 0
+    assert connection.execute(
+        sa.text("SELECT status FROM brc_budget_reservations")
+    ).scalar_one() == "consumed"
+
+
 def test_schema_truth_bundle_enforces_current_identity_and_converges_netting_keys(
     connection,
 ):

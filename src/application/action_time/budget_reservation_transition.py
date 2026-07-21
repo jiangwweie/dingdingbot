@@ -296,6 +296,24 @@ def _ticket_has_exchange_write_or_unknown(
         return True
     if conn.execute(sa.select(attempts.c.ticket_id).where(sa.and_(*attempt_predicates)).limit(1)).first():
         return True
+    attempt_rows = conn.execute(
+        sa.select(attempts.c.ticket_id)
+        .where(attempts.c.ticket_id == ticket_id)
+    ).mappings().all()
+    required_command_columns = {"ticket_id", "command_state", "dispatch_started_at_ms", "exchange_order_id"}
+    if not required_command_columns <= set(commands.c.keys()):
+        return True
+    command_rows = conn.execute(
+        sa.select(commands.c.command_state, commands.c.dispatch_started_at_ms, commands.c.exchange_order_id)
+        .where(commands.c.ticket_id == ticket_id)
+    ).mappings().all()
+    if not attempt_rows:
+        return any(
+            row["dispatch_started_at_ms"] is not None
+            or row["exchange_order_id"] is not None
+            or str(row["command_state"] or "") not in {"prepared", "reconciled_absent"}
+            for row in command_rows
+        )
     safe_attempt = conn.execute(
         sa.select(attempts.c.ticket_id)
         .where(attempts.c.ticket_id == ticket_id)
@@ -305,13 +323,6 @@ def _ticket_has_exchange_write_or_unknown(
     ).first()
     if safe_attempt is None:
         return True
-    required_command_columns = {"ticket_id", "command_state", "dispatch_started_at_ms", "exchange_order_id"}
-    if not required_command_columns <= set(commands.c.keys()):
-        return True
-    command_rows = conn.execute(
-        sa.select(commands.c.command_state, commands.c.dispatch_started_at_ms, commands.c.exchange_order_id)
-        .where(commands.c.ticket_id == ticket_id)
-    ).mappings().all()
     if not command_rows:
         return True
     unsafe_command = sa.or_(
@@ -369,6 +380,8 @@ def _ticket_has_snapshot_exposure_or_order(
     ).mappings().all()
     symbols = {str(row.get("gateway_symbol") or "") for row in rows}
     client_ids = {str(row.get("client_order_id") or "") for row in rows}
+    if not symbols and not client_ids:
+        return False
     if not symbols or not client_ids:
         return True
     if any(
