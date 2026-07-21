@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -13,9 +14,11 @@ from sqlalchemy import event, text
 from src.application.action_time.exchange_command import (
     claim_next_exchange_command,
 )
+from src.application.action_time.action_time_ticket import _expire_stale_active_tickets
 from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
 )
+from src.application.action_time.entry_effect_projection import project_entry_effect
 from src.application.action_time.lifecycle_exchange_command_materializer import (
     materialize_lifecycle_exchange_commands,
 )
@@ -29,11 +32,43 @@ from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _prepare_real_submit,
 )
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
+    _load_module,
+    _upgrade_module,
     pg_control_connection,
 )
 from tests.unit.test_ticket_bound_orphan_protection_cleanup_command import (
     _flat_position_live_protection,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EXCHANGE_RESULT_FACTS_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-21-144_add_exchange_command_result_facts.py"
+)
+ENTRY_EFFECT_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py"
+)
+
+
+@pytest.fixture(autouse=True)
+def _install_entry_effect_schema(pg_control_connection):
+    with pg_control_connection.begin():
+        _upgrade_module(
+            pg_control_connection,
+            _load_module(
+                EXCHANGE_RESULT_FACTS_MIGRATION_PATH,
+                "migration_144_exchange_worker",
+            ),
+        )
+        _upgrade_module(
+            pg_control_connection,
+            _load_module(
+                ENTRY_EFFECT_MIGRATION_PATH,
+                "migration_145_exchange_worker",
+            ),
+        )
 
 
 class _WorkerGateway:
@@ -114,7 +149,7 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
     assert gateway.calls[0]["symbol"] == "ETH/USDT:USDT"
     assert gateway.calls[0]["position_side"] is None
     assert gateway.calls[0]["desired_leverage"] == 2
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         row = conn.execute(
             text(
                 "SELECT order_role, command_state, claim_token, exchange_result "
@@ -123,6 +158,18 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
             ),
             {"command_id": result["exchange_command_id"]},
         ).mappings().one()
+        command = conn.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_exchange_commands "
+                "WHERE exchange_command_id = :command_id"
+            ),
+            {"command_id": result["exchange_command_id"]},
+        ).mappings().one()
+        project_entry_effect(
+            conn,
+            command=dict(command),
+            now_ms=NOW_MS + 9000,
+        )
     assert row["order_role"] == "ENTRY"
     assert row["command_state"] == "confirmed_submitted"
     assert row["claim_token"]
@@ -134,6 +181,40 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
     assert exchange_result["selected_leverage"] == 2
     assert exchange_result["exchange_configured_initial_leverage"] == 2
     assert exchange_result["leverage_verified_at_ms"] == NOW_MS + 4999
+    truth = pg_control_connection.execute(
+        text(
+            "SELECT ticket.status AS ticket_status, "
+            "attempt.status AS attempt_status, attempt.entry_effect_state, "
+            "attempt.entry_effect_observed_at_ms, "
+            "attempt.protection_barrier_state, attempt.protection_quantity, "
+            "lifecycle.status AS lifecycle_status, lifecycle.entry_filled_qty "
+            "FROM brc_action_time_tickets AS ticket "
+            "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
+            "ON attempt.ticket_id = ticket.ticket_id "
+            "JOIN brc_ticket_bound_order_lifecycle_runs AS lifecycle "
+            "ON lifecycle.ticket_id = ticket.ticket_id"
+        )
+    ).mappings().one()
+    assert truth["ticket_status"] == "submitted"
+    assert truth["attempt_status"] == "submit_prepared"
+    assert truth["entry_effect_state"] == "accepted_filled"
+    assert truth["entry_effect_observed_at_ms"] == NOW_MS + 5000
+    assert truth["protection_barrier_state"] == "initial_stop_pending"
+    assert Decimal(str(truth["protection_quantity"])) == Decimal("0.01")
+    assert truth["lifecycle_status"] == "entry_filled"
+    assert Decimal(str(truth["entry_filled_qty"])) == Decimal("0.01")
+    assert pg_control_connection.execute(
+        text(
+            "SELECT COUNT(*) FROM brc_action_time_ticket_events "
+            "WHERE transition_reason = 'entry_exchange_effect_committed'"
+        )
+    ).scalar_one() == 1
+    assert pg_control_connection.execute(
+        text(
+            "SELECT COUNT(*) FROM brc_ticket_bound_lifecycle_events "
+            "WHERE event_type = 'entry_filled'"
+        )
+    ).scalar_one() == 1
 
 
 @pytest.mark.asyncio
@@ -317,6 +398,180 @@ async def test_worker_persists_ambiguous_outcome_and_blocks_later_commands(
     assert hold["source_kind"] == "exchange_command"
     assert hold["source_id"] == first["exchange_command_id"]
     assert hold["netting_domain_key"].endswith("|one_way|BOTH")
+    effect = pg_control_connection.execute(
+        text(
+            "SELECT ticket.status AS ticket_status, attempt.entry_effect_state, "
+            "attempt.protection_barrier_state, lifecycle.status AS lifecycle_status "
+            "FROM brc_action_time_tickets AS ticket "
+            "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
+            "ON attempt.ticket_id = ticket.ticket_id "
+            "JOIN brc_ticket_bound_order_lifecycle_runs AS lifecycle "
+            "ON lifecycle.ticket_id = ticket.ticket_id"
+        )
+    ).mappings().one()
+    assert effect == {
+        "ticket_status": "submitted",
+        "entry_effect_state": "outcome_unknown",
+        "protection_barrier_state": "hard_stopped",
+        "lifecycle_status": "entry_unknown",
+    }
+
+
+@pytest.mark.asyncio
+async def test_entry_projection_failure_rolls_back_command_result_and_all_projections(
+    pg_control_connection,
+    monkeypatch,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+
+    def fail_projection(*_args, **_kwargs):
+        raise RuntimeError("injected_entry_projection_failure")
+
+    monkeypatch.setattr(
+        "src.application.action_time.exchange_command_worker.project_entry_effect",
+        fail_projection,
+    )
+    with pytest.raises(RuntimeError, match="injected_entry_projection_failure"):
+        await run_one_ticket_bound_exchange_command(
+            pg_control_connection.engine,
+            gateway=_WorkerGateway(),
+            worker_id="atomic-rollback-worker",
+            now_ms=NOW_MS + 5000,
+            command_sources=("protected_submit",),
+        )
+
+    command_state = pg_control_connection.execute(
+        text(
+            "SELECT command_state FROM brc_ticket_bound_exchange_commands "
+            "WHERE order_role = 'ENTRY'"
+        )
+    ).scalar_one()
+    attempt = pg_control_connection.execute(
+        text(
+            "SELECT entry_effect_state, exchange_write_called "
+            "FROM brc_ticket_bound_protected_submit_attempts"
+        )
+    ).mappings().one()
+    assert command_state == "dispatching"
+    assert attempt["entry_effect_state"] == "not_called"
+    assert attempt["exchange_write_called"] in {False, 0}
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_action_time_tickets")
+    ).scalar_one() == "finalgate_ready"
+    assert pg_control_connection.execute(
+        text("SELECT COUNT(*) FROM brc_ticket_bound_order_lifecycle_runs")
+    ).scalar_one() == 0
+
+
+@pytest.mark.asyncio
+async def test_ticket_expiration_repairs_effect_active_lineage_without_reclaiming_budget(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id="effect-before-expiry-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+    with pg_control_connection.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_action_time_tickets "
+                "SET status = 'finalgate_ready', expires_at_ms = :expired_at"
+            ),
+            {"expired_at": NOW_MS + 5000},
+        )
+        expired_count = _expire_stale_active_tickets(
+            conn,
+            now_ms=NOW_MS + 6000,
+        )
+
+    assert expired_count == 0
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_action_time_tickets")
+    ).scalar_one() == "submitted"
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_budget_reservations")
+    ).scalar_one() == "consumed"
+
+
+@pytest.mark.asyncio
+async def test_ticket_expiration_cannot_reclaim_while_entry_io_is_dispatching(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_action_time_tickets SET expires_at_ms = :expires_at "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"expires_at": NOW_MS + 5000, "ticket_id": ids["ticket_id"]},
+    )
+    pg_control_connection.commit()
+
+    class ExpiryRacingGateway(_WorkerGateway):
+        async def place_order(self, **kwargs):
+            with pg_control_connection.engine.begin() as conn:
+                assert _expire_stale_active_tickets(
+                    conn,
+                    now_ms=NOW_MS + 6000,
+                ) == 0
+            return await super().place_order(**kwargs)
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=ExpiryRacingGateway(),
+        worker_id="expiry-race-worker",
+        now_ms=NOW_MS + 4999,
+        command_sources=("protected_submit",),
+    )
+
+    assert result["status"] == "command_confirmed"
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_action_time_tickets")
+    ).scalar_one() == "submitted"
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_budget_reservations")
+    ).scalar_one() == "consumed"
+
+
+@pytest.mark.asyncio
+async def test_predispatch_identity_hard_stop_never_creates_entry_effect(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    gateway = _WorkerGateway()
+    gateway.runtime_account_id = "wrong-account"
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="identity-hard-stop-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+
+    assert result["status"] == "command_hard_stopped"
+    assert gateway.calls == []
+    truth = pg_control_connection.execute(
+        text(
+            "SELECT ticket.status, attempt.entry_effect_state, "
+            "attempt.exchange_write_called "
+            "FROM brc_action_time_tickets AS ticket "
+            "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
+            "ON attempt.ticket_id = ticket.ticket_id"
+        )
+    ).one()
+    assert tuple(truth) == ("finalgate_ready", "not_called", 0)
 
 
 @pytest.mark.asyncio
@@ -580,6 +835,15 @@ async def test_entry_rejection_terminalizes_undispatched_protection_siblings(
     ).mappings().one()
     assert attempt["status"] == "submit_failed"
     assert "entry_rejected" in str(attempt["blockers"])
+    assert pg_control_connection.execute(
+        text("SELECT status FROM brc_action_time_tickets")
+    ).scalar_one() == "invalidated"
+    assert pg_control_connection.execute(
+        text(
+            "SELECT COUNT(*) FROM brc_action_time_ticket_events "
+            "WHERE transition_reason = 'entry_authoritatively_rejected'"
+        )
+    ).scalar_one() == 1
 
 
 @pytest.mark.asyncio
@@ -870,14 +1134,6 @@ async def test_worker_persists_typed_entry_fill_facts_when_schema_is_available(
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
     _prepare_real_submit(pg_control_connection, ids)
-    for statement in (
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_order_status TEXT",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN executed_qty NUMERIC",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN average_exec_price NUMERIC",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_observed_at_ms BIGINT",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN result_facts_complete BOOLEAN NOT NULL DEFAULT false",
-    ):
-        pg_control_connection.execute(text(statement))
     pg_control_connection.commit()
 
     class FilledGateway(_WorkerGateway):
@@ -921,14 +1177,6 @@ async def test_worker_accepts_exact_zero_entry_fill_without_dispatching_protecti
 
     ids = _create_ready_protected_submit(pg_control_connection)
     prepared = _prepare_real_submit(pg_control_connection, ids)
-    for statement in (
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_order_status TEXT",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN executed_qty NUMERIC",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN average_exec_price NUMERIC",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_observed_at_ms BIGINT",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN result_facts_complete BOOLEAN NOT NULL DEFAULT false",
-    ):
-        pg_control_connection.execute(text(statement))
     pg_control_connection.commit()
 
     class ZeroFillGateway(_WorkerGateway):
@@ -978,7 +1226,8 @@ async def test_worker_accepts_exact_zero_entry_fill_without_dispatching_protecti
     } == {"entry_filled_qty_zero_no_protection_dispatch"}
     attempt = pg_control_connection.execute(
         text(
-            "SELECT status, exchange_write_called "
+            "SELECT status, exchange_write_called, entry_effect_state, "
+            "protection_barrier_state, protection_quantity "
             "FROM brc_ticket_bound_protected_submit_attempts "
             "WHERE protected_submit_attempt_id = :attempt_id"
         ),
@@ -986,6 +1235,21 @@ async def test_worker_accepts_exact_zero_entry_fill_without_dispatching_protecti
     ).mappings().one()
     assert attempt["status"] == "submit_prepared"
     assert attempt["exchange_write_called"] in {True, 1}
+    assert attempt["entry_effect_state"] == "accepted_zero_fill"
+    assert attempt["protection_barrier_state"] == "fill_pending"
+    assert attempt["protection_quantity"] is None
+    ticket_status = pg_control_connection.execute(
+        text("SELECT status FROM brc_action_time_tickets")
+    ).scalar_one()
+    lifecycle = pg_control_connection.execute(
+        text(
+            "SELECT status, entry_filled_qty "
+            "FROM brc_ticket_bound_order_lifecycle_runs"
+        )
+    ).mappings().one()
+    assert ticket_status == "submitted"
+    assert lifecycle["status"] == "entry_fill_pending"
+    assert lifecycle["entry_filled_qty"] is None
 
 
 @pytest.mark.asyncio
@@ -994,14 +1258,6 @@ async def test_worker_persists_unknown_when_entry_fill_exceeds_requested_amount(
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
     _prepare_real_submit(pg_control_connection, ids)
-    for statement in (
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_order_status TEXT",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN executed_qty NUMERIC",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN average_exec_price NUMERIC",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_observed_at_ms BIGINT",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN result_facts_complete BOOLEAN NOT NULL DEFAULT false",
-    ):
-        pg_control_connection.execute(text(statement))
     pg_control_connection.commit()
 
     class ContradictoryFillGateway(_WorkerGateway):
@@ -1041,14 +1297,6 @@ async def test_worker_persists_unknown_when_entry_average_fill_price_is_not_posi
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
     _prepare_real_submit(pg_control_connection, ids)
-    for statement in (
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_order_status TEXT",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN executed_qty NUMERIC",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN average_exec_price NUMERIC",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN exchange_observed_at_ms BIGINT",
-        "ALTER TABLE brc_ticket_bound_exchange_commands ADD COLUMN result_facts_complete BOOLEAN NOT NULL DEFAULT false",
-    ):
-        pg_control_connection.execute(text(statement))
     pg_control_connection.commit()
 
     class InvalidAveragePriceGateway(_WorkerGateway):

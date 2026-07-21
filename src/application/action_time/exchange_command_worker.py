@@ -14,6 +14,7 @@ from src.application.action_time.exchange_command import (
     expire_stale_exchange_command_claims,
     record_claimed_exchange_command_outcome,
 )
+from src.application.action_time.entry_effect_projection import project_entry_effect
 from src.application.action_time.lifecycle_exchange_command_completion import (
     apply_completed_lifecycle_exchange_sources,
     apply_failed_lifecycle_exchange_source,
@@ -245,6 +246,7 @@ async def _run_one_ticket_bound_exchange_command(
                 },
                 now_ms=now_ms,
             )
+            project_entry_effect(conn, command=recorded, now_ms=now_ms)
             upsert_exchange_command_domain_hold(
                 conn,
                 command=recorded,
@@ -280,6 +282,7 @@ async def _run_one_ticket_bound_exchange_command(
                 },
                 now_ms=now_ms,
             )
+            project_entry_effect(conn, command=recorded, now_ms=now_ms)
             upsert_exchange_command_domain_hold(
                 conn,
                 command=recorded,
@@ -323,6 +326,7 @@ async def _run_one_ticket_bound_exchange_command(
                 },
                 now_ms=now_ms,
             )
+            project_entry_effect(conn, command=recorded, now_ms=now_ms)
     except ValueError as exc:
         return _record_contradictory_exchange_result(
             engine,
@@ -347,14 +351,6 @@ async def _run_one_ticket_bound_exchange_command(
             )
         else:
             failure_completion = {}
-            if str(recorded.get("order_role") or "") == "ENTRY":
-                _mark_entry_exchange_effect(
-                    conn,
-                    protected_submit_attempt_id=str(
-                        recorded.get("protected_submit_attempt_id") or ""
-                    ),
-                    now_ms=now_ms,
-                )
         completion = (
             apply_completed_lifecycle_exchange_sources(
                 conn,
@@ -412,14 +408,7 @@ def _record_contradictory_exchange_result(
             blockers=[blocker],
             now_ms=now_ms,
         )
-        if str(recorded.get("order_role") or "") == "ENTRY":
-            _mark_entry_exchange_effect(
-                conn,
-                protected_submit_attempt_id=str(
-                    recorded.get("protected_submit_attempt_id") or ""
-                ),
-                now_ms=now_ms,
-            )
+        project_entry_effect(conn, command=recorded, now_ms=now_ms)
     return _result(
         "command_outcome_unknown",
         recorded,
@@ -643,26 +632,3 @@ def _completion_now_ms(requested_now_ms: int | None) -> int:
     """Use fresh wall time in production while retaining deterministic tests."""
 
     return int(requested_now_ms or time.time() * 1000)
-
-
-def _mark_entry_exchange_effect(
-    conn: sa.engine.Connection,
-    *,
-    protected_submit_attempt_id: str,
-    now_ms: int,
-) -> None:
-    if not protected_submit_attempt_id:
-        return
-    table = sa.Table(
-        "brc_ticket_bound_protected_submit_attempts",
-        sa.MetaData(),
-        autoload_with=conn,
-    )
-    conn.execute(
-        table.update()
-        .where(
-            table.c.protected_submit_attempt_id == protected_submit_attempt_id,
-            table.c.exchange_write_called.is_(False),
-        )
-        .values(exchange_write_called=True, updated_at_ms=now_ms)
-    )

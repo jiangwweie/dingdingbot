@@ -119,7 +119,7 @@ LIFECYCLE_STATUS_SPECIFICATIONS: dict[str, LifecycleStatusSpecification] = {
         ProtectionState.PENDING,
         ReconciliationState.PENDING,
         LifecycleControlState.AUTOMATED,
-        "hard_stopped",
+        "entry_fill_pending",
         "wait_for_entry_fill_or_reconcile_order_status",
     ),
     "entry_filled": _spec(

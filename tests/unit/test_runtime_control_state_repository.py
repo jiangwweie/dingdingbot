@@ -417,6 +417,35 @@ def test_runtime_safety_submit_authority_requires_v2_capacity_fact_pair() -> Non
     ) is True
 
 
+def test_exact_ticket_bundle_reads_canonical_capacity_base_fact_snapshot() -> None:
+    class RecordingRepository(PgBackedRuntimeControlStateRepository):
+        def __init__(self):
+            self.fact_ids = []
+
+        def _read_exact_rows(self, table_name, id_column, id_value):
+            if table_name == "brc_action_time_tickets":
+                return [
+                    {
+                        "ticket_id": "ticket-1",
+                        "account_capacity_base_fact_snapshot_id": "capacity-base-1",
+                        "account_capacity_fact_snapshot_id": "obsolete-capacity-1",
+                    }
+                ]
+            if table_name == "brc_runtime_fact_snapshots":
+                self.fact_ids.append(id_value)
+            return []
+
+        def _action_time_bundle_payload(self, rows, *, ticket_id):
+            return rows
+
+    repository = RecordingRepository()
+
+    repository._read_action_time_exact_ticket_bundle(ticket_id="ticket-1")
+
+    assert "capacity-base-1" in repository.fact_ids
+    assert "obsolete-capacity-1" not in repository.fact_ids
+
+
 def test_current_readiness_allows_null_validity_until_projector_replaces_row() -> None:
     now_ms = 1770001000000
 

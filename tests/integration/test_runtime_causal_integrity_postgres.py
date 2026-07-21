@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+import importlib.util
 import multiprocessing
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
@@ -84,6 +88,12 @@ from tests.unit.test_pg_promotion_action_time_lane_materialization import (
 from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _prepare_real_submit,
     _submitted_orders,
+)
+
+
+ENTRY_EFFECT_MIGRATION_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py"
 )
 
 
@@ -236,25 +246,6 @@ def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:
     )
     lane_id = str(sequence["promotion"]["action_time_lane_input_id"])
     ticket_id = str(ticket["ticket_id"])
-    # The exact-ticket repository still reads the migration-134 runtime-safety
-    # fact key while the Ticket owns the canonical capacity-base fact key. Keep
-    # this disposable PG fixture production-shaped until that unrelated reader
-    # drift is repaired in its own production task.
-    conn.execute(
-        text(
-            "ALTER TABLE brc_action_time_tickets ADD COLUMN IF NOT EXISTS "
-            "account_capacity_fact_snapshot_id TEXT"
-        )
-    )
-    conn.execute(
-        text(
-            "UPDATE brc_action_time_tickets "
-            "SET account_capacity_fact_snapshot_id = "
-            "account_capacity_base_fact_snapshot_id "
-            "WHERE ticket_id = :ticket_id"
-        ),
-        {"ticket_id": ticket_id},
-    )
     preflight = finalgate.materialize_action_time_finalgate_preflight(
         conn,
         ticket_id=ticket_id,
@@ -326,6 +317,122 @@ def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:
     }
     prepared = _prepare_real_submit(conn, ids)
     return ids, prepared
+
+
+@pytest.mark.asyncio
+async def test_migration_145_repairs_expired_effect_lineage_and_preserves_terminal_lifecycle(
+    postgres_certification_engine,
+):
+    with postgres_certification_engine.begin() as conn:
+        ids, prepared = _prepare_exchange_commands_on_connection(conn)
+    gateway = FakeExchangeLedgerGateway(
+        postgres_certification_engine.url.render_as_string(hide_password=False),
+        caller_label="migration-145-repair",
+    )
+    result = await run_one_ticket_bound_exchange_command(
+        postgres_certification_engine,
+        gateway=gateway,
+        worker_id="migration-145-entry-worker",
+        now_ms=NOW_MS + 5_000,
+        command_sources=("protected_submit",),
+    )
+    assert result["status"] == "command_confirmed"
+    with postgres_certification_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_action_time_tickets SET status = 'expired' "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        )
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_protected_submit_attempts SET "
+                "entry_effect_state = 'not_called', "
+                "entry_effect_observed_at_ms = NULL, "
+                "protection_barrier_state = 'not_started', "
+                "protection_quantity = NULL "
+                "WHERE protected_submit_attempt_id = :attempt_id"
+            ),
+            {"attempt_id": prepared["protected_submit_attempt_id"]},
+        )
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_order_lifecycle_runs SET "
+                "status = 'entry_submit_sent', entry_fill_confirmed = false, "
+                "entry_filled_qty = NULL, entry_avg_price = NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE brc_budget_reservations SET status = 'released', "
+                "release_reason = 'legacy_expiry_release', "
+                "released_at_ms = :released_at, reconciliation_state = 'matched' "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"], "released_at": NOW_MS + 5_500},
+        )
+        spec = importlib.util.spec_from_file_location(
+            "migration_145_pg_repair",
+            ENTRY_EFFECT_MIGRATION_PATH,
+        )
+        assert spec is not None and spec.loader is not None
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        migration.op = Operations(MigrationContext.configure(conn))
+        migration._backfill_entry_effect()
+        migration._repair_effect_active_current_truth(sa.inspect(conn))
+
+        truth = conn.execute(
+            text(
+                "SELECT ticket.status AS ticket_status, "
+                "attempt.entry_effect_state, attempt.protection_barrier_state, "
+                "lifecycle.status AS lifecycle_status, "
+                "reservation.status AS reservation_status, "
+                "reservation.release_reason, reservation.released_at_ms, "
+                "reservation.current_first_blocker "
+                "FROM brc_action_time_tickets AS ticket "
+                "JOIN brc_ticket_bound_protected_submit_attempts AS attempt "
+                "ON attempt.ticket_id = ticket.ticket_id "
+                "JOIN brc_ticket_bound_order_lifecycle_runs AS lifecycle "
+                "ON lifecycle.ticket_id = ticket.ticket_id "
+                "JOIN brc_budget_reservations AS reservation "
+                "ON reservation.ticket_id = ticket.ticket_id "
+                "WHERE ticket.ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).mappings().one()
+        assert truth["ticket_status"] == "submitted"
+        assert truth["entry_effect_state"] == "accepted_filled"
+        assert truth["protection_barrier_state"] == "initial_stop_pending"
+        assert truth["lifecycle_status"] == "entry_filled"
+        assert truth["reservation_status"] == "consumed"
+        assert truth["release_reason"] is None
+        assert truth["released_at_ms"] is None
+        assert truth["current_first_blocker"] == (
+            "entry_effect_migration_capacity_revalidation_required"
+        )
+        assert conn.execute(
+            text(
+                "SELECT COUNT(*) FROM brc_budget_reservation_events "
+                "WHERE reason = 'entry_effect_migration_capacity_repair'"
+            )
+        ).scalar_one() == 1
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_order_lifecycle_runs "
+                "SET status = 'lifecycle_closed' WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        )
+        migration._repair_effect_active_current_truth(sa.inspect(conn))
+        assert conn.execute(
+            text(
+                "SELECT status FROM brc_ticket_bound_order_lifecycle_runs "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).scalar_one() == "lifecycle_closed"
 
 
 def _materialize_rci_account_capacity_current(

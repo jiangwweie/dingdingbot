@@ -1224,7 +1224,7 @@ class PgBackedRuntimeControlStateRepository:
             ticket.get("public_fact_snapshot_id"),
             ticket.get("action_time_fact_snapshot_id"),
             ticket.get("account_safe_fact_snapshot_id"),
-            ticket.get("account_capacity_fact_snapshot_id"),
+            ticket.get("account_capacity_base_fact_snapshot_id"),
             ticket.get("account_mode_snapshot_id"),
         ):
             rows["runtime_fact_snapshots"].extend(

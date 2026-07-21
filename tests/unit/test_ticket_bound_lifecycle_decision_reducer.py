@@ -170,6 +170,13 @@ def test_hard_stop_gets_a_deterministic_blocker_when_caller_omits_one():
     assert decision.failure_stage == "entry"
 
 
+def test_entry_fill_pending_uses_non_failure_event():
+    decision = lifecycle_decision_for_status("entry_fill_pending")
+
+    assert decision.event_type == "entry_fill_pending"
+    assert decision.first_blocker is None
+
+
 def test_generic_blocked_control_state_also_gets_a_deterministic_blocker():
     decision = lifecycle_decision_for_status("blocked")
 
