@@ -845,67 +845,6 @@ async def test_initial_protection_drain_is_pinned_to_the_primary_attempt_source(
 
 
 @pytest.mark.asyncio
-async def test_restart_after_entry_result_commit_recovers_same_source_initial_stop(
-    pg_control_connection,
-):
-    """The next worker resumes committed ENTRY protection after process loss."""
-
-    ids = _create_ready_protected_submit(pg_control_connection)
-    prepared = _prepare_real_submit(pg_control_connection, ids)
-    pg_control_connection.commit()
-    entry_gateway = _WorkerGateway()
-    entry = await run_one_ticket_bound_exchange_command(
-        pg_control_connection.engine,
-        gateway=entry_gateway,
-        worker_id="entry-before-process-loss",
-        now_ms=NOW_MS + 5000,
-        command_sources=("protected_submit",),
-    )
-    assert entry["status"] == "command_confirmed"
-    assert entry["order_role"] == "ENTRY"
-    assert entry_gateway.calls[0]["order_type"] == "market"
-    with pg_control_connection.engine.begin() as conn:
-        conn.execute(
-            text(
-                "UPDATE brc_action_time_tickets "
-                "SET status = 'expired', expires_at_ms = :expires_at_ms "
-                "WHERE ticket_id = :ticket_id"
-            ),
-            {"expires_at_ms": NOW_MS + 5000, "ticket_id": ids["ticket_id"]},
-        )
-
-    pg_control_connection.close()
-    restart_gateway = _WorkerGateway()
-    recovered = await run_one_ticket_bound_exchange_command(
-        pg_control_connection.engine,
-        gateway=restart_gateway,
-        worker_id="restart-after-entry-result-commit",
-        now_ms=NOW_MS + 5001,
-        command_sources=("protected_submit",),
-    )
-
-    assert recovered["status"] == "command_confirmed"
-    assert recovered["order_role"] == "SL"
-    assert recovered["source_command_id"] == prepared["protected_submit_attempt_id"]
-    assert [call["order_type"] for call in restart_gateway.calls] == ["stop_market"]
-    with pg_control_connection.engine.connect() as conn:
-        rows = {
-            row["order_role"]: row
-            for row in conn.execute(
-                text(
-                    "SELECT order_role, command_state, source_command_id "
-                    "FROM brc_ticket_bound_exchange_commands "
-                    "WHERE protected_submit_attempt_id = :attempt_id"
-                ),
-                {"attempt_id": prepared["protected_submit_attempt_id"]},
-            ).mappings()
-        }
-    assert rows["ENTRY"]["command_state"] == "confirmed_submitted"
-    assert rows["SL"]["command_state"] == "confirmed_submitted"
-    assert rows["SL"]["source_command_id"] == entry["source_command_id"]
-
-
-@pytest.mark.asyncio
 async def test_worker_rejects_lease_shorter_than_dispatch_timeout_and_commit_margin(
     pg_control_connection,
 ):

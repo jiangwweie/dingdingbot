@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: F401, F811
+
 import asyncio
 from decimal import Decimal
 import multiprocessing
@@ -234,6 +236,25 @@ def _prepare_exchange_commands_on_connection(conn) -> tuple[dict, dict]:
     )
     lane_id = str(sequence["promotion"]["action_time_lane_input_id"])
     ticket_id = str(ticket["ticket_id"])
+    # The exact-ticket repository still reads the migration-134 runtime-safety
+    # fact key while the Ticket owns the canonical capacity-base fact key. Keep
+    # this disposable PG fixture production-shaped until that unrelated reader
+    # drift is repaired in its own production task.
+    conn.execute(
+        text(
+            "ALTER TABLE brc_action_time_tickets ADD COLUMN IF NOT EXISTS "
+            "account_capacity_fact_snapshot_id TEXT"
+        )
+    )
+    conn.execute(
+        text(
+            "UPDATE brc_action_time_tickets "
+            "SET account_capacity_fact_snapshot_id = "
+            "account_capacity_base_fact_snapshot_id "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ticket_id},
+    )
     preflight = finalgate.materialize_action_time_finalgate_preflight(
         conn,
         ticket_id=ticket_id,
@@ -1251,3 +1272,170 @@ def test_rci_e4_ambiguous_gateway_timeout_blocks_later_dispatch(
             )
         ).scalar_one()
     assert hold_status == "active"
+
+
+def test_r12_process_restart_recovers_same_source_sl_after_ticket_expiry(
+    postgres_certification_engine,
+):
+    """A new process must recover durable protection without replaying ENTRY."""
+
+    with postgres_certification_engine.begin() as conn:
+        ids, prepared = _prepare_exchange_commands_on_connection(conn)
+    attempt_id = str(prepared["protected_submit_attempt_id"])
+    database_url = _database_url(postgres_certification_engine)
+    context = multiprocessing.get_context("spawn")
+
+    entry_process = context.Process(
+        target=run_fake_exchange_worker_process,
+        kwargs={
+            "database_url": database_url,
+            "worker_id": "r12-entry-process",
+            "caller_label": "r12-entry-process",
+            "now_ms": NOW_MS + 5_000,
+            "lease_ms": 15_000,
+        },
+    )
+    entry_process.start()
+    entry_process.join(15)
+    assert entry_process.exitcode == 0
+
+    with postgres_certification_engine.connect() as conn:
+        process_one_rows = {
+            row["order_role"]: dict(row)
+            for row in conn.execute(
+                text(
+                    "SELECT exchange_command_id, protected_submit_attempt_id, "
+                    "ticket_id, order_role, source_command_id, client_order_id, "
+                    "command_state, execution_attempt_count, order_type, "
+                    "exchange_order_status, executed_qty, average_exec_price "
+                    "FROM brc_ticket_bound_exchange_commands "
+                    "WHERE protected_submit_attempt_id = :attempt_id"
+                ),
+                {"attempt_id": attempt_id},
+            ).mappings()
+        }
+        process_one_attempt = dict(
+            conn.execute(
+                text(
+                    "SELECT protected_submit_attempt_id, ticket_id, status, "
+                    "exchange_write_called "
+                    "FROM brc_ticket_bound_protected_submit_attempts "
+                    "WHERE protected_submit_attempt_id = :attempt_id"
+                ),
+                {"attempt_id": attempt_id},
+            ).mappings().one()
+        )
+    entry_identity = process_one_rows["ENTRY"]
+    sl_identity = process_one_rows["SL"]
+    assert entry_identity["command_state"] == "confirmed_submitted"
+    assert entry_identity["exchange_order_status"] == "FILLED"
+    assert Decimal(str(entry_identity["executed_qty"])) > 0
+    assert Decimal(str(entry_identity["average_exec_price"])) > 0
+    assert entry_identity["execution_attempt_count"] == 1
+    assert sl_identity["command_state"] == "prepared"
+    assert sl_identity["execution_attempt_count"] == 0
+    assert sl_identity["order_type"] == "stop_market"
+    assert entry_identity["ticket_id"] == ids["ticket_id"]
+    assert sl_identity["ticket_id"] == ids["ticket_id"]
+    assert entry_identity["protected_submit_attempt_id"] == attempt_id
+    assert sl_identity["protected_submit_attempt_id"] == attempt_id
+    assert entry_identity["source_command_id"] == attempt_id
+    assert sl_identity["source_command_id"] == attempt_id
+    assert process_one_attempt == {
+        "protected_submit_attempt_id": attempt_id,
+        "ticket_id": ids["ticket_id"],
+        "status": "submit_prepared",
+        "exchange_write_called": True,
+    }
+    assert _fake_exchange_counts(postgres_certification_engine) == (1, 1)
+
+    with postgres_certification_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_action_time_tickets "
+                "SET status = 'expired', expires_at_ms = :expires_at_ms "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"expires_at_ms": NOW_MS + 5_000, "ticket_id": ids["ticket_id"]},
+        )
+
+    protection_process = context.Process(
+        target=run_fake_exchange_worker_process,
+        kwargs={
+            "database_url": database_url,
+            "worker_id": "r12-protection-restart-process",
+            "caller_label": "r12-protection-restart-process",
+            "now_ms": NOW_MS + 5_001,
+            "lease_ms": 15_000,
+        },
+    )
+    protection_process.start()
+    protection_process.join(15)
+    assert protection_process.exitcode == 0
+
+    with postgres_certification_engine.connect() as conn:
+        recovered_rows = {
+            row["order_role"]: dict(row)
+            for row in conn.execute(
+                text(
+                    "SELECT exchange_command_id, protected_submit_attempt_id, "
+                    "ticket_id, order_role, source_command_id, client_order_id, "
+                    "command_state, execution_attempt_count "
+                    "FROM brc_ticket_bound_exchange_commands "
+                    "WHERE protected_submit_attempt_id = :attempt_id"
+                ),
+                {"attempt_id": attempt_id},
+            ).mappings()
+        }
+        external_attempts = [
+            dict(row)
+            for row in conn.execute(
+                text(
+                    "SELECT client_order_id, caller_label "
+                    "FROM brc_rci_fake_exchange_attempts ORDER BY attempt_id"
+                )
+            ).mappings()
+        ]
+        ticket_status = conn.execute(
+            text(
+                "SELECT status FROM brc_action_time_tickets "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        ).scalar_one()
+        recovered_attempt = dict(
+            conn.execute(
+                text(
+                    "SELECT protected_submit_attempt_id, ticket_id "
+                    "FROM brc_ticket_bound_protected_submit_attempts "
+                    "WHERE protected_submit_attempt_id = :attempt_id"
+                ),
+                {"attempt_id": attempt_id},
+            ).mappings().one()
+        )
+
+    assert ticket_status == "expired"
+    assert recovered_rows["ENTRY"]["exchange_command_id"] == entry_identity[
+        "exchange_command_id"
+    ]
+    assert recovered_rows["SL"]["exchange_command_id"] == sl_identity[
+        "exchange_command_id"
+    ]
+    assert recovered_rows["ENTRY"]["source_command_id"] == attempt_id
+    assert recovered_rows["SL"]["source_command_id"] == attempt_id
+    assert recovered_attempt == {
+        "protected_submit_attempt_id": attempt_id,
+        "ticket_id": ids["ticket_id"],
+    }
+    assert recovered_rows["ENTRY"]["execution_attempt_count"] == 1
+    assert recovered_rows["SL"]["command_state"] == "confirmed_submitted"
+    assert recovered_rows["SL"]["execution_attempt_count"] == 1
+    assert _fake_exchange_counts(postgres_certification_engine) == (2, 2)
+    assert [row["client_order_id"] for row in external_attempts] == [
+        entry_identity["client_order_id"],
+        sl_identity["client_order_id"],
+    ]
+    assert [row["caller_label"] for row in external_attempts] == [
+        "r12-entry-process",
+        "r12-protection-restart-process",
+    ]

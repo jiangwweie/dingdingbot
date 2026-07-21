@@ -89,6 +89,9 @@ class FakeExchangeLedgerGateway:
         return SimpleNamespace(
             is_success=True,
             exchange_order_id=f"fake-{client_order_id}",
+            filled_qty=amount,
+            average_exec_price=Decimal("2000"),
+            exchange_order_status="FILLED",
         )
 
     async def cancel_order(self, **kwargs: Any) -> Any:
