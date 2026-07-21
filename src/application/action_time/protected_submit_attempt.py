@@ -582,19 +582,54 @@ def _project_durable_exchange_command_results(
         role = str(command.get("order_role") or "").upper()
         submitted = submitted_by_role.get(role)
         if submitted:
+            values: dict[str, Any] = {
+                "command_state": "confirmed_submitted",
+                "outcome_class": "exchange_accepted",
+                "exchange_order_id": str(submitted["exchange_order_id"]),
+                "exchange_result": submitted,
+                "resolved_at_ms": now_ms,
+                "updated_at_ms": now_ms,
+            }
+            typed_result_columns = {
+                "exchange_order_status",
+                "executed_qty",
+                "average_exec_price",
+                "exchange_observed_at_ms",
+                "result_facts_complete",
+            }
+            if typed_result_columns <= set(table.c.keys()):
+                executed_qty = (
+                    _optional_result_decimal(submitted.get("filled_qty"))
+                    if submitted.get("filled_qty") not in {None, ""}
+                    else None
+                )
+                average_exec_price = (
+                    _optional_result_decimal(submitted.get("average_exec_price"))
+                    if submitted.get("average_exec_price") not in {None, ""}
+                    else None
+                )
+                facts_complete = role != "ENTRY" or (
+                    executed_qty is not None
+                    and (executed_qty == 0 or average_exec_price is not None)
+                )
+                values.update(
+                    {
+                        "exchange_order_status": str(
+                            submitted.get("status") or "confirmed_submitted"
+                        ),
+                        "executed_qty": executed_qty,
+                        "average_exec_price": average_exec_price,
+                        "exchange_observed_at_ms": now_ms,
+                        "result_facts_complete": facts_complete,
+                    }
+                )
             conn.execute(
                 table.update()
                 .where(
                     table.c.exchange_command_id
                     == command["exchange_command_id"]
                 )
-                .values(
-                    command_state="confirmed_submitted",
-                    outcome_class="exchange_accepted",
-                    exchange_order_id=str(submitted["exchange_order_id"]),
-                    resolved_at_ms=now_ms,
-                    updated_at_ms=now_ms,
-                )
+                .values(**values)
             )
         elif aggregate_submitted:
             conn.execute(
@@ -1961,6 +1996,14 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0")
+
+
+def _optional_result_decimal(value: Any) -> Decimal | None:
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
 
 
 def _row_by_id(

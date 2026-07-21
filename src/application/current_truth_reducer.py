@@ -9,6 +9,7 @@ without each surface inventing a second definition of ``current``.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
 from typing import Any, Literal
@@ -26,6 +27,9 @@ from src.domain.runtime_semantic_kernel import (
     RuntimeSemanticState,
     RuntimeState,
     TerminalKind,
+)
+from src.domain.ticket_bound_exchange_command import (
+    exchange_command_effect_is_terminal,
 )
 
 
@@ -85,6 +89,10 @@ class LaneOperationalDecision(_FrozenModel):
 
 class TradeOperationalDecision(_FrozenModel):
     ticket_id: str = Field(min_length=1)
+    action_time_lane_input_id: str = ""
+    strategy_group_id: str = ""
+    symbol: str = ""
+    side: str = ""
     exposure_episode_id: str = ""
     netting_domain_key: str = ""
     phase: RuntimePhase
@@ -94,6 +102,10 @@ class TradeOperationalDecision(_FrozenModel):
     capacity_held: bool
     first_blocker: str
     next_system_action: str
+    owner_state: Literal[
+        "processing", "running", "needs_intervention", "completed"
+    ]
+    owner_message: str = Field(min_length=1)
     owner_action_required: bool
     semantic_fingerprint: str = Field(min_length=1)
 
@@ -222,7 +234,11 @@ def reduce_current_truth(
         )
         for candidate in candidates
     )
-    trades = tuple(_reduce_trade(row, now_ms=now_ms) for row in _rows(control_state, "action_time_tickets") if _ticket_current(row, now_ms))
+    trades = tuple(
+        _reduce_trade(control_state, row, now_ms=now_ms)
+        for row in _rows(control_state, "action_time_tickets")
+        if _ticket_current(row, now_ms)
+    )
     incidents = tuple(_incidents(lanes, trades, watermark_digest))
     summary = {
         "active_lane_count": len(lanes),
@@ -345,7 +361,30 @@ def _reduce_lane(
     )
 
 
-def _reduce_trade(row: Mapping[str, Any], *, now_ms: int) -> TradeOperationalDecision:
+def _reduce_trade(
+    control_state: Mapping[str, Any],
+    row: Mapping[str, Any],
+    *,
+    now_ms: int,
+) -> TradeOperationalDecision:
+    if _typed_trade_tables_present(control_state):
+        return _reduce_typed_trade(control_state, row, now_ms=now_ms)
+    if "available_control_state_tables" in control_state:
+        return _typed_trade_result(
+            row,
+            {},
+            str(row.get("netting_domain_key") or ""),
+            RuntimePhase.SUBMITTED,
+            RuntimeState.BLOCKED,
+            "unknown",
+            "unknown",
+            True,
+            "schema_revision_mismatch",
+            "apply_current_trade_truth_schema",
+            "needs_intervention",
+            "运行数据库版本不完整，交易链路已停止并等待修复",
+            True,
+        )
     status = str(row.get("status") or "").lower()
     semantic_state = semantic_state_for_aggregate("ticket", status)
     unknown = semantic_state.state is RuntimeState.OUTCOME_UNKNOWN
@@ -356,6 +395,9 @@ def _reduce_trade(row: Mapping[str, Any], *, now_ms: int) -> TradeOperationalDec
     fp = _digest({"ticket_id": row.get("ticket_id"), "status": status, "blocker": blocker})
     return TradeOperationalDecision(
         ticket_id=str(row.get("ticket_id") or ""),
+        strategy_group_id=str(row.get("strategy_group_id") or ""),
+        symbol=str(row.get("symbol") or ""),
+        side=str(row.get("side") or ""),
         exposure_episode_id=str(row.get("exposure_episode_id") or ""),
         netting_domain_key=str(row.get("netting_domain_key") or ""),
         phase=semantic_state.phase,
@@ -365,8 +407,531 @@ def _reduce_trade(row: Mapping[str, Any], *, now_ms: int) -> TradeOperationalDec
         capacity_held=not terminal,
         first_blocker=blocker,
         next_system_action=_next_action(blocker) if blocker else "continue_ticket_lifecycle",
+        owner_state="completed" if terminal else "processing",
+        owner_message=(
+            "交易生命周期已完成" if terminal else "交易结果正在自动确认"
+        ),
         owner_action_required=False,
         semantic_fingerprint=fp,
+    )
+
+
+def _reduce_typed_trade(
+    state: Mapping[str, Any],
+    ticket: Mapping[str, Any],
+    *,
+    now_ms: int,
+) -> TradeOperationalDecision:
+    ticket_id = str(ticket.get("ticket_id") or "")
+    attempts = _matching_rows(
+        state,
+        "ticket_bound_protected_submit_attempts",
+        "ticket_id",
+        ticket_id,
+    )
+    if len(attempts) != 1:
+        return _typed_trade_blocked(ticket, "current_truth_attempt_cardinality_invalid")
+    attempt = attempts[0]
+    attempt_id = str(attempt.get("protected_submit_attempt_id") or "")
+    lane_input_id = str(ticket.get("action_time_lane_input_id") or "")
+    lane_inputs = _matching_rows(
+        state,
+        "action_time_lane_inputs",
+        "action_time_lane_input_id",
+        lane_input_id,
+    )
+    if len(lane_inputs) != 1:
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_lane_input_cardinality_invalid",
+            attempt=attempt,
+        )
+    lane_input = lane_inputs[0]
+    if any(
+        str(lane_input.get(field) or "") != str(ticket.get(field) or "")
+        for field in ("strategy_group_id", "symbol", "side")
+    ):
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_ticket_lane_identity_mismatch",
+            attempt=attempt,
+        )
+    commands = _matching_rows(
+        state,
+        "ticket_bound_exchange_commands",
+        "protected_submit_attempt_id",
+        attempt_id,
+    )
+    entries = [row for row in commands if str(row.get("order_role") or "") == "ENTRY"]
+    lifecycles = [
+        row
+        for row in _matching_rows(
+            state,
+            "ticket_bound_order_lifecycle_runs",
+            "ticket_id",
+            ticket_id,
+        )
+        if str(row.get("protected_submit_attempt_id") or "") == attempt_id
+    ]
+    if len(entries) != 1:
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_entry_command_cardinality_invalid",
+            attempt=attempt,
+        )
+    entry = entries[0]
+    episode_id = str(ticket.get("exposure_episode_id") or "")
+    netting_key = str(entry.get("netting_domain_key") or "")
+    if (
+        str(entry.get("ticket_id") or "") != ticket_id
+        or str(entry.get("source_command_id") or "") != attempt_id
+        or str(entry.get("command_source") or "") != "protected_submit"
+        or str(entry.get("exposure_episode_id") or "") != episode_id
+        or any(
+            str(command.get("ticket_id") or "") != ticket_id
+            or str(command.get("exposure_episode_id") or "") != episode_id
+            or str(command.get("netting_domain_key") or "") != netting_key
+            for command in commands
+        )
+    ):
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_ticket_chain_identity_mismatch",
+            attempt=attempt,
+            netting_domain_key=netting_key,
+        )
+    entry_state = str(entry.get("command_state") or "")
+    if (
+        entry_state in {"dispatching", "outcome_unknown"}
+        or str(attempt.get("entry_effect_state") or "") == "outcome_unknown"
+    ):
+        observed_at_ms = int(
+            entry.get("updated_at_ms")
+            or entry.get("exchange_observed_at_ms")
+            or entry.get("created_at_ms")
+            or 0
+        )
+        overdue = observed_at_ms <= 0 or now_ms - observed_at_ms >= 30_000
+        return _typed_trade_result(
+            ticket, attempt, netting_key, RuntimePhase.SUBMITTED,
+            RuntimeState.OUTCOME_UNKNOWN,
+            str(attempt.get("protection_barrier_state") or "unknown"),
+            "pending", True, "entry_exchange_outcome_unknown",
+            "reconcile_exact_entry_exchange_identity",
+            "needs_intervention" if overdue else "processing",
+            (
+                "入场订单结果超过自动确认时限，需要介入"
+                if overdue
+                else "入场订单结果正在自动确认"
+            ),
+            overdue,
+        )
+    if len(lifecycles) != 1:
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_lifecycle_cardinality_invalid",
+            attempt=attempt,
+            netting_domain_key=netting_key,
+        )
+    lifecycle = lifecycles[0]
+    current_generation = int(attempt.get("protection_barrier_generation") or 1)
+    current_by_role: dict[str, Mapping[str, Any]] = {}
+    for role in ("SL", "TP1"):
+        role_rows = [row for row in commands if str(row.get("order_role") or "") == role]
+        if not role_rows:
+            return _typed_trade_blocked(
+                ticket,
+                f"current_truth_{role.lower()}_command_missing",
+                attempt=attempt,
+                netting_domain_key=netting_key,
+            )
+        if any(
+            int(row.get("command_generation") or 0) > current_generation
+            for row in role_rows
+        ):
+            return _typed_trade_blocked(
+                ticket,
+                "current_truth_future_protection_generation",
+                attempt=attempt,
+                netting_domain_key=netting_key,
+            )
+        current_rows = [
+            row
+            for row in role_rows
+            if int(row.get("command_generation") or 0) == current_generation
+        ]
+        if len(current_rows) != 1:
+            return _typed_trade_blocked(
+                ticket,
+                f"current_truth_{role.lower()}_command_cardinality_invalid",
+                attempt=attempt,
+                netting_domain_key=netting_key,
+            )
+        current_by_role[role] = current_rows[0]
+
+    recovery_rows = [
+        row
+        for row in _rows(state, "ticket_bound_protection_recovery_commands")
+        if str(row.get("ticket_id") or "") == ticket_id
+        or str(row.get("protected_submit_attempt_id") or "") == attempt_id
+    ]
+    if any(
+        int(row.get("protection_barrier_generation") or 0)
+        > current_generation
+        for row in recovery_rows
+    ):
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_future_recovery_generation",
+            attempt=attempt,
+            netting_domain_key=netting_key,
+        )
+    stale_active_recovery = [
+        row
+        for row in recovery_rows
+        if int(row.get("protection_barrier_generation") or 0)
+        < current_generation
+        and str(row.get("status") or "") == "prepared"
+    ]
+    if stale_active_recovery:
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_stale_active_recovery_generation",
+            attempt=attempt,
+            netting_domain_key=netting_key,
+        )
+    current_recovery_rows = [
+        row
+        for row in recovery_rows
+        if int(row.get("protection_barrier_generation") or 0)
+        == current_generation
+    ]
+    if len(current_recovery_rows) > 1:
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_recovery_cardinality_invalid",
+            attempt=attempt,
+            netting_domain_key=netting_key,
+        )
+    current_recovery = current_recovery_rows[0] if current_recovery_rows else {}
+    recovery_roles = _recovery_roles(current_recovery)
+    if current_recovery and (
+        str(current_recovery.get("ticket_id") or "") != ticket_id
+        or str(current_recovery.get("protected_submit_attempt_id") or "")
+        != attempt_id
+        or str(current_recovery.get("lifecycle_run_id") or "")
+        != str(lifecycle.get("lifecycle_run_id") or "")
+        or str(current_recovery.get("strategy_group_id") or "")
+        != str(ticket.get("strategy_group_id") or "")
+        or str(current_recovery.get("symbol") or "")
+        != str(ticket.get("symbol") or "")
+        or str(current_recovery.get("side") or "")
+        != str(ticket.get("side") or "")
+        or str(current_recovery.get("exposure_episode_id") or "") != episode_id
+        or str(current_recovery.get("netting_domain_key") or "") != netting_key
+        or str(current_recovery.get("source_entry_exchange_command_id") or "")
+        != str(entry.get("exchange_command_id") or "")
+        or _decimal_value(current_recovery.get("protection_quantity"))
+        != _decimal_value(attempt.get("protection_quantity"))
+        or not recovery_roles
+        or not recovery_roles.issubset({"SL", "TP1"})
+    ):
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_recovery_identity_mismatch",
+            attempt=attempt,
+            netting_domain_key=netting_key,
+        )
+
+    ticks = [
+        row
+        for row in _matching_rows(
+            state,
+            "ticket_bound_reconciliation_ticks",
+            "ticket_id",
+            ticket_id,
+        )
+        if str(row.get("protected_submit_attempt_id") or "") == attempt_id
+    ]
+    tick = max(
+        ticks,
+        key=lambda row: (
+            int(row.get("updated_at_ms") or row.get("created_at_ms") or 0),
+            str(row.get("reconciliation_tick_id") or ""),
+        ),
+        default={},
+    )
+    if tick and str(tick.get("exposure_episode_id") or "") != episode_id:
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_reconciliation_identity_mismatch",
+            attempt=attempt,
+            netting_domain_key=netting_key,
+        )
+    generation = current_generation
+    active_incidents: list[Mapping[str, Any]] = []
+    for incident in _rows(state, "runtime_incidents"):
+        if str(incident.get("incident_type") or "") != "initial_stop_not_established":
+            continue
+        details = _dict_value(incident.get("details"))
+        if str(details.get("ticket_id") or "") != ticket_id:
+            continue
+        incident_generation = int(
+            details.get("protection_barrier_generation") or 0
+        )
+        if (
+            incident_generation != generation
+            and str(incident.get("status") or "")
+            in {"closed", "invalidated"}
+        ):
+            continue
+        if (
+            str(details.get("protected_submit_attempt_id") or "") != attempt_id
+            or str(details.get("exposure_episode_id") or "") != episode_id
+            or str(details.get("netting_domain_key") or "") != netting_key
+            or incident_generation != generation
+        ):
+            return _typed_trade_blocked(
+                ticket,
+                "current_truth_incident_identity_mismatch",
+                attempt=attempt,
+                netting_domain_key=netting_key,
+            )
+        if str(incident.get("status") or "") in {"open", "investigating", "recovering"}:
+            active_incidents.append(incident)
+    if len(active_incidents) > 1:
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_incident_cardinality_invalid",
+            attempt=attempt,
+            netting_domain_key=netting_key,
+        )
+    active_holds = [
+        row
+        for row in _rows(state, "ticket_bound_scope_freezes")
+        if str(row.get("source_ticket_id") or "") == ticket_id
+        and str(row.get("source_kind") or "") == "protection_barrier"
+        and str(row.get("status") or "") == "active"
+    ]
+    if any(
+        row.get("netting_domain_key")
+        and str(row.get("netting_domain_key")) != netting_key
+        for row in active_holds
+    ):
+        return _typed_trade_blocked(
+            ticket,
+            "current_truth_hold_identity_mismatch",
+            attempt=attempt,
+            netting_domain_key=netting_key,
+        )
+
+    lifecycle_status = str(lifecycle.get("status") or "")
+    barrier = str(attempt.get("protection_barrier_state") or "unknown")
+    reservations = _matching_rows(
+        state,
+        "budget_reservations",
+        "ticket_id",
+        ticket_id,
+    )
+    reservation_status = str(reservations[0].get("status") or "") if len(reservations) == 1 else ""
+    if str(ticket.get("status") or "") in {"closed", "completed"} or lifecycle_status in {
+        "budget_settled",
+        "review_recorded",
+        "lifecycle_closed",
+    }:
+        terminal_release_proven = (
+            lifecycle_status in {"review_recorded", "lifecycle_closed"}
+            and str(attempt.get("entry_effect_state") or "")
+            in {"accepted_filled", "reconciled_absent", "rejected"}
+            and barrier == "closed"
+            and str(tick.get("status") or "") == "matched"
+            and str(tick.get("position_state") or "") == "flat"
+            and reservation_status == "released"
+            and not active_incidents
+            and not active_holds
+            and all(_exchange_command_terminal(row) for row in commands)
+        )
+        if not terminal_release_proven:
+            return _typed_trade_blocked(
+                ticket,
+                "current_truth_terminal_release_proof_incomplete",
+                attempt=attempt,
+                netting_domain_key=netting_key,
+            )
+        return _typed_trade_result(
+            ticket, attempt, netting_key, RuntimePhase.CLOSURE,
+            RuntimeState.TERMINAL, barrier, "matched", False, "",
+            "lifecycle_completed", "completed", "交易已平仓并完成结算记录", False,
+        )
+    if str(attempt.get("entry_effect_state") or "") == "accepted_zero_fill":
+        return _typed_trade_result(
+            ticket, attempt, netting_key, RuntimePhase.SUBMITTED,
+            RuntimeState.RUNNING, barrier, str(tick.get("status") or "pending"),
+            True, "entry_fill_pending",
+            "reconcile_exact_entry_until_fill_or_authoritative_absence",
+            "processing", "入场订单暂未成交，系统正在持续确认", False,
+        )
+    if active_incidents:
+        blocker = str(active_incidents[0].get("blocker_class") or "initial_stop_not_established")
+        return _typed_trade_result(
+            ticket, attempt, netting_key, RuntimePhase.PROTECTED,
+            RuntimeState.BLOCKED, barrier, str(tick.get("status") or "pending"),
+            True, blocker, "recover_or_reconcile_initial_stop",
+            "needs_intervention", "初始止损未建立，系统已冻结新增交易", True,
+        )
+    if active_holds:
+        blocker = str(active_holds[0].get("first_blocker") or "protection_barrier_hold_active")
+        return _typed_trade_result(
+            ticket, attempt, netting_key, RuntimePhase.PROTECTED,
+            RuntimeState.BLOCKED, barrier, str(tick.get("status") or "pending"),
+            True, blocker, "repair_or_reconcile_protection_barrier_hold",
+            "needs_intervention", "保护屏障仍处于冻结状态，需要处理后继续", True,
+        )
+    recovery_status = str(current_recovery.get("status") or "")
+    if current_recovery and "SL" in recovery_roles:
+        within_sla = (
+            barrier == "initial_stop_pending"
+            and now_ms < int(attempt.get("initial_stop_deadline_at_ms") or 0)
+        )
+        if recovery_status == "prepared" and not within_sla:
+            return _typed_trade_result(
+                ticket, attempt, netting_key, RuntimePhase.PROTECTED,
+                RuntimeState.BLOCKED, barrier, str(tick.get("status") or "pending"),
+                True, "initial_stop_recovery_in_progress",
+                "continue_automatic_initial_stop_recovery",
+                "needs_intervention", "初始止损尚未恢复，系统正在自动修复", True,
+            )
+        if recovery_status in {"blocked", "failed"}:
+            return _typed_trade_result(
+                ticket, attempt, netting_key, RuntimePhase.PROTECTED,
+                RuntimeState.BLOCKED, barrier, str(tick.get("status") or "pending"),
+                True,
+                str(current_recovery.get("first_blocker") or "initial_stop_recovery_failed"),
+                "repair_or_reconcile_initial_stop_recovery",
+                "needs_intervention", "初始止损自动恢复失败，需要介入", True,
+            )
+    if (
+        current_recovery
+        and recovery_roles == {"TP1"}
+        and recovery_status in {"blocked", "failed"}
+        and barrier in {"initial_stop_confirmed", "degraded"}
+    ):
+        return _typed_trade_result(
+            ticket, attempt, netting_key, RuntimePhase.PROTECTED,
+            RuntimeState.RUNNING, "degraded", str(tick.get("status") or "pending"),
+            True,
+            str(current_recovery.get("first_blocker") or "tp1_recovery_failed"),
+            "reconcile_or_retry_tp1_recovery",
+            "running", "止损保护正常，止盈单恢复仍在自动处理", False,
+        )
+    if barrier == "initial_stop_pending":
+        within_sla = now_ms < int(attempt.get("initial_stop_deadline_at_ms") or 0)
+        return _typed_trade_result(
+            ticket, attempt, netting_key, RuntimePhase.SUBMITTED,
+            RuntimeState.RUNNING if within_sla else RuntimeState.BLOCKED,
+            barrier, str(tick.get("status") or "pending"), True,
+            "initial_stop_pending_within_sla" if within_sla else "initial_stop_deadline_exhausted",
+            "establish_exact_initial_stop",
+            "processing" if within_sla else "needs_intervention",
+            (
+                "入场已成交，系统正在建立止损保护"
+                if within_sla
+                else "初始止损已超过建立时限，需要介入"
+            ),
+            not within_sla,
+        )
+    if barrier == "degraded" or lifecycle_status == "protection_degraded":
+        return _typed_trade_result(
+            ticket, attempt, netting_key, RuntimePhase.PROTECTED,
+            RuntimeState.RUNNING, "degraded", str(tick.get("status") or "pending"),
+            True, "tp1_recovery_pending", "recover_or_reconcile_tp1",
+            "running", "止损保护正常，止盈单正在自动恢复", False,
+        )
+    if barrier == "initial_stop_confirmed" and str(tick.get("status") or "") == "matched":
+        return _typed_trade_result(
+            ticket, attempt, netting_key, RuntimePhase.PROTECTED,
+            RuntimeState.RUNNING, barrier, "matched", True, "",
+            "continue_protected_lifecycle_monitoring", "running",
+            "持仓保护与交易所状态正常", False,
+        )
+    return _typed_trade_blocked(
+        ticket,
+        "current_truth_typed_trade_state_unclassified",
+        attempt=attempt,
+        netting_domain_key=netting_key,
+    )
+
+
+def _typed_trade_result(
+    ticket: Mapping[str, Any],
+    attempt: Mapping[str, Any],
+    netting_domain_key: str,
+    phase: RuntimePhase,
+    state: RuntimeState,
+    protection_state: str,
+    reconciliation_state: str,
+    capacity_held: bool,
+    blocker: str,
+    next_action: str,
+    owner_state: Literal["processing", "running", "needs_intervention", "completed"],
+    owner_message: str,
+    owner_action_required: bool,
+) -> TradeOperationalDecision:
+    facts = {
+        "ticket_id": ticket.get("ticket_id"),
+        "attempt_id": attempt.get("protected_submit_attempt_id"),
+        "phase": phase.value,
+        "state": state.value,
+        "barrier": protection_state,
+        "reconciliation": reconciliation_state,
+        "blocker": blocker,
+    }
+    return TradeOperationalDecision(
+        ticket_id=str(ticket.get("ticket_id") or ""),
+        action_time_lane_input_id=str(
+            ticket.get("action_time_lane_input_id") or ""
+        ),
+        strategy_group_id=str(ticket.get("strategy_group_id") or ""),
+        symbol=str(ticket.get("symbol") or ""),
+        side=str(ticket.get("side") or ""),
+        exposure_episode_id=str(ticket.get("exposure_episode_id") or ""),
+        netting_domain_key=netting_domain_key,
+        phase=phase,
+        state=state,
+        protection_state=protection_state,
+        reconciliation_state=reconciliation_state,
+        capacity_held=capacity_held,
+        first_blocker=blocker,
+        next_system_action=next_action,
+        owner_state=owner_state,
+        owner_message=owner_message,
+        owner_action_required=owner_action_required,
+        semantic_fingerprint=_digest(facts),
+    )
+
+
+def _typed_trade_blocked(
+    ticket: Mapping[str, Any],
+    blocker: str,
+    *,
+    attempt: Mapping[str, Any] | None = None,
+    netting_domain_key: str = "",
+) -> TradeOperationalDecision:
+    attempt = attempt or {}
+    return _typed_trade_result(
+        ticket,
+        attempt,
+        netting_domain_key,
+        RuntimePhase.SUBMITTED,
+        RuntimeState.BLOCKED,
+        str(attempt.get("protection_barrier_state") or "unknown"),
+        "unknown",
+        True,
+        blocker,
+        "repair_typed_trade_current_truth",
+        "processing",
+        "交易链路事实不完整，系统正在修复",
+        False,
     )
 
 
@@ -409,7 +974,75 @@ def _latest_blocking_process_outcome(state: Mapping[str, Any], key: tuple[str, s
 
 
 def _ticket_current(row: Mapping[str, Any], now_ms: int) -> bool:
-    return _row_current(row, now_ms) and str(row.get("status") or "").lower() not in {"expired", "rejected", "completed", "closed", "cancelled", "invalidated"}
+    return _row_current(row, now_ms)
+
+
+def _typed_trade_tables_present(state: Mapping[str, Any]) -> bool:
+    required = {
+        "ticket_bound_protected_submit_attempts",
+        "action_time_lane_inputs",
+        "ticket_bound_exchange_commands",
+        "ticket_bound_protection_recovery_commands",
+        "ticket_bound_order_lifecycle_runs",
+        "ticket_bound_reconciliation_ticks",
+        "runtime_incidents",
+        "ticket_bound_scope_freezes",
+    }
+    available = state.get("available_control_state_tables")
+    if isinstance(available, (list, tuple, set, frozenset)):
+        return required.issubset({str(item) for item in available})
+    return required.issubset(state)
+
+
+def _recovery_roles(row: Mapping[str, Any]) -> set[str]:
+    plan = _dict_value(row.get("command_plan"))
+    orders = plan.get("submit_missing_orders")
+    if not isinstance(orders, list):
+        return set()
+    return {
+        str(order.get("order_role") or "").upper()
+        for order in orders
+        if isinstance(order, Mapping) and str(order.get("order_role") or "")
+    }
+
+
+def _decimal_value(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("NaN")
+
+
+def _matching_rows(
+    state: Mapping[str, Any],
+    table: str,
+    field: str,
+    value: str,
+) -> list[Mapping[str, Any]]:
+    return [
+        row for row in _rows(state, table) if str(row.get(field) or "") == value
+    ]
+
+
+def _exchange_command_terminal(row: Mapping[str, Any]) -> bool:
+    return exchange_command_effect_is_terminal(
+        command_state=str(row.get("command_state") or ""),
+        exchange_order_status=(
+            str(row.get("exchange_order_status"))
+            if row.get("exchange_order_status") is not None
+            else None
+        ),
+        result_facts_complete=row.get("result_facts_complete") in {True, 1},
+    )
+
+
+def _dict_value(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        parsed = json.loads(value)
+        return dict(parsed) if isinstance(parsed, Mapping) else {}
+    return {}
 
 
 def _row_current(row: Mapping[str, Any], now_ms: int) -> bool:

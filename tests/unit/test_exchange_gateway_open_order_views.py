@@ -7,6 +7,7 @@ import pytest
 
 from src.domain.models import OrderStatus, OrderType
 from src.domain.exceptions import InvalidOrderError
+from src.domain.ticket_bound_exchange_command import ExchangeOrderLookupRequest
 from src.infrastructure.exchange_gateway import ExchangeGateway
 
 
@@ -319,3 +320,75 @@ async def test_cancel_conditional_fallback_reuses_complete_open_order_read():
         ("algo-visible-stop-id", SYMBOL, {}),
         ("algo-visible-stop-id", SYMBOL, {"stop": True}),
     ]
+
+
+class _RegularLookupRest:
+    def __init__(self, *, executed_qty: str, average_exec_price: str | None):
+        self.executed_qty = executed_qty
+        self.average_exec_price = average_exec_price
+
+    async def fetch_order(self, _order_id, symbol, params=None):
+        client_order_id = str((params or {}).get("origClientOrderId") or "")
+        return {
+            "id": "exchange-entry-lookup",
+            "clientOrderId": client_order_id,
+            "symbol": symbol,
+            "status": "open",
+            "filled": self.executed_qty,
+            "average": self.average_exec_price,
+            "info": {
+                "orderId": "exchange-entry-lookup",
+                "origClientOrderId": client_order_id,
+                "symbol": "ETHUSDT",
+                "executedQty": self.executed_qty,
+                "avgPrice": self.average_exec_price,
+            },
+        }
+
+
+def _entry_lookup_request() -> ExchangeOrderLookupRequest:
+    return ExchangeOrderLookupRequest(
+        exchange_id="binance_usdm",
+        gateway_symbol=SYMBOL,
+        command_kind="place_order",
+        order_role="ENTRY",
+        order_type="market",
+        client_order_id="entry-lookup-client",
+    )
+
+
+@pytest.mark.asyncio
+async def test_regular_lookup_normalizes_zero_fill_zero_average_to_no_fill_price():
+    gateway = _gateway(
+        _RegularLookupRest(
+            executed_qty="0",
+            average_exec_price="0.00000",
+        )
+    )
+
+    result = await gateway.find_order_by_client_id(
+        _entry_lookup_request(),
+        observed_at_ms=1_720_000_000_000,
+    )
+
+    assert result.executed_qty == Decimal("0")
+    assert result.average_exec_price is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("average_exec_price", ["0.00000", None])
+async def test_regular_lookup_positive_fill_without_positive_average_fails_closed(
+    average_exec_price,
+):
+    gateway = _gateway(
+        _RegularLookupRest(
+            executed_qty="0.01",
+            average_exec_price=average_exec_price,
+        )
+    )
+
+    with pytest.raises(ValueError):
+        await gateway.find_order_by_client_id(
+            _entry_lookup_request(),
+            observed_at_ms=1_720_000_000_000,
+        )

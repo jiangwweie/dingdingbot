@@ -92,11 +92,11 @@ def materialize_ticket_bound_exit_protection_set(
         existing_lifecycle=existing_lifecycle,
     )
     submit_request = _as_dict(attempt.get("submit_request"))
-    submit_result = _as_dict(attempt.get("submit_result"))
     entry_request = _order_by_role(submit_request.get("orders", []), "ENTRY")
-    entry_order = _order_by_role(submit_result.get("submitted_orders", []), "ENTRY")
-    sl_order = _order_by_role(submit_result.get("submitted_orders", []), "SL")
-    tp1_order = _order_by_role(submit_result.get("submitted_orders", []), "TP1")
+    current_orders = _typed_exchange_command_orders(conn, attempt_id=attempt_id)
+    entry_order = _order_by_role(current_orders, "ENTRY")
+    sl_order = _order_by_role(current_orders, "SL")
+    tp1_order = _order_by_role(current_orders, "TP1")
     entry_fill = _entry_fill(entry_request=entry_request, entry_order=entry_order)
     blockers.extend(entry_fill["blockers"])
     blockers.extend(_exit_order_blockers(sl_order, role="SL"))
@@ -296,6 +296,55 @@ def _lifecycle_by_ticket(conn: sa.engine.Connection, ticket_id: str) -> dict[str
     table = _table(conn, "brc_ticket_bound_order_lifecycle_runs")
     row = conn.execute(sa.select(table).where(table.c.ticket_id == ticket_id)).mappings().first()
     return dict(row) if row else {}
+
+
+def _typed_exchange_command_orders(
+    conn: sa.engine.Connection,
+    *,
+    attempt_id: str,
+) -> list[dict[str, Any]]:
+    """Expose typed durable command truth in the legacy order-shaped reducer."""
+
+    table = _table(conn, "brc_ticket_bound_exchange_commands")
+    rows = conn.execute(
+        sa.select(table)
+        .where(table.c.protected_submit_attempt_id == attempt_id)
+        .order_by(table.c.command_generation.asc(), table.c.updated_at_ms.asc())
+    ).mappings()
+    orders: list[dict[str, Any]] = []
+    for raw in rows:
+        row = dict(raw)
+        role = str(row.get("order_role") or "").upper()
+        state = str(row.get("command_state") or "")
+        if role in {"SL", "TP1"} and state == "reconciled_absent":
+            continue
+        executed_qty = row.get("executed_qty")
+        status = str(row.get("exchange_order_status") or "")
+        if role == "ENTRY" and row.get("result_facts_complete") in {True, 1}:
+            status = "FILLED" if _decimal(executed_qty) > 0 else status
+        elif state in {"confirmed_submitted", "reconciled_submitted"} and not status:
+            status = "OPEN"
+        orders.append(
+            {
+                "exchange_command_id": str(row["exchange_command_id"]),
+                "local_order_id": str(row.get("local_order_id") or ""),
+                "exchange_order_id": str(row.get("exchange_order_id") or ""),
+                "order_role": role,
+                "status": status,
+                "filled_qty": _decimal_text(executed_qty),
+                "average_exec_price": _decimal_text(row.get("average_exec_price")),
+                "amount": _decimal_text(row.get("amount")),
+                "price": _decimal_text(row.get("price")),
+                "trigger_price": _decimal_text(row.get("stop_price")),
+                "reduce_only": row.get("reduce_only") in {True, 1},
+                "command_state": state,
+            }
+        )
+    return orders
+
+
+def _decimal_text(value: Any) -> str | None:
+    return str(value) if value is not None else None
 
 
 def _attempt_blockers(

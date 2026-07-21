@@ -30,6 +30,14 @@ MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-04-086_create_pg_runtime_control_state_foundation.py"
 )
+TICKET_LIFECYCLE_MIGRATION_PATHS = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-091_create_ticket_bound_order_lifecycle.py",
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-096_create_ticket_bound_protection_recovery_commands.py",
+    REPO_ROOT
+    / "migrations/versions/2026-07-09-101_create_ticket_bound_reconciliation_ticks.py",
+)
 RISK_RESERVATION_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-09-103_add_budget_risk_at_stop_reservation.py"
@@ -49,6 +57,14 @@ RUNTIME_SUPERVISION_MIGRATION_PATH = (
 DYNAMIC_RISK_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-12-115_add_dynamic_execution_risk_policy.py"
+)
+CURRENT_TRADE_TRUTH_MIGRATION_PATHS = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-21-144_add_exchange_command_result_facts.py",
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py",
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-146_add_protection_recovery_generation.py",
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 PG_TEST_NOW_MS = 1770001000000
@@ -840,6 +856,19 @@ def _seed_pg_engine():
         migration.op = Operations(MigrationContext.configure(conn))
         try:
             migration.upgrade()
+            for index, migration_path in enumerate(
+                TICKET_LIFECYCLE_MIGRATION_PATHS
+            ):
+                lifecycle_migration = _load_file_module(
+                    migration_path,
+                    f"migration_lifecycle_{index}_server_monitor",
+                )
+                old_lifecycle_op = lifecycle_migration.op
+                lifecycle_migration.op = migration.op
+                try:
+                    lifecycle_migration.upgrade()
+                finally:
+                    lifecycle_migration.op = old_lifecycle_op
             old_risk_op = risk_reservation_migration.op
             risk_reservation_migration.op = migration.op
             try:
@@ -899,6 +928,23 @@ def _seed_pg_engine():
             dynamic_risk_migration.op = old_dynamic_risk_op
         install_runtime_control_state_revision(conn, revision="121")
         install_runtime_control_state_revision(conn, revision="122")
+        for revision in ("126", "127", "128", "129", "130", "131", "132"):
+            install_runtime_control_state_revision(conn, revision=revision)
+        for index, migration_path in enumerate(
+            CURRENT_TRADE_TRUTH_MIGRATION_PATHS
+        ):
+            current_truth_migration = _load_file_module(
+                migration_path,
+                f"migration_current_truth_{index}_server_monitor",
+            )
+            old_current_truth_op = current_truth_migration.op
+            current_truth_migration.op = Operations(
+                MigrationContext.configure(conn)
+            )
+            try:
+                current_truth_migration.upgrade()
+            finally:
+                current_truth_migration.op = old_current_truth_op
     return engine
 
 
@@ -1408,7 +1454,9 @@ def test_pg_stale_action_time_boundary_without_current_signal_is_quiet(
             assert artifact["source_mode"] == "db_backed"
             assert artifact["status"] == "healthy_waiting_quiet"
             assert artifact["decision"]["decision"] == "quiet"
-            assert artifact["decision"]["blocker_class"] == "none"
+            assert artifact["decision"]["blocker_class"] == (
+                "action_time_boundary_not_reproduced"
+            )
             assert artifact["decision"]["reasons"] == []
             assert artifact["notification"]["attempted"] is False
             assert artifact["notification"]["skipped_reason"] == "healthy_waiting_quiet"
@@ -1459,6 +1507,133 @@ def test_monitor_preserves_current_action_time_capability_blocker_without_notify
     assert decision["checkpoint"] == (
         "certify_current_release_action_time_capability"
     )
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_status", "expected_decision"),
+    (
+        ("entry_unknown", "processing", "quiet"),
+        ("sl_pending_within_sla", "processing", "quiet"),
+        ("sl_hard_incident", "needs_intervention", "notify"),
+        ("tp1_degraded", "running", "quiet"),
+        ("protected_matched", "running", "quiet"),
+    ),
+)
+def test_monitor_current_truth_keeps_effect_active_trade_out_of_market_wait(
+    case,
+    expected_status,
+    expected_decision,
+):
+    module = _load_module()
+    from tests.unit.test_current_truth_reducer import (  # noqa: PLC0415
+        _typed_trade_control_state,
+    )
+
+    decision = module._decision_from_current_truth_sources(
+        control_state=_typed_trade_control_state(case),
+        goal_status={
+            "status": "waiting_for_signal",
+            "checks": {},
+            "owner_action_required": False,
+        },
+        candidate_pool={
+            "candidate_rows": [],
+            "server_runtime_coverage": {
+                "status": "complete",
+                "expected_row_count": 1,
+                "active_matched_row_count": 1,
+                "missing_row_count": 0,
+            },
+        },
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["decision"] == expected_decision
+    assert decision["status"] == expected_status
+    assert decision["status"] not in {
+        "waiting_for_signal",
+        "healthy_waiting_quiet",
+    }
+    assert decision["checkpoint"] == "current_truth_bundle"
+
+
+def test_monitor_systemd_failure_precedes_running_trade_current_truth():
+    module = _load_module()
+    from tests.unit.test_current_truth_reducer import (  # noqa: PLC0415
+        _typed_trade_control_state,
+    )
+
+    decision = module._decision_from_current_truth_sources(
+        control_state=_typed_trade_control_state("protected_matched"),
+        goal_status={"status": "waiting_for_signal", "checks": {}},
+        candidate_pool={
+            "candidate_rows": [],
+            "server_runtime_coverage": {
+                "status": "complete",
+                "expected_row_count": 1,
+                "active_matched_row_count": 1,
+                "missing_row_count": 0,
+            },
+        },
+        systemd={"ready": False, "blockers": ["service:watcher:failed"]},
+    )
+
+    assert decision["decision"] == "notify"
+    assert decision["status"] == "notify_required"
+    assert decision["blocker_class"] == "watcher_or_service_failure"
+
+
+def test_monitor_closed_trade_does_not_override_current_market_wait(
+    tmp_path: Path,
+):
+    module = _load_module()
+    from tests.unit.test_action_time_projection_truth import (  # noqa: PLC0415
+        _attach_certifications,
+        _ready_control_state,
+    )
+    from tests.unit.test_current_truth_reducer import (  # noqa: PLC0415
+        _typed_trade_control_state,
+    )
+
+    state = _ready_control_state(tmp_path)
+    _attach_certifications(state)
+    closed = _typed_trade_control_state("closed")
+    for key in (
+        "action_time_tickets",
+        "ticket_bound_protected_submit_attempts",
+        "ticket_bound_exchange_commands",
+        "ticket_bound_protection_recovery_commands",
+        "ticket_bound_order_lifecycle_runs",
+        "ticket_bound_reconciliation_ticks",
+        "runtime_incidents",
+        "ticket_bound_scope_freezes",
+        "budget_reservations",
+    ):
+        state[key] = closed[key]
+    state["action_time_lane_inputs"] = [
+        *state.get("action_time_lane_inputs", []),
+        *closed["action_time_lane_inputs"],
+    ]
+    state.pop("available_control_state_tables", None)
+
+    decision = module._decision_from_current_truth_sources(
+        control_state=state,
+        goal_status={"status": "completed", "checks": {}},
+        candidate_pool={
+            "candidate_rows": [],
+            "server_runtime_coverage": {
+                "status": "complete",
+                "expected_row_count": 22,
+                "active_matched_row_count": 22,
+                "missing_row_count": 0,
+            },
+        },
+        systemd={"ready": True, "blockers": []},
+    )
+
+    assert decision["decision"] == "quiet"
+    assert decision["status"] == "healthy_waiting_quiet"
+    assert decision["status"] != "completed"
 
 
 def test_pg_completed_disabled_smoke_attempt_is_quiet_not_boundary_blocked(
@@ -1548,7 +1723,7 @@ def test_pg_overdue_unknown_exchange_command_notifies_from_current_table(
             assert artifact["notification"]["attempted"] is True
             assert artifact["source_refs"]["control_state_watermark"][
                 "table_counts"
-            ]["ticket_bound_exchange_commands"] == 1
+            ]["ticket_bound_exchange_commands"] == 3
             assert calls
     finally:
         engine.dispose()
@@ -1713,7 +1888,9 @@ def test_pg_expired_blocked_attempt_is_quiet_and_resolves_historical_notificatio
             )
 
             assert artifact["decision"]["decision"] == "quiet"
-            assert artifact["decision"]["blocker_class"] == "none"
+            assert artifact["decision"]["blocker_class"] == (
+                "action_time_boundary_not_reproduced"
+            )
             assert artifact["notification"]["attempted"] is False
             assert artifact["notification"]["resolved_historical_notification_count"] == 1
             assert calls == []

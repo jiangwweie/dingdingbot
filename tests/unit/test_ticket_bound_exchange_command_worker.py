@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -1098,6 +1099,67 @@ async def test_entry_replay_does_not_regress_degraded_protection_barrier(
     assert Decimal(str(barrier["protection_quantity"])) == Decimal("0.01")
 
 
+@pytest.mark.parametrize("barrier_state", ["initial_stop_confirmed", "closed"])
+@pytest.mark.asyncio
+async def test_entry_replay_does_not_reopen_terminal_protection_hold(
+    pg_control_connection,
+    barrier_state,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id=f"terminal-barrier-replay-{barrier_state}",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+    )
+    with pg_control_connection.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_protected_submit_attempts "
+                "SET protection_barrier_state = :barrier_state, "
+                "initial_stop_confirmed_at_ms = :confirmed_at_ms"
+            ),
+            {
+                "barrier_state": barrier_state,
+                "confirmed_at_ms": (
+                    NOW_MS + 5500
+                    if barrier_state == "initial_stop_confirmed"
+                    else None
+                ),
+            },
+        )
+        conn.execute(
+            text(
+                "UPDATE brc_ticket_bound_scope_freezes SET status = 'resolved' "
+                "WHERE source_kind = 'protection_barrier'"
+            )
+        )
+        command = conn.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_exchange_commands "
+                "WHERE exchange_command_id = :command_id"
+            ),
+            {"command_id": result["exchange_command_id"]},
+        ).mappings().one()
+        project_entry_effect(conn, command=dict(command), now_ms=NOW_MS + 6000)
+
+    assert pg_control_connection.execute(
+        text(
+            "SELECT protection_barrier_state FROM "
+            "brc_ticket_bound_protected_submit_attempts"
+        )
+    ).scalar_one() == barrier_state
+    assert pg_control_connection.execute(
+        text(
+            "SELECT count(*) FROM brc_ticket_bound_scope_freezes "
+            "WHERE source_kind = 'protection_barrier' AND status = 'active'"
+        )
+    ).scalar_one() == 0
+
+
 @pytest.mark.asyncio
 async def test_worker_binds_partial_entry_fill_before_initial_stop_dispatch(
     pg_control_connection,
@@ -1596,6 +1658,65 @@ async def test_initial_stop_failure_hard_stops_protection_barrier(
             )
         ).scalar_one()
         == "hard_stopped"
+    )
+
+
+@pytest.mark.asyncio
+async def test_initial_stop_phase_deadline_directly_projects_incident_and_hold(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id="deadline-incident-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    stop_gateway = _WorkerGateway()
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=stop_gateway,
+        worker_id="deadline-incident-stop",
+        now_ms=NOW_MS + 5001,
+        command_sources=("protected_submit",),
+        source_command_id=prepared["protected_submit_attempt_id"],
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        allowed_roles=("SL",),
+        absolute_deadline_at=time.monotonic() + 4.0,
+    )
+
+    incident = pg_control_connection.execute(
+        text(
+            "SELECT * FROM brc_runtime_incidents "
+            "WHERE incident_type = 'initial_stop_not_established'"
+        )
+    ).mappings().one()
+    hold = pg_control_connection.execute(
+        text(
+            "SELECT * FROM brc_ticket_bound_scope_freezes "
+            "WHERE source_kind = 'protection_barrier'"
+        )
+    ).mappings().one()
+    assert result["status"] == "hard_safety_stop"
+    assert result["exchange_write_called"] is False
+    assert stop_gateway.calls == []
+    assert incident["status"] == "open"
+    assert incident["blocker_class"] == "initial_stop_deadline_exhausted"
+    assert hold["status"] == "active"
+    assert hold["first_blocker"] == "initial_stop_deadline_exhausted"
+    assert (
+        pg_control_connection.execute(
+            text(
+                "SELECT command_state FROM brc_ticket_bound_exchange_commands "
+                "WHERE order_role = 'SL'"
+            )
+        ).scalar_one()
+        == "prepared"
     )
 
 
@@ -2172,6 +2293,18 @@ async def test_partial_cleanup_resumes_from_committed_command_without_repeating_
             .scalars()
             .all()
         )
+        first_effect = dict(
+            conn.execute(
+                text(
+                    "SELECT command_state, exchange_order_status, "
+                    "target_exchange_order_id FROM "
+                    "brc_ticket_bound_exchange_commands "
+                    "WHERE source_command_id = :source_id "
+                    "ORDER BY command_generation LIMIT 1"
+                ),
+                {"source_id": source_id},
+            ).mappings().one()
+        )
     second = await run_one_ticket_bound_exchange_command(
         pg_control_connection.engine,
         gateway=gateway,
@@ -2182,6 +2315,10 @@ async def test_partial_cleanup_resumes_from_committed_command_without_repeating_
 
     assert first["status"] == "command_confirmed"
     assert states_after_first == ["confirmed_submitted", "prepared"]
+    assert first_effect["exchange_order_status"] == "CANCELED"
+    assert first_effect["target_exchange_order_id"] == gateway.calls[0][
+        "exchange_order_id"
+    ]
     assert second["status"] == "command_confirmed"
     assert len(gateway.calls) == 2
     assert len({call["exchange_order_id"] for call in gateway.calls}) == 2
@@ -2196,6 +2333,131 @@ async def test_partial_cleanup_resumes_from_committed_command_without_repeating_
             ).scalar_one()
             == "result_recorded"
         )
+
+
+@pytest.mark.asyncio
+async def test_cleanup_cancel_outcome_unknown_does_not_mutate_protection_order(
+    pg_control_connection,
+):
+    set_id = _flat_position_live_protection(pg_control_connection)
+    source = prepare_ticket_bound_orphan_protection_cleanup_command(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        now_ms=NOW_MS + 6000,
+    )
+    source_id = source["orphan_protection_cleanup_command_id"]
+    materialize_lifecycle_exchange_commands(
+        pg_control_connection,
+        command_source="orphan_cleanup",
+        source_command_id=source_id,
+        now_ms=NOW_MS + 7000,
+    )
+    before = list(
+        pg_control_connection.execute(
+            text(
+                "SELECT exit_protection_order_id, status FROM "
+                "brc_ticket_bound_exit_protection_orders ORDER BY "
+                "exit_protection_order_id"
+            )
+        ).all()
+    )
+    pg_control_connection.commit()
+
+    class CancelTimeoutGateway(_WorkerGateway):
+        async def cancel_order(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            raise TimeoutError("cancel outcome unknown")
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=CancelTimeoutGateway(),
+        worker_id="cleanup-cancel-timeout",
+        now_ms=NOW_MS + 8000,
+        command_sources=("orphan_cleanup",),
+    )
+
+    assert result["status"] == "command_outcome_unknown"
+    assert pg_control_connection.execute(
+        text(
+            "SELECT exchange_order_status FROM brc_ticket_bound_exchange_commands "
+            "WHERE exchange_command_id = :command_id"
+        ),
+        {"command_id": result["exchange_command_id"]},
+    ).scalar_one() != "CANCELED"
+    assert list(
+        pg_control_connection.execute(
+            text(
+                "SELECT exit_protection_order_id, status FROM "
+                "brc_ticket_bound_exit_protection_orders ORDER BY "
+                "exit_protection_order_id"
+            )
+        ).all()
+    ) == before
+
+
+@pytest.mark.asyncio
+async def test_cleanup_cancel_target_mismatch_hard_stops_before_exchange(
+    pg_control_connection,
+):
+    set_id = _flat_position_live_protection(pg_control_connection)
+    source = prepare_ticket_bound_orphan_protection_cleanup_command(
+        pg_control_connection,
+        exit_protection_set_id=set_id,
+        now_ms=NOW_MS + 6000,
+    )
+    source_id = source["orphan_protection_cleanup_command_id"]
+    materialize_lifecycle_exchange_commands(
+        pg_control_connection,
+        command_source="orphan_cleanup",
+        source_command_id=source_id,
+        now_ms=NOW_MS + 7000,
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET target_exchange_order_id = 'exchange-wrong-target' "
+            "WHERE exchange_command_id = ("
+            "SELECT exchange_command_id FROM brc_ticket_bound_exchange_commands "
+            "WHERE source_command_id = :source_id "
+            "ORDER BY command_generation LIMIT 1)"
+        ),
+        {"source_id": source_id},
+    )
+    before = list(
+        pg_control_connection.execute(
+            text(
+                "SELECT exit_protection_order_id, status FROM "
+                "brc_ticket_bound_exit_protection_orders ORDER BY "
+                "exit_protection_order_id"
+            )
+        ).all()
+    )
+    pg_control_connection.commit()
+    gateway = _WorkerGateway()
+
+    result = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="cleanup-cancel-target-mismatch",
+        now_ms=NOW_MS + 8000,
+        command_sources=("orphan_cleanup",),
+    )
+
+    assert result["status"] == "command_hard_stopped"
+    assert result["exchange_write_called"] is False
+    assert result["blockers"] == [
+        "orphan_cleanup_cancel_target_identity_mismatch"
+    ]
+    assert gateway.calls == []
+    assert list(
+        pg_control_connection.execute(
+            text(
+                "SELECT exit_protection_order_id, status FROM "
+                "brc_ticket_bound_exit_protection_orders ORDER BY "
+                "exit_protection_order_id"
+            )
+        ).all()
+    ) == before
 
 
 def test_terminal_command_blocks_only_its_netting_domain(pg_control_connection):

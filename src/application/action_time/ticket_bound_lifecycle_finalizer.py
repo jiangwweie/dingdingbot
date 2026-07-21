@@ -21,6 +21,7 @@ from src.application.action_time.post_submit_closure import (
 )
 from src.application.action_time.ticket_bound_budget_settlement import (
     settle_ticket_bound_budget,
+    terminalize_effect_active_attempt_for_flat_settlement,
 )
 from src.application.action_time.account_risk_reprojection import (
     reproject_account_risk_current,
@@ -154,6 +155,20 @@ def finalize_ticket_bound_lifecycle_if_ready(
     )
 
     closure_savepoint = conn.begin_nested()
+    effect_terminalization = terminalize_effect_active_attempt_for_flat_settlement(
+        conn,
+        ticket_id=ticket_id,
+        protected_submit_attempt_id=attempt_id,
+        now_ms=now_ms,
+    )
+    if effect_terminalization.get("status") != "ready":
+        closure_savepoint.rollback()
+        return _result(
+            "finalization_blocked",
+            list(effect_terminalization.get("blockers") or []),
+            False,
+            lifecycle_status="settlement_blocked",
+        )
     settlement = settle_ticket_bound_budget(
         conn,
         ticket_id=ticket_id,

@@ -29,6 +29,9 @@ from src.application.action_time.lifecycle_mutation_capability import (
 from src.application.action_time.netting_domain_hold import (
     upsert_exchange_command_domain_hold,
 )
+from src.application.runtime_incident_projector import (
+    project_protection_barrier_failure,
+)
 from src.domain.exceptions import InsufficientMarginError, InvalidOrderError
 from src.domain.exchange_command_deadline import (
     ExchangeCommandDeadlineBudget,
@@ -269,6 +272,12 @@ async def _run_one_ticket_bound_exchange_command(
                 command_blockers = _gateway_identity_blockers(
                     command, gateway
                 ) + _execution_contract_blockers(command)
+                command_blockers.extend(
+                    _orphan_cleanup_cancel_identity_blockers(
+                        conn,
+                        command=command,
+                    )
+                )
             if command and deadline_budget is not None:
                 deadline_role = _deadline_role(str(command.get("order_role") or ""))
                 phase_decision = decide_exchange_phase_budget(
@@ -295,7 +304,7 @@ async def _run_one_ticket_bound_exchange_command(
                         claim_started_at=claim_started_at,
                     )
     except _ExchangePhaseDeadlineBlocked as blocked:
-        return _deadline_blocked_result(blocked)
+        return _deadline_blocked_result(engine, blocked, now_ms=now_ms)
     if not command:
         capability_blockers = list(capability.get("blockers") or [])
         return {
@@ -506,6 +515,11 @@ async def _run_one_ticket_bound_exchange_command(
         exchange_result,
     )
     placement_facts = _placement_result_facts(exchange_result)
+    if accepted and str(command.get("command_kind") or "") == "cancel_order":
+        # A successful cancel response is authoritative terminal venue truth
+        # for this exact durable cancel command.  Do not leave its effect in
+        # the synthetic ``confirmed_submitted`` order-status placeholder.
+        placement_facts["exchange_order_status"] = "CANCELED"
     now_ms = _completion_now_ms(requested_now_ms)
     commit_started_at = time.perf_counter()
     try:
@@ -754,6 +768,79 @@ def _execution_contract_blockers(command: dict[str, Any]) -> list[str]:
     return []
 
 
+def _orphan_cleanup_cancel_identity_blockers(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+) -> list[str]:
+    """Revalidate the exact current protection order before cancel dispatch."""
+
+    if str(command.get("command_kind") or "") != "cancel_order" or str(
+        command.get("command_source") or ""
+    ) != "orphan_cleanup":
+        return []
+    inspector = sa.inspect(conn)
+    if not all(
+        inspector.has_table(name)
+        for name in (
+            "brc_ticket_bound_exit_protection_orders",
+            "brc_ticket_bound_exit_protection_sets",
+        )
+    ):
+        return ["orphan_cleanup_cancel_identity_tables_missing"]
+    metadata = sa.MetaData()
+    orders = sa.Table(
+        "brc_ticket_bound_exit_protection_orders",
+        metadata,
+        autoload_with=conn,
+    )
+    sets = sa.Table(
+        "brc_ticket_bound_exit_protection_sets",
+        metadata,
+        autoload_with=conn,
+    )
+    parent_order_id = str(command.get("parent_order_id") or "").strip()
+    target_exchange_order_id = str(
+        command.get("target_exchange_order_id") or ""
+    ).strip()
+    role = str(command.get("order_role") or "").upper()
+    row = conn.execute(
+        sa.select(orders, sets.c.protected_submit_attempt_id)
+        .select_from(
+            orders.join(
+                sets,
+                sets.c.exit_protection_set_id
+                == orders.c.exit_protection_set_id,
+            )
+        )
+        .where(
+            orders.c.exit_protection_order_id == parent_order_id,
+            orders.c.ticket_id == str(command.get("ticket_id") or ""),
+            sets.c.protected_submit_attempt_id
+            == str(command.get("protected_submit_attempt_id") or ""),
+            orders.c.role == role,
+            orders.c.exchange_order_id == target_exchange_order_id,
+            orders.c.reduce_only.is_(True),
+            orders.c.status.in_(("submitted", "open", "partially_filled")),
+        )
+    ).mappings().one_or_none()
+    if row is None:
+        return ["orphan_cleanup_cancel_target_identity_mismatch"]
+    newer = conn.execute(
+        sa.select(orders.c.exit_protection_order_id)
+        .where(
+            orders.c.exit_protection_set_id == row["exit_protection_set_id"],
+            orders.c.role == role,
+            orders.c.generation > int(row.get("generation") or 0),
+            orders.c.status != "replaced",
+        )
+        .limit(1)
+    ).first()
+    if newer is not None:
+        return ["orphan_cleanup_cancel_target_generation_stale"]
+    return []
+
+
 def _gateway_identity_blockers(
     command: dict[str, Any],
     gateway: Any,
@@ -888,10 +975,19 @@ def _deadline_role(order_role: str) -> str:
 
 
 def _deadline_blocked_result(
+    engine: sa.Engine,
     blocked: _ExchangePhaseDeadlineBlocked,
+    *,
+    now_ms: int,
 ) -> dict[str, Any]:
     command = {**blocked.command, "command_state": "prepared"}
     blocker = blocked.decision.blocker or "exchange_command_deadline_blocked"
+    _project_protection_deadline_failure(
+        engine,
+        command=blocked.command,
+        blocker=blocker,
+        now_ms=now_ms,
+    )
     payload = _result(
         "hard_safety_stop",
         command,
@@ -934,6 +1030,13 @@ def _postclaim_deadline_blocked_result(
     if not released and decision.blocker:
         blockers.append(decision.blocker)
     current_command = dict(release.get("command") or command)
+    if released:
+        _project_protection_deadline_failure(
+            engine,
+            command=current_command,
+            blocker=blocker,
+            now_ms=now_ms,
+        )
     payload = _result(
         "hard_safety_stop",
         current_command,
@@ -1010,6 +1113,82 @@ def _release_claim_after_deadline_block(
         "released": False,
         "command": dict(current) if current is not None else command,
     }
+
+
+def _project_protection_deadline_failure(
+    engine: sa.Engine,
+    *,
+    command: dict[str, Any],
+    blocker: str,
+    now_ms: int,
+) -> None:
+    role = str(command.get("order_role") or "").upper()
+    if role not in {"SL", "TP1"}:
+        return
+    with engine.begin() as conn:
+        attempts = sa.Table(
+            "brc_ticket_bound_protected_submit_attempts",
+            sa.MetaData(),
+            autoload_with=conn,
+        )
+        attempt = conn.execute(
+            sa.select(attempts).where(
+                attempts.c.protected_submit_attempt_id
+                == str(command.get("protected_submit_attempt_id") or "")
+            )
+        ).mappings().one_or_none()
+        if (
+            attempt is None
+            or str(attempt.get("entry_effect_state") or "")
+            != "accepted_filled"
+        ):
+            return
+        generation = _protection_generation_for_worker_command(
+            conn,
+            command=command,
+        )
+        project_protection_barrier_failure(
+            conn,
+            protected_submit_attempt_id=str(
+                command.get("protected_submit_attempt_id") or ""
+            ),
+            order_role=role,
+            blocker=(
+                "initial_stop_deadline_exhausted"
+                if role == "SL"
+                else "tp1_deadline_exhausted"
+            ),
+            outcome_ambiguous=False,
+            protection_barrier_generation=generation,
+            trigger_ref=str(command.get("exchange_command_id") or ""),
+            now_ms=now_ms,
+        )
+
+
+def _protection_generation_for_worker_command(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+) -> int:
+    source = str(command.get("command_source") or "")
+    if source == "protected_submit":
+        return 1
+    if source != "protection_recovery":
+        raise ValueError("protection_deadline_command_source_invalid")
+    recoveries = sa.Table(
+        "brc_ticket_bound_protection_recovery_commands",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    generation = conn.execute(
+        sa.select(recoveries.c.protection_barrier_generation).where(
+            recoveries.c.protection_recovery_command_id
+            == str(command.get("source_command_id") or "")
+        )
+    ).scalar_one_or_none()
+    if generation is None:
+        raise ValueError("protection_deadline_recovery_generation_missing")
+    return int(generation)
 
 
 def _attach_phase_result(

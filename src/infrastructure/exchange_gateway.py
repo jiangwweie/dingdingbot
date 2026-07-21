@@ -6,7 +6,7 @@ import asyncio
 import time
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Callable, Awaitable, Any
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 try:
     import ccxt.pro as ccxtpro
@@ -17,7 +17,7 @@ import ccxt.async_support as ccxt_async
 
 from pydantic import BaseModel
 
-from src.domain.models import KlineData, AccountSnapshot, PositionInfo, OrderPlacementResult, OrderCancelResult, OrderStatus, OrderType, Order, OrderRole
+from src.domain.models import KlineData, AccountSnapshot, PositionInfo, OrderPlacementResult, OrderCancelResult, OrderStatus, OrderType, Order, OrderRole, Direction
 from src.domain.ticket_bound_exchange_command import (
     ExchangeOrderLookupRequest,
     ExchangeOrderLookupResult,
@@ -25,7 +25,6 @@ from src.domain.ticket_bound_exchange_command import (
     ExchangeOrderLookupView,
     required_exchange_order_lookup_view,
 )
-from decimal import Decimal
 from src.domain.exceptions import FatalStartupError, ConnectionLostError, DataQualityWarning, InsufficientMarginError, InvalidOrderError, OrderNotFoundError, OrderAlreadyFilledError, RateLimitError
 from src.infrastructure.logger import logger
 
@@ -770,7 +769,7 @@ class ExchangeGateway:
                     logger.info("WebSocket 账户订阅被取消")
                     break
 
-                except Exception as e:
+                except Exception:
                     reconnect_count += 1
                     if reconnect_count >= self._max_reconnect_attempts:
                         raise ConnectionLostError(
@@ -953,7 +952,7 @@ class ExchangeGateway:
             logger.debug(f"Asset snapshot updated: balance={total_balance}, positions={len(position_list)}")
             return snapshot
 
-        except Exception as e:
+        except Exception:
             raise
 
     def get_account_snapshot(self) -> Optional[AccountSnapshot]:
@@ -2847,6 +2846,11 @@ class ExchangeGateway:
                 "clientAlgoId",
             )
             exchange_status = self._optional_lookup_value(raw, "algoStatus")
+            # Conditional-stop lookup proves the SL identity/effect.  Binance's
+            # algo view exposes ``actualQty`` without an authoritative average
+            # fill price, so it must not be reinterpreted as ENTRY fill truth.
+            executed_qty = None
+            average_exec_price = None
         else:
             exchange_order_id = self._optional_lookup_value(
                 raw,
@@ -2868,6 +2872,31 @@ class ExchangeGateway:
                     "clientOrderid",
                 )
             exchange_status = self._optional_lookup_value(raw, "status")
+            executed_qty = self._optional_lookup_value(raw, "filled", "executedQty")
+            if executed_qty is None:
+                executed_qty = self._optional_lookup_value(info, "executedQty")
+            average_exec_price = self._optional_lookup_value(
+                raw,
+                "average",
+                "avgPrice",
+            )
+            if average_exec_price is None:
+                average_exec_price = self._optional_lookup_value(info, "avgPrice")
+            try:
+                if (
+                    executed_qty is not None
+                    and Decimal(str(executed_qty)) == 0
+                    and average_exec_price is not None
+                    and Decimal(str(average_exec_price)) == 0
+                ):
+                    # Binance represents an unfilled regular order with a
+                    # synthetic zero average.  Preserve exact zero-fill truth
+                    # without inventing a valid execution price.
+                    average_exec_price = None
+            except InvalidOperation:
+                # Leave malformed venue values intact so the typed result
+                # model rejects them instead of silently normalizing them.
+                pass
         raw_symbol = self._optional_lookup_value(raw, "symbol")
         if raw_symbol is None:
             raw_symbol = self._required_lookup_value(info, "symbol")
@@ -2885,6 +2914,8 @@ class ExchangeGateway:
             client_order_id=actual_client_id,
             gateway_symbol=gateway_symbol,
             exchange_status=exchange_status,
+            executed_qty=executed_qty,
+            average_exec_price=average_exec_price,
         )
 
     @classmethod
@@ -3249,8 +3280,6 @@ class ExchangeGateway:
         Returns:
             Direction 枚举
         """
-        from src.domain.models import Direction
-
         # 开仓单：buy=LONG, sell=SHORT
         # 平仓单：buy=SHORT(平空), sell=LONG(平多)
         if not reduce_only:
@@ -3330,7 +3359,6 @@ class ExchangeGateway:
             # 解析数量和价格（使用 Decimal 精度）
             amount = Decimal(str(raw_order.get('amount', 0))) if raw_order.get('amount') else Decimal('0')
             filled_qty = Decimal(str(raw_order.get('filled', 0))) if raw_order.get('filled') else Decimal('0')
-            remaining = Decimal(str(raw_order.get('remaining', 0))) if raw_order.get('remaining') else Decimal('0')
             price = Decimal(str(raw_order['price'])) if raw_order.get('price') else None
             average_exec_price = Decimal(str(raw_order['average'])) if raw_order.get('average') else None
 
@@ -3582,7 +3610,7 @@ class ExchangeGateway:
                     logger.info(f"WebSocket 订单监听被取消：{symbol}")
                     break
 
-                except Exception as e:
+                except Exception:
                     reconnect_count += 1
                     if reconnect_count >= self._max_reconnect_attempts:
                         raise ConnectionLostError(

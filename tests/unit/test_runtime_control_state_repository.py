@@ -58,6 +58,16 @@ LANE_IDENTITY_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-13-118_conserve_runtime_lane_identity.py"
 )
+CURRENT_TRADE_TRUTH_MIGRATION_PATHS = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-08-096_create_ticket_bound_protection_recovery_commands.py",
+    REPO_ROOT
+    / "migrations/versions/2026-07-21-144_add_exchange_command_result_facts.py",
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py",
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-146_add_protection_recovery_generation.py",
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 VALIDATOR_PATH = REPO_ROOT / "scripts/validate_runtime_control_state_repository.py"
 
@@ -141,6 +151,17 @@ def pg_control_connection():
                 account_risk_migration.upgrade()
             finally:
                 account_risk_migration.op = old_account_risk_op
+        for index, migration_path in enumerate(CURRENT_TRADE_TRUTH_MIGRATION_PATHS):
+            current_truth_migration = _load_module(
+                migration_path,
+                f"migration_current_trade_truth_{index}_repository",
+            )
+            old_current_truth_op = current_truth_migration.op
+            current_truth_migration.op = Operations(MigrationContext.configure(conn))
+            try:
+                current_truth_migration.upgrade()
+            finally:
+                current_truth_migration.op = old_current_truth_op
     with engine.connect() as conn:
         yield conn
     engine.dispose()
@@ -986,7 +1007,12 @@ def test_repository_exact_ticket_bundle_avoids_unrelated_control_state_scans(
     ]
     assert state["read_profile"] == "action_time_exact_ticket_bundle"
     assert state["action_time_ticket_bundle_id"] == ids["ticket_id"]
-    assert len(row_queries) <= 20
+    assert len(row_queries) <= 21
+    assert any(
+        "brc_ticket_bound_protection_recovery_commands" in statement
+        and "WHERE ticket_id" in statement
+        for statement in row_queries
+    )
     assert not any("brc_server_monitor_runs" in statement for statement in row_queries)
     assert not any(
         "brc_control_read_model_snapshots" in statement
@@ -1005,6 +1031,35 @@ def test_repository_monitor_read_profile_retains_protected_submit_lineage(
         submit_mode="disabled_smoke",
         now_ms=NOW_MS + 4000,
     )
+    pg_control_connection.execute(
+        text(
+            """
+            INSERT INTO brc_ticket_bound_protection_recovery_commands (
+              protection_recovery_command_id, protected_submit_attempt_id,
+              lifecycle_run_id, ticket_id, strategy_group_id, symbol, side,
+              protection_barrier_generation, exposure_episode_id,
+              netting_domain_key, source_entry_exchange_command_id,
+              protection_quantity, status, recovery_action, first_blocker,
+              blockers, command_plan, result_payload, authority_boundary,
+              created_at_ms, updated_at_ms
+            ) VALUES (
+              'recovery:monitor', :attempt_id, 'lifecycle:monitor', :ticket_id,
+              'SOR-001', 'ETHUSDT', 'long', 1, :episode_id,
+              'account|instrument|one_way|BOTH', 'entry:monitor', 0.01,
+              'prepared', 'submit_missing_protection', NULL, '[]',
+              '{"submit_missing_orders":[{"order_role":"SL"}]}', '{}',
+              'bounded recovery test', :created_at_ms, :updated_at_ms
+            )
+            """
+        ),
+        {
+            "attempt_id": prepared["protected_submit_attempt_id"],
+            "ticket_id": ids["ticket_id"],
+            "episode_id": f"exposure_episode:test:{ids['ticket_id']}",
+            "created_at_ms": NOW_MS + 4500,
+            "updated_at_ms": NOW_MS + 4500,
+        },
+    )
     pg_control_connection.commit()
 
     monitor_state = PgBackedRuntimeControlStateRepository(
@@ -1020,6 +1075,12 @@ def test_repository_monitor_read_profile_retains_protected_submit_lineage(
     assert monitor_state["table_counts"]["action_time_lane_inputs"] == 1
     assert monitor_state["table_counts"]["promotion_candidates"] == 1
     assert monitor_state["table_counts"]["live_signal_events"] == 1
+    assert (
+        monitor_state["table_counts"][
+            "ticket_bound_protection_recovery_commands"
+        ]
+        == 1
+    )
     assert monitor_state["ticket_bound_protected_submit_attempts"][0][
         "protected_submit_attempt_id"
     ] == prepared["protected_submit_attempt_id"]

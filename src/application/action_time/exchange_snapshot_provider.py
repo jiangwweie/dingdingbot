@@ -460,6 +460,11 @@ async def fetch_resolved_ticket_bound_exchange_snapshot(
         "position_side": scope.position_side,
         "netting_domain_key": scope.netting_domain_key,
         "open_orders": [_normalize_open_order(order) for order in open_orders or []],
+        # The provider completes the venue-wide open-order read for this exact
+        # exchange scope before constructing a snapshot.  Downstream terminal
+        # effect projection must require this explicit fact; partial/ad-hoc
+        # snapshots are never authoritative absence evidence.
+        "open_orders_complete": True,
         "recent_fills": normalized_fills,
         "entry_fill_history": entry_fill_history,
         "conditional_order_lineage": conditional_order_lineage,
@@ -811,6 +816,7 @@ def _normalize_open_order(order: Any) -> dict[str, Any]:
         "qty": str(
             raw.get("amount")
             or raw.get("remaining")
+            or raw.get("qty")
             or info.get("origQty")
             or info.get("quantity")
             or ""

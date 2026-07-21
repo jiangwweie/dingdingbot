@@ -70,8 +70,12 @@ CONTROL_STATE_TABLES: dict[str, str] = {
         "brc_ticket_bound_protected_submit_attempts"
     ),
     "ticket_bound_exchange_commands": "brc_ticket_bound_exchange_commands",
+    "ticket_bound_protection_recovery_commands": (
+        "brc_ticket_bound_protection_recovery_commands"
+    ),
     "ticket_bound_post_submit_closures": "brc_ticket_bound_post_submit_closures",
     "ticket_bound_order_lifecycle_runs": "brc_ticket_bound_order_lifecycle_runs",
+    "ticket_bound_reconciliation_ticks": "brc_ticket_bound_reconciliation_ticks",
     "ticket_bound_scope_freezes": "brc_ticket_bound_scope_freezes",
     "live_outcome_ledger": "brc_live_outcome_ledger",
     "goal_status_current": "brc_goal_status_current",
@@ -98,7 +102,9 @@ OPTIONAL_CONTROL_STATE_TABLES = {
     "runtime_process_outcomes",
     "strategy_semantic_admissions",
     "ticket_bound_order_lifecycle_runs",
+    "ticket_bound_reconciliation_ticks",
     "ticket_bound_exchange_commands",
+    "ticket_bound_protection_recovery_commands",
     "ticket_bound_scope_freezes",
     "live_outcome_ledger",
     # Account-risk current projections were introduced after the initial
@@ -417,6 +423,7 @@ class PgBackedRuntimeControlStateRepository:
             "source_mode": self.source_mode,
             "projection_target": self.projection_target,
             "read_now_ms": self.now_ms,
+            "available_control_state_tables": self._available_control_state_tables(),
             "table_counts": {key: len(value) for key, value in rows.items()},
             **rows,
         }
@@ -1259,6 +1266,16 @@ class PgBackedRuntimeControlStateRepository:
                         attempt_id,
                     )
                 )
+        rows["ticket_bound_reconciliation_ticks"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["ticket_bound_reconciliation_ticks"],
+            "ticket_id",
+            ticket_id,
+        )
+        rows["ticket_bound_protection_recovery_commands"] = self._read_exact_rows(
+            CONTROL_STATE_TABLES["ticket_bound_protection_recovery_commands"],
+            "ticket_id",
+            ticket_id,
+        )
         return self._action_time_bundle_payload(rows, ticket_id=ticket_id)
 
     def _read_exact_rows(
@@ -1266,8 +1283,18 @@ class PgBackedRuntimeControlStateRepository:
         table_name: str,
         column_name: str,
         value: str,
+        *,
+        optional: bool = False,
     ) -> list[dict[str, Any]]:
         if not value:
+            return []
+        optional_table_names = {
+            CONTROL_STATE_TABLES[key] for key in OPTIONAL_CONTROL_STATE_TABLES
+        }
+        if (
+            (optional or table_name in optional_table_names)
+            and not sa.inspect(self.conn).has_table(table_name)
+        ):
             return []
         statement = sa.text(
             f"SELECT * FROM {table_name} WHERE {column_name} = :value"
@@ -1293,6 +1320,7 @@ class PgBackedRuntimeControlStateRepository:
             "read_profile": "action_time_exact_ticket_bundle",
             "read_now_ms": self.now_ms,
             "action_time_ticket_bundle_id": ticket_id,
+            "available_control_state_tables": self._available_control_state_tables(),
             "table_counts": {key: len(value) for key, value in rows.items()},
             **rows,
         }
@@ -1331,9 +1359,20 @@ class PgBackedRuntimeControlStateRepository:
             "projection_target": self.projection_target,
             "read_profile": read_profile,
             "read_now_ms": self.now_ms,
+            "available_control_state_tables": self._available_control_state_tables(),
             "table_counts": {key: len(value) for key, value in rows.items()},
             **rows,
         }
+
+    def _available_control_state_tables(self) -> tuple[str, ...]:
+        existing = set(sa.inspect(self.conn).get_table_names())
+        return tuple(
+            sorted(
+                key
+                for key, table_name in CONTROL_STATE_TABLES.items()
+                if table_name in existing
+            )
+        )
 
     def _retain_requested_action_time_lineage(
         self,
@@ -1629,10 +1668,44 @@ class PgBackedRuntimeControlStateRepository:
             return
 
         ticket_ids = _texts(row.get("ticket_id") for row in attempts)
+        attempt_ids = _texts(
+            row.get("protected_submit_attempt_id") for row in attempts
+        )
         lane_ids = _texts(row.get("action_time_lane_input_id") for row in attempts)
         safety_ids = _texts(row.get("runtime_safety_snapshot_id") for row in attempts)
         handoff_ids = _texts(row.get("operation_layer_handoff_id") for row in attempts)
         ticket_rows = [row for row in ticket_rows if str(row.get("ticket_id") or "") in ticket_ids]
+
+        related_reads = (
+            (
+                "ticket_bound_exchange_commands",
+                "exchange_command_id",
+                "protected_submit_attempt_id",
+                attempt_ids,
+            ),
+            (
+                "ticket_bound_order_lifecycle_runs",
+                "lifecycle_run_id",
+                "ticket_id",
+                ticket_ids,
+            ),
+            (
+                "ticket_bound_reconciliation_ticks",
+                "reconciliation_tick_id",
+                "ticket_id",
+                ticket_ids,
+            ),
+        )
+        for logical_key, id_key, column_name, values in related_reads:
+            table_name = CONTROL_STATE_TABLES[logical_key]
+            if not sa.inspect(self.conn).has_table(table_name):
+                continue
+            self._merge_rows(
+                rows,
+                logical_key,
+                id_key,
+                self._read_rows_where_in(table_name, column_name, values),
+            )
 
         self._merge_rows(
             rows,
@@ -1656,6 +1729,20 @@ class PgBackedRuntimeControlStateRepository:
         )
 
         self._merge_rows(rows, "action_time_tickets", "ticket_id", ticket_rows)
+        recovery_table = CONTROL_STATE_TABLES[
+            "ticket_bound_protection_recovery_commands"
+        ]
+        if sa.inspect(self.conn).has_table(recovery_table):
+            self._merge_rows(
+                rows,
+                "ticket_bound_protection_recovery_commands",
+                "protection_recovery_command_id",
+                self._read_rows_where_in(
+                    recovery_table,
+                    "ticket_id",
+                    ticket_ids,
+                ),
+            )
         lane_ids.update(_texts(row.get("action_time_lane_input_id") for row in ticket_rows))
 
         lane_rows = self._read_rows_where_in(
@@ -2878,6 +2965,10 @@ def _monitor_bounded_statement(
         return statement.where(
             columns.status.in_(["open", "investigating", "recovering"])
         ).order_by(columns.opened_at_ms.desc()).limit(200)
+    if logical_key == "ticket_bound_scope_freezes" and "updated_at_ms" in columns:
+        return statement.where(columns.status == "active").order_by(
+            columns.updated_at_ms.desc()
+        ).limit(200)
     if logical_key == "ticket_bound_protected_submit_attempts" and "created_at_ms" in columns:
         return statement.where(
             columns.status.in_(
@@ -2896,6 +2987,13 @@ def _monitor_bounded_statement(
             columns.command_state.in_(
                 ["dispatching", "outcome_unknown", "hard_stopped"]
             )
+        ).order_by(columns.updated_at_ms.desc()).limit(200)
+    if (
+        logical_key == "ticket_bound_protection_recovery_commands"
+        and "updated_at_ms" in columns
+    ):
+        return statement.where(
+            columns.status.in_(["prepared", "blocked", "failed"])
         ).order_by(columns.updated_at_ms.desc()).limit(200)
     if logical_key == "runtime_process_outcomes" and "updated_at_ms" in columns:
         return statement.order_by(columns.updated_at_ms.desc()).limit(200)

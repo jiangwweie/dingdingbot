@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: F401, F811
+
 from sqlalchemy import text
 
 from scripts import materialize_ticket_bound_exit_protection_set as exit_protection
@@ -121,34 +123,16 @@ def test_exit_protection_blocks_without_tp1(
     pg_control_connection,
 ):
     _, prepared = _submitted_attempt(pg_control_connection)
-    row = pg_control_connection.execute(
-        text(
-            """
-            SELECT submit_result
-            FROM brc_ticket_bound_protected_submit_attempts
-            WHERE protected_submit_attempt_id = :attempt_id
-            """
-        ),
-        {"attempt_id": prepared["protected_submit_attempt_id"]},
-    ).scalar_one()
-    submit_result = _json_value(row)
-    submit_result["submitted_orders"] = [
-        order
-        for order in submit_result["submitted_orders"]
-        if order["order_role"] != "TP1"
-    ]
     pg_control_connection.execute(
         text(
             """
-            UPDATE brc_ticket_bound_protected_submit_attempts
-            SET submit_result = :submit_result
-            WHERE protected_submit_attempt_id = :attempt_id
+            UPDATE brc_ticket_bound_exchange_commands
+            SET command_state = 'reconciled_absent',
+                outcome_class = 'reconciled_absence', exchange_order_id = NULL
+            WHERE protected_submit_attempt_id = :attempt_id AND order_role = 'TP1'
             """
         ),
-        {
-            "attempt_id": prepared["protected_submit_attempt_id"],
-            "submit_result": _json_dumps(submit_result),
-        },
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
     )
 
     payload = exit_protection.materialize_ticket_bound_exit_protection_set(
@@ -168,34 +152,16 @@ def test_exit_protection_classifies_missing_sl_as_protection_missing(
     pg_control_connection,
 ):
     _, prepared = _submitted_attempt(pg_control_connection)
-    row = pg_control_connection.execute(
-        text(
-            """
-            SELECT submit_result
-            FROM brc_ticket_bound_protected_submit_attempts
-            WHERE protected_submit_attempt_id = :attempt_id
-            """
-        ),
-        {"attempt_id": prepared["protected_submit_attempt_id"]},
-    ).scalar_one()
-    submit_result = _json_value(row)
-    submit_result["submitted_orders"] = [
-        order
-        for order in submit_result["submitted_orders"]
-        if order["order_role"] != "SL"
-    ]
     pg_control_connection.execute(
         text(
             """
-            UPDATE brc_ticket_bound_protected_submit_attempts
-            SET submit_result = :submit_result
-            WHERE protected_submit_attempt_id = :attempt_id
+            UPDATE brc_ticket_bound_exchange_commands
+            SET command_state = 'reconciled_absent',
+                outcome_class = 'reconciled_absence', exchange_order_id = NULL
+            WHERE protected_submit_attempt_id = :attempt_id AND order_role = 'SL'
             """
         ),
-        {
-            "attempt_id": prepared["protected_submit_attempt_id"],
-            "submit_result": _json_dumps(submit_result),
-        },
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
     )
 
     payload = exit_protection.materialize_ticket_bound_exit_protection_set(

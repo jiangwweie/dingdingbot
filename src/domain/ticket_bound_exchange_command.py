@@ -84,6 +84,41 @@ class ExchangeCommandOutcomeClass(str, Enum):
     CONTRADICTORY_TRUTH = "contradictory_truth"
 
 
+TERMINAL_EXCHANGE_ORDER_STATUSES = {
+    "FILLED",
+    "CLOSED",
+    "CANCELED",
+    "CANCELLED",
+    "REJECTED",
+    "EXPIRED",
+}
+
+
+def exchange_command_effect_is_terminal(
+    *,
+    command_state: str,
+    exchange_order_status: str | None,
+    result_facts_complete: bool,
+) -> bool:
+    """Return whether command and venue effect both have terminal truth."""
+
+    state = str(command_state or "")
+    if state in {
+        ExchangeCommandState.CONFIRMED_REJECTED.value,
+        ExchangeCommandState.RECONCILED_ABSENT.value,
+        ExchangeCommandState.HARD_STOPPED.value,
+    }:
+        return True
+    if state not in {
+        ExchangeCommandState.CONFIRMED_SUBMITTED.value,
+        ExchangeCommandState.RECONCILED_SUBMITTED.value,
+    }:
+        return False
+    return bool(result_facts_complete) and str(
+        exchange_order_status or ""
+    ).upper() in TERMINAL_EXCHANGE_ORDER_STATUSES
+
+
 class ExchangeOrderLookupView(str, Enum):
     REGULAR_ORDER = "regular_order"
     CONDITIONAL_ALGO_ORDER = "conditional_algo_order"
@@ -145,6 +180,8 @@ class ExchangeOrderLookupResult(ExchangeCommandModel):
     client_order_id: str = Field(min_length=1, max_length=36)
     gateway_symbol: str = Field(min_length=1, max_length=128)
     exchange_status: Optional[str] = Field(default=None, max_length=128)
+    executed_qty: Optional[Decimal] = Field(default=None, ge=Decimal("0"))
+    average_exec_price: Optional[Decimal] = Field(default=None, gt=Decimal("0"))
 
     @model_validator(mode="after")
     def _require_exchange_identity_when_found(self) -> "ExchangeOrderLookupResult":
@@ -153,6 +190,12 @@ class ExchangeOrderLookupResult(ExchangeCommandModel):
             and not self.exchange_order_id
         ):
             raise ValueError("found lookup requires exchange_order_id")
+        if (
+            self.executed_qty is not None
+            and self.executed_qty > 0
+            and self.average_exec_price is None
+        ):
+            raise ValueError("positive lookup fill requires average execution price")
         return self
 
 

@@ -145,6 +145,10 @@ ENTRY_EFFECT_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py"
 )
+PROTECTION_RECOVERY_GENERATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-146_add_protection_recovery_generation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 
@@ -492,6 +496,13 @@ def pg_control_connection():
             _load_module(
                 ENTRY_EFFECT_MIGRATION_PATH,
                 "migration_145_runtime_safety",
+            ),
+        )
+        _upgrade_module(
+            conn,
+            _load_module(
+                PROTECTION_RECOVERY_GENERATION_MIGRATION_PATH,
+                "migration_146_runtime_safety",
             ),
         )
         conn.execute(

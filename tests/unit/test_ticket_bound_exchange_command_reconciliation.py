@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: F401, F811, F841
+
 import json
 
 import pytest
@@ -14,9 +16,13 @@ from src.application.action_time.exchange_command_reconciliation import (
     reconcile_unknown_exchange_commands,
     run_one_unknown_exchange_command_reconciliation,
 )
+from src.application.action_time.entry_effect_projection import project_entry_effect
 from src.application.action_time.netting_domain_hold import (
     upsert_exchange_command_domain_hold,
     upsert_netting_domain_hold,
+)
+from src.application.action_time.protection_recovery_command import (
+    prepare_ticket_bound_protection_recovery_command,
 )
 from src.domain.ticket_bound_exchange_command import (
     ExchangeCommandOutcomeClass,
@@ -147,6 +153,13 @@ async def test_unknown_command_reconciles_absent_after_visibility_window(
     pg_control_connection,
 ):
     command = _unknown_place_command(pg_control_connection, order_role="ENTRY")
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_exchange_instruments SET quantity_step=0.001 "
+            "WHERE exchange_instrument_id=:exchange_instrument_id"
+        ),
+        {"exchange_instrument_id": command["exchange_instrument_id"]},
+    )
     gateway = _TypedLookupGateway(_not_found_result(command))
 
     report = await reconcile_unknown_exchange_commands(
@@ -159,6 +172,104 @@ async def test_unknown_command_reconciles_absent_after_visibility_window(
     assert report["reconciled_absent"] == 1
     assert _command_state(pg_control_connection) == "reconciled_absent"
     assert report["automatic_resubmit_called"] is False
+    assert gateway.place_order_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_entry_found_with_positive_fill_projects_typed_late_fill_once(
+    pg_control_connection,
+):
+    command = _unknown_place_command(pg_control_connection, order_role="ENTRY")
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_exchange_instruments SET quantity_step=0.001 "
+            "WHERE exchange_instrument_id=:exchange_instrument_id"
+        ),
+        {"exchange_instrument_id": command["exchange_instrument_id"]},
+    )
+    project_entry_effect(
+        pg_control_connection,
+        command=_command_row(pg_control_connection),
+        now_ms=NOW_MS + 2_000,
+    )
+    upsert_exchange_command_domain_hold(
+        pg_control_connection,
+        command=command,
+        blockers=["network_ambiguous"],
+        now_ms=NOW_MS + 2_000,
+    )
+    gateway = _TypedLookupGateway(
+        _found_result(
+            command,
+            "regular_order",
+            filled_qty=str(command["amount"]),
+            average_exec_price="2500.25",
+            exchange_status="FILLED",
+        )
+    )
+
+    first = await reconcile_unknown_exchange_commands(
+        pg_control_connection,
+        gateway=gateway,
+        now_ms=NOW_MS + 5_000,
+        max_commands=10,
+    )
+    second = await reconcile_unknown_exchange_commands(
+        pg_control_connection,
+        gateway=gateway,
+        now_ms=NOW_MS + 6_000,
+        max_commands=10,
+    )
+    recovery_result = prepare_ticket_bound_protection_recovery_command(
+        pg_control_connection,
+        protected_submit_attempt_id=str(command["protected_submit_attempt_id"]),
+        now_ms=NOW_MS + 7_000,
+    )
+    assert recovery_result["status"] == "prepared", recovery_result
+
+    typed = _command_row(pg_control_connection)
+    attempt = pg_control_connection.execute(
+        text(
+            "SELECT entry_effect_state, protection_barrier_state, "
+            "protection_barrier_generation, protection_quantity "
+            "FROM brc_ticket_bound_protected_submit_attempts "
+            "WHERE protected_submit_attempt_id=:attempt_id"
+        ),
+        {"attempt_id": command["protected_submit_attempt_id"]},
+    ).mappings().one()
+    recovery = pg_control_connection.execute(
+        text(
+            "SELECT protection_barrier_generation, exposure_episode_id, "
+            "netting_domain_key, source_entry_exchange_command_id, "
+            "protection_quantity "
+            "FROM brc_ticket_bound_protection_recovery_commands "
+            "WHERE protected_submit_attempt_id=:attempt_id"
+        ),
+        {"attempt_id": command["protected_submit_attempt_id"]},
+    ).mappings().one()
+    recovery_stops = pg_control_connection.execute(
+        text(
+            "SELECT count(*) FROM brc_ticket_bound_exchange_commands "
+            "WHERE protected_submit_attempt_id=:attempt_id "
+            "AND command_source='protection_recovery' AND order_role='SL'"
+        ),
+        {"attempt_id": command["protected_submit_attempt_id"]},
+    ).scalar_one()
+
+    assert first["reconciled_submitted"] == 1
+    assert second["selected_count"] == 0
+    assert typed["result_facts_complete"] in {True, 1}
+    assert str(typed["executed_qty"]) == str(command["amount"])
+    assert attempt["entry_effect_state"] == "accepted_filled"
+    assert attempt["protection_barrier_state"] == "initial_stop_pending"
+    assert attempt["protection_barrier_generation"] == 2
+    assert str(attempt["protection_quantity"]) == str(command["amount"])
+    assert recovery["protection_barrier_generation"] == 2
+    assert recovery["exposure_episode_id"] == command["exposure_episode_id"]
+    assert recovery["netting_domain_key"] == command["netting_domain_key"]
+    assert recovery["source_entry_exchange_command_id"] == command["exchange_command_id"]
+    assert str(recovery["protection_quantity"]) == str(command["amount"])
+    assert recovery_stops == 1
     assert gateway.place_order_calls == 0
 
 
@@ -332,7 +443,7 @@ async def test_lookup_failure_retains_unknown_state_and_its_domain_hold(
 
 
 @pytest.mark.asyncio
-async def test_correct_view_absence_resolves_only_matching_command_hold(
+async def test_entry_absence_retains_its_hold_until_flat_proof(
     pg_control_connection,
 ):
     command = _unknown_place_command(pg_control_connection, order_role="ENTRY")
@@ -375,7 +486,7 @@ async def test_correct_view_absence_resolves_only_matching_command_hold(
         pg_control_connection,
         source_kind="exchange_command",
         source_id=command["exchange_command_id"],
-    ) == "resolved"
+    ) == "active"
     assert _hold_status(
         pg_control_connection,
         source_kind="unit",
@@ -387,6 +498,11 @@ async def test_correct_view_absence_resolves_only_matching_command_hold(
         "error_message": None,
         "exchange_order_id": None,
         "exchange_status": None,
+        "executed_qty": None,
+        "average_exec_price": None,
+        "filled_qty": None,
+        "exchange_order_status": None,
+        "exchange_observed_at_ms": NOW_MS + 5_000,
         "gateway_symbol": command["gateway_symbol"],
         "identity_kind": "origClientOrderId",
         "lookup_status": "not_found",
@@ -556,6 +672,9 @@ def _found_result(
     *,
     client_order_id: str | None = None,
     gateway_symbol: str | None = None,
+    filled_qty: str | None = None,
+    average_exec_price: str | None = None,
+    exchange_status: str | None = None,
 ) -> ExchangeOrderLookupResult:
     lookup_view = ExchangeOrderLookupView(expected_view)
     return ExchangeOrderLookupResult(
@@ -570,6 +689,9 @@ def _found_result(
         exchange_order_id="exchange-123",
         client_order_id=client_order_id or str(command["client_order_id"]),
         gateway_symbol=gateway_symbol or str(command["gateway_symbol"]),
+        executed_qty=filled_qty,
+        average_exec_price=average_exec_price,
+        exchange_status=exchange_status,
     )
 
 

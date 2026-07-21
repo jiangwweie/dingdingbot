@@ -55,6 +55,10 @@ from src.application.owner_notification import (  # noqa: E402
     render_owner_notification_card,
     select_owner_notification_delivery_batch,
 )
+from src.application.current_truth_projection_adapters import (  # noqa: E402
+    adapt_monitor_status,
+)
+from src.application.current_truth_reducer import reduce_current_truth  # noqa: E402
 from src.infrastructure.runtime_control_state_repository import (  # noqa: E402
     PgBackedRuntimeControlStateRepository,
     RuntimeControlStateRepositoryError,
@@ -533,6 +537,11 @@ def _open_system_incident_event(control_state: dict[str, Any]) -> dict[str, Any]
         if str(row.get("status") or "") in {"open", "investigating", "recovering"}
         and not str(row.get("strategy_group_id") or "")
         and not str(row.get("symbol") or "")
+        and not str(_as_dict(row.get("details")).get("ticket_id") or "")
+        and not str(
+            _as_dict(row.get("details")).get("protected_submit_attempt_id")
+            or ""
+        )
     ]
     if not incidents:
         return {}
@@ -934,6 +943,7 @@ def _decision_from_pg_sources(
     goal_status: dict[str, Any],
     candidate_pool: dict[str, Any],
     systemd: dict[str, Any],
+    prefer_current_trade_truth: bool = False,
 ) -> dict[str, Any]:
     reasons: list[str] = []
     status = str(goal_status.get("status") or "")
@@ -963,7 +973,11 @@ def _decision_from_pg_sources(
         reasons.extend([str(item) for item in systemd.get("blockers") or []])
         blocker_class = "watcher_or_service_failure"
         checkpoint = "systemd"
-    elif chain_event:
+    elif chain_event and (
+        not prefer_current_trade_truth
+        or str(chain_event.get("event_type") or "")
+        in {"runtime_system_incident", "runtime_process_failure"}
+    ):
         event_side = str(chain_event.get("side") or "")
         event_symbol = str(chain_event.get("symbol") or symbol)
         notify = chain_event.get("notify") is not False
@@ -990,7 +1004,7 @@ def _decision_from_pg_sources(
             ),
         }
 
-    if status == "waiting_for_signal":
+    if status in {"waiting_for_signal", "waiting_for_opportunity"}:
         if checks.get("watcher_liveness_healthy") is False or not coverage_complete:
             reasons.append("runtime_data_gap:pg_runtime_coverage")
             blocker_class = "runtime_data_gap"
@@ -1035,6 +1049,67 @@ def _decision_from_pg_sources(
                 else checkpoint
             ),
             "owner_message": "当前无新信号，前置工程阻断已记录，无需操作",
+        }
+    elif (
+        status == "temporarily_unavailable"
+        and goal_status.get("owner_action_required") is not True
+        and coverage_complete
+        and systemd.get("ready")
+    ):
+        preserved_blocker = str(
+            goal_status.get("first_blocker") or blocker_class or "none"
+        )
+        return {
+            "decision": "quiet",
+            "notify": False,
+            "status": "healthy_waiting_quiet",
+            "reasons": _dedupe(blockers),
+            "automation_id": "tokyo-runtime-server-monitor",
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "blocker_class": preserved_blocker,
+            "checkpoint": "current_truth_bundle",
+            "owner_message": "前置工程状态已记录，系统继续自动处理，无需操作",
+        }
+    elif (
+        status in {"processing", "running", "completed"}
+        and systemd.get("ready")
+    ):
+        return {
+            "decision": "quiet",
+            "notify": False,
+            "status": status,
+            "reasons": _dedupe(blockers),
+            "automation_id": "tokyo-runtime-server-monitor",
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "blocker_class": str(
+                goal_status.get("first_blocker") or blocker_class or "none"
+            ),
+            "checkpoint": "current_truth_bundle",
+            "owner_message": str(
+                goal_status.get("owner_message") or "系统正在按交易生命周期运行"
+            ),
+        }
+    elif status == "needs_intervention" and systemd.get("ready"):
+        reason = str(
+            goal_status.get("first_blocker")
+            or blocker_class
+            or "trade_runtime_intervention_required"
+        )
+        return {
+            "decision": "notify",
+            "notify": True,
+            "status": "needs_intervention",
+            "reasons": _dedupe([reason, *blockers]),
+            "automation_id": "tokyo-runtime-server-monitor",
+            "strategy_group_id": strategy_group_id,
+            "symbol": symbol,
+            "blocker_class": reason,
+            "checkpoint": "current_truth_bundle",
+            "owner_message": str(
+                goal_status.get("owner_message") or "交易运行状态需要介入"
+            ),
         }
     elif status == "protected_submit_rehearsal_completed":
         return {
@@ -1088,6 +1163,49 @@ def _decision_from_pg_sources(
         "checkpoint": checkpoint,
         "owner_message": "需要介入",
     }
+
+
+def _decision_from_current_truth_sources(
+    *,
+    control_state: dict[str, Any],
+    goal_status: dict[str, Any],
+    candidate_pool: dict[str, Any],
+    systemd: dict[str, Any],
+) -> dict[str, Any]:
+    """Adapt the same monitor snapshot before legacy presentation mapping."""
+
+    bundle = reduce_current_truth(control_state)
+    effect_active = any(
+        str(row.get("entry_effect_state") or "")
+        in {"accepted_zero_fill", "accepted_filled", "outcome_unknown"}
+        and str(row.get("protection_barrier_state") or "") != "closed"
+        for row in _pg_rows(
+            control_state.get("ticket_bound_protected_submit_attempts")
+        )
+    ) or any(
+        trade.first_blocker == "schema_revision_mismatch"
+        for trade in bundle.trade_decisions
+    )
+    use_current_truth_adapter = (
+        effect_active
+        or not bundle.trade_decisions
+        or all(
+            trade.owner_state == "completed"
+            for trade in bundle.trade_decisions
+        )
+    )
+    adapted_status = (
+        adapt_monitor_status(goal_status, bundle=bundle)
+        if use_current_truth_adapter
+        else goal_status
+    )
+    return _decision_from_pg_sources(
+        control_state=control_state,
+        goal_status=adapted_status,
+        candidate_pool=candidate_pool,
+        systemd=systemd,
+        prefer_current_trade_truth=effect_active,
+    )
 
 
 def _decision_from_pg_current_state_error(exc: RuntimeControlStateRepositoryError) -> dict[str, Any]:
@@ -1881,7 +1999,7 @@ def build_server_monitor_artifact_from_pg(
                     "current_projection_refresh_needed"
                 )
         _require_shared_current_bundle(candidate_pool, goal_status)
-        decision = _decision_from_pg_sources(
+        decision = _decision_from_current_truth_sources(
             control_state=control_state,
             goal_status=goal_status,
             candidate_pool=candidate_pool,

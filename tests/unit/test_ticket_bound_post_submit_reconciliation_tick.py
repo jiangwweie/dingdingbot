@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: F401, F811
+
 import json
 from decimal import Decimal
 from types import SimpleNamespace
@@ -17,6 +19,14 @@ from src.application.action_time.lifecycle_maintenance_scheduler import (
 )
 from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
+)
+from src.application.action_time.exchange_command import (
+    mark_exchange_command_dispatching,
+    record_exchange_command_outcome,
+    resize_prepared_protection_command_to_entry_fill,
+)
+from src.application.action_time.entry_effect_projection import (
+    project_protection_result,
 )
 from src.application.action_time.exchange_snapshot_provider import (
     _normalize_fill,
@@ -36,6 +46,10 @@ from tests.unit.test_ticket_bound_protected_submit_attempt import (
 )
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     pg_control_connection,
+)
+from src.domain.ticket_bound_exchange_command import (
+    ExchangeCommandOutcomeClass,
+    ExchangeCommandState,
 )
 
 
@@ -116,41 +130,18 @@ def test_first_tick_marks_tp1_missing_as_recovery_required(pg_control_connection
     assert row["sl_state"] == "open"
 
 
-def test_scheduled_tick_uses_latest_tp1_reprice_exchange_order(
+def test_scheduled_tick_uses_typed_tp1_exchange_order(
     pg_control_connection,
 ):
     prepared = _submitted_real_attempt(pg_control_connection)
     attempt_id = prepared["protected_submit_attempt_id"]
-    raw = pg_control_connection.execute(
-        text(
-            "SELECT submit_result FROM brc_ticket_bound_protected_submit_attempts "
-            "WHERE protected_submit_attempt_id = :attempt_id"
-        ),
-        {"attempt_id": attempt_id},
-    ).scalar_one()
-    submit_result = json.loads(raw) if isinstance(raw, str) else dict(raw)
-    original_tp1 = next(
-        order
-        for order in submit_result["submitted_orders"]
-        if order["order_role"] == "TP1"
-    )
-    repriced_tp1 = {
-        **original_tp1,
-        "exchange_order_id": "exchange-tp1-repriced",
-        "client_order_id": "client-tp1-repriced",
-        "price": "2010",
-    }
-    submit_result["submitted_orders"].append(repriced_tp1)
     pg_control_connection.execute(
         text(
-            "UPDATE brc_ticket_bound_protected_submit_attempts "
-            "SET submit_result = :submit_result "
-            "WHERE protected_submit_attempt_id = :attempt_id"
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET exchange_order_id = 'exchange-tp1-repriced', updated_at_ms = :now_ms "
+            "WHERE protected_submit_attempt_id = :attempt_id AND order_role = 'TP1'"
         ),
-        {
-            "attempt_id": attempt_id,
-            "submit_result": json.dumps(submit_result, sort_keys=True),
-        },
+        {"attempt_id": attempt_id, "now_ms": NOW_MS + 5500},
     )
     snapshot = _attempt_snapshot(prepared, omit_roles={"TP1"})
     snapshot["open_orders"].append(
@@ -158,7 +149,7 @@ def test_scheduled_tick_uses_latest_tp1_reprice_exchange_order(
             "exchange_order_id": "exchange-tp1-repriced",
             "side": "sell",
             "reduce_only": True,
-            "qty": repriced_tp1["amount"],
+            "qty": prepared["submit_request"]["orders"][2]["amount"],
             "price": "2010",
             "status": "open",
         }
@@ -223,7 +214,14 @@ def test_first_tick_freezes_scope_for_unknown_exchange_only_order(pg_control_con
 
     assert payload["status"] == "hard_stopped"
     assert payload["first_blocker"] == "exchange_only_unknown_order"
-    freeze = _one(pg_control_connection, "brc_ticket_bound_scope_freezes")
+    freeze = dict(
+        pg_control_connection.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_scope_freezes "
+                "WHERE source_kind = 'first_post_submit_reconciliation_tick'"
+            )
+        ).mappings().one()
+    )
     assert freeze["status"] == "active"
     assert freeze["strategy_group_id"] == "SOR-001"
     assert freeze["symbol"] == "ETHUSDT"
@@ -256,6 +254,107 @@ def test_entry_execution_truth_aggregates_multiple_exchange_fills():
     assert Decimal(execution["filled_qty"]) == Decimal("0.010")
     assert Decimal(execution["average_exec_price"]) == Decimal("2006")
     assert execution["fill_time_ms"] == NOW_MS + 5200
+
+
+def test_cumulative_entry_fill_resizes_undispatched_protection_in_same_generation(
+    pg_control_connection,
+):
+    _set_quantity_step(pg_control_connection, "0.001")
+    prepared = _entry_accepted_local_lifecycle_failed_attempt(pg_control_connection)
+    attempt_id = prepared["protected_submit_attempt_id"]
+
+    first = materialize_ticket_bound_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=attempt_id,
+        tick_kind="scheduled",
+        exchange_snapshot=_cumulative_entry_fill_snapshot(prepared, qty="0.005"),
+        now_ms=NOW_MS + 6000,
+    )
+    sl_before = _command_by_role(pg_control_connection, attempt_id, "SL")
+
+    second = materialize_ticket_bound_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=attempt_id,
+        tick_kind="recovery_check",
+        exchange_snapshot=_cumulative_entry_fill_snapshot(prepared, qty="0.008"),
+        now_ms=NOW_MS + 7000,
+    )
+    attempt = _attempt_by_id(pg_control_connection, attempt_id)
+    sl_after = _command_by_role(pg_control_connection, attempt_id, "SL")
+
+    assert first["status"] == "recovery_required"
+    assert second["status"] == "recovery_required"
+    assert attempt["protection_barrier_generation"] == 1
+    assert Decimal(str(attempt["protection_quantity"])) == Decimal("0.008")
+    assert sl_after["exchange_command_id"] == sl_before["exchange_command_id"]
+    assert sl_after["command_state"] == "prepared"
+    assert Decimal(str(sl_after["amount"])) == Decimal("0.008")
+
+
+def test_cumulative_entry_fill_after_stop_dispatch_opens_new_recovery_generation(
+    pg_control_connection,
+):
+    _set_quantity_step(pg_control_connection, "0.001")
+    prepared = _entry_accepted_local_lifecycle_failed_attempt(pg_control_connection)
+    attempt_id = prepared["protected_submit_attempt_id"]
+    materialize_ticket_bound_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=attempt_id,
+        tick_kind="scheduled",
+        exchange_snapshot=_cumulative_entry_fill_snapshot(prepared, qty="0.005"),
+        now_ms=NOW_MS + 6000,
+    )
+    sl = _command_by_role(pg_control_connection, attempt_id, "SL")
+    resized = resize_prepared_protection_command_to_entry_fill(
+        pg_control_connection,
+        exchange_command_id=sl["exchange_command_id"],
+        now_ms=NOW_MS + 6100,
+    )
+    assert Decimal(str(resized["amount"])) == Decimal("0.005")
+    mark_exchange_command_dispatching(
+        pg_control_connection,
+        exchange_command_id=sl["exchange_command_id"],
+        now_ms=NOW_MS + 6200,
+    )
+    submitted_sl = record_exchange_command_outcome(
+        pg_control_connection,
+        exchange_command_id=sl["exchange_command_id"],
+        target_state=ExchangeCommandState.CONFIRMED_SUBMITTED,
+        outcome_class=ExchangeCommandOutcomeClass.EXCHANGE_ACCEPTED,
+        exchange_result={
+            "exchange_order_id": "exchange-sl-partial-fill-generation-1",
+            "exchange_order_status": "OPEN",
+        },
+        now_ms=NOW_MS + 6300,
+    )
+    project_protection_result(
+        pg_control_connection,
+        command=submitted_sl,
+        now_ms=NOW_MS + 6300,
+    )
+
+    second = materialize_ticket_bound_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=attempt_id,
+        tick_kind="recovery_check",
+        exchange_snapshot=_cumulative_entry_fill_snapshot(
+            prepared,
+            qty="0.008",
+            sl_exchange_order_id="exchange-sl-partial-fill-generation-1",
+            sl_qty="0.005",
+        ),
+        now_ms=NOW_MS + 7000,
+    )
+    attempt = _attempt_by_id(pg_control_connection, attempt_id)
+    old_sl = _command_by_role(pg_control_connection, attempt_id, "SL")
+
+    assert second["status"] == "recovery_required"
+    assert second["first_blocker"] == "sl_protection_quantity_mismatch"
+    assert attempt["protection_barrier_generation"] == 2
+    assert attempt["protection_barrier_state"] == "hard_stopped"
+    assert Decimal(str(attempt["protection_quantity"])) == Decimal("0.008")
+    assert old_sl["exchange_command_id"] == sl["exchange_command_id"]
+    assert Decimal(str(old_sl["amount"])) == Decimal("0.005")
 
 
 def test_first_tick_rechecks_pending_visibility_after_deadline(pg_control_connection):
@@ -317,7 +416,10 @@ def test_first_tick_does_not_resolve_another_sources_scope_hold(pg_control_conne
     assert payload["status"] == "matched"
     freeze = dict(
         pg_control_connection.execute(
-            text("SELECT * FROM brc_ticket_bound_scope_freezes")
+            text(
+                "SELECT * FROM brc_ticket_bound_scope_freezes "
+                "WHERE source_kind = 'unit_test'"
+            )
         ).mappings().one()
     )
     assert freeze["status"] == "active"
@@ -397,25 +499,18 @@ async def test_scheduler_recovers_exchange_accepted_entry_after_local_update_fai
         for action in run["actions"]
     ]
     lifecycle = _one(pg_control_connection, "brc_ticket_bound_order_lifecycle_runs")
-    attempt = _one(pg_control_connection, "brc_ticket_bound_protected_submit_attempts")
-    submit_result = (
-        json.loads(attempt["submit_result"])
-        if isinstance(attempt["submit_result"], str)
-        else attempt["submit_result"]
+    entry = _command_by_role(
+        pg_control_connection,
+        prepared["protected_submit_attempt_id"],
+        "ENTRY",
     )
-    entry = next(
-        row
-        for row in submit_result["submitted_orders"]
-        if row["order_role"] == "ENTRY"
-    )
-
     assert payload["exchange_read_called"] is True
     assert lifecycle["status"] == "protection_missing"
     assert lifecycle["entry_fill_confirmed"] in {True, 1}
     assert Decimal(str(lifecycle["entry_filled_qty"])) == Decimal("0.010")
     assert Decimal(str(lifecycle["entry_avg_price"])) == Decimal("2000")
-    assert Decimal(entry["filled_qty"]) == Decimal("0.010")
-    assert Decimal(entry["average_exec_price"]) == Decimal("2000")
+    assert Decimal(str(entry["executed_qty"])) == Decimal("0.010")
+    assert Decimal(str(entry["average_exec_price"])) == Decimal("2000")
     assert "protection_recovery_prepared" in actions
     assert "protection_recovery_exchange_commands_prepared" in actions
     commands = list(
@@ -513,7 +608,6 @@ async def test_scheduler_materializes_scheduled_tick_for_active_lifecycle(
         fetch_exchange_snapshot=True,
         now_ms=NOW_MS + 9000,
     )
-
     assert second["exchange_read_called"] is True
     assert any(
         run.get("scheduled_tick", {}).get("status") == "matched"
@@ -638,6 +732,77 @@ def _attempt_snapshot(prepared: dict, *, omit_roles: set[str] | None = None) -> 
     }
 
 
+def _cumulative_entry_fill_snapshot(
+    prepared: dict,
+    *,
+    qty: str,
+    sl_exchange_order_id: str = "",
+    sl_qty: str = "",
+) -> dict:
+    open_orders: list[dict] = []
+    if sl_exchange_order_id:
+        open_orders.append(
+            {
+                "exchange_order_id": sl_exchange_order_id,
+                "side": "sell",
+                "reduce_only": True,
+                "qty": sl_qty,
+                "trigger_price": "1980",
+                "status": "open",
+            }
+        )
+    return {
+        "snapshot_id": f"snapshot:cumulative-entry-fill:{qty}",
+        "symbol": "ETHUSDT",
+        "open_orders": open_orders,
+        "recent_fills": [
+            {
+                "exchange_order_id": "exchange-entry-1",
+                "side": "buy",
+                "qty": qty,
+                "price": prepared["submit_request"]["reference_price"],
+                "timestamp_ms": NOW_MS + 5100,
+            }
+        ],
+        "position": {"qty": qty, "position_flat": False},
+        "fetched_at_ms": NOW_MS + 5500,
+    }
+
+
+def _attempt_by_id(conn, attempt_id: str) -> dict:
+    return dict(
+        conn.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_protected_submit_attempts "
+                "WHERE protected_submit_attempt_id = :attempt_id"
+            ),
+            {"attempt_id": attempt_id},
+        ).mappings().one()
+    )
+
+
+def _command_by_role(conn, attempt_id: str, role: str) -> dict:
+    return dict(
+        conn.execute(
+            text(
+                "SELECT * FROM brc_ticket_bound_exchange_commands "
+                "WHERE protected_submit_attempt_id = :attempt_id "
+                "AND command_source = 'protected_submit' AND order_role = :role"
+            ),
+            {"attempt_id": attempt_id, "role": role},
+        ).mappings().one()
+    )
+
+
+def _set_quantity_step(conn, quantity_step: str) -> None:
+    conn.execute(
+        text(
+            "UPDATE brc_exchange_instruments SET quantity_step = :quantity_step"
+        ),
+        {"quantity_step": quantity_step},
+    )
+
+
 def _count(conn, table_name: str) -> int:
     return int(conn.execute(text(f"SELECT count(*) FROM {table_name}")).scalar_one())
 
@@ -655,34 +820,16 @@ def _lifecycle_status(conn) -> str:
 
 
 def _mark_entry_visibility_pending(conn, attempt_id: str) -> None:
-    raw = conn.execute(
-        text(
-            """
-            SELECT submit_result
-            FROM brc_ticket_bound_protected_submit_attempts
-            WHERE protected_submit_attempt_id = :attempt_id
-            """
-        ),
-        {"attempt_id": attempt_id},
-    ).scalar_one()
-    submit_result = json.loads(raw) if isinstance(raw, str) else dict(raw)
-    for order in submit_result["submitted_orders"]:
-        if order["order_role"] == "ENTRY":
-            order["status"] = "NEW"
-            order.pop("filled_qty", None)
-            order.pop("average_exec_price", None)
     conn.execute(
         text(
             """
-            UPDATE brc_ticket_bound_protected_submit_attempts
-            SET submit_result = :submit_result
-            WHERE protected_submit_attempt_id = :attempt_id
+            UPDATE brc_ticket_bound_exchange_commands
+            SET exchange_order_status = 'NEW', executed_qty = NULL,
+                average_exec_price = NULL, result_facts_complete = 0
+            WHERE protected_submit_attempt_id = :attempt_id AND order_role = 'ENTRY'
             """
         ),
-        {
-            "attempt_id": attempt_id,
-            "submit_result": json.dumps(submit_result, sort_keys=True),
-        },
+        {"attempt_id": attempt_id},
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 import sqlalchemy as sa
@@ -12,9 +13,20 @@ from src.application.action_time.exchange_command import (
 from src.application.action_time.lifecycle_exchange_command_completion import (
     apply_completed_lifecycle_exchange_sources,
 )
+from src.application.action_time.entry_effect_projection import (
+    EntryEffectProjectionError,
+    project_entry_effect,
+    project_protection_result,
+)
+from src.application.action_time.lifecycle_exchange_command_materializer import (
+    materialize_lifecycle_exchange_commands,
+)
 from src.application.action_time.netting_domain_hold import (
     resolve_netting_domain_hold_source,
     upsert_exchange_command_domain_hold,
+)
+from src.application.action_time.protection_recovery_command import (
+    prepare_ticket_bound_protection_recovery_command,
 )
 from src.domain.ticket_bound_exchange_command import (
     ExchangeCommandOutcomeClass,
@@ -282,10 +294,36 @@ def apply_unknown_exchange_command_decision(
         exchange_result={
             "exchange_order_id": decision.get("exchange_order_id"),
             "error_message": blockers[0] if blockers else None,
+            "filled_qty": _normalized_lookup_quantity(
+                conn,
+                command=command,
+                lookup_evidence=_mapping(decision.get("lookup_evidence")),
+            ),
+            "average_exec_price": _mapping(
+                decision.get("lookup_evidence")
+            ).get("average_exec_price"),
+            "exchange_order_status": _mapping(
+                decision.get("lookup_evidence")
+            ).get("exchange_status"),
+            "exchange_observed_at_ms": _mapping(
+                decision.get("lookup_evidence")
+            ).get("observed_at_ms"),
             **_mapping(decision.get("lookup_evidence")),
         },
         now_ms=now_ms,
     )
+    entry_decision = project_entry_effect(conn, command=recorded, now_ms=now_ms)
+    protection_projection_blocker = ""
+    try:
+        project_protection_result(conn, command=recorded, now_ms=now_ms)
+    except EntryEffectProjectionError as exc:
+        protection_projection_blocker = str(exc)
+        upsert_exchange_command_domain_hold(
+            conn,
+            command=recorded,
+            blockers=[protection_projection_blocker],
+            now_ms=now_ms,
+        )
     if status == "hard_stopped":
         upsert_exchange_command_domain_hold(
             conn,
@@ -294,20 +332,48 @@ def apply_unknown_exchange_command_decision(
             now_ms=now_ms,
         )
     else:
-        resolve_netting_domain_hold_source(
-            conn,
-            netting_domain_key=str(recorded.get("netting_domain_key") or ""),
-            source_kind="exchange_command",
-            source_id=str(recorded.get("exchange_command_id") or ""),
-            resolution_source=f"exchange_command_{status}",
-            now_ms=now_ms,
+        safe_to_release_command_hold = (
+            str(recorded.get("order_role") or "") != "ENTRY"
+            and not protection_projection_blocker
         )
-        if status == "reconciled_submitted":
+        if safe_to_release_command_hold:
+            resolve_netting_domain_hold_source(
+                conn,
+                netting_domain_key=str(recorded.get("netting_domain_key") or ""),
+                source_kind="exchange_command",
+                source_id=str(recorded.get("exchange_command_id") or ""),
+                resolution_source=f"exchange_command_{status}",
+                now_ms=now_ms,
+            )
+        if status == "reconciled_submitted" and str(
+            recorded.get("order_role") or ""
+        ) != "ENTRY":
             apply_completed_lifecycle_exchange_sources(
                 conn,
                 now_ms=now_ms,
                 source_command_id=str(recorded.get("source_command_id") or ""),
             )
+        if status == "reconciled_submitted":
+            if entry_decision is not None and (
+                entry_decision.entry_effect_state.value == "accepted_filled"
+            ):
+                recovery = prepare_ticket_bound_protection_recovery_command(
+                    conn,
+                    protected_submit_attempt_id=str(
+                        recorded.get("protected_submit_attempt_id") or ""
+                    ),
+                    now_ms=now_ms,
+                )
+                recovery_id = str(
+                    recovery.get("protection_recovery_command_id") or ""
+                )
+                if recovery.get("status") == "prepared" and recovery_id:
+                    materialize_lifecycle_exchange_commands(
+                        conn,
+                        command_source="protection_recovery",
+                        source_command_id=recovery_id,
+                        now_ms=now_ms,
+                    )
     return {
         "status": status,
         "exchange_command_id": recorded.get("exchange_command_id"),
@@ -459,7 +525,64 @@ def _lookup_evidence(
         "observed_at_ms": result.observed_at_ms,
         "visibility_window_elapsed": visibility_window_elapsed,
         "exchange_status": result.exchange_status,
+        "executed_qty": (
+            str(result.executed_qty) if result.executed_qty is not None else None
+        ),
+        "average_exec_price": (
+            str(result.average_exec_price)
+            if result.average_exec_price is not None
+            else None
+        ),
     }
+
+
+def _normalized_lookup_quantity(
+    conn: sa.engine.Connection,
+    *,
+    command: dict[str, Any],
+    lookup_evidence: dict[str, Any],
+) -> str | None:
+    raw = lookup_evidence.get("executed_qty")
+    if raw is None:
+        return None
+    quantity = Decimal(str(raw))
+    if quantity == 0:
+        return "0"
+    if not sa.inspect(conn).has_table("brc_instrument_rule_snapshots"):
+        return str(quantity)
+    rules = sa.Table(
+        "brc_instrument_rule_snapshots",
+        sa.MetaData(),
+        autoload_with=conn,
+    )
+    rows = conn.execute(
+        sa.select(rules.c.quantity_step).where(
+            rules.c.exchange_instrument_id
+            == str(command.get("exchange_instrument_id") or ""),
+            rules.c.status == "current",
+        ).limit(2)
+    ).scalars().all()
+    if len(rows) == 1:
+        step = Decimal(str(rows[0]))
+    else:
+        instruments = sa.Table(
+            "brc_exchange_instruments",
+            sa.MetaData(),
+            autoload_with=conn,
+        )
+        fallback = conn.execute(
+            sa.select(instruments.c.quantity_step).where(
+                instruments.c.exchange_instrument_id
+                == str(command.get("exchange_instrument_id") or "")
+            ).limit(2)
+        ).scalars().all()
+        if len(fallback) != 1:
+            raise ValueError("late_fill_instrument_rule_snapshot_invalid")
+        step = Decimal(str(fallback[0]))
+    normalized = (quantity / step).to_integral_value(rounding=ROUND_HALF_UP) * step
+    if abs(quantity - normalized) > step * Decimal("0.000001"):
+        raise ValueError("late_fill_quantity_not_step_aligned")
+    return str(normalized)
 
 
 def _order_contains_exchange_id(order: Any, target_exchange_order_id: str) -> bool:

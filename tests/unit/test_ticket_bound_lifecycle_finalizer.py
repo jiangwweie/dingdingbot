@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: F401, F811
+
 import json
 from copy import deepcopy
 from decimal import Decimal
@@ -20,9 +22,15 @@ from src.application.action_time.lifecycle_maintenance_scheduler import (
     run_ticket_bound_lifecycle_maintenance_scheduler,
     select_ticket_bound_lifecycle_maintenance_scopes,
 )
+from src.application.action_time.post_submit_reconciliation_tick import (
+    materialize_ticket_bound_reconciliation_tick,
+)
 from src.application.action_time.ticket_bound_lifecycle_finalizer import (
     _stable_id,
     finalize_ticket_bound_lifecycle_if_ready,
+)
+from src.application.runtime_incident_projector import (
+    project_protection_barrier_failure,
 )
 from src.application.action_time import ticket_bound_lifecycle_finalizer as subject
 from src.application.action_time.ticket_bound_fill_projector import (
@@ -94,11 +102,90 @@ def test_finalizer_closes_reconciled_flat_lifecycle_and_is_idempotent(
     ) == 4
 
 
+def test_finalizer_terminalizes_effect_active_attempt_from_exact_flat_proof(
+    pg_control_connection,
+):
+    ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    _set_effect_active_attempt(pg_control_connection, barrier="initial_stop_confirmed")
+
+    first = finalize_ticket_bound_lifecycle_if_ready(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+    second = finalize_ticket_bound_lifecycle_if_ready(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 21_000,
+    )
+
+    assert first["status"] == "lifecycle_closed"
+    assert second["status"] == "lifecycle_closed"
+    assert _scalar(
+        pg_control_connection,
+        "SELECT protection_barrier_state FROM "
+        "brc_ticket_bound_protected_submit_attempts",
+    ) == "closed"
+
+
+def test_finalizer_does_not_terminalize_attempt_with_active_protection_incident(
+    pg_control_connection,
+):
+    ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    _open_finalizer_initial_stop_incident(pg_control_connection)
+
+    result = finalize_ticket_bound_lifecycle_if_ready(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+
+    assert result["status"] == "finalization_blocked"
+    assert result["blockers"] == ["ticket_budget_protection_incident_active"]
+    assert _scalar(
+        pg_control_connection,
+        "SELECT protection_barrier_state FROM "
+        "brc_ticket_bound_protected_submit_attempts",
+    ) == "hard_stopped"
+
+
+def test_finalizer_does_not_terminalize_attempt_with_active_protection_hold(
+    pg_control_connection,
+):
+    ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    _open_finalizer_initial_stop_incident(pg_control_connection)
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_runtime_incidents SET status = 'closed', "
+            "closed_at_ms = :now_ms "
+            "WHERE incident_type = 'initial_stop_not_established'"
+        ),
+        {"now_ms": NOW_MS + 19_000},
+    )
+
+    result = finalize_ticket_bound_lifecycle_if_ready(
+        pg_control_connection,
+        ticket_id=ticket_id,
+        now_ms=NOW_MS + 20_000,
+    )
+
+    assert result["status"] == "finalization_blocked"
+    assert result["blockers"] == [
+        "ticket_budget_protection_barrier_hold_active"
+    ]
+    assert _scalar(
+        pg_control_connection,
+        "SELECT protection_barrier_state FROM "
+        "brc_ticket_bound_protected_submit_attempts",
+    ) == "hard_stopped"
+
+
 def test_failed_release_reprojection_rolls_back_budget_release(
     pg_control_connection,
     monkeypatch,
 ):
     ticket_id = _prepare_reconciled_flat_exit(pg_control_connection)
+    _set_effect_active_attempt(pg_control_connection, barrier="initial_stop_confirmed")
     monkeypatch.setattr(
         subject,
         "reproject_account_risk_current",
@@ -123,6 +210,11 @@ def test_failed_release_reprojection_rolls_back_budget_release(
         "SELECT status FROM brc_budget_reservations WHERE ticket_id = :ticket_id",
         ticket_id=ticket_id,
     ) == "consumed"
+    assert _scalar(
+        pg_control_connection,
+        "SELECT protection_barrier_state FROM "
+        "brc_ticket_bound_protected_submit_attempts",
+    ) == "initial_stop_confirmed"
 
 
 def test_finalizer_appends_exact_fact_repair_when_legacy_event_is_incomplete(
@@ -561,6 +653,7 @@ async def test_production_scheduler_drives_final_fill_to_closed_outcome_without_
         "snapshot_ref": f"unit-final:{set_id}",
         "symbol": "ETHUSDT",
         "exchange_symbol": "ETH/USDT:USDT",
+        "open_orders_complete": True,
         "open_orders": [],
         "recent_fills": [
             {
@@ -649,6 +742,109 @@ async def test_production_scheduler_drives_final_fill_to_closed_outcome_without_
             ),
             {"ticket_id": scope["ticket_id"]},
         ).scalar_one() == 1
+        effects = _protection_command_effects(
+            conn,
+            ticket_id=str(scope["ticket_id"]),
+        )
+        assert effects["SL"] == {
+            "command_state": "reconciled_submitted",
+            "outcome_class": "reconciled_exchange_truth",
+            "exchange_order_status": "FILLED",
+        }
+        assert effects["TP1"]["command_state"] == "reconciled_absent"
+        assert effects["TP1"]["outcome_class"] == "reconciled_absence"
+        assert effects["TP1"]["exchange_order_status"] != "CANCELED"
+
+
+def test_partial_open_order_view_does_not_terminalize_protection_commands(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    _set_effect_active_attempt(
+        pg_control_connection,
+        barrier="initial_stop_confirmed",
+    )
+    snapshot, attempt_id, ticket_id = _flat_terminal_projection_snapshot(
+        pg_control_connection,
+        set_id=set_id,
+        open_orders_complete=False,
+    )
+    before = _protection_command_effects(pg_control_connection, ticket_id=ticket_id)
+    before_barrier = _scalar(
+        pg_control_connection,
+        "SELECT protection_barrier_state FROM "
+        "brc_ticket_bound_protected_submit_attempts "
+        "WHERE protected_submit_attempt_id = :attempt_id",
+        attempt_id=attempt_id,
+    )
+    before_hold_count = _scalar(
+        pg_control_connection,
+        "SELECT count(*) FROM brc_ticket_bound_scope_freezes "
+        "WHERE source_ticket_id = :ticket_id AND source_kind = 'protection_barrier' "
+        "AND status = 'active'",
+        ticket_id=ticket_id,
+    )
+
+    materialize_ticket_bound_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=attempt_id,
+        tick_kind="scheduled",
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 20_000,
+    )
+
+    assert _protection_command_effects(
+        pg_control_connection,
+        ticket_id=ticket_id,
+    ) == before
+    assert _scalar(
+        pg_control_connection,
+        "SELECT protection_barrier_state FROM "
+        "brc_ticket_bound_protected_submit_attempts "
+        "WHERE protected_submit_attempt_id = :attempt_id",
+        attempt_id=attempt_id,
+    ) == before_barrier
+    assert _scalar(
+        pg_control_connection,
+        "SELECT count(*) FROM brc_ticket_bound_scope_freezes "
+        "WHERE source_ticket_id = :ticket_id AND source_kind = 'protection_barrier' "
+        "AND status = 'active'",
+        ticket_id=ticket_id,
+    ) == before_hold_count
+
+
+def test_identity_mismatch_does_not_terminalize_current_protection_command(
+    pg_control_connection,
+):
+    set_id = _materialized_exit_protection_set(pg_control_connection)
+    snapshot, attempt_id, ticket_id = _flat_terminal_projection_snapshot(
+        pg_control_connection,
+        set_id=set_id,
+        open_orders_complete=True,
+    )
+    pg_control_connection.execute(
+        text(
+            "UPDATE brc_ticket_bound_exit_protection_orders "
+            "SET local_order_id = local_order_id || '-mismatch' "
+            "WHERE exit_protection_set_id = :set_id AND role = 'TP1'"
+        ),
+        {"set_id": set_id},
+    )
+    before = _protection_command_effects(pg_control_connection, ticket_id=ticket_id)
+
+    materialize_ticket_bound_reconciliation_tick(
+        pg_control_connection,
+        protected_submit_attempt_id=attempt_id,
+        tick_kind="scheduled",
+        exchange_snapshot=snapshot,
+        now_ms=NOW_MS + 20_000,
+    )
+
+    after = _protection_command_effects(pg_control_connection, ticket_id=ticket_id)
+    assert after["SL"]["command_state"] == "reconciled_absent"
+    assert after["SL"]["outcome_class"] == "reconciled_absence"
+    assert after["SL"]["exchange_order_status"] != "CANCELED"
+    assert after["TP1"] == before["TP1"]
 
 
 @pytest.mark.asyncio
@@ -713,6 +909,7 @@ async def test_production_scheduler_closes_exactly_attributed_manual_exchange_ex
         "snapshot_ref": f"unit-manual-exit:{set_id}",
         "symbol": "ETHUSDT",
         "exchange_symbol": "ETH/USDT:USDT",
+        "open_orders_complete": True,
         "open_orders": [
             {
                 "exchange_order_id": orders["SL"]["exchange_order_id"],
@@ -959,6 +1156,17 @@ async def test_production_scheduler_closes_exactly_attributed_manual_exchange_ex
             "WHERE ticket_id = :ticket_id",
             ticket_id=scope["ticket_id"],
         ) == 1
+        effects = _protection_command_effects(
+            conn,
+            ticket_id=str(scope["ticket_id"]),
+        )
+        assert effects["SL"]["command_state"] == "reconciled_absent"
+        assert effects["SL"]["exchange_order_status"] != "CANCELED"
+        assert effects["TP1"] == {
+            "command_state": "reconciled_submitted",
+            "outcome_class": "reconciled_exchange_truth",
+            "exchange_order_status": "FILLED",
+        }
         assert _scalar(
             conn,
             "SELECT count(*) FROM brc_ticket_bound_lifecycle_events "
@@ -1038,6 +1246,18 @@ def _prepare_reconciled_flat_exit(conn, *, leave_tp1_live: bool = False) -> str:
         ),
         {"set_id": set_id, "blockers": json.dumps([]), "now_ms": NOW_MS + 15_000},
     )
+    conn.execute(
+        text(
+            "UPDATE brc_ticket_bound_exchange_commands "
+            "SET exchange_order_status = CASE "
+            "WHEN order_role = 'SL' THEN 'FILLED' "
+            "WHEN order_role = 'TP1' THEN 'CANCELED' "
+            "ELSE exchange_order_status END, "
+            "result_facts_complete = 1, updated_at_ms = :now_ms "
+            "WHERE ticket_id = :ticket_id AND order_role IN ('SL', 'TP1')"
+        ),
+        {"ticket_id": ticket_id, "now_ms": NOW_MS + 15_000},
+    )
     lifecycle = conn.execute(
         text(
             "SELECT * FROM brc_ticket_bound_order_lifecycle_runs "
@@ -1088,6 +1308,119 @@ def _prepare_reconciled_flat_exit(conn, *, leave_tp1_live: bool = False) -> str:
         },
     )
     return ticket_id
+
+
+def _flat_terminal_projection_snapshot(
+    conn,
+    *,
+    set_id: str,
+    open_orders_complete: bool,
+) -> tuple[dict, str, str]:
+    scope = conn.execute(
+        text(
+            "SELECT ticket_id, protected_submit_attempt_id "
+            "FROM brc_ticket_bound_exit_protection_sets "
+            "WHERE exit_protection_set_id = :set_id"
+        ),
+        {"set_id": set_id},
+    ).mappings().one()
+    lifecycle = conn.execute(
+        text(
+            "SELECT entry_exchange_order_id, entry_filled_qty, entry_avg_price "
+            "FROM brc_ticket_bound_order_lifecycle_runs "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": scope["ticket_id"]},
+    ).mappings().one()
+    return (
+        {
+            "snapshot_id": f"unit-flat-terminal:{set_id}",
+            "symbol": "ETHUSDT",
+            "exchange_symbol": "ETH/USDT:USDT",
+            "open_orders_complete": open_orders_complete,
+            "open_orders": [],
+            "recent_fills": [
+                {
+                    "exchange_order_id": lifecycle["entry_exchange_order_id"],
+                    "qty": str(lifecycle["entry_filled_qty"]),
+                    "price": str(lifecycle["entry_avg_price"]),
+                    "timestamp_ms": NOW_MS + 19_000,
+                }
+            ],
+            "position": {
+                "qty": "0",
+                "side": "long",
+                "position_side": "BOTH",
+                "position_mode": "one_way",
+                "position_flat": True,
+                "complete": True,
+            },
+        },
+        str(scope["protected_submit_attempt_id"]),
+        str(scope["ticket_id"]),
+    )
+
+
+def _protection_command_effects(conn, *, ticket_id: str) -> dict[str, dict[str, str]]:
+    return {
+        str(row["order_role"]): {
+            "command_state": str(row["command_state"] or ""),
+            "outcome_class": str(row["outcome_class"] or ""),
+            "exchange_order_status": str(row["exchange_order_status"] or ""),
+        }
+        for row in conn.execute(
+            text(
+                "SELECT order_role, command_state, outcome_class, "
+                "exchange_order_status "
+                "FROM brc_ticket_bound_exchange_commands "
+                "WHERE ticket_id = :ticket_id AND command_kind = 'place_order' "
+                "AND order_role IN ('SL', 'TP1')"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings()
+    }
+
+
+def _set_effect_active_attempt(conn, *, barrier: str) -> str:
+    attempt_id = conn.execute(
+        text(
+            "SELECT protected_submit_attempt_id "
+            "FROM brc_ticket_bound_protected_submit_attempts"
+        )
+    ).scalar_one()
+    confirmed_at_ms = (
+        NOW_MS + 5_001 if barrier == "initial_stop_confirmed" else None
+    )
+    conn.execute(
+        text(
+            "UPDATE brc_ticket_bound_protected_submit_attempts "
+            "SET entry_effect_state = 'accepted_filled', "
+            "entry_effect_observed_at_ms = :observed_at_ms, "
+            "protection_barrier_state = :barrier, "
+            "initial_stop_confirmed_at_ms = :confirmed_at_ms, "
+            "protection_quantity = 0.01"
+        ),
+        {
+            "observed_at_ms": NOW_MS + 5_000,
+            "barrier": barrier,
+            "confirmed_at_ms": confirmed_at_ms,
+        },
+    )
+    return str(attempt_id)
+
+
+def _open_finalizer_initial_stop_incident(conn) -> None:
+    attempt_id = _set_effect_active_attempt(conn, barrier="initial_stop_pending")
+    project_protection_barrier_failure(
+        conn,
+        protected_submit_attempt_id=attempt_id,
+        order_role="SL",
+        blocker="initial_stop_deadline_exhausted",
+        outcome_ambiguous=False,
+        protection_barrier_generation=1,
+        trigger_ref="finalizer-capacity-gate-test",
+        now_ms=NOW_MS + 18_000,
+    )
 
 
 def _scalar(conn, statement: str, **params):

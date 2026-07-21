@@ -60,7 +60,16 @@ def classify_entry_effect(
         )
     if state == "outcome_unknown":
         return _unknown()
-    if state != "confirmed_submitted":
+    if state == "reconciled_absent":
+        return EntryEffectDecision(
+            EntryEffectState.RECONCILED_ABSENT,
+            ProtectionBarrierState.NOT_STARTED,
+            None,
+            None,
+            None,
+            False,
+        )
+    if state not in {"confirmed_submitted", "reconciled_submitted"}:
         return None
     qty = Decimal(str(executed_qty)) if executed_qty is not None else None
     price = (

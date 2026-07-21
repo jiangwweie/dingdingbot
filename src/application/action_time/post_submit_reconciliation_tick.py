@@ -18,6 +18,14 @@ from src.application.action_time.exchange_order_ownership import (
 from src.application.action_time.exchange_scope import (
     resolve_ticket_bound_exchange_scope,
 )
+from src.application.action_time.entry_effect_projection import (
+    EntryEffectProjectionError,
+    project_reconciled_entry_execution,
+)
+from src.application.runtime_incident_projector import (
+    project_protection_barrier_failure,
+    resolve_protection_barrier_from_flat_proof,
+)
 from src.application.action_time.lifecycle_safety_core import (
     reduce_lifecycle_decision,
 )
@@ -46,6 +54,15 @@ FIRST_TICK_KIND = "first_post_submit"
 SCHEDULED_TICK_KIND = "scheduled"
 RECOVERY_CHECK_TICK_KIND = "recovery_check"
 TICK_KINDS = {FIRST_TICK_KIND, SCHEDULED_TICK_KIND, RECOVERY_CHECK_TICK_KIND}
+FLAT_RESIDUAL_ABSENT_STATES = {
+    "absent",
+    "cancelled",
+    "canceled",
+    "rejected",
+    "expired",
+    "filled",
+    "closed",
+}
 
 
 def select_ticket_bound_first_reconciliation_tick_scopes(
@@ -214,12 +231,10 @@ def materialize_ticket_bound_reconciliation_tick(
         )
 
     snapshot = dict(exchange_snapshot or {})
-    submit_result = _as_dict(attempt.get("submit_result"))
-    submitted_orders = [
-        dict(order)
-        for order in submit_result.get("submitted_orders", [])
-        if isinstance(order, dict)
-    ]
+    submitted_orders = _current_exchange_command_orders(
+        conn,
+        protected_submit_attempt_id=attempt_id,
+    )
     submitted_orders = _current_exit_protection_orders(
         conn,
         protected_submit_attempt_id=attempt_id,
@@ -241,17 +256,72 @@ def materialize_ticket_bound_reconciliation_tick(
     sl_order = _order_by_role(submitted_orders, "SL")
     tp1_order = _order_by_role(submitted_orders, "TP1")
     entry_state = _entry_state(entry_order, open_orders, recent_fills, position)
-    sl_state = _protection_state(sl_order, open_orders, recent_fills)
-    tp1_state = _protection_state(tp1_order, open_orders, recent_fills)
+    expected_protection_quantity = _decimal(attempt.get("protection_quantity"))
+    sl_state = _protection_state(
+        sl_order,
+        open_orders,
+        recent_fills,
+        expected_quantity=expected_protection_quantity,
+    )
+    tp1_state = _protection_state(
+        tp1_order,
+        open_orders,
+        recent_fills,
+        expected_quantity=None,
+    )
     position_state = _position_state(position)
     entry_execution = _entry_execution_truth(entry_order, recent_fills)
     if entry_execution:
-        attempt = _conserve_entry_execution_truth(
-            conn,
-            attempt=attempt,
-            entry_execution=entry_execution,
-            now_ms=now_ms,
-        )
+        try:
+            project_reconciled_entry_execution(
+                conn,
+                protected_submit_attempt_id=attempt_id,
+                exchange_order_id=str(entry_execution["exchange_order_id"]),
+                executed_qty=_decimal(entry_execution["filled_qty"]),
+                average_exec_price=_decimal(entry_execution["average_exec_price"]),
+                exchange_observed_at_ms=_int_optional(entry_execution.get("fill_time_ms")),
+                now_ms=now_ms,
+            )
+            attempt = _row_by_id(
+                conn,
+                "brc_ticket_bound_protected_submit_attempts",
+                "protected_submit_attempt_id",
+                attempt_id,
+            )
+            expected_protection_quantity = _decimal(
+                attempt.get("protection_quantity")
+            )
+            submitted_orders = _current_exchange_command_orders(
+                conn,
+                protected_submit_attempt_id=attempt_id,
+            )
+            submitted_orders = _current_exit_protection_orders(
+                conn,
+                protected_submit_attempt_id=attempt_id,
+                submitted_orders=submitted_orders,
+            )
+            sl_order = _order_by_role(submitted_orders, "SL")
+            tp1_order = _order_by_role(submitted_orders, "TP1")
+            sl_state = _protection_state(
+                sl_order,
+                open_orders,
+                recent_fills,
+                expected_quantity=expected_protection_quantity,
+            )
+            tp1_state = _protection_state(
+                tp1_order,
+                open_orders,
+                recent_fills,
+                expected_quantity=None,
+            )
+        except EntryEffectProjectionError as exc:
+            return _result(
+                "blocked",
+                now_ms=now_ms,
+                tick={},
+                blockers=[str(exc)],
+                next_action="repair_typed_entry_execution_projection",
+            )
     blockers: list[str] = []
     warnings: list[str] = []
     status = "matched"
@@ -308,8 +378,36 @@ def materialize_ticket_bound_reconciliation_tick(
             authority_boundary=AUTHORITY_BOUNDARY,
             now_ms=now_ms,
         )
-    elif position_state == "open" and sl_state == "missing":
-        blockers.append("sl_exchange_order_missing")
+    elif position_state == "open" and sl_state in {"missing", "quantity_mismatch"}:
+        sl_blocker = (
+            "sl_protection_quantity_mismatch"
+            if sl_state == "quantity_mismatch"
+            else "sl_exchange_order_missing"
+        )
+        blockers.append(sl_blocker)
+        initial_stop_deadline_at_ms = int(
+            attempt.get("initial_stop_deadline_at_ms") or 0
+        )
+        if sl_state == "quantity_mismatch" or (
+            initial_stop_deadline_at_ms > 0
+            and now_ms >= initial_stop_deadline_at_ms
+        ):
+            project_protection_barrier_failure(
+                conn,
+                protected_submit_attempt_id=attempt_id,
+                order_role="SL",
+                blocker=(
+                    sl_blocker
+                    if sl_state == "quantity_mismatch"
+                    else "initial_stop_deadline_exhausted"
+                ),
+                outcome_ambiguous=False,
+                protection_barrier_generation=int(
+                    attempt.get("protection_barrier_generation") or 1
+                ),
+                trigger_ref=_tick_id(attempt_id, tick_kind),
+                now_ms=now_ms,
+            )
         status = "recovery_required"
         next_action = "submit_missing_sl"
         _update_lifecycle_if_present(
@@ -352,14 +450,75 @@ def materialize_ticket_bound_reconciliation_tick(
             now_ms=now_ms,
         )
     elif status == "matched":
-        resolve_netting_domain_hold_source(
-            conn,
-            netting_domain_key=exchange_scope.netting_domain_key,
-            source_kind=f"{tick_kind}_reconciliation_tick",
-            source_id=_tick_id(attempt_id, tick_kind),
-            resolution_source="matched_post_submit_reconciliation_tick",
-            now_ms=now_ms,
-        )
+        if (
+            position_state == "flat"
+            and position.get("complete") is True
+            and entry_state == "filled"
+        ):
+            flat_sl_state = _flat_protection_residual_state(
+                sl_order,
+                open_orders=open_orders,
+                recent_fills=recent_fills,
+                open_orders_complete=(
+                    snapshot.get("open_orders_complete") is True
+                ),
+            )
+            flat_tp1_state = _flat_protection_residual_state(
+                tp1_order,
+                open_orders=open_orders,
+                recent_fills=recent_fills,
+                open_orders_complete=(
+                    snapshot.get("open_orders_complete") is True
+                ),
+            )
+            barrier_resolution = resolve_protection_barrier_from_flat_proof(
+                conn,
+                protected_submit_attempt_id=attempt_id,
+                ticket_id=exchange_scope.ticket_id,
+                exposure_episode_id=exchange_scope.exposure_episode_id,
+                netting_domain_key=exchange_scope.netting_domain_key,
+                source_entry_exchange_command_id=str(
+                    entry_order.get("exchange_command_id") or ""
+                ),
+                protection_barrier_generation=int(
+                    attempt.get("protection_barrier_generation") or 1
+                ),
+                authoritative_position_flat=True,
+                exact_live_residual_absent=(
+                    flat_sl_state in FLAT_RESIDUAL_ABSENT_STATES
+                    and flat_tp1_state in FLAT_RESIDUAL_ABSENT_STATES
+                ),
+                resolution_source="matched_flat_reconciliation_tick",
+                now_ms=now_ms,
+            )
+            if barrier_resolution["status"] != "closed_from_flat_proof":
+                blocker = (
+                    "flat_protection_barrier_resolution_failed:"
+                    + str(barrier_resolution["status"])
+                )
+                blockers.append(blocker)
+                status = "hard_stopped"
+                next_action = "repair_exact_flat_protection_barrier_identity"
+            elif snapshot.get("open_orders_complete") is True:
+                _project_terminal_protection_command_effects_from_flat_snapshot(
+                    conn,
+                    attempt=attempt,
+                    exchange_scope=exchange_scope,
+                    current_orders=(sl_order, tp1_order),
+                    open_orders=open_orders,
+                    recent_fills=recent_fills,
+                    snapshot_ref=str(snapshot.get("snapshot_id") or ""),
+                    now_ms=now_ms,
+                )
+        if status == "matched":
+            resolve_netting_domain_hold_source(
+                conn,
+                netting_domain_key=exchange_scope.netting_domain_key,
+                source_kind=f"{tick_kind}_reconciliation_tick",
+                source_id=_tick_id(attempt_id, tick_kind),
+                resolution_source="matched_post_submit_reconciliation_tick",
+                now_ms=now_ms,
+            )
 
     tick = {
         "reconciliation_tick_id": _tick_id(attempt_id, tick_kind),
@@ -458,12 +617,21 @@ def _protection_state(
     order: dict[str, Any],
     open_orders: list[dict[str, Any]],
     recent_fills: list[dict[str, Any]],
+    *,
+    expected_quantity: Decimal | None,
 ) -> str:
     if not order or not str(order.get("exchange_order_id") or "").strip():
         return "missing"
     if _exchange_order_filled(order, recent_fills):
         return "filled"
-    if _exchange_order_by_id(open_orders, order):
+    open_order = _exchange_order_by_id(open_orders, order)
+    if open_order:
+        if expected_quantity is not None and expected_quantity > 0:
+            observed_quantity = _decimal(
+                open_order.get("qty") or open_order.get("amount")
+            )
+            if observed_quantity != expected_quantity:
+                return "quantity_mismatch"
         return "open"
     return "missing"
 
@@ -489,6 +657,21 @@ def _entry_execution_truth(
         if str(fill.get("exchange_order_id") or "") == exchange_order_id
     ]
     if not matching_fills:
+        filled_qty = _decimal(entry_order.get("filled_qty"))
+        average_exec_price = _decimal(entry_order.get("average_exec_price"))
+        if (
+            entry_order.get("result_facts_complete") is True
+            and str(entry_order.get("status") or "").upper()
+            in {"FILLED", "CLOSED"}
+            and filled_qty > 0
+            and average_exec_price > 0
+        ):
+            return {
+                "exchange_order_id": exchange_order_id,
+                "filled_qty": filled_qty,
+                "average_exec_price": average_exec_price,
+                "fill_time_ms": entry_order.get("exchange_observed_at_ms"),
+            }
         return {}
     total_qty = Decimal("0")
     total_notional = Decimal("0")
@@ -515,52 +698,31 @@ def _entry_execution_truth(
     }
 
 
-def _conserve_entry_execution_truth(
-    conn: sa.engine.Connection,
+def _flat_protection_residual_state(
+    order: dict[str, Any],
     *,
-    attempt: dict[str, Any],
-    entry_execution: dict[str, Any],
-    now_ms: int,
-) -> dict[str, Any]:
-    submit_result = _as_dict(attempt.get("submit_result"))
-    submitted_orders = [
-        dict(order)
-        for order in submit_result.get("submitted_orders", [])
-        if isinstance(order, dict)
-    ]
-    repaired = False
-    for order in submitted_orders:
-        if str(order.get("order_role") or "").upper() != "ENTRY":
-            continue
-        if str(order.get("exchange_order_id") or "") != str(
-            entry_execution["exchange_order_id"]
-        ):
-            continue
-        order.update(
-            {
-                "status": "FILLED",
-                "filled_qty": entry_execution["filled_qty"],
-                "average_exec_price": entry_execution["average_exec_price"],
-                "fee": entry_execution.get("fee"),
-                "fill_time_ms": entry_execution.get("fill_time_ms"),
-            }
-        )
-        repaired = True
-        break
-    if not repaired:
-        return attempt
-    updated = {
-        **attempt,
-        "submit_result": {**submit_result, "submitted_orders": submitted_orders},
-        "updated_at_ms": now_ms,
-    }
-    _upsert_row(
-        conn,
-        "brc_ticket_bound_protected_submit_attempts",
-        "protected_submit_attempt_id",
-        updated,
-    )
-    return updated
+    open_orders: list[dict[str, Any]],
+    recent_fills: list[dict[str, Any]],
+    open_orders_complete: bool,
+) -> str:
+    """Return only positive terminal/absence proof for one exact order identity."""
+
+    exchange_order_id = str(order.get("exchange_order_id") or "").strip()
+    if not exchange_order_id:
+        return "unknown"
+    if _exchange_order_filled(order, recent_fills):
+        return "filled"
+    if _exchange_order_by_id(open_orders, order):
+        return "open"
+    status = str(order.get("status") or "").strip().lower()
+    if status in FLAT_RESIDUAL_ABSENT_STATES:
+        return status
+    if not open_orders_complete:
+        return "unknown"
+    # The snapshot provider's open-order collection is a complete venue view.
+    # An exact persisted order identity absent from that view is authoritative
+    # absence for residual-order safety, not a generic negative inference.
+    return "absent"
 
 
 def _unknown_exchange_reduce_only_order(
@@ -787,8 +949,10 @@ def _current_exit_protection_orders(
             continue
         current_by_role[role] = {
             "order_role": role,
+            "local_order_id": str(row.get("local_order_id") or ""),
             "exchange_order_id": str(row["exchange_order_id"]),
             "status": str(row.get("status") or ""),
+            "generation": int(row.get("generation") or 1),
             "amount": row.get("qty"),
             "price": row.get("price"),
             "trigger_price": row.get("trigger_price"),
@@ -802,6 +966,168 @@ def _current_exit_protection_orders(
         if str(order.get("order_role") or "").upper() not in current_by_role
     ]
     return [*historical, *current_by_role.values()]
+
+
+def _project_terminal_protection_command_effects_from_flat_snapshot(
+    conn: sa.engine.Connection,
+    *,
+    attempt: dict[str, Any],
+    exchange_scope: Any,
+    current_orders: tuple[dict[str, Any], dict[str, Any]],
+    open_orders: list[dict[str, Any]],
+    recent_fills: list[dict[str, Any]],
+    snapshot_ref: str,
+    now_ms: int,
+) -> None:
+    """Project terminal venue effects only from a complete exact flat view.
+
+    The caller proves the position is authoritatively flat and the complete
+    open-order view contains no current ticket-bound residual.  This projector
+    still requires the current protection generation plus local/exchange order
+    identity to match exactly; ambiguous or historical rows remain untouched
+    so settlement continues to fail closed.
+    """
+
+    commands = _table(conn, "brc_ticket_bound_exchange_commands")
+    expected_attempt_id = str(attempt.get("protected_submit_attempt_id") or "")
+    expected_ticket_id = str(attempt.get("ticket_id") or "")
+    expected_episode_id = str(exchange_scope.exposure_episode_id or "")
+    expected_netting_domain_key = str(exchange_scope.netting_domain_key or "")
+    for order in current_orders:
+        role = str(order.get("order_role") or "").upper()
+        exchange_order_id = str(order.get("exchange_order_id") or "").strip()
+        local_order_id = str(order.get("local_order_id") or "").strip()
+        generation = int(order.get("generation") or 0)
+        if role not in {"SL", "TP1"} or not all(
+            (exchange_order_id, local_order_id, generation > 0)
+        ):
+            continue
+        if _exchange_order_by_id(open_orders, order):
+            continue
+        candidates = list(
+            conn.execute(
+                sa.select(commands).where(
+                    commands.c.ticket_id == expected_ticket_id,
+                    commands.c.protected_submit_attempt_id == expected_attempt_id,
+                    commands.c.exposure_episode_id == expected_episode_id,
+                    commands.c.netting_domain_key == expected_netting_domain_key,
+                    commands.c.order_role == role,
+                    commands.c.command_kind == "place_order",
+                    commands.c.command_generation == generation,
+                    commands.c.local_order_id == local_order_id,
+                    commands.c.exchange_order_id == exchange_order_id,
+                    commands.c.command_state.in_(
+                        ("confirmed_submitted", "reconciled_submitted")
+                    ),
+                )
+            ).mappings()
+        )
+        if len(candidates) != 1:
+            continue
+        command = dict(candidates[0])
+        if not str(command.get("client_order_id") or "").strip():
+            continue
+        fills = [
+            fill
+            for fill in recent_fills
+            if str(fill.get("exchange_order_id") or "") == exchange_order_id
+        ]
+        if any(
+            str(fill.get("client_order_id") or "").strip()
+            and str(fill.get("client_order_id"))
+            != str(command.get("client_order_id"))
+            for fill in fills
+        ):
+            continue
+        terminal_status = "FILLED" if fills else None
+        exchange_result = _as_dict(command.get("exchange_result"))
+        exchange_result.update(
+            {
+                "exchange_order_id": exchange_order_id,
+                "exchange_observed_at_ms": now_ms,
+                "reconciliation_source": "exact_flat_complete_open_orders",
+                "reconciliation_snapshot_ref": snapshot_ref,
+            }
+        )
+        if terminal_status is not None:
+            exchange_result["exchange_order_status"] = terminal_status
+        target_command_state = (
+            "reconciled_submitted" if fills else "reconciled_absent"
+        )
+        target_outcome_class = (
+            "reconciled_exchange_truth" if fills else "reconciled_absence"
+        )
+        conn.execute(
+            commands.update()
+            .where(
+                commands.c.exchange_command_id == command["exchange_command_id"],
+                commands.c.command_state == command["command_state"],
+                commands.c.exchange_order_id == exchange_order_id,
+            )
+            .values(
+                command_state=target_command_state,
+                outcome_class=target_outcome_class,
+                exchange_order_status=(
+                    terminal_status
+                    if terminal_status is not None
+                    else command.get("exchange_order_status")
+                ),
+                exchange_observed_at_ms=now_ms,
+                result_facts_complete=True,
+                exchange_result=exchange_result,
+                updated_at_ms=max(int(command.get("updated_at_ms") or 0), now_ms),
+            )
+        )
+
+
+def _current_exchange_command_orders(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+) -> list[dict[str, Any]]:
+    """Read current order identity and outcome facts from typed PG commands."""
+
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
+        return []
+    commands = _table(conn, "brc_ticket_bound_exchange_commands")
+    rows = conn.execute(
+        sa.select(commands)
+        .where(
+            commands.c.protected_submit_attempt_id
+            == protected_submit_attempt_id
+        )
+        .order_by(commands.c.command_generation.asc(), commands.c.updated_at_ms.asc())
+    ).mappings()
+    return [
+        {
+            "exchange_command_id": str(row["exchange_command_id"]),
+            "order_role": str(row.get("order_role") or "").upper(),
+            "exchange_order_id": str(row.get("exchange_order_id") or ""),
+            "status": str(
+                row.get("exchange_order_status")
+                or row.get("command_state")
+                or ""
+            ),
+            "amount": row.get("amount"),
+            "price": row.get("price"),
+            "trigger_price": row.get("stop_price"),
+            "reduce_only": row.get("reduce_only") in {True, 1},
+            "filled_qty": row.get("executed_qty"),
+            "average_exec_price": row.get("average_exec_price"),
+            "exchange_observed_at_ms": row.get("exchange_observed_at_ms"),
+            "result_facts_complete": row.get("result_facts_complete") in {True, 1},
+            "command_generation": row.get("command_generation"),
+            "command_source": row.get("command_source"),
+            "source_command_id": row.get("source_command_id"),
+            "protected_submit_attempt_id": row.get(
+                "protected_submit_attempt_id"
+            ),
+            "ticket_id": row.get("ticket_id"),
+            "exposure_episode_id": row.get("exposure_episode_id"),
+            "netting_domain_key": row.get("netting_domain_key"),
+        }
+        for row in rows
+    ]
 
 
 def _exchange_order_by_id(

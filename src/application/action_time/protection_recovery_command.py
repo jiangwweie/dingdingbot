@@ -49,11 +49,23 @@ def prepare_ticket_bound_protection_recovery_command(
             blockers=["protected_submit_attempt_id_required"],
             next_action="provide_protected_submit_attempt_id",
         )
-    existing = _row_by_id(
+    attempt = _row_by_id(
         conn,
-        "brc_ticket_bound_protection_recovery_commands",
+        "brc_ticket_bound_protected_submit_attempts",
         "protected_submit_attempt_id",
         attempt_id,
+    )
+    lifecycle = _row_by_id(
+        conn,
+        "brc_ticket_bound_order_lifecycle_runs",
+        "protected_submit_attempt_id",
+        attempt_id,
+    )
+    generation = int(attempt.get("protection_barrier_generation") or 1)
+    existing = _recovery_by_generation(
+        conn,
+        protected_submit_attempt_id=attempt_id,
+        protection_barrier_generation=generation,
     )
     if existing:
         existing_status = str(existing.get("status") or "blocked")
@@ -100,19 +112,12 @@ def prepare_ticket_bound_protection_recovery_command(
             next_action="use_existing_protection_recovery_command",
             extra={"idempotent_existing_protection_recovery_command": True},
         )
-    attempt = _row_by_id(
-        conn,
-        "brc_ticket_bound_protected_submit_attempts",
-        "protected_submit_attempt_id",
-        attempt_id,
+    entry_command = _typed_entry_command(conn, attempt_id=attempt_id)
+    blockers = _prepare_blockers(
+        attempt=attempt,
+        lifecycle=lifecycle,
+        entry_command=entry_command,
     )
-    lifecycle = _row_by_id(
-        conn,
-        "brc_ticket_bound_order_lifecycle_runs",
-        "protected_submit_attempt_id",
-        attempt_id,
-    )
-    blockers = _prepare_blockers(attempt=attempt, lifecycle=lifecycle)
     if blockers:
         return _result(
             "blocked",
@@ -121,7 +126,12 @@ def prepare_ticket_bound_protection_recovery_command(
             blockers=blockers,
             next_action="repair_protection_recovery_inputs",
         )
-    missing_orders = _missing_protection_orders(attempt, lifecycle=lifecycle)
+    missing_orders = _typed_missing_protection_orders(
+        conn,
+        attempt=attempt,
+        lifecycle=lifecycle,
+        generation=generation,
+    )
     blockers = _missing_order_blockers(missing_orders)
     if blockers:
         return _result(
@@ -134,6 +144,8 @@ def prepare_ticket_bound_protection_recovery_command(
     command = _command_row(
         attempt=attempt,
         lifecycle=lifecycle,
+        entry_command=entry_command,
+        generation=generation,
         missing_orders=missing_orders,
         now_ms=now_ms,
     )
@@ -553,15 +565,19 @@ def _prepare_blockers(
     *,
     attempt: dict[str, Any],
     lifecycle: dict[str, Any],
+    entry_command: dict[str, Any],
 ) -> list[str]:
     blockers: list[str] = []
     if not attempt:
         blockers.append("protected_submit_attempt_missing")
     if not lifecycle:
         blockers.append("ticket_bound_lifecycle_missing")
+    if not entry_command:
+        blockers.append("typed_entry_exchange_command_missing")
     if blockers:
         return blockers
     if str(lifecycle.get("status") or "") not in {
+        "entry_filled",
         "protection_missing",
         "protection_degraded",
         "protection_submit_failed",
@@ -573,6 +589,20 @@ def _prepare_blockers(
         blockers.append("entry_fill_not_confirmed_for_protection_recovery")
     if not str(lifecycle.get("entry_exchange_order_id") or "").strip():
         blockers.append("entry_exchange_order_id_missing_for_protection_recovery")
+    if str(entry_command.get("order_role") or "") != "ENTRY":
+        blockers.append("typed_entry_exchange_command_role_invalid")
+    if str(entry_command.get("command_state") or "") not in {
+        "confirmed_submitted",
+        "reconciled_submitted",
+    }:
+        blockers.append("typed_entry_exchange_command_not_submitted")
+    if entry_command.get("result_facts_complete") not in {True, 1}:
+        blockers.append("typed_entry_exchange_result_facts_incomplete")
+    protection_quantity = _decimal(attempt.get("protection_quantity"))
+    if protection_quantity <= 0:
+        blockers.append("typed_protection_quantity_missing")
+    if _decimal(entry_command.get("executed_qty")) != protection_quantity:
+        blockers.append("typed_entry_protection_quantity_mismatch")
     if str(attempt.get("submit_mode") or "") != "real_gateway_action":
         blockers.append(f"attempt_mode_not_real:{attempt.get('submit_mode')}")
     if attempt.get("exchange_write_called") is not True:
@@ -583,8 +613,6 @@ def _prepare_blockers(
         blockers.append("attempt_forbidden_effect:live_profile_changed")
     if attempt.get("order_sizing_changed") not in {False, None, "", 0}:
         blockers.append("attempt_forbidden_effect:order_sizing_changed")
-    if not _missing_protection_orders(attempt, lifecycle=lifecycle):
-        blockers.append("missing_protection_orders_not_found")
     return _dedupe(blockers)
 
 
@@ -668,6 +696,91 @@ def _missing_protection_orders(
     return missing
 
 
+def _typed_entry_command(
+    conn: sa.engine.Connection,
+    *,
+    attempt_id: str,
+) -> dict[str, Any]:
+    if not sa.inspect(conn).has_table("brc_ticket_bound_exchange_commands"):
+        return {}
+    table = _table(conn, "brc_ticket_bound_exchange_commands")
+    rows = conn.execute(
+        sa.select(table).where(
+            table.c.protected_submit_attempt_id == attempt_id,
+            table.c.order_role == "ENTRY",
+            table.c.command_source == "protected_submit",
+        ).limit(2)
+    ).mappings().all()
+    return dict(rows[0]) if len(rows) == 1 else {}
+
+
+def _typed_missing_protection_orders(
+    conn: sa.engine.Connection,
+    *,
+    attempt: dict[str, Any],
+    lifecycle: dict[str, Any],
+    generation: int,
+) -> list[dict[str, Any]]:
+    """Build recovery intent from typed command truth and request templates."""
+
+    attempt_id = str(attempt.get("protected_submit_attempt_id") or "")
+    quantity = _decimal(attempt.get("protection_quantity"))
+    if not attempt_id or quantity <= 0:
+        return []
+    commands = _table(conn, "brc_ticket_bound_exchange_commands")
+    typed_rows = list(
+        conn.execute(
+            sa.select(commands).where(
+                commands.c.protected_submit_attempt_id == attempt_id,
+                commands.c.order_role.in_(("SL", "TP1")),
+            )
+        ).mappings()
+    )
+    ambiguous_roles = {
+        str(row.get("order_role") or "")
+        for row in typed_rows
+        if str(row.get("command_state") or "") == "outcome_unknown"
+    }
+    if "SL" in ambiguous_roles:
+        return []
+    confirmed = {
+        str(row.get("order_role") or "")
+        for row in typed_rows
+        if str(row.get("command_state") or "")
+        in {"confirmed_submitted", "reconciled_submitted"}
+        and _decimal(row.get("amount")) == quantity
+    }
+    submit_request = _as_dict(attempt.get("submit_request"))
+    templates = [
+        dict(order)
+        for order in submit_request.get("orders", [])
+        if isinstance(order, dict)
+    ]
+    entry_template = _order_by_role(templates, "ENTRY")
+    requested_entry_qty = _decimal(entry_template.get("amount"))
+    forced_missing_roles = _forced_missing_roles_from_lifecycle(lifecycle)
+    missing: list[dict[str, Any]] = []
+    for role in ("SL", "TP1"):
+        if role in confirmed and role not in forced_missing_roles:
+            continue
+        template = _order_by_role(templates, role)
+        if not template:
+            continue
+        amount = quantity
+        if role == "TP1" and requested_entry_qty > 0:
+            requested_tp1_qty = _decimal(template.get("amount"))
+            if requested_tp1_qty > 0:
+                amount = min(quantity, quantity * requested_tp1_qty / requested_entry_qty)
+        missing.append(
+            {
+                **template,
+                "amount": str(amount),
+                "protection_barrier_generation": generation,
+            }
+        )
+    return missing
+
+
 def _forced_missing_roles_from_lifecycle(lifecycle: dict[str, Any]) -> set[str]:
     blockers = _json_list(lifecycle.get("blockers"))
     first_blocker = str(lifecycle.get("first_blocker") or "").strip()
@@ -725,12 +838,15 @@ def _command_row(
     *,
     attempt: dict[str, Any],
     lifecycle: dict[str, Any],
+    entry_command: dict[str, Any],
+    generation: int,
     missing_orders: list[dict[str, Any]],
     now_ms: int,
 ) -> dict[str, Any]:
     command_id = _stable_id(
         "ticket_protection_recovery_command",
         str(attempt["protected_submit_attempt_id"]),
+        str(generation),
     )
     command_plan = {
         "schema": "brc.ticket_bound_protection_recovery_command_plan.v1",
@@ -746,6 +862,13 @@ def _command_row(
         "strategy_group_id": str(attempt["strategy_group_id"]),
         "symbol": str(attempt["symbol"]),
         "side": str(attempt["side"]),
+        "protection_barrier_generation": generation,
+        "exposure_episode_id": str(entry_command["exposure_episode_id"]),
+        "netting_domain_key": str(entry_command["netting_domain_key"]),
+        "source_entry_exchange_command_id": str(
+            entry_command["exchange_command_id"]
+        ),
+        "protection_quantity": _decimal(attempt["protection_quantity"]),
         "status": "prepared",
         "recovery_action": "submit_missing_protection",
         "first_blocker": None,
@@ -780,7 +903,13 @@ def _refresh_failed_recovery_command(
         "protected_submit_attempt_id",
         str(existing.get("protected_submit_attempt_id") or ""),
     )
-    blockers = _prepare_blockers(attempt=attempt, lifecycle=lifecycle)
+    attempt_id = str(existing.get("protected_submit_attempt_id") or "")
+    entry_command = _typed_entry_command(conn, attempt_id=attempt_id)
+    blockers = _prepare_blockers(
+        attempt=attempt,
+        lifecycle=lifecycle,
+        entry_command=entry_command,
+    )
     if blockers:
         return _result(
             "blocked",
@@ -789,7 +918,13 @@ def _refresh_failed_recovery_command(
             blockers=blockers,
             next_action="repair_protection_recovery_inputs",
         )
-    missing_orders = _missing_protection_orders(attempt, lifecycle=lifecycle)
+    generation = int(existing.get("protection_barrier_generation") or 1)
+    missing_orders = _typed_missing_protection_orders(
+        conn,
+        attempt=attempt,
+        lifecycle=lifecycle,
+        generation=generation,
+    )
     blockers = _missing_order_blockers(missing_orders)
     if blockers:
         return _result(
@@ -803,6 +938,8 @@ def _refresh_failed_recovery_command(
         **_command_row(
             attempt=attempt,
             lifecycle=lifecycle,
+            entry_command=entry_command,
+            generation=generation,
             missing_orders=missing_orders,
             now_ms=now_ms,
         ),
@@ -1345,6 +1482,30 @@ def _row_by_id(
         return {}
     table = _table(conn, table_name)
     row = conn.execute(sa.select(table).where(table.c[id_column] == id_value)).mappings().first()
+    return dict(row) if row else {}
+
+
+def _recovery_by_generation(
+    conn: sa.engine.Connection,
+    *,
+    protected_submit_attempt_id: str,
+    protection_barrier_generation: int,
+) -> dict[str, Any]:
+    table = _table(conn, "brc_ticket_bound_protection_recovery_commands")
+    if "protection_barrier_generation" not in table.c:
+        return _row_by_id(
+            conn,
+            "brc_ticket_bound_protection_recovery_commands",
+            "protected_submit_attempt_id",
+            protected_submit_attempt_id,
+        )
+    row = conn.execute(
+        sa.select(table).where(
+            table.c.protected_submit_attempt_id == protected_submit_attempt_id,
+            table.c.protection_barrier_generation
+            == protection_barrier_generation,
+        )
+    ).mappings().first()
     return dict(row) if row else {}
 
 
