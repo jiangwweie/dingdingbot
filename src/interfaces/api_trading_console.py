@@ -2597,7 +2597,6 @@ async def _run_ticket_bound_protected_submit(
     from src.application.action_time.protected_submit_attempt import (
         SUBMIT_MODE_REAL_GATEWAY_ACTION,
         prepare_ticket_bound_protected_submit_attempt,
-        record_ticket_bound_protected_submit_result,
     )
 
     engine = sa.create_engine(database_url)
@@ -2613,19 +2612,19 @@ async def _run_ticket_bound_protected_submit(
             return report
         if submit_mode != SUBMIT_MODE_REAL_GATEWAY_ACTION:
             return report
-
-        submit_result = await _execute_ticket_bound_real_gateway_submit(
-            report,
-            engine=engine,
-        )
-        with engine.begin() as conn:
-            return record_ticket_bound_protected_submit_result(
-                conn,
-                protected_submit_attempt_id=str(
-                    report.get("protected_submit_attempt_id") or ""
-                ),
-                submit_result=submit_result,
-            )
+        return {
+            **report,
+            "status": "blocked",
+            "submit_allowed": False,
+            "blockers": [
+                "direct_ticket_bound_real_submit_retired_use_durable_dispatch_command"
+            ],
+            "next_action": "wait_for_durable_action_time_dispatch_command",
+            "official_operation_layer_submit_called": False,
+            "exchange_write_called": False,
+            "order_created": False,
+            "order_lifecycle_called": False,
+        }
     finally:
         engine.dispose()
 
@@ -2696,6 +2695,12 @@ async def _execute_ticket_bound_real_gateway_submit(
     *,
     engine: Any,
 ) -> dict[str, Any]:
+    """Retired direct gateway branch; leased command worker owns exchange I/O."""
+
+    raise RuntimeError(
+        "direct_ticket_bound_real_submit_retired_use_durable_dispatch_command"
+    )
+
     from src.application.order_lifecycle_service import OrderLifecycleService
     from src.interfaces import api as api_module
 

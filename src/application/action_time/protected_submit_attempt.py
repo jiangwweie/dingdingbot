@@ -8,8 +8,8 @@ Action-Time Ticket + FinalGate pass + Operation Layer handoff
 
 The disabled-smoke mode records a full ticket-bound submit attempt without
 calling the exchange. The real mode only prepares a ticket-bound attempt here;
-the API layer performs the official gateway call and then records the result
-through ``record_ticket_bound_protected_submit_result``.
+the leased durable Exchange Command worker performs the official gateway call
+and projects the result through ``record_ticket_bound_protected_submit_result``.
 """
 
 from __future__ import annotations

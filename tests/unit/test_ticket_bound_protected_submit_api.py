@@ -113,6 +113,20 @@ def test_ticket_bound_protected_submit_api_signature_has_no_legacy_inputs():
     assert "prepared_authorization_id" not in signature.parameters
 
 
+def test_direct_real_gateway_submit_branch_is_retired_from_console_api():
+    runner_source = inspect.getsource(
+        api_trading_console._run_ticket_bound_protected_submit
+    )
+    executor_source = inspect.getsource(
+        api_trading_console._execute_ticket_bound_real_gateway_submit
+    )
+
+    assert "_execute_ticket_bound_real_gateway_submit(" not in runner_source
+    assert "direct_ticket_bound_real_submit_retired_use_durable_dispatch_command" in (
+        executor_source
+    )
+
+
 def test_runtime_exchange_submit_gateway_status_requires_lifecycle_methods():
     gateway = SimpleNamespace(
         place_order=lambda **_kwargs: None,

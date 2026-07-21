@@ -1436,57 +1436,16 @@ async def test_raw_pg_input_reaches_real_gateway_submit_boundary(
     assert gateway_binding["blockers"] == []
 
     pg_control_connection.commit()
-    submit_result = await api_trading_console._execute_ticket_bound_real_gateway_submit(
-        prepared_submit,
-        engine=pg_control_connection.engine,
-    )
-    assert submit_result["status"] == "entry_submit_failed"
-    assert submit_result["blockers"] == ["controlled_exchange_write_boundary"]
-    assert submit_result["exchange_write_called"] is True
-    assert submit_result["order_created"] is True
-    assert submit_result["order_lifecycle_called"] is True
-    assert submit_result["submitted_orders"] == []
-    assert len(gateway.calls) == 1
-    assert gateway.calls[0]["client_order_id"] == submit_orders[0]["client_order_id"]
-    assert gateway.calls[0]["side"] == "sell"
-    assert gateway.calls[0]["order_type"] == "market"
-    assert gateway.calls[0]["reduce_only"] is False
-    assert list(order_repository.orders) == [submit_orders[0]["local_order_id"]]
-
-    recorded = protected_submit.record_ticket_bound_protected_submit_result(
-        pg_control_connection,
-        protected_submit_attempt_id=str(
-            prepared_submit["protected_submit_attempt_id"]
-        ),
-        submit_result=submit_result,
-        now_ms=NOW_MS + 8,
-    )
-    assert recorded["status"] == "submit_failed"
-    assert recorded["exchange_write_called"] is True
-    assert recorded["order_created"] is True
-    assert recorded["order_lifecycle_called"] is True
-    assert recorded["blockers"] == ["controlled_exchange_write_boundary"]
-
-    attempt_row = pg_control_connection.execute(
-        text(
-            """
-            SELECT status, submit_mode, exchange_write_called, order_created,
-                   order_lifecycle_called
-            FROM brc_ticket_bound_protected_submit_attempts
-            WHERE protected_submit_attempt_id = :protected_submit_attempt_id
-            """
-        ),
-        {
-            "protected_submit_attempt_id": str(
-                prepared_submit["protected_submit_attempt_id"]
-            )
-        },
-    ).mappings().one()
-    assert attempt_row["status"] == "submit_failed"
-    assert attempt_row["submit_mode"] == "real_gateway_action"
-    assert bool(attempt_row["exchange_write_called"]) is True
-    assert bool(attempt_row["order_created"]) is True
-    assert bool(attempt_row["order_lifecycle_called"]) is True
+    with pytest.raises(
+        RuntimeError,
+        match="direct_ticket_bound_real_submit_retired_use_durable_dispatch_command",
+    ):
+        await api_trading_console._execute_ticket_bound_real_gateway_submit(
+            prepared_submit,
+            engine=pg_control_connection.engine,
+        )
+    assert gateway.calls == []
+    assert list(order_repository.orders) == []
 
 
 @pytest.mark.parametrize(
