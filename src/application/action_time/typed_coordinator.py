@@ -23,6 +23,9 @@ from src.application.action_time.operation_layer_handoff import (
 from src.application.action_time.runtime_safety_state import (
     materialize_ticket_bound_runtime_safety_state,
 )
+from src.application.action_time.durable_dispatch_command import (
+    materialize_action_time_dispatch_command,
+)
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
 )
@@ -44,6 +47,7 @@ class TypedActionTimeCoordinatorResult:
     ticket_id: str | None
     finalgate_pass_id: str | None
     operation_layer_handoff_id: str | None
+    dispatch_command_id: str | None
     steps: tuple[TypedActionTimeStep, ...]
     first_blocker: str | None
 
@@ -83,6 +87,7 @@ def coordinate_action_time_invocation(
             ticket_id=None,
             finalgate_pass_id=None,
             operation_layer_handoff_id=None,
+            dispatch_command_id=None,
             steps=tuple(steps),
             first_blocker=blocker,
         )
@@ -222,12 +227,49 @@ def coordinate_action_time_invocation(
             "materialize_ticket_bound_runtime_safety_state",
             _first_blocker(safety, "ticket_bound_runtime_safety_not_ready"),
         )
+    if remaining_timeout_seconds() is None:
+        return blocked(
+            "materialize_action_time_dispatch_command",
+            "action_time_deadline_expired",
+        )
+    with engine.begin() as conn:
+        dispatch_command = materialize_action_time_dispatch_command(
+            conn,
+            action_time_invocation_id=invocation_id,
+            ticket_id=ticket_id,
+            operation_layer_handoff_id=handoff_id,
+            runtime_safety_snapshot=dict(safety.get("snapshot") or {}),
+            now_ms=wall_clock(),
+        )
+    dispatch_command_id = str(
+        dispatch_command.get("dispatch_command_id") or ""
+    ).strip()
+    steps.append(
+        _step(
+            "materialize_action_time_dispatch_command",
+            dispatch_command,
+            {
+                "ticket_id": ticket_id,
+                "operation_layer_handoff_id": handoff_id,
+                "dispatch_command_id": dispatch_command_id,
+            },
+        )
+    )
+    if str(dispatch_command.get("status") or "") not in {
+        "materialized",
+        "already_materialized",
+    } or not dispatch_command_id:
+        return blocked(
+            "materialize_action_time_dispatch_command",
+            _first_blocker(dispatch_command, "action_time_dispatch_command_not_materialized"),
+        )
     return TypedActionTimeCoordinatorResult(
         status="ready",
         action_time_invocation_id=invocation_id,
         ticket_id=ticket_id,
         finalgate_pass_id=finalgate_pass_id,
         operation_layer_handoff_id=handoff_id,
+        dispatch_command_id=dispatch_command_id,
         steps=tuple(steps),
         first_blocker=None,
     )

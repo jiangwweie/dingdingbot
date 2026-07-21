@@ -343,12 +343,13 @@ def test_l2_l7_production_systemd_keeps_broad_watcher_non_submit_authority() -> 
         / "deploy/systemd/brc-runtime-signal-watcher.service.d/85-action-time-refresh-if-needed.conf"
     ).read_text(encoding="utf-8")
 
-    assert "--identity-source pg_ticket" in dispatcher_dropin
-    assert "--execute-preflight" in dispatcher_dropin
-    assert "--execute-operation-layer-submit" in dispatcher_dropin
-    assert "--operation-layer-submit-mode from_submit_mode_decision" in dispatcher_dropin
+    assert "run_action_time_dispatch_command_once.py" in dispatcher_dropin
+    assert "--worker-id tokyo-runtime-signal-watcher" in dispatcher_dropin
     assert "--production-submit-execution-policy armed" in dispatcher_dropin
-    assert "--operation-layer-submit-mode real_gateway_action" not in dispatcher_dropin
+    assert "runtime_signal_watcher_resume_dispatcher.py" not in dispatcher_dropin
+    assert "--execute-preflight" not in dispatcher_dropin
+    assert "--execute-operation-layer-submit" not in dispatcher_dropin
+    assert "BRC_OPERATOR_SESSION_COOKIE" not in dispatcher_dropin
     assert "--resume-pack-json" not in dispatcher_dropin
     assert "--output-json" not in dispatcher_dropin
     assert "--report-dir" not in watcher_service + dispatcher_dropin + action_time_dropin

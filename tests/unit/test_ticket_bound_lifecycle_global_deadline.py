@@ -51,7 +51,7 @@ async def test_awaitable_is_cancelled_when_global_deadline_expires(monkeypatch):
         coroutine.close()
 
 
-def test_gateway_probe_owns_only_lifecycle_mutation_command_sources(
+def test_gateway_probe_owns_durable_protected_submit_command_source(
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
@@ -59,7 +59,7 @@ def test_gateway_probe_owns_only_lifecycle_mutation_command_sources(
 
     assert (
         lifecycle_cli._prepared_or_unknown_command_exists(pg_control_connection)
-        is False
+        is True
     )
 
     pg_control_connection.execute(

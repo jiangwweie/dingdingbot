@@ -897,6 +897,7 @@ def _result(
         "lifecycle_mutation_capability_ref": snapshot.get(
             "lifecycle_mutation_capability_ref"
         ),
+        "snapshot": snapshot,
         "blockers": _dedupe(blockers),
         "next_action": next_action,
         "authority_boundary": AUTHORITY_BOUNDARY,

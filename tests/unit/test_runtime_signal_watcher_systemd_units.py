@@ -174,17 +174,17 @@ def test_watcher_stage_slots_sum_to_290_seconds_and_are_timed():
         "resume_dispatcher",
     ):
         assert f"BRC_STAGE_MAX_RSS_KIB stage={stage} value=%M" in text
-    assert "--preflight-timeout-seconds 30" in text
+    assert "run_action_time_dispatch_command_once.py" in text
     assert "systemd-run" not in text
     assert "nohup" not in text
     assert " &" not in text
 
 
-def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
+def test_signal_watcher_dispatcher_dropin_uses_durable_dispatch_command_path():
     text = DROPIN_PATH.read_text(encoding="utf-8")
 
-    assert "runtime_signal_watcher_resume_dispatcher.py" in text
-    assert "--identity-source pg_ticket" in text
+    assert "run_action_time_dispatch_command_once.py" in text
+    assert "--worker-id tokyo-runtime-signal-watcher" in text
     assert "post-signal-resume-pack.json" not in text
     assert "--resume-pack-json" not in text
     assert "--output-json" not in text
@@ -195,9 +195,10 @@ def test_signal_watcher_dispatcher_dropin_uses_official_resume_path():
     assert "--owner-operator-id" not in text
     assert "--owner-confirmation-reference" not in text
     assert "--selected-strategy-group-id ${BRC_SELECTED_STRATEGY_GROUP_ID}" not in text
-    assert "--execute-preflight" in text
-    assert "--execute-operation-layer-submit" in text
-    assert "--operation-layer-submit-mode from_submit_mode_decision" in text
+    assert "runtime_signal_watcher_resume_dispatcher.py" not in text
+    assert "--execute-preflight" not in text
+    assert "--execute-operation-layer-submit" not in text
+    assert "BRC_OPERATOR_SESSION_COOKIE" not in text
     assert "--production-submit-execution-policy armed" in text
     assert "--operation-layer-submit-mode real_gateway_action" not in text
     assert "--execute-post-submit-finalize" not in text

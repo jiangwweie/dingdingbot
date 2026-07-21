@@ -1043,6 +1043,7 @@ def _run_typed_action_time_refresh(
             ticket_id=None,
             finalgate_pass_id=None,
             operation_layer_handoff_id=None,
+            dispatch_command_id=None,
             steps=(),
             first_blocker=f"typed_action_time_coordinator_failed:{type(exc).__name__}",
         )
@@ -1111,6 +1112,7 @@ def _run_typed_action_time_refresh(
         "ticket_id": result.ticket_id,
         "finalgate_pass_id": result.finalgate_pass_id,
         "operation_layer_handoff_id": result.operation_layer_handoff_id,
+        "dispatch_command_id": result.dispatch_command_id,
         "first_blocker": result.first_blocker,
     }
     return report

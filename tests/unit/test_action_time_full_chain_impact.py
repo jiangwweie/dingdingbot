@@ -21,6 +21,7 @@ from scripts import materialize_action_time_ticket as ticket_materializer
 from scripts import materialize_pg_promotion_action_time_lane as lane_materializer
 from scripts import materialize_ticket_bound_protected_submit_attempt as protected_submit
 from scripts import materialize_ticket_bound_runtime_safety_state as safety_state
+from scripts import run_action_time_dispatch_command_once as dispatch_worker
 from scripts import publish_runtime_control_current_projections as publisher
 from scripts import runtime_active_observation_monitor
 from src.application.runtime_strategy_signal_evaluation_service import (
@@ -52,6 +53,12 @@ from src.application.action_time.ticket_materialization_sequence import (
 )
 from src.application.action_time.runtime_pg_fact_snapshots import (
     write_account_safe_fact_snapshots,
+)
+from src.application.action_time.durable_dispatch_command import (
+    materialize_action_time_dispatch_command,
+)
+from src.application.action_time.exchange_command_worker import (
+    run_one_ticket_bound_exchange_command,
 )
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity
 from src.interfaces import api as trading_api_module
@@ -185,6 +192,10 @@ ASSET_NEUTRAL_EXPAND_MIGRATION_PATH = (
 ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-17-132_backfill_asset_neutral_account_risk_identity.py"
+)
+ACTION_TIME_DISPATCH_COMMAND_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-21-143_create_action_time_dispatch_commands.py"
 )
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
@@ -717,6 +728,10 @@ def pg_control_connection():
                 ASSET_NEUTRAL_EXPAND_MIGRATION_PATH,
                 "migration_131_action_time_full_chain",
             ),
+            (
+                ACTION_TIME_DISPATCH_COMMAND_MIGRATION_PATH,
+                "migration_143_action_time_full_chain",
+            ),
         ):
             extension = _load_module(path, module_name)
             old_extension_op = extension.op
@@ -992,6 +1007,89 @@ def test_six_event_specs_across_all_active_scopes_reach_disabled_smoke_from_prod
     assert _count(pg_control_connection, "brc_operation_layer_handoffs") == 1
     assert _count(pg_control_connection, "brc_runtime_safety_state_snapshots") == 1
     assert _count(pg_control_connection, "brc_ticket_bound_protected_submit_attempts") == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_safety_dispatch_command_reaches_durable_entry_commands_without_http(
+    pg_control_connection,
+    monkeypatch,
+):
+    _arm_submit_decision_env(monkeypatch)
+    signal_summary, last_price = _evaluator_signal_summary(
+        strategy_group_id="SOR-001",
+        symbol="ETHUSDT",
+        side="long",
+    )
+    payloads = _run_raw_pg_input_to_runtime_safety(
+        pg_control_connection,
+        monkeypatch,
+        strategy_group_id="SOR-001",
+        symbol="ETHUSDT",
+        side="long",
+        fact_values={"last_price": last_price},
+        signal_summary=signal_summary,
+    )
+    command = materialize_action_time_dispatch_command(
+        pg_control_connection,
+        action_time_invocation_id="invocation:full-chain-dispatch",
+        ticket_id=str(payloads["ticket"]["ticket_id"]),
+        operation_layer_handoff_id=str(
+            payloads["handoff"]["operation_layer_handoff_id"]
+        ),
+        runtime_safety_snapshot=dict(payloads["safety"]["snapshot"]),
+        now_ms=NOW_MS + 6,
+    )
+    assert command["status"] == "materialized", command
+    pg_control_connection.commit()
+
+    report = dispatch_worker.run_once(
+        pg_control_connection.engine,
+        worker_id="full-chain-dispatch-worker",
+        production_submit_execution_policy="armed",
+        now_ms=NOW_MS + 7,
+    )
+
+    assert report["status"] == "submit_prepared"
+    assert report["official_application_port_called"] is True
+    assert report["exchange_write_called"] is False
+    assert _count(pg_control_connection, "brc_action_time_dispatch_commands") == 1
+    assert _count(pg_control_connection, "brc_ticket_bound_protected_submit_attempts") == 1
+    assert _count(pg_control_connection, "brc_ticket_bound_exchange_commands") == 3
+
+    class _Gateway:
+        runtime_account_id = "owner-subaccount-runtime-v0"
+        runtime_exchange_id = "binance_usdm"
+
+        async def place_order(self, **kwargs):
+            return SimpleNamespace(
+                is_success=True,
+                exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+                selected_leverage=kwargs.get("desired_leverage"),
+                exchange_configured_initial_leverage=kwargs.get("desired_leverage"),
+            )
+
+    results = []
+    for offset in (8, 9, 10):
+        results.append(
+            await run_one_ticket_bound_exchange_command(
+                pg_control_connection.engine,
+                gateway=_Gateway(),
+                worker_id=f"full-chain-exchange-worker-{offset}",
+                now_ms=NOW_MS + offset,
+                command_sources=("protected_submit",),
+            )
+        )
+    assert [result["status"] for result in results] == [
+        "command_confirmed",
+        "command_confirmed",
+        "command_confirmed",
+    ]
+    attempt_status = pg_control_connection.execute(
+        text(
+            "SELECT status FROM brc_ticket_bound_protected_submit_attempts"
+        )
+    ).scalar_one()
+    assert attempt_status == "submitted"
 
 
 @pytest.mark.parametrize(
@@ -1676,10 +1774,12 @@ def _count(conn, table_name: str) -> int:
     assert table_name in {
         "brc_action_time_lane_inputs",
         "brc_action_time_tickets",
+        "brc_action_time_dispatch_commands",
         "brc_live_signal_events",
         "brc_operation_layer_handoffs",
         "brc_promotion_candidates",
         "brc_runtime_safety_state_snapshots",
+        "brc_ticket_bound_exchange_commands",
         "brc_ticket_bound_exit_protection_orders",
         "brc_ticket_bound_exit_protection_sets",
         "brc_ticket_bound_order_lifecycle_runs",
@@ -1895,6 +1995,19 @@ def _run_raw_pg_input_to_runtime_safety(
     assert safety_payload["submit_allowed"] is True
     assert safety_payload["blockers"] == []
     assert safety_payload["forbidden_effects"] == safety_state.FORBIDDEN_EFFECTS
+    invocation_id = str(ticket_payload.get("action_time_invocation_id") or "")
+    dispatch_payload = (
+        materialize_action_time_dispatch_command(
+            conn,
+            action_time_invocation_id=invocation_id,
+            ticket_id=str(ticket_payload["ticket_id"]),
+            operation_layer_handoff_id=str(handoff_payload["operation_layer_handoff_id"]),
+            runtime_safety_snapshot=dict(safety_payload.get("snapshot") or {}),
+            now_ms=NOW_MS + 6,
+        )
+        if invocation_id
+        else {"status": "not_applicable_legacy_non_invocation_fixture"}
+    )
 
     return {
         "signal": signal_payload,
@@ -1907,6 +2020,7 @@ def _run_raw_pg_input_to_runtime_safety(
         "finalgate": finalgate_payload,
         "handoff": handoff_payload,
         "safety": safety_payload,
+        "dispatch": dispatch_payload,
     }
 
 

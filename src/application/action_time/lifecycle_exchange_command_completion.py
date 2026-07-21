@@ -22,6 +22,9 @@ from src.application.action_time.runner_mutation_command import (
 from src.application.action_time.runner_protection_adjuster import (
     materialize_ticket_bound_runner_protection_adjustment,
 )
+from src.application.action_time.protected_submit_attempt import (
+    record_ticket_bound_protected_submit_result,
+)
 
 
 CONFIRMED = {"confirmed_submitted", "reconciled_submitted"}
@@ -36,9 +39,7 @@ def apply_completed_lifecycle_exchange_sources(
     source_command_id: str | None = None,
 ) -> list[dict[str, Any]]:
     table = _table(conn, "brc_ticket_bound_exchange_commands")
-    query = sa.select(table).where(
-        table.c.command_source != "protected_submit"
-    )
+    query = sa.select(table)
     if source_command_id:
         query = query.where(table.c.source_command_id == source_command_id)
     rows = [dict(row) for row in conn.execute(query).mappings()]
@@ -57,6 +58,15 @@ def apply_completed_lifecycle_exchange_sources(
         if states & UNRESOLVED:
             continue
         if states & BLOCKED:
+            if source == "protected_submit":
+                results.append(
+                    _record_protected_submit_terminal_outcome(
+                        conn,
+                        commands=commands,
+                        now_ms=now_ms,
+                    )
+                )
+                continue
             results.append(
                 {
                     "status": "source_blocked",
@@ -67,6 +77,15 @@ def apply_completed_lifecycle_exchange_sources(
             )
             continue
         if not states or not states <= CONFIRMED:
+            continue
+        if source == "protected_submit":
+            results.append(
+                _record_protected_submit_terminal_outcome(
+                    conn,
+                    commands=commands,
+                    now_ms=now_ms,
+                )
+            )
             continue
         if source == "protection_recovery":
             applied = apply_durable_protection_recovery_exchange_commands(
@@ -169,6 +188,99 @@ def apply_completed_lifecycle_exchange_sources(
                 }
             )
     return results
+
+
+def _record_protected_submit_terminal_outcome(
+    conn: sa.Connection,
+    *,
+    commands: list[dict[str, Any]],
+    now_ms: int,
+) -> dict[str, Any]:
+    """Project leased Exchange Command truth back to the submit attempt once."""
+
+    attempt_id = str(commands[0].get("protected_submit_attempt_id") or "")
+    attempt = _row_by_id(
+        conn,
+        "brc_ticket_bound_protected_submit_attempts",
+        "protected_submit_attempt_id",
+        attempt_id,
+    )
+    if not attempt:
+        return {
+            "status": "protected_submit_attempt_missing",
+            "command_source": "protected_submit",
+            "source_command_id": attempt_id,
+            "blockers": ["protected_submit_attempt_missing"],
+        }
+    if str(attempt.get("status") or "") != "submit_prepared":
+        return {
+            "status": "protected_submit_attempt_already_terminal",
+            "command_source": "protected_submit",
+            "source_command_id": attempt_id,
+            "blockers": [],
+        }
+    states = {str(row.get("command_state") or "") for row in commands}
+    failed = states & BLOCKED
+    result = _protected_submit_result_from_commands(
+        attempt=attempt,
+        commands=commands,
+        failed=failed,
+    )
+    record = record_ticket_bound_protected_submit_result(
+        conn,
+        protected_submit_attempt_id=attempt_id,
+        submit_result=result,
+        now_ms=now_ms,
+    )
+    return {
+        "status": "protected_submit_outcome_projected",
+        "command_source": "protected_submit",
+        "source_command_id": attempt_id,
+        "attempt_status": record.get("status"),
+        "blockers": list(record.get("blockers") or []),
+    }
+
+
+def _protected_submit_result_from_commands(
+    *,
+    attempt: dict[str, Any],
+    commands: list[dict[str, Any]],
+    failed: set[str],
+) -> dict[str, Any]:
+    submitted_orders = [
+        {
+            "local_order_id": row.get("local_order_id"),
+            "exchange_order_id": row.get("exchange_order_id"),
+            "order_role": row.get("order_role"),
+            "amount": str(row.get("amount")) if row.get("amount") is not None else None,
+            "reduce_only": row.get("reduce_only"),
+            "status": "OPEN",
+        }
+        for row in commands
+        if str(row.get("command_state") or "") in CONFIRMED
+    ]
+    blockers = _failed_command_blockers(commands) if failed else []
+    return {
+        "schema": "brc.ticket_bound_protected_submit_result.v1",
+        "status": (
+            "exchange_submit_orders_failed"
+            if failed
+            else "exchange_submit_orders_submitted"
+        ),
+        "ticket_id": attempt.get("ticket_id"),
+        "operation_submit_command_id": attempt.get("operation_submit_command_id"),
+        "strategy_group_id": attempt.get("strategy_group_id"),
+        "symbol": attempt.get("symbol"),
+        "side": attempt.get("side"),
+        "exchange_write_called": True,
+        "order_created": True,
+        "order_lifecycle_called": True,
+        "withdrawal_or_transfer_created": False,
+        "live_profile_changed": False,
+        "order_sizing_changed": False,
+        "submitted_orders": submitted_orders,
+        "blockers": blockers,
+    }
 
 
 def apply_failed_lifecycle_exchange_source(

@@ -273,8 +273,20 @@ def _apply_terminal_source_failure(
 ) -> dict[str, Any]:
     source = str(recorded.get("command_source") or "")
     source_id = str(recorded.get("source_command_id") or "")
-    if source not in {"protection_recovery", "runner_mutation", "orphan_cleanup"}:
+    if source not in {
+        "protected_submit",
+        "protection_recovery",
+        "runner_mutation",
+        "orphan_cleanup",
+    }:
         return {}
+    if source == "protected_submit":
+        results = apply_completed_lifecycle_exchange_sources(
+            conn,
+            now_ms=now_ms,
+            source_command_id=source_id,
+        )
+        return results[0] if results else {}
     return apply_failed_lifecycle_exchange_source(
         conn,
         command_source=source,

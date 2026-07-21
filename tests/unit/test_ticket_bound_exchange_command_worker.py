@@ -176,7 +176,7 @@ async def test_worker_dispatches_one_explicit_gtc_limit_tp1_without_market_fallb
     pg_control_connection,
 ):
     ids = _create_ready_protected_submit(pg_control_connection)
-    _prepare_real_submit(pg_control_connection, ids)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
     pg_control_connection.commit()
     gateway = _WorkerGateway()
     engine = pg_control_connection.engine
@@ -203,6 +203,14 @@ async def test_worker_dispatches_one_explicit_gtc_limit_tp1_without_market_fallb
     assert tp1_calls[0]["time_in_force"] == "GTC"
     assert "post_only" not in tp1_calls[0]
     assert all(call["order_type"] != "market" for call in tp1_calls)
+    attempt_status = pg_control_connection.execute(
+        text(
+            "SELECT status FROM brc_ticket_bound_protected_submit_attempts "
+            "WHERE protected_submit_attempt_id = :attempt_id"
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).scalar_one()
+    assert attempt_status == "submitted"
 
 
 @pytest.mark.asyncio

@@ -74,6 +74,7 @@ from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
 
 
 LIFECYCLE_MUTATION_COMMAND_SOURCES = (
+    "protected_submit",
     "protection_recovery",
     "runner_mutation",
     "orphan_cleanup",

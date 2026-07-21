@@ -27,13 +27,31 @@ def test_typed_coordinator_calls_direct_application_steps_without_subprocess(mon
 
     def safety(*_args, **_kwargs):
         calls.append("safety")
-        return {"status": "runtime_safety_state_ready", "blockers": []}
+        return {
+            "status": "runtime_safety_state_ready",
+            "blockers": [],
+            "snapshot": {
+                "runtime_safety_snapshot_id": "safety:one",
+                "operation_submit_command_id": "submit:one",
+                "strategy_group_id": "SOR-001",
+                "symbol": "ETHUSDT",
+                "side": "long",
+                "runtime_profile_id": "profile:one",
+                "safety_state": "live_submit_ready",
+                "submit_allowed": True,
+            },
+        }
+
+    def dispatch(*_args, **_kwargs):
+        calls.append("dispatch")
+        return {"status": "materialized", "dispatch_command_id": "dispatch:one", "blockers": []}
 
     monkeypatch.setattr(typed_coordinator, "_materialize_account_safe_facts", account)
     monkeypatch.setattr(typed_coordinator, "materialize_action_time_ticket_sequence", ticket)
     monkeypatch.setattr(typed_coordinator, "materialize_action_time_finalgate_preflight", finalgate)
     monkeypatch.setattr(typed_coordinator, "materialize_action_time_operation_layer_handoff", handoff)
     monkeypatch.setattr(typed_coordinator, "materialize_ticket_bound_runtime_safety_state", safety)
+    monkeypatch.setattr(typed_coordinator, "materialize_action_time_dispatch_command", dispatch)
     engine = sa.create_engine("sqlite://")
     try:
         result = typed_coordinator.coordinate_action_time_invocation(
@@ -54,14 +72,16 @@ def test_typed_coordinator_calls_direct_application_steps_without_subprocess(mon
     assert result.status == "ready"
     assert result.ticket_id == "ticket:one"
     assert result.operation_layer_handoff_id == "handoff:one"
+    assert result.dispatch_command_id == "dispatch:one"
     assert [step.name for step in result.steps] == [
         "materialize_account_safe_facts",
         "materialize_action_time_ticket_sequence",
         "materialize_action_time_finalgate_preflight",
         "materialize_action_time_operation_layer_handoff",
         "materialize_ticket_bound_runtime_safety_state",
+        "materialize_action_time_dispatch_command",
     ]
-    assert calls == ["account", "ticket", "finalgate", "handoff", "safety"]
+    assert calls == ["account", "ticket", "finalgate", "handoff", "safety", "dispatch"]
 
 
 def test_typed_coordinator_stops_before_next_authority_boundary_when_deadline_is_expired(monkeypatch):
