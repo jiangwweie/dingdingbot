@@ -701,7 +701,6 @@ def _persist_rows(
             )
         if existing and str(existing["semantic_fingerprint"]) == fingerprint:
             continue
-        event_count += 1
         event_values = {
             "account_risk_projection_event_id": _stable_id(
                 "account_risk_projection_event", row.account_exposure_current_id, fingerprint
@@ -716,7 +715,7 @@ def _persist_rows(
             if conn.dialect.name == "postgresql"
             else ":event_payload"
         )
-        conn.execute(
+        event_insert = conn.execute(
             sa.text(
                 """
                 INSERT INTO brc_account_risk_projection_events (
@@ -729,9 +728,11 @@ def _persist_rows(
                   """
                 + event_payload_expr
                 + ", :created_at_ms)"
+                + " ON CONFLICT (account_risk_projection_event_id) DO NOTHING"
             ),
             event_values,
         )
+        event_count += int(event_insert.rowcount == 1)
     return event_count
 
 

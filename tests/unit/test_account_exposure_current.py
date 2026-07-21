@@ -78,13 +78,33 @@ def test_owned_position_with_confirmed_stop_projects_directional_risk_once() -> 
         max_concurrent_positions=2,
         now_ms=NOW_MS + 1,
     )
+    flat = project_account_exposure_current(
+        conn,
+        snapshot=_snapshot(),
+        classification=AccountExchangeTruthClassification(
+            orders=(), positions=(), new_entry_allowed=True, blockers=()
+        ),
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
+        now_ms=NOW_MS + 2,
+    )
+    reopened = project_account_exposure_current(
+        conn,
+        snapshot=snapshot,
+        classification=classification,
+        runtime_profile_id="profile-1",
+        max_concurrent_positions=2,
+        now_ms=NOW_MS + 3,
+    )
 
     assert first.global_blockers == ()
     assert first.rows[0].exposure_state == "open_protected"
     assert first.rows[0].held_risk == Decimal("10")
     assert first.rows[0].position_slot_claimed is True
     assert second.semantic_event_count == 0
-    assert conn.execute(sa.text("SELECT COUNT(*) FROM brc_account_risk_projection_events")).scalar_one() == 1
+    assert flat.semantic_event_count == 1
+    assert reopened.semantic_event_count == 0
+    assert conn.execute(sa.text("SELECT COUNT(*) FROM brc_account_risk_projection_events")).scalar_one() == 2
 
 
 def test_multiple_protection_stops_preserve_quantity_specific_directional_risk() -> None:
