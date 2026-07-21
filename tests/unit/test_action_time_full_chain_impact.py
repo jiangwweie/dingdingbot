@@ -196,6 +196,18 @@ ACTION_TIME_DISPATCH_COMMAND_MIGRATION_PATH = (
     REPO_ROOT
     / "migrations/versions/2026-07-21-143_create_action_time_dispatch_commands.py"
 )
+EXCHANGE_COMMAND_RESULT_FACTS_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-21-144_add_exchange_command_result_facts.py"
+)
+ENTRY_EFFECT_PROJECTION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-145_add_entry_effect_projection.py"
+)
+PROTECTION_RECOVERY_GENERATION_MIGRATION_PATH = (
+    REPO_ROOT
+    / "migrations/versions/2026-07-22-146_add_protection_recovery_generation.py"
+)
 SEED_PATH = REPO_ROOT / "scripts/seed_runtime_control_state_foundation.py"
 
 ACTIVE_CANDIDATE_SCOPES = [
@@ -730,6 +742,18 @@ def pg_control_connection():
             (
                 ACTION_TIME_DISPATCH_COMMAND_MIGRATION_PATH,
                 "migration_143_action_time_full_chain",
+            ),
+            (
+                EXCHANGE_COMMAND_RESULT_FACTS_MIGRATION_PATH,
+                "migration_144_action_time_full_chain",
+            ),
+            (
+                ENTRY_EFFECT_PROJECTION_MIGRATION_PATH,
+                "migration_145_action_time_full_chain",
+            ),
+            (
+                PROTECTION_RECOVERY_GENERATION_MIGRATION_PATH,
+                "migration_146_action_time_full_chain",
             ),
         ):
             extension = _load_module(path, module_name)
