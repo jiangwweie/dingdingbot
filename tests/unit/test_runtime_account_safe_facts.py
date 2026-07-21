@@ -4,6 +4,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+import time
 
 import pytest
 import sqlalchemy as sa
@@ -256,6 +257,101 @@ def test_action_time_binds_capacity_fact_when_one_different_instrument_position_
     )
 
 
+def test_action_time_collects_the_full_account_snapshot_and_rules_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """One bounded collection must not serially spend the full timeout per read."""
+
+    observed_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    def fake_request_json(**_kwargs):
+        time.sleep(0.05)
+        return {"payload": {}, "observed_at_ms": observed_at_ms}
+
+    def fake_snapshot(**_kwargs):
+        time.sleep(0.05)
+        return module._impl.FullAccountRiskSnapshot(
+            snapshot_ready=True,
+            account_id="owner-subaccount-runtime-v0",
+            exchange_id="binance_usdm",
+            total_wallet_balance="100",
+            available_balance="100",
+            exchange_total_initial_margin="0",
+            can_trade=True,
+            position_mode="one_way",
+            source_snapshot_id="unit-concurrent-snapshot",
+            observed_at_ms=observed_at_ms,
+            valid_until_ms=observed_at_ms + 60_000,
+        )
+
+    monkeypatch.setattr(module._impl, "_request_json", fake_request_json)
+    monkeypatch.setattr(module._impl, "_fetch_account_risk_snapshot", fake_snapshot)
+
+    started_at = time.monotonic()
+    payloads, snapshot, errors = module._impl._collect_action_time_inputs(
+        account_id="owner-subaccount-runtime-v0",
+        exchange_id="binance_usdm",
+        api_key="unit-key",
+        api_secret="unit-secret",
+        env_file=None,
+        base_url="https://unit.invalid",
+        timeout_seconds=0.25,
+        urlopen=lambda *_args, **_kwargs: None,
+    )
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 0.12
+    assert set(payloads) == {"exchange_info", "leverage_brackets"}
+    assert snapshot is not None
+    assert snapshot.source_snapshot_id == "unit-concurrent-snapshot"
+    assert errors == {}
+
+
+def test_snapshot_failure_survives_a_partial_collection_as_the_exact_blocker(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    observed_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    monkeypatch.setattr(
+        module._impl,
+        "_request_json",
+        lambda **_kwargs: {"payload": {}, "observed_at_ms": observed_at_ms},
+    )
+    monkeypatch.setattr(
+        module._impl,
+        "_fetch_account_risk_snapshot",
+        lambda **_kwargs: module._impl.FullAccountRiskSnapshot(
+            snapshot_ready=False,
+            failure_code="account_risk_snapshot_fetch_failed",
+            account_id="owner-subaccount-runtime-v0",
+            exchange_id="binance_usdm",
+            source_snapshot_id="unit-failed-snapshot",
+            observed_at_ms=observed_at_ms,
+            valid_until_ms=observed_at_ms + 60_000,
+        ),
+    )
+    live_facts = module._impl.collect_account_safe_live_facts_from_scope(
+        {
+            "symbols": ["ETHUSDT"],
+            "identity_errors": [],
+            "account_id": "owner-subaccount-runtime-v0",
+            "exchange_id": "binance_usdm",
+            "runtime_profile_id": "owner-runtime-console-v1",
+            "has_candidate_specific_protection_template": True,
+        },
+        env_file=None,
+        timeout_seconds=0.25,
+    )
+    artifact = module.build_runtime_account_safe_facts(live_facts=live_facts)
+
+    assert live_facts["collector_errors"]["account_risk_snapshot"] == (
+        "account_risk_snapshot_fetch_failed"
+    )
+    assert module._impl._action_time_account_fact_blocker(artifact) == (
+        "account_capacity_base_fact_not_ready:"
+        "account_risk_snapshot_fetch_failed"
+    )
+
+
 @pytest.mark.parametrize(
     ("change", "expected_snapshot_complete"),
     [
@@ -426,6 +522,24 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
         raise AssertionError(path)
 
     monkeypatch.setattr(module._impl, "_request_json", fake_request_json)
+    observed_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    monkeypatch.setattr(
+        module._impl,
+        "_fetch_account_risk_snapshot",
+        lambda **_kwargs: module._impl.FullAccountRiskSnapshot(
+            snapshot_ready=True,
+            account_id="owner-subaccount-runtime-v0",
+            exchange_id="binance_usdm",
+            total_wallet_balance="100",
+            available_balance="100",
+            exchange_total_initial_margin="0",
+            can_trade=True,
+            position_mode="one_way",
+            source_snapshot_id="unit-account-snapshot",
+            observed_at_ms=observed_at_ms,
+            valid_until_ms=observed_at_ms + 60_000,
+        ),
+    )
 
     exit_code = module.main(
         [
@@ -462,8 +576,12 @@ def test_runtime_account_safe_facts_cli_writes_pg_snapshots(
         if row[0] != "account_capacity_base"
     )
     capacity_base_row = next(row for row in rows if row[0] == "account_capacity_base")
-    assert capacity_base_row[5] == 0
-    assert capacity_base_row[6] == "stale"
+    assert capacity_base_row[5] == 1
+    assert capacity_base_row[6] == "fresh"
+    capacity_base_values = json.loads(capacity_base_row[7])
+    assert capacity_base_values["account_capacity_source_snapshot_id"] == (
+        "unit-account-snapshot"
+    )
     account_mode_row = next(row for row in rows if row[0] == "account_mode")
     account_mode_values = json.loads(account_mode_row[7])
     account_safe_row = next(row for row in rows if row[0] == "account_safe")

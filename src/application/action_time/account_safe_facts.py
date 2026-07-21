@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, TimeoutError, wait
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 import urllib.request
 
@@ -249,7 +251,12 @@ def collect_account_safe_live_facts_from_scope(
     timeout_seconds: float = 12,
     urlopen: UrlOpen | None = None,
 ) -> dict[str, Any]:
-    """Collect exchange facts after the short PG scope read has completed."""
+    """Collect one complete account snapshot and rules within one deadline.
+
+    The account snapshot is the sole account/position/order/mode authority for
+    this Action-Time fact generation.  Exchange contract and leverage rules
+    are independent read-only surfaces, so they run concurrently with it.
+    """
 
     symbols = list(scope["symbols"])
     api_key = _env_value(
@@ -260,7 +267,6 @@ def collect_account_safe_live_facts_from_scope(
         ("EXCHANGE_API_SECRET", "BINANCE_SECRET_KEY", "binance_exchange_secret"),
         env_file=env_file,
     )
-    payloads: dict[str, dict[str, Any]] = {}
     errors: dict[str, str] = {
         "scope_identity": ",".join(scope["identity_errors"])
         for _ in [0]
@@ -268,47 +274,40 @@ def collect_account_safe_live_facts_from_scope(
     }
     opener = urlopen if urlopen is not None else urllib.request.urlopen
     collected_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    for name, (_method, path, signed) in READ_ONLY_ENDPOINTS.items():
-        try:
-            payloads[name] = _request_json(
-                base_url=base_url,
-                path=path,
-                api_key=api_key,
-                api_secret=api_secret,
-                signed=signed,
-                timeout_seconds=timeout_seconds,
-                urlopen=opener,
-            )
-        except Exception as exc:
-            errors[name] = f"{type(exc).__name__}:{str(exc)[:220]}"
-            payloads[name] = {}
-
-    exchange_rules = _exchange_rules(payloads["exchange_info"], symbols)
-    position = _position_summary(payloads["position_risk"], symbols)
-    open_orders = _open_order_summary(payloads["open_orders"], symbols)
-    account = _account_summary(payloads["account"])
-    leverage_brackets = _leverage_bracket_summary(
-        payloads["leverage_brackets"], symbols
+    payloads, account_risk_snapshot, collection_errors = _collect_action_time_inputs(
+        account_id=str(scope.get("account_id") or ""),
+        exchange_id=str(scope.get("exchange_id") or ""),
+        api_key=api_key,
+        api_secret=api_secret,
+        env_file=env_file,
+        base_url=base_url,
+        timeout_seconds=timeout_seconds,
+        urlopen=opener,
     )
-    account_mode = _account_mode_summary(
-        payloads["account_mode"],
+    errors.update(collection_errors)
+
+    exchange_rules = _exchange_rules(payloads.get("exchange_info", {}), symbols)
+    leverage_brackets = _leverage_bracket_summary(
+        payloads.get("leverage_brackets", {}), symbols
+    )
+    account = _account_summary_from_snapshot(account_risk_snapshot)
+    position = _position_summary_from_snapshot(account_risk_snapshot, symbols)
+    open_orders = _open_order_summary_from_snapshot(account_risk_snapshot, symbols)
+    account_mode = _account_mode_summary_from_snapshot(
+        account_risk_snapshot,
         account_id=scope.get("account_id"),
         exchange_id=scope.get("exchange_id"),
         runtime_profile_id=scope.get("runtime_profile_id"),
         collected_at_ms=collected_at_ms,
     )
-    budget = _budget_state(account_payload=payloads["account"], handoff_summary=scope)
+    budget = _budget_state(
+        account_payload=_account_payload_from_snapshot(account_risk_snapshot),
+        handoff_summary=scope,
+    )
     protection = _protection_state(scope)
     next_attempt_gate = _next_attempt_gate_state(
         position=position,
         open_orders=open_orders,
-    )
-    account_risk_snapshot = _fetch_account_risk_snapshot(
-        account_id=str(scope.get("account_id") or ""),
-        exchange_id=str(scope.get("exchange_id") or ""),
-        env_file=env_file,
-        base_url=base_url,
-        timeout_seconds=timeout_seconds,
     )
     return {
         "scope": "strategy_group_live_facts_input",
@@ -351,6 +350,232 @@ def collect_account_safe_live_facts_from_scope(
             "secrets_printed": False,
         },
     }
+
+
+def _collect_action_time_inputs(
+    *,
+    account_id: str,
+    exchange_id: str,
+    api_key: str | None,
+    api_secret: str | None,
+    env_file: Path | None,
+    base_url: str,
+    timeout_seconds: float,
+    urlopen: UrlOpen,
+) -> tuple[dict[str, dict[str, Any]], FullAccountRiskSnapshot | None, dict[str, str]]:
+    """Run the independent readonly inputs under one wall-clock budget."""
+
+    payloads: dict[str, dict[str, Any]] = {}
+    errors: dict[str, str] = {}
+    account_snapshot: FullAccountRiskSnapshot | None = None
+    if timeout_seconds <= 0:
+        return payloads, None, {"action_time_inputs": "timeout_invalid"}
+    request_specs = {
+        name: READ_ONLY_ENDPOINTS[name]
+        for name in ("exchange_info", "leverage_brackets")
+    }
+    executor = ThreadPoolExecutor(max_workers=len(request_specs) + 1)
+    futures: dict[Future[Any], str] = {}
+    try:
+        for name, (_method, path, signed) in request_specs.items():
+            futures[executor.submit(
+                _request_json,
+                base_url=base_url,
+                path=path,
+                api_key=api_key,
+                api_secret=api_secret,
+                signed=signed,
+                timeout_seconds=timeout_seconds,
+                urlopen=urlopen,
+            )] = name
+        futures[executor.submit(
+            _fetch_account_risk_snapshot,
+            account_id=account_id,
+            exchange_id=exchange_id,
+            env_file=env_file,
+            base_url=base_url,
+            timeout_seconds=timeout_seconds,
+        )] = "account_risk_snapshot"
+        deadline = time.monotonic() + timeout_seconds
+        pending = set(futures)
+        while pending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            done, pending = wait(
+                pending,
+                timeout=remaining,
+                return_when=FIRST_COMPLETED,
+            )
+            if not done:
+                raise TimeoutError
+            for future in done:
+                name = futures[future]
+                try:
+                    value = future.result()
+                except Exception as exc:
+                    errors[name] = _collector_error(exc)
+                    continue
+                if name == "account_risk_snapshot":
+                    account_snapshot = (
+                        value if isinstance(value, FullAccountRiskSnapshot) else None
+                    )
+                    if account_snapshot is None:
+                        errors[name] = "snapshot_missing"
+                    elif not account_snapshot.snapshot_ready:
+                        errors[name] = str(
+                            account_snapshot.failure_code
+                            or "account_risk_snapshot_not_ready"
+                        )
+                    continue
+                payloads[name] = value if isinstance(value, dict) else {}
+        return payloads, account_snapshot, errors
+    except TimeoutError:
+        for future, name in futures.items():
+            if not future.done():
+                future.cancel()
+                errors[name] = "collection_deadline_exceeded"
+        snapshot = None
+        for future, name in futures.items():
+            if name != "account_risk_snapshot" or not future.done():
+                continue
+            try:
+                value = future.result()
+            except Exception as exc:
+                errors[name] = _collector_error(exc)
+                continue
+            if isinstance(value, FullAccountRiskSnapshot):
+                snapshot = value
+                if not snapshot.snapshot_ready:
+                    errors[name] = str(
+                        snapshot.failure_code or "account_risk_snapshot_not_ready"
+                    )
+        return payloads, snapshot, errors
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _collector_error(exc: Exception) -> str:
+    return f"{type(exc).__name__}:{str(exc)[:220]}"
+
+
+def _account_summary_from_snapshot(
+    snapshot: FullAccountRiskSnapshot | None,
+) -> dict[str, Any]:
+    if snapshot is None or not snapshot.snapshot_ready:
+        return {"status": "missing"}
+    total_wallet_balance = snapshot.total_wallet_balance
+    available_balance = snapshot.available_balance
+    return {
+        "status": "fresh",
+        "exchange_account_trade_permission": snapshot.can_trade is True,
+        "total_wallet_balance": (
+            str(total_wallet_balance) if total_wallet_balance is not None else None
+        ),
+        "available_balance": (
+            str(available_balance) if available_balance is not None else None
+        ),
+        "total_wallet_balance_present": total_wallet_balance is not None,
+        "total_wallet_balance_positive": (
+            total_wallet_balance is not None and total_wallet_balance > Decimal("0")
+        ),
+        "available_balance_present": available_balance is not None,
+        "available_balance_positive": (
+            available_balance is not None and available_balance > Decimal("0")
+        ),
+    }
+
+
+def _account_payload_from_snapshot(
+    snapshot: FullAccountRiskSnapshot | None,
+) -> dict[str, Any]:
+    if snapshot is None or not snapshot.snapshot_ready:
+        return {}
+    return {
+        "payload": {
+            "canTrade": snapshot.can_trade is True,
+            "totalWalletBalance": (
+                str(snapshot.total_wallet_balance)
+                if snapshot.total_wallet_balance is not None
+                else None
+            ),
+            "availableBalance": (
+                str(snapshot.available_balance)
+                if snapshot.available_balance is not None
+                else None
+            ),
+        }
+    }
+
+
+def _position_summary_from_snapshot(
+    snapshot: FullAccountRiskSnapshot | None,
+    symbols: list[str],
+) -> dict[str, Any]:
+    if snapshot is None or not snapshot.snapshot_ready:
+        return {"status": "missing", "active_count": None, "active_symbols": []}
+    scoped_symbols = set(symbols)
+    active = sorted(
+        {
+            row.exchange_symbol
+            for row in snapshot.positions
+            if row.exchange_symbol in scoped_symbols and row.position_qty != 0
+        }
+    )
+    return {
+        "status": "no_active_position" if not active else "active_position_present",
+        "active_count": len(active),
+        "active_symbols": active,
+    }
+
+
+def _open_order_summary_from_snapshot(
+    snapshot: FullAccountRiskSnapshot | None,
+    symbols: list[str],
+) -> dict[str, Any]:
+    if snapshot is None or not snapshot.snapshot_ready:
+        return {"status": "missing", "open_order_count": None, "open_order_symbols": []}
+    scoped_symbols = set(symbols)
+    matched = sorted(
+        {
+            row.exchange_symbol
+            for row in (*snapshot.regular_open_orders, *snapshot.algo_open_orders)
+            if row.exchange_symbol in scoped_symbols
+        }
+    )
+    return {
+        "status": "no_open_orders" if not matched else "open_orders_present",
+        "open_order_count": len(matched),
+        "open_order_symbols": matched,
+    }
+
+
+def _account_mode_summary_from_snapshot(
+    snapshot: FullAccountRiskSnapshot | None,
+    *,
+    account_id: str | None,
+    exchange_id: str | None,
+    runtime_profile_id: str | None,
+    collected_at_ms: int,
+) -> dict[str, Any]:
+    if snapshot is None or not snapshot.snapshot_ready:
+        return _account_mode_summary(
+            {},
+            account_id=account_id,
+            exchange_id=exchange_id,
+            runtime_profile_id=runtime_profile_id,
+            collected_at_ms=collected_at_ms,
+        )
+    return _account_mode_summary(
+        {
+            "payload": {"dualSidePosition": snapshot.position_mode == "hedge"},
+            "observed_at_ms": snapshot.observed_at_ms,
+        },
+        account_id=account_id,
+        exchange_id=exchange_id,
+        runtime_profile_id=runtime_profile_id,
+        collected_at_ms=collected_at_ms,
+    )
 
 
 def _fetch_account_risk_snapshot(
@@ -772,14 +997,14 @@ def _action_time_account_fact_blocker(artifact: dict[str, Any]) -> str:
     """Return the capacity-owned blocker used before Invocation fact binding."""
 
     checks = _as_dict(artifact.get("checks"))
+    facts = _as_dict(artifact.get("facts"))
+    capacity = _as_dict(facts.get("account_capacity_base"))
+    failure_code = _snapshot_failure_code(capacity)
+    if failure_code:
+        return f"account_capacity_base_fact_not_ready:{failure_code}"
     if checks.get("account_capacity_base_safe") is not True:
         return "account_capacity_base_fact_not_safe"
     if checks.get("account_capacity_base_ready") is not True:
-        facts = _as_dict(artifact.get("facts"))
-        capacity = _as_dict(facts.get("account_capacity_base"))
-        failure_code = _snapshot_failure_code(capacity)
-        if failure_code:
-            return f"account_capacity_base_fact_not_ready:{failure_code}"
         return "account_capacity_base_fact_not_ready"
     return "action_time_account_facts_not_satisfied"
 
