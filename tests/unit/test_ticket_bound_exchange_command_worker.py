@@ -19,6 +19,7 @@ from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
 )
 from src.application.action_time.entry_effect_projection import (
+    _restore_submitted_ticket_for_effect_active_attempt,
     project_entry_effect,
     project_protection_result,
 )
@@ -1655,6 +1656,172 @@ async def test_initial_stop_confirmation_replay_is_idempotent(
             .one()
         )
     assert attempt_after == attempt_before
+
+
+@pytest.mark.asyncio
+async def test_ticket_repair_race_winner_does_not_write_false_transition_event(
+    pg_control_connection,
+    monkeypatch,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id="ticket-repair-race-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    with pg_control_connection.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE brc_action_time_tickets SET status = 'expired' "
+                "WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ids["ticket_id"]},
+        )
+        attempts = sa.Table(
+            "brc_ticket_bound_protected_submit_attempts",
+            sa.MetaData(),
+            autoload_with=conn,
+        )
+        commands = sa.Table(
+            "brc_ticket_bound_exchange_commands",
+            sa.MetaData(),
+            autoload_with=conn,
+        )
+        attempt = dict(
+            conn.execute(
+                sa.select(attempts).where(
+                    attempts.c.protected_submit_attempt_id
+                    == prepared["protected_submit_attempt_id"]
+                )
+            ).mappings().one()
+        )
+        stop = dict(
+            conn.execute(
+                sa.select(commands).where(
+                    commands.c.protected_submit_attempt_id
+                    == prepared["protected_submit_attempt_id"],
+                    commands.c.order_role == "SL",
+                )
+            ).mappings().one()
+        )
+        original_execute = sa.engine.Connection.execute
+        race_won = False
+
+        def racing_execute(connection, statement, *args, **kwargs):
+            nonlocal race_won
+            if (
+                connection is conn
+                and not race_won
+                and isinstance(statement, sa.sql.dml.Update)
+                and statement.table.name == "brc_action_time_tickets"
+            ):
+                race_won = True
+                original_execute(
+                    connection,
+                    sa.update(statement.table)
+                    .where(statement.table.c.ticket_id == ids["ticket_id"])
+                    .values(status="submitted"),
+                )
+            return original_execute(connection, statement, *args, **kwargs)
+
+        monkeypatch.setattr(sa.engine.Connection, "execute", racing_execute)
+        _restore_submitted_ticket_for_effect_active_attempt(
+            conn,
+            attempt=attempt,
+            command=stop,
+            now_ms=NOW_MS + 5001,
+        )
+
+    assert race_won is True
+    assert pg_control_connection.execute(
+        text(
+            "SELECT status FROM brc_action_time_tickets "
+            "WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_id": ids["ticket_id"]},
+    ).scalar_one() == "submitted"
+    assert pg_control_connection.execute(
+        text(
+            "SELECT COUNT(*) FROM brc_action_time_ticket_events "
+            "WHERE transition_reason = "
+            "'entry_effect_prevents_ticket_expiration'"
+        )
+    ).scalar_one() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("drift_field", "drift_value"),
+    (
+        ("exchange_instrument_id", "exchange-instrument:foreign"),
+        ("exposure_episode_id", "exposure-episode:foreign"),
+        ("side", "short"),
+        ("netting_domain_key", "netting-domain:foreign"),
+    ),
+)
+async def test_tp1_requires_same_identity_as_confirmed_stop_predecessor(
+    pg_control_connection,
+    drift_field,
+    drift_value,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    primary = await run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_WorkerGateway(),
+        worker_id=f"tp1-predecessor-{drift_field}",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY", "SL"),
+        drain_initial_protection=True,
+    )
+    assert primary["initial_protection_complete"] is True
+    attempt_id = prepared["protected_submit_attempt_id"]
+    with pg_control_connection.engine.begin() as conn:
+        commands = sa.Table(
+            "brc_ticket_bound_exchange_commands",
+            sa.MetaData(),
+            autoload_with=conn,
+        )
+        conn.execute(
+            commands.update()
+            .where(
+                commands.c.protected_submit_attempt_id == attempt_id,
+                commands.c.order_role == "SL",
+            )
+            .values(**{drift_field: drift_value})
+        )
+        identities = {
+            row["order_role"]: row[drift_field]
+            for row in conn.execute(
+                sa.select(commands.c.order_role, commands.c[drift_field]).where(
+                    commands.c.protected_submit_attempt_id == attempt_id,
+                    commands.c.order_role.in_(("SL", "TP1")),
+                )
+            ).mappings()
+        }
+        assert identities["SL"] == drift_value
+        assert identities["SL"] != identities["TP1"]
+        claimed = claim_next_exchange_command(
+            conn,
+            claim_owner=f"tp1-identity-{drift_field}",
+            now_ms=NOW_MS + 5002,
+            claim_scope=ExchangeCommandClaimScope(
+                command_sources=("protected_submit",),
+                source_command_id=attempt_id,
+                protected_submit_attempt_id=attempt_id,
+                allowed_roles=("TP1",),
+                allowed_command_kinds=("place_order",),
+                netting_domain_key=primary["netting_domain_key"],
+            ),
+        )
+    assert claimed == {}
 
 
 @pytest.mark.asyncio

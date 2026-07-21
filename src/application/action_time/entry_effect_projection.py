@@ -266,23 +266,17 @@ def _restore_submitted_ticket_for_effect_active_attempt(
     }:
         return
     tickets = _table(conn, "brc_action_time_tickets")
-    ticket = (
-        conn.execute(
-            sa.select(tickets).where(tickets.c.ticket_id == attempt["ticket_id"])
-        )
-        .mappings()
-        .one()
-    )
-    if str(ticket["status"]) != "expired":
-        return
-    conn.execute(
+    updated_ticket_id = conn.execute(
         tickets.update()
         .where(
             tickets.c.ticket_id == attempt["ticket_id"],
             tickets.c.status == "expired",
         )
         .values(status="submitted")
-    )
+        .returning(tickets.c.ticket_id)
+    ).scalar_one_or_none()
+    if updated_ticket_id is None:
+        return
     events = _table(conn, "brc_action_time_ticket_events")
     event_id = _stable_id(
         "entry_effect_ticket_repair_event",

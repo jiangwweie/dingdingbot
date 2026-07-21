@@ -646,7 +646,8 @@ def _protected_submit_source_is_current(
         command_table.c.reduce_only.is_(True),
         command_table.c.reduce_intent == "reduce_position",
         sa.exists(
-            sa.select(sa.literal(1)).where(
+            sa.select(sa.literal(1))
+            .where(
                 entry_commands.c.protected_submit_attempt_id
                 == attempts.c.protected_submit_attempt_id,
                 entry_commands.c.ticket_id == command_table.c.ticket_id,
@@ -678,6 +679,7 @@ def _protected_submit_source_is_current(
                 entry_commands.c.netting_domain_key
                 == command_table.c.netting_domain_key,
             )
+            .correlate(command_table, attempts)
         ),
     )
     if lifecycles is not None:
@@ -712,7 +714,8 @@ def _protected_submit_source_is_current(
             command_table.c.order_role == "TP1",
             attempts.c.protection_barrier_state == "initial_stop_confirmed",
             sa.exists(
-                sa.select(sa.literal(1)).where(
+                sa.select(sa.literal(1))
+                .where(
                     stop_commands.c.protected_submit_attempt_id
                     == attempts.c.protected_submit_attempt_id,
                     stop_commands.c.ticket_id == command_table.c.ticket_id,
@@ -728,7 +731,24 @@ def _protected_submit_source_is_current(
                     stop_commands.c.amount == attempts.c.protection_quantity,
                     stop_commands.c.reduce_only.is_(True),
                     stop_commands.c.reduce_intent == "reduce_position",
+                    stop_commands.c.account_id == command_table.c.account_id,
+                    stop_commands.c.exchange_id == command_table.c.exchange_id,
+                    stop_commands.c.exchange_instrument_id
+                    == command_table.c.exchange_instrument_id,
+                    stop_commands.c.exposure_episode_id
+                    == command_table.c.exposure_episode_id,
+                    stop_commands.c.side == command_table.c.side,
+                    stop_commands.c.position_mode == command_table.c.position_mode,
+                    stop_commands.c.position_side.is_not_distinct_from(
+                        command_table.c.position_side
+                    ),
+                    stop_commands.c.position_bucket
+                    == command_table.c.position_bucket,
+                    stop_commands.c.gateway_symbol == command_table.c.gateway_symbol,
+                    stop_commands.c.netting_domain_key
+                    == command_table.c.netting_domain_key,
                 )
+                .correlate(command_table, attempts)
             ),
         )
     )
