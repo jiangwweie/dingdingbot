@@ -219,6 +219,79 @@ def test_current_truth_reduces_typed_ticket_chain_without_market_wait_fallback(
 
 
 @pytest.mark.parametrize(
+    "ticket_status",
+    (
+        "created",
+        "preflight_pending",
+        "finalgate_ready",
+        "finalgate_rejected",
+        "expired",
+        "superseded",
+        "invalidated",
+    ),
+)
+def test_current_truth_keeps_legal_zero_attempt_presubmit_ticket_in_lane_truth(
+    ticket_status,
+):
+    state = _typed_trade_control_state("protected_matched")
+    state["action_time_tickets"][0]["status"] = ticket_status
+    state["ticket_bound_protected_submit_attempts"] = []
+    state["ticket_bound_exchange_commands"] = []
+    state["ticket_bound_order_lifecycle_runs"] = []
+    state["ticket_bound_reconciliation_ticks"] = []
+
+    bundle = reduce_current_truth(state)
+
+    assert bundle.trade_decisions == ()
+
+
+def test_current_truth_fails_closed_when_submitted_ticket_has_no_attempt():
+    state = _typed_trade_control_state("protected_matched")
+    state["ticket_bound_protected_submit_attempts"] = []
+    state["ticket_bound_exchange_commands"] = []
+    state["ticket_bound_order_lifecycle_runs"] = []
+    state["ticket_bound_reconciliation_ticks"] = []
+
+    decision = reduce_current_truth(state).trade_decisions[0]
+
+    assert decision.state is RuntimeState.BLOCKED
+    assert decision.first_blocker == "current_truth_attempt_cardinality_invalid"
+
+
+def test_current_truth_keeps_invalidated_ticket_with_entry_effect_in_trade_truth():
+    state = _typed_trade_control_state("protected_matched")
+    state["action_time_tickets"][0]["status"] = "invalidated"
+
+    decision = reduce_current_truth(state).trade_decisions[0]
+
+    assert decision.state is RuntimeState.RUNNING
+    assert decision.protection_state == "initial_stop_confirmed"
+
+
+def test_current_truth_does_not_promote_inert_presubmit_attempt_to_trade_truth():
+    state = _typed_trade_control_state("protected_matched")
+    state["action_time_tickets"][0]["status"] = "finalgate_ready"
+    state["ticket_bound_protected_submit_attempts"][0].update(
+        status="submit_prepared",
+        entry_effect_state="not_called",
+        exchange_write_called=False,
+        protection_barrier_state="not_started",
+    )
+    state["ticket_bound_exchange_commands"][0].update(
+        command_state="prepared",
+        exchange_order_id=None,
+        exchange_order_status=None,
+        exchange_write_called=False,
+    )
+    state["ticket_bound_order_lifecycle_runs"] = []
+    state["ticket_bound_reconciliation_ticks"] = []
+
+    bundle = reduce_current_truth(state)
+
+    assert bundle.trade_decisions == ()
+
+
+@pytest.mark.parametrize(
     "case",
     ("closed_open_sl", "closed_capacity_held", "budget_settled_only"),
 )

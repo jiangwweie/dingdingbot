@@ -1032,6 +1032,28 @@ def test_six_event_specs_across_all_active_scopes_reach_disabled_smoke_from_prod
     assert _count(pg_control_connection, "brc_ticket_bound_protected_submit_attempts") == 1
 
 
+def test_current_projection_keeps_new_ticket_in_lane_truth_before_submit_attempt(
+    pg_control_connection,
+    monkeypatch,
+):
+    signal_summary, last_price = _evaluator_signal_summary(
+        strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
+        side="long",
+    )
+    payloads = _run_raw_pg_input_to_runtime_safety(
+        pg_control_connection,
+        monkeypatch,
+        strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
+        side="long",
+        fact_values={"last_price": last_price},
+        signal_summary=signal_summary,
+    )
+
+    assert payloads["projection"]["status"] == "current_projections_published"
+
+
 @pytest.mark.asyncio
 async def test_runtime_safety_dispatch_command_reaches_durable_entry_commands_without_http(
     pg_control_connection,

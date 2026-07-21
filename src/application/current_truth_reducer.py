@@ -34,6 +34,17 @@ from src.domain.ticket_bound_exchange_command import (
 
 
 CURRENT_TRUTH_SCHEMA = "brc.current_truth_bundle.v1"
+PRE_EFFECT_TICKET_STATUSES = frozenset(
+    {
+        "created",
+        "preflight_pending",
+        "finalgate_ready",
+        "finalgate_rejected",
+        "expired",
+        "superseded",
+        "invalidated",
+    }
+)
 _WIP_LANES = ("CPM-RO-001", "MPG-001", "MI-001", "SOR-001", "BRF2-001")
 _BLOCKER_PRIORITY = {
     "hard_safety_stop": 10,
@@ -238,6 +249,7 @@ def reduce_current_truth(
         _reduce_trade(control_state, row, now_ms=now_ms)
         for row in _rows(control_state, "action_time_tickets")
         if _ticket_current(row, now_ms)
+        and _ticket_has_trade_decision_authority(control_state, row)
     )
     incidents = tuple(_incidents(lanes, trades, watermark_digest))
     summary = {
@@ -975,6 +987,65 @@ def _latest_blocking_process_outcome(state: Mapping[str, Any], key: tuple[str, s
 
 def _ticket_current(row: Mapping[str, Any], now_ms: int) -> bool:
     return _row_current(row, now_ms)
+
+
+def _ticket_has_trade_decision_authority(
+    state: Mapping[str, Any],
+    ticket: Mapping[str, Any],
+) -> bool:
+    """Keep effect-free pre-submit Tickets under lane current truth.
+
+    A typed trade decision owns the chain only after an exchange effect is
+    possible.  Before that boundary, the lane decision remains authoritative.
+    Submitted or otherwise post-boundary Tickets still enter the typed reducer
+    with zero Attempts so missing effect lineage fails closed there.
+    """
+
+    if not _typed_trade_tables_present(state):
+        return True
+    status = str(ticket.get("status") or "").lower()
+    if status not in PRE_EFFECT_TICKET_STATUSES:
+        return True
+    ticket_id = str(ticket.get("ticket_id") or "")
+    attempts = _matching_rows(
+        state,
+        "ticket_bound_protected_submit_attempts",
+        "ticket_id",
+        ticket_id,
+    )
+    if len(attempts) > 1:
+        return True
+    ticket_entries = [
+        row
+        for row in _matching_rows(
+            state,
+            "ticket_bound_exchange_commands",
+            "ticket_id",
+            ticket_id,
+        )
+        if str(row.get("order_role") or "") == "ENTRY"
+    ]
+    if not attempts:
+        return any(_entry_command_effect_is_possible(row) for row in ticket_entries)
+    attempt = attempts[0]
+    if (
+        str(attempt.get("entry_effect_state") or "not_called") != "not_called"
+        or attempt.get("exchange_write_called") is True
+    ):
+        return True
+    return any(_entry_command_effect_is_possible(row) for row in ticket_entries)
+
+
+def _entry_command_effect_is_possible(row: Mapping[str, Any]) -> bool:
+    return row.get("exchange_write_called") is True or str(
+        row.get("command_state") or ""
+    ) in {
+        "dispatching",
+        "outcome_unknown",
+        "confirmed_submitted",
+        "confirmed_rejected",
+        "reconciled_submitted",
+    }
 
 
 def _typed_trade_tables_present(state: Mapping[str, Any]) -> bool:

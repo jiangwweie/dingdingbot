@@ -108,6 +108,63 @@ def test_daily_trade_override_is_exact_scope_not_strategy_group_global():
     assert "owner_state" not in daily["rows"][1]
 
 
+def test_presubmit_ticket_without_exchange_effect_keeps_lane_projection_authority(
+    tmp_path,
+):
+    state = _ready_control_state(tmp_path)
+    lane = state["candidate_scope"][0]
+    state["action_time_tickets"] = [
+        {
+            "ticket_id": "ticket:presubmit",
+            "action_time_lane_input_id": "lane:presubmit",
+            "strategy_group_id": lane["strategy_group_id"],
+            "symbol": lane["symbol"],
+            "side": lane["side"],
+            "status": "finalgate_ready",
+            "created_at_ms": state["read_now_ms"],
+        }
+    ]
+    state["ticket_bound_protected_submit_attempts"] = []
+    state["available_control_state_tables"] = sorted(
+        set(state["available_control_state_tables"])
+        | {
+            "action_time_lane_inputs",
+            "runtime_incidents",
+            "ticket_bound_exchange_commands",
+            "ticket_bound_order_lifecycle_runs",
+            "ticket_bound_protected_submit_attempts",
+            "ticket_bound_protection_recovery_commands",
+            "ticket_bound_reconciliation_ticks",
+            "ticket_bound_scope_freezes",
+        }
+    )
+
+    bundle = reduce_current_truth(state)
+    decision = next(
+        item
+        for item in bundle.lane_decisions
+        if item.lane_identity.key
+        == (lane["strategy_group_id"], lane["symbol"], lane["side"])
+    )
+    goal = adapt_goal_status({"owner_state": {}, "evidence": {}}, bundle=bundle)
+    daily = adapt_daily_table(
+        {
+            "rows": [
+                {
+                    "strategy_group_id": lane["strategy_group_id"],
+                    "symbol": lane["symbol"],
+                    "side": lane["side"],
+                }
+            ]
+        },
+        bundle=bundle,
+    )
+
+    assert bundle.trade_decisions == ()
+    assert daily["rows"][0]["first_blocker"] == decision.first_blocker
+    assert goal["first_blocker"] == decision.first_blocker
+
+
 def test_daily_maps_two_independent_trade_lanes_without_cross_contamination():
     first_bundle = reduce_current_truth(
         _typed_trade_control_state("sl_hard_incident")
