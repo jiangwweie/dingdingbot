@@ -2240,8 +2240,15 @@ def _verify_contained_writer_state(
     payload = _json_receipt(
         capability, "fence_supersession_lifecycle_capability_receipt_invalid"
     )
-    if payload.get("enabled") is not False or payload.get("exchange_write_called") is not False:
-        raise RuntimeError("fence_supersession_lifecycle_capability_not_disabled")
+    # A contained predecessor may already have restored its durable lifecycle
+    # capability after certification.  That PG capability has no exchange or
+    # order authority, and the writer fence still prevents it from being used
+    # until the successor's fenced migration explicitly quiesces it again.
+    if (
+        payload.get("exchange_write_called") is not False
+        or payload.get("order_created") is not False
+    ):
+        raise RuntimeError("fence_supersession_lifecycle_capability_unsafe")
 
 
 def _validate_inherited_unit_prepolicy(value: Any) -> None:

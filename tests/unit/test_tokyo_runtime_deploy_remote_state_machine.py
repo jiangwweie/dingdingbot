@@ -597,7 +597,40 @@ def test_contained_writer_state_accepts_failed_stopped_unit(tmp_path):
         ):
             return machine.ChildResult(
                 returncode=0,
-                stdout='{"enabled":false,"exchange_write_called":false}',
+                stdout='{"enabled":false,"exchange_write_called":false,"order_created":false}',
+                stderr="",
+            )
+        raise AssertionError(command)
+
+    machine._verify_contained_writer_state(
+        release_path=release,
+        env_path=env_file,
+        runner=runner,
+        lock_handle=None,
+        canonical_lock_path=tmp_path / "deploy.lock",
+        require_root_owner=False,
+    )
+
+
+def test_contained_writer_state_accepts_enabled_lifecycle_without_order_authority(tmp_path):
+    release = tmp_path / "candidate"
+    release.mkdir()
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL=postgresql://example.invalid/db\n")
+
+    def runner(command, **kwargs):
+        if command[0] == "/usr/bin/systemctl":
+            return machine.ChildResult(returncode=0, stdout="inactive\n", stderr="")
+        if any(
+            str(item).endswith("set_ticket_lifecycle_mutation_capability.py")
+            for item in command
+        ):
+            return machine.ChildResult(
+                returncode=0,
+                stdout=(
+                    '{"enabled":true,"exchange_write_called":false,'
+                    '"order_created":false}'
+                ),
                 stderr="",
             )
         raise AssertionError(command)
@@ -688,7 +721,7 @@ def test_forward_fix_fence_supersession_requires_exact_stranded_predecessor(tmp_
         if any(str(item).endswith("set_ticket_lifecycle_mutation_capability.py") for item in command):
             return machine.ChildResult(
                 returncode=0,
-                stdout='{"enabled":false,"exchange_write_called":false}',
+                stdout='{"enabled":false,"exchange_write_called":false,"order_created":false}',
                 stderr="",
             )
         raise AssertionError(command)
@@ -754,7 +787,7 @@ def test_forward_fix_fence_supersession_allows_post_migration_pre_activation_onl
             return machine.ChildResult(returncode=0, stdout="136 (head)\n", stderr="")
         if command[0] == "/usr/bin/systemctl":
             return machine.ChildResult(returncode=0, stdout="inactive\n", stderr="")
-        return machine.ChildResult(returncode=0, stdout='{"enabled":false,"exchange_write_called":false}', stderr="")
+        return machine.ChildResult(returncode=0, stdout='{"enabled":false,"exchange_write_called":false,"order_created":false}', stderr="")
 
     result = machine.validate_forward_fix_fence_supersession(
         predecessor_transaction_id="deadbeef", predecessor_deploy_nonce="old-nonce",
@@ -811,7 +844,7 @@ def test_forward_fix_fence_supersession_allows_post_activation_pre_policy(tmp_pa
             return machine.ChildResult(returncode=0, stdout="inactive\n", stderr="")
         return machine.ChildResult(
             returncode=0,
-            stdout='{"enabled":false,"exchange_write_called":false}',
+            stdout='{"enabled":false,"exchange_write_called":false,"order_created":false}',
             stderr="",
         )
 
@@ -875,7 +908,7 @@ def test_forward_fix_fence_supersession_recovers_committed_but_unjournaled_migra
             return machine.ChildResult(returncode=0, stdout="inactive\n", stderr="")
         return machine.ChildResult(
             returncode=0,
-            stdout='{"enabled":false,"exchange_write_called":false}',
+            stdout='{"enabled":false,"exchange_write_called":false,"order_created":false}',
             stderr="",
         )
 
@@ -944,7 +977,7 @@ def test_forward_fix_fence_supersession_rejects_any_changed_containment_fact(
         if any(str(item).endswith("set_ticket_lifecycle_mutation_capability.py") for item in command):
             return machine.ChildResult(
                 returncode=0,
-                stdout='{"enabled":false,"exchange_write_called":false}',
+                stdout='{"enabled":false,"exchange_write_called":false,"order_created":false}',
                 stderr="",
             )
         raise AssertionError(command)
@@ -1127,7 +1160,7 @@ def test_fenced_migration_reports_only_bounded_terminal_stderr_line(tmp_path):
         if "--status" in command:
             return machine.ChildResult(
                 returncode=0,
-                stdout='{"enabled":false,"exchange_write_called":false}',
+                stdout='{"enabled":false,"exchange_write_called":false,"order_created":false}',
                 stderr="",
             )
         if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command):
@@ -1175,7 +1208,7 @@ def test_fenced_migration_omits_sqlalchemy_context_link_from_failure_summary(tmp
         if "--status" in command:
             return machine.ChildResult(
                 returncode=0,
-                stdout='{"enabled":false,"exchange_write_called":false}',
+                stdout='{"enabled":false,"exchange_write_called":false,"order_created":false}',
                 stderr="",
             )
         if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command):
@@ -1223,7 +1256,7 @@ def test_fenced_migration_prefers_database_error_to_sql_statement(tmp_path):
         if "--status" in command:
             return machine.ChildResult(
                 returncode=0,
-                stdout='{"enabled":false,"exchange_write_called":false}',
+                stdout='{"enabled":false,"exchange_write_called":false,"order_created":false}',
                 stderr="",
             )
         if any(str(item).endswith("verify_canary_readonly_role_preflight.py") for item in command):
