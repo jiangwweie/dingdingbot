@@ -1533,12 +1533,15 @@ def _action_time_continuation_identity(
     *,
     now_ms: int,
 ) -> dict[str, str]:
-    """Return the sole typed Ticket continuation, or fail closed.
+    """Return the sole typed Action-Time continuation, or fail closed.
 
     A continuation is no longer selected from the latest lane or promotion.
     Those rows are pre-ticket arbitration facts, not an execution identity.
-    More than one current Ticket is an operational incident: choosing the
-    newest row would silently cross-wire independent positions.
+    An unfinished selected Invocation is also a causal continuation: a retry
+    must resume that exact signal rather than create a new invocation or fall
+    through to the untyped refresh failure.  More than one current Ticket or
+    unfinished Invocation is an operational incident; choosing the newest row
+    would silently cross-wire independent positions.
     """
     inspector = sa.inspect(conn)
     metadata = sa.MetaData()
@@ -1563,6 +1566,56 @@ def _action_time_continuation_identity(
         if tickets_current:
             ticket = tickets_current[0]
             return _trigger_identity_row(ticket, ticket_id=str(ticket["ticket_id"]))
+
+    if (
+        inspector.has_table("brc_action_time_invocations")
+        and inspector.has_table("brc_live_signal_events")
+    ):
+        invocations = sa.Table(
+            "brc_action_time_invocations",
+            metadata,
+            autoload_with=conn,
+        )
+        signals = sa.Table(
+            "brc_live_signal_events",
+            metadata,
+            autoload_with=conn,
+        )
+        invocations_current = conn.execute(
+            sa.select(invocations)
+            .select_from(
+                invocations.join(
+                    signals,
+                    signals.c.signal_event_id == invocations.c.signal_event_id,
+                )
+            )
+            .where(
+                invocations.c.ticket_id.is_(None),
+                invocations.c.closed_at_ms.is_(None),
+                invocations.c.expires_at_ms > now_ms,
+                signals.c.source_kind == "live_market",
+                signals.c.status == "facts_validated",
+                signals.c.freshness_state == "fresh",
+                signals.c.expires_at_ms > now_ms,
+                signals.c.invalidated_at_ms.is_(None),
+            )
+            .order_by(
+                invocations.c.opened_at_ms.asc(),
+                invocations.c.action_time_invocation_id.asc(),
+            )
+        ).mappings().all()
+        if len(invocations_current) > 1:
+            raise RuntimeError(
+                "multiple_current_action_time_invocation_continuations"
+            )
+        if invocations_current:
+            invocation = invocations_current[0]
+            return _trigger_identity_row(
+                invocation,
+                action_time_invocation_id=str(
+                    invocation["action_time_invocation_id"]
+                ),
+            )
 
     return {}
 

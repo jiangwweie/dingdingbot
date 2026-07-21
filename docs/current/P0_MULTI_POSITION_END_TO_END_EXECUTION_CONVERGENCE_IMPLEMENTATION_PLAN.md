@@ -31,12 +31,13 @@ max 1 new Action-Time lane、notional、leverage、FinalGate 或 Operation Layer
 ### 0.2 当前 Live Enablement 状态
 
 ```text
-Live Enablement Before:
+Live Enablement observed on Tokyo (release `25483180` / schema `142`):
   fresh live Signal persisted
-  -> Invocation selected / typed coordinator started
-  -> blocked at materialize_account_safe_facts
+  -> Invocation selected and persisted
+  -> the unfinished Invocation was not selected as a continuation on a later watcher tick
+  -> watcher failed `action_time_typed_invocation_required`
   -> no Ticket
-  -> dispatcher reported no_actionable_pg_ticket
+  -> no exchange write
 
 R10 target state (not yet production-certified):
   fresh live Signal persisted
@@ -48,15 +49,16 @@ R10 target state (not yet production-certified):
   -> same-lineage lifecycle/reconciliation/settlement
 ```
 
-**当前 first blocker:** `action_time_boundary_not_reproduced`，具体阶段为
-`materialize_account_safe_facts`。精确 business blocker code 必须从 PG audit/process
-outcome 读取；在无法补查时禁止推断为策略未满足或 Owner 未授权。
+**当前 first blocker:** `engineering_handoff_gap:unfinished_action_time_invocation_not_resumed`。
+Tokyo PG 已确认 `SOR-001 / ETHUSDT / long` 的 Invocation 存在、无 Ticket、无事实引用；
+同一 release 的 watcher 随后报 `action_time_typed_invocation_required`。这不是策略未满足或
+Owner 未授权；精确 business blocker 仍必须从 PG audit/process outcome 读取。
 
 ### 0.2.1 2026-07-21 本地执行记录与未闭合边界
 
 | 切片 | 本地实现/证据 | 状态 | 对 production 的含义 |
 | --- | --- | --- | --- |
-| R10-T00 | Tokyo SSH 连续超时；最后已知 runtime 为 `25483180` / schema `142`；没有以推断代替 PG exact blocker | **待远端恢复后复核** | 禁止据此 restart、deploy 或声称 natural-event 已验收 |
+| R10-T00 | Tokyo 只读复核：runtime `25483180` / schema `142`，backend/watcher/lifecycle units active；`SOR-001 / ETHUSDT / long` signal 与 `action_time_invocation:6a1abeacce3eae0b02c410eec4334a87` 已持久化，但 Invocation 无 Ticket/fact refs，watcher 报 `action_time_typed_invocation_required` | **完成，工程根因已冻结** | 无仓位、无 open order、无 exchange write；禁止以 restart 替代修复 |
 | R10-T01/T02 | account capacity 可在 `0/2`、合法 `1/2` 进入 action-time；full account snapshot 成为 account/position/order/mode 的单一事实源 | **本地完成** | 消除 flat-only / 多次 snapshot 的已知工程阻塞，仍需真实 PG 验收 |
 | R10-T03 | typed coordinator 已单次 materialize Ticket、FinalGate、handoff、Runtime Safety；共享 Invocation deadline | **本地已有，需全链补证** | dispatcher 不得再重放这些步骤 |
 | R10-T04 | schema `143` 增加 `dispatch_command_id`；typed coordinator 仅在 Runtime Safety ready 后写入命令；systemd claim worker 以 typed application port 物化 submit attempt / Exchange Command；lifecycle worker 领取 `protected_submit`；Console API 的 direct real gateway branch 已 fail-closed 退役 | **本地完成** | Console session/HTTP 不再是定时自动链路依赖，也不能形成第二 real-submit path；仍需 Tokyo migration 与 runtime 验收 |
@@ -94,10 +96,11 @@ T02-T04 都触及 Action-Time 主链，必须串行。T05 的 readmodel/monitor 
 
 **Task ID:** `P0-ACH-R10-T00`
 
-**Goal:** 固定 2026-07-21 自然信号从 Signal 到 account-safe blocker 的 exact PG 谱系。
+**Goal:** 固定 2026-07-21 自然信号从 Signal 到 unfinished Invocation continuation failure 的 exact PG 谱系。
 
-**Why:** 当前已知失败阶段，但 SSH 中断后缺少精确 account-safe blocker、Invocation ID
-和 snapshot refs。没有 exact lineage 就不能决定事实生产器与 projection 的修复范围。
+**Why:** 已确认 signal 与 Invocation，但后续 watcher 未恢复其 typed causal context，
+并以 `action_time_typed_invocation_required` 失败。没有 exact lineage 就不能决定 continuation
+选择器与 producer 的修复范围。
 
 **Allowed files:** 无 production edit；只读 Tokyo/PG/exchange query；必要时更新本文档的
 completion record。
@@ -107,7 +110,7 @@ exchange write、credential 输出。
 
 **Requirements:**
 
-1. 查询 `signal:b37a62a6147794bc9a932c0984e83074` 的 StrategyGroup/symbol/side/Event Spec；
+1. 查询 `signal:b1e1fb73bb5e2f733081e5dbe947848e` 的 StrategyGroup/symbol/side/Event Spec；
 2. 查询 exact Invocation、arbitration rank/result、fact snapshot IDs、process outcomes；
 3. 查询是否存在 promotion/lane/reservation/Ticket，确认 atomic rollback 范围；
 4. 查询 Owner policy/runtime binding 的 enabled/tier/live-submit 状态和版本；
@@ -394,17 +397,17 @@ test: certify natural signal ticket-to-trade chain
 ## 0.6 R10 Chain Position
 
 ```text
-chain_position: action_time_boundary
-strategy_group_id: exact value pending PG lineage refresh
-symbol: exact value pending PG lineage refresh
-stage: natural_signal_selected_typed_coordinator_account_facts_blocked
-first_blocker: action_time_boundary_not_reproduced:materialize_account_safe_facts
-evidence: Tokyo 2026-07-21 11:32-11:36 systemd/PG/signed-GET snapshot at release 25483180 schema 142
-next_action: execute R10-T00 exact lineage freeze, then R10-T01 RED before production changes
+chain_position: action_time_invocation_continuation
+strategy_group_id: SOR-001
+symbol: ETHUSDT
+stage: natural_signal_selected_invocation_persisted_continuation_missing
+first_blocker: engineering_handoff_gap:unfinished_action_time_invocation_not_resumed
+evidence: Tokyo 2026-07-21 readonly systemd/PG query at release 25483180 schema 142; watcher action_time_typed_invocation_required; Invocation action_time_invocation:6a1abeacce3eae0b02c410eec4334a87
+next_action: add Invocation-before-arbitration continuation selection with current-signal and ambiguity fail-closed tests; then run focused regression before production changes
 stop_condition: deployed natural signal reaches exact Ticket-to-trade terminal outcome or one genuine conserved blocker
 owner_action_required: false
 authority_boundary: no policy/profile/sizing/scope expansion, no credential mutation, no FinalGate/Operation Layer bypass, no duplicate submit
-signal_event_id: signal:b37a62a6147794bc9a932c0984e83074
+signal_event_id: signal:b1e1fb73bb5e2f733081e5dbe947848e
 promotion_candidate_id: none_observed
 action_time_lane_input_id: none_observed
 ticket_id: none_observed

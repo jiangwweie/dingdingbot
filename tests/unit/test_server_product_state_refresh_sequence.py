@@ -984,6 +984,63 @@ def test_action_time_continuation_identity_prefers_exact_open_ticket_lineage():
                     "created_at_ms": now_ms - 1_000,
                 },
             )
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_live_signal_events (
+                        signal_event_id TEXT PRIMARY KEY,
+                        source_kind TEXT,
+                        status TEXT,
+                        freshness_state TEXT,
+                        expires_at_ms INTEGER,
+                        invalidated_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_action_time_invocations (
+                        action_time_invocation_id TEXT PRIMARY KEY,
+                        signal_event_id TEXT,
+                        strategy_group_id TEXT,
+                        symbol TEXT,
+                        side TEXT,
+                        ticket_id TEXT,
+                        opened_at_ms INTEGER,
+                        expires_at_ms INTEGER,
+                        closed_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_live_signal_events VALUES (
+                        'signal:other', 'live_market', 'facts_validated',
+                        'fresh', :expires_at_ms, NULL
+                    )
+                    """
+                ),
+                {"expires_at_ms": now_ms + 60_000},
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_action_time_invocations VALUES (
+                        'invocation:other', 'signal:other', 'SOR-001',
+                        'BTCUSDT', 'long', NULL, :opened_at_ms,
+                        :expires_at_ms, NULL
+                    )
+                    """
+                ),
+                {
+                    "opened_at_ms": now_ms - 500,
+                    "expires_at_ms": now_ms + 60_000,
+                },
+            )
 
             identity = module._action_time_continuation_identity(conn, now_ms=now_ms)
     finally:
@@ -1052,6 +1109,257 @@ def test_action_time_continuation_identity_fails_closed_for_multiple_tickets():
             with pytest.raises(
                 RuntimeError,
                 match="multiple_current_action_time_ticket_continuations",
+            ):
+                module._action_time_continuation_identity(conn, now_ms=now_ms)
+    finally:
+        engine.dispose()
+
+
+def test_action_time_continuation_identity_resumes_exact_open_invocation():
+    module = _load_module()
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_live_signal_events (
+                        signal_event_id TEXT PRIMARY KEY,
+                        source_kind TEXT,
+                        status TEXT,
+                        freshness_state TEXT,
+                        expires_at_ms INTEGER,
+                        invalidated_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_action_time_invocations (
+                        action_time_invocation_id TEXT PRIMARY KEY,
+                        signal_event_id TEXT,
+                        strategy_group_id TEXT,
+                        symbol TEXT,
+                        side TEXT,
+                        promotion_candidate_id TEXT,
+                        action_time_lane_input_id TEXT,
+                        ticket_id TEXT,
+                        opened_at_ms INTEGER,
+                        expires_at_ms INTEGER,
+                        closed_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_live_signal_events VALUES (
+                        'signal:exact', 'live_market', 'facts_validated',
+                        'fresh', :expires_at_ms, NULL
+                    )
+                    """
+                ),
+                {"expires_at_ms": now_ms + 60_000},
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_action_time_invocations VALUES (
+                        'invocation:exact', 'signal:exact', 'SOR-001',
+                        'ETHUSDT', 'long', NULL, NULL, NULL,
+                        :opened_at_ms, :expires_at_ms, NULL
+                    )
+                    """
+                ),
+                {
+                    "opened_at_ms": now_ms - 1_000,
+                    "expires_at_ms": now_ms + 60_000,
+                },
+            )
+
+            identity = module._action_time_continuation_identity(
+                conn,
+                now_ms=now_ms,
+            )
+    finally:
+        engine.dispose()
+
+    assert identity == {
+        "strategy_group_id": "SOR-001",
+        "symbol": "ETHUSDT",
+        "side": "long",
+        "signal_event_id": "signal:exact",
+        "action_time_invocation_id": "invocation:exact",
+    }
+
+
+def test_action_time_continuation_identity_ignores_terminal_or_stale_invocation():
+    module = _load_module()
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_live_signal_events (
+                        signal_event_id TEXT PRIMARY KEY,
+                        source_kind TEXT,
+                        status TEXT,
+                        freshness_state TEXT,
+                        expires_at_ms INTEGER,
+                        invalidated_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_action_time_invocations (
+                        action_time_invocation_id TEXT PRIMARY KEY,
+                        signal_event_id TEXT,
+                        strategy_group_id TEXT,
+                        symbol TEXT,
+                        side TEXT,
+                        ticket_id TEXT,
+                        opened_at_ms INTEGER,
+                        expires_at_ms INTEGER,
+                        closed_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_live_signal_events VALUES (
+                        'signal:expired', 'live_market', 'facts_validated',
+                        'expired', :expires_at_ms, :invalidated_at_ms
+                    )
+                    """
+                ),
+                {
+                    "expires_at_ms": now_ms - 1,
+                    "invalidated_at_ms": now_ms - 1,
+                },
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO brc_action_time_invocations VALUES (
+                        'invocation:expired', 'signal:expired', 'SOR-001',
+                        'ETHUSDT', 'long', NULL, :opened_at_ms,
+                        :expires_at_ms, NULL
+                    )
+                    """
+                ),
+                {
+                    "opened_at_ms": now_ms - 1_000,
+                    "expires_at_ms": now_ms - 1,
+                },
+            )
+
+            identity = module._action_time_continuation_identity(
+                conn,
+                now_ms=now_ms,
+            )
+    finally:
+        engine.dispose()
+
+    assert identity == {}
+
+
+def test_action_time_continuation_identity_fails_closed_for_multiple_open_invocations():
+    module = _load_module()
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    now_ms = 1_000_000
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_live_signal_events (
+                        signal_event_id TEXT PRIMARY KEY,
+                        source_kind TEXT,
+                        status TEXT,
+                        freshness_state TEXT,
+                        expires_at_ms INTEGER,
+                        invalidated_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                sa.text(
+                    """
+                    CREATE TABLE brc_action_time_invocations (
+                        action_time_invocation_id TEXT PRIMARY KEY,
+                        signal_event_id TEXT,
+                        strategy_group_id TEXT,
+                        symbol TEXT,
+                        side TEXT,
+                        ticket_id TEXT,
+                        opened_at_ms INTEGER,
+                        expires_at_ms INTEGER,
+                        closed_at_ms INTEGER
+                    )
+                    """
+                )
+            )
+            for suffix in ("btc", "eth"):
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_live_signal_events VALUES (
+                            :signal_event_id, 'live_market', 'facts_validated',
+                            'fresh', :expires_at_ms, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "signal_event_id": f"signal:{suffix}",
+                        "expires_at_ms": now_ms + 60_000,
+                    },
+                )
+                conn.execute(
+                    sa.text(
+                        """
+                        INSERT INTO brc_action_time_invocations VALUES (
+                            :invocation_id, :signal_event_id, 'SOR-001',
+                            :symbol, 'long', NULL, :opened_at_ms,
+                            :expires_at_ms, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "invocation_id": f"invocation:{suffix}",
+                        "signal_event_id": f"signal:{suffix}",
+                        "symbol": f"{suffix.upper()}USDT",
+                        "opened_at_ms": now_ms - 1_000,
+                        "expires_at_ms": now_ms + 60_000,
+                    },
+                )
+
+            with pytest.raises(
+                RuntimeError,
+                match="multiple_current_action_time_invocation_continuations",
             ):
                 module._action_time_continuation_identity(conn, now_ms=now_ms)
     finally:
