@@ -263,6 +263,31 @@ def test_ticket_identity_hash_changes_when_policy_version_changes():
     assert first != action_time_ticket.compute_action_time_ticket_hash(changed)
 
 
+def test_ticket_identity_hash_normalizes_sqlite_boolean_storage():
+    base = {
+        field: f"value-{field}"
+        for field in action_time_ticket.TICKET_IDENTITY_HASH_FIELDS
+    }
+    base.update(
+        {
+            field: "1"
+            for field in action_time_ticket.DECIMAL_HASH_FIELDS
+        }
+    )
+    base.update(
+        {
+            field: 1
+            for field in action_time_ticket.INTEGER_HASH_FIELDS
+        }
+    )
+    base["execution_eligible"] = True
+    sqlite_row = {**base, "execution_eligible": 1}
+
+    assert action_time_ticket.compute_action_time_ticket_hash(base) == (
+        action_time_ticket.compute_action_time_ticket_hash(sqlite_row)
+    )
+
+
 def test_enabled_capability_freezes_exact_policy_into_new_ticket(
     pg_control_connection,
 ):

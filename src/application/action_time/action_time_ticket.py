@@ -145,6 +145,7 @@ INTEGER_HASH_FIELDS = {
     "trigger_candle_close_time_ms",
     "expires_at_ms",
 }
+BOOLEAN_HASH_FIELDS = {"execution_eligible"}
 FORBIDDEN_EFFECTS = {
     "finalgate_called": False,
     "operation_layer_called": False,
@@ -1593,6 +1594,11 @@ def _canonical_ticket_hash_value(field: str, value: Any) -> Any:
             return int(value)
         except (TypeError, ValueError):
             return value
+    if field in BOOLEAN_HASH_FIELDS:
+        if value is True or value == 1:
+            return True
+        if value is False or value == 0:
+            return False
     return value
 
 

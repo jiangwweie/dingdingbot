@@ -726,6 +726,7 @@ def pg_control_connection():
             finally:
                 extension.op = old_extension_op
         seed.seed_runtime_control_state_foundation(conn)
+        _seed_simulation_runtime_instances(conn)
         asset_neutral_backfill = _load_module(
             ASSET_NEUTRAL_BACKFILL_MIGRATION_PATH,
             "migration_132_action_time_full_chain",
@@ -804,6 +805,71 @@ def pg_control_connection():
     with engine.connect() as conn:
         yield conn
     engine.dispose()
+
+
+def _seed_simulation_runtime_instances(conn) -> None:
+    """Give every seeded active lane one persisted evaluator identity.
+
+    The Action-Time capability reducer uses runtime instances as part of the
+    immutable lane key.  This historical full-chain fixture predates that
+    table, so a raw signal could never reproduce its own Action-Time boundary.
+    """
+
+    conn.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS strategy_runtime_instances (
+          runtime_instance_id TEXT PRIMARY KEY,
+          strategy_family_id TEXT NOT NULL,
+          strategy_family_version_id TEXT NOT NULL,
+          symbol TEXT NOT NULL,
+          side TEXT NOT NULL,
+          status TEXT NOT NULL
+        )
+        """
+    )
+    rows = conn.execute(
+        text(
+            """
+            SELECT strategy_group_id, symbol, side
+            FROM brc_strategy_group_candidate_scope
+            WHERE status = 'active'
+            """
+        )
+    ).mappings()
+    for row in rows:
+        conn.execute(
+            text(
+                """
+                INSERT INTO strategy_runtime_instances (
+                  runtime_instance_id,
+                  strategy_family_id,
+                  strategy_family_version_id,
+                  symbol,
+                  side,
+                  status
+                ) VALUES (
+                  :runtime_instance_id,
+                  :strategy_family_id,
+                  :strategy_family_version_id,
+                  :symbol,
+                  :side,
+                  'active'
+                )
+                """
+            ),
+            {
+                "runtime_instance_id": (
+                    "simulation:"
+                    f"{row['strategy_group_id']}:{row['symbol']}:{row['side']}"
+                ),
+                "strategy_family_id": row["strategy_group_id"],
+                "strategy_family_version_id": (
+                    f"simulation-evaluator:{row['strategy_group_id']}:v1"
+                ),
+                "symbol": row["symbol"],
+                "side": row["side"],
+            },
+        )
 
 
 def test_seed_contains_exact_active_candidate_scope_contract(pg_control_connection):

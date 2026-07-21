@@ -296,9 +296,31 @@ def _reduce_lane(
         blockers.append(str(fact.get("blocker_class") or "computed_not_satisfied"))
     elif not signal:
         blockers.append("market_wait_validated")
-    blocker = _select_blocker(blockers)
-    state = RuntimeState.RUNNING if blocker == "market_wait_validated" else RuntimeState.BLOCKED
-    phase = RuntimePhase.OBSERVATION if blocker in {"market_wait_validated", "computed_not_satisfied", "watcher_tick_missing", "detector_not_attached", "artifact_missing"} else RuntimePhase.SELECTION
+    # A fresh signal with a current detector fact and healthy coverage has
+    # crossed observation.  It must be represented as the Action-Time input,
+    # not fall through to the reducer's defensive empty-blocker default.
+    blocker = (
+        "action_time_preflight_ready"
+        if not blockers
+        else _select_blocker(blockers)
+    )
+    state = (
+        RuntimeState.RUNNING
+        if blocker in {"market_wait_validated", "action_time_preflight_ready"}
+        else RuntimeState.BLOCKED
+    )
+    phase = (
+        RuntimePhase.OBSERVATION
+        if blocker
+        in {
+            "market_wait_validated",
+            "computed_not_satisfied",
+            "watcher_tick_missing",
+            "detector_not_attached",
+            "artifact_missing",
+        }
+        else RuntimePhase.SELECTION
+    )
     refs = {
         "candidate_scope_id": identity.candidate_scope_id,
         "signal_event_id": str(signal.get("signal_event_id") or ""),
@@ -316,7 +338,8 @@ def _reduce_lane(
         blocker_owner=owner,
         next_system_action=_next_action(blocker),
         owner_action_required=owner == "owner",
-        current_issue=blocker != "market_wait_validated",
+        current_issue=blocker
+        not in {"market_wait_validated", "action_time_preflight_ready"},
         current_object_refs=refs,
         semantic_fingerprint=fp,
     )
@@ -404,7 +427,22 @@ def _select_blocker(values: Sequence[str]) -> str:
 
 
 def _next_action(blocker: str) -> str:
-    return {"market_wait_validated": "continue_watcher_observation_until_fresh_signal", "computed_not_satisfied": "continue_observation_with_failed_fact_matrix", "watcher_tick_missing": "refresh_readonly_watcher_for_candidate_symbol", "detector_not_attached": "attach_detector_for_candidate_symbol", "artifact_missing": "produce_per_symbol_readiness_evidence", "action_time_boundary_not_reproduced": "repair_non_executing_action_time_rehearsal_path", "outcome_unknown": "reconcile_exact_exchange_command", "protection_missing": "materialize_ticket_bound_protection"}.get(blocker, "reclassify_current_runtime_blocker")
+    actions = {
+        "market_wait_validated": (
+            "continue_watcher_observation_until_fresh_signal"
+        ),
+        "action_time_preflight_ready": "materialize_action_time_ticket",
+        "computed_not_satisfied": "continue_observation_with_failed_fact_matrix",
+        "watcher_tick_missing": "refresh_readonly_watcher_for_candidate_symbol",
+        "detector_not_attached": "attach_detector_for_candidate_symbol",
+        "artifact_missing": "produce_per_symbol_readiness_evidence",
+        "action_time_boundary_not_reproduced": (
+            "repair_non_executing_action_time_rehearsal_path"
+        ),
+        "outcome_unknown": "reconcile_exact_exchange_command",
+        "protection_missing": "materialize_ticket_bound_protection",
+    }
+    return actions.get(blocker, "reclassify_current_runtime_blocker")
 
 
 def _input_watermark(state: Mapping[str, Any], *, candidates: Sequence[Mapping[str, Any]], now_ms: int) -> dict[str, Any]:

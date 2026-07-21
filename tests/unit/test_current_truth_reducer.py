@@ -42,6 +42,39 @@ def test_current_truth_uses_one_stable_market_wait_after_certification(
     assert not first.incident_decisions
 
 
+def test_current_truth_promotes_a_fresh_fully_ready_lane_to_action_time(
+    tmp_path: Path,
+) -> None:
+    state = _ready_control_state(tmp_path)
+    _attach_certifications(state)
+    candidate = state["candidate_scope"][0]
+    now_ms = state["read_now_ms"]
+    state["live_signal_events"] = [
+        {
+            "signal_event_id": "signal:current-truth-ready",
+            "strategy_group_id": candidate["strategy_group_id"],
+            "symbol": candidate["symbol"],
+            "side": candidate["side"],
+            "status": "facts_validated",
+            "freshness_state": "fresh",
+            "observed_at_ms": now_ms,
+            "created_at_ms": now_ms,
+            "expires_at_ms": now_ms + 60_000,
+        }
+    ]
+
+    bundle = reduce_current_truth(state)
+    target = next(
+        item
+        for item in bundle.lane_decisions
+        if item.lane_identity.key
+        == (candidate["strategy_group_id"], candidate["symbol"], candidate["side"])
+    )
+
+    assert target.first_blocker == "action_time_preflight_ready"
+    assert target.current_issue is False
+
+
 def test_current_truth_keeps_two_tickets_as_independent_current_decisions(
     tmp_path: Path,
 ) -> None:

@@ -34,6 +34,9 @@ from src.application.action_time import protected_submit_attempt
 from src.application.action_time import runner_mutation_command
 from src.application.action_time import runner_protection_adjuster
 from src.application.action_time import runtime_safety_state
+from src.application.action_time.capability_certification import (
+    build_action_time_capability_identities,
+)
 from src.application.action_time.lifecycle_maintenance_scheduler import (
     run_ticket_bound_lifecycle_maintenance_scheduler,
 )
@@ -52,6 +55,10 @@ from src.application.action_time.exchange_command import (
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
 )
+from src.application.action_time.action_time_ticket import (
+    compute_action_time_ticket_hash,
+)
+from src.application.runtime_process_outcome import materialize_runtime_process_outcome
 from src.application.action_time.runtime_pg_fact_snapshots import (
     write_account_safe_fact_snapshots,
     write_pretrade_public_fact_snapshots,
@@ -60,6 +67,9 @@ from src.application.action_time.ticket_bound_fill_projector import (
     project_ticket_bound_exchange_fills,
 )
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity
+from src.infrastructure.runtime_control_state_repository import (
+    PgBackedRuntimeControlStateRepository,
+)
 from src.domain.ticket_exit_policy import (
     ExitEvaluationInput,
     ExitMarketFact,
@@ -115,6 +125,7 @@ FULL_CHAIN_FAILURE_SCENARIOS: tuple[str, ...] = (
     "flat_position_live_protection_cleanup",
     "duplicate_tp1_fill_idempotent",
 )
+SIMULATION_RUNTIME_HEAD = "a" * 40
 
 
 @dataclass(frozen=True)
@@ -1709,6 +1720,51 @@ def _insert_constructed_raw_input(
     )
     if signal.get("status") != "pg_live_signal_events_written":
         raise ValueError(f"simulation_producer_signal_write_failed:{signal}")
+    _certify_simulation_action_time_lane(
+        conn,
+        candidate_scope_id=str(row["candidate_scope_id"]),
+        now_ms=now_ms,
+    )
+
+
+def _certify_simulation_action_time_lane(
+    conn: sa.engine.Connection,
+    *,
+    candidate_scope_id: str,
+    now_ms: int,
+) -> None:
+    """Materialize the release-bound capability outcome for this raw lane."""
+
+    control_state = PgBackedRuntimeControlStateRepository(
+        conn,
+        now_ms=now_ms,
+    ).read_monitor_control_state()
+    identity = next(
+        (
+            item
+            for item in build_action_time_capability_identities(control_state)
+            if item.runtime_lane_identity.candidate_scope_id == candidate_scope_id
+        ),
+        None,
+    )
+    if identity is None:
+        raise ValueError("simulation_action_time_capability_identity_missing")
+    materialize_runtime_process_outcome(
+        conn,
+        process_name="action_time_capability_certification",
+        scope_key=identity.scope_key,
+        run_id=(
+            "simulation_action_time_capability:"
+            f"{identity.runtime_lane_identity.identity_key}"
+        ),
+        result_status="action_time_capability_certification_completed",
+        blockers=[],
+        started_at_ms=now_ms - 1,
+        completed_at_ms=now_ms,
+        runtime_head=SIMULATION_RUNTIME_HEAD,
+        source_watermark=identity.source_watermark,
+        lane_identity=identity.runtime_lane_identity,
+    )
 
 
 def _production_public_fact_values(*, side: str, last_price: Any) -> dict[str, Any]:
@@ -1819,7 +1875,6 @@ def bind_simulation_ticket_exposure_episode(
             "ticket_id": ticket_id,
         },
     )
-    updated = {**ticket, "exposure_episode_id": episode_id}
     conn.execute(
         sa.text(
             """
@@ -1833,7 +1888,28 @@ def bind_simulation_ticket_exposure_episode(
             "ticket_id": ticket_id,
         },
     )
-    return updated
+    persisted = dict(
+        conn.execute(
+            sa.text(
+                "SELECT * FROM brc_action_time_tickets WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings().one()
+    )
+    ticket_hash = compute_action_time_ticket_hash(persisted)
+    conn.execute(
+        sa.text(
+            "UPDATE brc_action_time_tickets "
+            "SET ticket_hash = :ticket_hash WHERE ticket_id = :ticket_id"
+        ),
+        {"ticket_hash": ticket_hash, "ticket_id": ticket_id},
+    )
+    return {
+        **ticket,
+        **persisted,
+        "status": ticket.get("status"),
+        "ticket_hash": ticket_hash,
+    }
 
 
 def _insert_coverage(
