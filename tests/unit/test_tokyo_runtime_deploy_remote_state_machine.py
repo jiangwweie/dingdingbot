@@ -582,6 +582,36 @@ def test_writer_fence_treats_not_yet_installed_canary_units_as_stopped(tmp_path)
     assert sorted(result["units_not_installed"]) == sorted(missing)
 
 
+def test_contained_writer_state_accepts_failed_stopped_unit(tmp_path):
+    release = tmp_path / "candidate"
+    release.mkdir()
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text("PG_DATABASE_URL=postgresql://example.invalid/db\n")
+
+    def runner(command, **kwargs):
+        if command[0] == "/usr/bin/systemctl":
+            return machine.ChildResult(returncode=0, stdout="failed\n", stderr="")
+        if any(
+            str(item).endswith("set_ticket_lifecycle_mutation_capability.py")
+            for item in command
+        ):
+            return machine.ChildResult(
+                returncode=0,
+                stdout='{"enabled":false,"exchange_write_called":false}',
+                stderr="",
+            )
+        raise AssertionError(command)
+
+    machine._verify_contained_writer_state(
+        release_path=release,
+        env_path=env_file,
+        runner=runner,
+        lock_handle=None,
+        canonical_lock_path=tmp_path / "deploy.lock",
+        require_root_owner=False,
+    )
+
+
 def _write_migration_in_progress_predecessor_journal(
     path: Path,
     *,

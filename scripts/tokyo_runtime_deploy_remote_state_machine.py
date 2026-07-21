@@ -2219,7 +2219,10 @@ def _verify_contained_writer_state(
             canonical_lock_path=canonical_lock_path,
             require_root_owner=require_root_owner,
         )
-        if state.returncode != 0 or state.stdout.strip() != "inactive":
+        # `failed` is a stopped systemd unit whose previous invocation exited
+        # unsuccessfully.  It cannot write; rejecting it would strand a
+        # correctly fenced host after a bounded watcher tick failure.
+        if state.returncode != 0 or state.stdout.strip() not in {"inactive", "failed"}:
             raise RuntimeError("fence_supersession_writer_not_inactive:" + unit)
     capability = _run_release_python_script(
         release_path=release_path,
