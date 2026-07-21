@@ -2,9 +2,9 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-07-20
-dual_position_status_verified: 2026-07-20
-runtime_observation_truth_status_verified: 2026-07-20
+last_verified: 2026-07-21
+dual_position_status_verified: 2026-07-21
+runtime_observation_truth_status_verified: 2026-07-21
 ---
 
 # Main Control Roadmap
@@ -59,7 +59,7 @@ design documents and acceptance proof.
 | 5 | **P0 Runtime Observation Truth And Forensics Remediation** | **deployed component baseline; HTTP 400/compact transport defect is closed, but production closure is superseded** | `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md`, `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | 6 | **P0 Production Runtime Full-Chain Readiness Remediation** | **remaining active work superseded by P0-ACH; retained as component design source** | `docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_DESIGN.md`, `docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | P0 correction | **P0 Account Truth Convergence And Failed-Submit Capacity Conservation** | **deployed at `386cc3d7` / migration 140; two-position Account Current authority is active** | `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_DESIGN.md`, `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_IMPLEMENTATION_PLAN.md` |
-| P0 current | **P0 Schema Truth、Action-Time 与双仓位端到端执行收敛** | **foundation committed at `60999176`; deletion-first Signal-to-exit design/plan complete and awaiting implementation confirmation** | `docs/current/P0_ACTION_TIME_INVOCATION_CLAIM_AND_RUNTIME_HEALTH_CONVERGENCE_DESIGN.md`, `docs/current/P0_ACTION_TIME_INVOCATION_CLAIM_AND_RUNTIME_HEALTH_CONVERGENCE_IMPLEMENTATION_PLAN.md`, `docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md`, `docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN.md` |
+| P0 current | **P0 Schema Truth、Action-Time 与双仓位端到端执行收敛** | **R0-R9 component baseline deployed at `25483180` / schema 142; R10 natural Signal-to-Ticket-to-trade remediation is ready for implementation after the 2026-07-21 account-fact break** | `docs/current/P0_ACTION_TIME_INVOCATION_CLAIM_AND_RUNTIME_HEALTH_CONVERGENCE_DESIGN.md`, `docs/current/P0_ACTION_TIME_INVOCATION_CLAIM_AND_RUNTIME_HEALTH_CONVERGENCE_IMPLEMENTATION_PLAN.md`, `docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md`, `docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN.md` |
 | 7 | **Dual-Position Hard-Cap Account Risk Model V0** | **migrations 134-140 and active policy are deployed component baselines; whole-chain recertification is folded into P0-ACH** | `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | 8 | **Capital Allocation V1** | P2 after V0 dual-position, observation truth closure, and additional real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 9 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
@@ -80,23 +80,33 @@ multi-signal Invocation loss, persisted Decimal Claim failure, Ticket expiry and
 current-health drift. No current lane may be called validated market wait until
 P0-ACH reaches `multi_position_pre_live_certified`.
 
+The 2026-07-21 production window supersedes the older occupancy snapshot for
+current planning. Tokyo runs exact release `25483180` at schema `142`; Account
+Current is `0/2` with new entry allowed, signed exchange reads show zero active
+positions and zero open orders, and all core timers are healthy. A distinct
+natural signal reached the typed Action-Time coordinator but stopped at
+`materialize_account_safe_facts`; no Ticket or exchange write followed, and the
+Ticket dispatcher then reported `no_actionable_pg_ticket`. The current P0 is
+therefore R10 producer-to-consumer convergence, not a missing-market or missing
+Owner-chat condition.
+
 ## Current Verified Progress
 
 | Area | Current fact |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs release `386cc3d761f17231a6c35d2bc96b347153cbd907`; Account Current reports 2/2 occupied slots, while the 2026-07-20 window produced 67 Signal Events, 32 Invocations and 3 Tickets without a new completed outcome |
-| **Active delivery branch** | `codex/budget-model-review-20260714` is the current repair branch and is aligned with Tokyo head `386cc3d7` |
+| **Live Candidate Baseline** | Tokyo runs release `2548318018f1e67b8dfe820556b0e71103b4580f`; Account Current reports 0/2 occupied slots and `new_entry_allowed=true`; the 2026-07-21 natural signal reached Action-Time account facts but created no Ticket |
+| **Active delivery branch** | `codex/budget-model-review-20260714` is the current repair branch and is aligned with Tokyo head `25483180` |
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` and its release manifest are the exact deployed-head authority |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
-| **PG migration** | Tokyo is at migration **140** (`2026-07-20-140_account_truth_convergence.py`) |
+| **PG migration** | Tokyo is at migration **142**; Alembic remains the sole schema authority |
 | **P0-LC deployment acceptance** | Postdeploy verification passes; backend HTTP checks, schema count, lifecycle units, and no-active lifecycle service are accepted without exchange write |
-| **Backend / watcher / monitor / lifecycle** | Backend and all three timers are active; 22/22 coverage is fresh, but detector current, multi-signal Invocation/process outcome conservation and Action-Time TTL remain incomplete |
+| **Backend / watcher / monitor / lifecycle** | Backend and all three timers are active; the latest natural watcher tick succeeded operationally, but Action-Time stopped at `materialize_account_safe_facts` and current projections did not preserve that blocker through the no-Ticket dispatcher result |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
 | **Post-submit first tick** | Deployed release includes `brc_ticket_bound_reconciliation_ticks`, `brc_ticket_bound_scope_freezes`, first post-submit tick selection, TP1 degraded recovery, retry limit, scope freeze writes, and stop-risk reservation rechecks |
 | **P0 capital-safety closure** | `381aed34` deploys current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, Live Outcome Ledger projection, and protective stop-risk direction validation |
 | **Current runtime coverage** | Five StrategyGroups and 22 candidate lanes have current healthy technical coverage; Candidate Pool still reports 22 `detector_not_attached`, while production signals prove detectors can emit events without a current decision projection |
 | **Typed Ticket boundary** | Side-aware price, normalized quantity, positive stop risk, one reservation, atomic fact-to-Ticket transaction, and six-Event-Spec production-shaped certification are deployed |
-| **Current tradeability** | Market wait is not validated. The recurring systemic first blocker is `action_time_invocation_missing`; deeper rows reached Claim, Ticket and Operation Layer but exposed process-outcome loss, persisted Decimal mismatch, Ticket expiry and local Order registration failure |
+| **Current tradeability** | Market wait is not validated. The current first blocker is `action_time_boundary_not_reproduced` at `materialize_account_safe_facts`; Ticket issuer wiring exists, but exact Invocation facts, shared deadline, single orchestration ownership and no-Ticket blocker conservation are incomplete |
 | **Opportunity calibration** | All 22 scopes produced historical signals with zero invalid observations; Replay was stdout-only and created no PG/file/runtime/exchange authority |
 | **Lifecycle production capability** | Typed exchange truth, fill projection, durable short-transaction commands, continuous reconciliation, settlement, finalization, terminal Outcome, account-mode bootstrap, and migration-shaped ops health are deployed |
 | **Trade feedback core** | P1-TFC uses one typed lifecycle decision across production callers, rehearsal, and Owner feedback; it is deployed rather than active WIP |
@@ -126,8 +136,9 @@ deliberately released.
 | 8 | **Runtime Observation Truth And Forensics Remediation** | **P0 deployed component baseline** | Typed compact blockers and HTTP semantics are accepted; its observation/business-gate and core-order closure assumptions are superseded |
 | 9 | **Production Runtime Full-Chain Readiness Remediation** | **component design retained; active work superseded** | Its detector/occupancy/projection tasks execute only through P0-ACH |
 | 10 | **Account Truth Convergence And Failed-Submit Capacity Conservation** | **P0 deployed component baseline** | Migration 140 and release `386cc3d7` provide active 2-position Account Current and terminal pre-dispatch capacity release |
-| 11 | **P0-ACH Multi-Position End-to-End Convergence R0-R9** | **foundation commit `60999176`; remaining implementation awaiting confirmation** | Replace global single-row/stdout paths; conserve and arbitrate every Signal; isolate each Ticket through submit, protection, runner, exit and exactly-once release; certify PG/shadow predeploy package |
-| 12 | **R1B Natural Live Lifecycle Calibration** | **interrupt after P0-ACH pre-live certification** | A natural eligible event may exercise the official real-order path; no forced second position is part of P0-ACH |
+| 11 | **P0-ACH R10 Natural Signal Ticket-to-trade convergence** | **P0 ready for implementation** | Replace legacy flat-only account gate with exact Invocation FactBundle; unify deadline and coordinator ownership; remove Operator-session dispatcher coupling; conserve the same blocker across all current projections |
+| 12 | **R10 bounded deploy and natural-event acceptance** | **after R10-T00 through T06 gates** | A distinct natural signal reaches durable dispatch/official submit and lifecycle, or one genuine exact blocker remains attached to the same Invocation; no forced second position is required |
+| 13 | **R1B venue and lifecycle calibration** | **event-driven after R10 deploy** | Measure fill, slippage, fees, funding, protection and runner behavior from the official path without weakening safety boundaries |
 
 ## Why This Was Not Detected Before Production Signals
 

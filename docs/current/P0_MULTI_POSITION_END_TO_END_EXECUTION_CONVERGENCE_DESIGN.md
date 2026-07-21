@@ -1,16 +1,220 @@
 ---
 title: P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN
-status: PROPOSED_IMPLEMENTATION_CONFIRMATION_REQUIRED
+status: ACTIVE_PRODUCTION_REMEDIATION_DESIGN
 authority: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md
 program_id: P0-ACH
 baseline_commit: 60999176
-target_state: multi_position_pre_live_certified
+current_runtime_commit: 2548318018f1e67b8dfe820556b0e71103b4580f
+current_schema_revision: 142
+last_verified: 2026-07-21
+target_state: natural_signal_ticket_to_trade_certified
 r7_supplement: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN.md
 owner_policy_change: none
 exchange_write_authority: unchanged
 ---
 
 # P0 多仓位端到端执行收敛设计
+
+## 0. 2026-07-21 自然信号生产复盘覆盖
+
+### 0.1 覆盖关系
+
+本节是 **2026-07-21 当前生产证据覆盖**。当本节与后文基于
+`60999176` 的阶段判断、Owner 确认门或旧 first blocker 冲突时，以本节为准。
+后文的 Signal-to-exit 不变量、删除优先原则和 R0-R9 设计继续有效。
+
+当前工程结论为：**Ticket issuer 已接入生产编排，但自然信号链仍未闭合**。
+watcher 本身保持无 Ticket 权限是正确边界；实际 Ticket producer 是 watcher 后置的
+`action_time_if_needed` typed coordinator。2026-07-21 的自然信号已经触发该 producer，
+但停在 `materialize_account_safe_facts`，因此后续 Ticket consumer 只能看到
+`no_actionable_pg_ticket`。
+
+### 0.2 已知客观事实
+
+| 事实 | 当前证据 | 设计含义 |
+| --- | --- | --- |
+| **运行版本** | Tokyo `/home/ubuntu/brc-deploy/app/current` 为 `25483180`；PG revision 为 **142** | 本问题不是旧 release 未切换 |
+| **服务健康** | backend、watcher timer、monitor timer、lifecycle timer 均 active；最近 oneshot result 为 success | systemd 存活与交易链可用必须分开判断 |
+| **自然信号** | 11:32 与 11:35 watcher 出现 fresh signal；其中 `signal:b37a62a6147794bc9a932c0984e83074` 被报告为 `ready_for_action_time_ticket_materialization` | 策略信号条件已经至少一次满足，不能归类为纯市场等待 |
+| **Action-Time 进度** | `85-action-time-refresh-if-needed.conf` 触发 typed coordinator；本次停在 `materialize_account_safe_facts` | Ticket producer 存在，当前 first blocker 位于 producer 的事实束入口 |
+| **Ticket 结果** | dispatcher 随后返回 `no_actionable_pg_ticket`；PG Ticket current 为 0，历史状态仅 `closed=6`、`expired=54` | consumer 正常拒绝无 Ticket，但其 `blocker_class=none` 会掩盖上游失败 |
+| **账户与容量** | 同一窗口只读交易所事实为 0 active position、0 open order；PG Account Current 为 `0/2`、`new_entry_allowed=true`、reconciliation matched | 当前 first blocker 没有证据指向仓位容量或 Owner 停止授权 |
+| **副作用** | lifecycle capability enabled；`exchange_write_called=false`、`order_created=false` | 本次没有误下单，也没有完成自然 Ticket-to-trade 验收 |
+| **补查边界** | 11:36 后本地 SSH 两次有界重连超时 | 精确 account-safe blocker code 必须从 PG process outcome 补取，不能凭日志阶段名臆造 |
+
+来源：2026-07-21 Tokyo systemd journal、PG current/audit、signed read-only exchange GET、
+当前 tracked code `25483180`。
+
+### 0.3 当前 blocker 分类
+
+```text
+chain_position: action_time_boundary
+stage_reached: action_time_invocation_selected_and_typed_coordinator_started
+first_blocker_class: action_time_boundary_not_reproduced
+first_blocker_detail: materialize_account_safe_facts business-blocked before Ticket commit
+owner_action_required: false
+authority_change_required: false
+```
+
+这不是策略信号不满足，也不是新增聊天授权缺失。Owner policy、FinalGate、
+Operation Layer 和 submit-mode 仍必须在后续逐级通过，但本次链路在到达这些边界前已停止。
+
+### 0.4 完整 Ticket-to-trade 问题矩阵
+
+| 链路阶段 | 已部署能力 | 当前问题或未完成证明 | 分类 | 优先级 |
+| --- | --- | --- | --- | --- |
+| Signal → Invocation | bounded Signal intake、确定性 arbitration、每 Signal Invocation/process outcome 代码已部署 | 自然信号 Invocation、selected result 与最终 blocker 尚未形成一次可直接查询的端到端验收行 | 工程与可观测性 | **P0** |
+| Invocation → Account Facts | typed coordinator 已调用真实只读 account collector | collector 仍以 legacy flat-only `account_safe_facts_ready` 作为总闸；它不能表达 `0/2`、`1/2` 下 exact NettingDomain 可开第二仓的语义 | 工程模型错误 | **P0** |
+| Account Facts → Ticket | atomic fact/promotion/reservation/lane/Ticket savepoint 已部署 | 本次未越过 account facts；没有证明自然事实束能在最短 TTL 内创建 Ticket | 工程验收缺口 | **P0** |
+| Deadline | coordinator 有 30 秒预算，systemd 有 37 秒 Action-Time timeout | account collector 顺序调用 6 个端点，并再次并发调用 5 个 account-risk 端点；单请求 timeout 被重复使用，remaining deadline 没有贯穿每个网络调用 | 性能与时序错误 | **P0** |
+| Ticket → FinalGate/Runtime Safety | typed coordinator 可 materialize FinalGate、handoff、Runtime Safety State | coordinator 与 dispatcher 都会触碰 FinalGate/handoff 语义，存在两个编排 owner；Ticket TTL 与 dispatcher 的新 timeout 不是同一 deadline | 所有权与时序风险 | **P0** |
+| Dispatcher | 只消费 PG Ticket、拒绝 file identity，边界正确 | `no_actionable_pg_ticket` 在上游 Invocation 已失败时仍投影为 `running + blocker_class=none`；失败被消费者的空结果覆盖 | Current truth 错误 | **P0** |
+| Automation identity | dispatcher 可为本机 API 自签 operator session | 自动交易进程依赖 Operator Console session secret/UI auth adapter；这不是 Owner policy，但属于不必要的部署耦合和单点故障 | 服务边界风险 | **P1** |
+| Operation Layer → durable submit | submit-mode decision、durable command、idempotency、`outcome_unknown` 对账已有代码与 PG 测试 | 当前 release 没有自然信号到达该阶段；constructed/fixed-clock 证明不能替代自然 producer-to-consumer 验收 | 运行验收缺口 | **P1** |
+| Submit → protection/lifecycle | protection、first tick、continuous reconciliation、runner、settlement、review 为部署基线 | 当前 0 position/0 order 且 timer 健康；但新 release 尚无自然 Ticket 证明 entry、SL、TP1、runner、exit、release 的同一 lineage | Live calibration | **R1B** |
+| Owner/monitor truth | PG process outcomes、shared reducer、server monitor 已部署 | watcher 的“待物化”、Action-Time 的实际失败和 dispatcher 的“无 Ticket”仍可形成三种互相矛盾的当前状态 | 产品状态错误 | **P0** |
+
+### 0.5 系统性根因
+
+本次暴露的不是一个 if 条件，而是以下组合：
+
+```text
+watcher 只负责 Signal，边界正确
+-> 后置 Action-Time producer 使用全账户 legacy flat-only gate
+-> account facts 重复采集且 deadline 分裂
+-> Ticket 未创建
+-> dispatcher 只看 Ticket，返回无动作
+-> current projection 没有把 exact Invocation failure 提升为当前 first blocker
+-> 系统看起来“运行中”，真实机会却已过期
+```
+
+测试逃逸原因同样是系统性的：
+
+1. typed coordinator 单测把 account、Ticket、FinalGate、handoff、safety 全部 mock 成完整结果；
+2. PostgreSQL 测试分别证明 Signal arbitration 与 Ticket materialization，但没有从真实
+   account snapshot producer 贯穿 typed coordinator 与 dispatcher；
+3. systemd 测试主要验证 drop-in 字符串存在，没有模拟同一 watcher tick 的三个
+   `ExecStartPost` 与共享 TTL；
+4. downstream fake/fixed-clock 证明从完整 Ticket 或完整事实开始，绕过了真实 producer 边界；
+5. monitor 测试没有要求“selected Invocation 失败时，no Ticket 不得清空 first blocker”。
+
+### 0.6 目标架构：一个 Invocation、一个事实束、一个 deadline、一个 current outcome
+
+```mermaid
+flowchart TD
+    A["Watcher commits immutable live Signal"] --> B["Signal Intake + deterministic arbitration"]
+    B --> C["ActionTimeInvocation"]
+    C --> D["Exact ActionTimeFactBundle"]
+    D --> E["Atomic Claim + Promotion + Lane + Ticket"]
+    E --> F["FinalGate + Runtime Safety State"]
+    F --> G["Operation Layer durable dispatch command"]
+    G --> H["Exchange command worker"]
+    H --> I["Protection commit barrier"]
+    I --> J["Reconciliation + runner + exit + settlement"]
+    C --> K["One durable current outcome per Invocation"]
+    D --> K
+    E --> K
+    F --> K
+    G --> K
+    K --> L["Monitor and Owner product state"]
+```
+
+#### 0.6.1 Exact ActionTimeFactBundle
+
+新增的是 typed application model，不是 JSON 文档表。一个 Invocation 的事实束必须包含：
+
+- `action_time_invocation_id`、完整 `RuntimeLaneIdentity` 与 source watermark；
+- 一次并发采集形成的 account、position、regular order、algo order、account mode snapshot；
+- exact `account_id + exchange_id + runtime_profile_id`；
+- exact `exchange_instrument_id + NettingDomainKey`；
+- fresh instrument rule、leverage bracket 与 executable price refs；
+- Account Capacity Current version、claimed slots、remaining capacity、same-domain conflict；
+- 每项事实的 observed/valid-until、source snapshot ID 与 failure code；
+- trusted refs 与 observed-but-blocked refs 分离，失败事实可审计但不能获得 submit authority。
+
+`account_safe_facts_ready` 不再等价于“账户完全 flat”。新闸门为：
+
+```text
+base account safety healthy
++ exact snapshot complete and fresh
++ Account Capacity Current allows one claim
++ exact NettingDomain has no conflicting position/order/hold
+= account_actionability_ready
+```
+
+#### 0.6.2 单一编排所有权
+
+Action-Time coordinator 是 `Signal/Invocation → dispatch-ready command` 的唯一应用层 owner：
+
+1. materialize exact fact bundle；
+2. atomic Claim/Promotion/Lane/Ticket；
+3. FinalGate；
+4. Runtime Safety State；
+5. Operation Layer handoff；
+6. durable dispatch command commit。
+
+dispatcher 只领取 durable command 并调用官方 submit adapter。它不得重新选择 Ticket、
+重建 FinalGate、重置 deadline 或用“无 Ticket”解释上游失败。
+
+#### 0.6.3 统一 deadline
+
+```text
+effective_deadline = min(
+  signal.expires_at_ms,
+  every trusted fact.valid_until_ms,
+  ticket.expires_at_ms when created,
+  action_time_started_at_ms + 30_000
+)
+```
+
+所有 PG lock、HTTP、signed GET 和 dispatcher 领取均从 remaining deadline 派生。
+网络事实并发获取；不得给 6 个顺序请求各分配完整 12 秒，也不得在 systemd 下一阶段重置预算。
+
+#### 0.6.4 Current truth conservation
+
+每个 selected Invocation 必须有一个 current outcome：
+
+```text
+processing
+| business_blocked(first_blocker, stage, fact refs)
+| retryable_failure(first_blocker, stage, retry deadline)
+| hard_failure(first_blocker, incident ref)
+| dispatch_ready(ticket/command refs)
+| submitted(attempt/command refs)
+| terminal(outcome ref)
+```
+
+`no_actionable_pg_ticket` 只允许用于“当前没有 selected/processing/failed Invocation”的纯空闲状态。
+只要某个 fresh Signal 已 selected 且未产生 Ticket，monitor 必须显示系统处理失败或暂不可用，
+不能显示 blocker none 或 market wait。
+
+### 0.7 不采用的方案
+
+| 方案 | 拒绝原因 |
+| --- | --- |
+| 在 watcher 中把 `allow_action_time_ticket_materialization` 改成 true | 把观察者升级成交易 producer，破坏权限边界，并形成第二条 Ticket 路径 |
+| dispatcher 发现无 Ticket 时临时创建 Ticket | consumer 反向承担 producer 职责，无法绑定 exact facts/deadline/transaction |
+| 只把当前 account-safe blocker 改成忽略 | 会绕过 active position/open order、NettingDomain 与 snapshot freshness 安全检查 |
+| 延长 systemd timeout | 掩盖重复网络采集和 deadline 分裂，不能保证 signal/fact 仍新鲜 |
+| 再加一个 report/JSON glue script | 违反 PG current 和 zero recurring file-I/O 边界 |
+| 要求 Owner 每次确认 Ticket | 把工程缺口转成手工操作，违反 Owner supervisor 模型 |
+
+### 0.8 当前完成定义
+
+本轮设计关闭只允许在以下条件全部成立后声明：
+
+1. 自然或 production-shaped raw signal 经真实 fact producer 创建 exact Invocation outcome；
+2. 0/2 与 1/2 不再被 legacy flat-only gate 阻止，2/2 与 same-domain 仍 fail-closed；
+3. account facts 每 Invocation 只形成一个 authoritative snapshot generation；
+4. producer、dispatcher 和 monitor 使用同一 deadline 与 source watermark；
+5. selected Invocation 未产生 Ticket 时，所有 current surfaces 显示同一 first blocker；
+6. Ticket 后只存在一个 FinalGate/handoff orchestration owner；
+7. automation 不依赖人工 Operator Console session；跨 HTTP 时使用独立 service identity；
+8. no-signal tick 创建 **0 JSON/MD**，Action-Time PG writes 有界；
+9. disposable PG、two-worker、deadline、restart、duplicate delivery、0/1/2 capacity、
+   fake exchange 与 monitor parity 全绿；
+10. Tokyo bounded deploy 后，下一 distinct natural signal 要么到达 durable dispatch/submit，
+    要么在同一 Invocation 上留下一个真实安全/策略/账户 blocker，不能再次无 Ticket 丢失。
 
 ## 1. 决策摘要
 

@@ -1,6 +1,6 @@
 ---
 title: P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN
-status: READY_FOR_OWNER_DEPLOY_CONFIRMATION
+status: READY_FOR_R10_IMPLEMENTATION
 authority: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_IMPLEMENTATION_PLAN.md
 program_id: P0-ACH
 design: docs/current/P0_MULTI_POSITION_END_TO_END_EXECUTION_CONVERGENCE_DESIGN.md
@@ -8,11 +8,388 @@ r7_design: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_DESIGN
 r7_plan: docs/current/P0_R7_CURRENT_TRUTH_REDUCER_AND_LEGACY_RETIREMENT_IMPLEMENTATION_PLAN.md
 baseline_commit: 60999176
 current_certified_commit: 1fd49cc09efdb9653d5e1df4da8b8bb2b5fe86f1
-target_stop: deployment_confirmation_gate
-production_deploy: out_of_scope_until_owner_confirmation
+current_runtime_commit: 2548318018f1e67b8dfe820556b0e71103b4580f
+current_schema_revision: 142
+last_verified: 2026-07-21
+target_stop: deployed_natural_signal_ticket_to_trade_acceptance
+production_deploy: bounded_apply_allowed_after_r10_gates_under_standing_authorization
 ---
 
 # P0 多仓位端到端执行收敛执行计划
+
+## 0. 2026-07-21 R10 当前执行覆盖
+
+### 0.1 覆盖声明
+
+**R0-R9 已作为 `25483180` / schema `142` 的部署组件基线存在。**
+本节定义自然信号暴露后的当前执行主线。当本节与后文“等待 Owner 实施/部署确认”、
+`60999176` first blocker 或旧部署前停止点冲突时，以本节为准。
+
+本轮不改变 StrategyGroup、symbol/side、2.5% Stop risk、max 2 positions、
+max 1 new Action-Time lane、notional、leverage、FinalGate 或 Operation Layer 权限。
+
+### 0.2 当前 Live Enablement 状态
+
+```text
+Live Enablement Before:
+  fresh live Signal persisted
+  -> Invocation selected / typed coordinator started
+  -> blocked at materialize_account_safe_facts
+  -> no Ticket
+  -> dispatcher reported no_actionable_pg_ticket
+
+Live Enablement After R10:
+  fresh live Signal persisted
+  -> exact Invocation FactBundle
+  -> atomic Claim/Promotion/Lane/Ticket or exact blocker
+  -> FinalGate/Runtime Safety/Operation handoff under one deadline
+  -> durable dispatch command
+  -> official protected submit or exact hard blocker
+  -> same-lineage lifecycle/reconciliation/settlement
+```
+
+**当前 first blocker:** `action_time_boundary_not_reproduced`，具体阶段为
+`materialize_account_safe_facts`。精确 business blocker code 必须从 PG audit/process
+outcome 读取；在无法补查时禁止推断为策略未满足或 Owner 未授权。
+
+### 0.3 串行执行顺序
+
+```mermaid
+flowchart LR
+    T00["R10-T00 Exact forensics"] --> T01["R10-T01 Production-shaped RED"]
+    T01 --> T02["R10-T02 Exact ActionTimeFactBundle"]
+    T02 --> T03["R10-T03 Single coordinator + deadline"]
+    T03 --> T04["R10-T04 Durable dispatcher boundary"]
+    T04 --> T05["R10-T05 Current truth + monitor"]
+    T05 --> T06["R10-T06 PG/full-chain certification"]
+    T06 --> T07["R10-T07 Bounded Tokyo deploy"]
+    T07 --> T08["R10-T08 Natural-event acceptance"]
+```
+
+T02-T04 都触及 Action-Time 主链，必须串行。T05 的 readmodel/monitor 实现可在 T04
+接口冻结后并行准备测试，但合并与部署必须在 T04 之后。
+
+## R10-T00 — Exact Production Forensics Freeze
+
+### Task Packet
+
+**Task ID:** `P0-ACH-R10-T00`
+
+**Goal:** 固定 2026-07-21 自然信号从 Signal 到 account-safe blocker 的 exact PG 谱系。
+
+**Why:** 当前已知失败阶段，但 SSH 中断后缺少精确 account-safe blocker、Invocation ID
+和 snapshot refs。没有 exact lineage 就不能决定事实生产器与 projection 的修复范围。
+
+**Allowed files:** 无 production edit；只读 Tokyo/PG/exchange query；必要时更新本文档的
+completion record。
+
+**Forbidden actions:** restart、deploy、migration、手工 PG update、Ticket/Signal 插入、
+exchange write、credential 输出。
+
+**Requirements:**
+
+1. 查询 `signal:b37a62a6147794bc9a932c0984e83074` 的 StrategyGroup/symbol/side/Event Spec；
+2. 查询 exact Invocation、arbitration rank/result、fact snapshot IDs、process outcomes；
+3. 查询是否存在 promotion/lane/reservation/Ticket，确认 atomic rollback 范围；
+4. 查询 Owner policy/runtime binding 的 enabled/tier/live-submit 状态和版本；
+5. 对照 signed GET、Account Current、core orders/positions 与 ticket-bound orders；
+6. 输出一个 first blocker、一个 owner、一个 next action，不生成 repo JSON/MD report。
+
+**Done When:** exact signal lineage 可以解释“为何没有 Ticket”，且策略、授权、账户事实、
+工程故障不再混为一类。
+
+**Hard Stop:** 未保护仓位、unknown exchange outcome、duplicate command、账户/交易所不一致。
+
+## R10-T01 — Production-Shaped RED Matrix
+
+### Task Packet
+
+**Task ID:** `P0-ACH-R10-T01`
+
+**Goal:** 在修改 producer 前建立真实 watcher→Invocation→facts→Ticket→dispatcher 的失败复现。
+
+**Allowed files:** focused unit/integration tests、disposable PostgreSQL fixtures、fake signed
+GET provider、systemd orchestration harness。
+
+**Forbidden files:** production implementation、policy、migration、exchange gateway。
+
+**Requirements:**
+
+1. 从 raw detector decision/live signal row 开始，禁止注入完整 Ticket-ready dictionary；
+2. 使用真实 `conserve_and_arbitrate_fresh_signals` 与真实 typed coordinator；
+3. account provider 只 mock HTTP response，不 mock `account_safe_facts_ready`；
+4. 覆盖 0/2、1/2 different instrument、2/2、same NettingDomain、open regular/algo order；
+5. 覆盖 sequential endpoint latency、deadline 前后 1ms、outer timeout、dispatcher delay；
+6. 覆盖 selected Invocation 失败后 dispatcher 不得返回 blocker none；
+7. 覆盖 duplicate watcher tick、service restart、two workers 和 exact idempotency。
+
+**Blocker Removed Or Reclassified:** 把“只在生产出现”转成 deterministic RED。
+
+**Tests:** 新 PostgreSQL integration + systemd-sequence harness；SQLite 不得替代 lock/Numeric。
+
+**Done When:** 至少一个 RED 精确复现 2026-07-21 断点，且每个后续 task 有对应失败用例。
+
+## R10-T02 — Exact ActionTimeFactBundle 与双仓位事实语义
+
+### Task Packet
+
+**Task ID:** `P0-ACH-R10-T02`
+
+**Goal:** 用一个 Invocation-bound typed fact bundle 替换 legacy flat-only account-safe 总闸。
+
+**Allowed files:**
+
+- `src/application/action_time/account_safe_facts.py`；
+- `src/application/action_time/runtime_pg_fact_snapshots.py`；
+- `src/application/action_time/account_capacity_materialization.py`；
+- `src/infrastructure/binance_usdm_account_risk_snapshot.py`；
+- 新纯 typed domain/application model；
+- focused tests。
+
+**Forbidden files:** Owner policy值、max position、notional/leverage、migration，除非 T02 先证明
+现有 schema 无法保存 stable indexed invariant 并重新进入 Schema Truth Gate。
+
+**Requirements:**
+
+1. 以 exact Invocation identity 解析 account/profile/instrument/NettingDomain；
+2. 一次并发 signed GET generation 获取 account、positions、regular/algo orders、mode；
+3. 删除 action-time 内重复 account/position/order/mode 网络采集；
+4. instrument rules/leverage refs 复用 fresh PG snapshot，缺失时按 remaining deadline bounded refresh；
+5. `account_actionability_ready` 使用 Account Capacity Current 与 exact-domain conflict；
+6. 0/2、1/2 different instrument 可继续；2/2、same-domain、unknown snapshot fail-closed；
+7. blocked snapshots 保留 observed refs，但不得进入 trusted refs 或 submit authority；
+8. 事实 bundle 的 snapshot generation/version 在 Ticket、FinalGate、Runtime Safety 中保持一致。
+
+**Live Enablement State After:** natural Invocation 可以在真实账户 0/2 或合法 1/2 状态继续，
+也可以留下 exact capacity/domain blocker。
+
+**Done When:** legacy `active_position_clear && open_orders_clear` 不再是双仓 Ticket 的总闸，
+且所有 hard conflict negative tests 仍通过。
+
+**Hard Stop:** 通过忽略 open order/position 来“修好”Ticket，或把不完整 snapshot 标记为 safe。
+
+## R10-T03 — 单一 Action-Time Coordinator 与统一 Deadline
+
+### Task Packet
+
+**Task ID:** `P0-ACH-R10-T03`
+
+**Goal:** 让一个 coordinator 独占 Invocation 到 durable dispatch-ready command 的编排。
+
+**Allowed files:**
+
+- `src/application/action_time/typed_coordinator.py`；
+- `src/application/action_time/ticket_materialization_sequence.py`；
+- FinalGate、Runtime Safety、Operation handoff application services；
+- `scripts/run_server_product_state_refresh_sequence.py`；
+- systemd Action-Time drop-in；
+- focused tests。
+
+**Forbidden files:** watcher Ticket 权限、loose FinalGate/Operation parameters、exchange write bypass。
+
+**Requirements:**
+
+1. input 仅 `action_time_invocation_id`；
+2. effective deadline 取 Signal/facts/Ticket/30s 最小值；
+3. 每个 network/PG/API timeout 从 remaining budget 派生；
+4. Ticket atomic transaction 保持 Claim/Promotion/Lane/Ticket all-or-none；
+5. FinalGate、Runtime Safety、handoff 只由 coordinator materialize 一次；
+6. coordinator 成功必须提交 durable dispatch command identity；
+7. 每个失败步骤同步写 Invocation current outcome 与 audit；
+8. 删除或机器证明不可达的第二 orchestration branch 不得作为 fallback 保留。
+
+**Performance acceptance:** account network calls 并发；Action-Time p95/p99 在 budget 内；
+无 signal 时不进入 heavy path；每 no-signal tick **0 JSON/MD**。
+
+**Done When:** 一个 Invocation 不会被 coordinator 和 dispatcher 各自重放 FinalGate/handoff，
+systemd 阶段切换也不会重置 TTL。
+
+## R10-T04 — Durable Dispatcher Boundary
+
+### Task Packet
+
+**Task ID:** `P0-ACH-R10-T04`
+
+**Goal:** dispatcher 只领取 durable command，并通过官方 application port 进入 protected submit。
+
+**Allowed files:** dispatcher、Operation Layer application service、protected-submit command worker、
+systemd wiring、focused tests。
+
+**Forbidden files:** UI/Operator policy、Owner credential、withdrawal/transfer、gateway bypass、第二 submit path。
+
+**Requirements:**
+
+1. dispatcher input 仅 durable dispatch command ID；
+2. 禁止重新选择 latest Ticket、重做 FinalGate、重建 Runtime Safety；
+3. 优先直接调用 typed official application port；不得依赖 Operator Console UI session；
+4. 若架构强制保留 HTTP，必须使用现有 server-owned service boundary；任何新 credential 需求
+   立即停止并单独升级 Owner 授权，不在本 task 偷渡；
+5. durable Exchange Command 先 commit，再 network I/O；
+6. crash-before/after-dispatch、timeout、outcome_unknown、duplicate worker 保持 exactly-once；
+7. submit mode 仍由 PG policy/current Runtime Safety 决定，systemd `armed` 不是绕过凭证。
+
+**Done When:** UI auth 不再是自动交易依赖，且 fake exchange ledger 证明每 command 最多一次 effect。
+
+## R10-T05 — Current Truth、Monitor 与 Owner 状态收敛
+
+### Task Packet
+
+**Task ID:** `P0-ACH-R10-T05`
+
+**Goal:** 让 Signal、Invocation、Ticket consumer 和 monitor 对同一 first blocker 一致。
+
+**Allowed files:** shared current reducer、process outcome relevance、Candidate/Goal/Tradeability、
+server monitor、notification、forensics、tests。
+
+**Forbidden files:** 新 current table、JSON cache、用过滤历史制造假健康。
+
+**Requirements:**
+
+1. selected/processing/failed Invocation 的优先级高于 `no_actionable_pg_ticket` 空闲结论；
+2. `no_actionable_pg_ticket + blocker none` 仅在没有 current Invocation 时成立；
+3. watcher `ready_for_action_time_ticket_materialization` 在 Owner 面只映射为“处理中”；
+4. exact stage、first blocker、source watermark、fact refs 在 developer forensics 可查询；
+5. monitor 仅在状态变化/需要介入时通知，重复同 blocker PG dedupe；
+6. business blocker 不让 oneshot systemd 变 failed，但也不能被标为 market wait；
+7. later same-lane success 可清 current blocker，audit history 保留。
+
+**Done When:** Readiness、Tradeability、Goal、Monitor、dispatcher 对同一 fixture 的
+first blocker、Owner state、owner_action_required 完全一致。
+
+## R10-T06 — PostgreSQL 与 Ticket-to-trade Full-Chain Certification
+
+### Task Packet
+
+**Task ID:** `P0-ACH-R10-T06`
+
+**Goal:** 在无真实 exchange write 条件下证明完整 producer-to-lifecycle 链。
+
+**Requirements:**
+
+1. six Event Specs 从 raw facts/decision 到 exact Invocation FactBundle；
+2. 0/2 与 1/2 positive；2/2、same-domain、stale、missing、conflict negative；
+3. Signal→Ticket→FinalGate→handoff→durable command→fake exchange→protection barrier；
+4. two Tickets different instrument 的 protection/runner/exit/release 隔离；
+5. two-worker、kill/restart、lock/statement timeout、deadline、duplicate delivery；
+6. actual systemd order `watcher → summary → action-time → dispatcher` 的等价 harness；
+7. `scripts/audit_production_runtime_file_io.py` 报告 `performance_risk.status=clear`；
+8. production credential 调用数 0，exchange write 0。
+
+**Done When:** 不再存在从 downstream-complete fixture 开始的唯一 happy-path 证明；
+真实 producer-consumer contract 全绿。
+
+## R10-T07 — Bounded Tokyo Deploy
+
+### Task Packet
+
+**Task ID:** `P0-ACH-R10-T07`
+
+**Goal:** 在当前 focused branch 上完成可回滚的 exact-SHA 部署，并保持真实资金边界。
+
+**Preconditions:**
+
+- clean scoped diff；
+- focused + PG + file-I/O + performance tests 全绿；
+- exact migration head 与 release manifest 对齐；
+- signed GET 证明 positions/orders/protection/reconciliation 正常；
+- 没有 unknown exchange outcome、unprotected position 或 duplicate command。
+
+**Sequence:**
+
+```text
+verify exchange/PG/account truth
+-> engage Writer Fence only if writer transition requires
+-> git fetch/export exact commit
+-> Alembic only when an approved migration exists
+-> switch app/current
+-> restart only affected units
+-> publish current projections
+-> no-write canary
+-> verify backend/watcher/monitor/lifecycle
+-> release fence only after exact acceptance
+```
+
+本开发阶段的 focused commit 和 bounded Tokyo apply 已在 Standing Authorization 内，
+不新增普通聊天确认门。若出现 credential mutation、destructive migration、profile/sizing/scope
+变化，则立即停止并升级 Owner 决策。
+
+**Done When:** deploy、schema、units、PG lineage、no-write canary、file-I/O/performance 全部通过。
+
+## R10-T08 — Natural-Event Acceptance
+
+### Task Packet
+
+**Task ID:** `P0-ACH-R10-T08`
+
+**Goal:** 使用下一个 distinct eligible natural signal 验收正式 Ticket-to-trade 路径。
+
+**Acceptance:**
+
+1. Signal、Invocation、FactBundle、Claim、Promotion、Lane、Ticket lineage 完整；
+2. 若被真实策略/账户/安全条件阻止，保存一个 exact blocker 且 Owner state 正确；
+3. 若全部通过，FinalGate、Runtime Safety、Operation handoff、durable command、submit attempt 完整；
+4. 真实提交后立即进入 protection barrier、reconciliation 和 lifecycle scheduler；
+5. exchange/local outcome unknown 时停止新 entry 并对账，不重复提交；
+6. 最终 closure 释放该 Ticket 自己的 slot/risk/margin 一次；
+7. 不强制制造第二仓，不把未出现自然机会当工程失败。
+
+**Done When:** 一个 distinct natural identity 到达真实 terminal outcome，或到达一个真实、
+可操作、未被 monitor 掩盖的 hard/business blocker。
+
+## 0.4 Git、分支与提交管理
+
+| 项目 | 规则 |
+| --- | --- |
+| **工作分支** | 继续 `codex/budget-model-review-20260714`；当前 Tokyo 与本分支同 head `25483180`，无需从 stale parent 新开修复线 |
+| **隔离** | 核心 execution/risk/lifecycle 文件串行；非核心 readmodel 测试可在独立 `codex/*` worktree 准备，必须由主控审查后合并 |
+| **提交粒度** | T01 test-only；T02 facts；T03 coordinator；T04 dispatcher；T05 projection；T06 certification；T07 deploy receipt |
+| **禁止混入** | `.agents/skills/skill-creator/` 等无关 untracked 用户文件、`output/**`、reports、runtime generated files |
+| **合并门** | 每 commit 独立可测、无旧 fallback reachability、没有 policy/profile/sizing diff |
+| **回滚** | code-only slice 可 revert；一旦新 writer 产生事实，保持 schema forward 并用 fence + forward-fix，不恢复旧 producer/dispatcher 路径 |
+
+建议提交主题：
+
+```text
+test: reproduce natural signal account-fact chain break
+fix: bind exact action-time account fact bundle
+refactor: unify action-time deadline and coordinator ownership
+refactor: dispatch durable operation commands without operator session
+fix: conserve invocation blocker across no-ticket projections
+test: certify natural signal ticket-to-trade chain
+```
+
+## 0.5 R10 Program Stop Conditions
+
+以下任一条件成立即停止 apply 或自然交易推进：
+
+- exact production blocker 尚未取证，却试图按猜测改 gate；
+- unprotected position、unknown exchange outcome、duplicate submit/command；
+- 2/2 capacity、same NettingDomain conflict 或 Account Current mismatch；
+- facts/Ticket/deadline stale；
+- Owner policy、runtime scope、profile、sizing、credential 发生未授权变化；
+- typed coordinator 与 dispatcher 仍各自 materialize FinalGate/handoff；
+- selected Invocation failure 仍被 `no_actionable_pg_ticket` 清空；
+- no-signal tick 写 JSON/MD 或 Action-Time 引入无界历史扫描；
+- PostgreSQL concurrency/timeout/restore 或 fake exchange exactly-once 未通过。
+
+## 0.6 R10 Chain Position
+
+```text
+chain_position: action_time_boundary
+strategy_group_id: exact value pending PG lineage refresh
+symbol: exact value pending PG lineage refresh
+stage: natural_signal_selected_typed_coordinator_account_facts_blocked
+first_blocker: action_time_boundary_not_reproduced:materialize_account_safe_facts
+evidence: Tokyo 2026-07-21 11:32-11:36 systemd/PG/signed-GET snapshot at release 25483180 schema 142
+next_action: execute R10-T00 exact lineage freeze, then R10-T01 RED before production changes
+stop_condition: deployed natural signal reaches exact Ticket-to-trade terminal outcome or one genuine conserved blocker
+owner_action_required: false
+authority_boundary: no policy/profile/sizing/scope expansion, no credential mutation, no FinalGate/Operation Layer bypass, no duplicate submit
+signal_event_id: signal:b37a62a6147794bc9a932c0984e83074
+promotion_candidate_id: none_observed
+action_time_lane_input_id: none_observed
+ticket_id: none_observed
+```
 
 ## 1. 执行目标
 
