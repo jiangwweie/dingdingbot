@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+import math
 import time
 from typing import Any
 
@@ -29,6 +30,11 @@ from src.application.action_time.netting_domain_hold import (
     upsert_exchange_command_domain_hold,
 )
 from src.domain.exceptions import InsufficientMarginError, InvalidOrderError
+from src.domain.exchange_command_deadline import (
+    ExchangeCommandDeadlineBudget,
+    ExchangePhaseDeadlineDecision,
+    decide_exchange_phase_budget,
+)
 from src.domain.ticket_bound_exchange_command import (
     ExchangeCommandClaimScope,
     ExchangeCommandOutcomeClass,
@@ -38,6 +44,20 @@ from src.domain.ticket_bound_exchange_command import (
 
 
 MIN_EXCHANGE_COMMAND_COMMIT_MARGIN_MS = 5_000
+
+
+class _ExchangePhaseDeadlineBlocked(RuntimeError):
+    def __init__(
+        self,
+        *,
+        decision: ExchangePhaseDeadlineDecision,
+        command: dict[str, Any],
+        claim_started_at: float | None,
+    ) -> None:
+        super().__init__(decision.blocker or "exchange_command_deadline_blocked")
+        self.decision = decision
+        self.command = command
+        self.claim_started_at = claim_started_at
 
 
 async def run_one_ticket_bound_exchange_command(
@@ -54,6 +74,14 @@ async def run_one_ticket_bound_exchange_command(
     allowed_command_kinds: tuple[str, ...] | None = None,
     netting_domain_key: str | None = None,
     dispatch_timeout_seconds: float | None = None,
+    absolute_deadline_at: float | None = None,
+    entry_network_timeout_seconds: float = 6.0,
+    initial_stop_network_timeout_seconds: float = 6.0,
+    tp1_network_timeout_seconds: float = 4.0,
+    deadline_commit_margin_seconds: float = 5.0,
+    entry_result_commit_reserve_seconds: float = 1.0,
+    initial_stop_result_commit_reserve_seconds: float = 1.0,
+    shutdown_reserve_seconds: float = 1.0,
     drain_initial_protection: bool = False,
 ) -> dict[str, Any]:
     """Run one durable command and optionally drain Entry -> Initial Stop.
@@ -64,10 +92,31 @@ async def run_one_ticket_bound_exchange_command(
     Each exchange I/O still has its own committed claim/result transaction.
     """
 
-    _validate_lease_timeout_budget(
-        lease_ms=lease_ms,
-        dispatch_timeout_seconds=dispatch_timeout_seconds,
+    deadline_budget = (
+        ExchangeCommandDeadlineBudget(
+            absolute_deadline_at=absolute_deadline_at,
+            entry_network_timeout_seconds=entry_network_timeout_seconds,
+            initial_stop_network_timeout_seconds=(
+                initial_stop_network_timeout_seconds
+            ),
+            tp1_network_timeout_seconds=tp1_network_timeout_seconds,
+            deadline_commit_margin_seconds=deadline_commit_margin_seconds,
+            entry_result_commit_reserve_seconds=(
+                entry_result_commit_reserve_seconds
+            ),
+            initial_stop_result_commit_reserve_seconds=(
+                initial_stop_result_commit_reserve_seconds
+            ),
+            shutdown_reserve_seconds=shutdown_reserve_seconds,
+        )
+        if absolute_deadline_at is not None
+        else None
     )
+    if deadline_budget is None:
+        _validate_lease_timeout_budget(
+            lease_ms=lease_ms,
+            dispatch_timeout_seconds=dispatch_timeout_seconds,
+        )
     claim_scope = ExchangeCommandClaimScope(
         command_sources=command_sources,
         source_command_id=source_command_id,
@@ -84,30 +133,33 @@ async def run_one_ticket_bound_exchange_command(
         now_ms=now_ms,
         claim_scope=claim_scope,
         dispatch_timeout_seconds=dispatch_timeout_seconds,
+        deadline_budget=deadline_budget,
     )
+    phases = _phase_telemetry_items(primary)
     if not (
         drain_initial_protection
         and primary.get("status") == "command_confirmed"
         and primary.get("command_source") == "protected_submit"
         and primary.get("order_role") == "ENTRY"
     ):
-        return primary
+        return _attach_exchange_telemetry(
+            primary,
+            phases=phases,
+            deadline_budget=deadline_budget,
+            entry_to_initial_stop_latency_ms=None,
+        )
 
     drained: list[dict[str, Any]] = []
-    deadline_at = (
-        time.monotonic() + dispatch_timeout_seconds
-        if dispatch_timeout_seconds is not None
-        else None
+    entry_committed_at = (
+        phases[0].get("result_committed_at_monotonic") if phases else None
     )
+    entry_to_initial_stop_latency_ms: int | None = None
     drain_roles = ["SL"]
     if allowed_roles is None or "TP1" in allowed_roles:
         drain_roles.append("TP1")
     if allowed_roles is not None and "SL" not in allowed_roles:
         drain_roles = []
     for index, role in enumerate(drain_roles):
-        timeout = dispatch_timeout_seconds
-        if deadline_at is not None:
-            timeout = max(0.001, deadline_at - time.monotonic())
         next_result = await _run_one_ticket_bound_exchange_command(
             engine,
             gateway=gateway,
@@ -124,20 +176,47 @@ async def run_one_ticket_bound_exchange_command(
                 allowed_command_kinds=("place_order",),
                 netting_domain_key=str(primary.get("netting_domain_key") or ""),
             ),
-            dispatch_timeout_seconds=timeout,
+            dispatch_timeout_seconds=dispatch_timeout_seconds,
+            deadline_budget=deadline_budget,
         )
+        next_phases = _phase_telemetry_items(next_result)
+        phases.extend(next_phases)
+        if (
+            role == "SL"
+            and next_result.get("status") == "command_confirmed"
+            and next_phases
+        ):
+            stop_committed_at = next_phases[0].get(
+                "result_committed_at_monotonic"
+            )
+            if entry_committed_at is not None and stop_committed_at is not None:
+                entry_to_initial_stop_latency_ms = max(
+                    0,
+                    int(
+                        round(
+                            (float(stop_committed_at) - float(entry_committed_at))
+                            * 1000
+                        )
+                    ),
+                )
         if next_result.get("status") == "no_prepared_command":
             break
         drained.append(next_result)
         if next_result.get("status") != "command_confirmed":
             break
-    return {
+    payload = {
         **primary,
         "initial_protection_drain": drained,
         "initial_protection_complete": any(
             _matches_initial_stop(primary=primary, candidate=item) for item in drained
         ),
     }
+    return _attach_exchange_telemetry(
+        payload,
+        phases=phases,
+        deadline_budget=deadline_budget,
+        entry_to_initial_stop_latency_ms=entry_to_initial_stop_latency_ms,
+    )
 
 
 async def _run_one_ticket_bound_exchange_command(
@@ -149,6 +228,7 @@ async def _run_one_ticket_bound_exchange_command(
     now_ms: int | None = None,
     claim_scope: ExchangeCommandClaimScope,
     dispatch_timeout_seconds: float | None = None,
+    deadline_budget: ExchangeCommandDeadlineBudget | None = None,
 ) -> dict[str, Any]:
     """Claim -> commit -> exchange I/O -> commit result.
 
@@ -158,27 +238,64 @@ async def _run_one_ticket_bound_exchange_command(
 
     requested_now_ms = now_ms
     now_ms = int(now_ms or time.time() * 1000)
-    with engine.begin() as conn:
-        expired = expire_stale_exchange_command_claims(conn, now_ms=now_ms)
-        for expired_command in expired:
-            upsert_exchange_command_domain_hold(
-                conn,
-                command=expired_command,
-                blockers=["exchange_command_outcome_unknown"],
-                now_ms=now_ms,
+    phase_decision: ExchangePhaseDeadlineDecision | None = None
+    claim_started_at = time.monotonic() if deadline_budget is not None else None
+    dispatch_started_at: float | None = None
+    command_blockers: list[str] = []
+    try:
+        with engine.begin() as conn:
+            expired = expire_stale_exchange_command_claims(conn, now_ms=now_ms)
+            for expired_command in expired:
+                upsert_exchange_command_domain_hold(
+                    conn,
+                    command=expired_command,
+                    blockers=["exchange_command_outcome_unknown"],
+                    now_ms=now_ms,
+                )
+            command = (
+                {}
+                if expired
+                else _claim_if_capable(
+                    conn,
+                    claim_owner=worker_id,
+                    now_ms=now_ms,
+                    lease_ms=lease_ms,
+                    claim_scope=claim_scope,
+                )
             )
-        command = (
-            {}
-            if expired
-            else _claim_if_capable(
-                conn,
-                claim_owner=worker_id,
-                now_ms=now_ms,
-                lease_ms=lease_ms,
-                claim_scope=claim_scope,
-            )
-        )
-        capability = lifecycle_mutation_capability_decision(conn)
+            capability = lifecycle_mutation_capability_decision(conn)
+            if command:
+                command_blockers = _gateway_identity_blockers(
+                    command, gateway
+                ) + _execution_contract_blockers(command)
+            if command and deadline_budget is not None:
+                role = _deadline_role(str(command.get("order_role") or ""))
+                dispatch_started_at = time.monotonic()
+                phase_decision = decide_exchange_phase_budget(
+                    deadline_budget,
+                    role=role,
+                    monotonic_now=dispatch_started_at,
+                    lease_ms=lease_ms,
+                    legacy_timeout_cap_seconds=dispatch_timeout_seconds,
+                    require_pre_entry_reserve=(
+                        role == "ENTRY"
+                        and str(command.get("command_source") or "")
+                        == "protected_submit"
+                    ),
+                )
+                if not phase_decision.allowed:
+                    if (
+                        phase_decision.blocker
+                        == "exchange_command_lease_timeout_budget_invalid"
+                    ):
+                        raise ValueError(phase_decision.blocker)
+                    raise _ExchangePhaseDeadlineBlocked(
+                        decision=phase_decision,
+                        command=command,
+                        claim_started_at=claim_started_at,
+                    )
+    except _ExchangePhaseDeadlineBlocked as blocked:
+        return _deadline_blocked_result(blocked)
     if not command:
         capability_blockers = list(capability.get("blockers") or [])
         return {
@@ -201,10 +318,15 @@ async def _run_one_ticket_bound_exchange_command(
             ),
         }
 
-    command_blockers = _gateway_identity_blockers(
-        command, gateway
-    ) + _execution_contract_blockers(command)
+    effective_timeout_seconds = (
+        phase_decision.effective_timeout_seconds
+        if phase_decision is not None
+        else dispatch_timeout_seconds
+    )
+    if dispatch_started_at is None:
+        dispatch_started_at = time.monotonic()
     if command_blockers:
+        commit_started_at = time.perf_counter()
         with engine.begin() as conn:
             recorded = record_claimed_exchange_command_outcome(
                 conn,
@@ -230,6 +352,8 @@ async def _run_one_ticket_bound_exchange_command(
                 recorded=recorded,
                 now_ms=now_ms,
             )
+        result_commit_latency_ms = _elapsed_ms(commit_started_at)
+        result_committed_at = time.monotonic()
         result_payload = _result(
             "command_hard_stopped",
             recorded,
@@ -237,20 +361,31 @@ async def _run_one_ticket_bound_exchange_command(
             exchange_write_called=False,
         )
         result_payload["lifecycle_completion"] = failure_completion
-        return result_payload
+        return _attach_phase_result(
+            result_payload,
+            command=recorded,
+            phase_decision=phase_decision,
+            claim_started_at=claim_started_at,
+            effective_timeout_seconds=effective_timeout_seconds,
+            dispatch_started_at=dispatch_started_at,
+            result_committed_at=result_committed_at,
+            exchange_request_count=0,
+            result_commit_latency_ms=result_commit_latency_ms,
+        )
 
     try:
         exchange_result = (
             await asyncio.wait_for(
                 _dispatch(command, gateway),
-                timeout=dispatch_timeout_seconds,
+                timeout=effective_timeout_seconds,
             )
-            if dispatch_timeout_seconds is not None
+            if effective_timeout_seconds is not None
             else await _dispatch(command, gateway)
         )
     except (InvalidOrderError, InsufficientMarginError) as exc:
         now_ms = _completion_now_ms(requested_now_ms)
         blocker = str(exc)
+        commit_started_at = time.perf_counter()
         with engine.begin() as conn:
             recorded = record_claimed_exchange_command_outcome(
                 conn,
@@ -277,6 +412,8 @@ async def _run_one_ticket_bound_exchange_command(
                 recorded=recorded,
                 now_ms=now_ms,
             )
+        result_commit_latency_ms = _elapsed_ms(commit_started_at)
+        result_committed_at = time.monotonic()
         result_payload = _result(
             "command_rejected",
             recorded,
@@ -285,9 +422,20 @@ async def _run_one_ticket_bound_exchange_command(
         )
         if failure_completion:
             result_payload["lifecycle_completion"] = [failure_completion]
-        return result_payload
+        return _attach_phase_result(
+            result_payload,
+            command=recorded,
+            phase_decision=phase_decision,
+            claim_started_at=claim_started_at,
+            effective_timeout_seconds=effective_timeout_seconds,
+            dispatch_started_at=dispatch_started_at,
+            result_committed_at=result_committed_at,
+            exchange_request_count=1,
+            result_commit_latency_ms=result_commit_latency_ms,
+        )
     except Exception as exc:
         now_ms = _completion_now_ms(requested_now_ms)
+        commit_started_at = time.perf_counter()
         with engine.begin() as conn:
             recorded = record_claimed_exchange_command_outcome(
                 conn,
@@ -309,11 +457,24 @@ async def _run_one_ticket_bound_exchange_command(
                 blockers=["exchange_command_outcome_unknown"],
                 now_ms=now_ms,
             )
-        return _result(
+        result_commit_latency_ms = _elapsed_ms(commit_started_at)
+        result_committed_at = time.monotonic()
+        result_payload = _result(
             "command_outcome_unknown",
             recorded,
             blockers=["exchange_command_outcome_unknown"],
             exchange_write_called=True,
+        )
+        return _attach_phase_result(
+            result_payload,
+            command=recorded,
+            phase_decision=phase_decision,
+            claim_started_at=claim_started_at,
+            effective_timeout_seconds=effective_timeout_seconds,
+            dispatch_started_at=dispatch_started_at,
+            result_committed_at=result_committed_at,
+            exchange_request_count=1,
+            result_commit_latency_ms=result_commit_latency_ms,
         )
 
     accepted, exchange_order_id, error = _accepted_result(
@@ -322,6 +483,7 @@ async def _run_one_ticket_bound_exchange_command(
     )
     placement_facts = _placement_result_facts(exchange_result)
     now_ms = _completion_now_ms(requested_now_ms)
+    commit_started_at = time.perf_counter()
     try:
         with engine.begin() as conn:
             recorded = record_claimed_exchange_command_outcome(
@@ -349,7 +511,7 @@ async def _run_one_ticket_bound_exchange_command(
             project_entry_effect(conn, command=recorded, now_ms=now_ms)
             project_protection_result(conn, command=recorded, now_ms=now_ms)
     except ValueError as exc:
-        return _record_contradictory_exchange_result(
+        result_payload = _record_contradictory_exchange_result(
             engine,
             command=command,
             exchange_order_id=exchange_order_id,
@@ -357,6 +519,21 @@ async def _run_one_ticket_bound_exchange_command(
             error=exc,
             now_ms=now_ms,
         )
+        result_commit_latency_ms = _elapsed_ms(commit_started_at)
+        result_committed_at = time.monotonic()
+        return _attach_phase_result(
+            result_payload,
+            command=command,
+            phase_decision=phase_decision,
+            claim_started_at=claim_started_at,
+            effective_timeout_seconds=effective_timeout_seconds,
+            dispatch_started_at=dispatch_started_at,
+            result_committed_at=result_committed_at,
+            exchange_request_count=1,
+            result_commit_latency_ms=result_commit_latency_ms,
+        )
+    result_commit_latency_ms = _elapsed_ms(commit_started_at)
+    result_committed_at = time.monotonic()
     with engine.begin() as conn:
         if not accepted:
             upsert_exchange_command_domain_hold(
@@ -390,7 +567,17 @@ async def _run_one_ticket_bound_exchange_command(
     result_payload["lifecycle_completion"] = completion
     if failure_completion:
         result_payload["lifecycle_completion"] = [failure_completion]
-    return result_payload
+    return _attach_phase_result(
+        result_payload,
+        command=recorded,
+        phase_decision=phase_decision,
+        claim_started_at=claim_started_at,
+        effective_timeout_seconds=effective_timeout_seconds,
+        dispatch_started_at=dispatch_started_at,
+        result_committed_at=result_committed_at,
+        exchange_request_count=1,
+        result_commit_latency_ms=result_commit_latency_ms,
+    )
 
 
 def _record_contradictory_exchange_result(
@@ -667,6 +854,125 @@ def _matches_initial_stop(
     )
 
 
+def _deadline_role(order_role: str) -> str:
+    role = str(order_role or "").upper()
+    if role == "ENTRY":
+        return "ENTRY"
+    if role == "TP1":
+        return "TP1"
+    return "SL"
+
+
+def _deadline_blocked_result(
+    blocked: _ExchangePhaseDeadlineBlocked,
+) -> dict[str, Any]:
+    command = {**blocked.command, "command_state": "prepared"}
+    blocker = blocked.decision.blocker or "exchange_command_deadline_blocked"
+    payload = _result(
+        "hard_safety_stop",
+        command,
+        blockers=[blocker],
+        exchange_write_called=False,
+    )
+    return _attach_phase_result(
+        payload,
+        command=command,
+        phase_decision=blocked.decision,
+        claim_started_at=blocked.claim_started_at,
+        effective_timeout_seconds=blocked.decision.effective_timeout_seconds,
+        dispatch_started_at=None,
+        result_committed_at=None,
+        exchange_request_count=0,
+        result_commit_latency_ms=0,
+    )
+
+
+def _attach_phase_result(
+    payload: dict[str, Any],
+    *,
+    command: dict[str, Any],
+    phase_decision: ExchangePhaseDeadlineDecision | None,
+    claim_started_at: float | None,
+    effective_timeout_seconds: float | None,
+    dispatch_started_at: float | None,
+    result_committed_at: float | None,
+    exchange_request_count: int,
+    result_commit_latency_ms: int,
+) -> dict[str, Any]:
+    deadline_remaining_before = (
+        phase_decision.deadline_remaining_seconds
+        if phase_decision is not None
+        else None
+    )
+    deadline_remaining_after = (
+        max(0.0, phase_decision.absolute_deadline_at - time.monotonic())
+        if phase_decision is not None
+        else None
+    )
+    phase = {
+        "schema": "brc.exchange_command_phase_telemetry.v1",
+        "order_role": command.get("order_role"),
+        "command_source": command.get("command_source"),
+        "source_command_id": command.get("source_command_id"),
+        "protected_submit_attempt_id": command.get(
+            "protected_submit_attempt_id"
+        ),
+        "exchange_command_id": command.get("exchange_command_id"),
+        "effective_timeout_seconds": effective_timeout_seconds,
+        "absolute_deadline_at": (
+            phase_decision.absolute_deadline_at
+            if phase_decision is not None
+            else None
+        ),
+        "deadline_remaining_before_seconds": deadline_remaining_before,
+        "deadline_remaining_after_seconds": deadline_remaining_after,
+        "claim_started_at_monotonic": claim_started_at,
+        "dispatch_started_at_monotonic": dispatch_started_at,
+        "result_committed_at_monotonic": result_committed_at,
+        "exchange_request_count": int(exchange_request_count),
+        "result_status": payload.get("status"),
+        "result_commit_latency_ms": max(0, int(result_commit_latency_ms)),
+    }
+    return {**payload, "exchange_phase_telemetry": phase}
+
+
+def _phase_telemetry_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    phase = payload.get("exchange_phase_telemetry")
+    return [dict(phase)] if isinstance(phase, dict) else []
+
+
+def _attach_exchange_telemetry(
+    payload: dict[str, Any],
+    *,
+    phases: list[dict[str, Any]],
+    deadline_budget: ExchangeCommandDeadlineBudget | None,
+    entry_to_initial_stop_latency_ms: int | None,
+) -> dict[str, Any]:
+    telemetry = {
+        "schema": "brc.ticket_bound_exchange_command_telemetry.v1",
+        "absolute_deadline_at": (
+            deadline_budget.absolute_deadline_at
+            if deadline_budget is not None
+            else None
+        ),
+        "exchange_request_count": sum(
+            int(item.get("exchange_request_count") or 0) for item in phases
+        ),
+        "phases": phases,
+        "entry_to_initial_stop_latency_ms": entry_to_initial_stop_latency_ms,
+        "deadline_budget": (
+            deadline_budget.model_dump()
+            if deadline_budget is not None
+            else None
+        ),
+    }
+    return {**payload, "exchange_telemetry": telemetry}
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, int(round((time.perf_counter() - started_at) * 1000)))
+
+
 def _validate_lease_timeout_budget(
     *,
     lease_ms: int,
@@ -676,7 +982,12 @@ def _validate_lease_timeout_budget(
         raise ValueError("exchange_command_claim_lease_invalid")
     if dispatch_timeout_seconds is None:
         return
-    required_lease_ms = int(dispatch_timeout_seconds * 1000) + (
+    if (
+        not math.isfinite(dispatch_timeout_seconds)
+        or dispatch_timeout_seconds <= 0
+    ):
+        raise ValueError("exchange_command_dispatch_timeout_invalid")
+    required_lease_ms = math.ceil(dispatch_timeout_seconds * 1000) + (
         MIN_EXCHANGE_COMMAND_COMMIT_MARGIN_MS
     )
     if lease_ms < required_lease_ms:

@@ -656,6 +656,11 @@ async def test_worker_owned_dispatch_timeout_persists_outcome_unknown(
     assert result["command_state"] == "outcome_unknown"
     assert result["exchange_write_called"] is True
     assert len(gateway.calls) == 1
+    assert result["exchange_telemetry"]["exchange_request_count"] == 1
+    assert result["exchange_telemetry"]["phases"][0]["order_role"] == "ENTRY"
+    assert result["exchange_telemetry"]["phases"][0]["result_status"] == (
+        "command_outcome_unknown"
+    )
 
 
 @pytest.mark.asyncio
@@ -931,6 +936,11 @@ async def test_entry_rejection_terminalizes_undispatched_protection_siblings(
     )
 
     assert result["status"] == "command_rejected"
+    assert result["exchange_telemetry"]["exchange_request_count"] == 1
+    assert result["exchange_telemetry"]["phases"][0]["order_role"] == "ENTRY"
+    assert result["exchange_telemetry"]["phases"][0]["result_status"] == (
+        "command_rejected"
+    )
     commands = list(
         pg_control_connection.execute(
             text(

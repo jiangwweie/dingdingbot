@@ -28,6 +28,65 @@ def test_cli_global_deadline_defaults_below_systemd_timeout():
 
     assert args.global_deadline_seconds == 28.0
     assert args.global_deadline_seconds < 35.0
+    assert args.entry_command_timeout_seconds == 6.0
+    assert args.initial_stop_command_timeout_seconds == 6.0
+    assert args.tp1_command_timeout_seconds == 4.0
+    assert args.deadline_commit_margin_seconds == 5.0
+    assert args.entry_result_commit_reserve_seconds == 1.0
+    assert args.initial_stop_result_commit_reserve_seconds == 1.0
+    assert args.deadline_shutdown_reserve_seconds == 1.0
+
+
+def test_cli_passes_the_exact_invocation_deadline_and_phase_budgets():
+    args = lifecycle_cli._parse_args(["--database-url", "postgresql://unit"])
+
+    assert lifecycle_cli._exchange_command_deadline_kwargs(
+        args,
+        absolute_deadline_at=123.456,
+    ) == {
+        "absolute_deadline_at": 123.456,
+        "entry_network_timeout_seconds": 6.0,
+        "initial_stop_network_timeout_seconds": 6.0,
+        "tp1_network_timeout_seconds": 4.0,
+        "deadline_commit_margin_seconds": 5.0,
+        "entry_result_commit_reserve_seconds": 1.0,
+        "initial_stop_result_commit_reserve_seconds": 1.0,
+        "shutdown_reserve_seconds": 1.0,
+    }
+
+
+@pytest.mark.parametrize(
+    "flag",
+    (
+        "--entry-command-timeout-seconds",
+        "--initial-stop-command-timeout-seconds",
+        "--tp1-command-timeout-seconds",
+        "--deadline-commit-margin-seconds",
+        "--entry-result-commit-reserve-seconds",
+        "--initial-stop-result-commit-reserve-seconds",
+        "--deadline-shutdown-reserve-seconds",
+    ),
+)
+@pytest.mark.parametrize("value", ("nan", "inf", "-inf"))
+def test_cli_rejects_non_finite_exchange_command_budgets(flag, value):
+    with pytest.raises(SystemExit):
+        lifecycle_cli._parse_args(
+            ["--database-url", "postgresql://unit", flag, value]
+        )
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    (
+        ("--global-deadline-seconds", "15"),
+        ("--command-lease-ms", "10999"),
+    ),
+)
+def test_cli_rejects_invalid_deadline_and_lease_inequalities(extra_args):
+    with pytest.raises(SystemExit):
+        lifecycle_cli._parse_args(
+            ["--database-url", "postgresql://unit", *extra_args]
+        )
 
 
 def test_expired_global_deadline_blocks_next_stage(monkeypatch):
@@ -100,6 +159,12 @@ async def test_entry_drain_uses_the_invocation_absolute_deadline_without_resetti
         command_sources=("protected_submit",),
         dispatch_timeout_seconds=10.0,
         absolute_deadline_at=110.0,
+        entry_network_timeout_seconds=1.0,
+        initial_stop_network_timeout_seconds=1.0,
+        tp1_network_timeout_seconds=1.0,
+        entry_result_commit_reserve_seconds=0.25,
+        initial_stop_result_commit_reserve_seconds=0.25,
+        shutdown_reserve_seconds=0.5,
         drain_initial_protection=True,
     )
 
@@ -112,6 +177,400 @@ async def test_entry_drain_uses_the_invocation_absolute_deadline_without_resetti
             "WHERE order_role = 'SL'"
         )
     ).scalar_one() == "prepared"
+    assert result["exchange_telemetry"]["exchange_request_count"] == 1
+    assert result["exchange_telemetry"]["absolute_deadline_at"] == 110.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("remaining_seconds", "expected_gateway_calls"),
+    ((4.999, 0), (5.0, 0), (6.0, 1)),
+)
+async def test_worker_fails_closed_at_deadline_commit_margin_boundary(
+    monkeypatch,
+    pg_control_connection,
+    remaining_seconds,
+    expected_gateway_calls,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_DeadlineGateway(),
+        worker_id="deadline-boundary-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    clock = {"now": 100.0}
+    monkeypatch.setattr(
+        exchange_command_worker.time,
+        "monotonic",
+        lambda: clock["now"],
+    )
+    gateway = _DeadlineGateway()
+    result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="deadline-boundary-stop",
+        now_ms=NOW_MS + 5001,
+        lease_ms=6_000,
+        command_sources=("protected_submit",),
+        source_command_id=prepared["protected_submit_attempt_id"],
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        allowed_roles=("SL",),
+        dispatch_timeout_seconds=10.0,
+        absolute_deadline_at=clock["now"] + remaining_seconds,
+    )
+
+    assert len(gateway.calls) == expected_gateway_calls
+    if expected_gateway_calls:
+        assert result["status"] == "command_confirmed"
+        assert result["exchange_telemetry"]["phases"][0][
+            "effective_timeout_seconds"
+        ] == 1.0
+    else:
+        assert result["first_blocker"] == (
+            "exchange_command_deadline_budget_exhausted_before_io"
+        )
+        assert pg_control_connection.execute(
+            text(
+                "SELECT command_state FROM brc_ticket_bound_exchange_commands "
+                "WHERE order_role = 'SL'"
+            )
+        ).scalar_one() == "prepared"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("remaining_seconds", "expected_gateway_calls"),
+    ((14.999, 0), (15.0, 1)),
+)
+async def test_worker_reserves_initial_protection_budget_before_entry_claim(
+    monkeypatch,
+    pg_control_connection,
+    remaining_seconds,
+    expected_gateway_calls,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    clock = {"now": 100.0}
+    monkeypatch.setattr(
+        exchange_command_worker.time,
+        "monotonic",
+        lambda: clock["now"],
+    )
+    gateway = _DeadlineGateway()
+    result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="pre-entry-reserve-worker",
+        now_ms=NOW_MS + 5000,
+        lease_ms=35_000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+        dispatch_timeout_seconds=10.0,
+        absolute_deadline_at=clock["now"] + remaining_seconds,
+    )
+
+    assert len(gateway.calls) == expected_gateway_calls
+    if expected_gateway_calls:
+        assert result["status"] == "command_confirmed"
+    else:
+        assert result["first_blocker"] == (
+            "protection_deadline_budget_insufficient_before_entry"
+        )
+        command = pg_control_connection.execute(
+            text(
+                "SELECT command_state, execution_attempt_count FROM "
+                "brc_ticket_bound_exchange_commands WHERE order_role = 'ENTRY'"
+            )
+        ).mappings().one()
+        assert command == {
+            "command_state": "prepared",
+            "execution_attempt_count": 0,
+        }
+        assert result["exchange_telemetry"]["exchange_request_count"] == 0
+
+
+class _DeadlineGateway:
+    runtime_account_id = "owner-subaccount-runtime-v0"
+    runtime_exchange_id = "binance_usdm"
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def place_order(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+            filled_qty=kwargs["amount"],
+            average_exec_price=Decimal("2000"),
+            exchange_order_status="FILLED",
+        )
+
+
+@pytest.mark.asyncio
+async def test_entry_sl_tp1_share_one_deadline_and_decreasing_budget(
+    monkeypatch,
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    clock = {"now": 100.0}
+
+    class AdvancingGateway(_DeadlineGateway):
+        async def place_order(self, **kwargs):
+            result = await super().place_order(**kwargs)
+            clock["now"] += 1.0
+            return result
+
+    monkeypatch.setattr(
+        exchange_command_worker.time,
+        "monotonic",
+        lambda: clock["now"],
+    )
+    result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=AdvancingGateway(),
+        worker_id="same-deadline-worker",
+        now_ms=NOW_MS + 5000,
+        lease_ms=35_000,
+        command_sources=("protected_submit",),
+        dispatch_timeout_seconds=10.0,
+        absolute_deadline_at=130.0,
+        drain_initial_protection=True,
+    )
+
+    telemetry = result["exchange_telemetry"]
+    assert result["initial_protection_complete"] is True
+    assert telemetry["exchange_request_count"] == 3
+    assert [item["order_role"] for item in telemetry["phases"]] == [
+        "ENTRY",
+        "SL",
+        "TP1",
+    ]
+    assert {item["absolute_deadline_at"] for item in telemetry["phases"]} == {
+        130.0
+    }
+    assert [
+        item["deadline_remaining_before_seconds"]
+        for item in telemetry["phases"]
+    ] == [30.0, 29.0, 28.0]
+    assert [item["effective_timeout_seconds"] for item in telemetry["phases"]] == [
+        6.0,
+        6.0,
+        4.0,
+    ]
+    assert all(item["result_commit_latency_ms"] >= 0 for item in telemetry["phases"])
+    assert telemetry["entry_to_initial_stop_latency_ms"] == 1_000
+    assert [
+        item["result_committed_at_monotonic"] for item in telemetry["phases"]
+    ] == [101.0, 102.0, 103.0]
+
+
+@pytest.mark.asyncio
+async def test_worker_rechecks_deadline_after_claim_before_gateway_io(
+    monkeypatch,
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_DeadlineGateway(),
+        worker_id="deadline-recheck-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    clock = {"calls": 0}
+
+    def monotonic() -> float:
+        clock["calls"] += 1
+        return 100.0 if clock["calls"] == 1 else 106.0
+
+    monkeypatch.setattr(exchange_command_worker.time, "monotonic", monotonic)
+    gateway = _DeadlineGateway()
+    result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="deadline-recheck-stop",
+        now_ms=NOW_MS + 5001,
+        lease_ms=35_000,
+        command_sources=("protected_submit",),
+        source_command_id=prepared["protected_submit_attempt_id"],
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        allowed_roles=("SL",),
+        absolute_deadline_at=111.0,
+    )
+
+    assert clock["calls"] >= 2
+    assert gateway.calls == []
+    assert result["first_blocker"] == (
+        "exchange_command_deadline_budget_exhausted_before_io"
+    )
+    assert pg_control_connection.execute(
+        text(
+            "SELECT command_state, execution_attempt_count FROM "
+            "brc_ticket_bound_exchange_commands WHERE order_role = 'SL'"
+        )
+    ).mappings().one() == {
+        "command_state": "prepared",
+        "execution_attempt_count": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_result_commit_latency_excludes_lifecycle_completion_transaction(
+    monkeypatch,
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    perf_clock = {"now": 100.0}
+    original_completion = (
+        exchange_command_worker.apply_completed_lifecycle_exchange_sources
+    )
+
+    def delayed_completion(*args, **kwargs):
+        perf_clock["now"] += 5.0
+        return original_completion(*args, **kwargs)
+
+    monkeypatch.setattr(
+        exchange_command_worker.time,
+        "perf_counter",
+        lambda: perf_clock["now"],
+    )
+    monkeypatch.setattr(
+        exchange_command_worker,
+        "apply_completed_lifecycle_exchange_sources",
+        delayed_completion,
+    )
+    result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_DeadlineGateway(),
+        worker_id="result-commit-latency-worker",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+
+    assert result["exchange_telemetry"]["phases"][0][
+        "result_commit_latency_ms"
+    ] == 0
+
+
+@pytest.mark.asyncio
+async def test_tp1_deadline_exhaustion_preserves_confirmed_initial_stop(
+    monkeypatch,
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    clock = {"now": 100.0}
+
+    class StopConsumesBudgetGateway(_DeadlineGateway):
+        async def place_order(self, **kwargs):
+            result = await super().place_order(**kwargs)
+            if kwargs["order_type"] == "market":
+                clock["now"] = 105.0
+            elif kwargs["order_type"] == "stop_market":
+                clock["now"] = 120.0
+            return result
+
+    monkeypatch.setattr(
+        exchange_command_worker.time,
+        "monotonic",
+        lambda: clock["now"],
+    )
+    gateway = StopConsumesBudgetGateway()
+    result = await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="tp1-budget-exhaustion",
+        now_ms=NOW_MS + 5000,
+        lease_ms=35_000,
+        command_sources=("protected_submit",),
+        dispatch_timeout_seconds=10.0,
+        absolute_deadline_at=125.0,
+        drain_initial_protection=True,
+    )
+
+    assert [call["order_type"] for call in gateway.calls] == [
+        "market",
+        "stop_market",
+    ]
+    assert result["initial_protection_complete"] is True
+    assert result["exchange_telemetry"]["exchange_request_count"] == 2
+    assert result["initial_protection_drain"][-1]["first_blocker"] == (
+        "exchange_command_deadline_budget_exhausted_before_io"
+    )
+    states = dict(
+        pg_control_connection.execute(
+            text(
+                "SELECT order_role, command_state FROM "
+                "brc_ticket_bound_exchange_commands WHERE order_role IN ('SL', 'TP1')"
+            )
+        ).all()
+    )
+    assert states == {"SL": "confirmed_submitted", "TP1": "prepared"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("lease_ms", "allowed"), ((7_000, True), (6_999, False)))
+async def test_worker_lease_inequality_uses_deadline_capped_timeout(
+    monkeypatch,
+    pg_control_connection,
+    lease_ms,
+    allowed,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    prepared = _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    await exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=_DeadlineGateway(),
+        worker_id="lease-cap-entry",
+        now_ms=NOW_MS + 5000,
+        command_sources=("protected_submit",),
+        allowed_roles=("ENTRY",),
+    )
+    monkeypatch.setattr(exchange_command_worker.time, "monotonic", lambda: 103.0)
+    gateway = _DeadlineGateway()
+    call = exchange_command_worker.run_one_ticket_bound_exchange_command(
+        pg_control_connection.engine,
+        gateway=gateway,
+        worker_id="lease-cap-stop",
+        now_ms=NOW_MS + 5001,
+        lease_ms=lease_ms,
+        command_sources=("protected_submit",),
+        source_command_id=prepared["protected_submit_attempt_id"],
+        protected_submit_attempt_id=prepared["protected_submit_attempt_id"],
+        allowed_roles=("SL",),
+        dispatch_timeout_seconds=10.0,
+        absolute_deadline_at=110.0,
+    )
+    if not allowed:
+        with pytest.raises(
+            ValueError,
+            match="exchange_command_lease_timeout_budget_invalid",
+        ):
+            await call
+        assert gateway.calls == []
+        return
+    result = await call
+    assert result["status"] == "command_confirmed"
+    assert result["exchange_telemetry"]["phases"][0][
+        "effective_timeout_seconds"
+    ] == 2.0
 
 
 def test_gateway_probe_owns_durable_protected_submit_command_source(

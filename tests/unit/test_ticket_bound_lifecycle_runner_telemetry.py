@@ -36,6 +36,13 @@ def test_systemd_timeout_hierarchy_leaves_structured_failure_margin():
     unit = (ROOT / "deploy/systemd/brc-ticket-lifecycle-maintenance.service").read_text()
 
     assert "--global-deadline-seconds 28" in unit
+    assert "--entry-command-timeout-seconds 6" in unit
+    assert "--initial-stop-command-timeout-seconds 6" in unit
+    assert "--tp1-command-timeout-seconds 4" in unit
+    assert "--deadline-commit-margin-seconds 5" in unit
+    assert "--entry-result-commit-reserve-seconds 1" in unit
+    assert "--initial-stop-result-commit-reserve-seconds 1" in unit
+    assert "--deadline-shutdown-reserve-seconds 1" in unit
     assert "/usr/bin/timeout --foreground --signal=TERM --kill-after=2s 36s" in unit
     assert "TimeoutStartSec=45s" in unit
     assert "/usr/bin/time -f" not in unit
@@ -46,3 +53,12 @@ def test_lifecycle_runner_uses_lightweight_gateway_binding():
 
     assert "src.infrastructure.runtime_exchange_gateway_binding" in source
     assert "src.interfaces" not in source
+
+
+def test_runner_counts_real_worker_exchange_requests_only():
+    assert lifecycle_cli._worker_exchange_request_count(
+        {"exchange_telemetry": {"exchange_request_count": 3}}
+    ) == 3
+    assert lifecycle_cli._worker_exchange_request_count(
+        {"exchange_write_called": True}
+    ) == 0

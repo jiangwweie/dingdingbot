@@ -7,6 +7,7 @@ import argparse
 import asyncio
 from contextlib import contextmanager
 import json
+import math
 import os
 from pathlib import Path
 import resource
@@ -66,6 +67,9 @@ from src.infrastructure.binance_usdm_account_risk_snapshot import (  # noqa: E40
 )
 from src.infrastructure.binance_usdm_streaming_signed_reader import (  # noqa: E402
     BinanceUsdmStreamingSignedReader,
+)
+from src.domain.exchange_command_deadline import (  # noqa: E402
+    ExchangeCommandDeadlineBudget,
 )
 from scripts.collect_strategy_group_live_facts_readonly import (  # noqa: E402
     DEFAULT_BASE_URL,
@@ -231,20 +235,26 @@ async def _amain(argv: list[str] | None = None) -> int:
             and gateway is not None
             and reconciliation_payload.get("status") == "no_unknown_commands"
         ):
-            dispatch_timeout = max(
-                0.1,
-                _remaining_seconds(deadline_at, "durable_exchange_command") - 1.0,
-            )
             with telemetry.stage("durable_exchange_command"):
-                telemetry.exchange_request_count += 1
                 worker_payload = await run_one_ticket_bound_exchange_command(
                     engine,
                     gateway=gateway,
                     worker_id=f"ticket-lifecycle:{os.getpid()}",
                     lease_ms=args.command_lease_ms,
                     command_sources=LIFECYCLE_MUTATION_COMMAND_SOURCES,
-                    dispatch_timeout_seconds=dispatch_timeout,
+                    dispatch_timeout_seconds=max(
+                        args.entry_command_timeout_seconds,
+                        args.initial_stop_command_timeout_seconds,
+                        args.tp1_command_timeout_seconds,
+                    ),
+                    **_exchange_command_deadline_kwargs(
+                        args,
+                        absolute_deadline_at=deadline_at,
+                    ),
                     drain_initial_protection=True,
+                )
+                telemetry.exchange_request_count += _worker_exchange_request_count(
+                    worker_payload
                 )
             _remaining_seconds(deadline_at, "durable_exchange_command_result")
 
@@ -411,7 +421,7 @@ async def _amain(argv: list[str] | None = None) -> int:
                 worker_payload.get("exchange_write_called") is True
             ),
             "network_inside_pg_transaction": False,
-            "max_mutation_commands_per_invocation": 1,
+            "max_mutation_commands_per_invocation": 3,
             "global_deadline_seconds": float(args.global_deadline_seconds),
             "deadline_remaining_seconds": max(0.0, deadline_at - time.monotonic()),
             "performance": telemetry.snapshot(deadline_at=deadline_at),
@@ -751,10 +761,91 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--account-risk-timeout-seconds", type=float, default=12.0)
     parser.add_argument("--command-lease-ms", type=int, default=35_000)
     parser.add_argument("--global-deadline-seconds", type=float, default=28.0)
+    parser.add_argument("--entry-command-timeout-seconds", type=float, default=6.0)
+    parser.add_argument(
+        "--initial-stop-command-timeout-seconds",
+        type=float,
+        default=6.0,
+    )
+    parser.add_argument("--tp1-command-timeout-seconds", type=float, default=4.0)
+    parser.add_argument(
+        "--deadline-commit-margin-seconds",
+        type=float,
+        default=5.0,
+    )
+    parser.add_argument(
+        "--entry-result-commit-reserve-seconds",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--initial-stop-result-commit-reserve-seconds",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--deadline-shutdown-reserve-seconds",
+        type=float,
+        default=1.0,
+    )
     args = parser.parse_args(argv)
-    if args.global_deadline_seconds <= 0:
-        parser.error("--global-deadline-seconds must be positive")
+    try:
+        budget = ExchangeCommandDeadlineBudget(
+            **_exchange_command_deadline_kwargs(
+                args,
+                absolute_deadline_at=args.global_deadline_seconds,
+            ),
+        )
+    except ValueError as exc:
+        parser.error(f"invalid exchange-command deadline budget: {exc}")
+    if args.global_deadline_seconds <= budget.pre_entry_reserve_seconds:
+        parser.error(
+            "--global-deadline-seconds must exceed the protected ENTRY reserve"
+        )
+    required_lease_ms = math.ceil(
+        max(
+            budget.entry_network_timeout_seconds,
+            budget.initial_stop_network_timeout_seconds,
+            budget.tp1_network_timeout_seconds,
+        )
+        * 1000
+    ) + math.ceil(budget.deadline_commit_margin_seconds * 1000)
+    if args.command_lease_ms < required_lease_ms:
+        parser.error(
+            "--command-lease-ms must cover the largest command timeout plus "
+            "deadline commit margin"
+        )
     return args
+
+
+def _exchange_command_deadline_kwargs(
+    args: argparse.Namespace,
+    *,
+    absolute_deadline_at: float,
+) -> dict[str, float]:
+    return {
+        "absolute_deadline_at": absolute_deadline_at,
+        "entry_network_timeout_seconds": args.entry_command_timeout_seconds,
+        "initial_stop_network_timeout_seconds": (
+            args.initial_stop_command_timeout_seconds
+        ),
+        "tp1_network_timeout_seconds": args.tp1_command_timeout_seconds,
+        "deadline_commit_margin_seconds": args.deadline_commit_margin_seconds,
+        "entry_result_commit_reserve_seconds": (
+            args.entry_result_commit_reserve_seconds
+        ),
+        "initial_stop_result_commit_reserve_seconds": (
+            args.initial_stop_result_commit_reserve_seconds
+        ),
+        "shutdown_reserve_seconds": args.deadline_shutdown_reserve_seconds,
+    }
+
+
+def _worker_exchange_request_count(payload: dict[str, Any]) -> int:
+    telemetry = payload.get("exchange_telemetry")
+    if not isinstance(telemetry, dict):
+        return 0
+    return max(0, int(telemetry.get("exchange_request_count") or 0))
 
 
 async def _await_before_deadline(
