@@ -764,6 +764,9 @@ def test_forward_fix_fence_supersession_allows_post_activation_pre_policy(tmp_pa
         if phase == "schema_migrated":
             result["revision"] = "136"
         journal.append(phase, {"result": result})
+    activation_index = machine.DEPLOY_PHASES.index("runtime_activation_committed")
+    for phase in machine.DEPLOY_PHASES[projection_index + 1:activation_index + 1]:
+        journal.append(phase, {"result": {"status": phase}})
     marker = tmp_path / "production-writers.blocked"
     marker.write_text(json.dumps({
         "schema": "brc.production_writer_fence.v1", "deploy_transaction_id": "deadbeef",
@@ -791,6 +794,18 @@ def test_forward_fix_fence_supersession_allows_post_activation_pre_policy(tmp_pa
     )
 
     assert result["mode"] == "post_activation_pre_policy"
+    journal.append("policy_applied", {"result": {"status": "policy_applied"}})
+
+    with pytest.raises(
+        ValueError, match="fence_supersession_predecessor_phase_invalid"
+    ):
+        machine.validate_forward_fix_fence_supersession(
+            predecessor_transaction_id="deadbeef", predecessor_deploy_nonce="old-nonce",
+            old_sha=predecessor_sha, target_sha=successor_sha,
+            previous_release_path=previous, app_current=current, expected_revision="136",
+            release_path=release, env_path=env_file, deploy_journal_directory=journal_dir,
+            runner=runner, require_root_owner=False, fence_marker=marker,
+        )
 
 
 def test_forward_fix_fence_supersession_recovers_committed_but_unjournaled_migration(

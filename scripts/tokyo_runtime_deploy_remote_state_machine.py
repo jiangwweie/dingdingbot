@@ -2029,11 +2029,11 @@ def validate_forward_fix_fence_supersession(
 ) -> dict[str, Any]:
     """Authorize a one-way successor before replacing a stranded fence.
 
-    A different deployment lineage may take over only before the predecessor's
-    migration has committed.  This is intentionally narrower than resume: it
-    proves the old pointer and schema are still compatible, writers remain
-    disabled, and the old journal's captured restore policy is inherited rather
-    than recaptured from the contained host.
+    A different deployment lineage may take over only while the predecessor
+    remains contained and has not applied its policy.  This is intentionally
+    narrower than resume: it proves the old pointer and schema are still
+    compatible, writers remain disabled, and the old journal's captured
+    restore policy is inherited rather than recaptured from the contained host.
     """
 
     predecessor_transaction_id = _required(
@@ -2055,7 +2055,16 @@ def validate_forward_fix_fence_supersession(
     if predecessor.transaction_id != predecessor_transaction_id or predecessor.deploy_nonce != predecessor_deploy_nonce:
         raise ValueError("fence_supersession_predecessor_journal_lineage_mismatch")
     phases = [str(entry.get("phase") or "") for entry in predecessor.entries]
-    if not phases or "runtime_activation_committed" in phases:
+    activation_index = DEPLOY_PHASES.index("runtime_activation_committed")
+    if (
+        not phases
+        or "policy_applied" in phases
+        or len(phases) - 1 > activation_index
+        or (
+            "runtime_activation_committed" in phases
+            and phases[-1] != "runtime_activation_committed"
+        )
+    ):
         raise ValueError("fence_supersession_predecessor_phase_invalid")
     post_migration = "schema_migrated" in phases
     if not post_migration and phases[-1] != "migration_in_progress":
