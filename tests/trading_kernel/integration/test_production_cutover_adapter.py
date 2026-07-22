@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from enum import StrEnum
 from types import ModuleType
 
 import pytest
@@ -79,6 +80,22 @@ async def test_cutover_phase_actions_preserve_entry_fence_and_exact_old_units() 
     assert system.phase_state.exchange_writes_fenced is True
     assert system.phase_state.entry_timer_enabled is False
     assert system.phase_state.exchange_commands_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_cutover_accepts_equivalent_phase_from_cli_main_module() -> None:
+    module = _production_adapter_module()
+    system = FakeTokyoSystem(module, _facts())
+    adapter = module.TokyoCutoverAdapter(system)
+    plan = _plan()
+    await adapter.inspect_preconditions(plan)
+
+    class MainModulePhase(StrEnum):
+        FENCE_EXCHANGE_WRITES = "fence_exchange_writes"
+
+    await adapter.apply_phase(MainModulePhase.FENCE_EXCHANGE_WRITES, plan)
+
+    assert system.actions == [("fence_new_entry", ())]
 
 
 @pytest.mark.asyncio

@@ -179,30 +179,31 @@ class TokyoCutoverAdapter:
 
     async def apply_phase(self, phase: CutoverPhase, plan: CutoverPlan) -> None:
         await self._require_non_quant_baseline(plan)
-        if phase is CutoverPhase.FENCE_EXCHANGE_WRITES:
+        phase_value = phase.value
+        if phase_value == CutoverPhase.FENCE_EXCHANGE_WRITES.value:
             if await self.system.read_persisted_non_quant_baseline(plan) is None:
                 baseline = self._non_quant_baseline
                 if baseline is None:
                     raise RuntimeError("non-quantitative baseline is unavailable")
                 await self.system.persist_non_quant_baseline(plan, baseline)
             await self.system.fence_new_entry(plan)
-        elif phase is CutoverPhase.STOP_OLD_WRITERS:
+        elif phase_value == CutoverPhase.STOP_OLD_WRITERS.value:
             await self.system.stop_units(plan, tuple(sorted(EXPECTED_OLD_BRC_UNITS)))
-        elif phase is CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT:
+        elif phase_value == CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT.value:
             await self.system.create_snapshot(plan)
-        elif phase is CutoverPhase.REBUILD_APPLICATION_SCHEMA:
+        elif phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
             await self.system.create_target_database(plan)
-        elif phase is CutoverPhase.SEED_CURRENT_AUTHORITY:
+        elif phase_value == CutoverPhase.SEED_CURRENT_AUTHORITY.value:
             await self.system.seed_target_authority(plan)
-        elif phase is CutoverPhase.DEPLOY_EXACT_RELEASE:
+        elif phase_value == CutoverPhase.DEPLOY_EXACT_RELEASE.value:
             await self.system.activate_release(plan)
-        elif phase is CutoverPhase.CERTIFY_SCHEMA_AND_READONLY:
+        elif phase_value == CutoverPhase.CERTIFY_SCHEMA_AND_READONLY.value:
             await self.system.certify_readonly(plan)
-        elif phase is CutoverPhase.ENABLE_OBSERVATION_MONITOR:
+        elif phase_value == CutoverPhase.ENABLE_OBSERVATION_MONITOR.value:
             await self.system.enable_observation(plan)
-        elif phase is CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE:
+        elif phase_value == CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE.value:
             await self.system.certify_signal_to_ticket_no_write(plan)
-        elif phase is CutoverPhase.CERTIFY_ENTRY_FENCED:
+        elif phase_value == CutoverPhase.CERTIFY_ENTRY_FENCED.value:
             await self.system.certify_entry_fenced(plan)
         else:
             raise RuntimeError(f"unsupported production cutover phase: {phase.value}")
@@ -214,32 +215,33 @@ class TokyoCutoverAdapter:
     ) -> bool:
         await self._require_non_quant_baseline(plan)
         state = await self.system.inspect_phase_state(plan)
-        if phase is CutoverPhase.FENCE_EXCHANGE_WRITES:
+        phase_value = phase.value
+        if phase_value == CutoverPhase.FENCE_EXCHANGE_WRITES.value:
             return (
                 state.exchange_writes_fenced
                 and not state.entry_timer_enabled
                 and not state.exchange_commands_enabled
             )
-        if phase is CutoverPhase.STOP_OLD_WRITERS:
+        if phase_value == CutoverPhase.STOP_OLD_WRITERS.value:
             return state.old_writers_stopped
-        if phase is CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT:
+        if phase_value == CutoverPhase.CREATE_SHORT_LIVED_SNAPSHOT.value:
             return state.snapshot_exists
-        if phase is CutoverPhase.REBUILD_APPLICATION_SCHEMA:
+        if phase_value == CutoverPhase.REBUILD_APPLICATION_SCHEMA.value:
             return state.target_schema_ready
-        if phase is CutoverPhase.SEED_CURRENT_AUTHORITY:
+        if phase_value == CutoverPhase.SEED_CURRENT_AUTHORITY.value:
             return state.seed_identity_matches
-        if phase is CutoverPhase.DEPLOY_EXACT_RELEASE:
+        if phase_value == CutoverPhase.DEPLOY_EXACT_RELEASE.value:
             return state.release_active
-        if phase is CutoverPhase.CERTIFY_SCHEMA_AND_READONLY:
+        if phase_value == CutoverPhase.CERTIFY_SCHEMA_AND_READONLY.value:
             return state.readonly_certified
-        if phase is CutoverPhase.ENABLE_OBSERVATION_MONITOR:
+        if phase_value == CutoverPhase.ENABLE_OBSERVATION_MONITOR.value:
             return state.observation_enabled and state.exchange_writes_fenced
-        if phase is CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE:
+        if phase_value == CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE.value:
             return (
                 state.signal_to_ticket_no_write_certified
                 and not state.exchange_commands_enabled
             )
-        if phase is CutoverPhase.CERTIFY_ENTRY_FENCED:
+        if phase_value == CutoverPhase.CERTIFY_ENTRY_FENCED.value:
             return (
                 state.exchange_writes_fenced
                 and not state.entry_timer_enabled
