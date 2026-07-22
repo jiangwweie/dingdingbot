@@ -150,6 +150,23 @@ async def test_entry_fence_keeps_runtime_directory_traversable_by_brc() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_target_database_waits_for_postgres_health_before_bootstrap() -> None:
+    module = _production_adapter_module()
+    runner = RecordingRunner(module)
+    system = module.SshTokyoSystem(runner)
+
+    await system.create_target_database(_plan())
+
+    assert runner.commands[0][-5:] == (
+        "up",
+        "-d",
+        "--wait",
+        "--wait-timeout",
+        "60",
+    )
+
+
 class AlwaysMissingRunner:
     def __init__(self, module: ModuleType) -> None:
         self.module = module

@@ -565,6 +565,9 @@ class SshTokyoSystem:
                 str(compose),
                 "up",
                 "-d",
+                "--wait",
+                "--wait-timeout",
+                "60",
             )
         )
         await self._release_python(
