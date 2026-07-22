@@ -36,6 +36,10 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.infrastructure.pg_models import owner_policy_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    RuntimeAuthoritySeedRequest,
+    seed_runtime_authority,
+)
 from tests.trading_kernel.unit.test_ticket import _ticket
 from tests.trading_kernel.integration.test_issue_ticket import _issue_request
 
@@ -202,6 +206,16 @@ async def test_readonly_certification_prints_json_without_report_files(
     fault_engine: AsyncEngine,
     tmp_path: Path,
 ) -> None:
+    async with PostgresKernelUnitOfWork(fault_engine) as uow:
+        await seed_runtime_authority(
+            uow,
+            RuntimeAuthoritySeedRequest(
+                account_id="subaccount-main",
+                runtime_commit="a" * 40,
+                schema_revision="0001_initial",
+                seeded_at_ms=1_000,
+            ),
+        )
     database_url = fault_engine.url.render_as_string(hide_password=False)
     before = sorted(path.name for path in tmp_path.iterdir())
 

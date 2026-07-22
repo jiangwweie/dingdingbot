@@ -25,6 +25,8 @@ from src.trading_kernel.application.project_owner_state import (
 )
 from src.trading_kernel.application.runtime_facts import (
     ActionTimeFactsRequest,
+    InstrumentRulesFacts,
+    InstrumentRulesRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
     ReviewEconomicsRequest,
@@ -194,6 +196,20 @@ class CertifiedActionFactsSource:
             available_margin=Decimal("1000000"),
             netting_domain_position_qty=Decimal("0"),
             netting_domain_open_order_count=0,
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_instrument_rules(
+        self,
+        request: InstrumentRulesRequest,
+    ) -> InstrumentRulesFacts:
+        return InstrumentRulesFacts(
+            exchange_instrument_id=request.exchange_instrument_id,
+            quantity_step=Decimal("0.001"),
+            price_tick=Decimal("0.1"),
+            min_quantity=Decimal("0.001"),
+            min_notional=Decimal("5"),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
