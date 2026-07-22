@@ -108,6 +108,8 @@ class _CcxtExchange(Protocol):
         limit: int,
     ) -> object: ...
 
+    def close(self) -> object: ...
+
 
 _AUTHORITATIVE_REJECTION_TYPES = {
     "BadRequest",
@@ -133,6 +135,17 @@ class CcxtVenueAdapter:
         self._settlement_assets = dict(settlement_assets or {})
         self._taker_fee_rates = dict(taker_fee_rates or {})
         self._clock_ms = clock_ms
+
+    async def close(self) -> None:
+        closed_exchange_ids: set[int] = set()
+        for exchange in self._exchanges.values():
+            exchange_identity = id(exchange)
+            if exchange_identity in closed_exchange_ids:
+                continue
+            closed_exchange_ids.add(exchange_identity)
+            close = getattr(exchange, "close", None)
+            if callable(close):
+                await _call_raw_exchange(close)
 
     async def read_action_time_facts(
         self,

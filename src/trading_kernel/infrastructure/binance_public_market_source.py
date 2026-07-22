@@ -21,6 +21,8 @@ class _CcxtPublicExchange(Protocol):
         limit: int | None = None,
     ) -> object: ...
 
+    def close(self) -> object: ...
+
 
 _TIMEFRAME_MS: Mapping[Timeframe, int] = {
     "15m": 900_000,
@@ -69,6 +71,17 @@ class CcxtBinancePublicMarketSource:
             if item.close_time_ms <= request.closed_at_ms
         )
         return closed[-request.limit :]
+
+    async def close(self) -> None:
+        operation = getattr(self._exchange, "close", None)
+        if not callable(operation):
+            return
+        if inspect.iscoroutinefunction(operation):
+            await operation()
+            return
+        response = await asyncio.to_thread(operation)
+        if inspect.isawaitable(response):
+            await response
 
     async def _fetch(
         self,
