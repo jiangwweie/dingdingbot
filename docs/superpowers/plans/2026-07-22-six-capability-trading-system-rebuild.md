@@ -255,6 +255,7 @@ git commit -m "refactor(kernel): separate strategy signals from ticket capital"
 - Create: `src/trading_kernel/domain/detectors/sor.py`
 - Create: `src/trading_kernel/domain/detectors/brf2.py`
 - Create: `src/trading_kernel/domain/detectors/__init__.py`
+- Test support: `tests/trading_kernel/unit/detectors/fixtures.py`
 - Test: `tests/trading_kernel/unit/detectors/test_registered_detectors.py`
 - Test: `tests/trading_kernel/unit/detectors/test_detector_negative_matrix.py`
 
@@ -263,7 +264,7 @@ git commit -m "refactor(kernel): separate strategy signals from ticket capital"
 - Produces: `DetectorResult` containing exact computed facts and optional occurrence time.
 - Produces: `detector_for(event_spec_id: str) -> StrategyDetector`.
 
-- [ ] **Step 1: Write failing detector routing and purity tests**
+- [x] **Step 1: Write failing detector routing and purity tests**
 
 ```python
 @pytest.mark.parametrize("event_id", [
@@ -280,13 +281,13 @@ def test_detector_returns_equal_results_for_equal_snapshots() -> None:
     assert detector.evaluate(snapshot) == detector.evaluate(snapshot)
 ```
 
-- [ ] **Step 2: Run detector tests and verify RED**
+- [x] **Step 2: Run detector tests and verify RED**
 
 Run: `pytest -q tests/trading_kernel/unit/detectors`
 
 Expected: collection fails because the market and detector modules do not exist.
 
-- [ ] **Step 3: Implement immutable market inputs and detector protocol**
+- [x] **Step 3: Implement immutable market inputs and detector protocol**
 
 ```python
 class ClosedCandle(BaseModel):
@@ -305,7 +306,7 @@ class StrategyDetector(Protocol):
     def evaluate(self, snapshot: MarketSnapshot) -> DetectorResult: ...
 ```
 
-- [ ] **Step 4: Port evaluator behavior from committed old production sources**
+- [x] **Step 4: Port evaluator behavior from committed old production sources**
 
 Port only pure calculations from:
 
@@ -319,7 +320,7 @@ d570018a^:src/domain/brf_price_action_evaluator.py
 
 Do not port packet, DB, artifact, readiness, invocation, or exchange dependencies.
 
-- [ ] **Step 5: Add negative tests for missing, stale, insufficient, and disable facts**
+- [x] **Step 5: Add negative tests for missing, stale, insufficient, and disable facts**
 
 ```python
 def test_brf2_strong_uptrend_disable_prevents_short_signal() -> None:
@@ -328,13 +329,13 @@ def test_brf2_strong_uptrend_disable_prevents_short_signal() -> None:
     assert result.facts_by_name["strong_uptrend_disable"].satisfied is True
 ```
 
-- [ ] **Step 6: Run detector tests and verify GREEN**
+- [x] **Step 6: Run detector tests and verify GREEN**
 
 Run: `pytest -q tests/trading_kernel/unit/detectors`
 
 Expected: all six positive vectors and the full negative matrix pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/trading_kernel/domain/market.py src/trading_kernel/domain/detector.py src/trading_kernel/domain/detectors tests/trading_kernel/unit/detectors
