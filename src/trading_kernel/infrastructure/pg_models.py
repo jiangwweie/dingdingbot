@@ -1,0 +1,449 @@
+"""Clean PostgreSQL authority model for the replacement trading kernel."""
+
+from __future__ import annotations
+
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
+
+
+NAMING_CONVENTION = {
+    "ix": "ix_%(table_name)s_%(column_0_N_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_N_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_N_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+metadata = sa.MetaData(naming_convention=NAMING_CONVENTION)
+
+ID = sa.String(160)
+SHORT_TEXT = sa.String(96)
+LONG_TEXT = sa.String(512)
+MONEY = sa.Numeric(38, 18)
+
+
+def _id(name: str, *, primary_key: bool = False, nullable: bool = False) -> sa.Column:
+    return sa.Column(name, ID, primary_key=primary_key, nullable=nullable)
+
+
+def _time(name: str, *, nullable: bool = False) -> sa.Column:
+    return sa.Column(name, sa.BigInteger, nullable=nullable)
+
+
+def _json(name: str, *, nullable: bool = False) -> sa.Column:
+    return sa.Column(name, JSONB, nullable=nullable)
+
+
+strategy_groups = sa.Table(
+    "brc_strategy_groups",
+    metadata,
+    _id("strategy_group_id", primary_key=True),
+    sa.Column("display_name", LONG_TEXT, nullable=False),
+    _id("active_version_id", nullable=True),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("updated_at_ms"),
+)
+
+strategy_versions = sa.Table(
+    "brc_strategy_versions",
+    metadata,
+    _id("strategy_version_id", primary_key=True),
+    _id("strategy_group_id"),
+    sa.Column("version", sa.Integer, nullable=False),
+    _json("semantics"),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("strategy_group_id", "version"),
+)
+
+event_specs = sa.Table(
+    "brc_event_specs",
+    metadata,
+    _id("event_spec_id", primary_key=True),
+    _id("strategy_version_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("timeframe", SHORT_TEXT, nullable=False),
+    sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
+    _json("execution_semantics"),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("created_at_ms"),
+)
+
+fact_definitions = sa.Table(
+    "brc_fact_definitions",
+    metadata,
+    _id("fact_definition_id", primary_key=True),
+    sa.Column("fact_name", SHORT_TEXT, nullable=False, unique=True),
+    sa.Column("value_type", SHORT_TEXT, nullable=False),
+    sa.Column("freshness_ms", sa.BigInteger, nullable=False),
+    _json("validation"),
+)
+
+event_required_facts = sa.Table(
+    "brc_event_required_facts",
+    metadata,
+    _id("event_spec_id"),
+    _id("fact_definition_id"),
+    sa.Column("required", sa.Boolean, nullable=False, server_default=sa.true()),
+    sa.PrimaryKeyConstraint("event_spec_id", "fact_definition_id"),
+)
+
+instruments = sa.Table(
+    "brc_instruments",
+    metadata,
+    _id("exchange_instrument_id", primary_key=True),
+    sa.Column("venue_id", SHORT_TEXT, nullable=False),
+    sa.Column("asset_class", SHORT_TEXT, nullable=False),
+    sa.Column("venue_symbol", SHORT_TEXT, nullable=False),
+    sa.Column("contract_kind", SHORT_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    sa.UniqueConstraint("venue_id", "venue_symbol"),
+)
+
+instrument_rules_current = sa.Table(
+    "brc_instrument_rules_current",
+    metadata,
+    _id("exchange_instrument_id", primary_key=True),
+    sa.Column("quantity_step", MONEY, nullable=False),
+    sa.Column("price_tick", MONEY, nullable=False),
+    sa.Column("min_quantity", MONEY, nullable=False),
+    sa.Column("min_notional", MONEY, nullable=False),
+    _json("session_and_settlement"),
+    _time("observed_at_ms"),
+    _time("valid_until_ms"),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+)
+
+owner_policy_events = sa.Table(
+    "brc_owner_policy_events",
+    metadata,
+    _id("owner_policy_event_id", primary_key=True),
+    _id("owner_policy_id"),
+    sa.Column("policy_version", sa.Integer, nullable=False),
+    sa.Column("operation", SHORT_TEXT, nullable=False),
+    _json("payload"),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("owner_policy_id", "policy_version"),
+)
+
+owner_policy_current = sa.Table(
+    "brc_owner_policy_current",
+    metadata,
+    _id("owner_policy_id", primary_key=True),
+    sa.Column("policy_version", sa.Integer, nullable=False),
+    sa.Column("enabled", sa.Boolean, nullable=False),
+    sa.Column("real_submit_enabled", sa.Boolean, nullable=False),
+    sa.Column("max_concurrent_tickets", sa.Integer, nullable=False),
+    sa.Column("max_gross_notional", MONEY, nullable=False),
+    _json("scope"),
+    _time("updated_at_ms"),
+)
+
+runtime_profiles = sa.Table(
+    "brc_runtime_profiles",
+    metadata,
+    _id("runtime_profile_id", primary_key=True),
+    sa.Column("venue_id", SHORT_TEXT, nullable=False),
+    _id("account_id"),
+    sa.Column("environment", SHORT_TEXT, nullable=False),
+    sa.Column("position_mode", SHORT_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("updated_at_ms"),
+)
+
+runtime_scopes_current = sa.Table(
+    "brc_runtime_scopes_current",
+    metadata,
+    _id("runtime_scope_id", primary_key=True),
+    _id("strategy_group_id"),
+    _id("strategy_version_id"),
+    _id("event_spec_id"),
+    _id("runtime_profile_id"),
+    _id("owner_policy_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("enabled", sa.Boolean, nullable=False),
+    sa.Column("scope_version", sa.Integer, nullable=False),
+    _time("updated_at_ms"),
+    sa.UniqueConstraint(
+        "strategy_group_id",
+        "event_spec_id",
+        "runtime_profile_id",
+        "exchange_instrument_id",
+        "position_side",
+    ),
+)
+
+facts_current = sa.Table(
+    "brc_facts_current",
+    metadata,
+    _id("fact_current_id", primary_key=True),
+    _id("runtime_scope_id"),
+    _id("fact_definition_id"),
+    _json("value"),
+    sa.Column("satisfied", sa.Boolean, nullable=False),
+    _time("observed_at_ms"),
+    _time("valid_until_ms"),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.UniqueConstraint("runtime_scope_id", "fact_definition_id"),
+)
+
+signal_events = sa.Table(
+    "brc_signal_events",
+    metadata,
+    _id("signal_event_id", primary_key=True),
+    _id("runtime_scope_id"),
+    _id("strategy_group_id"),
+    _id("event_spec_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("signal_grade", SHORT_TEXT, nullable=False),
+    _json("fact_digest"),
+    _time("occurred_at_ms"),
+    _time("expires_at_ms"),
+)
+
+readiness_current = sa.Table(
+    "brc_readiness_current",
+    metadata,
+    _id("runtime_scope_id", primary_key=True),
+    sa.Column("readiness_state", SHORT_TEXT, nullable=False),
+    sa.Column("first_blocker", LONG_TEXT, nullable=True),
+    _id("signal_event_id", nullable=True),
+    _json("fact_summary"),
+    _time("updated_at_ms"),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+)
+
+entry_lane_current = sa.Table(
+    "brc_entry_lane_current",
+    metadata,
+    sa.Column("lane_id", SHORT_TEXT, primary_key=True),
+    _id("ticket_id", nullable=True),
+    _id("signal_event_id", nullable=True),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("claimed_at_ms", nullable=True),
+    _time("lease_until_ms", nullable=True),
+    sa.Column("claim_owner", SHORT_TEXT, nullable=True),
+    sa.Column("version", sa.BigInteger, nullable=False),
+)
+
+runtime_capabilities_current = sa.Table(
+    "brc_runtime_capabilities_current",
+    metadata,
+    sa.Column("capability_key", SHORT_TEXT, primary_key=True),
+    sa.Column("enabled", sa.Boolean, nullable=False),
+    sa.Column("certified_commit", SHORT_TEXT, nullable=False),
+    sa.Column("schema_revision", SHORT_TEXT, nullable=False),
+    _json("certification"),
+    _time("updated_at_ms"),
+)
+
+trade_tickets = sa.Table(
+    "brc_trade_tickets",
+    metadata,
+    _id("ticket_id", primary_key=True),
+    _id("exposure_episode_id"),
+    _id("signal_event_id"),
+    _id("strategy_group_id"),
+    _id("strategy_version_id"),
+    _id("event_spec_id"),
+    _id("runtime_profile_id"),
+    _id("owner_policy_id"),
+    sa.Column("owner_policy_version", sa.Integer, nullable=False),
+    _id("runtime_scope_id"),
+    _id("account_id"),
+    sa.Column("venue_id", SHORT_TEXT, nullable=False),
+    _id("exchange_instrument_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
+    sa.Column("active_netting_domain_key", LONG_TEXT, nullable=True),
+    sa.Column("quantity", MONEY, nullable=False),
+    sa.Column("notional", MONEY, nullable=False),
+    sa.Column("leverage", MONEY, nullable=False),
+    sa.Column("risk_at_stop", MONEY, nullable=False),
+    sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
+    sa.Column("entry_limit_price", MONEY, nullable=True),
+    sa.Column("initial_stop_price", MONEY, nullable=False),
+    _json("take_profit_prices"),
+    sa.Column("fact_digest", LONG_TEXT, nullable=False),
+    sa.Column("decision_digest", LONG_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("created_at_ms"),
+    _time("expires_at_ms"),
+    _time("terminal_at_ms", nullable=True),
+    sa.UniqueConstraint("signal_event_id"),
+    sa.UniqueConstraint("active_netting_domain_key"),
+    sa.CheckConstraint("quantity > 0", name="quantity_positive"),
+    sa.CheckConstraint("notional > 0", name="notional_positive"),
+    sa.CheckConstraint("leverage > 0", name="leverage_positive"),
+    sa.CheckConstraint("risk_at_stop >= 0", name="risk_nonnegative"),
+)
+
+trade_aggregates = sa.Table(
+    "brc_trade_aggregates",
+    metadata,
+    _id("ticket_id", primary_key=True),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    sa.Column("version", sa.BigInteger, nullable=False),
+    sa.Column("last_event_sequence", sa.BigInteger, nullable=False),
+    sa.Column("position_qty", MONEY, nullable=False),
+    sa.Column("average_fill_price", MONEY, nullable=True),
+    sa.Column("protected_qty", MONEY, nullable=False),
+    _id("initial_stop_exchange_order_id", nullable=True),
+    _id("review_id", nullable=True),
+    _time("updated_at_ms"),
+    sa.CheckConstraint("version > 0", name="version_positive"),
+    sa.CheckConstraint("last_event_sequence > 0", name="sequence_positive"),
+    sa.CheckConstraint("position_qty >= 0", name="position_nonnegative"),
+    sa.CheckConstraint("protected_qty >= 0", name="protection_nonnegative"),
+)
+
+trade_events = sa.Table(
+    "brc_trade_events",
+    metadata,
+    _id("event_id", primary_key=True),
+    _id("ticket_id"),
+    sa.Column("sequence", sa.BigInteger, nullable=False),
+    sa.Column("event_type", SHORT_TEXT, nullable=False),
+    _json("payload"),
+    _time("occurred_at_ms"),
+    sa.UniqueConstraint("ticket_id", "sequence"),
+)
+
+exchange_commands = sa.Table(
+    "brc_exchange_commands",
+    metadata,
+    _id("command_id", primary_key=True),
+    _id("ticket_id"),
+    sa.Column("command_kind", SHORT_TEXT, nullable=False),
+    sa.Column("generation", sa.Integer, nullable=False),
+    sa.Column("idempotency_key", LONG_TEXT, nullable=False),
+    sa.Column("venue_client_order_id", SHORT_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    sa.Column("quantity", MONEY, nullable=False),
+    _json("request_payload"),
+    _json("result_payload", nullable=True),
+    sa.Column("claim_owner", SHORT_TEXT, nullable=True),
+    _time("lease_until_ms", nullable=True),
+    _time("created_at_ms"),
+    _time("deadline_at_ms"),
+    _time("completed_at_ms", nullable=True),
+    sa.UniqueConstraint("idempotency_key"),
+    sa.UniqueConstraint("venue_client_order_id"),
+    sa.UniqueConstraint("ticket_id", "command_kind", "generation"),
+    sa.CheckConstraint("generation > 0", name="generation_positive"),
+    sa.CheckConstraint("quantity > 0", name="quantity_positive"),
+)
+
+positions_current = sa.Table(
+    "brc_positions_current",
+    metadata,
+    sa.Column("netting_domain_key", LONG_TEXT, primary_key=True),
+    _id("ticket_id", nullable=True),
+    sa.Column("venue_id", SHORT_TEXT, nullable=False),
+    _id("account_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("quantity", MONEY, nullable=False),
+    sa.Column("average_entry_price", MONEY, nullable=True),
+    _time("observed_at_ms"),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    sa.CheckConstraint("quantity >= 0", name="quantity_nonnegative"),
+)
+
+budget_reservations = sa.Table(
+    "brc_budget_reservations",
+    metadata,
+    _id("budget_reservation_id", primary_key=True),
+    _id("ticket_id"),
+    _id("owner_policy_id"),
+    _id("account_id"),
+    sa.Column("reserved_notional", MONEY, nullable=False),
+    sa.Column("reserved_risk", MONEY, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("created_at_ms"),
+    _time("released_at_ms", nullable=True),
+    sa.UniqueConstraint("ticket_id"),
+    sa.CheckConstraint("reserved_notional > 0", name="notional_positive"),
+    sa.CheckConstraint("reserved_risk >= 0", name="risk_nonnegative"),
+)
+
+account_exposure_current = sa.Table(
+    "brc_account_exposure_current",
+    metadata,
+    _id("account_id", primary_key=True),
+    sa.Column("gross_notional", MONEY, nullable=False),
+    sa.Column("gross_risk_at_stop", MONEY, nullable=False),
+    sa.Column("active_ticket_count", sa.Integer, nullable=False),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+    _time("updated_at_ms"),
+    sa.CheckConstraint("gross_notional >= 0", name="notional_nonnegative"),
+    sa.CheckConstraint("gross_risk_at_stop >= 0", name="risk_nonnegative"),
+    sa.CheckConstraint("active_ticket_count >= 0", name="ticket_count_nonnegative"),
+)
+
+runtime_incidents = sa.Table(
+    "brc_runtime_incidents",
+    metadata,
+    _id("incident_id", primary_key=True),
+    _id("ticket_id", nullable=True),
+    sa.Column("incident_kind", SHORT_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    sa.Column("first_blocker", LONG_TEXT, nullable=False),
+    _json("details"),
+    _time("opened_at_ms"),
+    _time("resolved_at_ms", nullable=True),
+)
+
+trade_reviews = sa.Table(
+    "brc_trade_reviews",
+    metadata,
+    _id("review_id", primary_key=True),
+    _id("ticket_id"),
+    sa.Column("outcome", SHORT_TEXT, nullable=False),
+    _json("metrics"),
+    _json("decision_impact"),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("ticket_id"),
+)
+
+monitor_current = sa.Table(
+    "brc_monitor_current",
+    metadata,
+    sa.Column("monitor_key", SHORT_TEXT, primary_key=True),
+    sa.Column("owner_status", SHORT_TEXT, nullable=False),
+    sa.Column("summary", LONG_TEXT, nullable=False),
+    sa.Column("intervention", LONG_TEXT, nullable=False),
+    _id("ticket_id", nullable=True),
+    _id("incident_id", nullable=True),
+    _time("updated_at_ms"),
+    sa.Column("projection_version", sa.BigInteger, nullable=False),
+)
+
+monitor_events = sa.Table(
+    "brc_monitor_events",
+    metadata,
+    _id("monitor_event_id", primary_key=True),
+    sa.Column("monitor_key", SHORT_TEXT, nullable=False),
+    sa.Column("event_type", SHORT_TEXT, nullable=False),
+    _json("payload"),
+    _time("created_at_ms"),
+)
+
+retention_runs = sa.Table(
+    "brc_retention_runs",
+    metadata,
+    _id("retention_run_id", primary_key=True),
+    sa.Column("scope", SHORT_TEXT, nullable=False),
+    sa.Column("deleted_rows", sa.BigInteger, nullable=False),
+    _time("started_at_ms"),
+    _time("completed_at_ms"),
+)
+
+schema_metadata = sa.Table(
+    "brc_schema_metadata",
+    metadata,
+    sa.Column("metadata_key", SHORT_TEXT, primary_key=True),
+    sa.Column("metadata_value", LONG_TEXT, nullable=False),
+    _time("updated_at_ms"),
+)
