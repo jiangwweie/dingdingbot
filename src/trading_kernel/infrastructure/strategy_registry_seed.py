@@ -10,6 +10,8 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import KernelUnitOfWork
+from src.trading_kernel.domain.exit_policy import registered_exit_policies
+from src.trading_kernel.domain.exit_policy import ExitPolicy
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     RegistrySeedConflict,
@@ -20,6 +22,7 @@ from src.trading_kernel.domain.strategy_registry import (
 from src.trading_kernel.infrastructure.pg_models import (
     event_required_facts,
     event_specs,
+    exit_policies,
     fact_definitions,
     instruments,
     strategy_candidate_scopes,
@@ -66,6 +69,7 @@ class PostgresStrategyRegistryRepository:
             "inserted_strategy_group_count": 0,
             "inserted_strategy_version_count": 0,
             "inserted_event_count": 0,
+            "inserted_exit_policy_count": 0,
             "inserted_fact_definition_count": 0,
             "inserted_event_fact_count": 0,
             "inserted_instrument_count": 0,
@@ -217,6 +221,34 @@ class PostgresStrategyRegistryRepository:
                 ),
             )
 
+            exit_policy = next(
+                policy
+                for policy in registered_exit_policies()
+                if policy.event_spec_id == contract.event_spec_id
+            )
+            counters["inserted_exit_policy_count"] += await self._insert_exact(
+                exit_policies,
+                "exit_policy_id",
+                {
+                    "exit_policy_id": exit_policy.exit_policy_id,
+                    "exit_policy_version": exit_policy.exit_policy_version,
+                    "event_spec_id": exit_policy.event_spec_id,
+                    "position_side": exit_policy.position_side,
+                    "policy": exit_policy.model_dump(mode="json"),
+                    "semantic_hash": exit_policy.semantic_hash(),
+                    "status": "active",
+                    "created_at_ms": seeded_at_ms,
+                },
+                compare_keys=(
+                    "exit_policy_version",
+                    "event_spec_id",
+                    "position_side",
+                    "policy",
+                    "semantic_hash",
+                    "status",
+                ),
+            )
+
             for fact in (*contract.required_facts, *contract.disable_facts):
                 counters["inserted_event_fact_count"] += await self._insert_exact(
                     event_required_facts,
@@ -270,6 +302,31 @@ class PostgresStrategyRegistryRepository:
             .order_by(event_specs.c.event_id)
         )
         return tuple(str(value) for value in result.scalars())
+
+    async def get_exit_policy(self, event_spec_id: str) -> ExitPolicy | None:
+        normalized = str(event_spec_id or "").strip()
+        if not normalized:
+            raise ValueError("exit-policy lookup requires Event Spec identity")
+        result = await self._connection.execute(
+            sa.select(exit_policies).where(
+                exit_policies.c.event_spec_id == normalized,
+                exit_policies.c.status == "active",
+            )
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        policy = ExitPolicy.model_validate(row["policy"])
+        if (
+            policy.exit_policy_id != str(row["exit_policy_id"])
+            or policy.exit_policy_version != str(row["exit_policy_version"])
+            or policy.event_spec_id != normalized
+            or policy.semantic_hash() != str(row["semantic_hash"])
+        ):
+            raise RegistrySeedConflict(
+                f"existing Registry row conflicts: {row['exit_policy_id']}"
+            )
+        return policy
 
     async def _insert_exact(
         self,

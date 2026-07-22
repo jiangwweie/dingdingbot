@@ -19,6 +19,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
     ExchangeCommandStatus,
+    OrderCommandPayload,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.events import (
@@ -32,6 +33,11 @@ from src.trading_kernel.domain.events import (
     ExitAccepted,
     InitialStopAbsenceConfirmed,
     InitialStopConfirmed,
+    ProtectionCancelAbsenceConfirmed,
+    ProtectionReplacementAbsenceConfirmed,
+    ProtectionReplacementConfirmed,
+    TakeProfitAbsenceConfirmed,
+    TakeProfitConfirmed,
     TradeEvent,
 )
 from src.trading_kernel.domain.reducer import reduce_event
@@ -216,6 +222,31 @@ def _recovery_event(
                 exchange_order_id=exchange_order_id,
                 protected_qty=aggregate.position_qty,
             )
+        if command.kind is ExchangeCommandKind.TAKE_PROFIT:
+            payload = command.payload
+            if not isinstance(payload, OrderCommandPayload):
+                raise RuntimeError("TP1 recovery payload is invalid")
+            return TakeProfitConfirmed(
+                **common,
+                exchange_order_id=exchange_order_id,
+                target_qty=payload.quantity,
+            )
+        if command.kind is ExchangeCommandKind.REPLACE_PROTECTION:
+            payload = command.payload
+            if not isinstance(payload, OrderCommandPayload) or payload.stop_price is None:
+                raise RuntimeError("replacement recovery payload is invalid")
+            if payload.replaces_exchange_order_id is None:
+                raise RuntimeError("replacement recovery prior order is missing")
+            if payload.source_watermark_ms is None:
+                raise RuntimeError("replacement recovery watermark is missing")
+            return ProtectionReplacementConfirmed(
+                **common,
+                exchange_order_id=exchange_order_id,
+                protected_qty=payload.quantity,
+                stop_price=payload.stop_price,
+                replaces_exchange_order_id=payload.replaces_exchange_order_id,
+                source_watermark_ms=payload.source_watermark_ms,
+            )
         if command.kind is ExchangeCommandKind.EXIT:
             return ExitAccepted(
                 **common,
@@ -242,6 +273,16 @@ def _recovery_event(
             **common,
             command_id=command.command_id,
         )
+    if command.kind is ExchangeCommandKind.TAKE_PROFIT:
+        return TakeProfitAbsenceConfirmed(
+            **common,
+            command_id=command.command_id,
+        )
+    if command.kind is ExchangeCommandKind.REPLACE_PROTECTION:
+        return ProtectionReplacementAbsenceConfirmed(
+            **common,
+            command_id=command.command_id,
+        )
     if command.kind is ExchangeCommandKind.EXIT:
         return ExitAbsenceConfirmed(
             **common,
@@ -263,6 +304,14 @@ def _recovery_event(
             )
         if aggregate.status is AggregateStatus.CANCEL_OUTCOME_UNKNOWN:
             return CancelOrderAbsenceConfirmed(
+                **common,
+                exchange_order_id=target_order_id,
+            )
+        if (
+            aggregate.status
+            is AggregateStatus.RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN
+        ):
+            return ProtectionCancelAbsenceConfirmed(
                 **common,
                 exchange_order_id=target_order_id,
             )

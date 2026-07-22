@@ -33,7 +33,9 @@ from src.trading_kernel.domain.events import (
     ControlledFlattenAbsenceConfirmed,
     ExitAbsenceConfirmed,
     InitialStopAbsenceConfirmed,
+    TakeProfitFilled,
 )
+from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.venue_truth import (
     UnknownRecoveryStatus,
     VenueLookupStatus,
@@ -48,6 +50,7 @@ from tests.trading_kernel.integration.test_command_dispatch import (
     _reach_cancel_pending,
     _seed_policy,
 )
+from tests.trading_kernel.integration.test_issue_ticket import _ticket_for_signal
 from tests.trading_kernel.unit.test_ticket import _ticket
 
 
@@ -286,9 +289,14 @@ async def test_visible_unknown_initial_stop_recovers_protection_without_exit(
         incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
         lane = await uow.entry_admission.get_global_lane()
     assert aggregate is not None
-    assert aggregate.status is AggregateStatus.POSITION_PROTECTED
+    assert aggregate.status is AggregateStatus.TP1_PENDING
     assert aggregate.initial_stop_exchange_order_id == "venue-stop-recovered"
     assert all(item.kind is not ExchangeCommandKind.EXIT for item in commands)
+    assert [
+        item.status
+        for item in commands
+        if item.kind is ExchangeCommandKind.TAKE_PROFIT
+    ] == [ExchangeCommandStatus.PREPARED]
     assert incident is None
     assert lane is not None and lane.status == "idle"
 
@@ -503,6 +511,163 @@ async def test_absent_unknown_cancel_confirms_target_removal_and_resolves_unknow
     assert incident is None
 
 
+@pytest.mark.asyncio
+async def test_unknown_tp1_visible_and_absent_paths_are_both_exact(
+    dispatch_engine,
+) -> None:
+    visible_ticket, visible_command = await _make_unknown_tp1(
+        dispatch_engine,
+        position_side="long",
+        seed_policy=True,
+    )
+    visible = await recover_unknown_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticTruthPort(
+            _visible_truth(
+                visible_ticket,
+                visible_command,
+                "venue-take-profit-recovered",
+            )
+        ),
+        RecoverUnknownCommandRequest(
+            command_id=visible_command.command_id,
+            now_ms=2_600,
+            visibility_deadline_ms=2_500,
+            timeout_seconds=1,
+        ),
+    )
+    assert visible.status is UnknownRecoveryStatus.RECONCILED_SUBMITTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(visible_ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.POSITION_PROTECTED
+    assert aggregate.tp1_exchange_order_id == "venue-take-profit-recovered"
+
+    absent_ticket, absent_command = await _make_unknown_tp1(
+        dispatch_engine,
+        position_side="short",
+        seed_policy=False,
+    )
+    absent = await recover_unknown_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticTruthPort(
+            _absent_truth(
+                observed_at_ms=2_600,
+                position_quantity=absent_ticket.quantity,
+            )
+        ),
+        RecoverUnknownCommandRequest(
+            command_id=absent_command.command_id,
+            now_ms=2_600,
+            visibility_deadline_ms=2_500,
+            timeout_seconds=1,
+        ),
+    )
+    assert absent.status is UnknownRecoveryStatus.RECONCILED_ABSENT
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(absent_ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            absent_ticket.identity.ticket_id
+        )
+        incident = await uow.incidents.get_open_for_ticket(
+            absent_ticket.identity.ticket_id
+        )
+    assert aggregate is not None and aggregate.status is AggregateStatus.TP1_PENDING
+    tp1_commands = [
+        item for item in commands if item.kind is ExchangeCommandKind.TAKE_PROFIT
+    ]
+    assert [item.generation for item in tp1_commands] == [1, 2]
+    assert [item.status for item in tp1_commands] == [
+        ExchangeCommandStatus.RECONCILED_ABSENT,
+        ExchangeCommandStatus.PREPARED,
+    ]
+    assert incident is None
+
+
+@pytest.mark.asyncio
+async def test_unknown_replacement_visible_and_absent_paths_preserve_old_stop(
+    dispatch_engine,
+) -> None:
+    visible_ticket, visible_command = await _make_unknown_replacement(
+        dispatch_engine,
+        position_side="long",
+        seed_policy=True,
+    )
+    visible = await recover_unknown_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticTruthPort(
+            _visible_truth(
+                visible_ticket,
+                visible_command,
+                "venue-runner-stop-recovered",
+            )
+        ),
+        RecoverUnknownCommandRequest(
+            command_id=visible_command.command_id,
+            now_ms=2_900,
+            visibility_deadline_ms=2_800,
+            timeout_seconds=1,
+        ),
+    )
+    assert visible.status is UnknownRecoveryStatus.RECONCILED_SUBMITTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(visible_ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            visible_ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING
+    assert aggregate.active_stop_exchange_order_id == "venue-runner-stop-recovered"
+    assert any(item.kind is ExchangeCommandKind.CANCEL_ORDER for item in commands)
+
+    absent_ticket, absent_command = await _make_unknown_replacement(
+        dispatch_engine,
+        position_side="short",
+        seed_policy=False,
+    )
+    absent = await recover_unknown_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        StaticTruthPort(
+            _absent_truth(
+                observed_at_ms=2_900,
+                position_quantity=(
+                    absent_ticket.quantity
+                    - absent_ticket.take_profit_quantities[0]
+                ),
+            )
+        ),
+        RecoverUnknownCommandRequest(
+            command_id=absent_command.command_id,
+            now_ms=2_900,
+            visibility_deadline_ms=2_800,
+            timeout_seconds=1,
+        ),
+    )
+    assert absent.status is UnknownRecoveryStatus.RECONCILED_ABSENT
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(absent_ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            absent_ticket.identity.ticket_id
+        )
+        incident = await uow.incidents.get_open_for_ticket(
+            absent_ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.RUNNER_REPLACEMENT_PENDING
+    assert aggregate.active_stop_exchange_order_id == "venue-initial_stop-1"
+    replacement_commands = [
+        item
+        for item in commands
+        if item.kind is ExchangeCommandKind.REPLACE_PROTECTION
+    ]
+    assert [item.generation for item in replacement_commands] == [1, 2]
+    assert [item.status for item in replacement_commands] == [
+        ExchangeCommandStatus.RECONCILED_ABSENT,
+        ExchangeCommandStatus.PREPARED,
+    ]
+    assert incident is None
+
+
 async def _make_unknown_entry(engine):
     ticket = _ticket()
     await _seed_policy(engine)
@@ -554,6 +719,112 @@ async def _make_unknown_initial_stop(engine):
     return ticket, await _command_of_kind(engine, ticket, ExchangeCommandKind.INITIAL_STOP)
 
 
+async def _make_unknown_tp1(
+    engine,
+    *,
+    position_side: str,
+    seed_policy: bool,
+):
+    ticket = _ticket_for_signal(
+        f"signal-tp1-{position_side}",
+        f"episode-tp1-{position_side}",
+        position_side=position_side,
+    )
+    if seed_policy:
+        await _seed_policy(engine)
+    await _issue(engine, ticket)
+    accepting = AcceptingVenue(engine)
+    await _dispatch(engine, accepting, worker_id="entry-dispatcher", now_ms=1_100)
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await _dispatch(engine, accepting, worker_id="stop-dispatcher", now_ms=2_200)
+    await _dispatch(
+        engine,
+        SlowVenue(),
+        worker_id="tp1-dispatcher",
+        now_ms=2_300,
+        timeout_seconds=0.01,
+    )
+    return ticket, await _command_of_kind(
+        engine,
+        ticket,
+        ExchangeCommandKind.TAKE_PROFIT,
+    )
+
+
+async def _make_unknown_replacement(
+    engine,
+    *,
+    position_side: str,
+    seed_policy: bool,
+):
+    ticket = _ticket_for_signal(
+        f"signal-replacement-{position_side}",
+        f"episode-replacement-{position_side}",
+        position_side=position_side,
+    )
+    if seed_policy:
+        await _seed_policy(engine)
+    await _issue(engine, ticket)
+    accepting = AcceptingVenue(engine)
+    await _dispatch(engine, accepting, worker_id="entry-dispatcher", now_ms=1_100)
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await _dispatch(engine, accepting, worker_id="stop-dispatcher", now_ms=2_200)
+    await _dispatch(engine, accepting, worker_id="tp1-dispatcher", now_ms=2_300)
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert aggregate is not None
+        event = TakeProfitFilled(
+            event_id=f"event:{ticket.identity.ticket_id}:{aggregate.last_event_sequence + 1}",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_400,
+            filled_qty=ticket.take_profit_quantities[0],
+            average_fill_price=ticket.take_profit_prices[0],
+            runner_floor_price=Decimal("60010"),
+        )
+        await uow.commit_reduction(
+            event=event,
+            reduction=reduce_event(aggregate, event),
+            expected_version=aggregate.version,
+        )
+    await _dispatch(
+        engine,
+        SlowVenue(),
+        worker_id="replacement-dispatcher",
+        now_ms=2_500,
+        timeout_seconds=0.01,
+    )
+    return ticket, await _command_of_kind(
+        engine,
+        ticket,
+        ExchangeCommandKind.REPLACE_PROTECTION,
+    )
+
+
 async def _make_unknown_exit(engine):
     ticket, _ = await _make_unknown_initial_stop(engine)
     stop_command = await _command_of_kind(engine, ticket, ExchangeCommandKind.INITIAL_STOP)
@@ -566,6 +837,12 @@ async def _make_unknown_exit(engine):
             visibility_deadline_ms=2_300,
             timeout_seconds=1,
         ),
+    )
+    await _dispatch(
+        engine,
+        AcceptingVenue(engine),
+        worker_id="tp1-dispatcher",
+        now_ms=2_500,
     )
     async with PostgresKernelUnitOfWork(engine) as uow:
         await request_exit(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 import os
 from pathlib import Path
 import re
@@ -29,9 +30,14 @@ from src.trading_kernel.application.reconcile_ticket import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
+    CancelCommandPayload,
+    ExchangeCommandKind,
     ExchangeCommandResult,
     ExchangeCommandStatus,
+    OrderCommandPayload,
 )
+from src.trading_kernel.domain.events import TakeProfitFilled
+from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.infrastructure.pg_models import owner_policy_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
@@ -80,10 +86,15 @@ class AcceptingVenue:
         self.saw_committed_claim = (
             command is not None and command.status is ExchangeCommandStatus.CLAIMED
         )
+        exchange_order_id = (
+            request.payload.exchange_order_id
+            if isinstance(request.payload, CancelCommandPayload)
+            else f"venue-{request.kind.value}-1"
+        )
         return ExchangeCommandResult(
             status=ExchangeCommandStatus.ACCEPTED,
             observed_at_ms=2_000,
-            exchange_order_id="venue-entry-1",
+            exchange_order_id=exchange_order_id,
         )
 
 
@@ -117,6 +128,231 @@ class CountingVenue:
             observed_at_ms=2_000,
             exchange_order_id="unexpected-order",
         )
+
+
+class KindAwareAcceptingVenue:
+    async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
+        exchange_order_id = (
+            request.payload.exchange_order_id
+            if isinstance(request.payload, CancelCommandPayload)
+            else f"venue-{request.kind.value}-1"
+        )
+        return ExchangeCommandResult(
+            status=ExchangeCommandStatus.ACCEPTED,
+            observed_at_ms=2_000,
+            exchange_order_id=exchange_order_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_tp1_and_replacement_commands_reach_protected_runner(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    venue = KindAwareAcceptingVenue()
+
+    await _dispatch_for_ticket(dispatch_engine, venue, ticket.identity.ticket_id)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await _dispatch_for_ticket(dispatch_engine, venue, ticket.identity.ticket_id)
+    await _dispatch_for_ticket(dispatch_engine, venue, ticket.identity.ticket_id)
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.POSITION_PROTECTED
+    tp1 = next(
+        command
+        for command in commands
+        if command.kind is ExchangeCommandKind.TAKE_PROFIT
+    )
+    assert isinstance(tp1.payload, OrderCommandPayload)
+    assert tp1.payload.order_type == "limit"
+    assert tp1.payload.reduce_only is True
+    assert tp1.payload.quantity == ticket.take_profit_quantities[0]
+    assert tp1.payload.limit_price == ticket.take_profit_prices[0]
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert aggregate is not None
+        event = TakeProfitFilled(
+            event_id=f"event:{ticket.identity.ticket_id}:{aggregate.last_event_sequence + 1}",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_300,
+            filled_qty=ticket.take_profit_quantities[0],
+            average_fill_price=ticket.take_profit_prices[0],
+            runner_floor_price=Decimal("60010"),
+        )
+        await uow.commit_reduction(
+            event=event,
+            reduction=reduce_event(aggregate, event),
+            expected_version=aggregate.version,
+        )
+
+    await _dispatch_for_ticket(dispatch_engine, venue, ticket.identity.ticket_id)
+    await _dispatch_for_ticket(dispatch_engine, venue, ticket.identity.ticket_id)
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.RUNNER_PROTECTED
+    assert aggregate.position_qty == ticket.quantity - ticket.take_profit_quantities[0]
+    replacement = next(
+        command
+        for command in commands
+        if command.kind is ExchangeCommandKind.REPLACE_PROTECTION
+    )
+    assert isinstance(replacement.payload, OrderCommandPayload)
+    assert replacement.payload.order_type == "stop_market"
+    assert replacement.payload.stop_price == Decimal("60010")
+    assert replacement.payload.replaces_exchange_order_id == "venue-initial_stop-1"
+    assert replacement.payload.source_watermark_ms == 2_300
+
+
+@pytest.mark.asyncio
+async def test_tp1_rejection_is_persisted_without_losing_initial_protection(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    accepting = KindAwareAcceptingVenue()
+    await _dispatch_for_ticket(dispatch_engine, accepting, ticket.identity.ticket_id)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await _dispatch_for_ticket(dispatch_engine, accepting, ticket.identity.ticket_id)
+    rejected = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        RejectingVenue(),
+        DispatchCommandRequest(
+            worker_id="tp1-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=2_300,
+            lease_until_ms=7_300,
+            timeout_seconds=1,
+        ),
+    )
+    assert rejected.status is DispatchCommandStatus.REJECTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.TP1_REJECTED
+    assert aggregate.active_stop_exchange_order_id == "venue-initial_stop-1"
+    assert incident is not None and incident.incident_kind == "take_profit_rejected"
+
+
+@pytest.mark.asyncio
+async def test_replacement_rejection_preserves_the_prior_active_stop(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    accepting = KindAwareAcceptingVenue()
+    await _dispatch_for_ticket(dispatch_engine, accepting, ticket.identity.ticket_id)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await _dispatch_for_ticket(dispatch_engine, accepting, ticket.identity.ticket_id)
+    await _dispatch_for_ticket(dispatch_engine, accepting, ticket.identity.ticket_id)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert aggregate is not None
+        event = TakeProfitFilled(
+            event_id=f"event:{ticket.identity.ticket_id}:{aggregate.last_event_sequence + 1}",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_300,
+            filled_qty=ticket.take_profit_quantities[0],
+            average_fill_price=ticket.take_profit_prices[0],
+            runner_floor_price=Decimal("60010"),
+        )
+        await uow.commit_reduction(
+            event=event,
+            reduction=reduce_event(aggregate, event),
+            expected_version=aggregate.version,
+        )
+    rejected = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        RejectingVenue(),
+        DispatchCommandRequest(
+            worker_id="replacement-dispatcher",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=2_400,
+            lease_until_ms=7_400,
+            timeout_seconds=1,
+        ),
+    )
+    assert rejected.status is DispatchCommandStatus.REJECTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.RUNNER_REPLACEMENT_REJECTED
+    assert aggregate.active_stop_exchange_order_id == "venue-initial_stop-1"
+    assert incident is not None
+    assert incident.incident_kind == "protection_replacement_rejected"
+
+
+async def _dispatch_for_ticket(
+    engine: AsyncEngine,
+    venue,
+    ticket_id: str,
+) -> None:
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="lifecycle-dispatcher",
+            ticket_id=ticket_id,
+            now_ms=2_200,
+            lease_until_ms=7_200,
+            timeout_seconds=1,
+        ),
+    )
+    assert result.status is DispatchCommandStatus.ACCEPTED
 
 
 @pytest.mark.asyncio
@@ -489,6 +725,11 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
             timeout_seconds=1,
         ),
     )
+    await _dispatch_for_ticket(
+        dispatch_engine,
+        accepting,
+        ticket.identity.ticket_id,
+    )
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await request_exit(
             uow,
@@ -571,7 +812,7 @@ async def test_cancel_rejection_is_persisted_and_blocks_settlement(
 
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.CANCEL_REJECTED
-    assert aggregate.pending_cancel_exchange_order_id == "venue-entry-1"
+    assert aggregate.pending_cancel_exchange_order_id == "venue-take_profit-1"
     cancel_commands = [
         command for command in commands if command.kind.value == "cancel_order"
     ]
@@ -591,8 +832,8 @@ async def test_cancel_rejection_is_persisted_and_blocks_settlement(
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
-                            exchange_order_id="venue-entry-1",
-                            venue_client_order_id="brc-owned-stop",
+                            exchange_order_id="venue-take_profit-1",
+                            venue_client_order_id="brc-owned-tp1",
                             position_side="long",
                             reduce_only=True,
                         ),
@@ -701,7 +942,7 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
     assert cancel_commands[0].status is ExchangeCommandStatus.RECONCILED_ABSENT
 
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        matched = await reconcile_ticket(
+        stop_absence = await reconcile_ticket(
             uow,
             ReconcileTicketRequest(
                 ticket_id=ticket.identity.ticket_id,
@@ -711,6 +952,24 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
                     average_entry_price=None,
                     open_orders=(),
                     observed_at_ms=3_500,
+                ),
+            ),
+        )
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+    assert stop_absence.status.value == "cancel_absence_recorded"
+    assert reservation is not None and reservation.status == "active"
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        matched = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity="0",
+                    average_entry_price=None,
+                    open_orders=(),
+                    observed_at_ms=3_600,
                 ),
             ),
         )
@@ -784,6 +1043,7 @@ async def _reach_cancel_pending(
             timeout_seconds=1,
         ),
     )
+    await _dispatch_for_ticket(engine, accepting, ticket.identity.ticket_id)
     async with PostgresKernelUnitOfWork(engine) as uow:
         await request_exit(
             uow,

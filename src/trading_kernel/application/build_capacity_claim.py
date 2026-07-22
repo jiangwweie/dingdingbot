@@ -18,6 +18,7 @@ from src.trading_kernel.domain.identities import (
     RuntimeIdentity,
     TicketIdentity,
 )
+from src.trading_kernel.domain.exit_policy import exit_policy_for, split_tp1_quantity
 from src.trading_kernel.domain.signal import StrategySignal
 from src.trading_kernel.domain.ticket import (
     EntryOrderType,
@@ -132,6 +133,15 @@ def build_capacity_claim(
         instrument_rules.price_tick,
         position_side=signal.position_side,
     )
+    exit_policy = exit_policy_for(signal.event_spec_id)
+    try:
+        take_profit_split = split_tp1_quantity(
+            total_quantity=quantity,
+            quantity_step=instrument_rules.quantity_step,
+            quantity_fraction=exit_policy.tp1.quantity_fraction,
+        )
+    except ValueError:
+        return _refused(CapacityClaimStatus.BUDGET_EXHAUSTED)
     runtime = RuntimeIdentity(
         runtime_profile_id=runtime_profile_id,
         strategy_group_id=signal.strategy_group_id,
@@ -183,6 +193,7 @@ def build_capacity_claim(
         ),
         initial_stop_price=stop_price,
         take_profit_prices=(take_profit_price,),
+        take_profit_quantities=(take_profit_split.tp1_quantity,),
     )
     return CapacityClaimDecision(
         status=CapacityClaimStatus.CLAIMED,

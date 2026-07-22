@@ -45,6 +45,8 @@ from src.trading_kernel.domain.effects import (
     PrepareControlledFlattenCommand,
     PrepareExitCommand,
     PrepareInitialStopCommand,
+    PrepareProtectionReplacementCommand,
+    PrepareTakeProfitCommand,
     ReleaseBudget,
     ReleaseEntryLane,
     ResolveIncident,
@@ -186,6 +188,34 @@ class PostgresKernelUnitOfWork:
                     _initial_stop_command(
                         aggregate,
                         effect,
+                        occurred_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
+            if isinstance(effect, PrepareTakeProfitCommand):
+                generation = await self._next_retryable_generation(
+                    aggregate=aggregate,
+                    kind=ExchangeCommandKind.TAKE_PROFIT,
+                )
+                await self.exchange_commands.add(
+                    _take_profit_command(
+                        aggregate,
+                        effect,
+                        generation=generation,
+                        occurred_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
+            if isinstance(effect, PrepareProtectionReplacementCommand):
+                generation = await self._next_retryable_generation(
+                    aggregate=aggregate,
+                    kind=ExchangeCommandKind.REPLACE_PROTECTION,
+                )
+                await self.exchange_commands.add(
+                    _protection_replacement_command(
+                        aggregate,
+                        effect,
+                        generation=generation,
                         occurred_at_ms=event.occurred_at_ms,
                     )
                 )
@@ -385,6 +415,32 @@ class PostgresKernelUnitOfWork:
                 terminal_at_ms=event.occurred_at_ms,
             )
 
+    async def _next_retryable_generation(
+        self,
+        *,
+        aggregate,
+        kind: ExchangeCommandKind,
+    ) -> int:
+        generation = await self.exchange_commands.next_generation(
+            ticket_id=aggregate.identity.ticket_id,
+            kind=kind,
+        )
+        if generation == 1:
+            return generation
+        prior_commands = await self.exchange_commands.list_for_ticket(
+            aggregate.identity.ticket_id
+        )
+        prior = max(
+            (command for command in prior_commands if command.kind is kind),
+            key=lambda command: command.generation,
+        )
+        require_next_generation_allowed(
+            kind=kind,
+            prior_status=prior.status,
+            next_generation=generation,
+        )
+        return generation
+
     def _require_connection(self) -> AsyncConnection:
         if self._connection is None:
             raise RuntimeError("unit of work must be entered before use")
@@ -469,6 +525,52 @@ def _exit_command(
             quantity=effect.quantity,
             order_type="market",
             reduce_only=True,
+        ),
+        occurred_at_ms=occurred_at_ms,
+    )
+
+
+def _take_profit_command(
+    aggregate,
+    effect: PrepareTakeProfitCommand,
+    *,
+    generation: int,
+    occurred_at_ms: int,
+) -> ExchangeCommand:
+    return _order_command(
+        aggregate=aggregate,
+        kind=ExchangeCommandKind.TAKE_PROFIT,
+        generation=generation,
+        payload=OrderCommandPayload(
+            side=_closing_side(aggregate),
+            quantity=effect.quantity,
+            order_type="limit",
+            reduce_only=True,
+            limit_price=effect.limit_price,
+        ),
+        occurred_at_ms=occurred_at_ms,
+    )
+
+
+def _protection_replacement_command(
+    aggregate,
+    effect: PrepareProtectionReplacementCommand,
+    *,
+    generation: int,
+    occurred_at_ms: int,
+) -> ExchangeCommand:
+    return _order_command(
+        aggregate=aggregate,
+        kind=ExchangeCommandKind.REPLACE_PROTECTION,
+        generation=generation,
+        payload=OrderCommandPayload(
+            side=_closing_side(aggregate),
+            quantity=effect.quantity,
+            order_type="stop_market",
+            reduce_only=True,
+            stop_price=effect.stop_price,
+            replaces_exchange_order_id=effect.replaces_exchange_order_id,
+            source_watermark_ms=effect.source_watermark_ms,
         ),
         occurred_at_ms=occurred_at_ms,
     )

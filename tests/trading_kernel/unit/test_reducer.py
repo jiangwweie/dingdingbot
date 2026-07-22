@@ -14,6 +14,8 @@ from src.trading_kernel.domain.effects import (
     PrepareEntryCommand,
     PrepareExitCommand,
     PrepareInitialStopCommand,
+    PrepareProtectionReplacementCommand,
+    PrepareTakeProfitCommand,
     ReleaseBudget,
     ReleaseEntryLane,
     ResolveIncident,
@@ -47,10 +49,19 @@ from src.trading_kernel.domain.events import (
     InitialStopRejected,
     OwnedOrphanOrderDetected,
     PositionFlatConfirmed,
+    ProtectionCancelAbsenceConfirmed,
     ProtectionCancelConfirmed,
+    ProtectionCancelOutcomeUnknown,
+    ProtectionReplacementAbsenceConfirmed,
+    ProtectionReplacementConfirmed,
+    ProtectionReplacementOutcomeUnknown,
     ReconciliationMatched,
     ReviewRecorded,
     TicketIssued,
+    TakeProfitAbsenceConfirmed,
+    TakeProfitConfirmed,
+    TakeProfitFilled,
+    TakeProfitOutcomeUnknown,
     UnownedOrderDetected,
 )
 from src.trading_kernel.domain.reducer import InvalidLifecycleTransition, reduce_event
@@ -221,10 +232,15 @@ def test_full_entry_fill_requires_initial_stop_before_releasing_entry_lane() -> 
         ),
     )
 
-    assert protected.aggregate.status is AggregateStatus.POSITION_PROTECTED
+    assert protected.aggregate.status is AggregateStatus.TP1_PENDING
     assert protected.aggregate.initial_stop_exchange_order_id == "stop-1"
     assert protected.effects == (
         ReleaseEntryLane(ticket_id=ticket.identity.ticket_id),
+        PrepareTakeProfitCommand(
+            ticket_id=ticket.identity.ticket_id,
+            quantity=ticket.take_profit_quantities[0],
+            limit_price=ticket.take_profit_prices[0],
+        ),
     )
 
 
@@ -420,7 +436,7 @@ def test_reconciled_initial_stop_submission_protects_position_and_resolves_unkno
         ),
     )
 
-    assert recovered.aggregate.status is AggregateStatus.POSITION_PROTECTED
+    assert recovered.aggregate.status is AggregateStatus.TP1_PENDING
     assert recovered.aggregate.initial_stop_exchange_order_id == "stop-recovered-1"
     assert recovered.aggregate.entry_lane_held is False
     assert recovered.effects == (
@@ -429,6 +445,11 @@ def test_reconciled_initial_stop_submission_protects_position_and_resolves_unkno
             incident_kind="initial_stop_outcome_unknown",
         ),
         ReleaseEntryLane(ticket_id=ticket.identity.ticket_id),
+        PrepareTakeProfitCommand(
+            ticket_id=ticket.identity.ticket_id,
+            quantity=ticket.take_profit_quantities[0],
+            limit_price=ticket.take_profit_prices[0],
+        ),
     )
 
 
@@ -555,44 +576,14 @@ def test_external_flat_enters_reconciliation_and_cancels_owned_protection() -> N
 
 
 def test_unknown_exit_outcome_opens_incident_without_creating_retry() -> None:
-    ticket = _ticket()
-    aggregate = reduce_event(
-        None,
-        TicketIssued(
-            event_id="event-1",
-            ticket=ticket,
-            sequence=1,
-            occurred_at_ms=1_001,
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        EntryFilled(
-            event_id="event-2",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=2,
-            occurred_at_ms=1_100,
-            filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        InitialStopConfirmed(
-            event_id="event-3",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=3,
-            occurred_at_ms=1_200,
-            exchange_order_id="stop-1",
-            protected_qty=ticket.quantity,
-        ),
-    ).aggregate
+    aggregate = _position_protected_aggregate()
+    ticket = aggregate.ticket
     aggregate = reduce_event(
         aggregate,
         ExitRequested(
             event_id="event-4",
             ticket_id=ticket.identity.ticket_id,
-            sequence=4,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_000,
             reason="strategy_exit",
         ),
@@ -603,7 +594,7 @@ def test_unknown_exit_outcome_opens_incident_without_creating_retry() -> None:
         ExitOutcomeUnknown(
             event_id="event-5",
             ticket_id=ticket.identity.ticket_id,
-            sequence=5,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_100,
             reason="venue_timeout",
         ),
@@ -719,44 +710,14 @@ def test_reconciled_controlled_flatten_absence_stays_incident_and_nonflat() -> N
 
 
 def test_exit_rejection_enters_explicit_recovery_and_allows_new_request() -> None:
-    ticket = _ticket()
-    aggregate = reduce_event(
-        None,
-        TicketIssued(
-            event_id="event-1",
-            ticket=ticket,
-            sequence=1,
-            occurred_at_ms=1_001,
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        EntryFilled(
-            event_id="event-2",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=2,
-            occurred_at_ms=1_100,
-            filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        InitialStopConfirmed(
-            event_id="event-3",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=3,
-            occurred_at_ms=1_200,
-            exchange_order_id="stop-1",
-            protected_qty=ticket.quantity,
-        ),
-    ).aggregate
+    aggregate = _position_protected_aggregate()
+    ticket = aggregate.ticket
     aggregate = reduce_event(
         aggregate,
         ExitRequested(
             event_id="event-4",
             ticket_id=ticket.identity.ticket_id,
-            sequence=4,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_000,
             reason="strategy_exit",
         ),
@@ -767,7 +728,7 @@ def test_exit_rejection_enters_explicit_recovery_and_allows_new_request() -> Non
         ExitRejected(
             event_id="event-5",
             ticket_id=ticket.identity.ticket_id,
-            sequence=5,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_100,
             reason="venue_rejected",
         ),
@@ -786,7 +747,7 @@ def test_exit_rejection_enters_explicit_recovery_and_allows_new_request() -> Non
         PositionFlatConfirmed(
             event_id="event-6-flat",
             ticket_id=ticket.identity.ticket_id,
-            sequence=6,
+            sequence=rejected.aggregate.last_event_sequence + 1,
             occurred_at_ms=2_150,
         ),
     )
@@ -797,7 +758,7 @@ def test_exit_rejection_enters_explicit_recovery_and_allows_new_request() -> Non
         ExitRequested(
             event_id="event-6",
             ticket_id=ticket.identity.ticket_id,
-            sequence=6,
+            sequence=rejected.aggregate.last_event_sequence + 1,
             occurred_at_ms=2_200,
             reason="recover_exit_rejection",
         ),
@@ -837,7 +798,7 @@ def test_owned_orphan_order_requests_exact_durable_cancel() -> None:
 
 def test_cancel_rejection_is_persisted_as_blocking_recovery_state() -> None:
     aggregate = _cancel_pending_aggregate()
-    assert aggregate.pending_cancel_exchange_order_id == "stop-1"
+    assert aggregate.pending_cancel_exchange_order_id == "tp-1"
 
     rejected = reduce_event(
         aggregate,
@@ -846,13 +807,13 @@ def test_cancel_rejection_is_persisted_as_blocking_recovery_state() -> None:
             ticket_id=aggregate.identity.ticket_id,
             sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_150,
-            exchange_order_id="stop-1",
+            exchange_order_id="tp-1",
             reason="venue_rejected",
         ),
     )
 
     assert rejected.aggregate.status is AggregateStatus.CANCEL_REJECTED
-    assert rejected.aggregate.pending_cancel_exchange_order_id == "stop-1"
+    assert rejected.aggregate.pending_cancel_exchange_order_id == "tp-1"
     assert rejected.effects == (
         OpenIncident(
             ticket_id=aggregate.identity.ticket_id,
@@ -881,13 +842,13 @@ def test_unknown_cancel_outcome_is_conserved_and_blocks_reconciliation() -> None
             ticket_id=aggregate.identity.ticket_id,
             sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_150,
-            exchange_order_id="stop-1",
+            exchange_order_id="tp-1",
             reason="venue_timeout",
         ),
     )
 
     assert unknown.aggregate.status is AggregateStatus.CANCEL_OUTCOME_UNKNOWN
-    assert unknown.aggregate.pending_cancel_exchange_order_id == "stop-1"
+    assert unknown.aggregate.pending_cancel_exchange_order_id == "tp-1"
     assert unknown.effects == (
         OpenIncident(
             ticket_id=aggregate.identity.ticket_id,
@@ -915,7 +876,7 @@ def test_reconciled_cancel_absence_resolves_only_cancel_unknown_incident() -> No
             ticket_id=aggregate.identity.ticket_id,
             sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_150,
-            exchange_order_id="stop-1",
+            exchange_order_id="tp-1",
             reason="venue_timeout",
         ),
     ).aggregate
@@ -927,7 +888,7 @@ def test_reconciled_cancel_absence_resolves_only_cancel_unknown_incident() -> No
             ticket_id=aggregate.identity.ticket_id,
             sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_200,
-            exchange_order_id="stop-1",
+            exchange_order_id="tp-1",
         ),
     )
 
@@ -936,7 +897,7 @@ def test_reconciled_cancel_absence_resolves_only_cancel_unknown_incident() -> No
     assert recovered.effects == (
         MarkCancelCommandReconciledAbsent(
             ticket_id=aggregate.identity.ticket_id,
-            exchange_order_id="stop-1",
+            exchange_order_id="tp-1",
         ),
         ResolveIncident(
             ticket_id=aggregate.identity.ticket_id,
@@ -1041,7 +1002,34 @@ def test_unowned_order_opens_incident_without_cancel_authority() -> None:
     )
 
 
-def _exit_outcome_unknown_aggregate():
+@pytest.mark.parametrize(
+    ("field_name", "exchange_order_id"),
+    (
+        ("active_stop_exchange_order_id", "active-stop-residue"),
+        ("tp1_exchange_order_id", "tp1-residue"),
+    ),
+)
+def test_reconciliation_rejects_any_owned_order_identity_residue(
+    field_name: str,
+    exchange_order_id: str,
+) -> None:
+    aggregate = _reconciliation_pending_aggregate().model_copy(
+        update={field_name: exchange_order_id}
+    )
+
+    with pytest.raises(InvalidLifecycleTransition, match="order identity residue"):
+        reduce_event(
+            aggregate,
+            ReconciliationMatched(
+                event_id="event-reconciliation-residue",
+                ticket_id=aggregate.identity.ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=2_250,
+            ),
+        )
+
+
+def _position_protected_aggregate():
     ticket = _ticket()
     aggregate = reduce_event(
         None,
@@ -1074,12 +1062,28 @@ def _exit_outcome_unknown_aggregate():
             protected_qty=ticket.quantity,
         ),
     ).aggregate
+    return reduce_event(
+        aggregate,
+        TakeProfitConfirmed(
+            event_id="event-4",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=4,
+            occurred_at_ms=1_300,
+            exchange_order_id="tp-1",
+            target_qty=ticket.take_profit_quantities[0],
+        ),
+    ).aggregate
+
+
+def _exit_outcome_unknown_aggregate():
+    aggregate = _position_protected_aggregate()
+    ticket = aggregate.ticket
     aggregate = reduce_event(
         aggregate,
         ExitRequested(
             event_id="event-4",
             ticket_id=ticket.identity.ticket_id,
-            sequence=4,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_000,
             reason="strategy_exit",
         ),
@@ -1089,7 +1093,7 @@ def _exit_outcome_unknown_aggregate():
         ExitOutcomeUnknown(
             event_id="event-5",
             ticket_id=ticket.identity.ticket_id,
-            sequence=5,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_100,
             reason="venue_timeout",
         ),
@@ -1157,45 +1161,15 @@ def _controlled_flatten_outcome_unknown_aggregate():
     ).aggregate
 
 def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> None:
-    ticket = _ticket()
-    aggregate = reduce_event(
-        None,
-        TicketIssued(
-            event_id="event-1",
-            ticket=ticket,
-            sequence=1,
-            occurred_at_ms=1_001,
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        EntryFilled(
-            event_id="event-2",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=2,
-            occurred_at_ms=1_100,
-            filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        InitialStopConfirmed(
-            event_id="event-3",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=3,
-            occurred_at_ms=1_200,
-            exchange_order_id="stop-1",
-            protected_qty=ticket.quantity,
-        ),
-    ).aggregate
+    aggregate = _position_protected_aggregate()
+    ticket = aggregate.ticket
 
     exit_requested = reduce_event(
         aggregate,
         ExitRequested(
             event_id="event-4",
             ticket_id=ticket.identity.ticket_id,
-            sequence=4,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_000,
             reason="strategy_exit",
         ),
@@ -1214,7 +1188,7 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
         ExitAccepted(
             event_id="event-5",
             ticket_id=ticket.identity.ticket_id,
-            sequence=5,
+            sequence=exit_requested.aggregate.last_event_sequence + 1,
             occurred_at_ms=2_050,
             exchange_order_id="exit-order-1",
         ),
@@ -1227,7 +1201,7 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
         PositionFlatConfirmed(
             event_id="event-6",
             ticket_id=ticket.identity.ticket_id,
-            sequence=6,
+            sequence=exit_accepted.aggregate.last_event_sequence + 1,
             occurred_at_ms=2_100,
         ),
     )
@@ -1235,29 +1209,53 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
     assert flat.effects == (
         CancelProtectionOrders(
             ticket_id=ticket.identity.ticket_id,
+            exchange_order_id="tp-1",
+        ),
+    )
+
+    tp_cancelled = reduce_event(
+        flat.aggregate,
+        ProtectionCancelConfirmed(
+            event_id="event-7",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=flat.aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_150,
+            exchange_order_id="tp-1",
+        ),
+    )
+    assert tp_cancelled.aggregate.tp1_exchange_order_id is None
+
+    stop_cancel_requested = reduce_event(
+        tp_cancelled.aggregate,
+        OwnedOrphanOrderDetected(
+            event_id="event-8",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=tp_cancelled.aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_175,
             exchange_order_id="stop-1",
         ),
     )
 
     cancelled = reduce_event(
-        flat.aggregate,
+        stop_cancel_requested.aggregate,
         ProtectionCancelConfirmed(
-            event_id="event-7",
+            event_id="event-9",
             ticket_id=ticket.identity.ticket_id,
-            sequence=7,
-            occurred_at_ms=2_150,
+            sequence=stop_cancel_requested.aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_190,
             exchange_order_id="stop-1",
         ),
     )
     assert cancelled.aggregate.initial_stop_exchange_order_id is None
+    assert cancelled.aggregate.active_stop_exchange_order_id is None
     assert cancelled.aggregate.protected_qty == Decimal("0")
 
     reconciled = reduce_event(
         cancelled.aggregate,
         ReconciliationMatched(
-            event_id="event-8",
+            event_id="event-10",
             ticket_id=ticket.identity.ticket_id,
-            sequence=8,
+            sequence=cancelled.aggregate.last_event_sequence + 1,
             occurred_at_ms=2_200,
         ),
     )
@@ -1269,9 +1267,9 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
     settled = reduce_event(
         reconciled.aggregate,
         BudgetSettled(
-            event_id="event-9",
+            event_id="event-11",
             ticket_id=ticket.identity.ticket_id,
-            sequence=9,
+            sequence=reconciled.aggregate.last_event_sequence + 1,
             occurred_at_ms=2_300,
         ),
     )
@@ -1281,9 +1279,9 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
     terminal = reduce_event(
         settled.aggregate,
         ReviewRecorded(
-            event_id="event-10",
+            event_id="event-12",
             ticket_id=ticket.identity.ticket_id,
-            sequence=10,
+            sequence=settled.aggregate.last_event_sequence + 1,
             occurred_at_ms=2_400,
             review_id="review-1",
         ),
@@ -1294,44 +1292,14 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
 
 
 def _reconciliation_pending_aggregate():
-    ticket = _ticket()
-    aggregate = reduce_event(
-        None,
-        TicketIssued(
-            event_id="event-1",
-            ticket=ticket,
-            sequence=1,
-            occurred_at_ms=1_001,
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        EntryFilled(
-            event_id="event-2",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=2,
-            occurred_at_ms=1_100,
-            filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        InitialStopConfirmed(
-            event_id="event-3",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=3,
-            occurred_at_ms=1_200,
-            exchange_order_id="stop-1",
-            protected_qty=ticket.quantity,
-        ),
-    ).aggregate
+    aggregate = _position_protected_aggregate()
+    ticket = aggregate.ticket
     aggregate = reduce_event(
         aggregate,
         ExitRequested(
             event_id="event-4",
             ticket_id=ticket.identity.ticket_id,
-            sequence=4,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_000,
             reason="strategy_exit",
         ),
@@ -1341,61 +1309,51 @@ def _reconciliation_pending_aggregate():
         PositionFlatConfirmed(
             event_id="event-5",
             ticket_id=ticket.identity.ticket_id,
-            sequence=5,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_100,
+        ),
+    ).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        ProtectionCancelConfirmed(
+            event_id="event-6",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_150,
+            exchange_order_id="tp-1",
+        ),
+    ).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        OwnedOrphanOrderDetected(
+            event_id="event-7",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_175,
+            exchange_order_id="stop-1",
         ),
     ).aggregate
     return reduce_event(
         aggregate,
         ProtectionCancelConfirmed(
-            event_id="event-6",
+            event_id="event-8",
             ticket_id=ticket.identity.ticket_id,
-            sequence=6,
-            occurred_at_ms=2_150,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=2_190,
             exchange_order_id="stop-1",
         ),
     ).aggregate
 
 
 def _cancel_pending_aggregate():
-    ticket = _ticket()
-    aggregate = reduce_event(
-        None,
-        TicketIssued(
-            event_id="event-1",
-            ticket=ticket,
-            sequence=1,
-            occurred_at_ms=1_001,
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        EntryFilled(
-            event_id="event-2",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=2,
-            occurred_at_ms=1_100,
-            filled_qty=ticket.quantity,
-            average_fill_price=Decimal("60000"),
-        ),
-    ).aggregate
-    aggregate = reduce_event(
-        aggregate,
-        InitialStopConfirmed(
-            event_id="event-3",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=3,
-            occurred_at_ms=1_200,
-            exchange_order_id="stop-1",
-            protected_qty=ticket.quantity,
-        ),
-    ).aggregate
+    aggregate = _position_protected_aggregate()
+    ticket = aggregate.ticket
     aggregate = reduce_event(
         aggregate,
         ExitRequested(
             event_id="event-4",
             ticket_id=ticket.identity.ticket_id,
-            sequence=4,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_000,
             reason="strategy_exit",
         ),
@@ -1405,7 +1363,7 @@ def _cancel_pending_aggregate():
         PositionFlatConfirmed(
             event_id="event-5",
             ticket_id=ticket.identity.ticket_id,
-            sequence=5,
+            sequence=aggregate.last_event_sequence + 1,
             occurred_at_ms=2_100,
         ),
     ).aggregate
@@ -1445,3 +1403,188 @@ def test_reducer_rejects_wrong_ticket_and_non_monotonic_sequence() -> None:
                 reason="venue_rejected",
             ),
         )
+
+
+def test_proven_absent_tp1_unknown_prepares_one_safe_new_generation() -> None:
+    aggregate = _tp1_pending_aggregate()
+    unknown = reduce_event(
+        aggregate,
+        TakeProfitOutcomeUnknown(
+            event_id="event-tp-unknown",
+            ticket_id=aggregate.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=1_300,
+            reason="venue_timeout",
+        ),
+    ).aggregate
+
+    recovered = reduce_event(
+        unknown,
+        TakeProfitAbsenceConfirmed(
+            event_id="event-tp-absent",
+            ticket_id=unknown.identity.ticket_id,
+            sequence=unknown.last_event_sequence + 1,
+            occurred_at_ms=1_400,
+            command_id="command-tp-1",
+        ),
+    )
+
+    assert recovered.aggregate.status is AggregateStatus.TP1_PENDING
+    assert recovered.effects == (
+        ResolveIncident(
+            ticket_id=unknown.identity.ticket_id,
+            incident_kind="take_profit_outcome_unknown",
+        ),
+        PrepareTakeProfitCommand(
+            ticket_id=unknown.identity.ticket_id,
+            quantity=unknown.tp1_target_qty,
+            limit_price=unknown.ticket.take_profit_prices[0],
+        ),
+    )
+
+
+def test_proven_absent_replacement_unknown_retries_exact_frozen_terms() -> None:
+    aggregate = _replacement_pending_aggregate()
+    unknown = reduce_event(
+        aggregate,
+        ProtectionReplacementOutcomeUnknown(
+            event_id="event-replacement-unknown",
+            ticket_id=aggregate.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=1_600,
+            reason="venue_timeout",
+        ),
+    ).aggregate
+
+    recovered = reduce_event(
+        unknown,
+        ProtectionReplacementAbsenceConfirmed(
+            event_id="event-replacement-absent",
+            ticket_id=unknown.identity.ticket_id,
+            sequence=unknown.last_event_sequence + 1,
+            occurred_at_ms=1_700,
+            command_id="command-replacement-1",
+        ),
+    )
+
+    assert recovered.aggregate.status is AggregateStatus.RUNNER_REPLACEMENT_PENDING
+    assert recovered.effects == (
+        ResolveIncident(
+            ticket_id=unknown.identity.ticket_id,
+            incident_kind="protection_replacement_outcome_unknown",
+        ),
+        PrepareProtectionReplacementCommand(
+            ticket_id=unknown.identity.ticket_id,
+            quantity=unknown.position_qty,
+            stop_price=Decimal("60010"),
+            replaces_exchange_order_id="stop-1",
+            source_watermark_ms=1_500,
+        ),
+    )
+
+
+def test_proven_absent_old_stop_cancel_finishes_runner_protection() -> None:
+    replacement = _replacement_pending_aggregate()
+    confirmed = reduce_event(
+        replacement,
+        ProtectionReplacementConfirmed(
+            event_id="event-replacement-confirmed",
+            ticket_id=replacement.identity.ticket_id,
+            sequence=replacement.last_event_sequence + 1,
+            occurred_at_ms=1_600,
+            exchange_order_id="stop-2",
+            protected_qty=replacement.position_qty,
+            stop_price=Decimal("60010"),
+            replaces_exchange_order_id="stop-1",
+            source_watermark_ms=1_500,
+        ),
+    ).aggregate
+    unknown = reduce_event(
+        confirmed,
+        ProtectionCancelOutcomeUnknown(
+            event_id="event-cancel-unknown",
+            ticket_id=confirmed.identity.ticket_id,
+            sequence=confirmed.last_event_sequence + 1,
+            occurred_at_ms=1_700,
+            exchange_order_id="stop-1",
+            reason="venue_timeout",
+        ),
+    ).aggregate
+
+    recovered = reduce_event(
+        unknown,
+        ProtectionCancelAbsenceConfirmed(
+            event_id="event-cancel-absent",
+            ticket_id=unknown.identity.ticket_id,
+            sequence=unknown.last_event_sequence + 1,
+            occurred_at_ms=1_800,
+            exchange_order_id="stop-1",
+        ),
+    )
+
+    assert recovered.aggregate.status is AggregateStatus.RUNNER_PROTECTED
+    assert recovered.aggregate.active_stop_exchange_order_id == "stop-2"
+    assert recovered.aggregate.pending_replaced_stop_exchange_order_id is None
+    assert recovered.effects == (
+        MarkCancelCommandReconciledAbsent(
+            ticket_id=unknown.identity.ticket_id,
+            exchange_order_id="stop-1",
+        ),
+        ResolveIncident(
+            ticket_id=unknown.identity.ticket_id,
+            incident_kind="runner_old_stop_cancel_outcome_unknown",
+        ),
+    )
+
+
+def _tp1_pending_aggregate():
+    ticket = _ticket()
+    aggregate = reduce_event(
+        None,
+        TicketIssued(
+            event_id="event-1",
+            ticket=ticket,
+            sequence=1,
+            occurred_at_ms=1_001,
+        ),
+    ).aggregate
+    aggregate = reduce_event(
+        aggregate,
+        EntryFilled(
+            event_id="event-2",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_100,
+            filled_qty=ticket.quantity,
+            average_fill_price=ticket.entry_reference_price,
+        ),
+    ).aggregate
+    return reduce_event(
+        aggregate,
+        InitialStopConfirmed(
+            event_id="event-3",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=3,
+            occurred_at_ms=1_200,
+            exchange_order_id="stop-1",
+            protected_qty=ticket.quantity,
+        ),
+    ).aggregate
+
+
+def _replacement_pending_aggregate():
+    aggregate = _tp1_pending_aggregate().model_copy(
+        update={"status": AggregateStatus.POSITION_PROTECTED}
+    )
+    return reduce_event(
+        aggregate,
+        TakeProfitFilled(
+            event_id="event-4",
+            ticket_id=aggregate.identity.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=1_500,
+            filled_qty=aggregate.tp1_target_qty,
+            average_fill_price=aggregate.ticket.take_profit_prices[0],
+            runner_floor_price=Decimal("60010"),
+        ),
+    ).aggregate

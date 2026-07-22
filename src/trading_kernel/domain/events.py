@@ -106,6 +106,54 @@ class InitialStopAbsenceConfirmed(_TicketEvent):
     command_id: str
 
 
+class TakeProfitConfirmed(_TicketEvent):
+    exchange_order_id: str
+    target_qty: Decimal
+
+
+class TakeProfitRejected(_TicketEvent):
+    reason: str
+
+
+class TakeProfitOutcomeUnknown(_TicketEvent):
+    reason: str
+
+
+class TakeProfitAbsenceConfirmed(_TicketEvent):
+    command_id: str
+
+
+class TakeProfitFilled(_TicketEvent):
+    filled_qty: Decimal
+    average_fill_price: Decimal
+    runner_floor_price: Decimal
+
+
+class RunnerStopRequested(_TicketEvent):
+    stop_price: Decimal
+    source_watermark_ms: int
+
+
+class ProtectionReplacementConfirmed(_TicketEvent):
+    exchange_order_id: str
+    protected_qty: Decimal
+    stop_price: Decimal
+    replaces_exchange_order_id: str
+    source_watermark_ms: int
+
+
+class ProtectionReplacementRejected(_TicketEvent):
+    reason: str
+
+
+class ProtectionReplacementOutcomeUnknown(_TicketEvent):
+    reason: str
+
+
+class ProtectionReplacementAbsenceConfirmed(_TicketEvent):
+    command_id: str
+
+
 class ExitRequested(_TicketEvent):
     reason: str
 
@@ -154,11 +202,29 @@ class OwnedOrphanOrderDetected(_TicketEvent):
     exchange_order_id: str
 
 
+class OwnedOrderAbsenceConfirmed(_TicketEvent):
+    exchange_order_id: str
+
+
 class UnownedOrderDetected(_TicketEvent):
     exchange_order_id: str
 
 
 class ProtectionCancelConfirmed(_TicketEvent):
+    exchange_order_id: str
+
+
+class ProtectionCancelRejected(_TicketEvent):
+    exchange_order_id: str
+    reason: str
+
+
+class ProtectionCancelOutcomeUnknown(_TicketEvent):
+    exchange_order_id: str
+    reason: str
+
+
+class ProtectionCancelAbsenceConfirmed(_TicketEvent):
     exchange_order_id: str
 
 
@@ -207,6 +273,16 @@ TradeEvent = (
     | InitialStopRejected
     | InitialStopOutcomeUnknown
     | InitialStopAbsenceConfirmed
+    | TakeProfitConfirmed
+    | TakeProfitRejected
+    | TakeProfitOutcomeUnknown
+    | TakeProfitAbsenceConfirmed
+    | TakeProfitFilled
+    | RunnerStopRequested
+    | ProtectionReplacementConfirmed
+    | ProtectionReplacementRejected
+    | ProtectionReplacementOutcomeUnknown
+    | ProtectionReplacementAbsenceConfirmed
     | ExitRequested
     | ExitAccepted
     | ExitRejected
@@ -219,8 +295,12 @@ TradeEvent = (
     | PositionFlatConfirmed
     | ExternalFlatDetected
     | OwnedOrphanOrderDetected
+    | OwnedOrderAbsenceConfirmed
     | UnownedOrderDetected
     | ProtectionCancelConfirmed
+    | ProtectionCancelRejected
+    | ProtectionCancelOutcomeUnknown
+    | ProtectionCancelAbsenceConfirmed
     | OwnedOrphanCancelConfirmed
     | CancelOrderRejected
     | CancelOrderOutcomeUnknown

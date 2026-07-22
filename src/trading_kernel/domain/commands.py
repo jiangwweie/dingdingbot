@@ -45,6 +45,8 @@ class OrderCommandPayload(BaseModel):
     reduce_only: bool
     limit_price: Decimal | None = None
     stop_price: Decimal | None = None
+    replaces_exchange_order_id: str | None = None
+    source_watermark_ms: int | None = None
 
     @field_validator("quantity")
     @classmethod
@@ -74,6 +76,15 @@ class OrderCommandPayload(BaseModel):
                 raise ValueError("conditional order requires stop_price")
         elif self.stop_price is not None:
             raise ValueError("non-conditional order forbids stop_price")
+        replacement_fields = (
+            self.replaces_exchange_order_id,
+            self.source_watermark_ms,
+        )
+        if any(value is not None for value in replacement_fields):
+            if not str(self.replaces_exchange_order_id or "").strip():
+                raise ValueError("replacement payload requires prior order identity")
+            if self.source_watermark_ms is None or self.source_watermark_ms <= 0:
+                raise ValueError("replacement payload requires a positive watermark")
         return self
 
 
@@ -141,6 +152,20 @@ class ExchangeCommand(BaseModel):
                 raise ValueError("cancel command requires cancel payload")
         elif not isinstance(self.payload, OrderCommandPayload):
             raise ValueError("order command requires order payload")
+        if isinstance(self.payload, OrderCommandPayload):
+            has_replacement_metadata = (
+                self.payload.replaces_exchange_order_id is not None
+                or self.payload.source_watermark_ms is not None
+            )
+            if self.kind is ExchangeCommandKind.REPLACE_PROTECTION:
+                if not has_replacement_metadata:
+                    raise ValueError(
+                        "protection replacement command requires replacement metadata"
+                    )
+            elif has_replacement_metadata:
+                raise ValueError(
+                    "only protection replacement commands allow replacement metadata"
+                )
         return self
 
 
@@ -216,6 +241,15 @@ def require_next_generation_allowed(
         raise CommandGenerationError("ENTRY is never retried")
     if prior_status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
         raise CommandGenerationError("unknown outcome must be reconciled first")
+    if (
+        kind is ExchangeCommandKind.REPLACE_PROTECTION
+        and prior_status
+        in {
+            ExchangeCommandStatus.ACCEPTED,
+            ExchangeCommandStatus.RECONCILED_ACCEPTED,
+        }
+    ):
+        return
     if prior_status not in {
         ExchangeCommandStatus.REJECTED,
         ExchangeCommandStatus.RECONCILED_ABSENT,

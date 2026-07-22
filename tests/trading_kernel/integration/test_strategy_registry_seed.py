@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.infrastructure.pg_models import (
     event_specs,
+    exit_policies,
     owner_policy_current,
     runtime_profiles,
     runtime_scopes_current,
@@ -63,6 +64,7 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
     assert first.inserted_strategy_group_count == 5
     assert first.inserted_strategy_version_count == 5
     assert first.inserted_event_count == 6
+    assert first.inserted_exit_policy_count == 6
     assert first.inserted_fact_definition_count == 18
     assert first.inserted_event_fact_count == 19
     assert first.inserted_instrument_count == 6
@@ -82,6 +84,7 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         assert await connection.scalar(sa.select(sa.func.count()).select_from(runtime_scopes_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(owner_policy_current)) == 0
         assert await connection.scalar(sa.select(sa.func.count()).select_from(strategy_candidate_scopes)) == 22
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(exit_policies)) == 6
 
 
 @pytest.mark.asyncio
@@ -99,5 +102,24 @@ async def test_strategy_seed_fails_closed_on_existing_semantic_conflict(
         )
 
     with pytest.raises(RegistrySeedConflict, match="event_spec:SOR-001:SOR-LONG:v2"):
+        async with PostgresKernelUnitOfWork(registry_engine) as uow:
+            await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
+
+
+@pytest.mark.asyncio
+async def test_strategy_seed_fails_closed_on_exit_policy_semantic_conflict(
+    registry_engine: AsyncEngine,
+) -> None:
+    async with PostgresKernelUnitOfWork(registry_engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000)
+
+    async with registry_engine.begin() as connection:
+        await connection.execute(
+            sa.update(exit_policies)
+            .where(exit_policies.c.event_spec_id == "event_spec:SOR-001:SOR-LONG:v2")
+            .values(semantic_hash="sha256:" + "0" * 64)
+        )
+
+    with pytest.raises(RegistrySeedConflict, match="exit-policy:SOR-001:SOR-LONG"):
         async with PostgresKernelUnitOfWork(registry_engine) as uow:
             await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)

@@ -19,6 +19,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandResult,
     ExchangeCommandStatus,
+    OrderCommandPayload,
 )
 from src.trading_kernel.domain.events import (
     CancelOrderOutcomeUnknown,
@@ -40,6 +41,14 @@ from src.trading_kernel.domain.events import (
     InitialStopRejected,
     OwnedOrphanCancelConfirmed,
     ProtectionCancelConfirmed,
+    ProtectionCancelOutcomeUnknown,
+    ProtectionCancelRejected,
+    ProtectionReplacementConfirmed,
+    ProtectionReplacementOutcomeUnknown,
+    ProtectionReplacementRejected,
+    TakeProfitConfirmed,
+    TakeProfitOutcomeUnknown,
+    TakeProfitRejected,
 )
 from src.trading_kernel.domain.reducer import reduce_event
 
@@ -237,6 +246,48 @@ def _command_result_event(
         return EntryOutcomeUnknown(**common, reason=str(result.reason))
     if kind is ExchangeCommandKind.EXIT and result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
         return ExitOutcomeUnknown(**common, reason=str(result.reason))
+    if kind is ExchangeCommandKind.TAKE_PROFIT:
+        if not isinstance(command.payload, OrderCommandPayload):
+            raise RuntimeError("TP1 command payload is invalid")
+        if result.status is ExchangeCommandStatus.ACCEPTED:
+            return TakeProfitConfirmed(
+                **common,
+                exchange_order_id=str(result.exchange_order_id),
+                target_qty=command.payload.quantity,
+            )
+        if result.status is ExchangeCommandStatus.REJECTED:
+            return TakeProfitRejected(**common, reason=str(result.reason))
+        if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+            return TakeProfitOutcomeUnknown(**common, reason=str(result.reason))
+    if kind is ExchangeCommandKind.REPLACE_PROTECTION:
+        payload = command.payload
+        if not isinstance(payload, OrderCommandPayload):
+            raise RuntimeError("protection replacement payload is invalid")
+        if payload.stop_price is None:
+            raise RuntimeError("protection replacement stop price is missing")
+        if payload.replaces_exchange_order_id is None:
+            raise RuntimeError("protection replacement prior order is missing")
+        if payload.source_watermark_ms is None:
+            raise RuntimeError("protection replacement watermark is missing")
+        if result.status is ExchangeCommandStatus.ACCEPTED:
+            return ProtectionReplacementConfirmed(
+                **common,
+                exchange_order_id=str(result.exchange_order_id),
+                protected_qty=payload.quantity,
+                stop_price=payload.stop_price,
+                replaces_exchange_order_id=payload.replaces_exchange_order_id,
+                source_watermark_ms=payload.source_watermark_ms,
+            )
+        if result.status is ExchangeCommandStatus.REJECTED:
+            return ProtectionReplacementRejected(
+                **common,
+                reason=str(result.reason),
+            )
+        if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+            return ProtectionReplacementOutcomeUnknown(
+                **common,
+                reason=str(result.reason),
+            )
     if kind is ExchangeCommandKind.INITIAL_STOP and result.status is ExchangeCommandStatus.REJECTED:
         return InitialStopRejected(**common, reason=str(result.reason))
     if kind is ExchangeCommandKind.INITIAL_STOP and result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
@@ -260,6 +311,26 @@ def _command_result_event(
                 )
             if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
                 return EntryRemainderCancelOutcomeUnknown(
+                    **common,
+                    exchange_order_id=command.payload.exchange_order_id,
+                    reason=str(result.reason),
+                )
+        if (
+            aggregate.status is AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING
+        ):
+            if result.status is ExchangeCommandStatus.ACCEPTED:
+                return ProtectionCancelConfirmed(
+                    **common,
+                    exchange_order_id=command.payload.exchange_order_id,
+                )
+            if result.status is ExchangeCommandStatus.REJECTED:
+                return ProtectionCancelRejected(
+                    **common,
+                    exchange_order_id=command.payload.exchange_order_id,
+                    reason=str(result.reason),
+                )
+            if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+                return ProtectionCancelOutcomeUnknown(
                     **common,
                     exchange_order_id=command.payload.exchange_order_id,
                     reason=str(result.reason),
@@ -308,7 +379,13 @@ def _command_result_event(
         if not isinstance(command.payload, CancelCommandPayload):
             raise RuntimeError("cancel command payload is invalid")
         cancel_payload = command.payload
-        if cancel_payload.exchange_order_id != aggregate.initial_stop_exchange_order_id:
+        known_order_ids = {
+            aggregate.initial_stop_exchange_order_id,
+            aggregate.active_stop_exchange_order_id,
+            aggregate.tp1_exchange_order_id,
+            aggregate.pending_replaced_stop_exchange_order_id,
+        }
+        if cancel_payload.exchange_order_id not in known_order_ids:
             return OwnedOrphanCancelConfirmed(
                 **common,
                 exchange_order_id=cancel_payload.exchange_order_id,

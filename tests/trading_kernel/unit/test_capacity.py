@@ -42,12 +42,14 @@ def test_capacity_claim_sizes_from_stop_risk_and_freezes_one_ticket() -> None:
     assert claim.risk_at_stop <= _policy().max_ticket_risk_at_stop
     assert claim.initial_stop_price == Decimal("99.0")
     assert claim.take_profit_prices == (Decimal("101.0"),)
+    assert claim.take_profit_quantities == (Decimal("5.0"),)
     assert claim.decision_digest.startswith("sha256:")
 
     ticket = claim.to_ticket()
     assert ticket.identity.ticket_id == claim.ticket_identity.ticket_id
     assert ticket.entry_reference_price == Decimal("100")
     assert ticket.identity.signal_event_id == "signal-capacity-long"
+    assert ticket.take_profit_quantities == (Decimal("5.0"),)
 
 
 def test_capacity_claim_caps_margin_by_current_account_equity() -> None:

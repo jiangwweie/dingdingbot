@@ -23,6 +23,20 @@ class PrepareInitialStopCommand(_Effect):
     stop_price: Decimal
 
 
+class PrepareTakeProfitCommand(_Effect):
+    ticket_id: str
+    quantity: Decimal
+    limit_price: Decimal
+
+
+class PrepareProtectionReplacementCommand(_Effect):
+    ticket_id: str
+    quantity: Decimal
+    stop_price: Decimal
+    replaces_exchange_order_id: str
+    source_watermark_ms: int
+
+
 class PrepareExitCommand(_Effect):
     ticket_id: str
     quantity: Decimal
@@ -78,6 +92,8 @@ class ReleaseBudget(_Effect):
 KernelEffect = (
     PrepareEntryCommand
     | PrepareInitialStopCommand
+    | PrepareTakeProfitCommand
+    | PrepareProtectionReplacementCommand
     | PrepareExitCommand
     | CancelEntryRemainder
     | RequestControlledFlatten

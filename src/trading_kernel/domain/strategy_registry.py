@@ -28,6 +28,7 @@ class RegistrySeedResult(BaseModel):
     inserted_strategy_group_count: int = 0
     inserted_strategy_version_count: int = 0
     inserted_event_count: int = 0
+    inserted_exit_policy_count: int = 0
     inserted_fact_definition_count: int = 0
     inserted_event_fact_count: int = 0
     inserted_instrument_count: int = 0
@@ -39,6 +40,7 @@ class RegistrySeedResult(BaseModel):
             self.inserted_strategy_group_count
             + self.inserted_strategy_version_count
             + self.inserted_event_count
+            + self.inserted_exit_policy_count
             + self.inserted_fact_definition_count
             + self.inserted_event_fact_count
             + self.inserted_instrument_count

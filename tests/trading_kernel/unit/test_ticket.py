@@ -63,6 +63,7 @@ def _ticket(**updates: object) -> TradeTicket:
         "entry_limit_price": None,
         "initial_stop_price": Decimal("59000"),
         "take_profit_prices": (Decimal("62000"),),
+        "take_profit_quantities": (Decimal("0.0005"),),
         "status": TicketStatus.ISSUED,
     }
     payload.update(updates)

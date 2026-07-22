@@ -83,10 +83,14 @@ async def lifecycle_engine() -> AsyncEngine:
 
 
 class LifecycleVenue:
+    def __init__(self) -> None:
+        self._last_observed_at_ms = 0
+
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
         order_ids = {
             ExchangeCommandKind.ENTRY: "entry-order-1",
             ExchangeCommandKind.INITIAL_STOP: "stop-order-1",
+            ExchangeCommandKind.TAKE_PROFIT: "tp-order-1",
             ExchangeCommandKind.EXIT: "exit-order-1",
         }
         if request.kind is ExchangeCommandKind.CANCEL_ORDER:
@@ -94,9 +98,14 @@ class LifecycleVenue:
             exchange_order_id = request.payload.exchange_order_id
         else:
             exchange_order_id = order_ids[request.kind]
+        candidate_observed_at_ms = request.deadline_at_ms - 29_998
+        self._last_observed_at_ms = max(
+            self._last_observed_at_ms + 1,
+            candidate_observed_at_ms,
+        )
         return ExchangeCommandResult(
             status=ExchangeCommandStatus.ACCEPTED,
-            observed_at_ms=2_000 + len(order_ids),
+            observed_at_ms=self._last_observed_at_ms,
             exchange_order_id=exchange_order_id,
         )
 
@@ -140,6 +149,9 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
     assert (
         await _dispatch(lifecycle_engine, venue, "dispatch-stop", 2_200)
     ).status is DispatchCommandStatus.ACCEPTED
+    assert (
+        await _dispatch(lifecycle_engine, venue, "dispatch-tp1", 2_250)
+    ).status is DispatchCommandStatus.ACCEPTED
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         protected = await uow.aggregates.get(ticket.identity.ticket_id)
         lane = await uow.entry_admission.get_global_lane()
@@ -174,6 +186,12 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
+                            exchange_order_id="tp-order-1",
+                            venue_client_order_id="brc-owned-tp1",
+                            position_side="long",
+                            reduce_only=True,
+                        ),
+                        VenueOrderSnapshot(
                             exchange_order_id="stop-order-1",
                             venue_client_order_id="brc-owned-stop",
                             position_side="long",
@@ -187,7 +205,33 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
     assert flat.status is ReconcileTicketStatus.POSITION_FLAT_RECORDED
 
     assert (
-        await _dispatch(lifecycle_engine, venue, "dispatch-cancel", 3_300)
+        await _dispatch(lifecycle_engine, venue, "dispatch-cancel-tp1", 3_300)
+    ).status is DispatchCommandStatus.ACCEPTED
+
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        stop_cleanup = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity="0",
+                    average_entry_price=None,
+                    open_orders=(
+                        VenueOrderSnapshot(
+                            exchange_order_id="stop-order-1",
+                            venue_client_order_id="brc-owned-stop",
+                            position_side="long",
+                            reduce_only=True,
+                        ),
+                    ),
+                    observed_at_ms=3_350,
+                ),
+            ),
+        )
+    assert stop_cleanup.status is ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
+    assert (
+        await _dispatch(lifecycle_engine, venue, "dispatch-cancel-stop", 3_375)
     ).status is DispatchCommandStatus.ACCEPTED
 
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
@@ -274,7 +318,9 @@ async def test_one_ticket_reaches_protected_exit_settlement_and_terminal_review(
     assert [command.kind for command in commands] == [
         ExchangeCommandKind.ENTRY,
         ExchangeCommandKind.INITIAL_STOP,
+        ExchangeCommandKind.TAKE_PROFIT,
         ExchangeCommandKind.EXIT,
+        ExchangeCommandKind.CANCEL_ORDER,
         ExchangeCommandKind.CANCEL_ORDER,
     ]
 
@@ -303,6 +349,7 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
             ),
         )
     await _dispatch(lifecycle_engine, venue, "dispatch-stop", 2_200)
+    await _dispatch(lifecycle_engine, venue, "dispatch-tp1", 2_250)
 
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         result = await reconcile_ticket(
@@ -314,6 +361,12 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
                     quantity="0",
                     average_entry_price=None,
                     open_orders=(
+                        VenueOrderSnapshot(
+                            exchange_order_id="tp-order-1",
+                            venue_client_order_id="brc-owned-tp1",
+                            position_side="long",
+                            reduce_only=True,
+                        ),
                         VenueOrderSnapshot(
                             exchange_order_id="stop-order-1",
                             venue_client_order_id="brc-owned-stop",
@@ -362,6 +415,7 @@ async def test_exit_timeout_is_conserved_as_unknown_and_never_redispatched(
             ),
         )
     await _dispatch(lifecycle_engine, venue, "dispatch-stop", 2_200)
+    await _dispatch(lifecycle_engine, venue, "dispatch-tp1", 2_250)
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         await request_exit(
             uow,
@@ -438,7 +492,7 @@ async def test_owned_orphan_order_creates_new_exact_cancel_generation(
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
     orphan_cancel = commands[-1]
     assert orphan_cancel.kind is ExchangeCommandKind.CANCEL_ORDER
-    assert orphan_cancel.generation == 2
+    assert orphan_cancel.generation == 3
     assert isinstance(orphan_cancel.payload, CancelCommandPayload)
     assert orphan_cancel.payload.exchange_order_id == "owned-orphan-1"
     assert reservation is not None and reservation.status == "active"
@@ -475,7 +529,7 @@ async def test_owned_orphan_order_creates_new_exact_cancel_generation(
             ticket.identity.ticket_id
         )
     assert still_present.status is ReconcileTicketStatus.PROTECTION_RESIDUE
-    assert len(commands_after_accept) == 5
+    assert len(commands_after_accept) == 7
 
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         matched = await reconcile_ticket(
@@ -561,8 +615,8 @@ async def test_unowned_open_order_opens_incident_without_creating_cancel(
         events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
     assert incident is not None and incident.incident_kind == "unowned_open_order"
-    assert len(commands) == 4
-    assert len(events) == 9
+    assert len(commands) == 6
+    assert len(events) == 12
     assert reservation is not None and reservation.status == "active"
 
 
@@ -615,7 +669,7 @@ async def test_protection_residue_blocks_match_without_duplicate_cancel(
 
     assert first.status is ReconcileTicketStatus.PROTECTION_RESIDUE
     assert second.status is ReconcileTicketStatus.PROTECTION_RESIDUE
-    assert len(commands) == 4
+    assert len(commands) == 5
     assert commands[-1].kind is ExchangeCommandKind.CANCEL_ORDER
     assert commands[-1].status is ExchangeCommandStatus.PREPARED
     assert reservation is not None and reservation.status == "active"
@@ -679,14 +733,24 @@ async def test_same_instrument_long_and_short_tickets_are_isolated(
     assert short_position is not None and short_position.quantity == short_ticket.quantity
     assert exposure is not None and exposure.active_ticket_count == 2
 
-    long_entry, long_stop = long_commands
-    short_entry, short_stop = short_commands
+    long_entry, long_stop, long_tp1 = long_commands
+    short_entry, short_stop, short_tp1 = short_commands
     assert isinstance(long_entry.payload, OrderCommandPayload)
     assert isinstance(long_stop.payload, OrderCommandPayload)
+    assert isinstance(long_tp1.payload, OrderCommandPayload)
     assert isinstance(short_entry.payload, OrderCommandPayload)
     assert isinstance(short_stop.payload, OrderCommandPayload)
-    assert (long_entry.payload.side, long_stop.payload.side) == ("buy", "sell")
-    assert (short_entry.payload.side, short_stop.payload.side) == ("sell", "buy")
+    assert isinstance(short_tp1.payload, OrderCommandPayload)
+    assert (
+        long_entry.payload.side,
+        long_stop.payload.side,
+        long_tp1.payload.side,
+    ) == ("buy", "sell", "sell")
+    assert (
+        short_entry.payload.side,
+        short_stop.payload.side,
+        short_tp1.payload.side,
+    ) == ("sell", "buy", "buy")
 
 
 async def _seed_policy(engine: AsyncEngine) -> None:
@@ -773,6 +837,13 @@ async def _protect_ticket(
         observed_at_ms + 100,
     )
     assert protected.status is DispatchCommandStatus.ACCEPTED
+    tp1 = await _dispatch(
+        engine,
+        venue,
+        f"{worker_prefix}-tp1",
+        observed_at_ms + 150,
+    )
+    assert tp1.status is DispatchCommandStatus.ACCEPTED
 
 
 async def _reach_reconciliation_pending_after_cancel(
@@ -798,6 +869,7 @@ async def _reach_reconciliation_pending_after_cancel(
             ),
         )
     await _dispatch(engine, venue, "dispatch-stop", 2_200)
+    await _dispatch(engine, venue, "dispatch-tp1", 2_250)
     async with PostgresKernelUnitOfWork(engine) as uow:
         await request_exit(
             uow,
@@ -819,6 +891,12 @@ async def _reach_reconciliation_pending_after_cancel(
                     average_entry_price=None,
                     open_orders=(
                         VenueOrderSnapshot(
+                            exchange_order_id="tp-order-1",
+                            venue_client_order_id="brc-owned-tp1",
+                            position_side=ticket.identity.netting_domain.position_side,
+                            reduce_only=True,
+                        ),
+                        VenueOrderSnapshot(
                             exchange_order_id="stop-order-1",
                             venue_client_order_id="brc-owned-stop",
                             position_side=ticket.identity.netting_domain.position_side,
@@ -830,7 +908,35 @@ async def _reach_reconciliation_pending_after_cancel(
             ),
         )
     if dispatch_cancel:
-        await _dispatch(engine, venue, "dispatch-cancel", 3_300)
+        await _dispatch(engine, venue, "dispatch-cancel-tp1", 3_300)
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            stop_cleanup = await reconcile_ticket(
+                uow,
+                ReconcileTicketRequest(
+                    ticket_id=ticket.identity.ticket_id,
+                    snapshot=PositionSnapshot(
+                        netting_domain=ticket.identity.netting_domain,
+                        quantity="0",
+                        average_entry_price=None,
+                        open_orders=(
+                            VenueOrderSnapshot(
+                                exchange_order_id="stop-order-1",
+                                venue_client_order_id="brc-owned-stop",
+                                position_side=(
+                                    ticket.identity.netting_domain.position_side
+                                ),
+                                reduce_only=True,
+                            ),
+                        ),
+                        observed_at_ms=3_350,
+                    ),
+                ),
+            )
+        assert (
+            stop_cleanup.status
+            is ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
+        )
+        await _dispatch(engine, venue, "dispatch-cancel-stop", 3_375)
 
 
 async def _issue(engine: AsyncEngine, ticket) -> None:

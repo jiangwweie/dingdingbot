@@ -19,6 +19,7 @@ from src.trading_kernel.domain.commands import (
     CommandPayload,
 )
 from src.trading_kernel.domain.events import TradeEvent
+from src.trading_kernel.domain.exit_policy import ExitPolicy
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.signal import SignalFactSnapshot, StrategySignal
@@ -570,6 +571,8 @@ class StrategyRegistryRepository(Protocol):
     ) -> RegistrySeedResult: ...
 
     async def list_current_event_ids(self) -> tuple[str, ...]: ...
+
+    async def get_exit_policy(self, event_spec_id: str) -> ExitPolicy | None: ...
 
 
 class VenueCommandRequest(BaseModel):

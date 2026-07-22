@@ -217,6 +217,7 @@ class CapacityClaim(BaseModel):
     entry_limit_price: Decimal | None
     initial_stop_price: Decimal
     take_profit_prices: tuple[Decimal, ...]
+    take_profit_quantities: tuple[Decimal, ...]
     decision_digest: str
 
     @field_validator(
@@ -274,6 +275,14 @@ class CapacityClaim(BaseModel):
                 raise ValueError("market CapacityClaim forbids a limit price")
         elif self.entry_limit_price is None or self.entry_limit_price <= 0:
             raise ValueError("limit CapacityClaim requires a positive limit price")
+        if len(self.take_profit_prices) != len(self.take_profit_quantities):
+            raise ValueError("CapacityClaim take-profit legs must align")
+        if any(value <= 0 for value in self.take_profit_prices):
+            raise ValueError("CapacityClaim take-profit prices must be positive")
+        if any(value <= 0 for value in self.take_profit_quantities):
+            raise ValueError("CapacityClaim take-profit quantities must be positive")
+        if sum(self.take_profit_quantities, Decimal("0")) >= self.quantity:
+            raise ValueError("CapacityClaim take-profit legs must preserve a runner")
         expected_digest = build_capacity_claim_digest(self)
         if expected_digest != self.decision_digest:
             raise ValueError("CapacityClaim decision digest differs from its payload")
@@ -300,6 +309,7 @@ class CapacityClaim(BaseModel):
             entry_limit_price=self.entry_limit_price,
             initial_stop_price=self.initial_stop_price,
             take_profit_prices=self.take_profit_prices,
+            take_profit_quantities=self.take_profit_quantities,
         )
 
 
@@ -337,6 +347,7 @@ def freeze_capacity_claim(
     entry_limit_price: Decimal | None,
     initial_stop_price: Decimal,
     take_profit_prices: tuple[Decimal, ...],
+    take_profit_quantities: tuple[Decimal, ...],
 ) -> CapacityClaim:
     payload: dict[str, Any] = {
         "capacity_claim_id": "claim:pending",
@@ -359,6 +370,7 @@ def freeze_capacity_claim(
         "entry_limit_price": entry_limit_price,
         "initial_stop_price": initial_stop_price,
         "take_profit_prices": take_profit_prices,
+        "take_profit_quantities": take_profit_quantities,
         "decision_digest": "sha256:" + "0" * 64,
     }
     provisional = CapacityClaim.model_construct(**payload)

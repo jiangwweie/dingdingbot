@@ -17,6 +17,8 @@ from src.trading_kernel.domain.effects import (
     PrepareControlledFlattenCommand,
     PrepareExitCommand,
     PrepareInitialStopCommand,
+    PrepareProtectionReplacementCommand,
+    PrepareTakeProfitCommand,
     ReleaseBudget,
     ReleaseEntryLane,
     ResolveIncident,
@@ -52,11 +54,25 @@ from src.trading_kernel.domain.events import (
     InitialStopOutcomeUnknown,
     InitialStopRejected,
     OwnedOrphanOrderDetected,
+    OwnedOrderAbsenceConfirmed,
     OwnedOrphanCancelConfirmed,
     PositionFlatConfirmed,
     ProtectionCancelConfirmed,
+    ProtectionCancelAbsenceConfirmed,
+    ProtectionCancelOutcomeUnknown,
+    ProtectionCancelRejected,
+    ProtectionReplacementAbsenceConfirmed,
+    ProtectionReplacementConfirmed,
+    ProtectionReplacementOutcomeUnknown,
+    ProtectionReplacementRejected,
     ReconciliationMatched,
     ReviewRecorded,
+    RunnerStopRequested,
+    TakeProfitConfirmed,
+    TakeProfitAbsenceConfirmed,
+    TakeProfitFilled,
+    TakeProfitOutcomeUnknown,
+    TakeProfitRejected,
     TicketIssued,
     TradeEvent,
     UnownedOrderDetected,
@@ -308,17 +324,36 @@ def reduce_event(
                     incident_kind="initial_stop_outcome_unknown",
                 )
             )
-        initial_stop_effects.append(
-            ReleaseEntryLane(ticket_id=current.identity.ticket_id)
+        tp_prices = current.ticket.take_profit_prices
+        tp_quantities = current.ticket.take_profit_quantities
+        if len(tp_prices) != 1 or len(tp_quantities) != 1:
+            raise InvalidLifecycleTransition(
+                "registered exit policy requires exactly one TP1 leg"
+            )
+        tp1_quantity = tp_quantities[0]
+        if tp1_quantity >= current.position_qty:
+            raise InvalidLifecycleTransition("TP1 must preserve a runner quantity")
+        initial_stop_effects.extend(
+            (
+                ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+                PrepareTakeProfitCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=tp1_quantity,
+                    limit_price=tp_prices[0],
+                ),
+            )
         )
         return _transition(
             current,
             event,
-            status=AggregateStatus.POSITION_PROTECTED,
+            status=AggregateStatus.TP1_PENDING,
             updates={
                 "entry_lane_held": False,
                 "protected_qty": event.protected_qty,
                 "initial_stop_exchange_order_id": event.exchange_order_id.strip(),
+                "active_stop_exchange_order_id": event.exchange_order_id.strip(),
+                "active_stop_price": current.ticket.initial_stop_price,
+                "tp1_target_qty": tp1_quantity,
             },
             effects=tuple(initial_stop_effects),
         )
@@ -389,10 +424,301 @@ def reduce_event(
             ),
         )
 
+    if isinstance(event, TakeProfitConfirmed):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.TP1_PENDING,
+                AggregateStatus.TP1_OUTCOME_UNKNOWN,
+            },
+        )
+        exchange_order_id = str(event.exchange_order_id or "").strip()
+        if not exchange_order_id:
+            raise InvalidLifecycleTransition("TP1 acceptance requires order identity")
+        if event.target_qty != current.tp1_target_qty:
+            raise InvalidLifecycleTransition("TP1 accepted quantity differs from Ticket")
+        tp1_confirm_effects: tuple[KernelEffect, ...] = ()
+        if current.status is AggregateStatus.TP1_OUTCOME_UNKNOWN:
+            tp1_confirm_effects = (
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="take_profit_outcome_unknown",
+                ),
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.POSITION_PROTECTED,
+            updates={"tp1_exchange_order_id": exchange_order_id},
+            effects=tp1_confirm_effects,
+        )
+
+    if isinstance(event, TakeProfitRejected):
+        _require_status(current, AggregateStatus.TP1_PENDING)
+        if not str(event.reason or "").strip():
+            raise InvalidLifecycleTransition("TP1 rejection requires reason")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.TP1_REJECTED,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="take_profit_rejected",
+                ),
+            ),
+        )
+
+    if isinstance(event, TakeProfitOutcomeUnknown):
+        _require_status(current, AggregateStatus.TP1_PENDING)
+        if not str(event.reason or "").strip():
+            raise InvalidLifecycleTransition("TP1 unknown outcome requires reason")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.TP1_OUTCOME_UNKNOWN,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="take_profit_outcome_unknown",
+                ),
+            ),
+        )
+
+    if isinstance(event, TakeProfitAbsenceConfirmed):
+        _require_status(current, AggregateStatus.TP1_OUTCOME_UNKNOWN)
+        if not str(event.command_id or "").strip():
+            raise InvalidLifecycleTransition(
+                "reconciled TP1 absence requires command identity"
+            )
+        if len(current.ticket.take_profit_prices) != 1:
+            raise InvalidLifecycleTransition("TP1 retry requires one frozen price")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.TP1_PENDING,
+            effects=(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="take_profit_outcome_unknown",
+                ),
+                PrepareTakeProfitCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=current.tp1_target_qty,
+                    limit_price=current.ticket.take_profit_prices[0],
+                ),
+            ),
+        )
+
+    if isinstance(event, TakeProfitFilled):
+        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        if event.filled_qty != current.tp1_target_qty:
+            raise InvalidLifecycleTransition("TP1 fill must equal the frozen target")
+        if event.average_fill_price <= 0 or event.runner_floor_price <= 0:
+            raise InvalidLifecycleTransition("TP1 fill and runner floor must be positive")
+        if current.active_stop_exchange_order_id is None:
+            raise InvalidLifecycleTransition("TP1 fill has no active stop to replace")
+        runner_qty = current.position_qty - event.filled_qty
+        if runner_qty <= 0:
+            raise InvalidLifecycleTransition("TP1 fill must preserve runner exposure")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+            updates={
+                "position_qty": runner_qty,
+                "tp1_filled_qty": event.filled_qty,
+                "tp1_exchange_order_id": None,
+                "break_even_floor_price": event.runner_floor_price,
+                "pending_stop_price": event.runner_floor_price,
+                "pending_stop_watermark_ms": event.occurred_at_ms,
+            },
+            effects=(
+                PrepareProtectionReplacementCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=runner_qty,
+                    stop_price=event.runner_floor_price,
+                    replaces_exchange_order_id=(
+                        current.active_stop_exchange_order_id
+                    ),
+                    source_watermark_ms=event.occurred_at_ms,
+                ),
+            ),
+        )
+
+    if isinstance(event, RunnerStopRequested):
+        _require_status(current, AggregateStatus.RUNNER_PROTECTED)
+        if current.active_stop_exchange_order_id is None:
+            raise InvalidLifecycleTransition("runner move requires active stop identity")
+        if current.active_stop_price is None:
+            raise InvalidLifecycleTransition("runner move requires active stop price")
+        if event.stop_price <= 0 or event.source_watermark_ms <= 0:
+            raise InvalidLifecycleTransition("runner move requires price and watermark")
+        if current.identity.netting_domain.position_side == "long":
+            improved = event.stop_price > current.active_stop_price
+        else:
+            improved = event.stop_price < current.active_stop_price
+        if not improved:
+            raise InvalidLifecycleTransition("runner stop must improve monotonically")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+            updates={
+                "pending_stop_price": event.stop_price,
+                "pending_stop_watermark_ms": event.source_watermark_ms,
+            },
+            effects=(
+                PrepareProtectionReplacementCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=current.position_qty,
+                    stop_price=event.stop_price,
+                    replaces_exchange_order_id=(
+                        current.active_stop_exchange_order_id
+                    ),
+                    source_watermark_ms=event.source_watermark_ms,
+                ),
+            ),
+        )
+
+    if isinstance(event, ProtectionReplacementConfirmed):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+                AggregateStatus.RUNNER_REPLACEMENT_OUTCOME_UNKNOWN,
+            },
+        )
+        exchange_order_id = str(event.exchange_order_id or "").strip()
+        if not exchange_order_id:
+            raise InvalidLifecycleTransition(
+                "protection replacement requires order identity"
+            )
+        if event.protected_qty != current.position_qty:
+            raise InvalidLifecycleTransition(
+                "protection replacement must cover exact runner quantity"
+            )
+        if event.replaces_exchange_order_id != current.active_stop_exchange_order_id:
+            raise InvalidLifecycleTransition("replaced stop identity mismatch")
+        if (
+            event.stop_price != current.pending_stop_price
+            or event.source_watermark_ms != current.pending_stop_watermark_ms
+        ):
+            raise InvalidLifecycleTransition("replacement terms differ from request")
+        replacement_confirm_effects: list[KernelEffect] = []
+        if current.status is AggregateStatus.RUNNER_REPLACEMENT_OUTCOME_UNKNOWN:
+            replacement_confirm_effects.append(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="protection_replacement_outcome_unknown",
+                )
+            )
+        replacement_confirm_effects.append(
+            CancelProtectionOrders(
+                ticket_id=current.identity.ticket_id,
+                exchange_order_id=event.replaces_exchange_order_id,
+            )
+        )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING,
+            updates={
+                "protected_qty": event.protected_qty,
+                "active_stop_exchange_order_id": exchange_order_id,
+                "active_stop_price": event.stop_price,
+                "pending_replaced_stop_exchange_order_id": (
+                    event.replaces_exchange_order_id
+                ),
+                "pending_stop_price": None,
+                "pending_stop_watermark_ms": None,
+                "runner_stop_watermark_ms": event.source_watermark_ms,
+            },
+            effects=tuple(replacement_confirm_effects),
+        )
+
+    if isinstance(event, ProtectionReplacementRejected):
+        _require_status(current, AggregateStatus.RUNNER_REPLACEMENT_PENDING)
+        if not str(event.reason or "").strip():
+            raise InvalidLifecycleTransition(
+                "protection replacement rejection requires reason"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_REPLACEMENT_REJECTED,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="protection_replacement_rejected",
+                ),
+            ),
+        )
+
+    if isinstance(event, ProtectionReplacementOutcomeUnknown):
+        _require_status(current, AggregateStatus.RUNNER_REPLACEMENT_PENDING)
+        if not str(event.reason or "").strip():
+            raise InvalidLifecycleTransition(
+                "protection replacement unknown outcome requires reason"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_REPLACEMENT_OUTCOME_UNKNOWN,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="protection_replacement_outcome_unknown",
+                ),
+            ),
+        )
+
+    if isinstance(event, ProtectionReplacementAbsenceConfirmed):
+        _require_status(
+            current,
+            AggregateStatus.RUNNER_REPLACEMENT_OUTCOME_UNKNOWN,
+        )
+        if not str(event.command_id or "").strip():
+            raise InvalidLifecycleTransition(
+                "reconciled replacement absence requires command identity"
+            )
+        if (
+            current.active_stop_exchange_order_id is None
+            or current.pending_stop_price is None
+            or current.pending_stop_watermark_ms is None
+        ):
+            raise InvalidLifecycleTransition(
+                "replacement retry requires exact pending terms"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+            effects=(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="protection_replacement_outcome_unknown",
+                ),
+                PrepareProtectionReplacementCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=current.position_qty,
+                    stop_price=current.pending_stop_price,
+                    replaces_exchange_order_id=(
+                        current.active_stop_exchange_order_id
+                    ),
+                    source_watermark_ms=current.pending_stop_watermark_ms,
+                ),
+            ),
+        )
+
     if isinstance(event, ExitRequested):
         _require_status_in(
             current,
-            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.EXIT_REJECTED},
+            {
+                AggregateStatus.POSITION_PROTECTED,
+                AggregateStatus.RUNNER_PROTECTED,
+                AggregateStatus.EXIT_REJECTED,
+            },
         )
         reason = str(event.reason or "").strip()
         if not reason:
@@ -586,14 +912,13 @@ def reduce_event(
         )
         updates: dict[str, object] = {"position_qty": Decimal("0")}
         flat_effects: list[KernelEffect] = []
-        if current.initial_stop_exchange_order_id is not None:
-            updates["pending_cancel_exchange_order_id"] = (
-                current.initial_stop_exchange_order_id
-            )
+        cleanup_order_id = _next_cleanup_order_id(current)
+        if cleanup_order_id is not None:
+            updates["pending_cancel_exchange_order_id"] = cleanup_order_id
             flat_effects.append(
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
-                    exchange_order_id=current.initial_stop_exchange_order_id,
+                    exchange_order_id=cleanup_order_id,
                 )
             )
         if current.entry_lane_held:
@@ -610,18 +935,32 @@ def reduce_event(
         )
 
     if isinstance(event, ExternalFlatDetected):
-        _require_status(current, AggregateStatus.POSITION_PROTECTED)
-        if current.initial_stop_exchange_order_id is None:
-            raise InvalidLifecycleTransition("external flat has no owned protection identity")
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.TP1_PENDING,
+                AggregateStatus.TP1_REJECTED,
+                AggregateStatus.TP1_OUTCOME_UNKNOWN,
+                AggregateStatus.POSITION_PROTECTED,
+                AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+                AggregateStatus.RUNNER_REPLACEMENT_REJECTED,
+                AggregateStatus.RUNNER_REPLACEMENT_OUTCOME_UNKNOWN,
+                AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING,
+                AggregateStatus.RUNNER_OLD_STOP_CANCEL_REJECTED,
+                AggregateStatus.RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN,
+                AggregateStatus.RUNNER_PROTECTED,
+            },
+        )
+        cleanup_order_id = _next_cleanup_order_id(current)
+        if cleanup_order_id is None:
+            raise InvalidLifecycleTransition("external flat has no owned order identity")
         return _transition(
             current,
             event,
             status=AggregateStatus.RECONCILIATION_PENDING,
             updates={
                 "position_qty": Decimal("0"),
-                "pending_cancel_exchange_order_id": (
-                    current.initial_stop_exchange_order_id
-                ),
+                "pending_cancel_exchange_order_id": cleanup_order_id,
             },
             effects=(
                 OpenIncident(
@@ -630,7 +969,7 @@ def reduce_event(
                 ),
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
-                    exchange_order_id=current.initial_stop_exchange_order_id,
+                    exchange_order_id=cleanup_order_id,
                 ),
             ),
         )
@@ -656,6 +995,19 @@ def reduce_event(
             ),
         )
 
+    if isinstance(event, OwnedOrderAbsenceConfirmed):
+        _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
+        if not str(event.exchange_order_id or "").strip():
+            raise InvalidLifecycleTransition("owned order absence requires identity")
+        if event.exchange_order_id not in _known_cleanup_order_ids(current):
+            raise InvalidLifecycleTransition("absent order is not owned by Ticket")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RECONCILIATION_PENDING,
+            updates=_clear_cleanup_order(current, event.exchange_order_id),
+        )
+
     if isinstance(event, UnownedOrderDetected):
         _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
         if not str(event.exchange_order_id or "").strip():
@@ -673,20 +1025,97 @@ def reduce_event(
         )
 
     if isinstance(event, ProtectionCancelConfirmed):
+        if current.status is AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING:
+            if event.exchange_order_id != current.pending_replaced_stop_exchange_order_id:
+                raise InvalidLifecycleTransition(
+                    "runner replaced-stop cancel identity mismatch"
+                )
+            runner_cancel_updates: dict[str, object] = {
+                "pending_replaced_stop_exchange_order_id": None,
+            }
+            if event.exchange_order_id == current.initial_stop_exchange_order_id:
+                runner_cancel_updates["initial_stop_exchange_order_id"] = None
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.RUNNER_PROTECTED,
+                updates=runner_cancel_updates,
+            )
         _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
-        if event.exchange_order_id != current.initial_stop_exchange_order_id:
-            raise InvalidLifecycleTransition("cancelled protection identity mismatch")
         if event.exchange_order_id != current.pending_cancel_exchange_order_id:
             raise InvalidLifecycleTransition("pending cancel identity mismatch")
+        if event.exchange_order_id not in _known_cleanup_order_ids(current):
+            raise InvalidLifecycleTransition("cancelled order is not owned by Ticket")
         return _transition(
             current,
             event,
             status=AggregateStatus.RECONCILIATION_PENDING,
-            updates={
-                "protected_qty": Decimal("0"),
-                "initial_stop_exchange_order_id": None,
-                "pending_cancel_exchange_order_id": None,
-            },
+            updates=_clear_cleanup_order(current, event.exchange_order_id),
+        )
+
+    if isinstance(event, ProtectionCancelRejected):
+        _require_status(current, AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING)
+        if event.exchange_order_id != current.pending_replaced_stop_exchange_order_id:
+            raise InvalidLifecycleTransition("rejected replaced-stop identity mismatch")
+        if not str(event.reason or "").strip():
+            raise InvalidLifecycleTransition("replaced-stop rejection requires reason")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_OLD_STOP_CANCEL_REJECTED,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="runner_old_stop_cancel_rejected",
+                ),
+            ),
+        )
+
+    if isinstance(event, ProtectionCancelOutcomeUnknown):
+        _require_status(current, AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING)
+        if event.exchange_order_id != current.pending_replaced_stop_exchange_order_id:
+            raise InvalidLifecycleTransition("unknown replaced-stop identity mismatch")
+        if not str(event.reason or "").strip():
+            raise InvalidLifecycleTransition("unknown replaced-stop cancel requires reason")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="runner_old_stop_cancel_outcome_unknown",
+                ),
+            ),
+        )
+
+    if isinstance(event, ProtectionCancelAbsenceConfirmed):
+        _require_status(
+            current,
+            AggregateStatus.RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN,
+        )
+        if event.exchange_order_id != current.pending_replaced_stop_exchange_order_id:
+            raise InvalidLifecycleTransition("absent replaced-stop identity mismatch")
+        absence_updates: dict[str, object] = {
+            "pending_replaced_stop_exchange_order_id": None,
+        }
+        if event.exchange_order_id == current.initial_stop_exchange_order_id:
+            absence_updates["initial_stop_exchange_order_id"] = None
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_PROTECTED,
+            updates=absence_updates,
+            effects=(
+                MarkCancelCommandReconciledAbsent(
+                    ticket_id=current.identity.ticket_id,
+                    exchange_order_id=event.exchange_order_id,
+                ),
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="runner_old_stop_cancel_outcome_unknown",
+                ),
+            ),
         )
 
     if isinstance(event, OwnedOrphanCancelConfirmed):
@@ -699,7 +1128,7 @@ def reduce_event(
             current,
             event,
             status=AggregateStatus.RECONCILIATION_PENDING,
-            updates={"pending_cancel_exchange_order_id": None},
+            updates=_clear_cleanup_order(current, event.exchange_order_id),
         )
 
     if isinstance(event, CancelOrderRejected):
@@ -748,16 +1177,7 @@ def reduce_event(
         )
         if event.exchange_order_id != current.pending_cancel_exchange_order_id:
             raise InvalidLifecycleTransition("absent cancel identity mismatch")
-        absence_updates: dict[str, object] = {
-            "pending_cancel_exchange_order_id": None,
-        }
-        if event.exchange_order_id == current.initial_stop_exchange_order_id:
-            absence_updates.update(
-                {
-                    "protected_qty": Decimal("0"),
-                    "initial_stop_exchange_order_id": None,
-                }
-            )
+        absence_updates = _clear_cleanup_order(current, event.exchange_order_id)
         absence_effects: tuple[KernelEffect, ...] = ()
         if current.status is AggregateStatus.CANCEL_OUTCOME_UNKNOWN:
             absence_effects = (
@@ -780,8 +1200,8 @@ def reduce_event(
 
     if isinstance(event, ReconciliationMatched):
         _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
-        if current.initial_stop_exchange_order_id is not None:
-            raise InvalidLifecycleTransition("protection residue remains")
+        if _known_cleanup_order_ids(current):
+            raise InvalidLifecycleTransition("owned order identity residue remains")
         if current.protected_qty != 0:
             raise InvalidLifecycleTransition("protected quantity remains")
         if current.pending_cancel_exchange_order_id is not None:
@@ -881,3 +1301,36 @@ def _transition(
         }
     )
     return Reduction(aggregate=aggregate, effects=effects)
+
+
+def _known_cleanup_order_ids(current: TradeAggregate) -> tuple[str, ...]:
+    identities: list[str] = []
+    for identity in (
+        current.tp1_exchange_order_id,
+        current.active_stop_exchange_order_id,
+        current.initial_stop_exchange_order_id,
+    ):
+        if identity is not None and identity not in identities:
+            identities.append(identity)
+    return tuple(identities)
+
+
+def _next_cleanup_order_id(current: TradeAggregate) -> str | None:
+    identities = _known_cleanup_order_ids(current)
+    return None if not identities else identities[0]
+
+
+def _clear_cleanup_order(
+    current: TradeAggregate,
+    exchange_order_id: str,
+) -> dict[str, object]:
+    updates: dict[str, object] = {"pending_cancel_exchange_order_id": None}
+    if exchange_order_id == current.tp1_exchange_order_id:
+        updates["tp1_exchange_order_id"] = None
+    if exchange_order_id == current.active_stop_exchange_order_id:
+        updates["active_stop_exchange_order_id"] = None
+        updates["active_stop_price"] = None
+        updates["protected_qty"] = Decimal("0")
+    if exchange_order_id == current.initial_stop_exchange_order_id:
+        updates["initial_stop_exchange_order_id"] = None
+    return updates

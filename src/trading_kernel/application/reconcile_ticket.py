@@ -20,6 +20,7 @@ from src.trading_kernel.domain.events import (
     ExternalFlatDetected,
     ExitRequested,
     OwnedOrphanOrderDetected,
+    OwnedOrderAbsenceConfirmed,
     PositionFlatConfirmed,
     ReconciliationMatched,
     TradeEvent,
@@ -134,7 +135,19 @@ async def reconcile_ticket(
             occurred_at_ms=snapshot.observed_at_ms,
         )
         status = ReconcileTicketStatus.POSITION_FLAT_RECORDED
-    elif aggregate.status is AggregateStatus.POSITION_PROTECTED and snapshot.quantity == 0:
+    elif aggregate.status in {
+        AggregateStatus.TP1_PENDING,
+        AggregateStatus.TP1_REJECTED,
+        AggregateStatus.TP1_OUTCOME_UNKNOWN,
+        AggregateStatus.POSITION_PROTECTED,
+        AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+        AggregateStatus.RUNNER_REPLACEMENT_REJECTED,
+        AggregateStatus.RUNNER_REPLACEMENT_OUTCOME_UNKNOWN,
+        AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING,
+        AggregateStatus.RUNNER_OLD_STOP_CANCEL_REJECTED,
+        AggregateStatus.RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN,
+        AggregateStatus.RUNNER_PROTECTED,
+    } and snapshot.quantity == 0:
         event = ExternalFlatDetected(
             event_id=_event_id(aggregate),
             ticket_id=request.ticket_id,
@@ -143,39 +156,70 @@ async def reconcile_ticket(
         )
         status = ReconcileTicketStatus.EXTERNAL_FLAT_INCIDENT
     elif aggregate.status is AggregateStatus.RECONCILIATION_PENDING:
-        if aggregate.initial_stop_exchange_order_id is not None:
+        if aggregate.pending_cancel_exchange_order_id is not None:
             return ReconcileTicketResult(
                 status=ReconcileTicketStatus.PROTECTION_RESIDUE
             )
-        if snapshot.open_orders:
-            unowned_order = next(
-                (
-                    order
-                    for order in snapshot.open_orders
-                    if not _is_kernel_owned_order(order.venue_client_order_id)
-                ),
-                None,
+        unowned_order = next(
+            (
+                order
+                for order in snapshot.open_orders
+                if not _is_kernel_owned_order(order.venue_client_order_id)
+            ),
+            None,
+        )
+        if unowned_order is not None:
+            existing_incident = await uow.incidents.get_open_for_ticket(
+                request.ticket_id
             )
-            if unowned_order is not None:
-                existing_incident = await uow.incidents.get_open_for_ticket(
-                    request.ticket_id
+            if (
+                existing_incident is not None
+                and existing_incident.incident_kind == "unowned_open_order"
+            ):
+                return ReconcileTicketResult(
+                    status=ReconcileTicketStatus.UNOWNED_ORDER_INCIDENT
                 )
-                if (
-                    existing_incident is not None
-                    and existing_incident.incident_kind == "unowned_open_order"
-                ):
-                    return ReconcileTicketResult(
-                        status=ReconcileTicketStatus.UNOWNED_ORDER_INCIDENT
+            event = UnownedOrderDetected(
+                event_id=_event_id(aggregate),
+                ticket_id=request.ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=snapshot.observed_at_ms,
+                exchange_order_id=unowned_order.exchange_order_id,
+            )
+            status = ReconcileTicketStatus.UNOWNED_ORDER_INCIDENT
+        else:
+            known_order_id = _next_known_cleanup_order_id(aggregate)
+            if known_order_id is not None:
+                known_still_open = any(
+                    order.exchange_order_id == known_order_id
+                    for order in snapshot.open_orders
+                )
+                if not known_still_open:
+                    event = OwnedOrderAbsenceConfirmed(
+                        event_id=_event_id(aggregate),
+                        ticket_id=request.ticket_id,
+                        sequence=aggregate.last_event_sequence + 1,
+                        occurred_at_ms=snapshot.observed_at_ms,
+                        exchange_order_id=known_order_id,
                     )
-                event = UnownedOrderDetected(
-                    event_id=_event_id(aggregate),
-                    ticket_id=request.ticket_id,
-                    sequence=aggregate.last_event_sequence + 1,
-                    occurred_at_ms=snapshot.observed_at_ms,
-                    exchange_order_id=unowned_order.exchange_order_id,
-                )
-                status = ReconcileTicketStatus.UNOWNED_ORDER_INCIDENT
-            else:
+                    status = ReconcileTicketStatus.CANCEL_ABSENCE_RECORDED
+                else:
+                    commands = await uow.exchange_commands.list_for_ticket(
+                        request.ticket_id
+                    )
+                    if _has_cancel_attempt(commands, known_order_id):
+                        return ReconcileTicketResult(
+                            status=ReconcileTicketStatus.PROTECTION_RESIDUE
+                        )
+                    event = OwnedOrphanOrderDetected(
+                        event_id=_event_id(aggregate),
+                        ticket_id=request.ticket_id,
+                        sequence=aggregate.last_event_sequence + 1,
+                        occurred_at_ms=snapshot.observed_at_ms,
+                        exchange_order_id=known_order_id,
+                    )
+                    status = ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
+            elif snapshot.open_orders:
                 owned_order = snapshot.open_orders[0]
                 commands = await uow.exchange_commands.list_for_ticket(request.ticket_id)
                 if _has_cancel_attempt(commands, owned_order.exchange_order_id):
@@ -190,14 +234,14 @@ async def reconcile_ticket(
                     exchange_order_id=owned_order.exchange_order_id,
                 )
                 status = ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
-        elif snapshot.quantity == 0:
-            event = ReconciliationMatched(
-                event_id=_event_id(aggregate),
-                ticket_id=request.ticket_id,
-                sequence=aggregate.last_event_sequence + 1,
-                occurred_at_ms=snapshot.observed_at_ms,
-            )
-            status = ReconcileTicketStatus.MATCHED
+            elif snapshot.quantity == 0:
+                event = ReconciliationMatched(
+                    event_id=_event_id(aggregate),
+                    ticket_id=request.ticket_id,
+                    sequence=aggregate.last_event_sequence + 1,
+                    occurred_at_ms=snapshot.observed_at_ms,
+                )
+                status = ReconcileTicketStatus.MATCHED
     elif aggregate.status in {
         AggregateStatus.CANCEL_REJECTED,
         AggregateStatus.CANCEL_OUTCOME_UNKNOWN,
@@ -294,3 +338,15 @@ def _has_cancel_attempt(commands, exchange_order_id: str) -> bool:
         and command.payload.exchange_order_id == exchange_order_id
         for command in commands
     )
+
+
+def _next_known_cleanup_order_id(aggregate) -> str | None:
+    identities: list[str] = []
+    for identity in (
+        aggregate.tp1_exchange_order_id,
+        aggregate.active_stop_exchange_order_id,
+        aggregate.initial_stop_exchange_order_id,
+    ):
+        if identity is not None and identity not in identities:
+            identities.append(identity)
+    return None if not identities else identities[0]

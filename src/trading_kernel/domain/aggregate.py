@@ -22,7 +22,19 @@ class AggregateStatus(StrEnum):
     PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN = "partial_fill_cancel_outcome_unknown"
     PROTECTION_PENDING = "protection_pending"
     INITIAL_STOP_OUTCOME_UNKNOWN = "initial_stop_outcome_unknown"
+    TP1_PENDING = "tp1_pending"
+    TP1_REJECTED = "tp1_rejected"
+    TP1_OUTCOME_UNKNOWN = "tp1_outcome_unknown"
     POSITION_PROTECTED = "position_protected"
+    RUNNER_REPLACEMENT_PENDING = "runner_replacement_pending"
+    RUNNER_REPLACEMENT_REJECTED = "runner_replacement_rejected"
+    RUNNER_REPLACEMENT_OUTCOME_UNKNOWN = "runner_replacement_outcome_unknown"
+    RUNNER_OLD_STOP_CANCEL_PENDING = "runner_old_stop_cancel_pending"
+    RUNNER_OLD_STOP_CANCEL_REJECTED = "runner_old_stop_cancel_rejected"
+    RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN = (
+        "runner_old_stop_cancel_outcome_unknown"
+    )
+    RUNNER_PROTECTED = "runner_protected"
     EXIT_PENDING = "exit_pending"
     EXIT_ACCEPTED = "exit_accepted"
     EXIT_REJECTED = "exit_rejected"
@@ -53,6 +65,16 @@ class TradeAggregate(BaseModel):
     protected_qty: Decimal = Decimal("0")
     entry_exchange_order_id: str | None = None
     initial_stop_exchange_order_id: str | None = None
+    active_stop_exchange_order_id: str | None = None
+    active_stop_price: Decimal | None = None
+    tp1_exchange_order_id: str | None = None
+    tp1_target_qty: Decimal = Decimal("0")
+    tp1_filled_qty: Decimal = Decimal("0")
+    break_even_floor_price: Decimal | None = None
+    pending_replaced_stop_exchange_order_id: str | None = None
+    pending_stop_price: Decimal | None = None
+    pending_stop_watermark_ms: int | None = None
+    runner_stop_watermark_ms: int | None = None
     pending_cancel_exchange_order_id: str | None = None
     exit_exchange_order_id: str | None = None
     review_id: str | None = None

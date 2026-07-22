@@ -73,6 +73,25 @@ event_specs = sa.Table(
     _time("created_at_ms"),
 )
 
+exit_policies = sa.Table(
+    "brc_exit_policies",
+    metadata,
+    _id("exit_policy_id", primary_key=True),
+    sa.Column("exit_policy_version", SHORT_TEXT, nullable=False),
+    _id("event_spec_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    _json("policy"),
+    sa.Column("semantic_hash", LONG_TEXT, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("event_spec_id"),
+    sa.UniqueConstraint("semantic_hash"),
+    sa.CheckConstraint(
+        "position_side IN ('long', 'short')",
+        name="position_side_valid",
+    ),
+)
+
 fact_definitions = sa.Table(
     "brc_fact_definitions",
     metadata,
@@ -398,6 +417,7 @@ capacity_claims = sa.Table(
     sa.Column("entry_limit_price", MONEY, nullable=True),
     sa.Column("initial_stop_price", MONEY, nullable=False),
     _json("take_profit_prices"),
+    _json("take_profit_quantities"),
     sa.Column("decision_digest", LONG_TEXT, nullable=False),
     _time("created_at_ms"),
     _time("expires_at_ms"),
@@ -440,6 +460,7 @@ trade_tickets = sa.Table(
     sa.Column("entry_limit_price", MONEY, nullable=True),
     sa.Column("initial_stop_price", MONEY, nullable=False),
     _json("take_profit_prices"),
+    _json("take_profit_quantities"),
     sa.Column("fact_digest", LONG_TEXT, nullable=False),
     sa.Column("decision_digest", LONG_TEXT, nullable=False),
     sa.Column("status", SHORT_TEXT, nullable=False),
@@ -467,6 +488,16 @@ trade_aggregates = sa.Table(
     sa.Column("protected_qty", MONEY, nullable=False),
     _id("entry_exchange_order_id", nullable=True),
     _id("initial_stop_exchange_order_id", nullable=True),
+    _id("active_stop_exchange_order_id", nullable=True),
+    sa.Column("active_stop_price", MONEY, nullable=True),
+    _id("tp1_exchange_order_id", nullable=True),
+    sa.Column("tp1_target_qty", MONEY, nullable=False),
+    sa.Column("tp1_filled_qty", MONEY, nullable=False),
+    sa.Column("break_even_floor_price", MONEY, nullable=True),
+    _id("pending_replaced_stop_exchange_order_id", nullable=True),
+    sa.Column("pending_stop_price", MONEY, nullable=True),
+    _time("pending_stop_watermark_ms", nullable=True),
+    _time("runner_stop_watermark_ms", nullable=True),
     _id("pending_cancel_exchange_order_id", nullable=True),
     _id("exit_exchange_order_id", nullable=True),
     _id("review_id", nullable=True),
@@ -475,6 +506,8 @@ trade_aggregates = sa.Table(
     sa.CheckConstraint("last_event_sequence > 0", name="sequence_positive"),
     sa.CheckConstraint("position_qty >= 0", name="position_nonnegative"),
     sa.CheckConstraint("protected_qty >= 0", name="protection_nonnegative"),
+    sa.CheckConstraint("tp1_target_qty >= 0", name="tp1_target_nonnegative"),
+    sa.CheckConstraint("tp1_filled_qty >= 0", name="tp1_filled_nonnegative"),
 )
 
 trade_events = sa.Table(

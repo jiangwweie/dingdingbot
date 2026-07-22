@@ -606,7 +606,7 @@ git commit -m "feat(kernel): reconcile unknown exchange command outcomes"
 - Produces six exact versioned Exit Policy bindings.
 - Produces lifecycle decisions for Initial Stop, TP1, break-even floor, runner replacement, final exit, orphan cleanup, and terminal flatness.
 
-- [ ] **Step 1: Write failing policy contract tests**
+- [x] **Step 1: Write failing policy contract tests**
 
 ```python
 @pytest.mark.parametrize("event_id", [
@@ -619,17 +619,17 @@ def test_each_registered_event_has_one_current_exit_policy(event_id: str) -> Non
     assert policy.runner.kind is RunnerKind.STRUCTURAL_ATR
 ```
 
-- [ ] **Step 2: Run policy tests and verify RED**
+- [x] **Step 2: Run policy tests and verify RED**
 
 Run: `pytest -q tests/trading_kernel/unit/test_exit_policy.py`
 
 Expected: failure because no exit-policy domain exists in the rebuilt kernel.
 
-- [ ] **Step 3: Implement the accepted policy family**
+- [x] **Step 3: Implement the accepted policy family**
 
 SOR-LONG retains its exact committed policy: 1R TP1 at 50%, cost-adjusted break-even floor, 15m structural ATR runner, ATR period 14, structure window 4, buffer 0.5 ATR, two-tick minimum improvement, and 96-bar time stop. The other five use the accepted 1R/50% plus structural ATR runner family on their registered timeframe and registered structural invalidation fact; no unregistered time stop is invented.
 
-- [ ] **Step 4: Write failing lifecycle branch tests**
+- [x] **Step 4: Write failing lifecycle branch tests**
 
 ```python
 def test_tp1_fill_replaces_full_stop_with_runner_quantity() -> None:
@@ -638,23 +638,23 @@ def test_tp1_fill_replaces_full_stop_with_runner_quantity() -> None:
     assert any(effect.kind is EffectKind.REPLACE_RUNNER_STOP for effect in effects)
 ```
 
-- [ ] **Step 5: Run lifecycle tests and verify RED**
+- [x] **Step 5: Run lifecycle tests and verify RED**
 
 Run: `pytest -q tests/trading_kernel/full_chain/test_registered_strategy_exit_matrix.py`
 
 Expected: failure because the current reducer does not bind all six strategy exit policies.
 
-- [ ] **Step 6: Implement concurrent lifecycle maintenance**
+- [x] **Step 6: Implement concurrent lifecycle maintenance**
 
 Lifecycle workers claim exact active Tickets independently; they never hold the global ENTRY lane. Stop/TP/runner cancel-replace uses durable commands and exact lineage. Position-flat with live protection creates cleanup commands before settlement completes.
 
-- [ ] **Step 7: Run focused lifecycle tests**
+- [x] **Step 7: Run focused lifecycle tests**
 
 Run: `pytest -q tests/trading_kernel/unit/test_exit_policy.py tests/trading_kernel/full_chain/test_registered_strategy_exit_matrix.py tests/trading_kernel/full_chain/test_ticket_lifecycle.py tests/trading_kernel/full_chain/test_fault_matrix.py`
 
 Expected: all tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/trading_kernel/domain/exit_policy.py src/trading_kernel/application/maintain_ticket_lifecycle.py src/trading_kernel/domain/reducer.py src/trading_kernel/domain/events.py src/trading_kernel/domain/effects.py src/trading_kernel/infrastructure/pg_models.py src/trading_kernel/infrastructure/pg_repositories.py migrations/trading_kernel/versions/0001_initial.py tests/trading_kernel/unit/test_exit_policy.py tests/trading_kernel/full_chain/test_registered_strategy_exit_matrix.py

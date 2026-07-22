@@ -82,6 +82,29 @@ def upgrade() -> None:
         _time("created_at_ms"),
     )
     op.create_table(
+        "brc_exit_policies",
+        _id("exit_policy_id", primary_key=True),
+        sa.Column("exit_policy_version", SHORT_TEXT, nullable=False),
+        _id("event_spec_id"),
+        sa.Column("position_side", SHORT_TEXT, nullable=False),
+        _json("policy"),
+        sa.Column("semantic_hash", LONG_TEXT, nullable=False),
+        sa.Column("status", SHORT_TEXT, nullable=False),
+        _time("created_at_ms"),
+        sa.UniqueConstraint(
+            "event_spec_id",
+            name="uq_brc_exit_policies_event_spec_id",
+        ),
+        sa.UniqueConstraint(
+            "semantic_hash",
+            name="uq_brc_exit_policies_semantic_hash",
+        ),
+        sa.CheckConstraint(
+            "position_side IN ('long', 'short')",
+            name="ck_brc_exit_policies_position_side_valid",
+        ),
+    )
+    op.create_table(
         "brc_fact_definitions",
         _id("fact_definition_id", primary_key=True),
         sa.Column("fact_name", SHORT_TEXT, nullable=False, unique=True),
@@ -415,6 +438,7 @@ def upgrade() -> None:
         sa.Column("entry_limit_price", MONEY, nullable=True),
         sa.Column("initial_stop_price", MONEY, nullable=False),
         _json("take_profit_prices"),
+        _json("take_profit_quantities"),
         sa.Column("decision_digest", LONG_TEXT, nullable=False),
         _time("created_at_ms"),
         _time("expires_at_ms"),
@@ -479,6 +503,7 @@ def upgrade() -> None:
         sa.Column("entry_limit_price", MONEY, nullable=True),
         sa.Column("initial_stop_price", MONEY, nullable=False),
         _json("take_profit_prices"),
+        _json("take_profit_quantities"),
         sa.Column("fact_digest", LONG_TEXT, nullable=False),
         sa.Column("decision_digest", LONG_TEXT, nullable=False),
         sa.Column("status", SHORT_TEXT, nullable=False),
@@ -510,6 +535,16 @@ def upgrade() -> None:
         sa.Column("protected_qty", MONEY, nullable=False),
         _id("entry_exchange_order_id", nullable=True),
         _id("initial_stop_exchange_order_id", nullable=True),
+        _id("active_stop_exchange_order_id", nullable=True),
+        sa.Column("active_stop_price", MONEY, nullable=True),
+        _id("tp1_exchange_order_id", nullable=True),
+        sa.Column("tp1_target_qty", MONEY, nullable=False),
+        sa.Column("tp1_filled_qty", MONEY, nullable=False),
+        sa.Column("break_even_floor_price", MONEY, nullable=True),
+        _id("pending_replaced_stop_exchange_order_id", nullable=True),
+        sa.Column("pending_stop_price", MONEY, nullable=True),
+        _time("pending_stop_watermark_ms", nullable=True),
+        _time("runner_stop_watermark_ms", nullable=True),
         _id("pending_cancel_exchange_order_id", nullable=True),
         _id("exit_exchange_order_id", nullable=True),
         _id("review_id", nullable=True),
@@ -526,6 +561,14 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "protected_qty >= 0",
             name="ck_brc_trade_aggregates_protection_nonnegative",
+        ),
+        sa.CheckConstraint(
+            "tp1_target_qty >= 0",
+            name="ck_brc_trade_aggregates_tp1_target_nonnegative",
+        ),
+        sa.CheckConstraint(
+            "tp1_filled_qty >= 0",
+            name="ck_brc_trade_aggregates_tp1_filled_nonnegative",
         ),
     )
     op.create_table(
@@ -731,6 +774,7 @@ def downgrade() -> None:
         "brc_instruments",
         "brc_event_required_facts",
         "brc_fact_definitions",
+        "brc_exit_policies",
         "brc_event_specs",
         "brc_strategy_versions",
         "brc_strategy_groups",

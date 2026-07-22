@@ -60,12 +60,25 @@ from src.trading_kernel.domain.events import (
     InitialStopOutcomeUnknown,
     InitialStopRejected,
     OwnedOrphanOrderDetected,
+    OwnedOrderAbsenceConfirmed,
     OwnedOrphanCancelConfirmed,
     PositionFlatConfirmed,
     ProtectionCancelConfirmed,
+    ProtectionCancelAbsenceConfirmed,
+    ProtectionCancelOutcomeUnknown,
+    ProtectionCancelRejected,
+    ProtectionReplacementAbsenceConfirmed,
+    ProtectionReplacementConfirmed,
+    ProtectionReplacementOutcomeUnknown,
+    ProtectionReplacementRejected,
     ReconciliationMatched,
     ReviewRecorded,
     TicketIssued,
+    TakeProfitAbsenceConfirmed,
+    TakeProfitConfirmed,
+    TakeProfitFilled,
+    TakeProfitOutcomeUnknown,
+    TakeProfitRejected,
     TradeEvent,
     UnownedOrderDetected,
 )
@@ -111,6 +124,15 @@ _EVENT_MODELS = {
         InitialStopRejected,
         InitialStopOutcomeUnknown,
         InitialStopAbsenceConfirmed,
+        TakeProfitConfirmed,
+        TakeProfitRejected,
+        TakeProfitOutcomeUnknown,
+        TakeProfitAbsenceConfirmed,
+        TakeProfitFilled,
+        ProtectionReplacementConfirmed,
+        ProtectionReplacementRejected,
+        ProtectionReplacementOutcomeUnknown,
+        ProtectionReplacementAbsenceConfirmed,
         ExitRequested,
         ExitAccepted,
         ExitRejected,
@@ -123,9 +145,13 @@ _EVENT_MODELS = {
         PositionFlatConfirmed,
         ExternalFlatDetected,
         OwnedOrphanOrderDetected,
+        OwnedOrderAbsenceConfirmed,
         OwnedOrphanCancelConfirmed,
         UnownedOrderDetected,
         ProtectionCancelConfirmed,
+        ProtectionCancelRejected,
+        ProtectionCancelOutcomeUnknown,
+        ProtectionCancelAbsenceConfirmed,
         ReconciliationMatched,
         BudgetSettled,
         CancelOrderAbsenceConfirmed,
@@ -1075,6 +1101,9 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
         "entry_limit_price": ticket.entry_limit_price,
         "initial_stop_price": ticket.initial_stop_price,
         "take_profit_prices": [str(price) for price in ticket.take_profit_prices],
+        "take_profit_quantities": [
+            str(quantity) for quantity in ticket.take_profit_quantities
+        ],
         "fact_digest": ticket.fact_digest,
         "decision_digest": ticket.decision_digest(),
         "status": ticket.status.value,
@@ -1126,6 +1155,9 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         ),
         initial_stop_price=Decimal(row["initial_stop_price"]),
         take_profit_prices=tuple(Decimal(value) for value in row["take_profit_prices"]),
+        take_profit_quantities=tuple(
+            Decimal(value) for value in row["take_profit_quantities"]
+        ),
         status=TicketStatus(str(row["status"])),
     )
 
@@ -1166,6 +1198,9 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "entry_limit_price": claim.entry_limit_price,
         "initial_stop_price": claim.initial_stop_price,
         "take_profit_prices": [str(value) for value in claim.take_profit_prices],
+        "take_profit_quantities": [
+            str(value) for value in claim.take_profit_quantities
+        ],
         "decision_digest": claim.decision_digest,
         "created_at_ms": claim.created_at_ms,
         "expires_at_ms": claim.expires_at_ms,
@@ -1220,6 +1255,9 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         take_profit_prices=tuple(
             Decimal(value) for value in row["take_profit_prices"]
         ),
+        take_profit_quantities=tuple(
+            Decimal(value) for value in row["take_profit_quantities"]
+        ),
         decision_digest=str(row["decision_digest"]),
     )
 
@@ -1240,6 +1278,18 @@ def _aggregate_values(
         "protected_qty": aggregate.protected_qty,
         "entry_exchange_order_id": aggregate.entry_exchange_order_id,
         "initial_stop_exchange_order_id": aggregate.initial_stop_exchange_order_id,
+        "active_stop_exchange_order_id": aggregate.active_stop_exchange_order_id,
+        "active_stop_price": aggregate.active_stop_price,
+        "tp1_exchange_order_id": aggregate.tp1_exchange_order_id,
+        "tp1_target_qty": aggregate.tp1_target_qty,
+        "tp1_filled_qty": aggregate.tp1_filled_qty,
+        "break_even_floor_price": aggregate.break_even_floor_price,
+        "pending_replaced_stop_exchange_order_id": (
+            aggregate.pending_replaced_stop_exchange_order_id
+        ),
+        "pending_stop_price": aggregate.pending_stop_price,
+        "pending_stop_watermark_ms": aggregate.pending_stop_watermark_ms,
+        "runner_stop_watermark_ms": aggregate.runner_stop_watermark_ms,
         "pending_cancel_exchange_order_id": (
             aggregate.pending_cancel_exchange_order_id
         ),
@@ -1276,6 +1326,48 @@ def _aggregate_from_row(
             None
             if row["initial_stop_exchange_order_id"] is None
             else str(row["initial_stop_exchange_order_id"])
+        ),
+        active_stop_exchange_order_id=(
+            None
+            if row["active_stop_exchange_order_id"] is None
+            else str(row["active_stop_exchange_order_id"])
+        ),
+        active_stop_price=(
+            None
+            if row["active_stop_price"] is None
+            else Decimal(row["active_stop_price"])
+        ),
+        tp1_exchange_order_id=(
+            None
+            if row["tp1_exchange_order_id"] is None
+            else str(row["tp1_exchange_order_id"])
+        ),
+        tp1_target_qty=Decimal(row["tp1_target_qty"]),
+        tp1_filled_qty=Decimal(row["tp1_filled_qty"]),
+        break_even_floor_price=(
+            None
+            if row["break_even_floor_price"] is None
+            else Decimal(row["break_even_floor_price"])
+        ),
+        pending_replaced_stop_exchange_order_id=(
+            None
+            if row["pending_replaced_stop_exchange_order_id"] is None
+            else str(row["pending_replaced_stop_exchange_order_id"])
+        ),
+        pending_stop_price=(
+            None
+            if row["pending_stop_price"] is None
+            else Decimal(row["pending_stop_price"])
+        ),
+        pending_stop_watermark_ms=(
+            None
+            if row["pending_stop_watermark_ms"] is None
+            else int(row["pending_stop_watermark_ms"])
+        ),
+        runner_stop_watermark_ms=(
+            None
+            if row["runner_stop_watermark_ms"] is None
+            else int(row["runner_stop_watermark_ms"])
         ),
         pending_cancel_exchange_order_id=(
             None

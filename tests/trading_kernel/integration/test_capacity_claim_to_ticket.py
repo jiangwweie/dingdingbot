@@ -83,6 +83,9 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
 
     assert claim is not None
     assert ticket == claim.to_ticket()
+    assert ticket is not None
+    assert ticket.take_profit_quantities == claim.take_profit_quantities
+    assert sum(ticket.take_profit_quantities, Decimal("0")) < ticket.quantity
     assert reservation is not None
     assert reservation.reserved_notional == claim.notional
     assert reservation.reserved_risk == claim.risk_at_stop

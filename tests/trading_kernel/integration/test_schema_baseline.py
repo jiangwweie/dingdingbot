@@ -10,6 +10,7 @@ EXPECTED_TABLES = {
     "brc_budget_reservations",
     "brc_capacity_claims",
     "brc_entry_lane_current",
+    "brc_exit_policies",
     "brc_event_required_facts",
     "brc_event_specs",
     "brc_exchange_commands",
@@ -169,12 +170,40 @@ def test_ticket_schema_freezes_runtime_scope_identity_and_version() -> None:
 
     assert "runtime_scope_id" in tickets.c
     assert "runtime_scope_version" in tickets.c
+    assert "take_profit_quantities" in tickets.c
+
+
+def test_exit_policy_registry_and_capacity_claim_freeze_runner_split() -> None:
+    policies = metadata.tables["brc_exit_policies"]
+    claims = metadata.tables["brc_capacity_claims"]
+
+    assert {
+        "exit_policy_id",
+        "exit_policy_version",
+        "event_spec_id",
+        "semantic_hash",
+        "policy",
+        "status",
+    }.issubset(policies.c.keys())
+    assert "take_profit_quantities" in claims.c
 
 
 def test_aggregate_schema_conserves_authoritative_entry_order_identity() -> None:
     aggregates = metadata.tables["brc_trade_aggregates"]
 
     assert "entry_exchange_order_id" in aggregates.c
+    assert {
+        "active_stop_exchange_order_id",
+        "active_stop_price",
+        "tp1_exchange_order_id",
+        "tp1_target_qty",
+        "tp1_filled_qty",
+        "break_even_floor_price",
+        "pending_replaced_stop_exchange_order_id",
+        "pending_stop_price",
+        "pending_stop_watermark_ms",
+        "runner_stop_watermark_ms",
+    }.issubset(aggregates.c.keys())
 
 
 def test_cancel_command_allows_null_quantity_without_weakening_order_quantity() -> None:

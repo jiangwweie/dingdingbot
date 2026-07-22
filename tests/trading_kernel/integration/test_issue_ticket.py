@@ -387,6 +387,7 @@ def _issue_request(*, ticket, now_ms: int, claim_owner: str) -> IssueTicketReque
             entry_limit_price=ticket.entry_limit_price,
             initial_stop_price=ticket.initial_stop_price,
             take_profit_prices=ticket.take_profit_prices,
+            take_profit_quantities=ticket.take_profit_quantities,
         ),
         now_ms=now_ms,
         claim_owner=claim_owner,

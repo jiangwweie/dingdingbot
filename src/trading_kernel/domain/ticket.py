@@ -51,6 +51,7 @@ class TradeTicket(BaseModel):
     entry_limit_price: Decimal | None = None
     initial_stop_price: Decimal
     take_profit_prices: tuple[Decimal, ...] = ()
+    take_profit_quantities: tuple[Decimal, ...] = ()
     status: TicketStatus = TicketStatus.ISSUED
 
     @field_validator(
@@ -102,6 +103,16 @@ class TradeTicket(BaseModel):
             raise ValueError("take-profit prices must be positive")
         return values
 
+    @field_validator("take_profit_quantities")
+    @classmethod
+    def _require_positive_take_profit_quantities(
+        cls,
+        values: tuple[Decimal, ...],
+    ) -> tuple[Decimal, ...]:
+        if any(value <= 0 for value in values):
+            raise ValueError("take-profit quantities must be positive")
+        return values
+
     @model_validator(mode="after")
     def _validate_deadline_and_order_shape(self) -> "TradeTicket":
         if self.expires_at_ms <= self.created_at_ms:
@@ -111,6 +122,10 @@ class TradeTicket(BaseModel):
                 raise ValueError("limit entry requires a positive limit price")
         elif self.entry_limit_price is not None:
             raise ValueError("market entry forbids a limit price")
+        if len(self.take_profit_prices) != len(self.take_profit_quantities):
+            raise ValueError("take-profit prices and quantities must align")
+        if sum(self.take_profit_quantities, Decimal("0")) >= self.quantity:
+            raise ValueError("take-profit quantities must preserve a runner position")
         return self
 
     def decision_digest(self) -> str:
