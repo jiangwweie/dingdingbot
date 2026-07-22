@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from src.trading_kernel.domain.capacity import ActionTimeFacts
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.review import ReviewEconomicsFacts
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
@@ -146,3 +147,62 @@ class LifecycleFactsSource(Protocol):
         self,
         request: LifecycleFactsRequest,
     ) -> TicketLifecycleFacts: ...
+
+
+class ReviewEconomicsRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    ticket_id: str
+    netting_domain: NettingDomain
+    expected_entry_quantity: Decimal
+    entry_venue_client_order_id: str
+    exit_venue_client_order_ids: tuple[str, ...]
+    entry_time_ms: int
+    exit_time_ms: int
+    funding_attribution_exact: bool
+    observed_at_ms: int
+
+    @field_validator(
+        "ticket_id",
+        "entry_venue_client_order_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("review economics request identities must be non-blank")
+        return normalized
+
+    @field_validator("exit_venue_client_order_ids", mode="before")
+    @classmethod
+    def _normalize_exit_identities(cls, value: object) -> tuple[str, ...]:
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("review exit order identities must be a sequence")
+        normalized = tuple(str(item or "").strip() for item in value)
+        if not normalized or any(not item for item in normalized):
+            raise ValueError("review requires non-blank exit order identities")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("review exit order identities must be unique")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_review_window(self) -> "ReviewEconomicsRequest":
+        if self.expected_entry_quantity <= 0:
+            raise ValueError("review expected entry quantity must be positive")
+        if self.entry_venue_client_order_id in self.exit_venue_client_order_ids:
+            raise ValueError("entry order identity cannot also be an exit identity")
+        if (
+            self.entry_time_ms <= 0
+            or self.exit_time_ms < self.entry_time_ms
+            or self.observed_at_ms < self.exit_time_ms
+        ):
+            raise ValueError("review economics time window is invalid")
+        return self
+
+
+class ReviewEconomicsSource(Protocol):
+    async def read_review_economics(
+        self,
+        request: ReviewEconomicsRequest,
+    ) -> ReviewEconomicsFacts: ...

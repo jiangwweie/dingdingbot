@@ -235,11 +235,19 @@ async def reconcile_ticket(
                 )
                 status = ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
             elif snapshot.quantity == 0:
+                open_incident = await uow.incidents.get_open_for_ticket(
+                    request.ticket_id
+                )
                 event = ReconciliationMatched(
                     event_id=_event_id(aggregate),
                     ticket_id=request.ticket_id,
                     sequence=aggregate.last_event_sequence + 1,
                     occurred_at_ms=snapshot.observed_at_ms,
+                    resolved_incident_kind=(
+                        None
+                        if open_incident is None
+                        else open_incident.incident_kind
+                    ),
                 )
                 status = ReconcileTicketStatus.MATCHED
     elif aggregate.status in {

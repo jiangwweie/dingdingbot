@@ -58,6 +58,8 @@ async def test_clean_alembic_baseline_upgrades_and_downgrades_postgres() -> None
                     "ck_brc_trade_aggregates_position_nonnegative",
                     "ck_brc_trade_aggregates_protection_nonnegative",
                     "ck_brc_trade_aggregates_sequence_positive",
+                    "ck_brc_trade_aggregates_tp1_filled_nonnegative",
+                    "ck_brc_trade_aggregates_tp1_target_nonnegative",
                     "ck_brc_trade_aggregates_version_positive",
                 },
             }

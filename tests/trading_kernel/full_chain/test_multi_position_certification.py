@@ -157,10 +157,12 @@ async def test_two_serial_entries_become_concurrent_protected_long_short_positio
     assert [command.kind.value for command in long_commands] == [
         "entry",
         "initial_stop",
+        "take_profit",
     ]
     assert [command.kind.value for command in short_commands] == [
         "entry",
         "initial_stop",
+        "take_profit",
     ]
     assert long_budget is not None and long_budget.status == "active"
     assert short_budget is not None and short_budget.status == "active"
@@ -175,6 +177,8 @@ async def test_two_serial_entries_become_concurrent_protected_long_short_positio
     assert [call.position_side for call in venue.calls] == [
         "long",
         "long",
+        "long",
+        "short",
         "short",
         "short",
     ]
@@ -225,6 +229,13 @@ async def _protect(
     assert fill.status is ReconcileTicketStatus.ENTRY_FILL_RECORDED
     stop = await _dispatch(engine, venue, ticket.identity.ticket_id, stop_now_ms)
     assert stop.status is DispatchCommandStatus.ACCEPTED
+    take_profit = await _dispatch(
+        engine,
+        venue,
+        ticket.identity.ticket_id,
+        stop_now_ms + 1,
+    )
+    assert take_profit.status is DispatchCommandStatus.ACCEPTED
 
 
 async def _dispatch(

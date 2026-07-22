@@ -255,6 +255,17 @@ class TicketRepository(Protocol):
         terminal_at_ms: int,
     ) -> None: ...
 
+    async def has_other_instrument_ticket_in_window(
+        self,
+        *,
+        ticket_id: str,
+        venue_id: str,
+        account_id: str,
+        exchange_instrument_id: str,
+        entry_time_ms: int,
+        exit_time_ms: int,
+    ) -> bool: ...
+
 
 class AggregateRepository(Protocol):
     async def add(

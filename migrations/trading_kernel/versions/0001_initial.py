@@ -531,6 +531,17 @@ def upgrade() -> None:
         sa.CheckConstraint("leverage > 0", name="ck_brc_trade_tickets_leverage_positive"),
         sa.CheckConstraint("risk_at_stop >= 0", name="ck_brc_trade_tickets_risk_nonnegative"),
     )
+    op.create_index(
+        "ix_brc_trade_tickets_instrument_window",
+        "brc_trade_tickets",
+        [
+            "venue_id",
+            "account_id",
+            "exchange_instrument_id",
+            "created_at_ms",
+            "terminal_at_ms",
+        ],
+    )
     op.create_table(
         "brc_trade_aggregates",
         _id("ticket_id", primary_key=True),

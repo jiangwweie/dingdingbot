@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -23,6 +24,8 @@ from src.trading_kernel.application.recover_unknown_command import (
 from src.trading_kernel.application.runtime_facts import (
     PositionSnapshotRequest,
     PositionSnapshotSource,
+    ReviewEconomicsRequest,
+    ReviewEconomicsSource,
 )
 from src.trading_kernel.application.settle_ticket import (
     RecordTradeReviewRequest,
@@ -31,6 +34,22 @@ from src.trading_kernel.application.settle_ticket import (
     settle_ticket,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.commands import (
+    ExchangeCommand,
+    ExchangeCommandKind,
+    ExchangeCommandStatus,
+)
+from src.trading_kernel.domain.events import (
+    EntryFilled,
+    EntryPartiallyFilled,
+    ExternalFlatDetected,
+    PositionFlatConfirmed,
+    TradeEvent,
+)
+from src.trading_kernel.domain.review import (
+    ReviewEconomicsUnavailable,
+    calculate_review_economics,
+)
 
 
 _POSITION_RECONCILIATION_STATUSES = (
@@ -118,6 +137,8 @@ async def run_reconciliation_worker_once(
     venue_truth: VenueTruthPort,
     position_source: PositionSnapshotSource,
     request: ReconciliationWorkerRequest,
+    *,
+    review_economics_source: ReviewEconomicsSource | None = None,
 ) -> ReconciliationWorkerResult:
     async with uow_factory() as uow:
         unknown = await uow.exchange_commands.get_one_unknown()
@@ -207,29 +228,207 @@ async def run_reconciliation_worker_once(
             )
 
         review = await uow.aggregates.get_next_for_statuses(
-            (AggregateStatus.REVIEW_PENDING,)
+            (AggregateStatus.REVIEW_PENDING,),
+            work_kind="reconciliation",
+            now_ms=request.now_ms,
         )
         if review is not None:
+            commands = await uow.exchange_commands.list_for_ticket(
+                review.identity.ticket_id
+            )
+            events = await uow.events.list_for_ticket(review.identity.ticket_id)
+            review_window = _review_window(events)
+            exit_client_ids = _review_exit_client_ids(commands)
+            if review_window is None or not exit_client_ids:
+                await uow.aggregates.schedule_next_check(
+                    review.identity.ticket_id,
+                    work_kind="reconciliation",
+                    due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                )
+                return ReconciliationWorkerResult(
+                    status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+                    ticket_id=review.identity.ticket_id,
+                    detail="review_lineage:incomplete",
+                )
+            entry_time_ms, exit_time_ms, executed_entry_quantity = review_window
+            overlapping_exposure = (
+                await uow.tickets.has_other_instrument_ticket_in_window(
+                    ticket_id=review.identity.ticket_id,
+                    venue_id=review.identity.netting_domain.venue_id,
+                    account_id=review.identity.netting_domain.account_id,
+                    exchange_instrument_id=(
+                        review.identity.netting_domain.exchange_instrument_id
+                    ),
+                    entry_time_ms=entry_time_ms,
+                    exit_time_ms=exit_time_ms,
+                )
+            )
+            entry_client_id = _entry_client_id(commands)
+            if entry_client_id is None:
+                await uow.aggregates.schedule_next_check(
+                    review.identity.ticket_id,
+                    work_kind="reconciliation",
+                    due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                )
+                return ReconciliationWorkerResult(
+                    status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+                    ticket_id=review.identity.ticket_id,
+                    detail="review_entry_command:missing",
+                )
+
+    if review is not None:
+        assert entry_client_id is not None
+        if review_economics_source is None:
+            await _schedule_review_retry(
+                uow_factory,
+                ticket_id=review.identity.ticket_id,
+                due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+            )
+            return ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+                ticket_id=review.identity.ticket_id,
+                detail="review_economics_source:missing",
+            )
+        try:
+            economics_facts = await asyncio.wait_for(
+                review_economics_source.read_review_economics(
+                    ReviewEconomicsRequest(
+                        ticket_id=review.identity.ticket_id,
+                        netting_domain=review.identity.netting_domain,
+                        expected_entry_quantity=executed_entry_quantity,
+                        entry_venue_client_order_id=entry_client_id,
+                        exit_venue_client_order_ids=exit_client_ids,
+                        entry_time_ms=entry_time_ms,
+                        exit_time_ms=exit_time_ms,
+                        funding_attribution_exact=not overlapping_exposure,
+                        observed_at_ms=request.now_ms,
+                    )
+                ),
+                timeout=request.timeout_seconds,
+            )
+            if economics_facts.ticket_id != review.identity.ticket_id:
+                raise ReviewEconomicsUnavailable(
+                    "review economics Ticket identity mismatch"
+                )
+            economics = calculate_review_economics(
+                facts=economics_facts,
+                expected_entry_quantity=executed_entry_quantity,
+                position_side=review.identity.netting_domain.position_side,
+                risk_at_stop=review.ticket.risk_at_stop,
+            )
+        except Exception as exc:
+            await _schedule_review_retry(
+                uow_factory,
+                ticket_id=review.identity.ticket_id,
+                due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+            )
+            return ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+                ticket_id=review.identity.ticket_id,
+                detail=f"review_economics:{type(exc).__name__}",
+            )
+
+        metrics = {
+            "signal_event_id": review.identity.signal_event_id,
+            "event_spec_id": review.identity.runtime.event_spec_id,
+            "ticket_quantity": str(review.ticket.quantity),
+            "executed_entry_quantity": str(executed_entry_quantity),
+            "risk_at_stop": str(review.ticket.risk_at_stop),
+            **economics.model_dump(mode="json"),
+        }
+        async with uow_factory() as uow:
             await record_trade_review(
                 uow,
                 RecordTradeReviewRequest(
                     ticket_id=review.identity.ticket_id,
                     review_id=f"review:{review.identity.ticket_id}",
                     outcome="terminal_flat",
-                    metrics={
-                        "signal_event_id": review.identity.signal_event_id,
-                        "event_spec_id": review.identity.runtime.event_spec_id,
-                        "entry_quantity": str(review.ticket.quantity),
-                        "entry_average_price": str(review.average_fill_price),
-                        "risk_at_stop": str(review.ticket.risk_at_stop),
+                    metrics=metrics,
+                    decision_impact={
+                        "status": "recorded",
+                        "economics_completeness": (
+                            economics.economics_completeness.value
+                        ),
                     },
-                    decision_impact={"status": "recorded"},
                     recorded_at_ms=request.now_ms,
                 ),
             )
-            return ReconciliationWorkerResult(
-                status=ReconciliationWorkerStatus.REVIEWED,
-                ticket_id=review.identity.ticket_id,
-            )
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.REVIEWED,
+            ticket_id=review.identity.ticket_id,
+        )
 
     return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.NO_WORK)
+
+
+def _review_window(
+    events: list[TradeEvent],
+) -> tuple[int, int, Decimal] | None:
+    entry_events = [
+        event
+        for event in events
+        if isinstance(event, (EntryFilled, EntryPartiallyFilled))
+    ]
+    flat_events = [
+        event
+        for event in events
+        if isinstance(event, (PositionFlatConfirmed, ExternalFlatDetected))
+    ]
+    if len(entry_events) != 1 or not flat_events:
+        return None
+    entry = entry_events[0]
+    exit_event = min(
+        (event for event in flat_events if event.occurred_at_ms >= entry.occurred_at_ms),
+        key=lambda event: event.occurred_at_ms,
+        default=None,
+    )
+    if exit_event is None:
+        return None
+    return entry.occurred_at_ms, exit_event.occurred_at_ms, entry.filled_qty
+
+
+def _entry_client_id(commands: list[ExchangeCommand]) -> str | None:
+    entries = [
+        command
+        for command in commands
+        if command.kind is ExchangeCommandKind.ENTRY
+        and command.status
+        in {
+            ExchangeCommandStatus.ACCEPTED,
+            ExchangeCommandStatus.RECONCILED_ACCEPTED,
+        }
+    ]
+    if len(entries) != 1:
+        return None
+    return entries[0].venue_client_order_id
+
+
+def _review_exit_client_ids(
+    commands: list[ExchangeCommand],
+) -> tuple[str, ...]:
+    accepted_statuses = {
+        ExchangeCommandStatus.ACCEPTED,
+        ExchangeCommandStatus.RECONCILED_ACCEPTED,
+    }
+    identities = (
+        command.venue_client_order_id
+        for command in commands
+        if command.kind
+        not in {ExchangeCommandKind.ENTRY, ExchangeCommandKind.CANCEL_ORDER}
+        and command.status in accepted_statuses
+    )
+    return tuple(dict.fromkeys(identities))
+
+
+async def _schedule_review_retry(
+    uow_factory: UnitOfWorkFactory,
+    *,
+    ticket_id: str,
+    due_at_ms: int,
+) -> None:
+    async with uow_factory() as uow:
+        await uow.aggregates.schedule_next_check(
+            ticket_id,
+            work_kind="reconciliation",
+            due_at_ms=due_at_ms,
+        )

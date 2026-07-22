@@ -197,6 +197,43 @@ class PostgresTicketRepository:
         if updated.rowcount != 1:
             raise AggregateVersionConflict("Ticket missing during terminalization")
 
+    async def has_other_instrument_ticket_in_window(
+        self,
+        *,
+        ticket_id: str,
+        venue_id: str,
+        account_id: str,
+        exchange_instrument_id: str,
+        entry_time_ms: int,
+        exit_time_ms: int,
+    ) -> bool:
+        if entry_time_ms <= 0 or exit_time_ms < entry_time_ms:
+            raise ValueError("Ticket overlap window is invalid")
+        result = await self._connection.execute(
+            sa.select(
+                sa.exists().where(
+                    trade_tickets.c.ticket_id != ticket_id,
+                    trade_tickets.c.venue_id == venue_id,
+                    trade_tickets.c.account_id == account_id,
+                    trade_tickets.c.exchange_instrument_id
+                    == exchange_instrument_id,
+                    trade_tickets.c.status.not_in(
+                        (
+                            "expired_before_submit",
+                            "entry_rejected",
+                            "entry_reconciled_absent",
+                        )
+                    ),
+                    trade_tickets.c.created_at_ms <= exit_time_ms,
+                    sa.or_(
+                        trade_tickets.c.terminal_at_ms.is_(None),
+                        trade_tickets.c.terminal_at_ms >= entry_time_ms,
+                    ),
+                )
+            )
+        )
+        return bool(result.scalar_one())
+
 
 class PostgresAggregateRepository:
     def __init__(self, connection: AsyncConnection) -> None:

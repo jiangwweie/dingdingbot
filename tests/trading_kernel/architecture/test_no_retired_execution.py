@@ -21,6 +21,8 @@ RETIRED_EXPLICIT_PATHS = (
     "src/application/reconciliation.py",
     "src/application/startup_reconciliation_service.py",
     "src/infrastructure/exchange_gateway.py",
+    "src/trading_kernel/interfaces/worker.py",
+    "scripts/trading_kernel/run_worker_once.py",
 )
 
 RETIRED_IMPORT_MARKERS = (
@@ -70,3 +72,23 @@ def test_production_code_does_not_import_retired_execution_modules() -> None:
     assert not remaining, "retired execution imports remain:\n" + "\n".join(
         sorted(remaining)
     )
+
+
+def test_systemd_contains_only_the_four_runtime_worker_pairs() -> None:
+    expected = {
+        f"brc-trading-kernel-{worker}.{unit_kind}"
+        for worker in (
+            "observation-worker",
+            "entry-worker",
+            "lifecycle-worker",
+            "reconciliation-worker",
+        )
+        for unit_kind in ("service", "timer")
+    }
+    actual = {
+        path.name
+        for path in (REPO_ROOT / "deploy" / "systemd").iterdir()
+        if path.is_file()
+    }
+
+    assert actual == expected

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rebuild the six registered StrategyGroup Event capabilities into the single `src/trading_kernel/**` production chain, certify the complete input-to-review lifecycle locally, and stop before Tokyo deployment for Owner confirmation.
+**Goal:** Rebuild the six registered StrategyGroup Event capabilities into the single `src/trading_kernel/**` production chain and certify the complete input-to-review lifecycle locally before the separately gated Tokyo deployment.
 
 **Architecture:** Closed market snapshots feed six pure deterministic detectors that emit immutable `StrategySignal` records and exact fact lineage. A bounded candidate selector chooses one fresh signal, action-time facts produce an immutable `CapacityClaim`, and the existing globally serialized Ticket issuer atomically creates the Ticket, budget reservation, Netting Domain hold, lifecycle aggregate, and durable ENTRY command. Venue truth, exit policy, protection, reconciliation, settlement, and Owner projection remain one kernel authority with no compatibility path.
 
@@ -683,7 +683,7 @@ git commit -m "feat(kernel): bind six strategy exit policies to ticket lifecycle
 - Reconciliation Worker owns venue truth, unknown outcomes, settlement, and review closure.
 - Owner projection returns only documented product states.
 
-- [ ] **Step 1: Write failing ownership tests**
+- [x] **Step 1: Write failing ownership tests**
 
 ```python
 def test_each_runtime_transition_has_one_worker_owner() -> None:
@@ -695,17 +695,17 @@ def test_each_runtime_transition_has_one_worker_owner() -> None:
     }
 ```
 
-- [ ] **Step 2: Run runtime tests and verify RED**
+- [x] **Step 2: Run runtime tests and verify RED**
 
 Run: `pytest -q tests/trading_kernel/integration/test_global_runtime_workers.py`
 
 Expected: failure because the current worker combines multiple selectors and the new workers do not exist.
 
-- [ ] **Step 3: Implement bounded independent worker selectors**
+- [x] **Step 3: Implement bounded independent worker selectors**
 
 Each tick claims at most one bounded unit of work, uses exact indexed selectors, and records state only when it changes. External calls are timeout-bounded. A no-signal observation tick creates zero files and no append-only event row.
 
-- [ ] **Step 4: Write failing Owner projection tests**
+- [x] **Step 4: Write failing Owner projection tests**
 
 ```python
 @pytest.mark.parametrize((fixture_name, expected), [
@@ -719,23 +719,23 @@ def test_owner_projection_uses_product_states(fixture_name: str, expected: str) 
     assert project_owner_state(owner_projection_fixture(fixture_name)).state == expected
 ```
 
-- [ ] **Step 5: Run projection tests and verify RED**
+- [x] **Step 5: Run projection tests and verify RED**
 
 Run: `pytest -q tests/trading_kernel/integration/test_owner_projection.py`
 
 Expected: failure because current projection does not include strategy observation and candidate state.
 
-- [ ] **Step 6: Implement one current Owner projection**
+- [x] **Step 6: Implement one current Owner projection**
 
 Internal blocker identities remain diagnostic fields; the primary state is one of `not_enabled`, `running`, `waiting_for_opportunity`, `processing`, `temporarily_unavailable`, `needs_intervention`, `paused`, or `completed`.
 
-- [ ] **Step 7: Run focused runtime tests**
+- [x] **Step 7: Run focused runtime tests**
 
 Run: `pytest -q tests/trading_kernel/integration/test_global_runtime_workers.py tests/trading_kernel/integration/test_owner_projection.py tests/trading_kernel/integration/test_runtime_worker.py`
 
 Expected: all tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/trading_kernel/application/project_owner_state.py src/trading_kernel/interfaces/reconciliation_worker.py src/trading_kernel/interfaces/lifecycle_worker.py src/trading_kernel/interfaces/observation_worker.py src/trading_kernel/interfaces/worker.py src/trading_kernel/interfaces/readonly_api.py src/trading_kernel/application/runtime.py tests/trading_kernel/integration/test_global_runtime_workers.py tests/trading_kernel/integration/test_owner_projection.py
@@ -744,7 +744,7 @@ git commit -m "feat(kernel): split runtime ownership and owner projection"
 
 ---
 
-### Task 9: Certify the full six-capability chain and stop before Tokyo
+### Task 9: Certify the full six-capability chain before Tokyo
 
 **Files:**
 - Create: `tests/trading_kernel/full_chain/test_six_event_system_certification.py`
@@ -760,7 +760,7 @@ git commit -m "feat(kernel): split runtime ownership and owner projection"
 - Proves all six Events can progress from closed market input to deterministic signal and through the shared Ticket chain.
 - Proves Tokyo and exchange-write capability remain disabled.
 
-- [ ] **Step 1: Write failing requirement-by-requirement certification tests**
+- [x] **Step 1: Write failing requirement-by-requirement certification tests**
 
 ```python
 @pytest.mark.parametrize("event_id", [
@@ -774,17 +774,17 @@ async def test_registered_event_reaches_terminal_review(event_id: str, certified
     assert result.open_incident_count == 0
 ```
 
-- [ ] **Step 2: Run certification test and verify RED**
+- [x] **Step 2: Run certification test and verify RED**
 
 Run: `pytest -q tests/trading_kernel/full_chain/test_six_event_system_certification.py`
 
 Expected: at least one Event or fault branch remains unimplemented before the final integration work.
 
-- [ ] **Step 3: Close only failures proven by the certification matrix**
+- [x] **Step 3: Close only failures proven by the certification matrix**
 
 Do not add compatibility behavior. Fix shared abstractions when a failure affects a problem class; add per-Event code only when the registered strategy semantics are genuinely different.
 
-- [ ] **Step 4: Run complete local certification**
+- [x] **Step 4: Run complete local certification**
 
 Run:
 
@@ -793,20 +793,22 @@ pytest -q tests/trading_kernel
 ruff check src/trading_kernel tests/trading_kernel scripts/trading_kernel migrations/trading_kernel
 mypy src/trading_kernel scripts/trading_kernel
 python3 scripts/audit_production_runtime_file_io.py
-python3 scripts/trading_kernel/bootstrap_schema.py --verify-rebuild
+pytest -q tests/trading_kernel/integration/test_schema_migration_postgres.py
 ```
 
 Expected: full test suite passes, Ruff passes, Mypy reports zero errors, file-I/O audit reports zero production readers/writers, and an empty PostgreSQL database rebuilds from `0001_initial` plus the deterministic seed.
 
-- [ ] **Step 5: Verify destructive cutover remains refusal-safe without applying Tokyo**
+- [x] **Step 5: Verify destructive cutover remains refusal-safe without applying Tokyo**
 
 Run: `pytest -q tests/trading_kernel/integration/test_cutover_state_machine.py`
 
 Expected: all flatness, order, protection, unknown-outcome, writer-fence, identity, interruption, and resume tests pass. Do not execute `cutover_tokyo.py --apply`.
 
-- [ ] **Step 6: Update current authority and mark the Tokyo stop**
+- [x] **Step 6: Update current authority and record the Tokyo authorization boundary**
 
-Current documents must state that local six-capability certification is complete while Tokyo deployment, production Capacity values, initial live scope, and real-funds enablement remain blocked for Owner confirmation.
+Current documents must state that local six-capability certification is complete,
+the Owner has authorized Tokyo deployment and one small acceptance Ticket, and
+exchange-write capability remains fail-closed until Tokyo hard gates pass.
 
 - [ ] **Step 7: Commit**
 
@@ -817,9 +819,9 @@ git commit -m "test(kernel): certify six-event complete trading system"
 
 ## Plan Self-Review
 
-- **Spec coverage:** Tasks 1-9 cover Registry, six detectors, observation, Signal production, arbitration, Capacity, Ticket issuance, venue truth, unknown recovery, exit policy, lifecycle, settlement, review, Owner projection, schema, performance, and the Tokyo stop boundary.
+- **Spec coverage:** Tasks 1-9 cover Registry, six detectors, observation, Signal production, arbitration, Capacity, Ticket issuance, venue truth, unknown recovery, exit policy, lifecycle, settlement, review, Owner projection, schema, performance, and the separately gated Tokyo boundary.
 - **Authority coverage:** All production code remains under `src/trading_kernel/**`; scripts are thin entrypoints and do not own business logic.
 - **Deletion coverage:** No task reintroduces readiness packets, evidence packets, promotion packets, shadow candidates, action-time invocations, file-backed authority, old tables, dual writes, or compatibility imports.
 - **Performance coverage:** Observation runs at closed-bar event time; facts are bounded upserts; append-only growth occurs only for real signals and lifecycle transitions; exact active-ticket selectors bound reconciliation; external calls are timeout-bounded; no-signal ticks create zero files.
-- **Safety coverage:** Unknown outcomes never resend, partial fills flatten, same-domain occupancy blocks, account mode is validated, and deployment stays disabled.
+- **Safety coverage:** Unknown outcomes never resend, partial fills flatten, same-domain occupancy blocks, account mode is validated, and exchange writes remain disabled until Tokyo hard gates pass.
 - **Execution mode:** The active Owner goal already authorizes inline implementation. No subagent dispatch or separate execution-choice prompt is required.

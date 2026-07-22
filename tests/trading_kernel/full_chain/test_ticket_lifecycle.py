@@ -391,6 +391,55 @@ async def test_external_flat_opens_incident_and_enters_owned_protection_cleanup(
     assert commands[-1].kind is ExchangeCommandKind.CANCEL_ORDER
     assert reservation is not None and reservation.status == "active"
 
+    assert (
+        await _dispatch(lifecycle_engine, venue, "cancel-external-flat-tp1", 2_400)
+    ).status is DispatchCommandStatus.ACCEPTED
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        stop_cleanup = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity="0",
+                    average_entry_price=None,
+                    open_orders=(
+                        VenueOrderSnapshot(
+                            exchange_order_id="stop-order-1",
+                            venue_client_order_id="brc-owned-stop",
+                            position_side="long",
+                            reduce_only=True,
+                        ),
+                    ),
+                    observed_at_ms=2_500,
+                ),
+            ),
+        )
+    assert stop_cleanup.status is ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
+    assert (
+        await _dispatch(lifecycle_engine, venue, "cancel-external-flat-stop", 2_600)
+    ).status is DispatchCommandStatus.ACCEPTED
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        matched = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity="0",
+                    average_entry_price=None,
+                    open_orders=(),
+                    observed_at_ms=2_700,
+                ),
+            ),
+        )
+        incident_after_match = await uow.incidents.get_open_for_ticket(
+            ticket.identity.ticket_id
+        )
+
+    assert matched.status is ReconcileTicketStatus.MATCHED
+    assert incident_after_match is None
+
 
 @pytest.mark.asyncio
 async def test_exit_timeout_is_conserved_as_unknown_and_never_redispatched(

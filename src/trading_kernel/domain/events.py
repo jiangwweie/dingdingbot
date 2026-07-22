@@ -247,7 +247,7 @@ class CancelOrderAbsenceConfirmed(_TicketEvent):
 
 
 class ReconciliationMatched(_TicketEvent):
-    pass
+    resolved_incident_kind: str | None = None
 
 
 class BudgetSettled(_TicketEvent):

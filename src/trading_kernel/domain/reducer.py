@@ -1206,11 +1206,21 @@ def reduce_event(
             raise InvalidLifecycleTransition("protected quantity remains")
         if current.pending_cancel_exchange_order_id is not None:
             raise InvalidLifecycleTransition("cancel outcome remains unresolved")
+        matched_effects: list[KernelEffect] = [
+            SettleBudget(ticket_id=current.identity.ticket_id)
+        ]
+        if event.resolved_incident_kind is not None:
+            matched_effects.append(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind=event.resolved_incident_kind,
+                )
+            )
         return _transition(
             current,
             event,
             status=AggregateStatus.SETTLEMENT_PENDING,
-            effects=(SettleBudget(ticket_id=current.identity.ticket_id),),
+            effects=tuple(matched_effects),
         )
 
     if isinstance(event, BudgetSettled):

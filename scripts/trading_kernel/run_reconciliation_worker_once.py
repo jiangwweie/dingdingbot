@@ -24,6 +24,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.trading_kernel.application.ports import VenueTruthPort  # noqa: E402
 from src.trading_kernel.application.runtime_facts import (  # noqa: E402
     PositionSnapshotSource,
+    ReviewEconomicsSource,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import (  # noqa: E402
     PostgresKernelUnitOfWork,
@@ -73,6 +74,8 @@ async def _run(args: argparse.Namespace) -> int:
         raise TypeError("venue factory must provide VenueTruthPort")
     if not callable(getattr(adapter, "read_position_snapshot", None)):
         raise TypeError("venue factory must provide PositionSnapshotSource")
+    if not callable(getattr(adapter, "read_review_economics", None)):
+        raise TypeError("venue factory must provide ReviewEconomicsSource")
 
     engine = create_async_engine(database_url)
     try:
@@ -87,6 +90,7 @@ async def _run(args: argparse.Namespace) -> int:
                 unknown_visibility_grace_ms=args.unknown_visibility_grace_ms,
                 idle_poll_interval_ms=args.idle_poll_interval_ms,
             ),
+            review_economics_source=cast(ReviewEconomicsSource, adapter),
         )
         print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
         return 0

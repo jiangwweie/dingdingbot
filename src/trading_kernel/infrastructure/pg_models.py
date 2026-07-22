@@ -484,6 +484,14 @@ trade_tickets = sa.Table(
     sa.CheckConstraint("leverage > 0", name="leverage_positive"),
     sa.CheckConstraint("risk_at_stop >= 0", name="risk_nonnegative"),
 )
+sa.Index(
+    "ix_brc_trade_tickets_instrument_window",
+    trade_tickets.c.venue_id,
+    trade_tickets.c.account_id,
+    trade_tickets.c.exchange_instrument_id,
+    trade_tickets.c.created_at_ms,
+    trade_tickets.c.terminal_at_ms,
+)
 
 trade_aggregates = sa.Table(
     "brc_trade_aggregates",

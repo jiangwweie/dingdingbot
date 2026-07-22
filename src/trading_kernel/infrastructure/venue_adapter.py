@@ -15,6 +15,7 @@ from src.trading_kernel.application.runtime_facts import (
     ActionTimeFactsRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
+    ReviewEconomicsRequest,
 )
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
@@ -32,6 +33,7 @@ from src.trading_kernel.domain.venue_truth import (
     VenueTruthSnapshot,
 )
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+from src.trading_kernel.domain.review import ReviewEconomicsFacts, ReviewFill
 from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
 
 
@@ -375,6 +377,98 @@ class CcxtVenueAdapter:
             exit_taker_fee_rate=taker_fee_rate,
             price_tick=request.price_tick,
             market_facts=market_facts,
+            observed_at_ms=request.observed_at_ms,
+        )
+
+    async def read_review_economics(
+        self,
+        request: ReviewEconomicsRequest,
+    ) -> ReviewEconomicsFacts:
+        domain = request.netting_domain
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+        )
+        settlement_asset = self._settlement_assets.get(
+            (domain.venue_id, domain.exchange_instrument_id)
+        )
+        if not settlement_asset:
+            raise RuntimeError("canonical instrument has no settlement asset mapping")
+
+        client_ids = (
+            request.entry_venue_client_order_id,
+            *request.exit_venue_client_order_ids,
+        )
+        rows: list[object] = []
+        for client_id in client_ids:
+            rows.extend(
+                _require_list(
+                    await _call_raw_exchange(
+                        exchange.fetch_my_trades,
+                        symbol,
+                        request.entry_time_ms,
+                        100,
+                        {"clientOrderId": client_id},
+                    ),
+                    name="review fills",
+                )
+            )
+        fills_by_trade_id: dict[str, ReviewFill] = {}
+        known_client_ids = set(client_ids)
+        for row in rows:
+            fill = _review_fill(
+                row,
+                known_client_ids=known_client_ids,
+                settlement_asset=settlement_asset,
+                position_side=domain.position_side,
+                entry_time_ms=request.entry_time_ms,
+                exit_time_ms=request.exit_time_ms,
+            )
+            if fill is None:
+                continue
+            existing = fills_by_trade_id.get(fill.exchange_trade_id)
+            if existing is not None and existing != fill:
+                raise RuntimeError("venue returned contradictory duplicate review fill")
+            fills_by_trade_id[fill.exchange_trade_id] = fill
+
+        ordered_fills = tuple(
+            sorted(
+                fills_by_trade_id.values(),
+                key=lambda item: (item.occurred_at_ms, item.exchange_trade_id),
+            )
+        )
+        entry_fills = tuple(
+            fill
+            for fill in ordered_fills
+            if fill.venue_client_order_id == request.entry_venue_client_order_id
+        )
+        exit_client_ids = set(request.exit_venue_client_order_ids)
+        exit_fills = tuple(
+            fill
+            for fill in ordered_fills
+            if fill.venue_client_order_id in exit_client_ids
+        )
+
+        if request.funding_attribution_exact:
+            funding_quote, funding_unavailable_reason = await _funding_quote(
+                exchange,
+                venue_id=domain.venue_id,
+                symbol=symbol,
+                settlement_asset=settlement_asset,
+                entry_time_ms=request.entry_time_ms,
+                exit_time_ms=request.exit_time_ms,
+            )
+        else:
+            funding_quote = None
+            funding_unavailable_reason = "overlapping_instrument_exposure"
+
+        return ReviewEconomicsFacts(
+            ticket_id=request.ticket_id,
+            entry_fills=entry_fills,
+            exit_fills=exit_fills,
+            funding_quote=funding_quote,
+            funding_unavailable_reason=funding_unavailable_reason,
             observed_at_ms=request.observed_at_ms,
         )
 
@@ -827,6 +921,125 @@ def _fill_metrics(
             fee_quote += abs(Decimal(str(fee.get("cost"))))
     average_price = None if quantity == 0 else weighted_price / quantity
     return quantity, average_price, fee_quote
+
+
+def _review_fill(
+    value: object,
+    *,
+    known_client_ids: set[str],
+    settlement_asset: str,
+    position_side: Literal["long", "short"],
+    entry_time_ms: int,
+    exit_time_ms: int,
+) -> ReviewFill | None:
+    if not isinstance(value, Mapping):
+        raise RuntimeError("venue review fill row is not a mapping")
+    info = value.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    client_id = str(
+        value.get("clientOrderId")
+        or raw_info.get("clientOrderId")
+        or ""
+    ).strip()
+    if client_id not in known_client_ids:
+        return None
+    raw_position_side = str(
+        value.get("positionSide")
+        or raw_info.get("positionSide")
+        or ""
+    ).strip().lower()
+    if _position_side_literal(raw_position_side) != position_side:
+        raise RuntimeError("review fill position side differs from Ticket")
+    trade_id = str(
+        value.get("id")
+        or raw_info.get("tradeId")
+        or raw_info.get("id")
+        or ""
+    ).strip()
+    if not trade_id:
+        raise RuntimeError("review fill lacks exchange trade identity")
+    occurred_at_ms = int(
+        value.get("timestamp")
+        or raw_info.get("time")
+        or raw_info.get("timestamp")
+        or 0
+    )
+    if not entry_time_ms <= occurred_at_ms <= exit_time_ms:
+        raise RuntimeError("review fill falls outside Ticket exposure window")
+    quantity = abs(Decimal(str(value.get("amount") or raw_info.get("qty") or "0")))
+    price = Decimal(str(value.get("price") or raw_info.get("price") or "0"))
+    if quantity <= 0 or price <= 0:
+        raise RuntimeError("review fill quantity and price must be positive")
+    fee = value.get("fee")
+    if not isinstance(fee, Mapping) or fee.get("cost") is None:
+        raise RuntimeError("review fill fee is unavailable")
+    fee_asset = str(fee.get("currency") or "").strip().upper()
+    if fee_asset != settlement_asset.upper():
+        raise RuntimeError("review fill fee is not in the settlement asset")
+    fee_quote = abs(Decimal(str(fee.get("cost"))))
+    return ReviewFill(
+        exchange_trade_id=trade_id,
+        venue_client_order_id=client_id,
+        quantity=quantity,
+        price=price,
+        fee_quote=fee_quote,
+        occurred_at_ms=occurred_at_ms,
+    )
+
+
+async def _funding_quote(
+    exchange: _CcxtExchange,
+    *,
+    venue_id: str,
+    symbol: str,
+    settlement_asset: str,
+    entry_time_ms: int,
+    exit_time_ms: int,
+) -> tuple[Decimal | None, str | None]:
+    raw_fetch = getattr(exchange, "fapiPrivateGetIncome", None)
+    if venue_id != "binance-usdm" or not callable(raw_fetch):
+        return None, "funding_read_unsupported"
+    market_id = symbol.split(":", 1)[0].replace("/", "")
+    rows = _require_list(
+        await _call_raw_exchange(
+            raw_fetch,
+            {
+                "symbol": market_id,
+                "incomeType": "FUNDING_FEE",
+                "startTime": entry_time_ms,
+                "endTime": exit_time_ms,
+                "limit": 1000,
+            },
+        ),
+        name="funding income",
+    )
+    funding_by_id: dict[str, tuple[Decimal, int]] = {}
+    for value in rows:
+        if not isinstance(value, Mapping):
+            raise RuntimeError("venue funding income row is not a mapping")
+        if str(value.get("incomeType") or "").upper() != "FUNDING_FEE":
+            continue
+        if str(value.get("symbol") or "") != market_id:
+            continue
+        occurred_at_ms = int(value.get("time") or value.get("timestamp") or 0)
+        if not entry_time_ms <= occurred_at_ms <= exit_time_ms:
+            continue
+        funding_id = str(value.get("tranId") or value.get("id") or "").strip()
+        if not funding_id:
+            raise RuntimeError("funding income lacks exchange identity")
+        asset = str(value.get("asset") or value.get("currency") or "").upper()
+        if asset != settlement_asset.upper():
+            raise RuntimeError("funding income is not in the settlement asset")
+        amount = Decimal(str(value.get("income") or value.get("amount") or ""))
+        normalized = (amount, occurred_at_ms)
+        existing = funding_by_id.get(funding_id)
+        if existing is not None and existing != normalized:
+            raise RuntimeError("venue returned contradictory duplicate funding income")
+        funding_by_id[funding_id] = normalized
+    return (
+        sum((amount for amount, _ in funding_by_id.values()), Decimal("0")),
+        None,
+    )
 
 
 def _lifecycle_market_facts(

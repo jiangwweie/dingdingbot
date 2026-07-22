@@ -126,6 +126,23 @@ lock exact current row
 Venue I/O happens after a durable command lease commits and before its result is
 recorded in a second short transaction.
 
+## Runtime Ownership And Review
+
+Production cadence is split across four independently bounded workers:
+
+```text
+Observation Worker
+Entry Worker
+Lifecycle Worker
+Reconciliation Worker
+```
+
+The Entry Worker is the only owner of new Ticket issuance. Lifecycle and
+reconciliation continue concurrently for existing Tickets. The terminal Review
+records realized PnL, fees, funding, net PnL, and R-Multiple from exact Ticket
+order identities. When funding cannot be attributed exactly, Review records
+`funding_unavailable` and does not fabricate net economics.
+
 ## Cutover
 
 The old writers are fenced only after exchange flatness, order absence,
@@ -150,6 +167,12 @@ The rebuild is complete only when:
 7. Tokyo runs the exact commit and schema;
 8. one controlled real-funds Ticket reaches terminal review and final flatness;
 9. the final audit finds no unverified requirement or fallback path.
+
+Local implementation currently satisfies items 1-6 with `303 passed`, Ruff
+clean, Mypy clean across 68 source files, zero runtime file-authority findings,
+and one clean 33-table `0001_initial` rebuild. The Owner has authorized Tokyo
+cutover and controlled real-funds acceptance; no Tokyo mutation is claimed by
+this local evidence.
 
 ## Exchange-Write Hard Stops
 

@@ -9,6 +9,7 @@ from src.trading_kernel.application.runtime_facts import (
     ActionTimeFactsRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
+    ReviewEconomicsRequest,
 )
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -267,6 +268,73 @@ class LifecycleFactsExchange:
             for index in range(limit)
         ]
 
+
+class ReviewEconomicsExchange:
+    def __init__(self, *, include_fee: bool = True) -> None:
+        self.include_fee = include_fee
+        self.trade_calls: list[tuple[str, int | None, int, dict[str, object]]] = []
+        self.funding_calls: list[dict[str, object]] = []
+
+    async def fetch_my_trades(self, symbol, since, limit, params):
+        assert symbol == "BTC/USDT:USDT"
+        assert since == 1_000
+        assert limit == 100
+        self.trade_calls.append((symbol, since, limit, dict(params)))
+        fee = {"cost": "0.1", "currency": "USDT"}
+        rows = [
+            {
+                "id": "trade-entry",
+                "clientOrderId": "brc-entry-1",
+                "amount": "1",
+                "price": "100",
+                "fee": fee if self.include_fee else None,
+                "timestamp": 1_100,
+                "info": {"positionSide": "LONG"},
+            },
+            {
+                "id": "trade-tp1",
+                "clientOrderId": "brc-tp1-1",
+                "amount": "0.5",
+                "price": "110",
+                "fee": {"cost": "0.05", "currency": "USDT"},
+                "timestamp": 2_000,
+                "info": {"positionSide": "LONG"},
+            },
+            {
+                "id": "trade-runner",
+                "clientOrderId": "brc-runner-1",
+                "amount": "0.5",
+                "price": "120",
+                "fee": {"cost": "0.05", "currency": "USDT"},
+                "timestamp": 3_000,
+                "info": {"positionSide": "LONG"},
+            },
+            {
+                "id": "unrelated-trade",
+                "clientOrderId": "manual-order",
+                "amount": "10",
+                "price": "1",
+                "fee": {"cost": "1", "currency": "USDT"},
+                "timestamp": 2_500,
+                "info": {"positionSide": "LONG"},
+            },
+        ]
+        client_id = str(params.get("clientOrderId") or "")
+        return [row for row in rows if row["clientOrderId"] == client_id]
+
+    async def fapiPrivateGetIncome(self, params):
+        self.funding_calls.append(dict(params))
+        return [
+            {
+                "tranId": "funding-1",
+                "incomeType": "FUNDING_FEE",
+                "symbol": "BTCUSDT",
+                "income": "-0.3",
+                "asset": "USDT",
+                "time": 2_500,
+            }
+        ]
+
 @pytest.mark.asyncio
 async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> None:
     exchange = FakeAsyncExchange()
@@ -478,6 +546,106 @@ async def test_ccxt_adapter_builds_tp1_fee_and_runner_market_facts() -> None:
     assert facts.market_facts.is_final_closed_candle is True
     assert facts.market_facts.structure_reference == Decimal("60001")
     assert facts.market_facts.atr > 0
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_builds_exact_ticket_bound_review_economics_facts() -> None:
+    exchange = ReviewEconomicsExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        clock_ms=lambda: 4_000,
+    )
+
+    facts = await adapter.read_review_economics(_review_request())
+
+    assert [fill.exchange_trade_id for fill in facts.entry_fills] == [
+        "trade-entry"
+    ]
+    assert [fill.exchange_trade_id for fill in facts.exit_fills] == [
+        "trade-tp1",
+        "trade-runner",
+    ]
+    assert facts.funding_quote == Decimal("-0.3")
+    assert facts.funding_unavailable_reason is None
+    assert [call[3] for call in exchange.trade_calls] == [
+        {"clientOrderId": "brc-entry-1"},
+        {"clientOrderId": "brc-tp1-1"},
+        {"clientOrderId": "brc-runner-1"},
+    ]
+    assert exchange.funding_calls == [
+        {
+            "symbol": "BTCUSDT",
+            "incomeType": "FUNDING_FEE",
+            "startTime": 1_000,
+            "endTime": 3_500,
+            "limit": 1000,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_marks_funding_unavailable_for_overlapping_exposure() -> None:
+    exchange = ReviewEconomicsExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        clock_ms=lambda: 4_000,
+    )
+
+    facts = await adapter.read_review_economics(
+        _review_request().model_copy(update={"funding_attribution_exact": False})
+    )
+
+    assert facts.funding_quote is None
+    assert facts.funding_unavailable_reason == "overlapping_instrument_exposure"
+    assert exchange.funding_calls == []
+
+
+@pytest.mark.asyncio
+async def test_ccxt_adapter_rejects_review_fill_without_exact_fee() -> None:
+    exchange = ReviewEconomicsExchange(include_fee=False)
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        venue_symbols={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "BTC/USDT:USDT"
+        },
+        settlement_assets={
+            (
+                "binance-usdm",
+                "binance-usdm:BTCUSDT:perpetual",
+            ): "USDT"
+        },
+        clock_ms=lambda: 4_000,
+    )
+
+    with pytest.raises(RuntimeError, match="review fill fee is unavailable"):
+        await adapter.read_review_economics(_review_request())
 
 
 @pytest.mark.asyncio
@@ -697,4 +865,23 @@ def _cancel_truth_request() -> VenueTruthRequest:
         venue_client_order_id=request.venue_client_order_id,
         payload=request.payload,
         observed_at_ms=2_000,
+    )
+
+
+def _review_request() -> ReviewEconomicsRequest:
+    return ReviewEconomicsRequest(
+        ticket_id="ticket-1",
+        netting_domain=NettingDomain(
+            venue_id="binance-usdm",
+            account_id="experiment-1",
+            exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+            position_side="long",
+        ),
+        expected_entry_quantity=Decimal("1"),
+        entry_venue_client_order_id="brc-entry-1",
+        exit_venue_client_order_ids=("brc-tp1-1", "brc-runner-1"),
+        entry_time_ms=1_000,
+        exit_time_ms=3_500,
+        funding_attribution_exact=True,
+        observed_at_ms=4_000,
     )

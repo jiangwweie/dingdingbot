@@ -131,6 +131,18 @@ def test_candidate_selector_has_bounded_ordering_indexes() -> None:
     ) in _index_column_sets(signals)
 
 
+def test_review_funding_attribution_has_bounded_instrument_window_index() -> None:
+    tickets = metadata.tables["brc_trade_tickets"]
+
+    assert (
+        "venue_id",
+        "account_id",
+        "exchange_instrument_id",
+        "created_at_ms",
+        "terminal_at_ms",
+    ) in _index_column_sets(tickets)
+
+
 def test_owner_capacity_policy_has_positive_database_constraints() -> None:
     policies = metadata.tables["brc_owner_policy_current"]
     check_sql = {
