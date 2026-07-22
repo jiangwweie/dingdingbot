@@ -1,81 +1,53 @@
-# BRC StrategyGroup Runtime Governance
+# BRC Multi-Position Trading Kernel
 
-Status: CURRENT_ENTRY
-Last updated: 2026-06-15
+Status: active rebuild and controlled cutover
 
-## Current Meaning
+## Target
 
-This repository is the BRC StrategyGroup runtime-governance pilot.
+This repository contains one PostgreSQL-backed trading kernel:
 
 ```text
-Owner selects a StrategyGroup
--> system admits or rejects it with clear reasons
--> watcher observes the market
--> fresh signal prepares candidate evidence
--> action-time FinalGate runs
--> official Operation Layer is the only real order path
--> post-submit finalize, reconciliation, budget settlement, and review close the loop
+typed live signal
+-> immutable Ticket
+-> durable exchange command
+-> protected multi-position lifecycle
+-> reconciliation
+-> settlement
+-> review
 ```
 
-The system is not a raw evidence-packet workflow. The Owner-facing product
-surface is the Strategy Control Board.
+The kernel supports multiple concurrent Netting Domains while serializing new
+ENTRY admission. It forbids add-to-position behavior, ENTRY retries after
+authoritative rejection, blind resend after unknown outcome, and runtime
+fallback to retired models.
 
 ## Start Here
 
 ```text
 AGENTS.md
 docs/README.md
-docs/current/OWNER_RUNTIME_OPERATING_MODEL.md
-docs/current/AI_AGENT_CONSTRAINTS.md
-docs/current/STRATEGY_CONTROL_BOARD_CONTRACT.md
-docs/current/strategy-group-handoffs/main-control-handoff-index.md
+docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md
+docs/current/P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md
+docs/current/MAIN_CONTROL_ROADMAP.md
 ```
 
-## Historical Docs
-
-Historical docs were compressed into:
+## Current Production Code
 
 ```text
-docs/history-archive-2026-06-15-pre-governance.tar.gz
+src/trading_kernel/**
+migrations/trading_kernel/**
+scripts/trading_kernel/**
 ```
 
-They are recovery material only. They must not be used as current product truth
-or as a source of new Owner-confirmation blockers.
-
-## Development Quick Start
+## Local Verification
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+pytest tests/trading_kernel -q
+ruff check src/trading_kernel tests/trading_kernel scripts/trading_kernel
+python3 scripts/audit_production_runtime_file_io.py
+python3 scripts/trading_kernel/verify_schema.py
+python3 scripts/trading_kernel/certify_readonly.py
 ```
 
-Local backend:
-
-```bash
-python src/main.py
-```
-
-Frontend:
-
-```bash
-cd gemimi-web-front
-npm run dev
-```
-
-## Safety Boundary
-
-Real order actions are allowed only through:
-
-```text
-fresh signal
--> RequiredFacts readiness
--> candidate / authorization evidence
--> action-time FinalGate
--> official Operation Layer
--> post-submit finalize / reconciliation / budget settlement
-```
-
-Never bypass FinalGate or Operation Layer. Never create withdrawal or transfer
-actions. Never mutate secrets, credentials, live profile, or order-sizing
-defaults without a separate explicit task.
+Tokyo cutover and real-funds acceptance use committed tooling only. Ad hoc
+server edits and retired runtime restoration are not supported.
