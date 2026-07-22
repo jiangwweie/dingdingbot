@@ -20,7 +20,9 @@ from src.trading_kernel.domain.effects import (
 )
 from src.trading_kernel.domain.events import (
     BudgetSettled,
+    EntryAccepted,
     EntryFilled,
+    EntryOutcomeUnknown,
     EntryPartiallyFilled,
     EntryRejected,
     ExitRequested,
@@ -92,6 +94,64 @@ def test_authoritative_entry_rejection_is_terminal_and_never_retries() -> None:
                 average_fill_price=Decimal("60000"),
             ),
         )
+
+
+def test_entry_acceptance_is_conserved_before_fill() -> None:
+    issued = reduce_event(
+        None,
+        TicketIssued(
+            event_id="event-1",
+            ticket=_ticket(),
+            sequence=1,
+            occurred_at_ms=1_001,
+        ),
+    ).aggregate
+
+    accepted = reduce_event(
+        issued,
+        EntryAccepted(
+            event_id="event-2",
+            ticket_id=issued.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_050,
+            exchange_order_id="entry-order-1",
+        ),
+    )
+
+    assert accepted.aggregate.status is AggregateStatus.ENTRY_ACCEPTED
+    assert accepted.aggregate.entry_exchange_order_id == "entry-order-1"
+    assert accepted.effects == ()
+
+
+def test_unknown_entry_outcome_opens_incident_and_blocks_progression() -> None:
+    issued = reduce_event(
+        None,
+        TicketIssued(
+            event_id="event-1",
+            ticket=_ticket(),
+            sequence=1,
+            occurred_at_ms=1_001,
+        ),
+    ).aggregate
+
+    unknown = reduce_event(
+        issued,
+        EntryOutcomeUnknown(
+            event_id="event-2",
+            ticket_id=issued.identity.ticket_id,
+            sequence=2,
+            occurred_at_ms=1_050,
+            reason="venue_timeout",
+        ),
+    )
+
+    assert unknown.aggregate.status is AggregateStatus.ENTRY_OUTCOME_UNKNOWN
+    assert unknown.effects == (
+        OpenIncident(
+            ticket_id=issued.identity.ticket_id,
+            incident_kind="entry_outcome_unknown",
+        ),
+    )
 
 
 def test_full_entry_fill_requires_initial_stop_before_releasing_entry_lane() -> None:

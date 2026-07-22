@@ -292,6 +292,7 @@ def upgrade() -> None:
         sa.Column("position_qty", MONEY, nullable=False),
         sa.Column("average_fill_price", MONEY, nullable=True),
         sa.Column("protected_qty", MONEY, nullable=False),
+        _id("entry_exchange_order_id", nullable=True),
         _id("initial_stop_exchange_order_id", nullable=True),
         _id("review_id", nullable=True),
         _time("updated_at_ms"),

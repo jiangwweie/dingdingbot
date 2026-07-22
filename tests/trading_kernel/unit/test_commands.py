@@ -9,6 +9,7 @@ from src.trading_kernel.domain.commands import (
     CommandGenerationError,
     ExchangeCommand,
     ExchangeCommandKind,
+    ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
     build_command_id,
@@ -75,6 +76,40 @@ def test_exchange_command_is_immutable_and_exact() -> None:
                 **command.model_dump(),
                 "unexpected": True,
             }
+        )
+
+
+def test_exchange_command_result_requires_authoritative_outcome_shape() -> None:
+    accepted = ExchangeCommandResult(
+        status=ExchangeCommandStatus.ACCEPTED,
+        observed_at_ms=2_000,
+        exchange_order_id="venue-order-1",
+    )
+    rejected = ExchangeCommandResult(
+        status=ExchangeCommandStatus.REJECTED,
+        observed_at_ms=2_001,
+        reason="insufficient_margin",
+    )
+    unknown = ExchangeCommandResult(
+        status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
+        observed_at_ms=2_002,
+        reason="timeout",
+    )
+
+    assert accepted.exchange_order_id == "venue-order-1"
+    assert rejected.reason == "insufficient_margin"
+    assert unknown.status is ExchangeCommandStatus.OUTCOME_UNKNOWN
+
+    with pytest.raises(ValidationError):
+        ExchangeCommandResult(
+            status=ExchangeCommandStatus.ACCEPTED,
+            observed_at_ms=2_000,
+        )
+
+    with pytest.raises(ValidationError):
+        ExchangeCommandResult(
+            status=ExchangeCommandStatus.REJECTED,
+            observed_at_ms=2_000,
         )
 
 

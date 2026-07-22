@@ -13,7 +13,9 @@ from src.trading_kernel.domain.ticket import TradeTicket
 
 class AggregateStatus(StrEnum):
     ENTRY_PENDING = "entry_pending"
+    ENTRY_ACCEPTED = "entry_accepted"
     ENTRY_REJECTED = "entry_rejected"
+    ENTRY_OUTCOME_UNKNOWN = "entry_outcome_unknown"
     PARTIAL_FILL_INCIDENT = "partial_fill_incident"
     PROTECTION_PENDING = "protection_pending"
     POSITION_PROTECTED = "position_protected"
@@ -35,6 +37,6 @@ class TradeAggregate(BaseModel):
     position_qty: Decimal = Decimal("0")
     average_fill_price: Decimal | None = None
     protected_qty: Decimal = Decimal("0")
+    entry_exchange_order_id: str | None = None
     initial_stop_exchange_order_id: str | None = None
     review_id: str | None = None
-

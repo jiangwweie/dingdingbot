@@ -23,7 +23,9 @@ from src.trading_kernel.domain.effects import (
 )
 from src.trading_kernel.domain.events import (
     BudgetSettled,
+    EntryAccepted,
     EntryFilled,
+    EntryOutcomeUnknown,
     EntryPartiallyFilled,
     EntryRejected,
     ExitRequested,
@@ -56,6 +58,34 @@ def reduce_event(
 
     _require_event_identity_and_sequence(current, event)
 
+    if isinstance(event, EntryAccepted):
+        _require_status(current, AggregateStatus.ENTRY_PENDING)
+        exchange_order_id = str(event.exchange_order_id or "").strip()
+        if not exchange_order_id:
+            raise InvalidLifecycleTransition("ENTRY acceptance requires order identity")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_ACCEPTED,
+            updates={"entry_exchange_order_id": exchange_order_id},
+        )
+
+    if isinstance(event, EntryOutcomeUnknown):
+        _require_status(current, AggregateStatus.ENTRY_PENDING)
+        if not str(event.reason or "").strip():
+            raise InvalidLifecycleTransition("unknown ENTRY outcome requires reason")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_OUTCOME_UNKNOWN,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="entry_outcome_unknown",
+                ),
+            ),
+        )
+
     if isinstance(event, EntryRejected):
         _require_status(current, AggregateStatus.ENTRY_PENDING)
         return _transition(
@@ -69,7 +99,10 @@ def reduce_event(
         )
 
     if isinstance(event, EntryFilled):
-        _require_status(current, AggregateStatus.ENTRY_PENDING)
+        _require_status_in(
+            current,
+            {AggregateStatus.ENTRY_PENDING, AggregateStatus.ENTRY_ACCEPTED},
+        )
         if event.filled_qty != current.ticket.quantity:
             raise InvalidLifecycleTransition("full entry fill must equal Ticket quantity")
         if event.average_fill_price <= 0:
@@ -92,7 +125,10 @@ def reduce_event(
         )
 
     if isinstance(event, EntryPartiallyFilled):
-        _require_status(current, AggregateStatus.ENTRY_PENDING)
+        _require_status_in(
+            current,
+            {AggregateStatus.ENTRY_PENDING, AggregateStatus.ENTRY_ACCEPTED},
+        )
         if not Decimal("0") < event.filled_qty < event.requested_qty:
             raise InvalidLifecycleTransition("partial fill quantity is contradictory")
         if event.requested_qty != current.ticket.quantity:
@@ -231,6 +267,17 @@ def _require_status(current: TradeAggregate, expected: AggregateStatus) -> None:
     if current.status is not expected:
         raise InvalidLifecycleTransition(
             f"event requires {expected.value}, current is {current.status.value}"
+        )
+
+
+def _require_status_in(
+    current: TradeAggregate,
+    expected: set[AggregateStatus],
+) -> None:
+    if current.status not in expected:
+        allowed = ", ".join(sorted(status.value for status in expected))
+        raise InvalidLifecycleTransition(
+            f"event requires one of {allowed}, current is {current.status.value}"
         )
 
 

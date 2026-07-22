@@ -8,8 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncTransactio
 
 from src.trading_kernel.application.ports import (
     AggregateVersionConflict,
+    RuntimeIncidentRecord,
     UnsupportedKernelEffect,
 )
+from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
@@ -18,7 +20,12 @@ from src.trading_kernel.domain.commands import (
     build_command_id,
     build_venue_client_order_id,
 )
-from src.trading_kernel.domain.effects import PrepareEntryCommand
+from src.trading_kernel.domain.effects import (
+    OpenIncident,
+    PrepareEntryCommand,
+    ReleaseBudget,
+    ReleaseEntryLane,
+)
 from src.trading_kernel.domain.events import TicketIssued, TradeEvent
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType
@@ -119,8 +126,48 @@ class PostgresKernelUnitOfWork:
                     _entry_command(effect, occurred_at_ms=event.occurred_at_ms)
                 )
                 continue
+            if isinstance(effect, ReleaseBudget):
+                await self.budgets.release(
+                    effect.ticket_id,
+                    released_at_ms=event.occurred_at_ms,
+                )
+                await self.entry_admission.release_account_exposure(
+                    account_id=aggregate.ticket.identity.netting_domain.account_id,
+                    notional=aggregate.ticket.notional,
+                    risk_at_stop=aggregate.ticket.risk_at_stop,
+                    updated_at_ms=event.occurred_at_ms,
+                )
+                continue
+            if isinstance(effect, ReleaseEntryLane):
+                await self.entry_admission.release_global_lane(
+                    ticket_id=effect.ticket_id
+                )
+                continue
+            if isinstance(effect, OpenIncident):
+                await self.incidents.add(
+                    RuntimeIncidentRecord(
+                        incident_id=(
+                            f"incident:{effect.ticket_id}:"
+                            f"{aggregate.last_event_sequence}"
+                        ),
+                        ticket_id=effect.ticket_id,
+                        incident_kind=effect.incident_kind,
+                        status="open",
+                        first_blocker=effect.incident_kind,
+                        details={"event_id": event.event_id},
+                        opened_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
             raise UnsupportedKernelEffect(
                 f"no durable materializer for {type(effect).__name__}"
+            )
+
+        if aggregate.status is AggregateStatus.ENTRY_REJECTED:
+            await self.tickets.mark_terminal(
+                ticket_id,
+                status="entry_rejected",
+                terminal_at_ms=event.occurred_at_ms,
             )
 
     def _require_connection(self) -> AsyncConnection:

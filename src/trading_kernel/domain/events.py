@@ -52,6 +52,14 @@ class EntryRejected(_TicketEvent):
     reason: str
 
 
+class EntryAccepted(_TicketEvent):
+    exchange_order_id: str
+
+
+class EntryOutcomeUnknown(_TicketEvent):
+    reason: str
+
+
 class EntryFilled(_TicketEvent):
     filled_qty: Decimal
     average_fill_price: Decimal
@@ -90,7 +98,9 @@ class ReviewRecorded(_TicketEvent):
 
 TradeEvent = (
     TicketIssued
+    | EntryAccepted
     | EntryRejected
+    | EntryOutcomeUnknown
     | EntryFilled
     | EntryPartiallyFilled
     | InitialStopConfirmed
@@ -100,4 +110,3 @@ TradeEvent = (
     | BudgetSettled
     | ReviewRecorded
 )
-

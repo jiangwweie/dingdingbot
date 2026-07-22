@@ -21,12 +21,15 @@ from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
+    ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
 )
 from src.trading_kernel.domain.events import (
     BudgetSettled,
+    EntryAccepted,
     EntryFilled,
+    EntryOutcomeUnknown,
     EntryPartiallyFilled,
     EntryRejected,
     ExitRequested,
@@ -60,7 +63,9 @@ _EVENT_MODELS = {
     event_type.__name__: event_type
     for event_type in (
         TicketIssued,
+        EntryAccepted,
         EntryRejected,
+        EntryOutcomeUnknown,
         EntryFilled,
         EntryPartiallyFilled,
         InitialStopConfirmed,
@@ -86,6 +91,25 @@ class PostgresTicketRepository:
         )
         row = result.mappings().one_or_none()
         return None if row is None else _ticket_from_row(row)
+
+    async def mark_terminal(
+        self,
+        ticket_id: str,
+        *,
+        status: str,
+        terminal_at_ms: int,
+    ) -> None:
+        updated = await self._connection.execute(
+            sa.update(trade_tickets)
+            .where(trade_tickets.c.ticket_id == ticket_id)
+            .values(
+                status=status,
+                terminal_at_ms=terminal_at_ms,
+                active_netting_domain_key=None,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("Ticket missing during terminalization")
 
 
 class PostgresAggregateRepository:
@@ -238,6 +262,105 @@ class PostgresExchangeCommandRepository:
         )
         return [await self._command_from_row(row) for row in result.mappings()]
 
+    async def claim_one_prepared(
+        self,
+        *,
+        worker_id: str,
+        now_ms: int,
+        lease_until_ms: int,
+    ) -> ExchangeCommand | None:
+        result = await self._connection.execute(
+            sa.select(exchange_commands.c.command_id)
+            .where(
+                exchange_commands.c.status == ExchangeCommandStatus.PREPARED.value,
+                exchange_commands.c.deadline_at_ms > now_ms,
+            )
+            .order_by(exchange_commands.c.created_at_ms, exchange_commands.c.command_id)
+            .with_for_update(skip_locked=True, of=exchange_commands)
+            .limit(1)
+        )
+        command_id = result.scalar_one_or_none()
+        if command_id is None:
+            return None
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.command_id == command_id,
+                exchange_commands.c.status == ExchangeCommandStatus.PREPARED.value,
+            )
+            .values(
+                status=ExchangeCommandStatus.CLAIMED.value,
+                claim_owner=worker_id,
+                lease_until_ms=lease_until_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            return None
+        return await self.get(str(command_id))
+
+    async def record_result(
+        self,
+        *,
+        command_id: str,
+        worker_id: str,
+        result: ExchangeCommandResult,
+    ) -> None:
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.command_id == command_id,
+                exchange_commands.c.status == ExchangeCommandStatus.CLAIMED.value,
+                exchange_commands.c.claim_owner == worker_id,
+            )
+            .values(
+                status=result.status.value,
+                result_payload=result.model_dump(mode="json"),
+                completed_at_ms=result.observed_at_ms,
+                lease_until_ms=None,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("command claim changed before result")
+
+    async def get_one_expired_claim(self, *, now_ms: int) -> ExchangeCommand | None:
+        result = await self._connection.execute(
+            sa.select(exchange_commands.c.command_id)
+            .where(
+                exchange_commands.c.status == ExchangeCommandStatus.CLAIMED.value,
+                exchange_commands.c.lease_until_ms <= now_ms,
+            )
+            .order_by(exchange_commands.c.lease_until_ms, exchange_commands.c.command_id)
+            .with_for_update(skip_locked=True, of=exchange_commands)
+            .limit(1)
+        )
+        command_id = result.scalar_one_or_none()
+        return None if command_id is None else await self.get(str(command_id))
+
+    async def record_expired_claim_unknown(
+        self,
+        *,
+        command_id: str,
+        result: ExchangeCommandResult,
+    ) -> None:
+        if result.status is not ExchangeCommandStatus.OUTCOME_UNKNOWN:
+            raise ValueError("expired claim recovery requires unknown outcome")
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.command_id == command_id,
+                exchange_commands.c.status == ExchangeCommandStatus.CLAIMED.value,
+                exchange_commands.c.lease_until_ms <= result.observed_at_ms,
+            )
+            .values(
+                status=result.status.value,
+                result_payload=result.model_dump(mode="json"),
+                completed_at_ms=result.observed_at_ms,
+                lease_until_ms=None,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("expired command claim changed")
+
     async def _command_from_row(self, row: Mapping[str, object]) -> ExchangeCommand:
         ticket = await self._tickets.get(str(row["ticket_id"]))
         if ticket is None:
@@ -278,11 +401,16 @@ class PostgresBudgetRepository:
         return None if row is None else BudgetReservationRecord.model_validate(row)
 
     async def release(self, ticket_id: str, *, released_at_ms: int) -> None:
-        await self._connection.execute(
+        updated = await self._connection.execute(
             sa.update(budget_reservations)
-            .where(budget_reservations.c.ticket_id == ticket_id)
+            .where(
+                budget_reservations.c.ticket_id == ticket_id,
+                budget_reservations.c.status == "active",
+            )
             .values(status="released", released_at_ms=released_at_ms)
         )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("active budget reservation is missing")
 
 
 class PostgresIncidentRepository:
@@ -451,6 +579,37 @@ class PostgresEntryAdmissionRepository:
         if result.rowcount != 1:
             raise AggregateVersionConflict("account exposure changed during reserve")
 
+    async def release_account_exposure(
+        self,
+        *,
+        account_id: str,
+        notional: Decimal,
+        risk_at_stop: Decimal,
+        updated_at_ms: int,
+    ) -> None:
+        current = await self.get_account_exposure(account_id, for_update=True)
+        if current is None or current.active_ticket_count <= 0:
+            raise AggregateVersionConflict("account exposure is missing during release")
+        if current.gross_notional < notional or current.gross_risk_at_stop < risk_at_stop:
+            raise AggregateVersionConflict("account exposure release would become negative")
+        updated = await self._connection.execute(
+            sa.update(account_exposure_current)
+            .where(
+                account_exposure_current.c.account_id == account_id,
+                account_exposure_current.c.projection_version
+                == current.projection_version,
+            )
+            .values(
+                gross_notional=current.gross_notional - notional,
+                gross_risk_at_stop=current.gross_risk_at_stop - risk_at_stop,
+                active_ticket_count=current.active_ticket_count - 1,
+                projection_version=current.projection_version + 1,
+                updated_at_ms=updated_at_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("account exposure changed during release")
+
     async def claim_global_lane(
         self,
         *,
@@ -480,6 +639,27 @@ class PostgresEntryAdmissionRepository:
         )
         if result.rowcount != 1:
             raise AggregateVersionConflict("global entry lane changed during claim")
+
+    async def release_global_lane(self, *, ticket_id: str) -> None:
+        updated = await self._connection.execute(
+            sa.update(entry_lane_current)
+            .where(
+                entry_lane_current.c.lane_id == self.GLOBAL_LANE_ID,
+                entry_lane_current.c.ticket_id == ticket_id,
+                entry_lane_current.c.status == "claimed",
+            )
+            .values(
+                ticket_id=None,
+                signal_event_id=None,
+                status="idle",
+                claimed_at_ms=None,
+                lease_until_ms=None,
+                claim_owner=None,
+                version=entry_lane_current.c.version + 1,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict("global entry lane ownership mismatch")
 
 
 def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
@@ -577,6 +757,7 @@ def _aggregate_values(
         "position_qty": aggregate.position_qty,
         "average_fill_price": aggregate.average_fill_price,
         "protected_qty": aggregate.protected_qty,
+        "entry_exchange_order_id": aggregate.entry_exchange_order_id,
         "initial_stop_exchange_order_id": aggregate.initial_stop_exchange_order_id,
         "review_id": aggregate.review_id,
         "updated_at_ms": updated_at_ms or aggregate.ticket.created_at_ms,
@@ -600,6 +781,11 @@ def _aggregate_from_row(
             else Decimal(row["average_fill_price"])
         ),
         protected_qty=Decimal(row["protected_qty"]),
+        entry_exchange_order_id=(
+            None
+            if row["entry_exchange_order_id"] is None
+            else str(row["entry_exchange_order_id"])
+        ),
         initial_stop_exchange_order_id=(
             None
             if row["initial_stop_exchange_order_id"] is None

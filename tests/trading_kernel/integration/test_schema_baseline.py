@@ -84,6 +84,12 @@ def test_ticket_schema_freezes_runtime_scope_identity_and_version() -> None:
     assert "runtime_scope_version" in tickets.c
 
 
+def test_aggregate_schema_conserves_authoritative_entry_order_identity() -> None:
+    aggregates = metadata.tables["brc_trade_aggregates"]
+
+    assert "entry_exchange_order_id" in aggregates.c
+
+
 def _unique_column_sets(table: sa.Table) -> set[tuple[str, ...]]:
     return {
         tuple(column.name for column in constraint.columns)

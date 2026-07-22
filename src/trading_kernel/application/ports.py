@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Protocol, Self
+from typing import Callable, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
 from src.trading_kernel.domain.aggregate import TradeAggregate
-from src.trading_kernel.domain.commands import ExchangeCommand
+from src.trading_kernel.domain.commands import (
+    ExchangeCommand,
+    ExchangeCommandKind,
+    ExchangeCommandResult,
+    OrderCommandPayload,
+)
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import TradeTicket
@@ -89,6 +94,14 @@ class TicketRepository(Protocol):
 
     async def get(self, ticket_id: str) -> TradeTicket | None: ...
 
+    async def mark_terminal(
+        self,
+        ticket_id: str,
+        *,
+        status: str,
+        terminal_at_ms: int,
+    ) -> None: ...
+
 
 class AggregateRepository(Protocol):
     async def add(
@@ -123,6 +136,31 @@ class ExchangeCommandRepository(Protocol):
     async def get(self, command_id: str) -> ExchangeCommand | None: ...
 
     async def list_for_ticket(self, ticket_id: str) -> list[ExchangeCommand]: ...
+
+    async def claim_one_prepared(
+        self,
+        *,
+        worker_id: str,
+        now_ms: int,
+        lease_until_ms: int,
+    ) -> ExchangeCommand | None: ...
+
+    async def record_result(
+        self,
+        *,
+        command_id: str,
+        worker_id: str,
+        result: ExchangeCommandResult,
+    ) -> None: ...
+
+    async def get_one_expired_claim(self, *, now_ms: int) -> ExchangeCommand | None: ...
+
+    async def record_expired_claim_unknown(
+        self,
+        *,
+        command_id: str,
+        result: ExchangeCommandResult,
+    ) -> None: ...
 
 
 class BudgetRepository(Protocol):
@@ -178,6 +216,15 @@ class EntryAdmissionRepository(Protocol):
         updated_at_ms: int,
     ) -> None: ...
 
+    async def release_account_exposure(
+        self,
+        *,
+        account_id: str,
+        notional: Decimal,
+        risk_at_stop: Decimal,
+        updated_at_ms: int,
+    ) -> None: ...
+
     async def claim_global_lane(
         self,
         *,
@@ -188,6 +235,32 @@ class EntryAdmissionRepository(Protocol):
         lease_until_ms: int,
         expected_version: int,
     ) -> None: ...
+
+    async def release_global_lane(self, *, ticket_id: str) -> None: ...
+
+
+class VenueCommandRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    command_id: str
+    kind: ExchangeCommandKind
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    position_side: Literal["long", "short"]
+    venue_client_order_id: str
+    payload: OrderCommandPayload
+    deadline_at_ms: int
+
+
+class VenuePort(Protocol):
+    async def execute(
+        self,
+        request: VenueCommandRequest,
+    ) -> ExchangeCommandResult: ...
+
+
+UnitOfWorkFactory = Callable[[], "KernelUnitOfWork"]
 
 
 class KernelUnitOfWork(Protocol):

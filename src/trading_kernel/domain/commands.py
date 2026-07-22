@@ -7,7 +7,7 @@ from enum import StrEnum
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from src.trading_kernel.domain.identities import TicketIdentity
 
@@ -119,6 +119,43 @@ class ExchangeCommand(BaseModel):
             raise ValueError("command deadline must be after creation")
         if len(self.venue_client_order_id) > 36:
             raise ValueError("venue client order id exceeds supported boundary")
+        return self
+
+
+class ExchangeCommandResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: ExchangeCommandStatus
+    observed_at_ms: int
+    exchange_order_id: str | None = None
+    reason: str | None = None
+    venue_payload: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("observed_at_ms")
+    @classmethod
+    def _require_positive_time(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("command result time must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_result_shape(self) -> "ExchangeCommandResult":
+        if self.status not in {
+            ExchangeCommandStatus.ACCEPTED,
+            ExchangeCommandStatus.REJECTED,
+            ExchangeCommandStatus.OUTCOME_UNKNOWN,
+        }:
+            raise ValueError("command result must be authoritative or unknown")
+        if self.status is ExchangeCommandStatus.ACCEPTED:
+            if not str(self.exchange_order_id or "").strip():
+                raise ValueError("accepted command requires exchange order identity")
+            if self.reason is not None:
+                raise ValueError("accepted command forbids rejection reason")
+        else:
+            if not str(self.reason or "").strip():
+                raise ValueError("rejected or unknown command requires reason")
+            if self.exchange_order_id is not None:
+                raise ValueError("non-accepted result forbids exchange order identity")
         return self
 
 
