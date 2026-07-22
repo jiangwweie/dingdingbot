@@ -1,11 +1,6 @@
-# 开发依赖
-black>=24.0.0
-mypy>=1.8.0
-flake8>=7.0.0
-pre-commit>=3.6.0
-pytest-xdist>=3.5.0
-coverage>=7.0.0
+-r requirements.txt
 
-# 类型_stub
-types-PyYAML>=6.0.0
-types-requests>=2.31.0
+mypy>=1.8.0
+pytest>=7.4.4
+pytest-asyncio>=0.23.3
+ruff>=0.15.0

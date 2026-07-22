@@ -1,45 +1,7 @@
-# Core Framework
-fastapi>=0.109.0
-uvicorn>=0.27.0
-pydantic>=2.5.3
-pydantic-settings>=2.1.0
-python-multipart>=0.0.6
-
-# Async HTTP
-aiohttp>=3.9.1
-aioresponses>=0.7.6
-
-# Exchange Integration
-ccxt==4.5.56
-
-# Configuration
-pyyaml>=6.0.1
-
-# Testing
-pytest>=7.4.4
-pytest-asyncio>=0.23.3
-pytest-cov>=4.1.0
-pytest-mock>=2.0.0
-httpx>=0.26.0
-
-# Utilities
-python-dotenv>=1.0.0
-langgraph>=0.2.60
-
-# Database
-sqlalchemy>=2.0.0
-greenlet>=3.0.0  # SQLAlchemy 异步功能必需
-aiosqlite>=0.19.0
+# Trading-kernel production dependencies
+alembic>=1.13.0,<2.0.0
 asyncpg>=0.29.0,<0.31.0
-psycopg[binary]>=3.1.18,<4.0.0
-alembic>=1.13.0
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-
-# Optimization
-optuna>=3.5.0
-nest_asyncio>=1.6.0
-
-# Caching
-cachetools>=5.3.0
-ijson>=3.5.1,<4.0.0
+ccxt==4.5.56
+greenlet>=3.0.0
+pydantic>=2.5.3,<3.0.0
+sqlalchemy>=2.0.0,<3.0.0
