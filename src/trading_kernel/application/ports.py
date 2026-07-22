@@ -12,9 +12,10 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommand,
     ExchangeCommandKind,
     ExchangeCommandResult,
-    OrderCommandPayload,
+    CommandPayload,
 )
 from src.trading_kernel.domain.events import TradeEvent
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import TradeTicket
 
@@ -52,6 +53,17 @@ class RuntimeIncidentRecord(BaseModel):
     details: dict[str, JsonValue]
     opened_at_ms: int
     resolved_at_ms: int | None = None
+
+
+class TradeReviewRecord(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    review_id: str
+    ticket_id: str
+    outcome: str
+    metrics: dict[str, JsonValue]
+    decision_impact: dict[str, JsonValue]
+    created_at_ms: int
 
 
 class OwnerPolicySnapshot(BaseModel):
@@ -137,6 +149,13 @@ class ExchangeCommandRepository(Protocol):
 
     async def list_for_ticket(self, ticket_id: str) -> list[ExchangeCommand]: ...
 
+    async def next_generation(
+        self,
+        *,
+        ticket_id: str,
+        kind: ExchangeCommandKind,
+    ) -> int: ...
+
     async def claim_one_prepared(
         self,
         *,
@@ -183,6 +202,23 @@ class IncidentRepository(Protocol):
     ) -> RuntimeIncidentRecord | None: ...
 
     async def resolve(self, incident_id: str, *, resolved_at_ms: int) -> None: ...
+
+
+class PositionRepository(Protocol):
+    async def upsert(
+        self,
+        *,
+        ticket_id: str,
+        snapshot: PositionSnapshot,
+    ) -> None: ...
+
+    async def get(self, netting_domain_key: str) -> PositionSnapshot | None: ...
+
+
+class ReviewRepository(Protocol):
+    async def add(self, review: TradeReviewRecord) -> None: ...
+
+    async def get_for_ticket(self, ticket_id: str) -> TradeReviewRecord | None: ...
 
 
 class EntryAdmissionRepository(Protocol):
@@ -249,7 +285,7 @@ class VenueCommandRequest(BaseModel):
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
     venue_client_order_id: str
-    payload: OrderCommandPayload
+    payload: CommandPayload
     deadline_at_ms: int
 
 
@@ -270,6 +306,8 @@ class KernelUnitOfWork(Protocol):
     exchange_commands: ExchangeCommandRepository
     budgets: BudgetRepository
     incidents: IncidentRepository
+    positions: PositionRepository
+    reviews: ReviewRepository
     entry_admission: EntryAdmissionRepository
 
     async def __aenter__(self) -> Self: ...

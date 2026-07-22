@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.trading_kernel.domain.commands import (
+    CancelCommandPayload,
     CommandGenerationError,
     ExchangeCommand,
     ExchangeCommandKind,
@@ -105,6 +106,39 @@ def test_exchange_command_result_requires_authoritative_outcome_shape() -> None:
             status=ExchangeCommandStatus.ACCEPTED,
             observed_at_ms=2_000,
         )
+
+
+def test_cancel_command_requires_exact_exchange_order_identity() -> None:
+    identity = _identity()
+    command = ExchangeCommand(
+        command_id=build_command_id(
+            ticket_id=identity.ticket_id,
+            kind=ExchangeCommandKind.CANCEL_ORDER,
+            generation=1,
+        ),
+        ticket_identity=identity,
+        kind=ExchangeCommandKind.CANCEL_ORDER,
+        generation=1,
+        idempotency_key="cancel-stop-1",
+        venue_client_order_id="brc-cancel-stop-1",
+        payload=CancelCommandPayload(exchange_order_id="stop-order-1"),
+        status=ExchangeCommandStatus.PREPARED,
+        created_at_ms=2_000,
+        deadline_at_ms=12_000,
+    )
+
+    assert command.payload.exchange_order_id == "stop-order-1"
+
+    with pytest.raises(ValidationError):
+        ExchangeCommand(
+            **{
+                **command.model_dump(),
+                "kind": ExchangeCommandKind.EXIT,
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        CancelCommandPayload(exchange_order_id=" ")
 
     with pytest.raises(ValidationError):
         ExchangeCommandResult(

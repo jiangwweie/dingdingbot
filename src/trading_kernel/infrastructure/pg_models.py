@@ -292,6 +292,7 @@ trade_aggregates = sa.Table(
     sa.Column("protected_qty", MONEY, nullable=False),
     _id("entry_exchange_order_id", nullable=True),
     _id("initial_stop_exchange_order_id", nullable=True),
+    _id("exit_exchange_order_id", nullable=True),
     _id("review_id", nullable=True),
     _time("updated_at_ms"),
     sa.CheckConstraint("version > 0", name="version_positive"),
@@ -322,7 +323,7 @@ exchange_commands = sa.Table(
     sa.Column("idempotency_key", LONG_TEXT, nullable=False),
     sa.Column("venue_client_order_id", SHORT_TEXT, nullable=False),
     sa.Column("status", SHORT_TEXT, nullable=False),
-    sa.Column("quantity", MONEY, nullable=False),
+    sa.Column("quantity", MONEY, nullable=True),
     _json("request_payload"),
     _json("result_payload", nullable=True),
     sa.Column("claim_owner", SHORT_TEXT, nullable=True),
@@ -334,7 +335,10 @@ exchange_commands = sa.Table(
     sa.UniqueConstraint("venue_client_order_id"),
     sa.UniqueConstraint("ticket_id", "command_kind", "generation"),
     sa.CheckConstraint("generation > 0", name="generation_positive"),
-    sa.CheckConstraint("quantity > 0", name="quantity_positive"),
+    sa.CheckConstraint(
+        "quantity IS NULL OR quantity > 0",
+        name="quantity_positive",
+    ),
 )
 
 positions_current = sa.Table(

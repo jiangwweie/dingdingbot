@@ -13,6 +13,8 @@ from src.trading_kernel.application.ports import (
     VenuePort,
 )
 from src.trading_kernel.domain.commands import (
+    CancelCommandPayload,
+    ExchangeCommand,
     ExchangeCommandKind,
     ExchangeCommandResult,
     ExchangeCommandStatus,
@@ -21,6 +23,11 @@ from src.trading_kernel.domain.events import (
     EntryAccepted,
     EntryOutcomeUnknown,
     EntryRejected,
+    ExitAccepted,
+    ExitOutcomeUnknown,
+    InitialStopConfirmed,
+    OwnedOrphanCancelConfirmed,
+    ProtectionCancelConfirmed,
 )
 from src.trading_kernel.domain.reducer import reduce_event
 
@@ -94,9 +101,9 @@ async def dispatch_one_command(
             aggregate = await uow.aggregates.get(expired.ticket_identity.ticket_id)
             if aggregate is None:
                 raise RuntimeError("expired command has no Ticket aggregate")
-            event = _entry_result_event(
-                ticket_id=expired.ticket_identity.ticket_id,
-                next_sequence=aggregate.last_event_sequence + 1,
+            event = _command_result_event(
+                command=expired,
+                aggregate=aggregate,
                 result=result,
             )
             await uow.exchange_commands.record_expired_claim_unknown(
@@ -135,8 +142,6 @@ async def dispatch_one_command(
         payload=command.payload,
         deadline_at_ms=command.deadline_at_ms,
     )
-    if command.kind is not ExchangeCommandKind.ENTRY:
-        raise RuntimeError("only ENTRY dispatch is implemented")
     try:
         result = await asyncio.wait_for(
             venue.execute(venue_request),
@@ -159,9 +164,9 @@ async def dispatch_one_command(
         aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
         if aggregate is None:
             raise RuntimeError("claimed command has no Ticket aggregate")
-        event = _entry_result_event(
-            ticket_id=command.ticket_identity.ticket_id,
-            next_sequence=aggregate.last_event_sequence + 1,
+        event = _command_result_event(
+            command=command,
+            aggregate=aggregate,
             result=result,
         )
         await uow.exchange_commands.record_result(
@@ -181,25 +186,57 @@ async def dispatch_one_command(
     )
 
 
-def _entry_result_event(
+def _command_result_event(
     *,
-    ticket_id: str,
-    next_sequence: int,
+    command: ExchangeCommand,
+    aggregate,
     result: ExchangeCommandResult,
 ):
+    kind = command.kind
+    ticket_id = aggregate.identity.ticket_id
+    next_sequence = aggregate.last_event_sequence + 1
     common = {
         "event_id": f"event:{ticket_id}:{next_sequence}",
         "ticket_id": ticket_id,
         "sequence": next_sequence,
         "occurred_at_ms": result.observed_at_ms,
     }
-    if result.status is ExchangeCommandStatus.ACCEPTED:
+    if kind is ExchangeCommandKind.ENTRY and result.status is ExchangeCommandStatus.ACCEPTED:
         return EntryAccepted(
             **common,
             exchange_order_id=str(result.exchange_order_id),
         )
-    if result.status is ExchangeCommandStatus.REJECTED:
+    if kind is ExchangeCommandKind.ENTRY and result.status is ExchangeCommandStatus.REJECTED:
         return EntryRejected(**common, reason=str(result.reason))
-    if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+    if kind is ExchangeCommandKind.ENTRY and result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
         return EntryOutcomeUnknown(**common, reason=str(result.reason))
-    raise RuntimeError(f"unsupported ENTRY result status: {result.status.value}")
+    if kind is ExchangeCommandKind.EXIT and result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+        return ExitOutcomeUnknown(**common, reason=str(result.reason))
+    if result.status is not ExchangeCommandStatus.ACCEPTED:
+        raise RuntimeError(
+            f"unsupported {kind.value} result status: {result.status.value}"
+        )
+    if kind is ExchangeCommandKind.INITIAL_STOP:
+        return InitialStopConfirmed(
+            **common,
+            exchange_order_id=str(result.exchange_order_id),
+            protected_qty=aggregate.position_qty,
+        )
+    if kind is ExchangeCommandKind.EXIT:
+        return ExitAccepted(
+            **common,
+            exchange_order_id=str(result.exchange_order_id),
+        )
+    if kind is ExchangeCommandKind.CANCEL_ORDER:
+        if not isinstance(command.payload, CancelCommandPayload):
+            raise RuntimeError("cancel command payload is invalid")
+        if command.payload.exchange_order_id != aggregate.initial_stop_exchange_order_id:
+            return OwnedOrphanCancelConfirmed(
+                **common,
+                exchange_order_id=command.payload.exchange_order_id,
+            )
+        return ProtectionCancelConfirmed(
+            **common,
+            exchange_order_id=str(result.exchange_order_id),
+        )
+    raise RuntimeError(f"unsupported command kind: {kind.value}")

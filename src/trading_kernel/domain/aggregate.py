@@ -20,6 +20,8 @@ class AggregateStatus(StrEnum):
     PROTECTION_PENDING = "protection_pending"
     POSITION_PROTECTED = "position_protected"
     EXIT_PENDING = "exit_pending"
+    EXIT_ACCEPTED = "exit_accepted"
+    EXIT_OUTCOME_UNKNOWN = "exit_outcome_unknown"
     RECONCILIATION_PENDING = "reconciliation_pending"
     SETTLEMENT_PENDING = "settlement_pending"
     REVIEW_PENDING = "review_pending"
@@ -39,4 +41,5 @@ class TradeAggregate(BaseModel):
     protected_qty: Decimal = Decimal("0")
     entry_exchange_order_id: str | None = None
     initial_stop_exchange_order_id: str | None = None
+    exit_exchange_order_id: str | None = None
     review_id: str | None = None

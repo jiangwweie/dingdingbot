@@ -1,0 +1,246 @@
+"""Reconcile one exact Ticket against one typed venue snapshot."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from src.trading_kernel.application.ports import KernelUnitOfWork
+from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.commands import (
+    CancelCommandPayload,
+    ExchangeCommandStatus,
+)
+from src.trading_kernel.domain.events import (
+    EntryFilled,
+    EntryPartiallyFilled,
+    ExternalFlatDetected,
+    ExitRequested,
+    OwnedOrphanOrderDetected,
+    PositionFlatConfirmed,
+    ReconciliationMatched,
+    UnownedOrderDetected,
+)
+from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.reducer import reduce_event
+
+
+class ReconcileTicketStatus(StrEnum):
+    NO_CHANGE = "no_change"
+    ENTRY_FILL_RECORDED = "entry_fill_recorded"
+    PARTIAL_FILL_INCIDENT = "partial_fill_incident"
+    EXTERNAL_FLAT_INCIDENT = "external_flat_incident"
+    POSITION_FLAT_RECORDED = "position_flat_recorded"
+    PROTECTION_RESIDUE = "protection_residue"
+    OWNED_ORPHAN_CANCEL_REQUESTED = "owned_orphan_cancel_requested"
+    UNOWNED_ORDER_INCIDENT = "unowned_order_incident"
+    MATCHED = "matched"
+
+
+class ExitTicketStatus(StrEnum):
+    REQUESTED = "requested"
+
+
+class ReconcileTicketRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    ticket_id: str
+    snapshot: PositionSnapshot
+
+
+class ExitTicketRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    ticket_id: str
+    reason: str
+    requested_at_ms: int
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _require_reason(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("exit reason must be non-blank")
+        return normalized
+
+
+class ReconcileTicketResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: ReconcileTicketStatus
+
+
+class ExitTicketResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: ExitTicketStatus
+
+
+async def reconcile_ticket(
+    uow: KernelUnitOfWork,
+    request: ReconcileTicketRequest,
+) -> ReconcileTicketResult:
+    aggregate = await uow.aggregates.get(request.ticket_id)
+    if aggregate is None:
+        raise ValueError("Ticket aggregate does not exist")
+    snapshot = request.snapshot
+    if snapshot.netting_domain != aggregate.identity.netting_domain:
+        raise ValueError("position snapshot Netting Domain mismatch")
+    await uow.positions.upsert(ticket_id=request.ticket_id, snapshot=snapshot)
+
+    event = None
+    status = ReconcileTicketStatus.NO_CHANGE
+    if aggregate.status is AggregateStatus.ENTRY_ACCEPTED:
+        if snapshot.quantity == aggregate.ticket.quantity:
+            event = EntryFilled(
+                event_id=_event_id(aggregate),
+                ticket_id=request.ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=snapshot.observed_at_ms,
+                filled_qty=snapshot.quantity,
+                average_fill_price=snapshot.average_entry_price,
+            )
+            status = ReconcileTicketStatus.ENTRY_FILL_RECORDED
+        elif 0 < snapshot.quantity < aggregate.ticket.quantity:
+            event = EntryPartiallyFilled(
+                event_id=_event_id(aggregate),
+                ticket_id=request.ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=snapshot.observed_at_ms,
+                filled_qty=snapshot.quantity,
+                requested_qty=aggregate.ticket.quantity,
+                average_fill_price=snapshot.average_entry_price,
+            )
+            status = ReconcileTicketStatus.PARTIAL_FILL_INCIDENT
+    elif aggregate.status in {
+        AggregateStatus.EXIT_PENDING,
+        AggregateStatus.EXIT_ACCEPTED,
+    } and snapshot.quantity == 0:
+        event = PositionFlatConfirmed(
+            event_id=_event_id(aggregate),
+            ticket_id=request.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=snapshot.observed_at_ms,
+        )
+        status = ReconcileTicketStatus.POSITION_FLAT_RECORDED
+    elif aggregate.status is AggregateStatus.POSITION_PROTECTED and snapshot.quantity == 0:
+        event = ExternalFlatDetected(
+            event_id=_event_id(aggregate),
+            ticket_id=request.ticket_id,
+            sequence=aggregate.last_event_sequence + 1,
+            occurred_at_ms=snapshot.observed_at_ms,
+        )
+        status = ReconcileTicketStatus.EXTERNAL_FLAT_INCIDENT
+    elif aggregate.status is AggregateStatus.RECONCILIATION_PENDING:
+        if aggregate.initial_stop_exchange_order_id is not None:
+            return ReconcileTicketResult(
+                status=ReconcileTicketStatus.PROTECTION_RESIDUE
+            )
+        if snapshot.open_orders:
+            unowned_order = next(
+                (
+                    order
+                    for order in snapshot.open_orders
+                    if not _is_kernel_owned_order(order.venue_client_order_id)
+                ),
+                None,
+            )
+            if unowned_order is not None:
+                existing_incident = await uow.incidents.get_open_for_ticket(
+                    request.ticket_id
+                )
+                if (
+                    existing_incident is not None
+                    and existing_incident.incident_kind == "unowned_open_order"
+                ):
+                    return ReconcileTicketResult(
+                        status=ReconcileTicketStatus.UNOWNED_ORDER_INCIDENT
+                    )
+                event = UnownedOrderDetected(
+                    event_id=_event_id(aggregate),
+                    ticket_id=request.ticket_id,
+                    sequence=aggregate.last_event_sequence + 1,
+                    occurred_at_ms=snapshot.observed_at_ms,
+                    exchange_order_id=unowned_order.exchange_order_id,
+                )
+                status = ReconcileTicketStatus.UNOWNED_ORDER_INCIDENT
+            else:
+                owned_order = snapshot.open_orders[0]
+                commands = await uow.exchange_commands.list_for_ticket(request.ticket_id)
+                if _has_cancel_attempt(commands, owned_order.exchange_order_id):
+                    return ReconcileTicketResult(
+                        status=ReconcileTicketStatus.PROTECTION_RESIDUE
+                    )
+                event = OwnedOrphanOrderDetected(
+                    event_id=_event_id(aggregate),
+                    ticket_id=request.ticket_id,
+                    sequence=aggregate.last_event_sequence + 1,
+                    occurred_at_ms=snapshot.observed_at_ms,
+                    exchange_order_id=owned_order.exchange_order_id,
+                )
+                status = ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
+        elif snapshot.quantity == 0:
+            event = ReconciliationMatched(
+                event_id=_event_id(aggregate),
+                ticket_id=request.ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=snapshot.observed_at_ms,
+            )
+            status = ReconcileTicketStatus.MATCHED
+
+    if event is not None:
+        await uow.commit_reduction(
+            event=event,
+            reduction=reduce_event(aggregate, event),
+            expected_version=aggregate.version,
+        )
+    return ReconcileTicketResult(status=status)
+
+
+async def request_exit(
+    uow: KernelUnitOfWork,
+    request: ExitTicketRequest,
+) -> ExitTicketResult:
+    aggregate = await uow.aggregates.get(request.ticket_id)
+    if aggregate is None:
+        raise ValueError("Ticket aggregate does not exist")
+    event = ExitRequested(
+        event_id=_event_id(aggregate),
+        ticket_id=request.ticket_id,
+        sequence=aggregate.last_event_sequence + 1,
+        occurred_at_ms=request.requested_at_ms,
+        reason=request.reason,
+    )
+    await uow.commit_reduction(
+        event=event,
+        reduction=reduce_event(aggregate, event),
+        expected_version=aggregate.version,
+    )
+    return ExitTicketResult(status=ExitTicketStatus.REQUESTED)
+
+
+def _event_id(aggregate) -> str:
+    return (
+        f"event:{aggregate.identity.ticket_id}:"
+        f"{aggregate.last_event_sequence + 1}"
+    )
+
+
+def _is_kernel_owned_order(venue_client_order_id: str | None) -> bool:
+    return str(venue_client_order_id or "").startswith("brc-")
+
+
+def _has_cancel_attempt(commands, exchange_order_id: str) -> bool:
+    non_repeatable = {
+        ExchangeCommandStatus.PREPARED,
+        ExchangeCommandStatus.CLAIMED,
+        ExchangeCommandStatus.ACCEPTED,
+        ExchangeCommandStatus.OUTCOME_UNKNOWN,
+    }
+    return any(
+        command.status in non_repeatable
+        and isinstance(command.payload, CancelCommandPayload)
+        and command.payload.exchange_order_id == exchange_order_id
+        for command in commands
+    )

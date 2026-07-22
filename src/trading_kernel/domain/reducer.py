@@ -10,7 +10,6 @@ from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.effects import (
     CancelEntryRemainder,
     CancelProtectionOrders,
-    CreateTradeReview,
     KernelEffect,
     OpenIncident,
     PrepareEntryCommand,
@@ -28,13 +27,20 @@ from src.trading_kernel.domain.events import (
     EntryOutcomeUnknown,
     EntryPartiallyFilled,
     EntryRejected,
+    ExternalFlatDetected,
+    ExitAccepted,
+    ExitOutcomeUnknown,
     ExitRequested,
     InitialStopConfirmed,
+    OwnedOrphanOrderDetected,
+    OwnedOrphanCancelConfirmed,
     PositionFlatConfirmed,
+    ProtectionCancelConfirmed,
     ReconciliationMatched,
     ReviewRecorded,
     TicketIssued,
     TradeEvent,
+    UnownedOrderDetected,
 )
 
 
@@ -189,18 +195,143 @@ def reduce_event(
             ),
         )
 
-    if isinstance(event, PositionFlatConfirmed):
+    if isinstance(event, ExitAccepted):
         _require_status(current, AggregateStatus.EXIT_PENDING)
+        exchange_order_id = str(event.exchange_order_id or "").strip()
+        if not exchange_order_id:
+            raise InvalidLifecycleTransition("EXIT acceptance requires order identity")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.EXIT_ACCEPTED,
+            updates={"exit_exchange_order_id": exchange_order_id},
+        )
+
+    if isinstance(event, ExitOutcomeUnknown):
+        _require_status(current, AggregateStatus.EXIT_PENDING)
+        reason = str(event.reason or "").strip()
+        if not reason:
+            raise InvalidLifecycleTransition("EXIT unknown outcome requires reason")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.EXIT_OUTCOME_UNKNOWN,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="exit_outcome_unknown",
+                ),
+            ),
+        )
+
+    if isinstance(event, PositionFlatConfirmed):
+        _require_status_in(
+            current,
+            {
+                AggregateStatus.EXIT_PENDING,
+                AggregateStatus.EXIT_ACCEPTED,
+                AggregateStatus.EXIT_OUTCOME_UNKNOWN,
+            },
+        )
+        if current.initial_stop_exchange_order_id is None:
+            raise InvalidLifecycleTransition("flat position has no owned protection identity")
         return _transition(
             current,
             event,
             status=AggregateStatus.RECONCILIATION_PENDING,
             updates={"position_qty": Decimal("0")},
-            effects=(CancelProtectionOrders(ticket_id=current.identity.ticket_id),),
+            effects=(
+                CancelProtectionOrders(
+                    ticket_id=current.identity.ticket_id,
+                    exchange_order_id=current.initial_stop_exchange_order_id,
+                ),
+            ),
+        )
+
+    if isinstance(event, ExternalFlatDetected):
+        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        if current.initial_stop_exchange_order_id is None:
+            raise InvalidLifecycleTransition("external flat has no owned protection identity")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RECONCILIATION_PENDING,
+            updates={"position_qty": Decimal("0")},
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="external_flat",
+                ),
+                CancelProtectionOrders(
+                    ticket_id=current.identity.ticket_id,
+                    exchange_order_id=current.initial_stop_exchange_order_id,
+                ),
+            ),
+        )
+
+    if isinstance(event, OwnedOrphanOrderDetected):
+        _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
+        exchange_order_id = str(event.exchange_order_id or "").strip()
+        if not exchange_order_id:
+            raise InvalidLifecycleTransition("owned orphan order identity is required")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RECONCILIATION_PENDING,
+            effects=(
+                CancelProtectionOrders(
+                    ticket_id=current.identity.ticket_id,
+                    exchange_order_id=exchange_order_id,
+                ),
+            ),
+        )
+
+    if isinstance(event, UnownedOrderDetected):
+        _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
+        if not str(event.exchange_order_id or "").strip():
+            raise InvalidLifecycleTransition("unowned order identity is required")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RECONCILIATION_PENDING,
+            effects=(
+                OpenIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="unowned_open_order",
+                ),
+            ),
+        )
+
+    if isinstance(event, ProtectionCancelConfirmed):
+        _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
+        if event.exchange_order_id != current.initial_stop_exchange_order_id:
+            raise InvalidLifecycleTransition("cancelled protection identity mismatch")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RECONCILIATION_PENDING,
+            updates={
+                "protected_qty": Decimal("0"),
+                "initial_stop_exchange_order_id": None,
+            },
+        )
+
+    if isinstance(event, OwnedOrphanCancelConfirmed):
+        _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
+        if not str(event.exchange_order_id or "").strip():
+            raise InvalidLifecycleTransition("owned orphan cancel identity is required")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RECONCILIATION_PENDING,
         )
 
     if isinstance(event, ReconciliationMatched):
         _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
+        if current.initial_stop_exchange_order_id is not None:
+            raise InvalidLifecycleTransition("protection residue remains")
+        if current.protected_qty != 0:
+            raise InvalidLifecycleTransition("protected quantity remains")
         return _transition(
             current,
             event,
@@ -214,7 +345,6 @@ def reduce_event(
             current,
             event,
             status=AggregateStatus.REVIEW_PENDING,
-            effects=(CreateTradeReview(ticket_id=current.identity.ticket_id),),
         )
 
     if isinstance(event, ReviewRecorded):
@@ -227,7 +357,6 @@ def reduce_event(
             event,
             status=AggregateStatus.TERMINAL,
             updates={"review_id": review_id},
-            effects=(ReleaseBudget(ticket_id=current.identity.ticket_id),),
         )
 
     raise InvalidLifecycleTransition(f"unsupported event: {type(event).__name__}")

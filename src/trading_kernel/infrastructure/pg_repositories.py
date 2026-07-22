@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 
 import sqlalchemy as sa
+from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -16,9 +17,12 @@ from src.trading_kernel.application.ports import (
     EntryLaneSnapshot,
     OwnerPolicySnapshot,
     RuntimeIncidentRecord,
+    TradeReviewRecord,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
+    CancelCommandPayload,
+    CommandPayload,
     ExchangeCommand,
     ExchangeCommandKind,
     ExchangeCommandResult,
@@ -32,19 +36,27 @@ from src.trading_kernel.domain.events import (
     EntryOutcomeUnknown,
     EntryPartiallyFilled,
     EntryRejected,
+    ExternalFlatDetected,
+    ExitAccepted,
+    ExitOutcomeUnknown,
     ExitRequested,
     InitialStopConfirmed,
+    OwnedOrphanOrderDetected,
+    OwnedOrphanCancelConfirmed,
     PositionFlatConfirmed,
+    ProtectionCancelConfirmed,
     ReconciliationMatched,
     ReviewRecorded,
     TicketIssued,
     TradeEvent,
+    UnownedOrderDetected,
 )
 from src.trading_kernel.domain.identities import (
     NettingDomain,
     RuntimeIdentity,
     TicketIdentity,
 )
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.ticket import EntryOrderType, TicketStatus, TradeTicket
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
@@ -52,9 +64,11 @@ from src.trading_kernel.infrastructure.pg_models import (
     entry_lane_current,
     exchange_commands,
     owner_policy_current,
+    positions_current,
     runtime_incidents,
     trade_aggregates,
     trade_events,
+    trade_reviews,
     trade_tickets,
 )
 
@@ -70,12 +84,20 @@ _EVENT_MODELS = {
         EntryPartiallyFilled,
         InitialStopConfirmed,
         ExitRequested,
+        ExitAccepted,
+        ExitOutcomeUnknown,
         PositionFlatConfirmed,
+        ExternalFlatDetected,
+        OwnedOrphanOrderDetected,
+        OwnedOrphanCancelConfirmed,
+        UnownedOrderDetected,
+        ProtectionCancelConfirmed,
         ReconciliationMatched,
         BudgetSettled,
         ReviewRecorded,
     )
 }
+_COMMAND_PAYLOAD_ADAPTER = TypeAdapter(CommandPayload)
 
 
 class PostgresTicketRepository:
@@ -234,7 +256,11 @@ class PostgresExchangeCommandRepository:
                 idempotency_key=command.idempotency_key,
                 venue_client_order_id=command.venue_client_order_id,
                 status=command.status.value,
-                quantity=command.payload.quantity,
+                quantity=(
+                    command.payload.quantity
+                    if isinstance(command.payload, OrderCommandPayload)
+                    else None
+                ),
                 request_payload=command.payload.model_dump(mode="json"),
                 result_payload=None,
                 claim_owner=None,
@@ -261,6 +287,21 @@ class PostgresExchangeCommandRepository:
             .order_by(exchange_commands.c.created_at_ms, exchange_commands.c.command_id)
         )
         return [await self._command_from_row(row) for row in result.mappings()]
+
+    async def next_generation(
+        self,
+        *,
+        ticket_id: str,
+        kind: ExchangeCommandKind,
+    ) -> int:
+        result = await self._connection.execute(
+            sa.select(sa.func.coalesce(sa.func.max(exchange_commands.c.generation), 0))
+            .where(
+                exchange_commands.c.ticket_id == ticket_id,
+                exchange_commands.c.command_kind == kind.value,
+            )
+        )
+        return int(result.scalar_one()) + 1
 
     async def claim_one_prepared(
         self,
@@ -372,7 +413,7 @@ class PostgresExchangeCommandRepository:
             generation=int(row["generation"]),
             idempotency_key=str(row["idempotency_key"]),
             venue_client_order_id=str(row["venue_client_order_id"]),
-            payload=OrderCommandPayload.model_validate(row["request_payload"]),
+            payload=_COMMAND_PAYLOAD_ADAPTER.validate_python(row["request_payload"]),
             status=ExchangeCommandStatus(str(row["status"])),
             created_at_ms=int(row["created_at_ms"]),
             deadline_at_ms=int(row["deadline_at_ms"]),
@@ -427,10 +468,16 @@ class PostgresIncidentRepository:
         ticket_id: str,
     ) -> RuntimeIncidentRecord | None:
         result = await self._connection.execute(
-            sa.select(runtime_incidents).where(
+            sa.select(runtime_incidents)
+            .where(
                 runtime_incidents.c.ticket_id == ticket_id,
                 runtime_incidents.c.status == "open",
             )
+            .order_by(
+                runtime_incidents.c.opened_at_ms.desc(),
+                runtime_incidents.c.incident_id.desc(),
+            )
+            .limit(1)
         )
         row = result.mappings().one_or_none()
         return None if row is None else RuntimeIncidentRecord.model_validate(row)
@@ -441,6 +488,94 @@ class PostgresIncidentRepository:
             .where(runtime_incidents.c.incident_id == incident_id)
             .values(status="resolved", resolved_at_ms=resolved_at_ms)
         )
+
+
+class PostgresPositionRepository:
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def upsert(
+        self,
+        *,
+        ticket_id: str,
+        snapshot: PositionSnapshot,
+    ) -> None:
+        key = snapshot.netting_domain.key()
+        current = await self._connection.execute(
+            sa.select(positions_current.c.projection_version)
+            .where(positions_current.c.netting_domain_key == key)
+            .with_for_update(of=positions_current)
+        )
+        version = current.scalar_one_or_none()
+        values = {
+            "ticket_id": ticket_id if snapshot.quantity > 0 else None,
+            "venue_id": snapshot.netting_domain.venue_id,
+            "account_id": snapshot.netting_domain.account_id,
+            "exchange_instrument_id": (
+                snapshot.netting_domain.exchange_instrument_id
+            ),
+            "position_side": snapshot.netting_domain.position_side,
+            "quantity": snapshot.quantity,
+            "average_entry_price": snapshot.average_entry_price,
+            "observed_at_ms": snapshot.observed_at_ms,
+            "projection_version": 1 if version is None else int(version) + 1,
+        }
+        if version is None:
+            await self._connection.execute(
+                sa.insert(positions_current).values(
+                    netting_domain_key=key,
+                    **values,
+                )
+            )
+        else:
+            await self._connection.execute(
+                sa.update(positions_current)
+                .where(positions_current.c.netting_domain_key == key)
+                .values(**values)
+            )
+
+    async def get(self, netting_domain_key: str) -> PositionSnapshot | None:
+        result = await self._connection.execute(
+            sa.select(positions_current).where(
+                positions_current.c.netting_domain_key == netting_domain_key
+            )
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return PositionSnapshot(
+            netting_domain=NettingDomain(
+                venue_id=str(row["venue_id"]),
+                account_id=str(row["account_id"]),
+                exchange_instrument_id=str(row["exchange_instrument_id"]),
+                position_side=str(row["position_side"]),
+            ),
+            quantity=Decimal(row["quantity"]),
+            average_entry_price=(
+                None
+                if row["average_entry_price"] is None
+                else Decimal(row["average_entry_price"])
+            ),
+            open_orders=(),
+            observed_at_ms=int(row["observed_at_ms"]),
+        )
+
+
+class PostgresReviewRepository:
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def add(self, review: TradeReviewRecord) -> None:
+        await self._connection.execute(
+            sa.insert(trade_reviews).values(**review.model_dump(mode="json"))
+        )
+
+    async def get_for_ticket(self, ticket_id: str) -> TradeReviewRecord | None:
+        result = await self._connection.execute(
+            sa.select(trade_reviews).where(trade_reviews.c.ticket_id == ticket_id)
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else TradeReviewRecord.model_validate(row)
 
 
 class PostgresEntryAdmissionRepository:
@@ -759,6 +894,7 @@ def _aggregate_values(
         "protected_qty": aggregate.protected_qty,
         "entry_exchange_order_id": aggregate.entry_exchange_order_id,
         "initial_stop_exchange_order_id": aggregate.initial_stop_exchange_order_id,
+        "exit_exchange_order_id": aggregate.exit_exchange_order_id,
         "review_id": aggregate.review_id,
         "updated_at_ms": updated_at_ms or aggregate.ticket.created_at_ms,
     }
@@ -790,6 +926,11 @@ def _aggregate_from_row(
             None
             if row["initial_stop_exchange_order_id"] is None
             else str(row["initial_stop_exchange_order_id"])
+        ),
+        exit_exchange_order_id=(
+            None
+            if row["exit_exchange_order_id"] is None
+            else str(row["exit_exchange_order_id"])
         ),
         review_id=None if row["review_id"] is None else str(row["review_id"]),
     )

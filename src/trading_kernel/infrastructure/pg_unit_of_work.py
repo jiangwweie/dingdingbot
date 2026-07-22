@@ -13,6 +13,7 @@ from src.trading_kernel.application.ports import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
+    CancelCommandPayload,
     ExchangeCommand,
     ExchangeCommandKind,
     ExchangeCommandStatus,
@@ -21,10 +22,14 @@ from src.trading_kernel.domain.commands import (
     build_venue_client_order_id,
 )
 from src.trading_kernel.domain.effects import (
+    CancelProtectionOrders,
     OpenIncident,
     PrepareEntryCommand,
+    PrepareExitCommand,
+    PrepareInitialStopCommand,
     ReleaseBudget,
     ReleaseEntryLane,
+    SettleBudget,
 )
 from src.trading_kernel.domain.events import TicketIssued, TradeEvent
 from src.trading_kernel.domain.reducer import Reduction
@@ -36,6 +41,8 @@ from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresEntryAdmissionRepository,
     PostgresExchangeCommandRepository,
     PostgresIncidentRepository,
+    PostgresPositionRepository,
+    PostgresReviewRepository,
     PostgresTicketRepository,
 )
 
@@ -60,6 +67,8 @@ class PostgresKernelUnitOfWork:
         self.exchange_commands = PostgresExchangeCommandRepository(self._connection)
         self.budgets = PostgresBudgetRepository(self._connection)
         self.incidents = PostgresIncidentRepository(self._connection)
+        self.positions = PostgresPositionRepository(self._connection)
+        self.reviews = PostgresReviewRepository(self._connection)
         self.entry_admission = PostgresEntryAdmissionRepository(self._connection)
         return self
 
@@ -126,6 +135,38 @@ class PostgresKernelUnitOfWork:
                     _entry_command(effect, occurred_at_ms=event.occurred_at_ms)
                 )
                 continue
+            if isinstance(effect, PrepareInitialStopCommand):
+                await self.exchange_commands.add(
+                    _initial_stop_command(
+                        aggregate,
+                        effect,
+                        occurred_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
+            if isinstance(effect, PrepareExitCommand):
+                await self.exchange_commands.add(
+                    _exit_command(
+                        aggregate,
+                        effect,
+                        occurred_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
+            if isinstance(effect, CancelProtectionOrders):
+                generation = await self.exchange_commands.next_generation(
+                    ticket_id=aggregate.identity.ticket_id,
+                    kind=ExchangeCommandKind.CANCEL_ORDER,
+                )
+                await self.exchange_commands.add(
+                    _cancel_protection_command(
+                        aggregate,
+                        effect,
+                        generation=generation,
+                        occurred_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
             if isinstance(effect, ReleaseBudget):
                 await self.budgets.release(
                     effect.ticket_id,
@@ -159,6 +200,18 @@ class PostgresKernelUnitOfWork:
                     )
                 )
                 continue
+            if isinstance(effect, SettleBudget):
+                await self.budgets.release(
+                    effect.ticket_id,
+                    released_at_ms=event.occurred_at_ms,
+                )
+                await self.entry_admission.release_account_exposure(
+                    account_id=aggregate.ticket.identity.netting_domain.account_id,
+                    notional=aggregate.ticket.notional,
+                    risk_at_stop=aggregate.ticket.risk_at_stop,
+                    updated_at_ms=event.occurred_at_ms,
+                )
+                continue
             raise UnsupportedKernelEffect(
                 f"no durable materializer for {type(effect).__name__}"
             )
@@ -167,6 +220,12 @@ class PostgresKernelUnitOfWork:
             await self.tickets.mark_terminal(
                 ticket_id,
                 status="entry_rejected",
+                terminal_at_ms=event.occurred_at_ms,
+            )
+        elif aggregate.status is AggregateStatus.TERMINAL:
+            await self.tickets.mark_terminal(
+                ticket_id,
+                status="terminal",
                 terminal_at_ms=event.occurred_at_ms,
             )
 
@@ -212,6 +271,101 @@ def _entry_command(
         created_at_ms=occurred_at_ms,
         deadline_at_ms=ticket.expires_at_ms,
     )
+
+
+def _initial_stop_command(
+    aggregate,
+    effect: PrepareInitialStopCommand,
+    *,
+    occurred_at_ms: int,
+) -> ExchangeCommand:
+    return _order_command(
+        aggregate=aggregate,
+        kind=ExchangeCommandKind.INITIAL_STOP,
+        payload=OrderCommandPayload(
+            side=_closing_side(aggregate),
+            quantity=effect.quantity,
+            order_type="stop_market",
+            reduce_only=True,
+            stop_price=effect.stop_price,
+        ),
+        occurred_at_ms=occurred_at_ms,
+    )
+
+
+def _exit_command(
+    aggregate,
+    effect: PrepareExitCommand,
+    *,
+    occurred_at_ms: int,
+) -> ExchangeCommand:
+    return _order_command(
+        aggregate=aggregate,
+        kind=ExchangeCommandKind.EXIT,
+        payload=OrderCommandPayload(
+            side=_closing_side(aggregate),
+            quantity=effect.quantity,
+            order_type="market",
+            reduce_only=True,
+        ),
+        occurred_at_ms=occurred_at_ms,
+    )
+
+
+def _cancel_protection_command(
+    aggregate,
+    effect: CancelProtectionOrders,
+    *,
+    generation: int,
+    occurred_at_ms: int,
+) -> ExchangeCommand:
+    command_id = build_command_id(
+        ticket_id=aggregate.identity.ticket_id,
+        kind=ExchangeCommandKind.CANCEL_ORDER,
+        generation=generation,
+    )
+    return ExchangeCommand(
+        command_id=command_id,
+        ticket_identity=aggregate.identity,
+        kind=ExchangeCommandKind.CANCEL_ORDER,
+        generation=generation,
+        idempotency_key=command_id,
+        venue_client_order_id=build_venue_client_order_id(command_id),
+        payload=CancelCommandPayload(exchange_order_id=effect.exchange_order_id),
+        status=ExchangeCommandStatus.PREPARED,
+        created_at_ms=occurred_at_ms,
+        deadline_at_ms=occurred_at_ms + 30_000,
+    )
+
+
+def _order_command(
+    *,
+    aggregate,
+    kind: ExchangeCommandKind,
+    payload: OrderCommandPayload,
+    occurred_at_ms: int,
+) -> ExchangeCommand:
+    command_id = build_command_id(
+        ticket_id=aggregate.identity.ticket_id,
+        kind=kind,
+        generation=1,
+    )
+    return ExchangeCommand(
+        command_id=command_id,
+        ticket_identity=aggregate.identity,
+        kind=kind,
+        generation=1,
+        idempotency_key=command_id,
+        venue_client_order_id=build_venue_client_order_id(command_id),
+        payload=payload,
+        status=ExchangeCommandStatus.PREPARED,
+        created_at_ms=occurred_at_ms,
+        deadline_at_ms=occurred_at_ms + 30_000,
+    )
+
+
+def _closing_side(aggregate) -> str:
+    return "sell" if aggregate.identity.netting_domain.position_side == "long" else "buy"
 
 
 def _event_ticket_id(event: TradeEvent) -> str:

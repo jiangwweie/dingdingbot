@@ -77,6 +77,23 @@ class OrderCommandPayload(BaseModel):
         return self
 
 
+class CancelCommandPayload(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_order_id: str
+
+    @field_validator("exchange_order_id", mode="before")
+    @classmethod
+    def _require_exchange_order_id(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("cancel command requires exchange order identity")
+        return normalized
+
+
+CommandPayload = OrderCommandPayload | CancelCommandPayload
+
+
 class ExchangeCommand(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -86,7 +103,7 @@ class ExchangeCommand(BaseModel):
     generation: int
     idempotency_key: str
     venue_client_order_id: str
-    payload: OrderCommandPayload
+    payload: CommandPayload
     status: ExchangeCommandStatus
     created_at_ms: int
     deadline_at_ms: int
@@ -119,6 +136,11 @@ class ExchangeCommand(BaseModel):
             raise ValueError("command deadline must be after creation")
         if len(self.venue_client_order_id) > 36:
             raise ValueError("venue client order id exceeds supported boundary")
+        if self.kind is ExchangeCommandKind.CANCEL_ORDER:
+            if not isinstance(self.payload, CancelCommandPayload):
+                raise ValueError("cancel command requires cancel payload")
+        elif not isinstance(self.payload, OrderCommandPayload):
+            raise ValueError("order command requires order payload")
         return self
 
 

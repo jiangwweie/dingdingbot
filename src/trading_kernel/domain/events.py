@@ -80,8 +80,36 @@ class ExitRequested(_TicketEvent):
     reason: str
 
 
+class ExitAccepted(_TicketEvent):
+    exchange_order_id: str
+
+
+class ExitOutcomeUnknown(_TicketEvent):
+    reason: str
+
+
 class PositionFlatConfirmed(_TicketEvent):
     pass
+
+
+class ExternalFlatDetected(_TicketEvent):
+    pass
+
+
+class OwnedOrphanOrderDetected(_TicketEvent):
+    exchange_order_id: str
+
+
+class UnownedOrderDetected(_TicketEvent):
+    exchange_order_id: str
+
+
+class ProtectionCancelConfirmed(_TicketEvent):
+    exchange_order_id: str
+
+
+class OwnedOrphanCancelConfirmed(_TicketEvent):
+    exchange_order_id: str
 
 
 class ReconciliationMatched(_TicketEvent):
@@ -105,7 +133,14 @@ TradeEvent = (
     | EntryPartiallyFilled
     | InitialStopConfirmed
     | ExitRequested
+    | ExitAccepted
+    | ExitOutcomeUnknown
     | PositionFlatConfirmed
+    | ExternalFlatDetected
+    | OwnedOrphanOrderDetected
+    | UnownedOrderDetected
+    | ProtectionCancelConfirmed
+    | OwnedOrphanCancelConfirmed
     | ReconciliationMatched
     | BudgetSettled
     | ReviewRecorded

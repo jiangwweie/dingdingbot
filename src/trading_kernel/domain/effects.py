@@ -40,6 +40,7 @@ class RequestControlledFlatten(_Effect):
 
 class CancelProtectionOrders(_Effect):
     ticket_id: str
+    exchange_order_id: str
 
 
 class OpenIncident(_Effect):
@@ -59,10 +60,6 @@ class ReleaseBudget(_Effect):
     ticket_id: str
 
 
-class CreateTradeReview(_Effect):
-    ticket_id: str
-
-
 KernelEffect = (
     PrepareEntryCommand
     | PrepareInitialStopCommand
@@ -74,6 +71,4 @@ KernelEffect = (
     | ReleaseEntryLane
     | SettleBudget
     | ReleaseBudget
-    | CreateTradeReview
 )
-

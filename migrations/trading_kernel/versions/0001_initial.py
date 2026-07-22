@@ -294,6 +294,7 @@ def upgrade() -> None:
         sa.Column("protected_qty", MONEY, nullable=False),
         _id("entry_exchange_order_id", nullable=True),
         _id("initial_stop_exchange_order_id", nullable=True),
+        _id("exit_exchange_order_id", nullable=True),
         _id("review_id", nullable=True),
         _time("updated_at_ms"),
         sa.CheckConstraint("version > 0", name="ck_brc_trade_aggregates_version_positive"),
@@ -333,7 +334,7 @@ def upgrade() -> None:
         sa.Column("idempotency_key", LONG_TEXT, nullable=False),
         sa.Column("venue_client_order_id", SHORT_TEXT, nullable=False),
         sa.Column("status", SHORT_TEXT, nullable=False),
-        sa.Column("quantity", MONEY, nullable=False),
+        sa.Column("quantity", MONEY, nullable=True),
         _json("request_payload"),
         _json("result_payload", nullable=True),
         sa.Column("claim_owner", SHORT_TEXT, nullable=True),
@@ -360,7 +361,7 @@ def upgrade() -> None:
             name="ck_brc_exchange_commands_generation_positive",
         ),
         sa.CheckConstraint(
-            "quantity > 0",
+            "quantity IS NULL OR quantity > 0",
             name="ck_brc_exchange_commands_quantity_positive",
         ),
     )

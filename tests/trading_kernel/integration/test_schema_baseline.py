@@ -90,6 +90,18 @@ def test_aggregate_schema_conserves_authoritative_entry_order_identity() -> None
     assert "entry_exchange_order_id" in aggregates.c
 
 
+def test_cancel_command_allows_null_quantity_without_weakening_order_quantity() -> None:
+    commands = metadata.tables["brc_exchange_commands"]
+
+    assert commands.c.quantity.nullable is True
+    check_sql = {
+        str(constraint.sqltext)
+        for constraint in commands.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+    assert "quantity IS NULL OR quantity > 0" in check_sql
+
+
 def _unique_column_sets(table: sa.Table) -> set[tuple[str, ...]]:
     return {
         tuple(column.name for column in constraint.columns)
