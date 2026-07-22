@@ -90,7 +90,7 @@ class _CcxtExchange(Protocol):
         params: Mapping[str, object],
     ) -> object: ...
 
-    def fetch_ticker(self, symbol: str) -> object: ...
+    def fetch_order_book(self, symbol: str, limit: int) -> object: ...
 
     def fetch_balance(self, params: Mapping[str, object]) -> object: ...
 
@@ -162,9 +162,9 @@ class CcxtVenueAdapter:
         if not settlement_asset:
             raise RuntimeError("canonical instrument has no settlement asset mapping")
 
-        ticker, balance, mode, positions, regular_orders, conditional_orders = (
+        order_book, balance, mode, positions, regular_orders, conditional_orders = (
             await asyncio.gather(
-                _call_raw_exchange(exchange.fetch_ticker, symbol),
+                _call_raw_exchange(exchange.fetch_order_book, symbol, 5),
                 _call_raw_exchange(exchange.fetch_balance, {"type": "future"}),
                 _call_raw_exchange(exchange.fetch_position_mode, symbol, {}),
                 _call_raw_exchange(
@@ -188,7 +188,7 @@ class CcxtVenueAdapter:
                 ),
             )
         )
-        ticker_mapping = _require_mapping(ticker, name="ticker")
+        order_book_mapping = _require_mapping(order_book, name="order book")
         balance_mapping = _require_mapping(balance, name="balance")
         mode_mapping = _require_mapping(mode, name="position mode")
         position_rows = _require_list(positions, name="positions")
@@ -205,16 +205,8 @@ class CcxtVenueAdapter:
             exchange_instrument_id=request.exchange_instrument_id,
             position_side=request.position_side,
             account_position_mode=_account_position_mode(mode_mapping),
-            best_bid_price=_positive_decimal_field(
-                ticker_mapping,
-                "bid",
-                fallback_info_key="bidPrice",
-            ),
-            best_ask_price=_positive_decimal_field(
-                ticker_mapping,
-                "ask",
-                fallback_info_key="askPrice",
-            ),
+            best_bid_price=_top_of_book_price(order_book_mapping, "bids"),
+            best_ask_price=_top_of_book_price(order_book_mapping, "asks"),
             account_equity=_balance_decimal(
                 balance_mapping,
                 bucket="total",
@@ -890,17 +882,19 @@ def _open_order_count(
     return count
 
 
-def _positive_decimal_field(
+def _top_of_book_price(
     value: Mapping[object, object],
-    key: str,
-    *,
-    fallback_info_key: str,
+    side: Literal["bids", "asks"],
 ) -> Decimal:
-    info = value.get("info")
-    raw_info = info if isinstance(info, Mapping) else {}
-    result = Decimal(str(value.get(key) or raw_info.get(fallback_info_key) or "0"))
+    rows = value.get(side)
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError(f"venue order book {side} is missing")
+    top = rows[0]
+    if not isinstance(top, (list, tuple)) or not top:
+        raise RuntimeError(f"venue order book {side} top level is invalid")
+    result = Decimal(str(top[0] or "0"))
     if result <= 0:
-        raise RuntimeError(f"venue {key} is missing or non-positive")
+        raise RuntimeError(f"venue order book {side} price is non-positive")
     return result
 
 

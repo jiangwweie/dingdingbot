@@ -161,7 +161,16 @@ class CancelTruthExchange(TruthExchange):
 
 class ActionFactsExchange:
     async def fetch_ticker(self, symbol):
-        return {"symbol": symbol, "bid": "59999.9", "ask": "60000.1"}
+        return {"symbol": symbol, "last": "60000"}
+
+    async def fetch_order_book(self, symbol, limit):
+        assert symbol == "BTC/USDT:USDT"
+        assert limit == 5
+        return {
+            "symbol": symbol,
+            "bids": [["59999.9", "1"]],
+            "asks": [["60000.1", "1"]],
+        }
 
     async def fetch_balance(self, params):
         assert params == {"type": "future"}
