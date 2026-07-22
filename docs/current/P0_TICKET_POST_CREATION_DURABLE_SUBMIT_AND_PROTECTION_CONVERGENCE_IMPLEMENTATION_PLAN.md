@@ -1,17 +1,29 @@
 ---
 title: P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_IMPLEMENTATION_PLAN
-status: LOCAL_ENGINEERING_CERTIFIED_AWAITING_OWNER_DEPLOY_CONFIRMATION
+status: R11_COMPONENT_PLAN_SUPERSEDED_BY_R12_LOCAL_CERTIFICATION
 authority: docs/current/P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_IMPLEMENTATION_PLAN.md
 program_id: P0-ACH-R11
 design: docs/current/P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_DESIGN.md
 current_runtime_commit: 8c61a208062520a5c426e2151e4692e256fec5dd
 current_schema_revision: 143
-last_verified: 2026-07-21
+last_verified: 2026-07-22
+corrective_design: docs/current/P0_ENTRY_EFFECT_PROTECTION_AUTHORITY_AND_DEADLINE_REMEDIATION_DESIGN.md
 implementation_authority: codex_owned_core_execution
-production_deploy: wait_for_owner_confirmation_after_merge_readiness
+production_deploy: superseded_by_r12_controlled_deploy_stage
 ---
 
 # P0 Ticket 创建后 Durable Submit 与 Protection Barrier 执行计划
+
+## 0. Status Transition — 2026-07-22
+
+本计划的 R11-T00～T09 是历史执行分解，不再定义当前 first blocker。R12 已补齐
+EntryEffect 原子投影、Protection Authority、exact-source Initial Stop、absolute deadline、
+recovery/current truth 和 PG full-chain certification，并合入 `dev@4debdc00`。
+
+当前状态为 **本地工程已认证、Tokyo 未部署、自然交易尚未验收**。受控部署、fence 与
+natural-event acceptance 只以
+`P0_ENTRY_EFFECT_PROTECTION_AUTHORITY_AND_DEADLINE_REMEDIATION_DESIGN.md` 为准；本文件中
+“Owner-confirmed deploy”措辞是 R11 历史计划，不构成当前授权模型。
 
 ## 0. 执行目标
 
@@ -45,9 +57,9 @@ Ticket
 每个 command 继续保持 **commit-before-I/O**、稳定 client order identity、短事务和
 unknown reconciliation。修复不得恢复 Console direct-submit，也不得扩大任何真实资金权限。
 
-## 1. 当前基线与执行判断
+## 1. R11 历史执行基线与判断
 
-### 1.1 已知状态
+### 1.1 R11 计划时已知状态
 
 | 项目 | 当前状态 |
 | --- | --- |
@@ -78,25 +90,24 @@ after:
   -> bounded reconciliation/lifecycle
 ```
 
-### 1.3 当前 First Blocker
+### 1.3 R11 计划时 First Blocker（已被 R12 替代）
 
 ```text
-branch_engineering_state: R11-T00~T08 local implementation and certification complete
-tokyo_runtime_state: still 8c61a208 / schema 143 until a bounded deployment
-first_blocker: owner_deploy_confirmation_required
-owner: Owner deployment decision
-owner_action_required: true
-next_action: commit the reviewed branch, then apply the bounded R11-T09 deployment only after explicit confirmation
+r11_branch_engineering_state: T00~T08 local implementation and certification complete
+r11_tokyo_runtime_snapshot: 8c61a208 / schema 143
+r11_first_blocker: deployment decision after local R11 review
+r11_status: superseded by R12 expiry/source/deadline correction
+current_authority: P0_ENTRY_EFFECT_PROTECTION_AUTHORITY_AND_DEADLINE_REMEDIATION_DESIGN.md
 ```
 
-### 1.4 本地执行完成记录
+### 1.4 R11 本地执行记录（历史）
 
 | 执行面 | 验收证据 | 状态 |
 | --- | --- | --- |
 | R11-T00~T08 | typed result migration `144`、sibling terminalization、exact fill protection binding、Initial Stop drain、lease budget、exact bundle、monitor、legacy removal | **完成并已本地审查** |
 | Regression | 主回归 265 项 + materialization 3 项 | **268 项通过** |
 | Static / runtime-cadence boundary | `git diff --check`、Ruff、file-I/O audit、output artifact scope、Alembic head | **通过** |
-| R11-T09 | Tokyo exact SHA/schema deployment、no-write canary、runtime health、natural-event acceptance | **等待 Owner 明确部署确认** |
+| R11-T09 | Tokyo exact SHA/schema deployment、no-write canary、runtime health、natural-event acceptance | **未执行；由 R12 controlled deploy stage 替代** |
 
 ## 2. 全局执行约束
 
@@ -886,18 +897,18 @@ natural-event lineage or exact terminal blocker
 
 Evidence 输出使用 stdout/PG audit；不得创建 routine repo JSON/MD report。
 
-## 20. Chain Position
+## 20. R11 Historical Chain Position
 
 ```text
 chain_position: ticket_created_to_open_protected
 program: P0-ACH-R11
-live_enablement_state_before: deployed_durable_dispatch_with_unclosed_post_ticket_safety_defects
-live_enablement_state_after: ticket_post_creation_pre_live_certified_then_owner_confirmed_natural_acceptance
-blocker_removed_or_reclassified: hard_safety_stop:durable_protected_submit_failure_fill_and_latency_gap
+r11_live_enablement_state_before: deployed_durable_dispatch_with_unclosed_post_ticket_safety_defects
+r11_claimed_state_after: ticket_post_creation_pre_live_certified_then_deploy
+r11_blocker_removed_or_reclassified: hard_safety_stop:durable_protected_submit_failure_fill_and_latency_gap
 per_symbol_per_fact_acceptance: exact ticket instrument side fill qty avg price protection qty command outcome and reconciliation
 stop_condition: every possible entry effect is immediately protected or represented by an exact current incident
 capability_unlocked: durable_exact_fill_immediate_protection_and_terminal_failure_conservation
-next_engineering_bottleneck: R1B natural live lifecycle calibration
-rehearsal_boundary: no real exchange write before Owner-confirmed deploy and official natural-event gates
-owner_action_required: only_at_production_deploy_confirmation
+superseded_by: P0-ACH-R12 EntryEffect/ProtectionAuthority/deadline correction
+current_next_engineering_bottleneck: controlled Tokyo deployment and postdeploy current-truth verification
+rehearsal_boundary: no real exchange write before controlled deploy and official natural-event gates
 ```

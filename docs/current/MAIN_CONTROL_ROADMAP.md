@@ -2,7 +2,7 @@
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
 authority: docs/current/MAIN_CONTROL_ROADMAP.md
-last_verified: 2026-07-21
+last_verified: 2026-07-22
 dual_position_status_verified: 2026-07-21
 runtime_observation_truth_status_verified: 2026-07-21
 ---
@@ -59,7 +59,7 @@ design documents and acceptance proof.
 | 5 | **P0 Runtime Observation Truth And Forensics Remediation** | **deployed component baseline; HTTP 400/compact transport defect is closed, but production closure is superseded** | `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_DESIGN.md`, `docs/current/P0_RUNTIME_OBSERVATION_TRUTH_AND_FORENSICS_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | 6 | **P0 Production Runtime Full-Chain Readiness Remediation** | **remaining active work superseded by P0-ACH; retained as component design source** | `docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_DESIGN.md`, `docs/current/P0_PRODUCTION_RUNTIME_FULL_CHAIN_READINESS_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | P0 correction | **P0 Account Truth Convergence And Failed-Submit Capacity Conservation** | **deployed at `386cc3d7` / migration 140; two-position Account Current authority is active** | `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_DESIGN.md`, `docs/current/P0_ACCOUNT_TRUTH_CONVERGENCE_AND_FAILED_SUBMIT_CAPACITY_CONSERVATION_IMPLEMENTATION_PLAN.md` |
-| P0 current | **P0 Ticket 创建后 Durable Submit 与 Protection Barrier 收敛** | **R10 Ticket/durable-dispatch baseline remains deployed at `8c61a208` / schema 143; R11 local repair and certification are complete on the focused branch, while Owner-confirmed production deployment remains pending** | `docs/current/P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_DESIGN.md`, `docs/current/P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_IMPLEMENTATION_PLAN.md` |
+| P0 current | **P0 Entry Effect、Protection Authority 与 Deadline 收敛** | **R12 corrective engineering is locally certified on `dev@4debdc00` / migration `146`; Tokyo remains an unrefreshed `8c61a208` / schema `143` snapshot and has not received this change** | `docs/current/P0_ENTRY_EFFECT_PROTECTION_AUTHORITY_AND_DEADLINE_REMEDIATION_DESIGN.md` |
 | 7 | **Dual-Position Hard-Cap Account Risk Model V0** | **migrations 134-140 and active policy are deployed component baselines; whole-chain recertification is folded into P0-ACH** | `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_DESIGN.md`, `docs/current/DUAL_POSITION_ACCOUNT_RISK_V0_RELEASE_BLOCKER_REMEDIATION_IMPLEMENTATION_PLAN.md` |
 | 8 | **Capital Allocation V1** | P2 after V0 dual-position, observation truth closure, and additional real per-ticket outcomes | `docs/current/TRADING_QUALITY_CAPITAL_RISK_ALLOCATION_DESIGN.md` |
 | 9 | **Multi-Asset Execution Kernel** | P2 after crypto live lifecycle calibration | asset-neutral Instrument/Venue/Calendar/Policy contracts |
@@ -80,27 +80,26 @@ multi-signal Invocation loss, persisted Decimal Claim failure, Ticket expiry and
 current-health drift. No current lane may be called validated market wait until
 P0-ACH reaches `multi_position_pre_live_certified`.
 
-The latest 2026-07-21 post-R10 review supersedes the older `25483180/schema 142`
-planning snapshot. Tokyo runs exact release `8c61a208062520a5c426e2151e4692e256fec5dd`
-at schema `143`; the read-only inventory found zero current Tickets and zero
-current Exchange Commands, so there is no observed risky in-flight aggregate at
-the review instant. Code and deterministic reproductions nevertheless prove
-three post-Ticket P0 defects: early command failure can strand siblings and
-capacity, partial Entry fill is not bound to protection quantity, and the
-30-second one-command cadence can delay Initial Stop. The current P0 is therefore
-R11 Ticket-to-`open_protected` safety convergence. This is an engineering blocker,
-not a strategy-signal or chat-authorization blocker; production deployment still
-requires the separate Owner confirmation recorded in the R11 plan.
+The 2026-07-22 R12 correction supersedes the older `25483180/schema 142` and R11
+planning snapshots. The last recorded Tokyo release is
+`8c61a208062520a5c426e2151e4692e256fec5dd` at schema `143`; its former zero
+Ticket/zero ExchangeCommand inventory is historical evidence only and must be
+re-read before deployment. `dev@4debdc00` closes the observed post-Ticket defect
+class locally: EntryEffect is projected atomically, protection authority survives
+Ticket expiry while exposure may exist, Initial Stop drain is exact-source, and
+one absolute deadline governs the invocation. The next blocker is controlled
+Tokyo deployment plus postdeploy current-truth verification, not strategy signal,
+symbol scope, market condition, or Owner-policy authorization.
 
 ## Current Verified Progress
 
 | Area | Current fact |
 | --- | --- |
-| **Live Candidate Baseline** | Tokyo runs release `8c61a208062520a5c426e2151e4692e256fec5dd`; the review-time PG inventory contains zero current Tickets and zero current Exchange Commands, while historical blocked/failed Attempts remain provenance rather than current in-flight authority |
-| **Active delivery branch** | `codex/budget-model-review-20260714` contains R11 implementation, review and local certification; it awaits commit and explicit Owner deployment confirmation |
+| **Live Candidate Baseline** | The last recorded Tokyo snapshot is `8c61a208062520a5c426e2151e4692e256fec5dd` / schema `143`; its zero Ticket/zero ExchangeCommand inventory is not a substitute for the mandatory predeploy read |
+| **Active delivery branch** | `dev@4debdc00` contains R12 implementation and local PG full-chain certification; no Tokyo deployment has been performed from this head |
 | **Tokyo release line** | `/home/ubuntu/brc-deploy/app/current` and its release manifest are the exact deployed-head authority |
 | **Deployment method** | Server-side `git fetch + git archive export`; no local upload package is required for normal deploy |
-| **PG migration** | Tokyo remains at migration **143**; R11 allocates forward migration **144** for typed exchange-result facts, with Alembic as the sole schema authority |
+| **PG migration** | Local `dev` Alembic head is **146**; the last recorded Tokyo revision is **143**. Alembic remains the sole schema authority and deployment uses forward migration only |
 | **P0-LC deployment acceptance** | Postdeploy verification passes; backend HTTP checks, schema count, lifecycle units, and no-active lifecycle service are accepted without exchange write |
 | **Backend / watcher / monitor / lifecycle** | Backend and all three timers are active; the latest natural watcher tick succeeded operationally, but Action-Time stopped at `materialize_account_safe_facts` and current projections did not preserve that blocker through the no-Ticket dispatcher result |
 | **Real gateway submit-boundary test** | Deployed `110e680c` includes local impact coverage proving constructed PG fresh signal can reach `real_gateway_action -> gateway.place_order(...)` boundary with controlled test-gateway stop |
@@ -108,7 +107,7 @@ requires the separate Owner confirmation recorded in the R11 plan.
 | **P0 capital-safety closure** | `381aed34` deploys current-risk scope freeze blocking, stale/no-risk freeze resolution, scheduled/recovery reconciliation ticks, Live Outcome Ledger projection, and protective stop-risk direction validation |
 | **Current runtime coverage** | Five StrategyGroups and 22 candidate lanes have current healthy technical coverage; Candidate Pool still reports 22 `detector_not_attached`, while production signals prove detectors can emit events without a current decision projection |
 | **Typed Ticket boundary** | Side-aware price, normalized quantity, positive stop risk, one reservation, atomic fact-to-Ticket transaction, and six-Event-Spec production-shaped certification are deployed |
-| **Current tradeability** | Tokyo global health and zero in-flight inventory do not certify the next Ticket because it still runs R10. R11 closes the local engineering blocker; bounded production deploy and natural-event acceptance remain explicitly Owner-confirmed gates |
+| **Current tradeability** | `dev` is **pre-live certified** for the R12 ticket-bound path, but Tokyo has not yet received it. Trading capability requires postdeploy current-state verification and a later natural signal reaching same-source Initial Stop / `open_protected` or one exact visible blocker |
 | **Opportunity calibration** | All 22 scopes produced historical signals with zero invalid observations; Replay was stdout-only and created no PG/file/runtime/exchange authority |
 | **Lifecycle production capability** | Typed exchange truth, fill projection, durable short-transaction commands, continuous reconciliation, settlement, finalization, terminal Outcome, account-mode bootstrap, and migration-shaped ops health are deployed |
 | **Trade feedback core** | P1-TFC uses one typed lifecycle decision across production callers, rehearsal, and Owner feedback; it is deployed rather than active WIP |
@@ -138,9 +137,9 @@ deliberately released.
 | 8 | **Runtime Observation Truth And Forensics Remediation** | **P0 deployed component baseline** | Typed compact blockers and HTTP semantics are accepted; its observation/business-gate and core-order closure assumptions are superseded |
 | 9 | **Production Runtime Full-Chain Readiness Remediation** | **component design retained; active work superseded** | Its detector/occupancy/projection tasks execute only through P0-ACH |
 | 10 | **Account Truth Convergence And Failed-Submit Capacity Conservation** | **P0 deployed component baseline** | Migration 140 and release `386cc3d7` provide active 2-position Account Current and terminal pre-dispatch capacity release |
-| 11 | **P0-ACH R11-T00～T08 Ticket post-creation engineering closure** | **local implementation and certification complete** | Early-failure terminalization, exact-fill protection binding, Initial Stop latency, lease/deadline, current truth, hot-path cost, dead-code and quality-gate findings are closed on the branch |
-| 12 | **R11-T09 bounded deploy and natural-event acceptance** | **after all engineering gates and explicit Owner deploy confirmation** | Exact SHA/schema deploy preserves no current unsafe aggregate; a natural eligible Ticket reaches `open_protected` or one exact terminal blocker visible to monitor |
-| 13 | **R1B venue and lifecycle calibration** | **event-driven after R11 acceptance** | Measure fill, slippage, fees, funding, protection and runner behavior from the official path without weakening safety boundaries |
+| 11 | **P0-ACH R12 local EntryEffect/ProtectionAuthority certification** | **complete on `dev@4debdc00`** | Atomic EntryEffect projection, exact-source Initial Stop, absolute deadline, recovery/current truth and typed PG full-chain acceptance are complete locally |
+| 12 | **R12 controlled Tokyo deploy and postdeploy verification** | **next P0 operational step** | Re-read current aggregate, apply exact SHA/schema `146` under fence, verify runtime head/timers/current truth with no exchange write |
+| 13 | **R12 natural-event acceptance then R1B calibration** | **event-driven after controlled deploy** | A distinct natural Ticket reaches same-source `open_protected`, exact terminal blocker, then venue fill/slippage/fee/funding calibration without weakening safety boundaries |
 
 ## Why This Was Not Detected Before Production Signals
 

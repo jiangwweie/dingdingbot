@@ -1,20 +1,32 @@
 ---
 title: P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_DESIGN
-status: CURRENT_DESIGN_LOCAL_IMPLEMENTATION_CERTIFIED_AWAITING_OWNER_DEPLOY_CONFIRMATION
+status: COMPONENT_DESIGN_SUPERSEDED_BY_R12_LOCAL_CERTIFIED
 authority: docs/current/P0_TICKET_POST_CREATION_DURABLE_SUBMIT_AND_PROTECTION_CONVERGENCE_DESIGN.md
 program_id: P0-ACH-R11
 parent_program: P0-ACH
 supersedes_scope: ticket_created_to_open_protected_defect_remediation
 current_runtime_commit: 8c61a208062520a5c426e2151e4692e256fec5dd
 current_schema_revision: 143
-last_verified: 2026-07-21
+last_verified: 2026-07-22
+corrective_design: docs/current/P0_ENTRY_EFFECT_PROTECTION_AUTHORITY_AND_DEADLINE_REMEDIATION_DESIGN.md
 target_state: ticket_post_creation_pre_live_certified
 owner_policy_change: none
 exchange_write_authority: unchanged
-production_deploy: requires_separate_owner_confirmation_after_local_merge_readiness
+production_deploy: superseded_by_r12_controlled_deploy_stage
 ---
 
 # P0 Ticket 创建后 Durable Submit 与 Protection Barrier 收敛设计
+
+## 0. Status Transition — 2026-07-22
+
+本文件保留 **R11** 的问题登记、设计取舍和已完成组件范围。R11 后续审查发现
+ENTRY effect 跨 Ticket TTL、exact-source drain 与 absolute deadline 的缺口；其纠偏已在
+**R12** 完成并合入 `dev@4debdc00`。因此 R11 的“本地认证后等待部署”不再是当前
+项目状态。
+
+当前权威状态、剩余部署步骤与自然事件验收边界以
+`P0_ENTRY_EFFECT_PROTECTION_AUTHORITY_AND_DEADLINE_REMEDIATION_DESIGN.md` 为准。
+Tokyo 的 `8c61a208` / schema `143` 仅为最后留存快照，不得代替部署前实时核验。
 
 ## 0. 决策摘要
 
@@ -76,7 +88,7 @@ authority_change_required: false
 该问题不是策略信号条件、Owner policy、资本授权或 live profile 缺失。
 它是 **现有已授权范围内的工程安全缺陷**。
 
-### 0.4 2026-07-21 本地实现闭合记录
+### 0.4 2026-07-21 R11 本地实现闭合记录（历史）
 
 以下是当前分支的 **本地工程事实**，不等同于 Tokyo 已部署或自然真实订单验收：
 
@@ -88,10 +100,10 @@ authority_change_required: false
 | `TPS-P1-02`、`TPS-P1-03` | Action-Time 改为 exact ticket bundle；Entry effect 后立即进入 lifecycle/reconciliation，monitor 区分 pending 与无保护 incident |
 | `TPS-P2-01`、`TPS-P2-03` | Console direct submit 已删除；canonical instrument 断言改为验证 Ticket 冻结 identity；Ruff 清零 |
 
-本地验收为定向 **268 项**通过（其中 265 项主回归加 3 项 materialization），
+R11 本地验收曾记录定向 **268 项**通过（其中 265 项主回归加 3 项 materialization），
 `audit_production_runtime_file_io.py` 为 `suspicious_runtime_file_authority=0`、
-`frequent_report_write=0`，Alembic head 为 `144`。Tokyo 当前仍是 `8c61a208` / schema `143`，
-下一阻塞是 Owner 部署确认，而不是策略、授权或工程实现缺口。
+`frequent_report_write=0`，Alembic head 为 `144`。R12 后续复现证明这组 green checks 未覆盖
+Entry 跨 TTL、exact-source drain 与 absolute deadline；当前本地认证和部署边界以 R12 文档为准。
 
 ## 1. 完整问题登记
 
