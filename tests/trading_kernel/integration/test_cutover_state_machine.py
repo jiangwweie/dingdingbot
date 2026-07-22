@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -29,19 +28,15 @@ from scripts.trading_kernel.verify_flat_cutover import (
     verify_cutover_facts,
 )
 from src.trading_kernel.infrastructure.pg_models import (
-    entry_lane_current,
-    instrument_rules_current,
     metadata,
-    owner_policy_current,
     runtime_capabilities_current,
-    runtime_profiles,
-    runtime_scopes_current,
     schema_metadata,
 )
-from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.infrastructure.strategy_registry_seed import (
-    seed_strategy_registry,
+from src.trading_kernel.infrastructure.runtime_authority_seed import (
+    RuntimeAuthoritySeedRequest,
+    build_runtime_seed_identity,
+    seed_runtime_authority,
 )
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
@@ -77,7 +72,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
 
     assert plan.target_commit == "a" * 40
     assert plan.target_schema_revision == "0001_initial"
-    assert plan.target_seed_identity == "sha256:" + "b" * 64
+    assert plan.target_seed_identity.startswith("sha256:")
     assert CUTOVER_PHASES == (
         CutoverPhase.PLAN_IDENTITIES,
         CutoverPhase.FENCE_EXCHANGE_WRITES,
@@ -90,7 +85,7 @@ def test_cutover_plan_freezes_exact_target_identity_and_phase_order() -> None:
         CutoverPhase.CERTIFY_SCHEMA_AND_READONLY,
         CutoverPhase.ENABLE_OBSERVATION_MONITOR,
         CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE,
-        CutoverPhase.ENABLE_EXCHANGE_COMMANDS,
+        CutoverPhase.CERTIFY_ENTRY_FENCED,
     )
     with pytest.raises(ValidationError):
         _plan(target_commit="not-a-commit")
@@ -252,14 +247,13 @@ async def test_journal_rejects_same_cutover_id_with_changed_plan_identity(
 
 
 @pytest.mark.asyncio
-async def test_resume_after_exchange_command_enable_effect_does_not_restart_cutover(
+async def test_resume_after_entry_fence_certification_does_not_restart_cutover(
     journal_database_url: str,
 ) -> None:
     plan = _plan(cutover_id="tokyo-kernel-final-phase-crash")
     adapter = FakeCutoverAdapter(
         _facts(plan),
-        fail_after_effect_once=CutoverPhase.ENABLE_EXCHANGE_COMMANDS,
-        activate_new_writer_on_enable=True,
+        fail_after_effect_once=CutoverPhase.CERTIFY_ENTRY_FENCED,
     )
     journal = PostgresCutoverJournal(journal_database_url)
     try:
@@ -272,7 +266,7 @@ async def test_resume_after_exchange_command_enable_effect_does_not_restart_cuto
 
     assert completed.status == "completed"
     assert adapter.apply_calls.count(CutoverPhase.REBUILD_APPLICATION_SCHEMA) == 1
-    assert adapter.apply_calls.count(CutoverPhase.ENABLE_EXCHANGE_COMMANDS) == 1
+    assert adapter.apply_calls.count(CutoverPhase.CERTIFY_ENTRY_FENCED) == 1
 
 
 @pytest.mark.asyncio
@@ -336,9 +330,8 @@ async def test_disposable_postgres_rehearsal_rebuilds_clean_schema_and_seeds_aut
     assert "legacy_execution_path" not in actual_tables
     assert seed_identity == plan.target_seed_identity
     assert capabilities == {
-        "exchange_commands": True,
-        "observation_monitor": True,
-        "signal_to_ticket": True,
+        "exchange_commands": False,
+        "strategy_signal_ingest": True,
     }
 
 
@@ -408,12 +401,10 @@ class FakeCutoverAdapter:
         *,
         final_fact_change: dict[str, object] | None = None,
         fail_after_effect_once: CutoverPhase | None = None,
-        activate_new_writer_on_enable: bool = False,
     ) -> None:
         self.facts = facts
         self.final_fact_change = final_fact_change or {}
         self.fail_after_effect_once = fail_after_effect_once
-        self.activate_new_writer_on_enable = activate_new_writer_on_enable
         self.failed_once = False
         self.apply_calls: list[CutoverPhase] = []
         self.satisfied: set[CutoverPhase] = set()
@@ -433,16 +424,6 @@ class FakeCutoverAdapter:
             )
         elif phase is CutoverPhase.STOP_OLD_WRITERS:
             self.facts = self.facts.model_copy(update={"active_old_writers": ()})
-        elif (
-            phase is CutoverPhase.ENABLE_EXCHANGE_COMMANDS
-            and self.activate_new_writer_on_enable
-        ):
-            self.facts = self.facts.model_copy(
-                update={
-                    "active_new_writers": ("kernel-worker",),
-                    "exchange_writes_fenced": False,
-                }
-            )
         self.satisfied.add(phase)
         if phase is self.fail_after_effect_once and not self.failed_once:
             self.failed_once = True
@@ -539,6 +520,8 @@ class LocalPostgresCutoverAdapter:
         self.new_writers: tuple[str, ...] = ()
         self.release_deployed = False
         self.readonly_certified = False
+        self.observation_enabled = False
+        self.signal_to_ticket_no_write_certified = False
 
     async def close(self) -> None:
         await self.engine.dispose()
@@ -591,13 +574,12 @@ class LocalPostgresCutoverAdapter:
                 raise RuntimeError("rehearsal schema certification failed")
             self.readonly_certified = True
         elif phase is CutoverPhase.ENABLE_OBSERVATION_MONITOR:
-            await self._set_capability("observation_monitor", enabled=True)
+            self.observation_enabled = True
         elif phase is CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE:
-            await self._set_capability("signal_to_ticket", enabled=True)
-        elif phase is CutoverPhase.ENABLE_EXCHANGE_COMMANDS:
-            await self._set_capability("exchange_commands", enabled=True)
-            self.new_writers = ("kernel-worker",)
-            self.writes_fenced = False
+            self.signal_to_ticket_no_write_certified = True
+        elif phase is CutoverPhase.CERTIFY_ENTRY_FENCED:
+            if await self._capability_enabled("exchange_commands"):
+                raise RuntimeError("exchange commands must remain disabled")
 
     async def phase_satisfied(
         self,
@@ -625,137 +607,31 @@ class LocalPostgresCutoverAdapter:
         if phase is CutoverPhase.CERTIFY_SCHEMA_AND_READONLY:
             return self.readonly_certified
         if phase is CutoverPhase.ENABLE_OBSERVATION_MONITOR:
-            return await self._capability_enabled("observation_monitor")
+            return self.observation_enabled
         if phase is CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE:
             return (
-                await self._capability_enabled("signal_to_ticket")
+                self.signal_to_ticket_no_write_certified
                 and not await self._capability_enabled("exchange_commands")
             )
-        if phase is CutoverPhase.ENABLE_EXCHANGE_COMMANDS:
-            return await self._capability_enabled("exchange_commands")
+        if phase is CutoverPhase.CERTIFY_ENTRY_FENCED:
+            return (
+                self.writes_fenced
+                and not await self._capability_enabled("exchange_commands")
+            )
         return False
 
     async def _seed_authority(self, plan: CutoverPlan) -> None:
         async with PostgresKernelUnitOfWork(self.engine) as uow:
-            await seed_strategy_registry(uow, seeded_at_ms=1_000)
-
-        sor_long = next(
-            contract
-            for contract in registered_strategy_contracts()
-            if contract.event_id == "SOR-LONG"
-        )
-        async with self.engine.begin() as connection:
-            await connection.execute(
-                sa.insert(instrument_rules_current).values(
-                    exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                    quantity_step=Decimal("0.001"),
-                    price_tick=Decimal("0.1"),
-                    min_quantity=Decimal("0.001"),
-                    min_notional=Decimal("5"),
-                    session_and_settlement={},
-                    observed_at_ms=1_000,
-                    valid_until_ms=10_000,
-                    projection_version=1,
-                )
-            )
-            await connection.execute(
-                sa.insert(owner_policy_current).values(
-                    owner_policy_id="policy-main",
-                    policy_version=1,
-                    enabled=True,
-                    real_submit_enabled=False,
-                    max_concurrent_tickets=8,
-                    max_gross_notional=Decimal("1000"),
-                    scope={},
-                    updated_at_ms=1_000,
-                )
-            )
-            await connection.execute(
-                sa.insert(runtime_profiles).values(
-                    runtime_profile_id=plan.runtime_profile_id,
-                    venue_id=plan.venue_id,
+            result = await seed_runtime_authority(
+                uow,
+                RuntimeAuthoritySeedRequest(
                     account_id=plan.account_id,
-                    environment="live",
-                    position_mode="independent_sides",
-                    status="active",
-                    updated_at_ms=1_000,
-                )
+                    runtime_commit=plan.target_commit,
+                    schema_revision=plan.target_schema_revision,
+                    seeded_at_ms=1_000,
+                ),
             )
-            await connection.execute(
-                sa.insert(runtime_scopes_current).values(
-                    runtime_scope_id="scope-sor-btc-long",
-                    strategy_group_id=sor_long.strategy_group_id,
-                    strategy_version_id=sor_long.strategy_version_id,
-                    event_spec_id=sor_long.event_spec_id,
-                    runtime_profile_id=plan.runtime_profile_id,
-                    owner_policy_id="policy-main",
-                    exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                    position_side="long",
-                    enabled=True,
-                    scope_version=1,
-                    updated_at_ms=1_000,
-                )
-            )
-            await connection.execute(
-                sa.insert(entry_lane_current).values(
-                    lane_id="global-entry",
-                    ticket_id=None,
-                    signal_event_id=None,
-                    status="idle",
-                    claimed_at_ms=None,
-                    lease_until_ms=None,
-                    claim_owner=None,
-                    version=0,
-                )
-            )
-            await connection.execute(
-                sa.insert(schema_metadata),
-                [
-                    {
-                        "metadata_key": "runtime_commit",
-                        "metadata_value": plan.target_commit,
-                        "updated_at_ms": 1_000,
-                    },
-                    {
-                        "metadata_key": "schema_revision",
-                        "metadata_value": plan.target_schema_revision,
-                        "updated_at_ms": 1_000,
-                    },
-                    {
-                        "metadata_key": "seed_identity",
-                        "metadata_value": plan.target_seed_identity,
-                        "updated_at_ms": 1_000,
-                    },
-                ],
-            )
-            await connection.execute(
-                sa.insert(runtime_capabilities_current),
-                [
-                    {
-                        "capability_key": capability,
-                        "enabled": False,
-                        "certified_commit": plan.target_commit,
-                        "schema_revision": plan.target_schema_revision,
-                        "certification": {},
-                        "updated_at_ms": 1_000,
-                    }
-                    for capability in (
-                        "observation_monitor",
-                        "signal_to_ticket",
-                        "exchange_commands",
-                    )
-                ],
-            )
-
-    async def _set_capability(self, capability: str, *, enabled: bool) -> None:
-        async with self.engine.begin() as connection:
-            await connection.execute(
-                sa.update(runtime_capabilities_current)
-                .where(
-                    runtime_capabilities_current.c.capability_key == capability
-                )
-                .values(enabled=enabled, certification={"status": "pass"})
-            )
+        assert result.runtime_seed_semantic_hash == plan.target_seed_identity
 
     async def _capability_enabled(self, capability: str) -> bool:
         async with self.engine.connect() as connection:
@@ -803,6 +679,16 @@ class LocalPostgresCutoverAdapter:
 
 
 def _plan(**changes: object) -> CutoverPlan:
+    runtime_commit = "a" * 40
+    schema_revision = "0001_initial"
+    seed_identity = build_runtime_seed_identity(
+        RuntimeAuthoritySeedRequest(
+            account_id="subaccount-main",
+            runtime_commit=runtime_commit,
+            schema_revision=schema_revision,
+            seeded_at_ms=1_000,
+        )
+    )
     values: dict[str, object] = {
         "cutover_id": "tokyo-kernel-20260722",
         "server_id": "tokyo-primary",
@@ -811,9 +697,9 @@ def _plan(**changes: object) -> CutoverPlan:
         "account_id": "subaccount-main",
         "runtime_profile_id": "tiny-live-v1",
         "application_schema": "public",
-        "target_commit": "a" * 40,
-        "target_schema_revision": "0001_initial",
-        "target_seed_identity": "sha256:" + "b" * 64,
+        "target_commit": runtime_commit,
+        "target_schema_revision": schema_revision,
+        "target_seed_identity": seed_identity,
         "target_release_id": "release-aaaaaaaaaaaa",
     }
     values.update(changes)

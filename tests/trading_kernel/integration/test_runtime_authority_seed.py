@@ -130,6 +130,9 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
     assert first.total_inserted_count > 0
     assert second.total_inserted_count == 0
     assert second.runtime_seed_semantic_hash == first.runtime_seed_semantic_hash
+    assert runtime_seed.build_runtime_seed_identity(request) == (
+        first.runtime_seed_semantic_hash
+    )
 
     async with runtime_seed_engine.connect() as connection:
         policy = (

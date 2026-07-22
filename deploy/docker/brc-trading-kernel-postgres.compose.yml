@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: brc-trading-kernel-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: brc_kernel
+      POSTGRES_PASSWORD: ${TRADING_KERNEL_POSTGRES_PASSWORD}
+      POSTGRES_DB: brc_trading_kernel
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - brc-trading-kernel-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brc_kernel -d brc_trading_kernel"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  brc-trading-kernel-pg-data:
+    name: brc-trading-kernel-pg-data

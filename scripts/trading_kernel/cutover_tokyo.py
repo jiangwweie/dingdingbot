@@ -51,7 +51,7 @@ class CutoverPhase(StrEnum):
     CERTIFY_SCHEMA_AND_READONLY = "certify_schema_and_readonly"
     ENABLE_OBSERVATION_MONITOR = "enable_observation_monitor"
     CERTIFY_SIGNAL_TO_TICKET_NO_WRITE = "certify_signal_to_ticket_no_write"
-    ENABLE_EXCHANGE_COMMANDS = "enable_exchange_commands"
+    CERTIFY_ENTRY_FENCED = "certify_entry_fenced"
 
 
 CUTOVER_PHASES = (
@@ -66,7 +66,7 @@ CUTOVER_PHASES = (
     CutoverPhase.CERTIFY_SCHEMA_AND_READONLY,
     CutoverPhase.ENABLE_OBSERVATION_MONITOR,
     CutoverPhase.CERTIFY_SIGNAL_TO_TICKET_NO_WRITE,
-    CutoverPhase.ENABLE_EXCHANGE_COMMANDS,
+    CutoverPhase.CERTIFY_ENTRY_FENCED,
 )
 
 

@@ -14,7 +14,10 @@ import sqlalchemy as sa
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.domain.strategy_registry import (
+    build_registry_semantic_hash,
+    registered_strategy_contracts,
+)
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     entry_lane_current,
@@ -174,6 +177,19 @@ _POLICY_COMPARE_KEYS = (
     "target_leverage",
     "scope",
 )
+
+
+def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
+    """Compute the exact seed identity before touching PostgreSQL."""
+
+    contracts = registered_strategy_contracts()
+    scope_ids = _scope_ids(_runtime_scope_rows(request.seeded_at_ms))
+    return _seed_identity(
+        account_id=request.account_id,
+        schema_revision=request.schema_revision,
+        registry_semantic_hash=build_registry_semantic_hash(contracts),
+        scope_ids=scope_ids,
+    )
 
 
 async def seed_runtime_authority(
