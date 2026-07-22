@@ -49,6 +49,41 @@ class RuntimeIncidentRecord(BaseModel):
     resolved_at_ms: int | None = None
 
 
+class OwnerPolicySnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    owner_policy_id: str
+    policy_version: int
+    enabled: bool
+    real_submit_enabled: bool
+    max_concurrent_tickets: int
+    max_gross_notional: Decimal
+
+
+class AccountExposureSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    account_id: str
+    gross_notional: Decimal
+    gross_risk_at_stop: Decimal
+    active_ticket_count: int
+    projection_version: int
+    updated_at_ms: int
+
+
+class EntryLaneSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    lane_id: str
+    ticket_id: str | None
+    signal_event_id: str | None
+    status: str
+    claimed_at_ms: int | None
+    lease_until_ms: int | None
+    claim_owner: str | None
+    version: int
+
+
 class TicketRepository(Protocol):
     async def add(self, ticket: TradeTicket) -> None: ...
 
@@ -112,6 +147,49 @@ class IncidentRepository(Protocol):
     async def resolve(self, incident_id: str, *, resolved_at_ms: int) -> None: ...
 
 
+class EntryAdmissionRepository(Protocol):
+    async def lock_global_lane(self) -> EntryLaneSnapshot: ...
+
+    async def get_global_lane(self) -> EntryLaneSnapshot | None: ...
+
+    async def get_owner_policy(
+        self,
+        owner_policy_id: str,
+    ) -> OwnerPolicySnapshot | None: ...
+
+    async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool: ...
+
+    async def has_ticket_for_signal(self, signal_event_id: str) -> bool: ...
+
+    async def get_account_exposure(
+        self,
+        account_id: str,
+        *,
+        for_update: bool = False,
+    ) -> AccountExposureSnapshot | None: ...
+
+    async def reserve_account_exposure(
+        self,
+        *,
+        account_id: str,
+        notional: Decimal,
+        risk_at_stop: Decimal,
+        expected_version: int | None,
+        updated_at_ms: int,
+    ) -> None: ...
+
+    async def claim_global_lane(
+        self,
+        *,
+        ticket_id: str,
+        signal_event_id: str,
+        claim_owner: str,
+        claimed_at_ms: int,
+        lease_until_ms: int,
+        expected_version: int,
+    ) -> None: ...
+
+
 class KernelUnitOfWork(Protocol):
     tickets: TicketRepository
     aggregates: AggregateRepository
@@ -119,6 +197,7 @@ class KernelUnitOfWork(Protocol):
     exchange_commands: ExchangeCommandRepository
     budgets: BudgetRepository
     incidents: IncidentRepository
+    entry_admission: EntryAdmissionRepository
 
     async def __aenter__(self) -> Self: ...
 

@@ -6,11 +6,15 @@ from collections.abc import Mapping
 from decimal import Decimal
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import (
     AggregateVersionConflict,
+    AccountExposureSnapshot,
     BudgetReservationRecord,
+    EntryLaneSnapshot,
+    OwnerPolicySnapshot,
     RuntimeIncidentRecord,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
@@ -40,8 +44,11 @@ from src.trading_kernel.domain.identities import (
 )
 from src.trading_kernel.domain.ticket import EntryOrderType, TicketStatus, TradeTicket
 from src.trading_kernel.infrastructure.pg_models import (
+    account_exposure_current,
     budget_reservations,
+    entry_lane_current,
     exchange_commands,
+    owner_policy_current,
     runtime_incidents,
     trade_aggregates,
     trade_events,
@@ -306,6 +313,173 @@ class PostgresIncidentRepository:
             .where(runtime_incidents.c.incident_id == incident_id)
             .values(status="resolved", resolved_at_ms=resolved_at_ms)
         )
+
+
+class PostgresEntryAdmissionRepository:
+    GLOBAL_LANE_ID = "global-entry"
+
+    def __init__(self, connection: AsyncConnection) -> None:
+        self._connection = connection
+
+    async def lock_global_lane(self) -> EntryLaneSnapshot:
+        await self._connection.execute(
+            pg_insert(entry_lane_current)
+            .values(
+                lane_id=self.GLOBAL_LANE_ID,
+                ticket_id=None,
+                signal_event_id=None,
+                status="idle",
+                claimed_at_ms=None,
+                lease_until_ms=None,
+                claim_owner=None,
+                version=0,
+            )
+            .on_conflict_do_nothing(index_elements=[entry_lane_current.c.lane_id])
+        )
+        result = await self._connection.execute(
+            sa.select(entry_lane_current)
+            .where(entry_lane_current.c.lane_id == self.GLOBAL_LANE_ID)
+            .with_for_update(of=entry_lane_current)
+        )
+        row = result.mappings().one()
+        return EntryLaneSnapshot.model_validate(row)
+
+    async def get_global_lane(self) -> EntryLaneSnapshot | None:
+        result = await self._connection.execute(
+            sa.select(entry_lane_current).where(
+                entry_lane_current.c.lane_id == self.GLOBAL_LANE_ID
+            )
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else EntryLaneSnapshot.model_validate(row)
+
+    async def get_owner_policy(
+        self,
+        owner_policy_id: str,
+    ) -> OwnerPolicySnapshot | None:
+        result = await self._connection.execute(
+            sa.select(owner_policy_current).where(
+                owner_policy_current.c.owner_policy_id == owner_policy_id
+            )
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return OwnerPolicySnapshot(
+            owner_policy_id=str(row["owner_policy_id"]),
+            policy_version=int(row["policy_version"]),
+            enabled=bool(row["enabled"]),
+            real_submit_enabled=bool(row["real_submit_enabled"]),
+            max_concurrent_tickets=int(row["max_concurrent_tickets"]),
+            max_gross_notional=Decimal(row["max_gross_notional"]),
+        )
+
+    async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool:
+        result = await self._connection.execute(
+            sa.select(trade_tickets.c.ticket_id)
+            .where(
+                trade_tickets.c.active_netting_domain_key == netting_domain_key
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def has_ticket_for_signal(self, signal_event_id: str) -> bool:
+        result = await self._connection.execute(
+            sa.select(trade_tickets.c.ticket_id)
+            .where(trade_tickets.c.signal_event_id == signal_event_id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def get_account_exposure(
+        self,
+        account_id: str,
+        *,
+        for_update: bool = False,
+    ) -> AccountExposureSnapshot | None:
+        statement = sa.select(account_exposure_current).where(
+            account_exposure_current.c.account_id == account_id
+        )
+        if for_update:
+            statement = statement.with_for_update(of=account_exposure_current)
+        result = await self._connection.execute(statement)
+        row = result.mappings().one_or_none()
+        return (
+            None
+            if row is None
+            else AccountExposureSnapshot.model_validate(row)
+        )
+
+    async def reserve_account_exposure(
+        self,
+        *,
+        account_id: str,
+        notional: Decimal,
+        risk_at_stop: Decimal,
+        expected_version: int | None,
+        updated_at_ms: int,
+    ) -> None:
+        if expected_version is None:
+            await self._connection.execute(
+                sa.insert(account_exposure_current).values(
+                    account_id=account_id,
+                    gross_notional=notional,
+                    gross_risk_at_stop=risk_at_stop,
+                    active_ticket_count=1,
+                    projection_version=1,
+                    updated_at_ms=updated_at_ms,
+                )
+            )
+            return
+        result = await self._connection.execute(
+            sa.update(account_exposure_current)
+            .where(
+                account_exposure_current.c.account_id == account_id,
+                account_exposure_current.c.projection_version == expected_version,
+            )
+            .values(
+                gross_notional=account_exposure_current.c.gross_notional + notional,
+                gross_risk_at_stop=(
+                    account_exposure_current.c.gross_risk_at_stop + risk_at_stop
+                ),
+                active_ticket_count=account_exposure_current.c.active_ticket_count + 1,
+                projection_version=expected_version + 1,
+                updated_at_ms=updated_at_ms,
+            )
+        )
+        if result.rowcount != 1:
+            raise AggregateVersionConflict("account exposure changed during reserve")
+
+    async def claim_global_lane(
+        self,
+        *,
+        ticket_id: str,
+        signal_event_id: str,
+        claim_owner: str,
+        claimed_at_ms: int,
+        lease_until_ms: int,
+        expected_version: int,
+    ) -> None:
+        result = await self._connection.execute(
+            sa.update(entry_lane_current)
+            .where(
+                entry_lane_current.c.lane_id == self.GLOBAL_LANE_ID,
+                entry_lane_current.c.status == "idle",
+                entry_lane_current.c.version == expected_version,
+            )
+            .values(
+                ticket_id=ticket_id,
+                signal_event_id=signal_event_id,
+                status="claimed",
+                claimed_at_ms=claimed_at_ms,
+                lease_until_ms=lease_until_ms,
+                claim_owner=claim_owner,
+                version=expected_version + 1,
+            )
+        )
+        if result.rowcount != 1:
+            raise AggregateVersionConflict("global entry lane changed during claim")
 
 
 def _ticket_values(ticket: TradeTicket) -> dict[str, object]:

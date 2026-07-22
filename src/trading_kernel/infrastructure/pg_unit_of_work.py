@@ -26,6 +26,7 @@ from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresAggregateRepository,
     PostgresBudgetRepository,
     PostgresEventRepository,
+    PostgresEntryAdmissionRepository,
     PostgresExchangeCommandRepository,
     PostgresIncidentRepository,
     PostgresTicketRepository,
@@ -52,6 +53,7 @@ class PostgresKernelUnitOfWork:
         self.exchange_commands = PostgresExchangeCommandRepository(self._connection)
         self.budgets = PostgresBudgetRepository(self._connection)
         self.incidents = PostgresIncidentRepository(self._connection)
+        self.entry_admission = PostgresEntryAdmissionRepository(self._connection)
         return self
 
     async def __aexit__(
