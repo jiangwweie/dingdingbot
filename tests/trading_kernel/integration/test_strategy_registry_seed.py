@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+import subprocess
+import sys
 from uuid import uuid4
 
 import asyncpg
@@ -27,6 +30,35 @@ from tests.trading_kernel.integration.test_issue_ticket import (
     _database_url,
     _run_alembic,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_strategy_registry_seed_cli_is_runnable_outside_repo(
+    tmp_path: Path,
+) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(
+                REPO_ROOT
+                / "scripts"
+                / "trading_kernel"
+                / "seed_strategy_registry.py"
+            ),
+            "--help",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--database-url" in result.stdout
+    assert list(tmp_path.rglob("*")) == []
 
 
 @pytest_asyncio.fixture

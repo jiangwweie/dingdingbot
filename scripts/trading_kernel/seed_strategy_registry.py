@@ -7,11 +7,20 @@ import argparse
 import asyncio
 from datetime import UTC, datetime
 import os
+from pathlib import Path
+import sys
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.infrastructure.strategy_registry_seed import (
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.trading_kernel.infrastructure.pg_unit_of_work import (  # noqa: E402
+    PostgresKernelUnitOfWork,
+)
+from src.trading_kernel.infrastructure.strategy_registry_seed import (  # noqa: E402
     seed_strategy_registry,
 )
 
