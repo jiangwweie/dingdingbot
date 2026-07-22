@@ -1090,6 +1090,11 @@ def _write_runtime_detector_decisions(
                     ) ON CONFLICT (lane_identity_key, event_spec_id, event_spec_version,
                       detector_key, decision_identity)
                     WHERE fact_surface = 'pretrade_strategy'
+                      AND lane_identity_key IS NOT NULL
+                      AND event_spec_id IS NOT NULL
+                      AND event_spec_version IS NOT NULL
+                      AND detector_key IS NOT NULL
+                      AND decision_identity IS NOT NULL
                     DO NOTHING
                     """
                 ),

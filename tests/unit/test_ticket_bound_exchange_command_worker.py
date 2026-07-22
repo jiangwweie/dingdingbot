@@ -37,6 +37,9 @@ from tests.unit.test_ticket_bound_protected_submit_attempt import (
     _create_ready_protected_submit,
     _prepare_real_submit,
 )
+from src.application.action_time.protected_submit_attempt import (
+    _project_durable_exchange_command_results,
+)
 from tests.unit.test_ticket_bound_runtime_safety_state_materialization import (
     _load_module,
     _upgrade_module,
@@ -111,6 +114,28 @@ class _WorkerGateway:
         return SimpleNamespace(
             is_success=True,
             exchange_order_id=kwargs["exchange_order_id"],
+        )
+
+
+class _RoleTruthGateway(_WorkerGateway):
+    """Return realistic entry-fill and resting-protection result facts."""
+
+    async def place_order(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        is_entry = kwargs.get("reduce_only") is not True
+        return SimpleNamespace(
+            is_success=True,
+            exchange_order_id=f"exchange-{kwargs['client_order_id']}",
+            filled_qty=kwargs["amount"] if is_entry else Decimal("0"),
+            average_exec_price=Decimal("2000") if is_entry else None,
+            exchange_order_status="FILLED" if is_entry else "OPEN",
+            selected_leverage=(
+                kwargs.get("desired_leverage") if is_entry else None
+            ),
+            exchange_configured_initial_leverage=(
+                kwargs.get("desired_leverage") if is_entry else None
+            ),
+            leverage_verified_at_ms=(NOW_MS + 4999 if is_entry else None),
         )
 
 
@@ -238,6 +263,118 @@ async def test_worker_commits_claim_before_exchange_io_and_result_after(
         ).scalar_one()
         == 1
     )
+
+
+@pytest.mark.asyncio
+async def test_protected_submit_source_completion_preserves_typed_role_results(
+    pg_control_connection,
+):
+    ids = _create_ready_protected_submit(pg_control_connection)
+    _prepare_real_submit(pg_control_connection, ids)
+    pg_control_connection.commit()
+    engine = pg_control_connection.engine
+    gateway = _RoleTruthGateway()
+
+    results = []
+    entry_observed_at_ms = None
+    for offset in (5000, 6000, 7000):
+        results.append(
+            await run_one_ticket_bound_exchange_command(
+                engine,
+                gateway=gateway,
+                worker_id=f"role-truth-worker-{offset}",
+                now_ms=NOW_MS + offset,
+                command_sources=("protected_submit",),
+            )
+        )
+        if entry_observed_at_ms is None:
+            entry_observed_at_ms = pg_control_connection.execute(
+                text(
+                    "SELECT exchange_observed_at_ms "
+                    "FROM brc_ticket_bound_exchange_commands "
+                    "WHERE order_role = 'ENTRY'"
+                )
+            ).scalar_one()
+            pg_control_connection.execute(
+                text(
+                    "UPDATE brc_ticket_bound_exchange_commands "
+                    "SET command_state = 'reconciled_submitted', "
+                    "outcome_class = 'reconciled_exchange_truth' "
+                    "WHERE order_role = 'ENTRY'"
+                )
+            )
+            pg_control_connection.commit()
+
+    assert [result["status"] for result in results] == [
+        "command_confirmed",
+        "command_confirmed",
+        "command_confirmed",
+    ]
+    rows = {
+        row["order_role"]: row
+        for row in pg_control_connection.execute(
+            text(
+                "SELECT order_role, command_state, outcome_class, "
+                "exchange_result, exchange_order_status, executed_qty, "
+                "average_exec_price, exchange_observed_at_ms, "
+                "result_facts_complete "
+                "FROM brc_ticket_bound_exchange_commands"
+            )
+        ).mappings()
+    }
+
+    assert rows["ENTRY"]["exchange_order_status"] == "FILLED"
+    assert rows["ENTRY"]["command_state"] == "reconciled_submitted"
+    assert rows["ENTRY"]["outcome_class"] == "reconciled_exchange_truth"
+    entry_result = rows["ENTRY"]["exchange_result"]
+    if isinstance(entry_result, str):
+        import json
+
+        entry_result = json.loads(entry_result)
+    assert entry_result["selected_leverage"] == 2
+    assert Decimal(str(rows["ENTRY"]["executed_qty"])) == Decimal("0.01")
+    assert Decimal(str(rows["ENTRY"]["average_exec_price"])) == Decimal("2000")
+    assert rows["ENTRY"]["exchange_observed_at_ms"] == entry_observed_at_ms
+    for role in ("SL", "TP1"):
+        assert rows[role]["exchange_order_status"] == "OPEN"
+        assert Decimal(str(rows[role]["executed_qty"])) == Decimal("0")
+        assert rows[role]["average_exec_price"] is None
+        assert rows[role]["result_facts_complete"] in {True, 1}
+    assert (
+        pg_control_connection.execute(
+            text("SELECT status FROM brc_ticket_bound_protected_submit_attempts")
+        ).scalar_one()
+        == "submitted"
+    )
+
+    attempt = dict(
+        pg_control_connection.execute(
+            text("SELECT * FROM brc_ticket_bound_protected_submit_attempts")
+        ).mappings().one()
+    )
+    _project_durable_exchange_command_results(
+        pg_control_connection,
+        attempt=attempt,
+        submit_result={
+            "status": "exchange_submit_orders_submitted",
+            "submitted_orders": [],
+        },
+        now_ms=NOW_MS + 8000,
+    )
+    preserved_entry = pg_control_connection.execute(
+        text(
+            "SELECT command_state, outcome_class, exchange_order_status, "
+            "executed_qty, average_exec_price, exchange_observed_at_ms "
+            "FROM brc_ticket_bound_exchange_commands "
+            "WHERE order_role = 'ENTRY'"
+        )
+    ).mappings().one()
+    assert preserved_entry["command_state"] == "reconciled_submitted"
+    assert preserved_entry["outcome_class"] == "reconciled_exchange_truth"
+    assert preserved_entry["exchange_order_status"] == "FILLED"
+    assert Decimal(str(preserved_entry["executed_qty"])) == Decimal("0.01")
+    assert Decimal(str(preserved_entry["average_exec_price"])) == Decimal("2000")
+    assert preserved_entry["exchange_observed_at_ms"] == entry_observed_at_ms
 
 
 @pytest.mark.asyncio

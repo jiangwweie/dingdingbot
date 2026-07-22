@@ -165,5 +165,14 @@ def test_partial_entry_materializes_protection_for_actual_fill_not_requested_qty
         ),
         {"ticket_id": ids["ticket_id"]},
     ).scalar_one()
+    durable_sl_qty = pg_control_connection.execute(
+        text(
+            "SELECT amount FROM brc_ticket_bound_exchange_commands "
+            "WHERE protected_submit_attempt_id = :attempt_id "
+            "AND order_role = 'SL'"
+        ),
+        {"attempt_id": prepared["protected_submit_attempt_id"]},
+    ).scalar_one()
     assert Decimal(str(lifecycle_qty)) == actual
     assert Decimal(str(sl_qty)) == actual
+    assert Decimal(str(durable_sl_qty)) == actual

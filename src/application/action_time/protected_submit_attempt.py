@@ -579,6 +579,14 @@ def _project_durable_exchange_command_results(
         if str(item).strip()
     ]
     for command in commands:
+        command_state = str(command.get("command_state") or "")
+        if command_state in {
+            "confirmed_submitted",
+            "reconciled_submitted",
+        }:
+            # Durable command truth is already stronger than its derived
+            # aggregate, including when that aggregate omits this role.
+            continue
         role = str(command.get("order_role") or "").upper()
         submitted = submitted_by_role.get(role)
         if submitted:
@@ -590,6 +598,15 @@ def _project_durable_exchange_command_results(
                 "resolved_at_ms": now_ms,
                 "updated_at_ms": now_ms,
             }
+            if role in {"SL", "TP1"}:
+                submitted_amount = _optional_result_decimal(submitted.get("amount"))
+                if submitted_amount is not None and submitted_amount > 0:
+                    # The legacy aggregate path is allowed only to initialize
+                    # a still-prepared durable command.  Its protection
+                    # quantity must nevertheless retain the exact accepted
+                    # quantity so the typed exit materializer can prove a
+                    # partial ENTRY is protected at the actual fill.
+                    values["amount"] = submitted_amount
             typed_result_columns = {
                 "exchange_order_status",
                 "executed_qty",
@@ -619,7 +636,9 @@ def _project_durable_exchange_command_results(
                         ),
                         "executed_qty": executed_qty,
                         "average_exec_price": average_exec_price,
-                        "exchange_observed_at_ms": now_ms,
+                        "exchange_observed_at_ms": (
+                            submitted.get("exchange_observed_at_ms") or now_ms
+                        ),
                         "result_facts_complete": facts_complete,
                     }
                 )

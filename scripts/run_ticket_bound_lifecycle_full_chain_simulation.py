@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Run a local ticket-bound L2-L9 full-chain simulation against PG.
+"""Run a disposable-RCI ticket-bound L2-L9 full-chain simulation against PG.
 
 This command constructs PG input rows and runs the ticket-bound lifecycle chain
-with a mock exchange result. It does not call FinalGate, Operation Layer, the
-exchange, live profile mutation, sizing mutation, withdrawal, or transfer.
+through FinalGate and Operation Layer with a mock exchange result. It does not
+call the exchange, mutate the live profile or sizing defaults, or create a
+withdrawal or transfer.
+
+The target database must be an isolated ``brc_rci_test_*`` PostgreSQL database;
+the harness rejects runtime databases before it writes synthetic facts.
 """
 
 from __future__ import annotations

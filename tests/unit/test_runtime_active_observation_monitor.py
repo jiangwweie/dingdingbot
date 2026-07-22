@@ -2346,7 +2346,12 @@ def test_typed_detector_decision_is_immutable_and_repeat_is_a_noop(tmp_path):
                     "ON brc_runtime_fact_snapshots "
                     "(lane_identity_key, event_spec_id, event_spec_version, "
                     "detector_key, decision_identity) "
-                    "WHERE fact_surface = 'pretrade_strategy'"
+                    "WHERE fact_surface = 'pretrade_strategy' "
+                    "AND lane_identity_key IS NOT NULL "
+                    "AND event_spec_id IS NOT NULL "
+                    "AND event_spec_version IS NOT NULL "
+                    "AND detector_key IS NOT NULL "
+                    "AND decision_identity IS NOT NULL"
                 )
             )
 

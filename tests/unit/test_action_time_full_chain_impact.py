@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, text
@@ -29,6 +30,9 @@ from src.application.runtime_strategy_signal_evaluation_service import (
     RuntimeStrategySignalEvaluationStatus,
 )
 from src.application.action_time.full_chain_simulation_harness import (
+    _candidate_runtime_row,
+    _fact_values,
+    _production_shaped_protection_snapshot,
     bind_simulation_ticket_exposure_episode,
     FULL_CHAIN_FAILURE_SCENARIOS,
     FullChainSimulationInput,
@@ -1052,6 +1056,104 @@ def test_current_projection_keeps_new_ticket_in_lane_truth_before_submit_attempt
     )
 
     assert payloads["projection"]["status"] == "current_projections_published"
+
+
+def test_full_chain_snapshot_preserves_typed_decimal_through_flat_closure(
+    pg_control_connection,
+    monkeypatch,
+):
+    _arm_submit_decision_env(monkeypatch)
+    monkeypatch.setattr(publisher.time, "time", lambda: NOW_MS / 1000)
+    runtime_row = _candidate_runtime_row(
+        pg_control_connection,
+        strategy_group_id="CPM-RO-001",
+        symbol="ETHUSDT",
+        side="long",
+    )
+    fact_values = _fact_values(pg_control_connection, runtime_row)
+    fact_values[str(runtime_row["protection_ref_type"])] = "1976"
+    fact_values["last_price"] = "2000"
+    fact_values["take_profit_1"] = "2024"
+
+    payloads = run_ticket_bound_full_chain_simulation(
+        pg_control_connection,
+        FullChainSimulationInput(
+            strategy_group_id="CPM-RO-001",
+            symbol="ETHUSDT",
+            side="long",
+            fact_values=fact_values,
+            now_ms=NOW_MS,
+        ),
+        projection_publisher=lambda conn: (
+            publisher.publish_runtime_control_current_projections(
+                conn,
+                target_runtime_head="a" * 40,
+            )
+        ),
+    )
+    protection_orders = sa.Table(
+        "brc_ticket_bound_exit_protection_orders",
+        sa.MetaData(),
+        autoload_with=pg_control_connection,
+    )
+    typed_sl_qty = pg_control_connection.execute(
+        sa.select(protection_orders.c.qty).where(
+            protection_orders.c.exit_protection_set_id
+            == payloads["protection"]["exit_protection_set_id"],
+            protection_orders.c.role == "SL",
+        )
+    ).scalar_one()
+    snapshot = _production_shaped_protection_snapshot(
+        pg_control_connection,
+        exit_protection_set_id=payloads["protection"]["exit_protection_set_id"],
+        final_exit=False,
+        now_ms=NOW_MS + 10,
+    )
+    snapshot_sl_qty = next(
+        Decimal(order["qty"])
+        for order in snapshot["open_orders"]
+        if order["exchange_order_id"] == "mock-exchange-sl"
+    )
+    attempt_truth = pg_control_connection.execute(
+        text(
+            "SELECT entry_effect_state, protection_barrier_state "
+            "FROM brc_ticket_bound_protected_submit_attempts"
+        )
+    ).mappings().one()
+    command_truth = {
+        row["order_role"]: row
+        for row in pg_control_connection.execute(
+            text(
+                "SELECT order_role, command_state, exchange_order_status "
+                "FROM brc_ticket_bound_exchange_commands"
+            )
+        ).mappings()
+    }
+    active_barrier_holds = pg_control_connection.execute(
+        text(
+            "SELECT COUNT(*) FROM brc_ticket_bound_scope_freezes "
+            "WHERE source_kind = 'protection_barrier' AND status = 'active'"
+        )
+    ).scalar_one()
+
+    assert snapshot_sl_qty == typed_sl_qty
+    assert payloads["submitted"]["projected_roles"] == ["ENTRY", "SL", "TP1"]
+    assert payloads["authority_boundary"]["calls_exchange_write"] is False
+    assert attempt_truth == {
+        "entry_effect_state": "accepted_filled",
+        "protection_barrier_state": "closed",
+    }
+    assert command_truth["ENTRY"]["exchange_order_status"] == "FILLED"
+    assert command_truth["SL"]["command_state"] == "reconciled_submitted"
+    assert command_truth["SL"]["exchange_order_status"] == "FILLED"
+    assert command_truth["TP1"]["command_state"] == "reconciled_absent"
+    assert active_barrier_holds == 0
+    assert "sl_protection_quantity_mismatch" not in payloads["initial_scheduler"][
+        "blockers"
+    ]
+    assert payloads["initial_scheduler"]["status"] == "scheduler_complete"
+    assert payloads["final_scheduler"]["status"] == "scheduler_complete"
+    assert payloads["final"]["status"] == "closed"
 
 
 @pytest.mark.asyncio

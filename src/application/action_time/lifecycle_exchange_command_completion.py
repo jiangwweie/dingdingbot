@@ -320,12 +320,30 @@ def _protected_submit_result_from_commands(
             "order_role": row.get("order_role"),
             "amount": str(row.get("amount")) if row.get("amount") is not None else None,
             "reduce_only": row.get("reduce_only"),
-            "status": "OPEN",
+            "status": (
+                row.get("exchange_order_status") or "confirmed_submitted"
+            ),
+            "filled_qty": (
+                str(row.get("executed_qty"))
+                if row.get("executed_qty") is not None
+                else None
+            ),
+            "average_exec_price": (
+                str(row.get("average_exec_price"))
+                if row.get("average_exec_price") is not None
+                else None
+            ),
+            "exchange_observed_at_ms": row.get("exchange_observed_at_ms"),
         }
         for row in commands
         if str(row.get("command_state") or "") in CONFIRMED
     ]
-    blockers = _failed_command_blockers(commands) if failed else []
+    failed_commands = [
+        row
+        for row in commands
+        if str(row.get("command_state") or "") in BLOCKED
+    ]
+    blockers = _failed_command_blockers(failed_commands) if failed else []
     return {
         "schema": "brc.ticket_bound_protected_submit_result.v1",
         "status": (

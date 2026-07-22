@@ -16,6 +16,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
+from scripts import run_ticket_bound_lifecycle_full_chain_simulation as full_chain_script
 from src.application.action_time import finalgate_preflight as finalgate
 from src.application.action_time import operation_layer_handoff as handoff
 from src.application.action_time import runtime_safety_state as safety
@@ -67,6 +68,10 @@ from src.infrastructure.runtime_signal_forensics_repository import (
 )
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
+)
+from src.application.action_time.full_chain_simulation_harness import (
+    FullChainSimulationInput,
+    run_ticket_bound_full_chain_simulation,
 )
 from src.domain.account_risk import AccountRiskPolicy
 from src.infrastructure.binance_usdm_account_risk_snapshot import (
@@ -353,7 +358,9 @@ async def test_migration_145_repairs_expired_effect_lineage_and_preserves_termin
                 "entry_effect_state = 'not_called', "
                 "entry_effect_observed_at_ms = NULL, "
                 "protection_barrier_state = 'not_started', "
-                "protection_quantity = NULL "
+                "protection_quantity = NULL, "
+                "initial_stop_deadline_at_ms = NULL, "
+                "initial_stop_confirmed_at_ms = NULL "
                 "WHERE protected_submit_attempt_id = :attempt_id"
             ),
             {"attempt_id": prepared["protected_submit_attempt_id"]},
@@ -985,6 +992,151 @@ def _prepare_capacity_invocation(
         valid_until_ms=NOW_MS + 600_000,
     )
     return invocation, capacity, snapshot
+
+
+def _install_full_chain_simulation_runtime_instances(conn) -> None:
+    """Attach all persisted, execution-disabled evaluator identities used by PG."""
+
+    candidates = conn.execute(
+        text(
+            """
+            SELECT candidate_scope_id, strategy_group_id, symbol, side
+            FROM brc_strategy_group_candidate_scope
+            WHERE status = 'active'
+            ORDER BY candidate_scope_id
+            """
+        )
+    ).mappings()
+    for candidate in candidates:
+        conn.execute(
+            text(
+                """
+            INSERT INTO strategy_runtime_instances (
+              runtime_instance_id, trial_binding_id, admission_decision_id,
+              strategy_family_id, strategy_family_version_id,
+              owner_risk_acceptance_id, carrier_id, symbol, side, status,
+              boundary, policy_snapshot, review_requirement,
+              execution_enabled, shadow_mode, created_at_ms, updated_at_ms,
+              activated_at_ms, expires_at_ms, revoked_at_ms, closed_at_ms, metadata
+            ) VALUES (
+              :runtime_instance_id, :trial_binding_id, :admission_decision_id,
+              :strategy_group_id, :strategy_family_version_id,
+              NULL, NULL, :symbol, :side, 'active',
+              CAST('{}' AS JSON), CAST('{}' AS JSON), 'not_required',
+              false, true, :now_ms, :now_ms, :now_ms, NULL, NULL, NULL,
+              CAST('{}' AS JSON)
+            ) ON CONFLICT (runtime_instance_id) DO NOTHING
+                """
+            ),
+            {
+                "runtime_instance_id": (
+                    "simulation:"
+                    f"{candidate['strategy_group_id']}:"
+                    f"{candidate['symbol']}:{candidate['side']}"
+                ),
+                "trial_binding_id": (
+                    f"simulation-trial:{candidate['candidate_scope_id']}"
+                ),
+                "admission_decision_id": (
+                    f"simulation-admission:{candidate['candidate_scope_id']}"
+                ),
+                "strategy_group_id": candidate["strategy_group_id"],
+                "strategy_family_version_id": (
+                    f"simulation-evaluator:{candidate['strategy_group_id']}:v1"
+                ),
+                "symbol": candidate["symbol"],
+                "side": candidate["side"],
+                "now_ms": NOW_MS - 10_000,
+            },
+        )
+
+
+def _enable_full_chain_simulation_lifecycle_capability(conn) -> None:
+    reference = ActionTimeCertificationReferenceV2(
+        stage="post_canary",
+        target_runtime_head="a" * 40,
+        certification_input_digest="sha256:" + "1" * 64,
+        release_activation_outcome_id="process:rci:full-chain-release",
+        release_activation_source_watermark="release:rci:full-chain-watermark",
+        lane_source_watermarks=(
+            LaneSourceWatermarkV1(
+                lane_scope_key="lane:rci:full-chain",
+                lane_identity_key="identity:rci:full-chain",
+                source_watermark="watermark:rci:full-chain",
+                process_outcome_id="process:rci:full-chain-lane",
+            ),
+        ),
+        fact_snapshot_ids=("fact:rci:full-chain",),
+        fact_set_digest="sha256:" + "2" * 64,
+        fact_min_valid_until_ms=NOW_MS + 120_000,
+        deploy_nonce="rci-full-chain-deploy-nonce",
+    )
+    proof = LifecycleMutationEnablementProof(
+        target_runtime_head="a" * 40,
+        lane_identity_digest="sha256:" + "3" * 64,
+        action_time_certification_ref=reference.certification_ref(),
+        action_time_certification_payload=reference,
+        certification_projection_digest="sha256:" + "4" * 64,
+    )
+    result = set_lifecycle_mutation_capability(
+        conn,
+        enabled=True,
+        certification_ref=proof.lifecycle_certification_ref(),
+        now_ms=NOW_MS - 1,
+        proof=proof,
+    )
+    assert result["status"] == "ready", result
+
+
+def test_rci_full_chain_harness_uses_typed_action_time_invocation_on_postgres(
+    postgres_certification_engine,
+):
+    with postgres_certification_engine.connect() as conn:
+        _install_full_chain_simulation_runtime_instances(conn)
+        _enable_full_chain_simulation_lifecycle_capability(conn)
+        payload = run_ticket_bound_full_chain_simulation(
+            conn,
+            FullChainSimulationInput(
+                strategy_group_id="CPM-RO-001",
+                symbol="ETHUSDT",
+                side="long",
+                now_ms=NOW_MS,
+            ),
+            projection_publisher=lambda _conn: {},
+        )
+        assert payload["sequence"]["status"] == "action_time_ticket_sequence_committed"
+        assert payload["ticket"]["action_time_invocation_id"]
+        assert payload["final"]["status"] == "closed"
+        assert payload["authority_boundary"]["calls_exchange_write"] is False
+
+
+def test_rci_full_chain_cli_uses_typed_action_time_invocation_on_postgres(
+    postgres_certification_engine,
+):
+    with postgres_certification_engine.begin() as conn:
+        _install_full_chain_simulation_runtime_instances(conn)
+        _enable_full_chain_simulation_lifecycle_capability(conn)
+    assert full_chain_script.main(
+        [
+            "--database-url",
+            postgres_certification_engine.url.render_as_string(hide_password=False),
+            "--strategy-group-id",
+            "CPM-RO-001",
+            "--symbol",
+            "ETHUSDT",
+            "--side",
+            "long",
+            "--now-ms",
+            str(NOW_MS),
+        ]
+    ) == 0
+    with postgres_certification_engine.connect() as conn:
+        assert conn.execute(
+            text("SELECT COUNT(*) FROM brc_action_time_invocations")
+        ).scalar_one() == 1
+        assert conn.execute(
+            text("SELECT COUNT(*) FROM brc_action_time_tickets")
+        ).scalar_one() == 1
 
 
 def _prepare_exchange_commands(engine) -> None:

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import asyncio
 from contextlib import contextmanager
+from hashlib import sha256
 import json
 import os
 import time
@@ -50,13 +51,36 @@ from src.application.action_time.exchange_command_worker import (
     run_one_ticket_bound_exchange_command,
 )
 from src.application.action_time.exchange_command import (
+    claim_next_exchange_command,
     list_exchange_commands_for_attempt,
+    record_claimed_exchange_command_outcome,
+)
+from src.application.action_time.entry_effect_projection import (
+    project_entry_effect,
+    project_protection_result,
+)
+from src.application.action_time.lifecycle_exchange_command_completion import (
+    apply_completed_lifecycle_exchange_sources,
 )
 from src.application.action_time.ticket_materialization_sequence import (
     materialize_action_time_ticket_sequence,
 )
+from src.application.action_time.action_time_invocation import (
+    start_action_time_invocation,
+)
+from src.application.action_time.account_capacity_reservation import (
+    AccountCapacityReservationResult,
+)
+from src.application.action_time.instrument_risk_facts import InstrumentRiskFacts
 from src.application.action_time.action_time_ticket import (
     compute_action_time_ticket_hash,
+)
+from src.domain.account_risk import AccountRiskPolicy
+from src.domain.instrument_risk_identity import (
+    InstrumentRiskIdentity,
+    InstrumentRuleSnapshotRefV2,
+    RiskClusterMembershipSnapshotRef,
+    instrument_rule_snapshot_v2_semantic_hash,
 )
 from src.application.runtime_process_outcome import materialize_runtime_process_outcome
 from src.application.action_time.runtime_pg_fact_snapshots import (
@@ -67,8 +91,16 @@ from src.application.action_time.ticket_bound_fill_projector import (
     project_ticket_bound_exchange_fills,
 )
 from src.domain.runtime_lane_identity import RuntimeLaneIdentity
+from src.domain.ticket_bound_exchange_command import (
+    ExchangeCommandClaimScope,
+    ExchangeCommandOutcomeClass,
+    ExchangeCommandState,
+)
 from src.infrastructure.runtime_control_state_repository import (
     PgBackedRuntimeControlStateRepository,
+)
+from src.infrastructure.binance_usdm_account_risk_snapshot import (
+    FullAccountRiskSnapshot,
 )
 from src.domain.ticket_exit_policy import (
     ExitEvaluationInput,
@@ -323,7 +355,7 @@ def run_ticket_exit_policy_certification(
             tp1_completion_state="unfilled",
         )
     )
-    partial = evaluate_exit_policy(
+    _partial = evaluate_exit_policy(
         ExitEvaluationInput(
             **base_values,
             tp1_completion_state="partial",
@@ -573,7 +605,7 @@ def run_ticket_bound_pre_exchange_acceptance(
         symbol=acceptance_case.symbol,
         side=acceptance_case.side,
     )
-    _insert_constructed_raw_input(
+    signal_event_id = _insert_constructed_raw_input(
         conn,
         row=row,
         fact_values=dict(acceptance_case.fact_values),
@@ -588,20 +620,24 @@ def run_ticket_bound_pre_exchange_acceptance(
         name="ticket_sequence",
         expected_status="action_time_ticket_sequence_committed",
         completed_at_ms=now_ms + 1,
-        action=lambda: materialize_action_time_ticket_sequence(
+        action=lambda: _materialize_simulation_ticket_sequence(
             conn,
+            row=row,
+            signal_event_id=signal_event_id,
             now_ms=now_ms,
             projection_publisher=(
                 lambda connection: projection_publisher(connection, now_ms=now_ms)
             ),
-            completion_clock_ms=lambda: now_ms + 1,
         ),
     )
     ticket = dict(sequence["ticket"])
     _require_payload_status(
         stage="ticket",
         payload=ticket,
-        expected_status="action_time_ticket_created",
+        expected_status=(
+            "action_time_ticket_created",
+            "action_time_ticket_already_exists",
+        ),
     )
     ticket = bind_simulation_ticket_exposure_episode(conn, ticket)
     finalgate = _execute_acceptance_stage(
@@ -781,18 +817,19 @@ def run_ticket_bound_full_chain_simulation(
         symbol=simulation_input.symbol,
         side=simulation_input.side,
     )
-    _insert_constructed_raw_input(
+    signal_event_id = _insert_constructed_raw_input(
         conn,
         row=row,
         fact_values=simulation_input.fact_values or _fact_values(conn, row),
         now_ms=now_ms,
     )
 
-    sequence_payload = materialize_action_time_ticket_sequence(
+    sequence_payload = _materialize_simulation_ticket_sequence(
         conn,
+        row=row,
+        signal_event_id=signal_event_id,
         now_ms=now_ms,
         projection_publisher=projection_publisher,
-        completion_clock_ms=lambda: now_ms + 2,
     )
     _require_payload_status(
         stage="atomic_ticket_sequence",
@@ -806,7 +843,10 @@ def run_ticket_bound_full_chain_simulation(
     _require_payload_status(
         stage="ticket",
         payload=ticket_payload,
-        expected_status="action_time_ticket_created",
+        expected_status=(
+            "action_time_ticket_created",
+            "action_time_ticket_already_exists",
+        ),
     )
     ticket_payload = bind_simulation_ticket_exposure_episode(conn, ticket_payload)
     finalgate_payload = finalgate_preflight.materialize_action_time_finalgate_preflight(
@@ -862,10 +902,9 @@ def run_ticket_bound_full_chain_simulation(
         submit_mode="real_gateway_action",
         now_ms=now_ms + 6,
     )
-    submitted_payload = protected_submit_attempt.record_ticket_bound_protected_submit_result(
+    submitted_payload = _record_mock_production_command_results(
         conn,
-        protected_submit_attempt_id=str(prepared_payload["protected_submit_attempt_id"]),
-        submit_result=_mock_exchange_submit_result(prepared_payload),
+        prepared=prepared_payload,
         now_ms=now_ms + 7,
     )
     protection_payload = (
@@ -970,6 +1009,381 @@ def run_ticket_bound_full_chain_simulation(
     }
 
 
+def _materialize_simulation_ticket_sequence(
+    conn: sa.engine.Connection,
+    *,
+    row: dict[str, Any],
+    signal_event_id: str,
+    now_ms: int,
+    projection_publisher: Callable[[sa.engine.Connection], dict[str, Any]],
+) -> dict[str, Any]:
+    """Use typed Action-Time input on PG; retain SQLite compatibility fixtures."""
+
+    if conn.dialect.name != "postgresql":
+        return materialize_action_time_ticket_sequence(
+            conn,
+            now_ms=now_ms,
+            projection_publisher=projection_publisher,
+            completion_clock_ms=lambda: now_ms + 2,
+        )
+    invocation = start_action_time_invocation(
+        conn,
+        signal_event_id=signal_event_id,
+        opened_at_ms=now_ms + 1,
+    )
+    capacity, snapshot = _bind_simulation_invocation_capacity(
+        conn,
+        row=row,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        observed_at_ms=now_ms + 1,
+    )
+    return materialize_action_time_ticket_sequence(
+        conn,
+        action_time_invocation_id=invocation.action_time_invocation_id,
+        stage_at_ms=now_ms + 1,
+        prefetched_account_capacity=capacity,
+        prefetched_account_snapshot=snapshot,
+        completion_clock_ms=lambda: now_ms + 2,
+    )
+
+
+def _bind_simulation_invocation_capacity(
+    conn: sa.engine.Connection,
+    *,
+    row: dict[str, Any],
+    action_time_invocation_id: str,
+    observed_at_ms: int,
+) -> tuple[AccountCapacityReservationResult, FullAccountRiskSnapshot]:
+    """Bind fresh synthetic readonly facts only for isolated certification PG."""
+
+    observed_at = datetime.fromtimestamp(
+        observed_at_ms / 1000, tz=timezone.utc
+    ).isoformat()
+    account_id = "owner-subaccount-runtime-v0"
+    runtime_profile_id = str(row["runtime_profile_id"])
+    write_account_safe_fact_snapshots(
+        conn,
+        artifact={
+            "generated_at_utc": observed_at,
+            "source_status": "simulation_invocation_bound_readonly_account_fact",
+            "checks": {
+                "account_safe_facts_ready": True,
+                "account_safe": True,
+                "account_trade_permission": True,
+                "account_capacity_base_ready": True,
+                "account_capacity_base_safe": True,
+                "open_orders_clear": True,
+                "active_position_or_open_order_clear": True,
+                "action_time_available_balance": True,
+                "source_signed_get_only": True,
+                "source_exchange_write_called": False,
+                "source_order_created": False,
+            },
+            "facts": {
+                "total_wallet_balance": "100",
+                "available_balance": "100",
+                "account_capacity_base": {
+                    "account_capacity_source_snapshot_id": (
+                        f"simulation-account-snapshot:{observed_at_ms}"
+                    ),
+                    "observed_at_ms": observed_at_ms,
+                    "valid_until_ms": observed_at_ms + 600_000,
+                    "snapshot_complete": True,
+                    "can_trade": True,
+                    "total_wallet_balance": "100",
+                    "available_balance": "100",
+                },
+                "exchange_max_leverage_by_symbol": {str(row["symbol"]): 100},
+            },
+            "account_mode": {
+                "status": "fresh",
+                "account_id": account_id,
+                "exchange_id": "binance_usdm",
+                "runtime_profile_id": runtime_profile_id,
+                "account_mode": "one_way",
+                "dual_side_position": False,
+                "position_mode_safe": True,
+                "observed_at": observed_at,
+                "source": "simulation:binance_usdm_signed_get:/fapi/v1/positionSide/dual",
+            },
+        },
+        source_ref="simulation:invocation-bound-account-facts",
+        action_time_invocation_id=action_time_invocation_id,
+    )
+    capacity = _install_simulation_capacity_fixture(
+        conn,
+        exchange_instrument_id=str(row["exchange_instrument_id"]),
+        account_id=account_id,
+        runtime_profile_id=runtime_profile_id,
+        now_ms=observed_at_ms,
+    )
+    return capacity, FullAccountRiskSnapshot(
+        snapshot_ready=True,
+        account_id=account_id,
+        exchange_id="binance_usdm",
+        total_wallet_balance=Decimal("100"),
+        available_balance=Decimal("100"),
+        exchange_total_initial_margin=Decimal("0"),
+        can_trade=True,
+        position_mode="one_way",
+        source_snapshot_id=str(capacity.account_source_fact_snapshot_id),
+        observed_at_ms=observed_at_ms,
+        valid_until_ms=observed_at_ms + 600_000,
+    )
+
+
+def _install_simulation_capacity_fixture(
+    conn: sa.engine.Connection,
+    *,
+    exchange_instrument_id: str,
+    account_id: str,
+    runtime_profile_id: str,
+    now_ms: int,
+) -> AccountCapacityReservationResult:
+    """Persist the immutable risk references needed by a typed PG rehearsal."""
+
+    fixture_key = sha256(exchange_instrument_id.encode("utf-8")).hexdigest()[:24]
+    rule_id = f"simulation-rule:{fixture_key}"
+    cluster_snapshot_id = f"simulation-cluster:{fixture_key}"
+    policy_version = "simulation-risk-policy-v1"
+    policy_event_id = "simulation-risk-policy-event-v1"
+    risk_cluster_id = "simulation_crypto_usd_beta"
+    semantic_hash = instrument_rule_snapshot_v2_semantic_hash(
+        {
+            "instrument_rule_snapshot_id": rule_id,
+            "rule_schema_version": "v2",
+            "price_tick": Decimal(".01"),
+            "quantity_step": Decimal(".001"),
+            "min_qty": Decimal(".001"),
+            "min_notional": Decimal("5"),
+            "contract_multiplier": Decimal("1"),
+            "exchange_max_leverage_for_claim_notional": 100,
+            "source_fact_snapshot_id": "simulation-rule-source-v1",
+            "valid_until_ms": now_ms + 600_000,
+            "risk_calculation_kind": "linear_quote_settled",
+        }
+    )
+    conn.execute(
+        sa.text(
+            """
+            UPDATE brc_exchange_instruments
+            SET instrument_type = 'perpetual', settlement_asset = 'USDT',
+                margin_asset = 'USDT', instrument_identity_schema_version = 'v1'
+            WHERE exchange_instrument_id = :exchange_instrument_id
+            """
+        ),
+        {"exchange_instrument_id": exchange_instrument_id},
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_instrument_rule_snapshots (
+              instrument_rule_snapshot_id, exchange_instrument_id, rule_schema_version,
+              price_tick, quantity_step, min_qty, min_notional, contract_multiplier,
+              exchange_max_leverage_for_claim_notional, source_fact_snapshot_id,
+              valid_until_ms, risk_calculation_kind, semantic_hash, status, created_at_ms
+            ) VALUES (
+              :rule_id, :exchange_instrument_id, 'v2', .01, .001, .001, 5, 1,
+              100, 'simulation-rule-source-v1', :valid_until_ms,
+              'linear_quote_settled', :semantic_hash, 'current', :now_ms
+            ) ON CONFLICT (instrument_rule_snapshot_id) DO NOTHING
+            """
+        ),
+        {
+            "rule_id": rule_id,
+            "exchange_instrument_id": exchange_instrument_id,
+            "valid_until_ms": now_ms + 600_000,
+            "semantic_hash": semantic_hash,
+            "now_ms": now_ms,
+        },
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_risk_cluster_membership_snapshots (
+              cluster_membership_snapshot_id, risk_policy_version,
+              primary_risk_cluster_id, semantic_hash, status, created_at_ms
+            ) VALUES (
+              :cluster_snapshot_id, :policy_version, :risk_cluster_id,
+              :semantic_hash, 'current', :now_ms
+            ) ON CONFLICT (cluster_membership_snapshot_id) DO NOTHING
+            """
+        ),
+        {
+            "cluster_snapshot_id": cluster_snapshot_id,
+            "policy_version": policy_version,
+            "risk_cluster_id": risk_cluster_id,
+            "semantic_hash": f"simulation-cluster-hash:{fixture_key}",
+            "now_ms": now_ms,
+        },
+    )
+    _install_simulation_account_risk_policy(
+        conn,
+        account_id=account_id,
+        runtime_profile_id=runtime_profile_id,
+        exchange_instrument_id=exchange_instrument_id,
+        risk_cluster_id=risk_cluster_id,
+        cluster_snapshot_id=cluster_snapshot_id,
+        policy_version=policy_version,
+        policy_event_id=policy_event_id,
+        now_ms=now_ms,
+    )
+    instrument_row = conn.execute(
+        sa.text(
+            """
+            SELECT exchange_id, exchange_symbol, asset_class
+            FROM brc_exchange_instruments
+            WHERE exchange_instrument_id = :exchange_instrument_id
+            """
+        ),
+        {"exchange_instrument_id": exchange_instrument_id},
+    ).mappings().one()
+    instrument_facts = InstrumentRiskFacts(
+        identity=InstrumentRiskIdentity(
+            exchange_instrument_id=exchange_instrument_id,
+            exchange_id=str(instrument_row["exchange_id"]),
+            exchange_symbol=str(instrument_row["exchange_symbol"]),
+            asset_class=str(instrument_row["asset_class"]),
+            instrument_type="perpetual",
+            settlement_asset="USDT",
+            margin_asset="USDT",
+            instrument_identity_schema_version="v1",
+        ),
+        rule_snapshot=InstrumentRuleSnapshotRefV2(
+            instrument_rule_snapshot_id=rule_id,
+            rule_schema_version="v2",
+            price_tick=Decimal(".01"),
+            quantity_step=Decimal(".001"),
+            min_qty=Decimal(".001"),
+            min_notional=Decimal("5"),
+            contract_multiplier=Decimal("1"),
+            exchange_max_leverage_for_claim_notional=100,
+            source_fact_snapshot_id="simulation-rule-source-v1",
+            valid_until_ms=now_ms + 600_000,
+            risk_calculation_kind="linear_quote_settled",
+            semantic_hash=semantic_hash,
+        ),
+        cluster_snapshot=RiskClusterMembershipSnapshotRef(
+            cluster_membership_snapshot_id=cluster_snapshot_id,
+            primary_risk_cluster_id=risk_cluster_id,
+            semantic_hash=f"simulation-cluster-hash:{fixture_key}",
+        ),
+    )
+    return AccountCapacityReservationResult(
+        allowed=True,
+        allocated_risk=Decimal(".6"),
+        intended_qty=Decimal(".003"),
+        selected_leverage=10,
+        reserved_margin=Decimal(".6"),
+        claimed_projection_version=2,
+        account_risk_policy_version=policy_version,
+        account_risk_policy_event_id=policy_event_id,
+        risk_cluster_id=risk_cluster_id,
+        exchange_instrument_id=exchange_instrument_id,
+        instrument_rule_snapshot_id=rule_id,
+        cluster_membership_snapshot_id=cluster_snapshot_id,
+        instrument_facts=instrument_facts,
+        account_source_fact_snapshot_id=f"simulation-account-snapshot:{now_ms}",
+        account_fact_schema_version="brc.account-risk-snapshot.v1",
+    )
+
+
+def _install_simulation_account_risk_policy(
+    conn: sa.engine.Connection,
+    *,
+    account_id: str,
+    runtime_profile_id: str,
+    exchange_instrument_id: str,
+    risk_cluster_id: str,
+    cluster_snapshot_id: str,
+    policy_version: str,
+    policy_event_id: str,
+    now_ms: int,
+) -> None:
+    policy = AccountRiskPolicy(
+        risk_policy_version=policy_version,
+        planned_stop_risk_fraction=Decimal("0.025"),
+        max_concurrent_positions=2,
+        max_portfolio_open_risk_fraction=Decimal("0.06"),
+        max_cluster_open_risk_fraction=Decimal("0.05"),
+        max_portfolio_initial_margin_fraction=Decimal("0.90"),
+        max_leverage=10,
+        max_new_action_time_lanes=1,
+        automatic_downsize_enabled=True,
+        unknown_exposure_policy="global_fail_closed",
+        activation_state="active",
+    )
+    params = {
+        "policy_event_id": policy_event_id,
+        "current_id": f"simulation-account-risk-policy:{runtime_profile_id}",
+        "account_id": account_id,
+        "runtime_profile_id": runtime_profile_id,
+        "exchange_instrument_id": exchange_instrument_id,
+        "risk_cluster_id": risk_cluster_id,
+        "cluster_snapshot_id": cluster_snapshot_id,
+        "now_ms": now_ms,
+        **policy.model_dump(mode="python"),
+    }
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_account_risk_policy_events (
+              account_risk_policy_event_id, account_id, runtime_profile_id,
+              event_type, risk_policy_version, payload, created_at_ms, created_by
+            ) VALUES (
+              :policy_event_id, :account_id, :runtime_profile_id, 'activate',
+              :risk_policy_version, CAST('{}' AS JSON), :now_ms, 'simulation_fixture'
+            ) ON CONFLICT (account_risk_policy_event_id) DO NOTHING
+            """
+        ),
+        params,
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_account_risk_policy_current (
+              account_risk_policy_current_id, account_id, runtime_profile_id,
+              risk_policy_version, planned_stop_risk_fraction,
+              max_concurrent_positions, max_portfolio_open_risk_fraction,
+              max_cluster_open_risk_fraction, max_portfolio_initial_margin_fraction,
+              max_leverage, max_new_action_time_lanes, automatic_downsize_enabled,
+              unknown_exposure_policy, activation_state, source_event_id, updated_at_ms
+            ) VALUES (
+              :current_id, :account_id, :runtime_profile_id, :risk_policy_version,
+              :planned_stop_risk_fraction, :max_concurrent_positions,
+              :max_portfolio_open_risk_fraction, :max_cluster_open_risk_fraction,
+              :max_portfolio_initial_margin_fraction, :max_leverage,
+              :max_new_action_time_lanes, :automatic_downsize_enabled,
+              :unknown_exposure_policy, :activation_state, :policy_event_id, :now_ms
+            ) ON CONFLICT (account_risk_policy_current_id) DO NOTHING
+            """
+        ),
+        params,
+    )
+    conn.execute(
+        sa.text(
+            """
+            INSERT INTO brc_risk_cluster_memberships (
+              risk_cluster_membership_id, risk_policy_version,
+              exchange_instrument_id, risk_cluster_id, created_at_ms, created_by,
+              cluster_membership_snapshot_id, membership_role, status
+            ) VALUES (
+              :membership_id, :risk_policy_version, :exchange_instrument_id,
+              :risk_cluster_id, :now_ms, 'simulation_fixture',
+              :cluster_snapshot_id, 'primary', 'active'
+            ) ON CONFLICT (risk_cluster_membership_id) DO NOTHING
+            """
+        ),
+        {
+            **params,
+            "membership_id": (
+                "simulation-risk-membership:"
+                f"{sha256(exchange_instrument_id.encode('utf-8')).hexdigest()[:24]}"
+            ),
+        },
+    )
+
+
 def run_ticket_bound_full_chain_failure_scenario(
     conn: sa.engine.Connection,
     simulation_input: FullChainSimulationInput,
@@ -990,15 +1404,12 @@ def run_ticket_bound_full_chain_failure_scenario(
     prepared = context["prepared_submit"]
 
     if scenario == "entry_accepted_sl_failed":
-        submitted = protected_submit_attempt.record_ticket_bound_protected_submit_result(
+        submitted = _record_mock_production_command_failure(
             conn,
-            protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
-            submit_result=_mock_exchange_submit_result_for_roles(
-                prepared,
-                roles=("ENTRY",),
-                status="protection_submit_failed",
-                blockers=["exchange_submit_failed:sl"],
-            ),
+            prepared=prepared,
+            accepted_roles=("ENTRY",),
+            failed_role="SL",
+            blocker="exchange_submit_failed:sl",
             now_ms=now_ms + 20,
         )
         recovery = protection_recovery_command.prepare_ticket_bound_protection_recovery_command(
@@ -1015,15 +1426,12 @@ def run_ticket_bound_full_chain_failure_scenario(
         )
 
     if scenario == "sl_ok_tp1_failed":
-        submitted = protected_submit_attempt.record_ticket_bound_protected_submit_result(
+        submitted = _record_mock_production_command_failure(
             conn,
-            protected_submit_attempt_id=str(prepared["protected_submit_attempt_id"]),
-            submit_result=_mock_exchange_submit_result_for_roles(
-                prepared,
-                roles=("ENTRY", "SL"),
-                status="protection_submit_failed",
-                blockers=["exchange_submit_failed:tp1"],
-            ),
+            prepared=prepared,
+            accepted_roles=("ENTRY", "SL"),
+            failed_role="TP1",
+            blocker="exchange_submit_failed:tp1",
             now_ms=now_ms + 20,
         )
         recovery = protection_recovery_command.prepare_ticket_bound_protection_recovery_command(
@@ -1235,17 +1643,18 @@ def _prepare_full_chain_submit_context(
         symbol=simulation_input.symbol,
         side=simulation_input.side,
     )
-    _insert_constructed_raw_input(
+    signal_event_id = _insert_constructed_raw_input(
         conn,
         row=row,
         fact_values=simulation_input.fact_values or _fact_values(conn, row),
         now_ms=now_ms,
     )
-    sequence_payload = materialize_action_time_ticket_sequence(
+    sequence_payload = _materialize_simulation_ticket_sequence(
         conn,
+        row=row,
+        signal_event_id=signal_event_id,
         now_ms=now_ms,
         projection_publisher=projection_publisher,
-        completion_clock_ms=lambda: now_ms + 2,
     )
     _require_payload_status(
         stage="atomic_ticket_sequence",
@@ -1259,7 +1668,10 @@ def _prepare_full_chain_submit_context(
     _require_payload_status(
         stage="ticket",
         payload=ticket_payload,
-        expected_status="action_time_ticket_created",
+        expected_status=(
+            "action_time_ticket_created",
+            "action_time_ticket_already_exists",
+        ),
     )
     ticket_payload = bind_simulation_ticket_exposure_episode(conn, ticket_payload)
     finalgate_payload = finalgate_preflight.materialize_action_time_finalgate_preflight(
@@ -1424,15 +1836,20 @@ def _require_payload_status(
     *,
     stage: str,
     payload: dict[str, Any],
-    expected_status: str,
+    expected_status: str | tuple[str, ...],
 ) -> None:
     actual_status = str(payload.get("status") or "")
-    if actual_status == expected_status:
+    expected_statuses = (
+        (expected_status,)
+        if isinstance(expected_status, str)
+        else expected_status
+    )
+    if actual_status in expected_statuses:
         return
     blockers = payload.get("blockers") or payload.get("first_blocker") or []
     raise RuntimeError(
         "full_chain_simulation_blocked:"
-        f"{stage}:{actual_status}:expected:{expected_status}:blockers:{blockers}"
+        f"{stage}:{actual_status}:expected:{expected_statuses}:blockers:{blockers}"
     )
 
 
@@ -1514,7 +1931,8 @@ def _insert_constructed_raw_input(
     now_ms: int,
     trigger_candle_close_time_ms: int | None = None,
     expires_at_ms: int | None = None,
-) -> None:
+) -> str:
+    _require_isolated_simulation_database(conn)
     semantic_fact_values = dict(fact_values)
     last_price = semantic_fact_values.pop(
         "last_price",
@@ -1720,11 +2138,31 @@ def _insert_constructed_raw_input(
     )
     if signal.get("status") != "pg_live_signal_events_written":
         raise ValueError(f"simulation_producer_signal_write_failed:{signal}")
+    signal_event_ids = [
+        str(item) for item in signal.get("signal_event_ids") or [] if str(item)
+    ]
+    if len(signal_event_ids) != 1:
+        raise ValueError(
+            "simulation_producer_exact_signal_identity_missing:"
+            f"{signal_event_ids}"
+        )
     _certify_simulation_action_time_lane(
         conn,
         candidate_scope_id=str(row["candidate_scope_id"]),
         now_ms=now_ms,
     )
+    return signal_event_ids[0]
+
+
+def _require_isolated_simulation_database(conn: sa.engine.Connection) -> None:
+    """Never allow this synthetic writer harness to target a runtime database."""
+
+    if conn.dialect.name != "postgresql":
+        return
+    database_name = str(conn.engine.url.database or "")
+    if database_name.startswith("brc_rci_test_"):
+        return
+    raise ValueError("full_chain_simulation_requires_isolated_rci_postgresql_database")
 
 
 def _certify_simulation_action_time_lane(
@@ -1858,9 +2296,25 @@ def bind_simulation_ticket_exposure_episode(
 ) -> dict[str, Any]:
     """Complete legacy constructed fixtures before any FinalGate transition."""
 
-    if str(ticket.get("exposure_episode_id") or "").strip():
-        return ticket
     ticket_id = str(ticket["ticket_id"])
+    persisted_before = dict(
+        conn.execute(
+            sa.text(
+                "SELECT * FROM brc_action_time_tickets WHERE ticket_id = :ticket_id"
+            ),
+            {"ticket_id": ticket_id},
+        ).mappings().one()
+    )
+    if str(
+        ticket.get("exposure_episode_id")
+        or persisted_before.get("exposure_episode_id")
+        or ""
+    ).strip():
+        return {
+            **ticket,
+            **persisted_before,
+            "status": ticket.get("status"),
+        }
     episode_id = f"exposure_episode:simulation:{ticket_id}"
     conn.execute(
         sa.text(
@@ -2150,13 +2604,13 @@ def _fact_values(conn: sa.engine.Connection, row: dict[str, Any]) -> dict[str, A
         else:
             result[key] = True
     if row["side"] == "short":
-        result[str(row["protection_ref_type"])] = "2000"
-        result["last_price"] = "1800"
-        result["take_profit_1"] = "1600"
-    else:
-        result[str(row["protection_ref_type"])] = "1800"
+        result[str(row["protection_ref_type"])] = "2024"
         result["last_price"] = "2000"
-        result["take_profit_1"] = "2200"
+        result["take_profit_1"] = "1976"
+    else:
+        result[str(row["protection_ref_type"])] = "1976"
+        result["last_price"] = "2000"
+        result["take_profit_1"] = "2024"
     return result
 
 
@@ -2167,30 +2621,42 @@ def _production_shaped_protection_snapshot(
     final_exit: bool,
     now_ms: int,
 ) -> dict[str, Any]:
+    protection_sets = _typed_table(
+        conn,
+        "brc_ticket_bound_exit_protection_sets",
+    )
+    protection_orders = _typed_table(
+        conn,
+        "brc_ticket_bound_exit_protection_orders",
+    )
     protection_set = conn.execute(
-        sa.text(
-            """
-            SELECT symbol, side, entry_filled_qty
-            FROM brc_ticket_bound_exit_protection_sets
-            WHERE exit_protection_set_id = :set_id
-            """
-        ),
-        {"set_id": exit_protection_set_id},
+        sa.select(
+            protection_sets.c.symbol,
+            protection_sets.c.side,
+            protection_sets.c.entry_filled_qty,
+        ).where(
+            protection_sets.c.exit_protection_set_id
+            == exit_protection_set_id
+        )
     ).mappings().one()
     orders = [
         dict(item)
         for item in conn.execute(
-            sa.text(
-                """
-                SELECT role, exchange_order_id, side, qty, price, trigger_price,
-                       reduce_only
-                FROM brc_ticket_bound_exit_protection_orders
-                WHERE exit_protection_set_id = :set_id
-                  AND role IN ('SL', 'TP1')
-                ORDER BY role
-                """
-            ),
-            {"set_id": exit_protection_set_id},
+            sa.select(
+                protection_orders.c.role,
+                protection_orders.c.exchange_order_id,
+                protection_orders.c.side,
+                protection_orders.c.qty,
+                protection_orders.c.price,
+                protection_orders.c.trigger_price,
+                protection_orders.c.reduce_only,
+            )
+            .where(
+                protection_orders.c.exit_protection_set_id
+                == exit_protection_set_id,
+                protection_orders.c.role.in_(("SL", "TP1")),
+            )
+            .order_by(protection_orders.c.role)
         ).mappings()
     ]
     by_role = {str(item["role"]): item for item in orders}
@@ -2201,6 +2667,7 @@ def _production_shaped_protection_snapshot(
             "symbol": str(protection_set["symbol"]),
             "exchange_symbol": str(protection_set["symbol"]),
             "open_orders": [],
+            "open_orders_complete": True,
             "recent_fills": [
                 {
                     "exchange_order_id": str(sl["exchange_order_id"]),
@@ -2238,6 +2705,7 @@ def _production_shaped_protection_snapshot(
             }
             for item in orders
         ],
+        "open_orders_complete": True,
         "recent_fills": [],
         "position": {
             "qty": str(protection_set["entry_filled_qty"]),
@@ -2296,18 +2764,33 @@ def _project_tp1_fill(
     exit_protection_set_id: str,
     now_ms: int,
 ) -> None:
+    protection_sets = _typed_table(
+        conn,
+        "brc_ticket_bound_exit_protection_sets",
+    )
+    protection_orders = _typed_table(
+        conn,
+        "brc_ticket_bound_exit_protection_orders",
+    )
     row = conn.execute(
-        sa.text(
-            """
-            SELECT s.ticket_id, o.exchange_order_id, o.qty, o.price
-            FROM brc_ticket_bound_exit_protection_sets s
-            JOIN brc_ticket_bound_exit_protection_orders o
-              ON o.exit_protection_set_id = s.exit_protection_set_id
-             AND o.role = 'TP1'
-            WHERE s.exit_protection_set_id = :exit_protection_set_id
-            """
-        ),
-        {"exit_protection_set_id": exit_protection_set_id},
+        sa.select(
+            protection_sets.c.ticket_id,
+            protection_orders.c.exchange_order_id,
+            protection_orders.c.qty,
+            protection_orders.c.price,
+        )
+        .select_from(
+            protection_sets.join(
+                protection_orders,
+                protection_orders.c.exit_protection_set_id
+                == protection_sets.c.exit_protection_set_id,
+            )
+        )
+        .where(
+            protection_sets.c.exit_protection_set_id
+            == exit_protection_set_id,
+            protection_orders.c.role == "TP1",
+        )
     ).mappings().one()
     projected = project_ticket_bound_exchange_fills(
         conn,
@@ -2346,6 +2829,186 @@ def _mock_exchange_submit_result(prepared: dict[str, Any]) -> dict[str, Any]:
             _mock_submitted_order(prepared, order)
             for order in prepared["submit_request"]["orders"]
         ],
+    }
+
+
+def _record_mock_production_command_results(
+    conn: sa.engine.Connection,
+    *,
+    prepared: dict[str, Any],
+    now_ms: int,
+) -> dict[str, Any]:
+    """Run mock accepted results through the production command projectors.
+
+    The fake result is simulation evidence only.  Typed commands remain the
+    source authority, and the projection order matches the durable worker:
+    record result, project ENTRY/protection truth, then complete the source.
+    """
+
+    attempt_id = str(prepared["protected_submit_attempt_id"])
+    submitted_by_role = {
+        str(order["order_role"]).upper(): order
+        for order in _mock_exchange_submit_result(prepared)["submitted_orders"]
+    }
+    projected: list[dict[str, Any]] = []
+    for offset, role in enumerate(("ENTRY", "SL", "TP1")):
+        command = claim_next_exchange_command(
+            conn,
+            claim_owner=f"full-chain-simulation:{role.lower()}",
+            now_ms=now_ms + offset,
+            claim_scope=ExchangeCommandClaimScope(
+                command_sources=("protected_submit",),
+                source_command_id=attempt_id,
+                protected_submit_attempt_id=attempt_id,
+                allowed_roles=(role,),
+            ),
+        )
+        if str(command.get("order_role") or "").upper() != role:
+            raise ValueError(f"simulation_exchange_command_claim_failed:{role}")
+        submitted = submitted_by_role[role]
+        exchange_result = {
+            "exchange_order_id": submitted["exchange_order_id"],
+            "exchange_order_status": "FILLED" if role == "ENTRY" else "OPEN",
+            "filled_qty": submitted.get("filled_qty") if role == "ENTRY" else None,
+            "average_exec_price": (
+                prepared["submit_request"]["reference_price"]
+                if role == "ENTRY"
+                else None
+            ),
+            "exchange_observed_at_ms": now_ms + offset,
+        }
+        recorded = record_claimed_exchange_command_outcome(
+            conn,
+            exchange_command_id=str(command["exchange_command_id"]),
+            claim_token=str(command["claim_token"]),
+            target_state=ExchangeCommandState.CONFIRMED_SUBMITTED,
+            outcome_class=ExchangeCommandOutcomeClass.EXCHANGE_ACCEPTED,
+            exchange_result=exchange_result,
+            now_ms=now_ms + offset,
+        )
+        project_entry_effect(conn, command=recorded, now_ms=now_ms + offset)
+        project_protection_result(
+            conn,
+            command=recorded,
+            now_ms=now_ms + offset,
+        )
+        projected.append(recorded)
+    completion = apply_completed_lifecycle_exchange_sources(
+        conn,
+        source_command_id=attempt_id,
+        now_ms=now_ms + len(projected),
+    )
+    attempt_status = str(
+        (completion[0] if completion else {}).get("attempt_status") or ""
+    )
+    return {
+        "status": attempt_status,
+        "protected_submit_attempt_id": attempt_id,
+        "projected_roles": [str(row["order_role"]) for row in projected],
+        "source_completion": completion,
+        "authority_boundary": (
+            "local_simulation_fake_results_through_production_command_projectors; "
+            "no_exchange_write_no_live_authority"
+        ),
+    }
+
+
+def _record_mock_production_command_failure(
+    conn: sa.engine.Connection,
+    *,
+    prepared: dict[str, Any],
+    accepted_roles: tuple[str, ...],
+    failed_role: str,
+    blocker: str,
+    now_ms: int,
+) -> dict[str, Any]:
+    """Project one exact command failure through the durable worker boundary."""
+
+    attempt_id = str(prepared["protected_submit_attempt_id"])
+    submitted_by_role = {
+        str(order["order_role"]).upper(): order
+        for order in _mock_exchange_submit_result(prepared)["submitted_orders"]
+    }
+    for offset, role in enumerate((*accepted_roles, failed_role)):
+        command = claim_next_exchange_command(
+            conn,
+            claim_owner=f"full-chain-failure:{role.lower()}",
+            now_ms=now_ms + offset,
+            claim_scope=ExchangeCommandClaimScope(
+                command_sources=("protected_submit",),
+                source_command_id=attempt_id,
+                protected_submit_attempt_id=attempt_id,
+                allowed_roles=(role,),
+            ),
+        )
+        if str(command.get("order_role") or "").upper() != role:
+            raise ValueError(f"simulation_exchange_command_claim_failed:{role}")
+        if role == failed_role:
+            recorded = record_claimed_exchange_command_outcome(
+                conn,
+                exchange_command_id=str(command["exchange_command_id"]),
+                claim_token=str(command["claim_token"]),
+                target_state=ExchangeCommandState.CONFIRMED_REJECTED,
+                outcome_class=(
+                    ExchangeCommandOutcomeClass.AUTHORITATIVE_REJECTION
+                ),
+                exchange_result={
+                    "error_code": blocker,
+                    "error_message": blocker,
+                    "exchange_write_called": True,
+                    "exchange_observed_at_ms": now_ms + offset,
+                },
+                now_ms=now_ms + offset,
+            )
+        else:
+            submitted = submitted_by_role[role]
+            recorded = record_claimed_exchange_command_outcome(
+                conn,
+                exchange_command_id=str(command["exchange_command_id"]),
+                claim_token=str(command["claim_token"]),
+                target_state=ExchangeCommandState.CONFIRMED_SUBMITTED,
+                outcome_class=ExchangeCommandOutcomeClass.EXCHANGE_ACCEPTED,
+                exchange_result={
+                    "exchange_order_id": submitted["exchange_order_id"],
+                    "exchange_order_status": (
+                        "FILLED" if role == "ENTRY" else "OPEN"
+                    ),
+                    "filled_qty": (
+                        submitted.get("filled_qty") if role == "ENTRY" else None
+                    ),
+                    "average_exec_price": (
+                        prepared["submit_request"]["reference_price"]
+                        if role == "ENTRY"
+                        else None
+                    ),
+                    "exchange_observed_at_ms": now_ms + offset,
+                },
+                now_ms=now_ms + offset,
+            )
+        project_entry_effect(conn, command=recorded, now_ms=now_ms + offset)
+        project_protection_result(conn, command=recorded, now_ms=now_ms + offset)
+
+    completion = apply_completed_lifecycle_exchange_sources(
+        conn,
+        source_command_id=attempt_id,
+        now_ms=now_ms + len(accepted_roles) + 1,
+    )
+    attempts = _typed_table(
+        conn,
+        "brc_ticket_bound_protected_submit_attempts",
+    )
+    attempt = conn.execute(
+        sa.select(attempts).where(
+            attempts.c.protected_submit_attempt_id == attempt_id
+        )
+    ).mappings().one()
+    return {
+        **dict(attempt),
+        "source_completion": completion,
+        "authority_boundary": (
+            "local_simulation_failure_through_production_command_projectors; "
+            "no_exchange_write_no_live_authority"
+        ),
     }
 
 
@@ -2421,18 +3084,25 @@ def _exchange_snapshot_from_pg(
     position_flat: bool = False,
 ) -> dict[str, Any]:
     omit_roles = omit_roles or set()
+    protection_orders = _typed_table(
+        conn,
+        "brc_ticket_bound_exit_protection_orders",
+    )
     orders = [
         dict(row)
         for row in conn.execute(
-            sa.text(
-                """
-                SELECT role, exchange_order_id, qty, side, reduce_only
-                FROM brc_ticket_bound_exit_protection_orders
-                WHERE exit_protection_set_id = :exit_protection_set_id
-                ORDER BY role
-                """
-            ),
-            {"exit_protection_set_id": exit_protection_set_id},
+            sa.select(
+                protection_orders.c.role,
+                protection_orders.c.exchange_order_id,
+                protection_orders.c.qty,
+                protection_orders.c.side,
+                protection_orders.c.reduce_only,
+            )
+            .where(
+                protection_orders.c.exit_protection_set_id
+                == exit_protection_set_id
+            )
+            .order_by(protection_orders.c.role)
         ).mappings()
         if row["role"] not in omit_roles
     ]
@@ -2458,6 +3128,13 @@ def _decimal(value: Any) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0")
+
+
+def _typed_table(
+    conn: sa.engine.Connection,
+    table_name: str,
+) -> sa.Table:
+    return sa.Table(table_name, sa.MetaData(), autoload_with=conn)
 
 
 def _json(value: Any) -> str:
