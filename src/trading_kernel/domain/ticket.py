@@ -34,8 +34,10 @@ class TradeTicket(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     identity: TicketIdentity
-    owner_policy_version_id: str
-    runtime_scope_version_id: str
+    owner_policy_id: str
+    owner_policy_version: int
+    runtime_scope_id: str
+    runtime_scope_version: int
     fact_digest: str
     created_at_ms: int
     expires_at_ms: int
@@ -50,8 +52,8 @@ class TradeTicket(BaseModel):
     status: TicketStatus = TicketStatus.ISSUED
 
     @field_validator(
-        "owner_policy_version_id",
-        "runtime_scope_version_id",
+        "owner_policy_id",
+        "runtime_scope_id",
         "fact_digest",
         mode="before",
     )
@@ -60,6 +62,13 @@ class TradeTicket(BaseModel):
         if not isinstance(value, str) or not value.strip():
             raise ValueError("ticket references must be non-blank strings")
         return value.strip()
+
+    @field_validator("owner_policy_version", "runtime_scope_version")
+    @classmethod
+    def _require_positive_version(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("ticket authority versions must be positive")
+        return value
 
     @field_validator(
         "quantity",

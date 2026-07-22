@@ -47,8 +47,10 @@ def _identity() -> TicketIdentity:
 def _ticket(**updates: object) -> TradeTicket:
     payload: dict[str, object] = {
         "identity": _identity(),
-        "owner_policy_version_id": "policy-v7",
-        "runtime_scope_version_id": "scope-v4",
+        "owner_policy_id": "policy-main",
+        "owner_policy_version": 7,
+        "runtime_scope_id": "scope-sor-btc-long",
+        "runtime_scope_version": 4,
         "fact_digest": "sha256:facts-1",
         "created_at_ms": 1_000,
         "expires_at_ms": 31_000,
@@ -75,6 +77,15 @@ def test_trade_ticket_is_immutable_and_contains_complete_decision() -> None:
 
     with pytest.raises(ValidationError):
         ticket.quantity = Decimal("0.002")  # type: ignore[misc]
+
+
+def test_trade_ticket_freezes_policy_and_scope_identity_and_version() -> None:
+    ticket = _ticket()
+
+    assert ticket.owner_policy_id == "policy-main"
+    assert ticket.owner_policy_version == 7
+    assert ticket.runtime_scope_id == "scope-sor-btc-long"
+    assert ticket.runtime_scope_version == 4
 
 
 @pytest.mark.parametrize(

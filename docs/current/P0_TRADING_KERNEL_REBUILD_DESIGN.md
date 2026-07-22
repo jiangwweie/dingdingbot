@@ -144,7 +144,10 @@ ticket_id
 + runtime_profile_id
 + exchange_instrument_id
 + position_side
++ owner_policy_id
 + owner_policy_version
++ runtime_scope_id
++ runtime_scope_version
 + signal_event_id
 ```
 
@@ -484,4 +487,3 @@ exchange write when any of these are true:
 - FinalGate or Operation Layer bypass;
 - production schema/code identity mismatch;
 - credential mutation, withdrawal, or transfer requirement.
-

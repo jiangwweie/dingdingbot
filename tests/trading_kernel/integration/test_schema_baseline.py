@@ -77,6 +77,13 @@ def test_financial_columns_use_fixed_precision_numeric() -> None:
         assert column.type.scale == 18
 
 
+def test_ticket_schema_freezes_runtime_scope_identity_and_version() -> None:
+    tickets = metadata.tables["brc_trade_tickets"]
+
+    assert "runtime_scope_id" in tickets.c
+    assert "runtime_scope_version" in tickets.c
+
+
 def _unique_column_sets(table: sa.Table) -> set[tuple[str, ...]]:
     return {
         tuple(column.name for column in constraint.columns)

@@ -251,6 +251,7 @@ trade_tickets = sa.Table(
     _id("owner_policy_id"),
     sa.Column("owner_policy_version", sa.Integer, nullable=False),
     _id("runtime_scope_id"),
+    sa.Column("runtime_scope_version", sa.Integer, nullable=False),
     _id("account_id"),
     sa.Column("venue_id", SHORT_TEXT, nullable=False),
     _id("exchange_instrument_id"),
