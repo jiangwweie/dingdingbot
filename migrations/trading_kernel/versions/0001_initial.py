@@ -69,9 +69,14 @@ def upgrade() -> None:
         "brc_event_specs",
         _id("event_spec_id", primary_key=True),
         _id("strategy_version_id"),
+        sa.Column("event_id", SHORT_TEXT, nullable=False, unique=True),
         sa.Column("position_side", SHORT_TEXT, nullable=False),
         sa.Column("timeframe", SHORT_TEXT, nullable=False),
+        sa.Column("freshness_window_ms", sa.BigInteger, nullable=False),
+        sa.Column("event_time_authority", SHORT_TEXT, nullable=False),
         sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
+        _id("protection_reference_fact_definition_id"),
+        _id("exit_policy_id"),
         _json("execution_semantics"),
         sa.Column("status", SHORT_TEXT, nullable=False),
         _time("created_at_ms"),
@@ -88,6 +93,7 @@ def upgrade() -> None:
         "brc_event_required_facts",
         _id("event_spec_id"),
         _id("fact_definition_id"),
+        sa.Column("role", SHORT_TEXT, nullable=False),
         sa.Column("required", sa.Boolean, nullable=False, server_default=sa.true()),
         sa.PrimaryKeyConstraint(
             "event_spec_id",
@@ -107,6 +113,30 @@ def upgrade() -> None:
             "venue_id",
             "venue_symbol",
             name="uq_brc_instruments_venue_id_venue_symbol",
+        ),
+    )
+    op.create_table(
+        "brc_strategy_candidate_scopes",
+        _id("candidate_scope_id", primary_key=True),
+        _id("strategy_group_id"),
+        _id("event_spec_id"),
+        _id("exchange_instrument_id"),
+        sa.Column("position_side", SHORT_TEXT, nullable=False),
+        sa.Column("priority_rank", sa.Integer, nullable=False),
+        sa.Column("status", SHORT_TEXT, nullable=False),
+        _time("created_at_ms"),
+        sa.UniqueConstraint(
+            "event_spec_id",
+            "exchange_instrument_id",
+            name="uq_brc_strategy_candidate_scopes_event_instrument",
+        ),
+        sa.CheckConstraint(
+            "position_side IN ('long', 'short')",
+            name="ck_brc_strategy_candidate_scopes_position_side_valid",
+        ),
+        sa.CheckConstraint(
+            "priority_rank > 0",
+            name="ck_brc_strategy_candidate_scopes_priority_positive",
         ),
     )
     op.create_table(
@@ -561,6 +591,7 @@ def downgrade() -> None:
         "brc_owner_policy_current",
         "brc_owner_policy_events",
         "brc_instrument_rules_current",
+        "brc_strategy_candidate_scopes",
         "brc_instruments",
         "brc_event_required_facts",
         "brc_fact_definitions",

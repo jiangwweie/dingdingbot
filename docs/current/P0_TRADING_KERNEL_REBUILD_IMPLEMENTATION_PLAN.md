@@ -124,9 +124,37 @@ Owner and Codex review and decide the separate aggressive StrategyGroup and
 strategy-signal refactor. Existing strategy models and producers are not
 implicitly accepted merely because the trading kernel is ready.
 
-## Task 16: Tokyo Cutover And Controlled Real-Funds Acceptance
+## Tasks 16-24: Six-Capability Strategy And Runtime Rebuild
 
-Task 16 is paused behind the Owner strategy-refactor gate above.
+The Owner approved the aggressive rebuild of the six formally registered Event
+contracts before Tokyo deployment. The detailed task-by-task execution plan is
+`docs/superpowers/plans/2026-07-22-six-capability-trading-system-rebuild.md`.
+
+The accepted scope is:
+
+1. deterministic Registry Seed for CPM-LONG, MPG-LONG, MI-LONG, SOR-LONG,
+   SOR-SHORT, and BRF2-SHORT;
+2. pure Event detectors and closed-market observation;
+3. immutable Strategy Signals without capital authority;
+4. deterministic candidate arbitration and action-time Capacity Claims;
+5. Venue Truth and unknown-outcome recovery;
+6. versioned Initial Stop, TP1, runner, lifecycle, settlement, review, and one
+   Owner projection;
+7. local six-Event full-chain certification and destructive-cutover rehearsal.
+
+The accepted exit-policy family is 1R TP1 for 50% plus a right-tail structural
+ATR runner. SOR-LONG retains its exact committed time-stop policy. Candidate
+selection orders Owner Policy Priority, Candidate Scope Priority, Event Time,
+Observed Time, then Signal Event ID.
+
+Production Capacity values and the first real-submit scope remain Tokyo-stage
+Owner Policy decisions. They do not block local implementation or local DB
+rebuild tests.
+
+## Task 25: Tokyo Cutover And Controlled Real-Funds Acceptance
+
+Task 25 remains paused until Tasks 16-24 pass local certification and the Owner
+explicitly confirms deployment.
 
 - [ ] Read current Tokyo commit, schema, services, DB roles, account mode,
   positions, orders, protection, and unresolved outcomes.
@@ -141,7 +169,7 @@ Task 16 is paused behind the Owner strategy-refactor gate above.
   reconciliation, settlement, review, and completed Owner state.
 - [ ] Delete short-lived backup and retired releases.
 
-## Task 17: Final Completion Audit
+## Task 26: Final Completion Audit
 
 - [ ] Run the complete current test suite, Ruff, Mypy, schema rebuild,
   downgrade/upgrade, file-I/O audit, and readonly certification.

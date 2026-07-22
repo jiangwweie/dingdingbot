@@ -20,6 +20,10 @@ from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.signal import ActionableSignal, SignalFactSnapshot
+from src.trading_kernel.domain.strategy_registry import (
+    RegisteredStrategyContract,
+    RegistrySeedResult,
+)
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
@@ -496,6 +500,18 @@ class SignalRepository(Protocol):
     ) -> tuple[SignalFactSnapshot, ...] | None: ...
 
 
+class StrategyRegistryRepository(Protocol):
+    async def seed_exact(
+        self,
+        contracts: tuple[RegisteredStrategyContract, ...],
+        *,
+        registry_semantic_hash: str,
+        seeded_at_ms: int,
+    ) -> RegistrySeedResult: ...
+
+    async def list_current_event_ids(self) -> tuple[str, ...]: ...
+
+
 class VenueCommandRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -532,6 +548,7 @@ class KernelUnitOfWork(Protocol):
     monitors: MonitorRepository
     entry_admission: EntryAdmissionRepository
     signals: SignalRepository
+    strategy_registry: StrategyRegistryRepository
 
     async def __aenter__(self) -> Self: ...
 

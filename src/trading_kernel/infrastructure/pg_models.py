@@ -60,9 +60,14 @@ event_specs = sa.Table(
     metadata,
     _id("event_spec_id", primary_key=True),
     _id("strategy_version_id"),
+    sa.Column("event_id", SHORT_TEXT, nullable=False, unique=True),
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("timeframe", SHORT_TEXT, nullable=False),
+    sa.Column("freshness_window_ms", sa.BigInteger, nullable=False),
+    sa.Column("event_time_authority", SHORT_TEXT, nullable=False),
     sa.Column("entry_order_type", SHORT_TEXT, nullable=False),
+    _id("protection_reference_fact_definition_id"),
+    _id("exit_policy_id"),
     _json("execution_semantics"),
     sa.Column("status", SHORT_TEXT, nullable=False),
     _time("created_at_ms"),
@@ -83,6 +88,7 @@ event_required_facts = sa.Table(
     metadata,
     _id("event_spec_id"),
     _id("fact_definition_id"),
+    sa.Column("role", SHORT_TEXT, nullable=False),
     sa.Column("required", sa.Boolean, nullable=False, server_default=sa.true()),
     sa.PrimaryKeyConstraint("event_spec_id", "fact_definition_id"),
 )
@@ -97,6 +103,25 @@ instruments = sa.Table(
     sa.Column("contract_kind", SHORT_TEXT, nullable=False),
     sa.Column("status", SHORT_TEXT, nullable=False),
     sa.UniqueConstraint("venue_id", "venue_symbol"),
+)
+
+strategy_candidate_scopes = sa.Table(
+    "brc_strategy_candidate_scopes",
+    metadata,
+    _id("candidate_scope_id", primary_key=True),
+    _id("strategy_group_id"),
+    _id("event_spec_id"),
+    _id("exchange_instrument_id"),
+    sa.Column("position_side", SHORT_TEXT, nullable=False),
+    sa.Column("priority_rank", sa.Integer, nullable=False),
+    sa.Column("status", SHORT_TEXT, nullable=False),
+    _time("created_at_ms"),
+    sa.UniqueConstraint("event_spec_id", "exchange_instrument_id"),
+    sa.CheckConstraint(
+        "position_side IN ('long', 'short')",
+        name="position_side_valid",
+    ),
+    sa.CheckConstraint("priority_rank > 0", name="priority_positive"),
 )
 
 instrument_rules_current = sa.Table(

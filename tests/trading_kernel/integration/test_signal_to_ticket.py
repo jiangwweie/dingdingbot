@@ -8,7 +8,7 @@ import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.ingest_signal import (
     IngestSignalRequest,
@@ -22,25 +22,23 @@ from src.trading_kernel.application.issue_ready_signal import (
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus
 from src.trading_kernel.domain.signal import (
     ActionableSignal,
+    SignalFactSnapshot,
     SignalTicketTerms,
     build_signal_fact_digest,
 )
 from src.trading_kernel.domain.ticket import EntryOrderType
 from src.trading_kernel.infrastructure.pg_models import (
-    event_specs,
-    event_required_facts,
-    fact_definitions,
     facts_current,
     instrument_rules_current,
-    instruments,
     owner_policy_current,
     runtime_capabilities_current,
     runtime_profiles,
     runtime_scopes_current,
-    strategy_groups,
-    strategy_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.strategy_registry_seed import (
+    seed_strategy_registry,
+)
 from tests.trading_kernel.integration.test_issue_ticket import (
     ADMIN_DSN,
     SAFE_DATABASE,
@@ -237,22 +235,16 @@ async def test_three_ready_signals_issue_serially_into_three_concurrent_domains(
     await _seed_additional_scope(
         issue_engine,
         runtime_scope_id="scope-sor-btc-short",
-        event_spec_id="SOR-SHORT:v3",
+        event_spec_id="event_spec:SOR-001:SOR-SHORT:v2",
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-        venue_symbol="BTCUSDT",
         position_side="short",
-        add_event_spec=True,
-        add_instrument=False,
     )
     await _seed_additional_scope(
         issue_engine,
         runtime_scope_id="scope-sor-eth-long",
-        event_spec_id="SOR-LONG:v3",
+        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
         exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
-        venue_symbol="ETHUSDT",
         position_side="long",
-        add_event_spec=False,
-        add_instrument=True,
     )
     signals = (
         _signal(signal_event_id="signal-1", occurred_at_ms=1_000),
@@ -584,17 +576,22 @@ def _signal(
     exchange_instrument_id: str = "binance-usdm:BTCUSDT:perpetual",
     occurred_at_ms: int = 1_000,
 ) -> ActionableSignal:
-    event_spec_id = "SOR-LONG:v3" if position_side == "long" else "SOR-SHORT:v3"
+    event_spec_id = (
+        "event_spec:SOR-001:SOR-LONG:v2"
+        if position_side == "long"
+        else "event_spec:SOR-001:SOR-SHORT:v2"
+    )
+    facts = _signal_facts(position_side=position_side)
     return ActionableSignal(
         signal_event_id=signal_event_id,
         runtime_scope_id=runtime_scope_id,
         runtime_scope_version=4,
         strategy_group_id="SOR-001",
-        strategy_version_id="SOR-001:v3",
+        strategy_version_id="sgv:SOR-001:v2",
         event_spec_id=event_spec_id,
         exchange_instrument_id=exchange_instrument_id,
         position_side=position_side,
-        fact_digest=build_signal_fact_digest(()),
+        fact_digest=build_signal_fact_digest(facts),
         occurred_at_ms=occurred_at_ms,
         expires_at_ms=10_000,
         terms=SignalTicketTerms(
@@ -610,48 +607,10 @@ def _signal(
 
 
 async def _seed_runtime_authority(engine: AsyncEngine) -> None:
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=1_000)
+
     async with engine.begin() as connection:
-        await connection.execute(
-            sa.insert(strategy_groups).values(
-                strategy_group_id="SOR-001",
-                display_name="Session Opening Range",
-                active_version_id="SOR-001:v3",
-                status="active",
-                updated_at_ms=1_000,
-            )
-        )
-        await connection.execute(
-            sa.insert(strategy_versions).values(
-                strategy_version_id="SOR-001:v3",
-                strategy_group_id="SOR-001",
-                version=3,
-                semantics={},
-                status="active",
-                created_at_ms=1_000,
-            )
-        )
-        await connection.execute(
-            sa.insert(event_specs).values(
-                event_spec_id="SOR-LONG:v3",
-                strategy_version_id="SOR-001:v3",
-                position_side="long",
-                timeframe="15m",
-                entry_order_type="market",
-                execution_semantics={},
-                status="active",
-                created_at_ms=1_000,
-            )
-        )
-        await connection.execute(
-            sa.insert(instruments).values(
-                exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-                venue_id="binance-usdm",
-                asset_class="crypto_contract",
-                venue_symbol="BTCUSDT",
-                contract_kind="perpetual",
-                status="active",
-            )
-        )
         await connection.execute(
             sa.insert(instrument_rules_current).values(
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
@@ -692,8 +651,8 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-btc-long",
                 strategy_group_id="SOR-001",
-                strategy_version_id="SOR-001:v3",
-                event_spec_id="SOR-LONG:v3",
+                strategy_version_id="sgv:SOR-001:v2",
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
                 runtime_profile_id="tiny-live-v1",
                 owner_policy_id="policy-main",
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
@@ -702,6 +661,11 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 scope_version=4,
                 updated_at_ms=1_000,
             )
+        )
+        await _insert_scope_facts(
+            connection,
+            runtime_scope_id="scope-sor-btc-long",
+            position_side="long",
         )
         await connection.execute(
             sa.insert(runtime_capabilities_current).values(
@@ -721,36 +685,18 @@ async def _seed_additional_scope(
     runtime_scope_id: str,
     event_spec_id: str,
     exchange_instrument_id: str,
-    venue_symbol: str,
     position_side: str,
-    add_event_spec: bool,
-    add_instrument: bool,
 ) -> None:
     async with engine.begin() as connection:
-        if add_event_spec:
-            await connection.execute(
-                sa.insert(event_specs).values(
-                    event_spec_id=event_spec_id,
-                    strategy_version_id="SOR-001:v3",
-                    position_side=position_side,
-                    timeframe="15m",
-                    entry_order_type="market",
-                    execution_semantics={},
-                    status="active",
-                    created_at_ms=1_000,
-                )
+        rules_exist = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(instrument_rules_current)
+            .where(
+                instrument_rules_current.c.exchange_instrument_id
+                == exchange_instrument_id
             )
-        if add_instrument:
-            await connection.execute(
-                sa.insert(instruments).values(
-                    exchange_instrument_id=exchange_instrument_id,
-                    venue_id="binance-usdm",
-                    asset_class="crypto_contract",
-                    venue_symbol=venue_symbol,
-                    contract_kind="perpetual",
-                    status="active",
-                )
-            )
+        )
+        if not rules_exist:
             await connection.execute(
                 sa.insert(instrument_rules_current).values(
                     exchange_instrument_id=exchange_instrument_id,
@@ -768,7 +714,7 @@ async def _seed_additional_scope(
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id=runtime_scope_id,
                 strategy_group_id="SOR-001",
-                strategy_version_id="SOR-001:v3",
+                strategy_version_id="sgv:SOR-001:v2",
                 event_spec_id=event_spec_id,
                 runtime_profile_id="tiny-live-v1",
                 owner_policy_id="policy-main",
@@ -779,6 +725,11 @@ async def _seed_additional_scope(
                 updated_at_ms=1_000,
             )
         )
+        await _insert_scope_facts(
+            connection,
+            runtime_scope_id=runtime_scope_id,
+            position_side=position_side,
+        )
 
 
 async def _seed_required_fact(
@@ -788,30 +739,60 @@ async def _seed_required_fact(
 ) -> None:
     async with engine.begin() as connection:
         await connection.execute(
-            sa.insert(fact_definitions).values(
-                fact_definition_id="fact-session-open",
-                fact_name="session_open",
-                value_type="boolean",
-                freshness_ms=1_000,
-                validation={},
+            sa.update(facts_current)
+            .where(
+                facts_current.c.runtime_scope_id == "scope-sor-btc-long",
+                facts_current.c.fact_definition_id
+                == "fact:opening_range_defined:v1",
             )
+            .values(valid_until_ms=valid_until_ms)
         )
-        await connection.execute(
-            sa.insert(event_required_facts).values(
-                event_spec_id="SOR-LONG:v3",
-                fact_definition_id="fact-session-open",
-                required=True,
-            )
+
+
+def _signal_facts(*, position_side: str) -> tuple[SignalFactSnapshot, ...]:
+    if position_side == "long":
+        values: tuple[tuple[str, object], ...] = (
+            ("fact:opening_range_defined:v1", True),
+            ("fact:breakout_confirmed:v1", True),
+            ("fact:opening_range_low_reference:v1", "9900.0"),
         )
+    else:
+        values = (
+            ("fact:opening_range_defined:v1", True),
+            ("fact:breakdown_confirmed:v1", True),
+            ("fact:opening_range_high_reference:v1", "10100.0"),
+        )
+    return tuple(
+        SignalFactSnapshot(
+            fact_definition_id=fact_definition_id,
+            value=value,
+            satisfied=True,
+            observed_at_ms=1_000,
+            valid_until_ms=10_000,
+            projection_version=1,
+        )
+        for fact_definition_id, value in values
+    )
+
+
+async def _insert_scope_facts(
+    connection: AsyncConnection,
+    *,
+    runtime_scope_id: str,
+    position_side: str,
+) -> None:
+    for fact in _signal_facts(position_side=position_side):
         await connection.execute(
             sa.insert(facts_current).values(
-                fact_current_id="fact-current-session-open",
-                runtime_scope_id="scope-sor-btc-long",
-                fact_definition_id="fact-session-open",
-                value=True,
-                satisfied=True,
-                observed_at_ms=1_000,
-                valid_until_ms=valid_until_ms,
-                projection_version=1,
+                fact_current_id=(
+                    f"fact-current:{runtime_scope_id}:{fact.fact_definition_id}"
+                ),
+                runtime_scope_id=runtime_scope_id,
+                fact_definition_id=fact.fact_definition_id,
+                value=fact.value,
+                satisfied=fact.satisfied,
+                observed_at_ms=fact.observed_at_ms,
+                valid_until_ms=fact.valid_until_ms,
+                projection_version=fact.projection_version,
             )
         )

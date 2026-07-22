@@ -30,6 +30,7 @@ EXPECTED_TABLES = {
     "brc_schema_metadata",
     "brc_signal_events",
     "brc_strategy_groups",
+    "brc_strategy_candidate_scopes",
     "brc_strategy_versions",
     "brc_trade_aggregates",
     "brc_trade_events",
