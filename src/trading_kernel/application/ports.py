@@ -614,6 +614,18 @@ class SignalRepository(Protocol):
         exchange_instrument_id: str,
     ) -> InstrumentRulesSnapshot | None: ...
 
+    async def upsert_instrument_rules(
+        self,
+        *,
+        exchange_instrument_id: str,
+        quantity_step: Decimal,
+        price_tick: Decimal,
+        min_quantity: Decimal,
+        min_notional: Decimal,
+        observed_at_ms: int,
+        valid_until_ms: int,
+    ) -> InstrumentRulesSnapshot: ...
+
     async def get_runtime_capability(
         self,
         capability_key: str,

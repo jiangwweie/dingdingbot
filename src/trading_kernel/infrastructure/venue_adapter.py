@@ -13,6 +13,8 @@ from pydantic import JsonValue
 from src.trading_kernel.application.ports import VenueCommandRequest, VenueTruthRequest
 from src.trading_kernel.application.runtime_facts import (
     ActionTimeFactsRequest,
+    InstrumentRulesFacts,
+    InstrumentRulesRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
     ReviewEconomicsRequest,
@@ -38,6 +40,10 @@ from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
 
 
 class _CcxtExchange(Protocol):
+    def load_markets(self, reload: bool = False) -> object: ...
+
+    def market(self, symbol: str) -> Mapping[str, object]: ...
+
     def create_order(
         self,
         symbol: str,
@@ -218,6 +224,30 @@ class CcxtVenueAdapter:
                 expected_symbol=symbol,
                 position_side=request.position_side,
             ),
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_instrument_rules(
+        self,
+        request: InstrumentRulesRequest,
+    ) -> InstrumentRulesFacts:
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=request.venue_id,
+            account_id=request.account_id,
+            exchange_instrument_id=request.exchange_instrument_id,
+        )
+        await _call_raw_exchange(exchange.load_markets, False)
+        market = exchange.market(symbol)
+        quantity_step, price_tick, min_quantity, min_notional = (
+            _instrument_rules(market)
+        )
+        return InstrumentRulesFacts(
+            exchange_instrument_id=request.exchange_instrument_id,
+            quantity_step=quantity_step,
+            price_tick=price_tick,
+            min_quantity=min_quantity,
+            min_notional=min_notional,
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -878,6 +908,70 @@ def _balance_decimal(
     if result < 0 or (bucket == "total" and result <= 0):
         raise RuntimeError(f"venue account {bucket} is invalid")
     return result
+
+
+def _instrument_rules(
+    market: Mapping[str, object],
+) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    info = market.get("info")
+    raw_info = info if isinstance(info, Mapping) else {}
+    filters = raw_info.get("filters")
+    filter_rows = filters if isinstance(filters, list) else []
+    by_type = {
+        str(row.get("filterType") or ""): row
+        for row in filter_rows
+        if isinstance(row, Mapping)
+    }
+    lot = by_type.get("LOT_SIZE", {})
+    price_filter = by_type.get("PRICE_FILTER", {})
+    notional_filter = by_type.get("MIN_NOTIONAL") or by_type.get("NOTIONAL") or {}
+
+    quantity_step = _positive_rule_value(
+        lot.get("stepSize"),
+        fallback=_nested_market_value(market, "precision", "amount"),
+        name="quantity step",
+    )
+    price_tick = _positive_rule_value(
+        price_filter.get("tickSize"),
+        fallback=_nested_market_value(market, "precision", "price"),
+        name="price tick",
+    )
+    min_quantity = _positive_rule_value(
+        lot.get("minQty"),
+        fallback=_nested_market_value(market, "limits", "amount", "min"),
+        name="minimum quantity",
+    )
+    min_notional = _positive_rule_value(
+        notional_filter.get("notional")
+        or notional_filter.get("minNotional"),
+        fallback=_nested_market_value(market, "limits", "cost", "min"),
+        name="minimum notional",
+    )
+    return quantity_step, price_tick, min_quantity, min_notional
+
+
+def _nested_market_value(
+    value: Mapping[str, object],
+    *keys: str,
+) -> object | None:
+    current: object = value
+    for key in keys:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _positive_rule_value(
+    value: object,
+    *,
+    fallback: object,
+    name: str,
+) -> Decimal:
+    parsed = Decimal(str(value or fallback or "0"))
+    if parsed <= 0:
+        raise RuntimeError(f"venue {name} is missing or non-positive")
+    return parsed
 
 
 async def _empty_rows() -> list[object]:

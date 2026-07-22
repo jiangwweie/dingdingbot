@@ -23,7 +23,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.trading_kernel.application.ports import VenuePort  # noqa: E402
 from src.trading_kernel.application.runtime_facts import (  # noqa: E402
-    ActionTimeFactsSource,
+    EntryFactsSource,
     LifecycleFactsSource,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import (  # noqa: E402
@@ -108,10 +108,14 @@ async def _run(args: argparse.Namespace) -> int:
                 raise TypeError(
                     "ENTRY venue factory must provide ActionTimeFactsSource"
                 )
+            if not callable(getattr(adapter, "read_instrument_rules", None)):
+                raise TypeError(
+                    "ENTRY venue factory must provide InstrumentRulesSource"
+                )
             result = await run_entry_worker_once(
                 lambda: PostgresKernelUnitOfWork(engine),
                 venue_port,
-                cast(ActionTimeFactsSource, adapter),
+                cast(EntryFactsSource, adapter),
                 EntryWorkerRequest(
                     worker_id=args.worker_id,
                     runtime_commit=args.runtime_commit,

@@ -20,7 +20,8 @@ from src.trading_kernel.application.issue_ticket import IssueTicketStatus
 from src.trading_kernel.application.ports import UnitOfWorkFactory, VenuePort
 from src.trading_kernel.application.runtime_facts import (
     ActionTimeFactsRequest,
-    ActionTimeFactsSource,
+    EntryFactsSource,
+    InstrumentRulesRequest,
 )
 from src.trading_kernel.application.select_entry_candidate import (
     SelectEntryCandidateRequest,
@@ -85,7 +86,7 @@ class EntryWorkerResult(BaseModel):
 async def run_entry_worker_once(
     uow_factory: UnitOfWorkFactory,
     venue: VenuePort,
-    facts_source: ActionTimeFactsSource,
+    facts_source: EntryFactsSource,
     request: EntryWorkerRequest,
 ) -> EntryWorkerResult:
     existing = await _dispatch_entry(uow_factory, venue, request, ticket_id=None)
@@ -141,9 +142,19 @@ async def run_entry_worker_once(
         observed_at_ms=request.now_ms,
         valid_for_ms=request.action_fact_validity_ms,
     )
+    rules_request = InstrumentRulesRequest(
+        venue_id=profile.venue_id,
+        account_id=profile.account_id,
+        exchange_instrument_id=signal.exchange_instrument_id,
+        observed_at_ms=request.now_ms,
+        valid_for_ms=request.action_fact_validity_ms,
+    )
     try:
-        action_facts = await asyncio.wait_for(
-            facts_source.read_action_time_facts(facts_request),
+        action_facts, instrument_rules = await asyncio.wait_for(
+            asyncio.gather(
+                facts_source.read_action_time_facts(facts_request),
+                facts_source.read_instrument_rules(rules_request),
+            ),
             timeout=request.timeout_seconds,
         )
     except Exception as exc:
@@ -159,6 +170,15 @@ async def run_entry_worker_once(
         return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE)
 
     async with uow_factory() as uow:
+        await uow.signals.upsert_instrument_rules(
+            exchange_instrument_id=instrument_rules.exchange_instrument_id,
+            quantity_step=instrument_rules.quantity_step,
+            price_tick=instrument_rules.price_tick,
+            min_quantity=instrument_rules.min_quantity,
+            min_notional=instrument_rules.min_notional,
+            observed_at_ms=instrument_rules.observed_at_ms,
+            valid_until_ms=instrument_rules.valid_until_ms,
+        )
         issued = await issue_ready_signal(
             uow,
             IssueReadySignalRequest(

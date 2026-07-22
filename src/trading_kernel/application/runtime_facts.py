@@ -57,6 +57,85 @@ class ActionTimeFactsSource(Protocol):
     ) -> ActionTimeFacts: ...
 
 
+class InstrumentRulesRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    venue_id: str
+    account_id: str
+    exchange_instrument_id: str
+    observed_at_ms: int
+    valid_for_ms: int
+
+    @field_validator(
+        "venue_id",
+        "account_id",
+        "exchange_instrument_id",
+        mode="before",
+    )
+    @classmethod
+    def _require_rule_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("instrument rule identities must be non-blank")
+        return normalized
+
+    @field_validator("observed_at_ms", "valid_for_ms")
+    @classmethod
+    def _require_positive_rule_time(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("instrument rule times must be positive")
+        return value
+
+
+class InstrumentRulesFacts(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exchange_instrument_id: str
+    quantity_step: Decimal
+    price_tick: Decimal
+    min_quantity: Decimal
+    min_notional: Decimal
+    observed_at_ms: int
+    valid_until_ms: int
+
+    @field_validator("exchange_instrument_id", mode="before")
+    @classmethod
+    def _require_instrument_identity(cls, value: object) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("instrument rules require instrument identity")
+        return normalized
+
+    @field_validator(
+        "quantity_step",
+        "price_tick",
+        "min_quantity",
+        "min_notional",
+    )
+    @classmethod
+    def _require_positive_rule(cls, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise ValueError("instrument rules must be positive")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_rule_window(self) -> "InstrumentRulesFacts":
+        if self.observed_at_ms <= 0 or self.valid_until_ms <= self.observed_at_ms:
+            raise ValueError("instrument rule window must be current")
+        return self
+
+
+class InstrumentRulesSource(Protocol):
+    async def read_instrument_rules(
+        self,
+        request: InstrumentRulesRequest,
+    ) -> InstrumentRulesFacts: ...
+
+
+class EntryFactsSource(ActionTimeFactsSource, InstrumentRulesSource, Protocol):
+    pass
+
+
 class PositionSnapshotRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

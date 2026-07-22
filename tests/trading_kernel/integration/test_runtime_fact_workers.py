@@ -7,6 +7,8 @@ import pytest
 from src.trading_kernel.application.ingest_signal import IngestSignalRequest, ingest_signal
 from src.trading_kernel.application.runtime_facts import (
     ActionTimeFactsRequest,
+    InstrumentRulesFacts,
+    InstrumentRulesRequest,
     LifecycleFactsRequest,
     PositionSnapshotRequest,
 )
@@ -53,6 +55,7 @@ runtime_fact_worker_engine = dispatch_fixture.dispatch_engine
 class FakeActionTimeFactsSource:
     def __init__(self) -> None:
         self.requests: list[ActionTimeFactsRequest] = []
+        self.rule_requests: list[InstrumentRulesRequest] = []
 
     async def read_action_time_facts(
         self,
@@ -73,6 +76,21 @@ class FakeActionTimeFactsSource:
             available_margin=Decimal("1000"),
             netting_domain_position_qty=Decimal("0"),
             netting_domain_open_order_count=0,
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+
+    async def read_instrument_rules(
+        self,
+        request: InstrumentRulesRequest,
+    ) -> InstrumentRulesFacts:
+        self.rule_requests.append(request)
+        return InstrumentRulesFacts(
+            exchange_instrument_id=request.exchange_instrument_id,
+            quantity_step=Decimal("0.001"),
+            price_tick=Decimal("0.1"),
+            min_quantity=Decimal("0.001"),
+            min_notional=Decimal("5"),
             observed_at_ms=request.observed_at_ms,
             valid_until_ms=request.observed_at_ms + request.valid_for_ms,
         )
@@ -222,11 +240,19 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
     assert result.status is EntryWorkerStatus.DISPATCHED
     assert result.ticket_id is not None
     assert len(facts.requests) == 1
+    assert len(facts.rule_requests) == 1
     assert venue.command_kinds == ["entry"]
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
         ticket = await uow.tickets.get(result.ticket_id)
         commands = await uow.exchange_commands.list_for_ticket(result.ticket_id)
+        rules = await uow.signals.get_instrument_rules(
+            signal.exchange_instrument_id
+        )
     assert ticket is not None
+    assert rules is not None
+    assert rules.observed_at_ms == 1_003
+    assert rules.valid_until_ms == 2_003
+    assert rules.projection_version == 2
     assert len(commands) == 1
     assert commands[0].status is ExchangeCommandStatus.ACCEPTED
 

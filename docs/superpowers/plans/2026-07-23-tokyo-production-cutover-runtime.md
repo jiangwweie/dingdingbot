@@ -51,7 +51,7 @@
 - Produces: `SignalRepository.upsert_instrument_rules(...) -> InstrumentRulesSnapshot`.
 - Entry Worker persists live rules before `issue_ready_signal`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 async def test_entry_worker_refreshes_live_instrument_rules_before_ticket() -> None:
@@ -66,13 +66,13 @@ async def test_disabling_new_entry_does_not_block_prepared_initial_stop() -> Non
     assert result.status is LifecycleWorkerStatus.DISPATCHED
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `pytest -q tests/trading_kernel/integration/test_runtime_fact_workers.py -k 'instrument_rules or disabling_new_entry'`
 
 Expected: FAIL because the rule-source protocol and persistence path do not exist.
 
-- [ ] **Step 3: Implement the minimal rule path**
+- [x] **Step 3: Implement the minimal rule path**
 
 ```python
 class InstrumentRulesSource(Protocol):
@@ -87,13 +87,13 @@ transaction, persist the exact rule projection in a short transaction, then
 call `issue_ready_signal`. Owner Policy gates only new Ticket issuance;
 lifecycle command dispatch remains available for an already accepted Ticket.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `pytest -q tests/trading_kernel/integration/test_runtime_fact_workers.py tests/trading_kernel/unit/test_venue_adapter.py`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/trading_kernel scripts/trading_kernel tests/trading_kernel
@@ -415,4 +415,3 @@ git commit -m "docs(kernel): record Tokyo production acceptance"
   controlled exit remain available for accepted exposure.
 - **No compatibility:** No old runtime import, old table reader in cadence,
   dual write, or fallback service is introduced.
-

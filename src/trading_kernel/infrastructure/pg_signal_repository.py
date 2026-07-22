@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Literal, cast
 
 import sqlalchemy as sa
@@ -528,6 +529,53 @@ class PostgresSignalRepository:
             if row is None
             else InstrumentRulesSnapshot.model_validate(row, extra="ignore")
         )
+
+    async def upsert_instrument_rules(
+        self,
+        *,
+        exchange_instrument_id: str,
+        quantity_step: Decimal,
+        price_tick: Decimal,
+        min_quantity: Decimal,
+        min_notional: Decimal,
+        observed_at_ms: int,
+        valid_until_ms: int,
+    ) -> InstrumentRulesSnapshot:
+        result = await self._connection.execute(
+            sa.select(instrument_rules_current)
+            .where(
+                instrument_rules_current.c.exchange_instrument_id
+                == exchange_instrument_id
+            )
+            .with_for_update()
+        )
+        row = result.mappings().one_or_none()
+        projection_version = 1 if row is None else int(row["projection_version"]) + 1
+        values = {
+            "exchange_instrument_id": exchange_instrument_id,
+            "quantity_step": quantity_step,
+            "price_tick": price_tick,
+            "min_quantity": min_quantity,
+            "min_notional": min_notional,
+            "session_and_settlement": {},
+            "observed_at_ms": observed_at_ms,
+            "valid_until_ms": valid_until_ms,
+            "projection_version": projection_version,
+        }
+        if row is None:
+            await self._connection.execute(
+                sa.insert(instrument_rules_current).values(values)
+            )
+        else:
+            await self._connection.execute(
+                sa.update(instrument_rules_current)
+                .where(
+                    instrument_rules_current.c.exchange_instrument_id
+                    == exchange_instrument_id
+                )
+                .values(values)
+            )
+        return InstrumentRulesSnapshot.model_validate(values, extra="ignore")
 
     async def get_runtime_capability(
         self,
