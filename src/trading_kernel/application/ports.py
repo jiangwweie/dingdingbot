@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum
+from types import TracebackType
 from typing import Callable, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -209,6 +210,14 @@ class ExchangeCommandRepository(Protocol):
         result: ExchangeCommandResult,
     ) -> None: ...
 
+    async def mark_cancel_reconciled_absent(
+        self,
+        *,
+        ticket_id: str,
+        exchange_order_id: str,
+        observed_at_ms: int,
+    ) -> None: ...
+
 
 class BudgetRepository(Protocol):
     async def add(self, reservation: BudgetReservationRecord) -> None: ...
@@ -354,7 +363,7 @@ class KernelUnitOfWork(Protocol):
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: object | None,
+        traceback: TracebackType | None,
     ) -> None: ...
 
     async def commit_reduction(

@@ -38,7 +38,17 @@ class RequestControlledFlatten(_Effect):
     quantity: Decimal
 
 
+class PrepareControlledFlattenCommand(_Effect):
+    ticket_id: str
+    quantity: Decimal
+
+
 class CancelProtectionOrders(_Effect):
+    ticket_id: str
+    exchange_order_id: str
+
+
+class MarkCancelCommandReconciledAbsent(_Effect):
     ticket_id: str
     exchange_order_id: str
 
@@ -66,7 +76,9 @@ KernelEffect = (
     | PrepareExitCommand
     | CancelEntryRemainder
     | RequestControlledFlatten
+    | PrepareControlledFlattenCommand
     | CancelProtectionOrders
+    | MarkCancelCommandReconciledAbsent
     | OpenIncident
     | ReleaseEntryLane
     | SettleBudget

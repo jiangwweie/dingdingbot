@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -13,6 +14,7 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandStatus,
 )
 from src.trading_kernel.domain.events import (
+    CancelOrderAbsenceConfirmed,
     EntryFilled,
     EntryPartiallyFilled,
     ExternalFlatDetected,
@@ -20,6 +22,7 @@ from src.trading_kernel.domain.events import (
     OwnedOrphanOrderDetected,
     PositionFlatConfirmed,
     ReconciliationMatched,
+    TradeEvent,
     UnownedOrderDetected,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
@@ -33,6 +36,7 @@ class ReconcileTicketStatus(StrEnum):
     EXTERNAL_FLAT_INCIDENT = "external_flat_incident"
     POSITION_FLAT_RECORDED = "position_flat_recorded"
     PROTECTION_RESIDUE = "protection_residue"
+    CANCEL_ABSENCE_RECORDED = "cancel_absence_recorded"
     OWNED_ORPHAN_CANCEL_REQUESTED = "owned_orphan_cancel_requested"
     UNOWNED_ORDER_INCIDENT = "unowned_order_incident"
     MATCHED = "matched"
@@ -89,7 +93,7 @@ async def reconcile_ticket(
         raise ValueError("position snapshot Netting Domain mismatch")
     await uow.positions.upsert(ticket_id=request.ticket_id, snapshot=snapshot)
 
-    event = None
+    event: TradeEvent | None = None
     status = ReconcileTicketStatus.NO_CHANGE
     if aggregate.status is AggregateStatus.ENTRY_ACCEPTED:
         if snapshot.quantity == aggregate.ticket.quantity:
@@ -99,7 +103,7 @@ async def reconcile_ticket(
                 sequence=aggregate.last_event_sequence + 1,
                 occurred_at_ms=snapshot.observed_at_ms,
                 filled_qty=snapshot.quantity,
-                average_fill_price=snapshot.average_entry_price,
+                average_fill_price=_required_average_entry_price(snapshot),
             )
             status = ReconcileTicketStatus.ENTRY_FILL_RECORDED
         elif 0 < snapshot.quantity < aggregate.ticket.quantity:
@@ -110,12 +114,18 @@ async def reconcile_ticket(
                 occurred_at_ms=snapshot.observed_at_ms,
                 filled_qty=snapshot.quantity,
                 requested_qty=aggregate.ticket.quantity,
-                average_fill_price=snapshot.average_entry_price,
+                average_fill_price=_required_average_entry_price(snapshot),
             )
             status = ReconcileTicketStatus.PARTIAL_FILL_INCIDENT
     elif aggregate.status in {
         AggregateStatus.EXIT_PENDING,
         AggregateStatus.EXIT_ACCEPTED,
+        AggregateStatus.EXIT_REJECTED,
+        AggregateStatus.EXIT_OUTCOME_UNKNOWN,
+        AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+        AggregateStatus.CONTROLLED_FLATTEN_ACCEPTED,
+        AggregateStatus.CONTROLLED_FLATTEN_REJECTED,
+        AggregateStatus.CONTROLLED_FLATTEN_OUTCOME_UNKNOWN,
     } and snapshot.quantity == 0:
         event = PositionFlatConfirmed(
             event_id=_event_id(aggregate),
@@ -188,6 +198,39 @@ async def reconcile_ticket(
                 occurred_at_ms=snapshot.observed_at_ms,
             )
             status = ReconcileTicketStatus.MATCHED
+    elif aggregate.status in {
+        AggregateStatus.CANCEL_REJECTED,
+        AggregateStatus.CANCEL_OUTCOME_UNKNOWN,
+    }:
+        target_order_id = aggregate.pending_cancel_exchange_order_id
+        if target_order_id is None:
+            raise RuntimeError("cancel recovery state has no exact order identity")
+        target_still_open = any(
+            order.exchange_order_id == target_order_id
+            for order in snapshot.open_orders
+        )
+        if target_still_open:
+            if aggregate.status is AggregateStatus.CANCEL_OUTCOME_UNKNOWN:
+                return ReconcileTicketResult(
+                    status=ReconcileTicketStatus.PROTECTION_RESIDUE
+                )
+            event = OwnedOrphanOrderDetected(
+                event_id=_event_id(aggregate),
+                ticket_id=request.ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=snapshot.observed_at_ms,
+                exchange_order_id=target_order_id,
+            )
+            status = ReconcileTicketStatus.OWNED_ORPHAN_CANCEL_REQUESTED
+        else:
+            event = CancelOrderAbsenceConfirmed(
+                event_id=_event_id(aggregate),
+                ticket_id=request.ticket_id,
+                sequence=aggregate.last_event_sequence + 1,
+                occurred_at_ms=snapshot.observed_at_ms,
+                exchange_order_id=target_order_id,
+            )
+            status = ReconcileTicketStatus.CANCEL_ABSENCE_RECORDED
 
     if event is not None:
         await uow.commit_reduction(
@@ -196,6 +239,13 @@ async def reconcile_ticket(
             expected_version=aggregate.version,
         )
     return ReconcileTicketResult(status=status)
+
+
+def _required_average_entry_price(snapshot: PositionSnapshot) -> Decimal:
+    price = snapshot.average_entry_price
+    if price is None:
+        raise RuntimeError("open position snapshot lacks average entry price")
+    return price
 
 
 async def request_exit(

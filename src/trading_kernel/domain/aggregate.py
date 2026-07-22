@@ -17,12 +17,21 @@ class AggregateStatus(StrEnum):
     ENTRY_REJECTED = "entry_rejected"
     ENTRY_OUTCOME_UNKNOWN = "entry_outcome_unknown"
     PARTIAL_FILL_INCIDENT = "partial_fill_incident"
+    PARTIAL_FILL_CANCEL_REJECTED = "partial_fill_cancel_rejected"
+    PARTIAL_FILL_CANCEL_OUTCOME_UNKNOWN = "partial_fill_cancel_outcome_unknown"
     PROTECTION_PENDING = "protection_pending"
     POSITION_PROTECTED = "position_protected"
     EXIT_PENDING = "exit_pending"
     EXIT_ACCEPTED = "exit_accepted"
+    EXIT_REJECTED = "exit_rejected"
     EXIT_OUTCOME_UNKNOWN = "exit_outcome_unknown"
+    CONTROLLED_FLATTEN_PENDING = "controlled_flatten_pending"
+    CONTROLLED_FLATTEN_ACCEPTED = "controlled_flatten_accepted"
+    CONTROLLED_FLATTEN_REJECTED = "controlled_flatten_rejected"
+    CONTROLLED_FLATTEN_OUTCOME_UNKNOWN = "controlled_flatten_outcome_unknown"
     RECONCILIATION_PENDING = "reconciliation_pending"
+    CANCEL_REJECTED = "cancel_rejected"
+    CANCEL_OUTCOME_UNKNOWN = "cancel_outcome_unknown"
     SETTLEMENT_PENDING = "settlement_pending"
     REVIEW_PENDING = "review_pending"
     TERMINAL = "terminal"
@@ -36,10 +45,12 @@ class TradeAggregate(BaseModel):
     status: AggregateStatus
     version: int
     last_event_sequence: int
+    entry_lane_held: bool = True
     position_qty: Decimal = Decimal("0")
     average_fill_price: Decimal | None = None
     protected_qty: Decimal = Decimal("0")
     entry_exchange_order_id: str | None = None
     initial_stop_exchange_order_id: str | None = None
+    pending_cancel_exchange_order_id: str | None = None
     exit_exchange_order_id: str | None = None
     review_id: str | None = None

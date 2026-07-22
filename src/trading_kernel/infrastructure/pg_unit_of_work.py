@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 from types import TracebackType
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncTransaction
 
 from src.trading_kernel.application.ports import (
     AggregateVersionConflict,
+    AggregateRepository,
+    BudgetRepository,
+    EntryAdmissionRepository,
+    EventRepository,
+    ExchangeCommandRepository,
+    IncidentRepository,
+    MonitorRepository,
+    PositionRepository,
+    ReviewRepository,
     RuntimeIncidentRecord,
+    TicketRepository,
     UnsupportedKernelEffect,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
@@ -20,15 +31,20 @@ from src.trading_kernel.domain.commands import (
     OrderCommandPayload,
     build_command_id,
     build_venue_client_order_id,
+    require_next_generation_allowed,
 )
 from src.trading_kernel.domain.effects import (
+    CancelEntryRemainder,
     CancelProtectionOrders,
+    MarkCancelCommandReconciledAbsent,
     OpenIncident,
     PrepareEntryCommand,
+    PrepareControlledFlattenCommand,
     PrepareExitCommand,
     PrepareInitialStopCommand,
     ReleaseBudget,
     ReleaseEntryLane,
+    RequestControlledFlatten,
     SettleBudget,
 )
 from src.trading_kernel.domain.events import TicketIssued, TradeEvent
@@ -52,6 +68,17 @@ __all__ = ["AggregateVersionConflict", "PostgresKernelUnitOfWork"]
 
 
 class PostgresKernelUnitOfWork:
+    tickets: TicketRepository
+    aggregates: AggregateRepository
+    events: EventRepository
+    exchange_commands: ExchangeCommandRepository
+    budgets: BudgetRepository
+    incidents: IncidentRepository
+    monitors: MonitorRepository
+    positions: PositionRepository
+    reviews: ReviewRepository
+    entry_admission: EntryAdmissionRepository
+
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
         self._connection: AsyncConnection | None = None
@@ -146,11 +173,72 @@ class PostgresKernelUnitOfWork:
                     )
                 )
                 continue
+            if isinstance(effect, CancelEntryRemainder):
+                if aggregate.entry_exchange_order_id is None:
+                    raise UnsupportedKernelEffect(
+                        "partial fill has no authoritative ENTRY order identity"
+                    )
+                generation = await self.exchange_commands.next_generation(
+                    ticket_id=aggregate.identity.ticket_id,
+                    kind=ExchangeCommandKind.CANCEL_ORDER,
+                )
+                await self.exchange_commands.add(
+                    _cancel_protection_command(
+                        aggregate,
+                        CancelProtectionOrders(
+                            ticket_id=effect.ticket_id,
+                            exchange_order_id=aggregate.entry_exchange_order_id,
+                        ),
+                        generation=generation,
+                        occurred_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
+            if isinstance(effect, RequestControlledFlatten):
+                if (
+                    aggregate.status is not AggregateStatus.PARTIAL_FILL_INCIDENT
+                    or aggregate.position_qty != effect.quantity
+                ):
+                    raise UnsupportedKernelEffect(
+                        "controlled flatten intent differs from partial exposure"
+                    )
+                continue
+            if isinstance(effect, PrepareControlledFlattenCommand):
+                await self.exchange_commands.add(
+                    _controlled_flatten_command(
+                        aggregate,
+                        effect,
+                        occurred_at_ms=event.occurred_at_ms,
+                    )
+                )
+                continue
             if isinstance(effect, PrepareExitCommand):
+                generation = await self.exchange_commands.next_generation(
+                    ticket_id=aggregate.identity.ticket_id,
+                    kind=ExchangeCommandKind.EXIT,
+                )
+                if generation > 1:
+                    prior_commands = await self.exchange_commands.list_for_ticket(
+                        aggregate.identity.ticket_id
+                    )
+                    prior = max(
+                        (
+                            command
+                            for command in prior_commands
+                            if command.kind is ExchangeCommandKind.EXIT
+                        ),
+                        key=lambda command: command.generation,
+                    )
+                    require_next_generation_allowed(
+                        kind=ExchangeCommandKind.EXIT,
+                        prior_status=prior.status,
+                        next_generation=generation,
+                    )
                 await self.exchange_commands.add(
                     _exit_command(
                         aggregate,
                         effect,
+                        generation=generation,
                         occurred_at_ms=event.occurred_at_ms,
                     )
                 )
@@ -160,6 +248,28 @@ class PostgresKernelUnitOfWork:
                     ticket_id=aggregate.identity.ticket_id,
                     kind=ExchangeCommandKind.CANCEL_ORDER,
                 )
+                if generation > 1:
+                    prior_commands = await self.exchange_commands.list_for_ticket(
+                        aggregate.identity.ticket_id
+                    )
+                    prior = max(
+                        (
+                            command
+                            for command in prior_commands
+                            if command.kind is ExchangeCommandKind.CANCEL_ORDER
+                        ),
+                        key=lambda command: command.generation,
+                    )
+                    if (
+                        isinstance(prior.payload, CancelCommandPayload)
+                        and prior.payload.exchange_order_id
+                        == effect.exchange_order_id
+                    ):
+                        require_next_generation_allowed(
+                            kind=ExchangeCommandKind.CANCEL_ORDER,
+                            prior_status=prior.status,
+                            next_generation=generation,
+                        )
                 await self.exchange_commands.add(
                     _cancel_protection_command(
                         aggregate,
@@ -167,6 +277,13 @@ class PostgresKernelUnitOfWork:
                         generation=generation,
                         occurred_at_ms=event.occurred_at_ms,
                     )
+                )
+                continue
+            if isinstance(effect, MarkCancelCommandReconciledAbsent):
+                await self.exchange_commands.mark_cancel_reconciled_absent(
+                    ticket_id=effect.ticket_id,
+                    exchange_order_id=effect.exchange_order_id,
+                    observed_at_ms=event.occurred_at_ms,
                 )
                 continue
             if isinstance(effect, ReleaseBudget):
@@ -253,8 +370,12 @@ def _entry_command(
         kind=ExchangeCommandKind.ENTRY,
         generation=1,
     )
-    side = "buy" if ticket.identity.netting_domain.position_side == "long" else "sell"
-    order_type = "market" if ticket.entry_order_type is EntryOrderType.MARKET else "limit"
+    side: Literal["buy", "sell"] = (
+        "buy" if ticket.identity.netting_domain.position_side == "long" else "sell"
+    )
+    order_type: Literal["market", "limit"] = (
+        "market" if ticket.entry_order_type is EntryOrderType.MARKET else "limit"
+    )
     return ExchangeCommand(
         command_id=command_id,
         ticket_identity=ticket.identity,
@@ -299,11 +420,32 @@ def _exit_command(
     aggregate,
     effect: PrepareExitCommand,
     *,
+    generation: int,
     occurred_at_ms: int,
 ) -> ExchangeCommand:
     return _order_command(
         aggregate=aggregate,
         kind=ExchangeCommandKind.EXIT,
+        generation=generation,
+        payload=OrderCommandPayload(
+            side=_closing_side(aggregate),
+            quantity=effect.quantity,
+            order_type="market",
+            reduce_only=True,
+        ),
+        occurred_at_ms=occurred_at_ms,
+    )
+
+
+def _controlled_flatten_command(
+    aggregate,
+    effect: PrepareControlledFlattenCommand,
+    *,
+    occurred_at_ms: int,
+) -> ExchangeCommand:
+    return _order_command(
+        aggregate=aggregate,
+        kind=ExchangeCommandKind.CONTROLLED_FLATTEN,
         payload=OrderCommandPayload(
             side=_closing_side(aggregate),
             quantity=effect.quantity,
@@ -344,19 +486,20 @@ def _order_command(
     *,
     aggregate,
     kind: ExchangeCommandKind,
+    generation: int = 1,
     payload: OrderCommandPayload,
     occurred_at_ms: int,
 ) -> ExchangeCommand:
     command_id = build_command_id(
         ticket_id=aggregate.identity.ticket_id,
         kind=kind,
-        generation=1,
+        generation=generation,
     )
     return ExchangeCommand(
         command_id=command_id,
         ticket_identity=aggregate.identity,
         kind=kind,
-        generation=1,
+        generation=generation,
         idempotency_key=command_id,
         venue_client_order_id=build_venue_client_order_id(command_id),
         payload=payload,
@@ -366,7 +509,7 @@ def _order_command(
     )
 
 
-def _closing_side(aggregate) -> str:
+def _closing_side(aggregate) -> Literal["buy", "sell"]:
     return "sell" if aggregate.identity.netting_domain.position_side == "long" else "buy"
 
 

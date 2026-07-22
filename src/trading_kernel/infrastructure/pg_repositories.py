@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from decimal import Decimal
+from typing import Literal
 
 import sqlalchemy as sa
 from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import (
@@ -22,7 +23,6 @@ from src.trading_kernel.application.ports import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
-    CancelCommandPayload,
     CommandPayload,
     ExchangeCommand,
     ExchangeCommandKind,
@@ -32,16 +32,28 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.domain.events import (
     BudgetSettled,
+    CancelOrderAbsenceConfirmed,
+    CancelOrderOutcomeUnknown,
+    CancelOrderRejected,
+    ControlledFlattenAccepted,
+    ControlledFlattenOutcomeUnknown,
+    ControlledFlattenRejected,
     EntryAccepted,
     EntryFilled,
     EntryOutcomeUnknown,
     EntryPartiallyFilled,
     EntryRejected,
+    EntryRemainderCancelConfirmed,
+    EntryRemainderCancelOutcomeUnknown,
+    EntryRemainderCancelRejected,
     ExternalFlatDetected,
     ExitAccepted,
     ExitOutcomeUnknown,
+    ExitRejected,
     ExitRequested,
     InitialStopConfirmed,
+    InitialStopOutcomeUnknown,
+    InitialStopRejected,
     OwnedOrphanOrderDetected,
     OwnedOrphanCancelConfirmed,
     PositionFlatConfirmed,
@@ -85,10 +97,19 @@ _EVENT_MODELS = {
         EntryOutcomeUnknown,
         EntryFilled,
         EntryPartiallyFilled,
+        EntryRemainderCancelConfirmed,
+        EntryRemainderCancelRejected,
+        EntryRemainderCancelOutcomeUnknown,
         InitialStopConfirmed,
+        InitialStopRejected,
+        InitialStopOutcomeUnknown,
         ExitRequested,
         ExitAccepted,
+        ExitRejected,
         ExitOutcomeUnknown,
+        ControlledFlattenAccepted,
+        ControlledFlattenRejected,
+        ControlledFlattenOutcomeUnknown,
         PositionFlatConfirmed,
         ExternalFlatDetected,
         OwnedOrphanOrderDetected,
@@ -97,10 +118,13 @@ _EVENT_MODELS = {
         ProtectionCancelConfirmed,
         ReconciliationMatched,
         BudgetSettled,
+        CancelOrderAbsenceConfirmed,
+        CancelOrderRejected,
+        CancelOrderOutcomeUnknown,
         ReviewRecorded,
     )
 }
-_COMMAND_PAYLOAD_ADAPTER = TypeAdapter(CommandPayload)
+_COMMAND_PAYLOAD_ADAPTER: TypeAdapter[CommandPayload] = TypeAdapter(CommandPayload)
 
 
 class PostgresTicketRepository:
@@ -417,7 +441,35 @@ class PostgresExchangeCommandRepository:
         if updated.rowcount != 1:
             raise AggregateVersionConflict("expired command claim changed")
 
-    async def _command_from_row(self, row: Mapping[str, object]) -> ExchangeCommand:
+    async def mark_cancel_reconciled_absent(
+        self,
+        *,
+        ticket_id: str,
+        exchange_order_id: str,
+        observed_at_ms: int,
+    ) -> None:
+        updated = await self._connection.execute(
+            sa.update(exchange_commands)
+            .where(
+                exchange_commands.c.ticket_id == ticket_id,
+                exchange_commands.c.command_kind
+                == ExchangeCommandKind.CANCEL_ORDER.value,
+                exchange_commands.c.status
+                == ExchangeCommandStatus.OUTCOME_UNKNOWN.value,
+                exchange_commands.c.request_payload["exchange_order_id"].astext
+                == exchange_order_id,
+            )
+            .values(
+                status=ExchangeCommandStatus.RECONCILED_ABSENT.value,
+                completed_at_ms=observed_at_ms,
+            )
+        )
+        if updated.rowcount != 1:
+            raise AggregateVersionConflict(
+                "unknown cancel command was not available for absence reconciliation"
+            )
+
+    async def _command_from_row(self, row: RowMapping) -> ExchangeCommand:
         ticket = await self._tickets.get(str(row["ticket_id"]))
         if ticket is None:
             raise RuntimeError("exchange command exists without immutable Ticket")
@@ -563,7 +615,7 @@ class PostgresPositionRepository:
                 venue_id=str(row["venue_id"]),
                 account_id=str(row["account_id"]),
                 exchange_instrument_id=str(row["exchange_instrument_id"]),
-                position_side=str(row["position_side"]),
+                position_side=_position_side(row["position_side"]),
             ),
             quantity=Decimal(row["quantity"]),
             average_entry_price=(
@@ -905,7 +957,7 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
     }
 
 
-def _ticket_from_row(row: Mapping[str, object]) -> TradeTicket:
+def _ticket_from_row(row: RowMapping) -> TradeTicket:
     runtime = RuntimeIdentity(
         runtime_profile_id=str(row["runtime_profile_id"]),
         strategy_group_id=str(row["strategy_group_id"]),
@@ -916,7 +968,7 @@ def _ticket_from_row(row: Mapping[str, object]) -> TradeTicket:
         venue_id=str(row["venue_id"]),
         account_id=str(row["account_id"]),
         exchange_instrument_id=str(row["exchange_instrument_id"]),
-        position_side=str(row["position_side"]),
+        position_side=_position_side(row["position_side"]),
     )
     identity = TicketIdentity(
         ticket_id=str(row["ticket_id"]),
@@ -960,11 +1012,15 @@ def _aggregate_values(
         "status": aggregate.status.value,
         "version": aggregate.version,
         "last_event_sequence": aggregate.last_event_sequence,
+        "entry_lane_held": aggregate.entry_lane_held,
         "position_qty": aggregate.position_qty,
         "average_fill_price": aggregate.average_fill_price,
         "protected_qty": aggregate.protected_qty,
         "entry_exchange_order_id": aggregate.entry_exchange_order_id,
         "initial_stop_exchange_order_id": aggregate.initial_stop_exchange_order_id,
+        "pending_cancel_exchange_order_id": (
+            aggregate.pending_cancel_exchange_order_id
+        ),
         "exit_exchange_order_id": aggregate.exit_exchange_order_id,
         "review_id": aggregate.review_id,
         "updated_at_ms": updated_at_ms or aggregate.ticket.created_at_ms,
@@ -972,7 +1028,7 @@ def _aggregate_values(
 
 
 def _aggregate_from_row(
-    row: Mapping[str, object],
+    row: RowMapping,
     ticket: TradeTicket,
 ) -> TradeAggregate:
     return TradeAggregate(
@@ -981,6 +1037,7 @@ def _aggregate_from_row(
         status=AggregateStatus(str(row["status"])),
         version=int(row["version"]),
         last_event_sequence=int(row["last_event_sequence"]),
+        entry_lane_held=bool(row["entry_lane_held"]),
         position_qty=Decimal(row["position_qty"]),
         average_fill_price=(
             None
@@ -998,6 +1055,11 @@ def _aggregate_from_row(
             if row["initial_stop_exchange_order_id"] is None
             else str(row["initial_stop_exchange_order_id"])
         ),
+        pending_cancel_exchange_order_id=(
+            None
+            if row["pending_cancel_exchange_order_id"] is None
+            else str(row["pending_cancel_exchange_order_id"])
+        ),
         exit_exchange_order_id=(
             None
             if row["exit_exchange_order_id"] is None
@@ -1014,7 +1076,7 @@ def _event_ticket_id(event: TradeEvent) -> str:
 
 
 def _same_monitor_state(
-    current: Mapping[str, object],
+    current: RowMapping,
     requested: MonitorStateRecord,
 ) -> bool:
     return all(
@@ -1027,3 +1089,12 @@ def _same_monitor_state(
             "incident_id",
         )
     )
+
+
+def _position_side(value: object) -> Literal["long", "short"]:
+    normalized = str(value)
+    if normalized == "long":
+        return "long"
+    if normalized == "short":
+        return "short"
+    raise RuntimeError(f"invalid persisted position side: {normalized!r}")

@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandRequest,
-    DispatchCommandStatus,
     dispatch_one_command,
 )
 from src.trading_kernel.application.ports import (

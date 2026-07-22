@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import sys
 import time
-from typing import Callable
+from typing import Callable, cast
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -21,6 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.trading_kernel.application.ports import VenuePort  # noqa: E402
 from src.trading_kernel.application.runtime import RuntimeTickRequest  # noqa: E402
 from src.trading_kernel.infrastructure.pg_unit_of_work import (  # noqa: E402
     PostgresKernelUnitOfWork,
@@ -69,12 +70,13 @@ async def _run(args: argparse.Namespace) -> int:
         venue = await venue
     if not callable(getattr(venue, "execute", None)):
         raise TypeError("venue factory must return a VenuePort")
+    venue_port = cast(VenuePort, venue)
 
     engine = create_async_engine(database_url)
     try:
         result = await run_worker_once(
             lambda: PostgresKernelUnitOfWork(engine),
-            venue,
+            venue_port,
             RuntimeTickRequest(
                 monitor_key=args.monitor_key,
                 owner_policy_id=args.owner_policy_id,

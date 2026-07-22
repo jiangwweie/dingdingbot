@@ -399,6 +399,47 @@ def load(yaml_path):
     ]
 
 
+def test_file_io_audit_rejects_any_trading_kernel_runtime_file_read():
+    occurrences = _audit_source(
+        "src/trading_kernel/application/runtime.py",
+        """
+def load(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        return handle.read()
+""",
+    )
+
+    flagged = [
+        item for item in occurrences if "runtime_file_read" in item.risk_flags
+    ]
+    assert flagged
+    assert {item.runtime_surface for item in flagged} == {
+        "trading_kernel_runtime"
+    }
+    assert all("blocking_cleanup_required" in item.risk_flags for item in flagged)
+
+
+def test_file_io_audit_rejects_any_trading_kernel_runtime_file_write():
+    occurrences = _audit_source(
+        "scripts/trading_kernel/run_worker_once.py",
+        """
+from pathlib import Path
+
+def save(path):
+    Path(path).write_text("state", encoding="utf-8")
+""",
+    )
+
+    flagged = [
+        item for item in occurrences if "runtime_file_write" in item.risk_flags
+    ]
+    assert flagged
+    assert {item.runtime_surface for item in flagged} == {
+        "trading_kernel_runtime"
+    }
+    assert all("blocking_cleanup_required" in item.risk_flags for item in flagged)
+
+
 def test_file_io_audit_flags_unbounded_destructive_file_mutation(
     tmp_path: Path,
 ):

@@ -882,6 +882,12 @@ def _occurrence(
 def _runtime_surface(rel_path: str) -> str:
     if rel_path.startswith("deploy/systemd/"):
         return "production_systemd"
+    if rel_path.startswith("src/trading_kernel/"):
+        return "trading_kernel_runtime"
+    if rel_path == "scripts/trading_kernel/run_worker_once.py":
+        return "trading_kernel_runtime"
+    if rel_path.startswith("scripts/trading_kernel/"):
+        return "one_shot_ops"
     if rel_path.endswith("runtime_signal_watcher_tick.py"):
         return "watcher_tick"
     if rel_path.endswith("run_server_product_state_refresh_sequence.py"):
@@ -953,7 +959,15 @@ def _risk_flags(
         "production_cadence_script",
         "owner_console_readmodel",
         "action_time_or_submit_chain",
+        "trading_kernel_runtime",
     }
+    if runtime_surface == "trading_kernel_runtime":
+        if operation in {"read", "read_write"}:
+            flags.add("runtime_file_read")
+            flags.add("blocking_cleanup_required")
+        if operation in {"write", "read_write", "directory_write"}:
+            flags.add("runtime_file_write")
+            flags.add("blocking_cleanup_required")
     if production_surface and operation == "read" and role_guess in {
         "generated_export_or_report_reader",
         "markdown_artifact_or_doc",

@@ -71,9 +71,31 @@ class EntryPartiallyFilled(_TicketEvent):
     average_fill_price: Decimal
 
 
+class EntryRemainderCancelConfirmed(_TicketEvent):
+    exchange_order_id: str
+
+
+class EntryRemainderCancelRejected(_TicketEvent):
+    exchange_order_id: str
+    reason: str
+
+
+class EntryRemainderCancelOutcomeUnknown(_TicketEvent):
+    exchange_order_id: str
+    reason: str
+
+
 class InitialStopConfirmed(_TicketEvent):
     exchange_order_id: str
     protected_qty: Decimal
+
+
+class InitialStopRejected(_TicketEvent):
+    reason: str
+
+
+class InitialStopOutcomeUnknown(_TicketEvent):
+    reason: str
 
 
 class ExitRequested(_TicketEvent):
@@ -84,7 +106,23 @@ class ExitAccepted(_TicketEvent):
     exchange_order_id: str
 
 
+class ExitRejected(_TicketEvent):
+    reason: str
+
+
 class ExitOutcomeUnknown(_TicketEvent):
+    reason: str
+
+
+class ControlledFlattenAccepted(_TicketEvent):
+    exchange_order_id: str
+
+
+class ControlledFlattenRejected(_TicketEvent):
+    reason: str
+
+
+class ControlledFlattenOutcomeUnknown(_TicketEvent):
     reason: str
 
 
@@ -112,6 +150,20 @@ class OwnedOrphanCancelConfirmed(_TicketEvent):
     exchange_order_id: str
 
 
+class CancelOrderRejected(_TicketEvent):
+    exchange_order_id: str
+    reason: str
+
+
+class CancelOrderOutcomeUnknown(_TicketEvent):
+    exchange_order_id: str
+    reason: str
+
+
+class CancelOrderAbsenceConfirmed(_TicketEvent):
+    exchange_order_id: str
+
+
 class ReconciliationMatched(_TicketEvent):
     pass
 
@@ -131,16 +183,28 @@ TradeEvent = (
     | EntryOutcomeUnknown
     | EntryFilled
     | EntryPartiallyFilled
+    | EntryRemainderCancelConfirmed
+    | EntryRemainderCancelRejected
+    | EntryRemainderCancelOutcomeUnknown
     | InitialStopConfirmed
+    | InitialStopRejected
+    | InitialStopOutcomeUnknown
     | ExitRequested
     | ExitAccepted
+    | ExitRejected
     | ExitOutcomeUnknown
+    | ControlledFlattenAccepted
+    | ControlledFlattenRejected
+    | ControlledFlattenOutcomeUnknown
     | PositionFlatConfirmed
     | ExternalFlatDetected
     | OwnedOrphanOrderDetected
     | UnownedOrderDetected
     | ProtectionCancelConfirmed
     | OwnedOrphanCancelConfirmed
+    | CancelOrderRejected
+    | CancelOrderOutcomeUnknown
+    | CancelOrderAbsenceConfirmed
     | ReconciliationMatched
     | BudgetSettled
     | ReviewRecorded

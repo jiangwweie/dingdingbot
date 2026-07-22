@@ -12,6 +12,7 @@ from src.trading_kernel.application.ports import (
     VenueCommandRequest,
     VenuePort,
 )
+from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommand,
@@ -20,12 +21,23 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandStatus,
 )
 from src.trading_kernel.domain.events import (
+    CancelOrderOutcomeUnknown,
+    CancelOrderRejected,
+    ControlledFlattenAccepted,
+    ControlledFlattenOutcomeUnknown,
+    ControlledFlattenRejected,
     EntryAccepted,
     EntryOutcomeUnknown,
     EntryRejected,
+    EntryRemainderCancelConfirmed,
+    EntryRemainderCancelOutcomeUnknown,
+    EntryRemainderCancelRejected,
     ExitAccepted,
     ExitOutcomeUnknown,
+    ExitRejected,
     InitialStopConfirmed,
+    InitialStopOutcomeUnknown,
+    InitialStopRejected,
     OwnedOrphanCancelConfirmed,
     ProtectionCancelConfirmed,
 )
@@ -225,6 +237,58 @@ def _command_result_event(
         return EntryOutcomeUnknown(**common, reason=str(result.reason))
     if kind is ExchangeCommandKind.EXIT and result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
         return ExitOutcomeUnknown(**common, reason=str(result.reason))
+    if kind is ExchangeCommandKind.INITIAL_STOP and result.status is ExchangeCommandStatus.REJECTED:
+        return InitialStopRejected(**common, reason=str(result.reason))
+    if kind is ExchangeCommandKind.INITIAL_STOP and result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+        return InitialStopOutcomeUnknown(**common, reason=str(result.reason))
+    if kind is ExchangeCommandKind.EXIT and result.status is ExchangeCommandStatus.REJECTED:
+        return ExitRejected(**common, reason=str(result.reason))
+    if kind is ExchangeCommandKind.CANCEL_ORDER:
+        if not isinstance(command.payload, CancelCommandPayload):
+            raise RuntimeError("cancel command payload is invalid")
+        if aggregate.status is AggregateStatus.PARTIAL_FILL_INCIDENT:
+            if result.status is ExchangeCommandStatus.ACCEPTED:
+                return EntryRemainderCancelConfirmed(
+                    **common,
+                    exchange_order_id=command.payload.exchange_order_id,
+                )
+            if result.status is ExchangeCommandStatus.REJECTED:
+                return EntryRemainderCancelRejected(
+                    **common,
+                    exchange_order_id=command.payload.exchange_order_id,
+                    reason=str(result.reason),
+                )
+            if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+                return EntryRemainderCancelOutcomeUnknown(
+                    **common,
+                    exchange_order_id=command.payload.exchange_order_id,
+                    reason=str(result.reason),
+                )
+        if result.status is ExchangeCommandStatus.REJECTED:
+            return CancelOrderRejected(
+                **common,
+                exchange_order_id=command.payload.exchange_order_id,
+                reason=str(result.reason),
+            )
+        if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+            return CancelOrderOutcomeUnknown(
+                **common,
+                exchange_order_id=command.payload.exchange_order_id,
+                reason=str(result.reason),
+            )
+    if kind is ExchangeCommandKind.CONTROLLED_FLATTEN:
+        if result.status is ExchangeCommandStatus.ACCEPTED:
+            return ControlledFlattenAccepted(
+                **common,
+                exchange_order_id=str(result.exchange_order_id),
+            )
+        if result.status is ExchangeCommandStatus.REJECTED:
+            return ControlledFlattenRejected(**common, reason=str(result.reason))
+        if result.status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
+            return ControlledFlattenOutcomeUnknown(
+                **common,
+                reason=str(result.reason),
+            )
     if result.status is not ExchangeCommandStatus.ACCEPTED:
         raise RuntimeError(
             f"unsupported {kind.value} result status: {result.status.value}"
@@ -243,10 +307,11 @@ def _command_result_event(
     if kind is ExchangeCommandKind.CANCEL_ORDER:
         if not isinstance(command.payload, CancelCommandPayload):
             raise RuntimeError("cancel command payload is invalid")
-        if command.payload.exchange_order_id != aggregate.initial_stop_exchange_order_id:
+        cancel_payload = command.payload
+        if cancel_payload.exchange_order_id != aggregate.initial_stop_exchange_order_id:
             return OwnedOrphanCancelConfirmed(
                 **common,
-                exchange_order_id=command.payload.exchange_order_id,
+                exchange_order_id=cancel_payload.exchange_order_id,
             )
         return ProtectionCancelConfirmed(
             **common,

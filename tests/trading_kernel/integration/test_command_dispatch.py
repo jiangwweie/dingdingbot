@@ -25,6 +25,12 @@ from src.trading_kernel.application.issue_ticket import (
     issue_ticket,
 )
 from src.trading_kernel.application.ports import VenueCommandRequest
+from src.trading_kernel.application.reconcile_ticket import (
+    ExitTicketRequest,
+    ReconcileTicketRequest,
+    reconcile_ticket,
+    request_exit,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
@@ -32,6 +38,7 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.infrastructure.pg_models import owner_policy_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from tests.trading_kernel.unit.test_ticket import _ticket
 
 
@@ -315,6 +322,407 @@ async def test_restart_conserves_expired_claim_as_unknown_without_redispatch(
     assert incident is not None
 
 
+@pytest.mark.asyncio
+async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        AcceptingVenue(dispatch_engine),
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        ),
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price="60000",
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        RejectingVenue(),
+        DispatchCommandRequest(
+            worker_id="stop-dispatcher",
+            now_ms=2_200,
+            lease_until_ms=7_200,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.status is DispatchCommandStatus.REJECTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+        lane = await uow.entry_admission.get_global_lane()
+
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.EXIT_PENDING
+    assert aggregate.entry_lane_held is True
+    assert {command.kind.value: command.status for command in commands} == {
+        "entry": ExchangeCommandStatus.ACCEPTED,
+        "initial_stop": ExchangeCommandStatus.REJECTED,
+        "exit": ExchangeCommandStatus.PREPARED,
+    }
+    assert incident is not None
+    assert incident.incident_kind == "initial_stop_rejected"
+    assert lane is not None and lane.status == "claimed"
+
+
+@pytest.mark.asyncio
+async def test_initial_stop_timeout_is_conserved_and_prepares_controlled_exit(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        AcceptingVenue(dispatch_engine),
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        ),
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price="60000",
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        SlowVenue(),
+        DispatchCommandRequest(
+            worker_id="stop-dispatcher",
+            now_ms=2_200,
+            lease_until_ms=7_200,
+            timeout_seconds=0.01,
+        ),
+    )
+
+    assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+
+    assert aggregate is not None and aggregate.status is AggregateStatus.EXIT_PENDING
+    assert [
+        command.status
+        for command in commands
+        if command.kind.value == "initial_stop"
+    ] == [ExchangeCommandStatus.OUTCOME_UNKNOWN]
+    assert [command.kind.value for command in commands].count("initial_stop") == 1
+    assert any(
+        command.kind.value == "exit"
+        and command.status is ExchangeCommandStatus.PREPARED
+        for command in commands
+    )
+    assert incident is not None
+    assert incident.incident_kind == "initial_stop_outcome_unknown"
+
+
+@pytest.mark.asyncio
+async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generation(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _issue(dispatch_engine, ticket)
+    accepting = AcceptingVenue(dispatch_engine)
+    await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        accepting,
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        ),
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price="60000",
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        accepting,
+        DispatchCommandRequest(
+            worker_id="stop-dispatcher",
+            now_ms=2_200,
+            lease_until_ms=7_200,
+            timeout_seconds=1,
+        ),
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await request_exit(
+            uow,
+            ExitTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                reason="strategy_exit",
+                requested_at_ms=3_000,
+            ),
+        )
+
+    rejected = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        RejectingVenue(),
+        DispatchCommandRequest(
+            worker_id="exit-dispatcher",
+            now_ms=3_100,
+            lease_until_ms=8_100,
+            timeout_seconds=1,
+        ),
+    )
+    assert rejected.status is DispatchCommandStatus.REJECTED
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.status is AggregateStatus.EXIT_REJECTED
+    assert incident is not None and incident.incident_kind == "exit_rejected"
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await request_exit(
+            uow,
+            ExitTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                reason="recover_exit_rejection",
+                requested_at_ms=3_200,
+            ),
+        )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    exit_commands = [
+        command for command in commands if command.kind.value == "exit"
+    ]
+    assert [command.generation for command in exit_commands] == [1, 2]
+    assert [command.status for command in exit_commands] == [
+        ExchangeCommandStatus.REJECTED,
+        ExchangeCommandStatus.PREPARED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_rejection_is_persisted_and_blocks_settlement(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    accepting = AcceptingVenue(dispatch_engine)
+    await _reach_cancel_pending(dispatch_engine, ticket, accepting)
+
+    rejected = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        RejectingVenue(),
+        DispatchCommandRequest(
+            worker_id="cancel-dispatcher",
+            now_ms=3_300,
+            lease_until_ms=8_300,
+            timeout_seconds=1,
+        ),
+    )
+
+    assert rejected.status is DispatchCommandStatus.REJECTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.CANCEL_REJECTED
+    assert aggregate.pending_cancel_exchange_order_id == "venue-entry-1"
+    cancel_commands = [
+        command for command in commands if command.kind.value == "cancel_order"
+    ]
+    assert len(cancel_commands) == 1
+    assert cancel_commands[0].status is ExchangeCommandStatus.REJECTED
+    assert incident is not None and incident.incident_kind == "cancel_order_rejected"
+    assert reservation is not None and reservation.status == "active"
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        retry_requested = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity="0",
+                    average_entry_price=None,
+                    open_orders=(
+                        VenueOrderSnapshot(
+                            exchange_order_id="venue-entry-1",
+                            venue_client_order_id="brc-owned-stop",
+                            position_side="long",
+                            reduce_only=True,
+                        ),
+                    ),
+                    observed_at_ms=3_400,
+                ),
+            ),
+        )
+    assert retry_requested.status.value == "owned_orphan_cancel_requested"
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    cancel_commands = [
+        command for command in commands if command.kind.value == "cancel_order"
+    ]
+    assert [command.generation for command in cancel_commands] == [1, 2]
+    assert [command.status for command in cancel_commands] == [
+        ExchangeCommandStatus.REJECTED,
+        ExchangeCommandStatus.PREPARED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
+    dispatch_engine: AsyncEngine,
+) -> None:
+    ticket = _ticket()
+    await _seed_policy(dispatch_engine)
+    await _reach_cancel_pending(
+        dispatch_engine,
+        ticket,
+        AcceptingVenue(dispatch_engine),
+    )
+
+    unknown = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        SlowVenue(),
+        DispatchCommandRequest(
+            worker_id="cancel-dispatcher",
+            now_ms=3_300,
+            lease_until_ms=8_300,
+            timeout_seconds=0.01,
+        ),
+    )
+
+    assert unknown.status is DispatchCommandStatus.OUTCOME_UNKNOWN
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.CANCEL_OUTCOME_UNKNOWN
+    cancel_commands = [
+        command for command in commands if command.kind.value == "cancel_order"
+    ]
+    assert len(cancel_commands) == 1
+    assert cancel_commands[0].status is ExchangeCommandStatus.OUTCOME_UNKNOWN
+    assert incident is not None
+    assert incident.incident_kind == "cancel_order_outcome_unknown"
+    assert reservation is not None and reservation.status == "active"
+
+    repeated = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        CountingVenue(),
+        DispatchCommandRequest(
+            worker_id="repeat-dispatcher",
+            now_ms=8_500,
+            lease_until_ms=13_500,
+            timeout_seconds=1,
+        ),
+    )
+    assert repeated.status is DispatchCommandStatus.NO_COMMAND
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        blocked = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity="0",
+                    average_entry_price=None,
+                    open_orders=(),
+                    observed_at_ms=3_400,
+                ),
+            ),
+        )
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+    assert blocked.status.value == "cancel_absence_recorded"
+    assert reservation is not None and reservation.status == "active"
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.RECONCILIATION_PENDING
+    assert aggregate.pending_cancel_exchange_order_id is None
+    cancel_commands = [
+        command for command in commands if command.kind.value == "cancel_order"
+    ]
+    assert cancel_commands[0].status is ExchangeCommandStatus.RECONCILED_ABSENT
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        matched = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity="0",
+                    average_entry_price=None,
+                    open_orders=(),
+                    observed_at_ms=3_500,
+                ),
+            ),
+        )
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+    assert matched.status.value == "matched"
+    assert reservation is not None and reservation.status == "released"
+
+
 async def _seed_policy(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.execute(
@@ -338,6 +746,79 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
             IssueTicketRequest(ticket=ticket, now_ms=1_001, claim_owner="issuer-1"),
         )
     assert result.status is IssueTicketStatus.ISSUED
+
+
+async def _reach_cancel_pending(
+    engine: AsyncEngine,
+    ticket,
+    accepting: AcceptingVenue,
+) -> None:
+    await _issue(engine, ticket)
+    await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(engine),
+        accepting,
+        DispatchCommandRequest(
+            worker_id="entry-dispatcher",
+            now_ms=1_100,
+            lease_until_ms=6_100,
+            timeout_seconds=1,
+        ),
+    )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity=ticket.quantity,
+                    average_entry_price="60000",
+                    observed_at_ms=2_100,
+                ),
+            ),
+        )
+    await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(engine),
+        accepting,
+        DispatchCommandRequest(
+            worker_id="stop-dispatcher",
+            now_ms=2_200,
+            lease_until_ms=7_200,
+            timeout_seconds=1,
+        ),
+    )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await request_exit(
+            uow,
+            ExitTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                reason="strategy_exit",
+                requested_at_ms=3_000,
+            ),
+        )
+    await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(engine),
+        accepting,
+        DispatchCommandRequest(
+            worker_id="exit-dispatcher",
+            now_ms=3_100,
+            lease_until_ms=8_100,
+            timeout_seconds=1,
+        ),
+    )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=PositionSnapshot(
+                    netting_domain=ticket.identity.netting_domain,
+                    quantity="0",
+                    average_entry_price=None,
+                    observed_at_ms=3_200,
+                ),
+            ),
+        )
 
 
 def _database_url(database_name: str) -> str:
