@@ -128,6 +128,28 @@ async def test_static_inactive_service_counts_as_stopped_and_disabled() -> None:
     assert stopped is True
 
 
+@pytest.mark.asyncio
+async def test_entry_fence_keeps_runtime_directory_traversable_by_brc() -> None:
+    module = _production_adapter_module()
+    runner = RecordingRunner(module)
+    system = module.SshTokyoSystem(runner)
+
+    await system.fence_new_entry(_plan())
+
+    assert runner.commands[0] == (
+        "sudo",
+        "install",
+        "-d",
+        "-o",
+        "root",
+        "-g",
+        "brc",
+        "-m",
+        "0750",
+        "/etc/brc",
+    )
+
+
 class AlwaysMissingRunner:
     def __init__(self, module: ModuleType) -> None:
         self.module = module
@@ -172,6 +194,22 @@ class StaticInactiveUnitRunner:
                 stderr="",
             )
         raise AssertionError(f"unexpected command: {argv!r}")
+
+
+class RecordingRunner:
+    def __init__(self, module: ModuleType) -> None:
+        self.module = module
+        self.commands: list[tuple[str, ...]] = []
+
+    async def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        check: bool = True,
+    ) -> object:
+        del check
+        self.commands.append(argv)
+        return self.module._RemoteResult(returncode=0, stdout="", stderr="")
 
 
 class FakeTokyoSystem:

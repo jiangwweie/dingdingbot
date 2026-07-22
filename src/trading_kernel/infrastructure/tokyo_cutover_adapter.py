@@ -467,7 +467,20 @@ class SshTokyoSystem:
 
     async def fence_new_entry(self, plan: CutoverPlan) -> None:
         del plan
-        await self._runner.run(("sudo", "install", "-d", "-m", "0750", "/etc/brc"))
+        await self._runner.run(
+            (
+                "sudo",
+                "install",
+                "-d",
+                "-o",
+                "root",
+                "-g",
+                "brc",
+                "-m",
+                "0750",
+                "/etc/brc",
+            )
+        )
         await self._runner.run(
             ("sudo", "touch", str(WRITE_FENCE))
         )
