@@ -25,7 +25,7 @@ multi-StrategyGroup typed observation
 | Kernel lifecycle | Implemented under `src/trading_kernel` |
 | Retired production code | Deleted in `d570018a` |
 | Multi-position certification | `104 passed` at commit `5946cbf1` |
-| Typed signal to Ticket | Implemented and committed in `17af6575` |
+| StrategySignal boundary | Immutable Fact Bundle, append-only lineage, and candidate persistence implemented; direct Signal-to-Ticket authority removed |
 | Destructive cutover tooling | Local state machine and disposable-PG rehearsal pass |
 | Database | One `0001_initial`, 29 target tables, downgrade/upgrade certified |
 | Static checks | Ruff pass; production Mypy zero errors |
@@ -37,7 +37,7 @@ multi-StrategyGroup typed observation
 | Order | Work | Exit condition |
 | --- | --- | --- |
 | 1 | Current documentation retirement | Only the rebuilt-kernel authority allowlist remains |
-| 2 | Typed signal to frozen Ticket | Production-shaped typed input can persist, queue, serialize, and issue Tickets |
+| 2 | StrategySignal to CapacityClaim to frozen Ticket | Typed observation persists without capital authority; action-time facts create the only Ticket-capable Claim |
 | 3 | Destructive cutover tooling | Crash-safe and resume-safe rehearsal passes every refusal case |
 | 4 | Strategy refactor decision and implementation | Strategy models and producers match the new kernel without retired semantics |
 | 5 | Tokyo cutover | Exact commit/schema/seed/services verified with retired tables absent |

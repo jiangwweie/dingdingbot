@@ -19,7 +19,7 @@ from src.trading_kernel.domain.commands import (
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.reducer import Reduction
-from src.trading_kernel.domain.signal import ActionableSignal, SignalFactSnapshot
+from src.trading_kernel.domain.signal import SignalFactSnapshot, StrategySignal
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     RegistrySeedResult,
@@ -420,21 +420,26 @@ class EntryAdmissionRepository(Protocol):
 
 
 class SignalRepository(Protocol):
-    async def add(self, signal: ActionableSignal) -> bool: ...
+    async def add(self, signal: StrategySignal) -> bool: ...
 
-    async def get(self, signal_event_id: str) -> ActionableSignal | None: ...
+    async def get(self, signal_event_id: str) -> StrategySignal | None: ...
+
+    async def get_fact_snapshots(
+        self,
+        signal_event_id: str,
+    ) -> tuple[SignalFactSnapshot, ...]: ...
 
     async def get_next_ready(
         self,
         *,
         now_ms: int,
-    ) -> ActionableSignal | None: ...
+    ) -> StrategySignal | None: ...
 
     async def get_next_stale_ready(
         self,
         *,
         now_ms: int,
-    ) -> ActionableSignal | None: ...
+    ) -> StrategySignal | None: ...
 
     async def get_readiness(
         self,

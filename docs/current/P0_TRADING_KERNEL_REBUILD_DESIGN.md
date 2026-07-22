@@ -17,8 +17,10 @@ dual write, or retired-runtime fallback.
 
 ```text
 StrategyGroup observer
--> ActionableSignal
--> persisted readiness
+-> immutable StrategySignal + fact lineage
+-> persisted candidate readiness
+-> deterministic candidate arbitration
+-> action-time CapacityClaim
 -> globally serialized Ticket issuance
 -> durable ENTRY command
 -> Initial Stop
@@ -58,19 +60,24 @@ No production module outside this package may own trading execution behavior.
 
 ## Signal Boundary
 
-`ActionableSignal` is the only strategy-to-kernel command. It freezes:
+`StrategySignal` is the only strategy-to-kernel observation input. It freezes:
 
 - signal, StrategyGroup, strategy version, event, scope, instrument, and side;
 - occurrence and expiry;
-- fact digest;
-- typed entry, quantity, notional, leverage, risk-at-stop, Initial Stop, and
-  take-profit terms.
+- the complete immutable Fact Bundle and its exact digest.
 
-The kernel persists the signal, validates current scope/profile/policy/account
-mode/instrument/capability, and records readiness. A globally serialized issuer
-selects one ready signal, revalidates authority, builds the deterministic Ticket,
-and commits the Ticket, budget, exposure, aggregate, event, and ENTRY command in
-one transaction.
+The strategy boundary cannot assign quantity, notional, leverage, account
+budget, order price, Initial Stop order, or take-profit orders. Signal ingestion
+validates Registry identity, runtime scope identity, current Fact equality,
+freshness, instrument identity, and code/schema capability before recording a
+candidate. Owner policy, account mode, action-time venue rules, current balance,
+margin, budget, and Netting Domain occupancy are evaluated only when a fresh
+candidate is narrowed and an immutable `CapacityClaim` is built.
+
+The globally serialized issuer accepts only a current `CapacityClaim`. It
+revalidates authority and atomically commits the Claim, Ticket, budget
+reservation, active Netting Domain hold, aggregate, first event, and durable
+ENTRY command. A `StrategySignal` can never issue a Ticket directly.
 
 Two fresh signals may be persisted concurrently. Their Tickets are issued
 serially. Once the first Ticket has protected exposure or a proven terminal
@@ -80,13 +87,17 @@ issue a Ticket.
 ## Persistence Model
 
 The clean baseline contains stable registry, policy, observation, lifecycle,
-and operations tables only. Signal ticket terms use typed columns. JSONB is
-limited to bounded metadata, fact summaries, command payloads, and review data.
+and operations tables only. Signal rows contain observation identity and time;
+their immutable Fact Bundles live in append-only typed snapshot rows. Financial
+and order terms exist only at the CapacityClaim and Ticket boundaries. JSONB is
+limited to typed fact values, bounded metadata, summaries, command payloads,
+and review data.
 
 Key lifecycle authorities are:
 
 ```text
 brc_signal_events
+brc_signal_fact_snapshots
 brc_readiness_current
 brc_entry_lane_current
 brc_trade_tickets
@@ -127,7 +138,8 @@ stages.
 
 The rebuild is complete only when:
 
-1. typed live signal reaches frozen Ticket without retired code;
+1. typed live StrategySignal reaches an action-time CapacityClaim and frozen
+   Ticket without retired code;
 2. serial Ticket issuance can create concurrent protected positions across
    distinct Netting Domains;
 3. same-instrument long and short remain isolated;

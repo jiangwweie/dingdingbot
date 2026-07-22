@@ -129,7 +129,7 @@ Run: `pytest -q tests/trading_kernel/unit/test_strategy_registry.py tests/tradin
 
 Expected: all tests pass.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/trading_kernel/domain/strategy_registry.py src/trading_kernel/infrastructure/strategy_registry_seed.py scripts/trading_kernel/seed_strategy_registry.py src/trading_kernel/infrastructure/pg_repositories.py src/trading_kernel/application/ports.py migrations/trading_kernel/versions/0001_initial.py tests/trading_kernel/unit/test_strategy_registry.py tests/trading_kernel/integration/test_strategy_registry_seed.py
@@ -142,20 +142,25 @@ git commit -m "feat(kernel): seed six registered strategy events"
 
 **Files:**
 - Replace: `src/trading_kernel/domain/signal.py`
+- Modify: `src/trading_kernel/application/ports.py`
 - Modify: `src/trading_kernel/application/ingest_signal.py`
 - Modify: `src/trading_kernel/application/issue_ready_signal.py`
+- Modify: `src/trading_kernel/application/issue_ticket.py`
+- Modify: `src/trading_kernel/application/runtime.py`
 - Modify: `src/trading_kernel/infrastructure/pg_signal_repository.py`
 - Modify: `src/trading_kernel/infrastructure/pg_models.py`
 - Modify: `migrations/trading_kernel/versions/0001_initial.py`
 - Test: `tests/trading_kernel/unit/test_signal.py`
 - Test: `tests/trading_kernel/integration/test_signal_to_ticket.py`
+- Test: `tests/trading_kernel/integration/test_runtime_worker.py`
+- Test: `tests/trading_kernel/integration/test_schema_baseline.py`
 
 **Interfaces:**
 - Replaces: `ActionableSignal` and `SignalTicketTerms`.
 - Produces: `StrategySignal` with identity, occurrence, expiry, and exact immutable fact snapshots only.
 - Produces: `brc_signal_fact_snapshots` append-only rows keyed by `signal_event_id + fact_definition_id`.
 
-- [ ] **Step 1: Write failing tests proving strategy signals cannot assign capital**
+- [x] **Step 1: Write failing tests proving strategy signals cannot assign capital**
 
 ```python
 def test_strategy_signal_rejects_ticket_terms() -> None:
@@ -168,13 +173,13 @@ def test_signal_digest_covers_the_exact_immutable_fact_bundle() -> None:
     assert signal.fact_digest == build_signal_fact_digest(signal.facts)
 ```
 
-- [ ] **Step 2: Run the unit test and verify RED**
+- [x] **Step 2: Run the unit test and verify RED**
 
 Run: `pytest -q tests/trading_kernel/unit/test_signal.py`
 
 Expected: failure because `StrategySignal` does not exist and current signals require `SignalTicketTerms`.
 
-- [ ] **Step 3: Implement the narrow signal model**
+- [x] **Step 3: Implement the narrow signal model**
 
 ```python
 class StrategySignal(BaseModel):
@@ -196,13 +201,13 @@ class StrategySignal(BaseModel):
 
 The model validator requires a unique fact definition set and an exact digest match. Quantity, notional, leverage, entry price, stop price, and take-profit terms are forbidden extras.
 
-- [ ] **Step 4: Run the unit test and verify GREEN**
+- [x] **Step 4: Run the unit test and verify GREEN**
 
 Run: `pytest -q tests/trading_kernel/unit/test_signal.py`
 
 Expected: all signal model tests pass.
 
-- [ ] **Step 5: Write failing integration tests for immutable fact persistence**
+- [x] **Step 5: Write failing integration tests for immutable fact persistence**
 
 ```python
 async def test_ingest_persists_signal_and_fact_lineage_without_ticket_terms(pg_uow) -> None:
@@ -214,23 +219,23 @@ async def test_ingest_persists_signal_and_fact_lineage_without_ticket_terms(pg_u
     assert await pg_uow.signals.get_fact_snapshots(stored.signal_event_id) == stored.facts
 ```
 
-- [ ] **Step 6: Run the integration test and verify RED**
+- [x] **Step 6: Run the integration test and verify RED**
 
 Run: `pytest -q tests/trading_kernel/integration/test_signal_to_ticket.py`
 
 Expected: failure because current persistence columns and issuer still read signal ticket terms.
 
-- [ ] **Step 7: Change persistence and ingestion semantics**
+- [x] **Step 7: Change persistence and ingestion semantics**
 
 Remove financial columns from `brc_signal_events`; add `brc_signal_fact_snapshots`; rename readiness state from `ticket_ready` to `candidate_ready`; keep duplicate signal identity idempotent. Ticket issuance must temporarily return `CAPACITY_CLAIM_MISSING` until Task 5 provides the claim.
 
-- [ ] **Step 8: Run focused tests**
+- [x] **Step 8: Run focused tests**
 
 Run: `pytest -q tests/trading_kernel/unit/test_signal.py tests/trading_kernel/integration/test_signal_to_ticket.py tests/trading_kernel/integration/test_schema_baseline.py`
 
 Expected: all updated tests pass and no signal producer can assign capital.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/trading_kernel/domain/signal.py src/trading_kernel/application/ingest_signal.py src/trading_kernel/application/issue_ready_signal.py src/trading_kernel/infrastructure/pg_signal_repository.py src/trading_kernel/infrastructure/pg_models.py migrations/trading_kernel/versions/0001_initial.py tests/trading_kernel/unit/test_signal.py tests/trading_kernel/integration/test_signal_to_ticket.py

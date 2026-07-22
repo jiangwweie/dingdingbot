@@ -1,33 +1,39 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 import pytest
 from pydantic import ValidationError
 
 from src.trading_kernel.domain.signal import (
-    ActionableSignal,
     SignalFactSnapshot,
-    SignalTicketTerms,
+    StrategySignal,
     build_signal_fact_digest,
 )
-from src.trading_kernel.domain.ticket import EntryOrderType
 
 
-def test_actionable_signal_is_immutable_and_rejects_invalid_ticket_terms() -> None:
+def test_strategy_signal_is_immutable_and_rejects_capital_or_order_terms() -> None:
     signal = _signal()
 
     with pytest.raises(ValidationError):
         signal.signal_event_id = "changed"  # type: ignore[misc]
-    with pytest.raises(ValidationError):
-        _signal(quantity=Decimal("0"))
-    with pytest.raises(ValidationError):
-        _signal(initial_stop_price=Decimal("-1"))
-    with pytest.raises(ValidationError):
-        _signal(risk_at_stop=Decimal("-0.01"))
+
+    forbidden = {
+        "quantity": "0.01",
+        "notional": "100",
+        "leverage": "5",
+        "risk_at_stop": "2.5",
+        "entry_order_type": "market",
+        "entry_limit_price": "100",
+        "initial_stop_price": "99",
+        "take_profit_prices": ["105"],
+        "terms": {"quantity": "0.01"},
+    }
+    payload = signal.model_dump(mode="json")
+    for field_name, value in forbidden.items():
+        with pytest.raises(ValidationError):
+            StrategySignal.model_validate({**payload, field_name: value})
 
 
-def test_actionable_signal_rejects_blank_identity_and_invalid_deadline() -> None:
+def test_strategy_signal_rejects_blank_identity_and_invalid_deadline() -> None:
     with pytest.raises(ValidationError):
         _signal(signal_event_id=" ")
     with pytest.raises(ValidationError):
@@ -36,40 +42,49 @@ def test_actionable_signal_rejects_blank_identity_and_invalid_deadline() -> None
         _signal(occurred_at_ms=1_000, expires_at_ms=1_000)
 
 
-def test_signal_ticket_terms_enforce_market_and_limit_order_shape() -> None:
+def test_strategy_signal_requires_exact_nonduplicate_fact_bundle() -> None:
+    facts = _facts()
+    signal = _signal(facts=facts)
+
+    assert signal.fact_digest == build_signal_fact_digest(facts)
+    assert signal.facts == tuple(sorted(facts, key=lambda item: item.fact_definition_id))
+
+    duplicate_payload = signal.model_dump(mode="python")
+    duplicate_payload["facts"] = (facts[0], facts[0], facts[2])
     with pytest.raises(ValidationError):
-        _signal(entry_order_type=EntryOrderType.MARKET, entry_limit_price=Decimal("1"))
+        StrategySignal.model_validate(duplicate_payload)
     with pytest.raises(ValidationError):
-        _signal(entry_order_type=EntryOrderType.LIMIT, entry_limit_price=None)
+        _signal(fact_digest="sha256:" + "0" * 64)
+    with pytest.raises(ValidationError):
+        _signal(facts=())
 
 
-def test_fact_digest_is_canonical_and_signal_requires_exact_sha256_identity() -> None:
-    facts = (
-        SignalFactSnapshot(
-            fact_definition_id="fact-2",
-            value={"b": 2, "a": 1},
-            satisfied=True,
-            observed_at_ms=1_000,
-            valid_until_ms=2_000,
-            projection_version=3,
-        ),
-        SignalFactSnapshot(
-            fact_definition_id="fact-1",
-            value="ready",
-            satisfied=True,
-            observed_at_ms=1_001,
-            valid_until_ms=2_001,
-            projection_version=4,
-        ),
+def test_fact_roles_fail_closed_for_condition_reference_and_disable_semantics() -> None:
+    facts = _facts()
+
+    with pytest.raises(ValidationError):
+        _signal(
+            facts=(facts[0].model_copy(update={"satisfied": False}), *facts[1:])
+        )
+    with pytest.raises(ValidationError):
+        _signal(
+            facts=(facts[0], facts[1].model_copy(update={"satisfied": False}), facts[2])
+        )
+    with pytest.raises(ValidationError):
+        _signal(
+            facts=(facts[0], facts[1], facts[2].model_copy(update={"satisfied": True}))
+        )
+    with pytest.raises(ValidationError):
+        _signal(facts=(facts[0], facts[2]))
+
+
+def test_fact_digest_is_canonical_across_input_order() -> None:
+    facts = _facts()
+
+    assert build_signal_fact_digest(facts) == build_signal_fact_digest(
+        tuple(reversed(facts))
     )
-
-    digest = build_signal_fact_digest(facts)
-
-    assert digest == build_signal_fact_digest(tuple(reversed(facts)))
-    assert digest.startswith("sha256:")
-    assert len(digest) == 71
-    with pytest.raises(ValidationError):
-        _signal(fact_digest="sha256:not-a-real-digest")
+    assert len(build_signal_fact_digest(facts)) == 71
 
 
 def _signal(
@@ -78,33 +93,53 @@ def _signal(
     runtime_scope_version: int = 1,
     occurred_at_ms: int = 1_000,
     expires_at_ms: int = 2_000,
-    quantity: Decimal = Decimal("0.01"),
-    risk_at_stop: Decimal = Decimal("2.5"),
-    entry_order_type: EntryOrderType = EntryOrderType.MARKET,
-    entry_limit_price: Decimal | None = None,
-    initial_stop_price: Decimal = Decimal("99"),
+    facts: tuple[SignalFactSnapshot, ...] | None = None,
     fact_digest: str | None = None,
-) -> ActionableSignal:
-    return ActionableSignal(
+) -> StrategySignal:
+    selected_facts = _facts() if facts is None else facts
+    return StrategySignal(
         signal_event_id=signal_event_id,
-        runtime_scope_id="scope-1",
+        runtime_scope_id="scope-sor-btc-short",
         runtime_scope_version=runtime_scope_version,
         strategy_group_id="SOR-001",
-        strategy_version_id="SOR-001:v3",
-        event_spec_id="SOR-LONG:v3",
+        strategy_version_id="sgv:SOR-001:v2",
+        event_spec_id="event_spec:SOR-001:SOR-SHORT:v2",
         exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-        position_side="long",
-        fact_digest=fact_digest or build_signal_fact_digest(()),
+        position_side="short",
+        fact_digest=fact_digest or build_signal_fact_digest(selected_facts),
         occurred_at_ms=occurred_at_ms,
         expires_at_ms=expires_at_ms,
-        terms=SignalTicketTerms(
-            quantity=quantity,
-            notional=Decimal("100"),
-            leverage=Decimal("5"),
-            risk_at_stop=risk_at_stop,
-            entry_order_type=entry_order_type,
-            entry_limit_price=entry_limit_price,
-            initial_stop_price=initial_stop_price,
-            take_profit_prices=(Decimal("105"),),
+        facts=selected_facts,
+    )
+
+
+def _facts() -> tuple[SignalFactSnapshot, ...]:
+    return (
+        SignalFactSnapshot(
+            fact_definition_id="fact:breakdown_confirmed:v1",
+            role="condition",
+            value=True,
+            satisfied=True,
+            observed_at_ms=1_000,
+            valid_until_ms=2_000,
+            projection_version=1,
+        ),
+        SignalFactSnapshot(
+            fact_definition_id="fact:opening_range_high_reference:v1",
+            role="protection_reference",
+            value="10100.0",
+            satisfied=True,
+            observed_at_ms=1_000,
+            valid_until_ms=2_000,
+            projection_version=1,
+        ),
+        SignalFactSnapshot(
+            fact_definition_id="fact:strong_uptrend_disable:v1",
+            role="disable",
+            value=False,
+            satisfied=False,
+            observed_at_ms=1_000,
+            valid_until_ms=2_000,
+            projection_version=1,
         ),
     )

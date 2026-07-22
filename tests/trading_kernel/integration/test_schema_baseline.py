@@ -29,6 +29,7 @@ EXPECTED_TABLES = {
     "brc_runtime_scopes_current",
     "brc_schema_metadata",
     "brc_signal_events",
+    "brc_signal_fact_snapshots",
     "brc_strategy_groups",
     "brc_strategy_candidate_scopes",
     "brc_strategy_versions",
@@ -78,22 +79,46 @@ def test_financial_columns_use_fixed_precision_numeric() -> None:
         assert column.type.scale == 18
 
 
-def test_signal_schema_enforces_typed_identity_order_and_time_shape() -> None:
+def test_signal_schema_contains_observation_identity_without_capital_or_order_terms() -> None:
     signals = metadata.tables["brc_signal_events"]
     check_sql = {
         str(constraint.sqltext)
         for constraint in signals.constraints
         if isinstance(constraint, sa.CheckConstraint)
     }
+    forbidden_columns = {
+        "signal_grade",
+        "quantity",
+        "notional",
+        "leverage",
+        "risk_at_stop",
+        "entry_order_type",
+        "entry_limit_price",
+        "initial_stop_price",
+        "take_profit_prices",
+    }
 
     assert "position_side IN ('long', 'short')" in check_sql
-    assert "entry_order_type IN ('market', 'limit')" in check_sql
-    assert (
-        "(entry_order_type = 'market' AND entry_limit_price IS NULL) OR "
-        "(entry_order_type = 'limit' AND entry_limit_price > 0)"
-    ) in check_sql
     assert "expires_at_ms > occurred_at_ms" in check_sql
     assert "fact_digest ~ '^sha256:[0-9a-f]{64}$'" in check_sql
+    assert forbidden_columns.isdisjoint(signals.c.keys())
+
+
+def test_signal_fact_snapshots_are_append_only_per_signal_and_definition() -> None:
+    snapshots = metadata.tables["brc_signal_fact_snapshots"]
+
+    assert tuple(column.name for column in snapshots.primary_key.columns) == (
+        "signal_event_id",
+        "fact_definition_id",
+    )
+    assert {
+        "role",
+        "value",
+        "satisfied",
+        "observed_at_ms",
+        "valid_until_ms",
+        "projection_version",
+    }.issubset(snapshots.c.keys())
 
 
 def test_ticket_schema_freezes_runtime_scope_identity_and_version() -> None:

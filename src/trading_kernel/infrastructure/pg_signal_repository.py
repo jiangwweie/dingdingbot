@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Literal, cast
 
 import sqlalchemy as sa
@@ -23,11 +22,9 @@ from src.trading_kernel.application.ports import (
     StrategyVersionSnapshot,
 )
 from src.trading_kernel.domain.signal import (
-    ActionableSignal,
     SignalFactSnapshot,
-    SignalTicketTerms,
+    StrategySignal,
 )
-from src.trading_kernel.domain.ticket import EntryOrderType
 from src.trading_kernel.infrastructure.pg_models import (
     event_specs,
     event_required_facts,
@@ -39,6 +36,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_profiles,
     runtime_scopes_current,
     signal_events,
+    signal_fact_snapshots,
     strategy_groups,
     strategy_versions,
     trade_tickets,
@@ -49,38 +47,61 @@ class PostgresSignalRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
 
-    async def add(self, signal: ActionableSignal) -> bool:
+    async def add(self, signal: StrategySignal) -> bool:
         result = await self._connection.execute(
             pg_insert(signal_events)
             .values(_signal_values(signal))
             .on_conflict_do_nothing(index_elements=[signal_events.c.signal_event_id])
         )
-        return result.rowcount == 1
+        if result.rowcount != 1:
+            return False
+        await self._connection.execute(
+            sa.insert(signal_fact_snapshots),
+            [_fact_snapshot_values(signal.signal_event_id, fact) for fact in signal.facts],
+        )
+        return True
 
-    async def get(self, signal_event_id: str) -> ActionableSignal | None:
+    async def get(self, signal_event_id: str) -> StrategySignal | None:
         result = await self._connection.execute(
             sa.select(signal_events).where(
                 signal_events.c.signal_event_id == signal_event_id
             )
         )
         row = result.mappings().one_or_none()
-        return None if row is None else _signal_from_row(row)
+        if row is None:
+            return None
+        facts = await self.get_fact_snapshots(signal_event_id)
+        return _signal_from_row(row, facts)
 
-    async def get_next_ready(self, *, now_ms: int) -> ActionableSignal | None:
-        return await self._get_next_ticket_ready(
+    async def get_fact_snapshots(
+        self,
+        signal_event_id: str,
+    ) -> tuple[SignalFactSnapshot, ...]:
+        result = await self._connection.execute(
+            sa.select(signal_fact_snapshots)
+            .where(signal_fact_snapshots.c.signal_event_id == signal_event_id)
+            .order_by(signal_fact_snapshots.c.fact_definition_id)
+        )
+        return tuple(
+            SignalFactSnapshot.model_validate(row, extra="ignore")
+            for row in result.mappings()
+        )
+
+    async def get_next_ready(self, *, now_ms: int) -> StrategySignal | None:
+        return await self._get_next_candidate_ready(
             expiry_predicate=signal_events.c.expires_at_ms > now_ms
         )
 
-    async def get_next_stale_ready(self, *, now_ms: int) -> ActionableSignal | None:
-        return await self._get_next_ticket_ready(
+    async def get_next_stale_ready(self, *, now_ms: int) -> StrategySignal | None:
+        return await self._get_next_candidate_ready(
             expiry_predicate=signal_events.c.expires_at_ms <= now_ms
         )
 
-    async def _get_next_ticket_ready(
+    async def _get_next_candidate_ready(
         self,
         *,
         expiry_predicate: sa.ColumnElement[bool],
-    ) -> ActionableSignal | None:
+    ) -> StrategySignal | None:
         already_ticketed = sa.exists(
             sa.select(trade_tickets.c.ticket_id).where(
                 trade_tickets.c.signal_event_id == signal_events.c.signal_event_id
@@ -94,7 +115,7 @@ class PostgresSignalRepository:
                 == signal_events.c.signal_event_id,
             )
             .where(
-                readiness_current.c.readiness_state == "ticket_ready",
+                readiness_current.c.readiness_state == "candidate_ready",
                 expiry_predicate,
                 ~already_ticketed,
             )
@@ -107,7 +128,11 @@ class PostgresSignalRepository:
         )
         result = await self._connection.execute(statement)
         row = result.mappings().one_or_none()
-        return None if row is None else _signal_from_row(row)
+        if row is None:
+            return None
+        signal_event_id = str(row["signal_event_id"])
+        facts = await self.get_fact_snapshots(signal_event_id)
+        return _signal_from_row(row, facts)
 
     async def get_readiness(
         self,
@@ -295,14 +320,21 @@ class PostgresSignalRepository:
         event_spec_id: str,
     ) -> tuple[SignalFactSnapshot, ...] | None:
         required_result = await self._connection.execute(
-            sa.select(event_required_facts.c.fact_definition_id)
+            sa.select(
+                event_required_facts.c.fact_definition_id,
+                event_required_facts.c.role,
+            )
             .where(
                 event_required_facts.c.event_spec_id == event_spec_id,
                 event_required_facts.c.required.is_(True),
             )
             .order_by(event_required_facts.c.fact_definition_id)
         )
-        required_ids = tuple(required_result.scalars())
+        requirements = {
+            str(row["fact_definition_id"]): str(row["role"])
+            for row in required_result.mappings()
+        }
+        required_ids = tuple(requirements)
         if not required_ids:
             return ()
 
@@ -318,12 +350,23 @@ class PostgresSignalRepository:
         if len(rows) != len(required_ids):
             return None
         return tuple(
-            SignalFactSnapshot.model_validate(row, extra="ignore") for row in rows
+            SignalFactSnapshot(
+                fact_definition_id=str(row["fact_definition_id"]),
+                role=cast(
+                    Literal["condition", "protection_reference", "disable"],
+                    requirements[str(row["fact_definition_id"])],
+                ),
+                value=row["value"],
+                satisfied=bool(row["satisfied"]),
+                observed_at_ms=int(row["observed_at_ms"]),
+                valid_until_ms=int(row["valid_until_ms"]),
+                projection_version=int(row["projection_version"]),
+            )
+            for row in rows
         )
 
 
-def _signal_values(signal: ActionableSignal) -> dict[str, object]:
-    terms = signal.terms
+def _signal_values(signal: StrategySignal) -> dict[str, object]:
     return {
         "signal_event_id": signal.signal_event_id,
         "runtime_scope_id": signal.runtime_scope_id,
@@ -333,23 +376,33 @@ def _signal_values(signal: ActionableSignal) -> dict[str, object]:
         "event_spec_id": signal.event_spec_id,
         "exchange_instrument_id": signal.exchange_instrument_id,
         "position_side": signal.position_side,
-        "signal_grade": "trade",
         "fact_digest": signal.fact_digest,
-        "quantity": terms.quantity,
-        "notional": terms.notional,
-        "leverage": terms.leverage,
-        "risk_at_stop": terms.risk_at_stop,
-        "entry_order_type": terms.entry_order_type,
-        "entry_limit_price": terms.entry_limit_price,
-        "initial_stop_price": terms.initial_stop_price,
-        "take_profit_prices": [str(value) for value in terms.take_profit_prices],
         "occurred_at_ms": signal.occurred_at_ms,
         "expires_at_ms": signal.expires_at_ms,
     }
 
 
-def _signal_from_row(row: RowMapping) -> ActionableSignal:
-    return ActionableSignal(
+def _fact_snapshot_values(
+    signal_event_id: str,
+    fact: SignalFactSnapshot,
+) -> dict[str, object]:
+    return {
+        "signal_event_id": signal_event_id,
+        "fact_definition_id": fact.fact_definition_id,
+        "role": fact.role,
+        "value": fact.value,
+        "satisfied": fact.satisfied,
+        "observed_at_ms": fact.observed_at_ms,
+        "valid_until_ms": fact.valid_until_ms,
+        "projection_version": fact.projection_version,
+    }
+
+
+def _signal_from_row(
+    row: RowMapping,
+    facts: tuple[SignalFactSnapshot, ...],
+) -> StrategySignal:
+    return StrategySignal(
         signal_event_id=str(row["signal_event_id"]),
         runtime_scope_id=str(row["runtime_scope_id"]),
         runtime_scope_version=int(row["runtime_scope_version"]),
@@ -361,20 +414,5 @@ def _signal_from_row(row: RowMapping) -> ActionableSignal:
         fact_digest=str(row["fact_digest"]),
         occurred_at_ms=int(row["occurred_at_ms"]),
         expires_at_ms=int(row["expires_at_ms"]),
-        terms=SignalTicketTerms(
-            quantity=Decimal(row["quantity"]),
-            notional=Decimal(row["notional"]),
-            leverage=Decimal(row["leverage"]),
-            risk_at_stop=Decimal(row["risk_at_stop"]),
-            entry_order_type=EntryOrderType(str(row["entry_order_type"])),
-            entry_limit_price=(
-                None
-                if row["entry_limit_price"] is None
-                else Decimal(row["entry_limit_price"])
-            ),
-            initial_stop_price=Decimal(row["initial_stop_price"]),
-            take_profit_prices=tuple(
-                Decimal(value) for value in row["take_profit_prices"]
-            ),
-        ),
+        facts=facts,
     )

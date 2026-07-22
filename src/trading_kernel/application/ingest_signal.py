@@ -3,24 +3,18 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
-from src.trading_kernel.application.ports import (
-    InstrumentRulesSnapshot,
-    KernelUnitOfWork,
-)
-from src.trading_kernel.domain.signal import ActionableSignal, build_signal_fact_digest
+from src.trading_kernel.application.ports import KernelUnitOfWork
+from src.trading_kernel.domain.signal import StrategySignal, build_signal_fact_digest
 
 
 class IngestSignalStatus(StrEnum):
-    TICKET_READY = "ticket_ready"
+    CANDIDATE_READY = "candidate_ready"
     DUPLICATE_SIGNAL = "duplicate_signal"
     SIGNAL_INVALID_OR_STALE = "signal_invalid_or_stale"
     SCOPE_OR_POLICY_MISMATCH = "scope_or_policy_mismatch"
-    ACCOUNT_MODE_INVALID = "account_mode_invalid"
-    INSTRUMENT_RULES_INVALID = "instrument_rules_invalid"
     SCHEMA_IDENTITY_MISMATCH = "schema_identity_mismatch"
 
 
@@ -28,15 +22,13 @@ class SignalAuthorityStatus(StrEnum):
     VALID = "valid"
     SIGNAL_INVALID_OR_STALE = "signal_invalid_or_stale"
     SCOPE_OR_POLICY_MISMATCH = "scope_or_policy_mismatch"
-    ACCOUNT_MODE_INVALID = "account_mode_invalid"
-    INSTRUMENT_RULES_INVALID = "instrument_rules_invalid"
     SCHEMA_IDENTITY_MISMATCH = "schema_identity_mismatch"
 
 
 class IngestSignalRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    signal: ActionableSignal
+    signal: StrategySignal
     runtime_commit: str
     schema_revision: str
     now_ms: int
@@ -72,27 +64,34 @@ async def ingest_signal(
         )
     await uow.signals.save_readiness(
         runtime_scope_id=request.signal.runtime_scope_id,
-        readiness_state="ticket_ready",
+        readiness_state="candidate_ready",
         first_blocker=None,
         signal_event_id=request.signal.signal_event_id,
-        fact_summary={"fact_digest": request.signal.fact_digest},
+        fact_summary={
+            "fact_count": len(request.signal.facts),
+            "fact_digest": request.signal.fact_digest,
+        },
         updated_at_ms=request.now_ms,
     )
     return IngestSignalResult(
-        status=IngestSignalStatus.TICKET_READY,
+        status=IngestSignalStatus.CANDIDATE_READY,
         signal_event_id=request.signal.signal_event_id,
     )
 
 
 async def validate_signal_authority(
     uow: KernelUnitOfWork,
-    signal: ActionableSignal,
+    signal: StrategySignal,
     *,
     runtime_commit: str,
     schema_revision: str,
     now_ms: int,
 ) -> SignalAuthorityStatus:
-    if now_ms < signal.occurred_at_ms or now_ms >= signal.expires_at_ms:
+    if (
+        now_ms < signal.occurred_at_ms
+        or now_ms >= signal.expires_at_ms
+        or not _signal_fact_bundle_is_consistent(signal)
+    ):
         return SignalAuthorityStatus.SIGNAL_INVALID_OR_STALE
 
     scope = await uow.signals.get_runtime_scope(signal.runtime_scope_id)
@@ -124,7 +123,6 @@ async def validate_signal_authority(
         or event_spec.status != "active"
         or event_spec.strategy_version_id != signal.strategy_version_id
         or event_spec.position_side != signal.position_side
-        or event_spec.entry_order_type != signal.terms.entry_order_type.value
     ):
         return SignalAuthorityStatus.SCOPE_OR_POLICY_MISMATCH
 
@@ -134,38 +132,22 @@ async def validate_signal_authority(
     )
     if (
         facts is None
+        or facts != signal.facts
         or any(
-            not fact.satisfied
-            or fact.observed_at_ms > signal.occurred_at_ms
+            fact.observed_at_ms > signal.occurred_at_ms
             or fact.valid_until_ms <= now_ms
+            or fact.valid_until_ms < signal.expires_at_ms
             for fact in facts
         )
         or build_signal_fact_digest(facts) != signal.fact_digest
     ):
         return SignalAuthorityStatus.SIGNAL_INVALID_OR_STALE
 
-    profile = await uow.signals.get_runtime_profile(scope.runtime_profile_id)
     instrument = await uow.signals.get_instrument(signal.exchange_instrument_id)
-    rules = await uow.signals.get_instrument_rules(signal.exchange_instrument_id)
-    policy = await uow.entry_admission.get_owner_policy(scope.owner_policy_id)
-    if profile is None or profile.status != "active" or profile.environment != "live":
+    if instrument is None or instrument.status != "active":
         return SignalAuthorityStatus.SCOPE_OR_POLICY_MISMATCH
-    if profile.position_mode != "independent_sides":
-        return SignalAuthorityStatus.ACCOUNT_MODE_INVALID
-    if (
-        instrument is None
-        or instrument.status != "active"
-        or instrument.venue_id != profile.venue_id
-        or rules is None
-        or rules.valid_until_ms <= now_ms
-    ):
-        return SignalAuthorityStatus.INSTRUMENT_RULES_INVALID
-    if policy is None or not policy.enabled or not policy.real_submit_enabled:
-        return SignalAuthorityStatus.SCOPE_OR_POLICY_MISMATCH
-    if not _terms_fit_instrument_rules(signal, rules):
-        return SignalAuthorityStatus.INSTRUMENT_RULES_INVALID
 
-    capability = await uow.signals.get_runtime_capability("signal_to_ticket")
+    capability = await uow.signals.get_runtime_capability("strategy_signal_ingest")
     if not (
         capability
         and capability.enabled
@@ -176,27 +158,18 @@ async def validate_signal_authority(
     return SignalAuthorityStatus.VALID
 
 
-def _terms_fit_instrument_rules(
-    signal: ActionableSignal,
-    rules: InstrumentRulesSnapshot,
-) -> bool:
-    quantity_step = rules.quantity_step
-    price_tick = rules.price_tick
-    terms = signal.terms
-    if (
-        terms.quantity < rules.min_quantity
-        or terms.notional < rules.min_notional
-        or not _is_multiple(terms.quantity, quantity_step)
-        or not _is_multiple(terms.initial_stop_price, price_tick)
-    ):
+def _signal_fact_bundle_is_consistent(signal: StrategySignal) -> bool:
+    try:
+        digest = build_signal_fact_digest(signal.facts)
+    except ValueError:
         return False
-    if terms.entry_limit_price is not None and not _is_multiple(
-        terms.entry_limit_price,
-        price_tick,
-    ):
+    if digest != signal.fact_digest:
         return False
-    return all(_is_multiple(price, price_tick) for price in terms.take_profit_prices)
-
-
-def _is_multiple(value: Decimal, increment: Decimal) -> bool:
-    return increment > 0 and value % increment == 0
+    references = [fact for fact in signal.facts if fact.role == "protection_reference"]
+    if len(references) != 1:
+        return False
+    if any(fact.role == "disable" and fact.satisfied for fact in signal.facts):
+        return False
+    return not any(
+        fact.role != "disable" and not fact.satisfied for fact in signal.facts
+    )

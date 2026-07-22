@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from decimal import Decimal
 from uuid import uuid4
 
@@ -21,12 +20,10 @@ from src.trading_kernel.application.issue_ready_signal import (
 )
 from src.trading_kernel.application.issue_ticket import IssueTicketStatus
 from src.trading_kernel.domain.signal import (
-    ActionableSignal,
     SignalFactSnapshot,
-    SignalTicketTerms,
+    StrategySignal,
     build_signal_fact_digest,
 )
-from src.trading_kernel.domain.ticket import EntryOrderType
 from src.trading_kernel.infrastructure.pg_models import (
     facts_current,
     instrument_rules_current,
@@ -34,6 +31,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_capabilities_current,
     runtime_profiles,
     runtime_scopes_current,
+    signal_fact_snapshots,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
@@ -70,14 +68,14 @@ async def signal_engine() -> AsyncEngine:
 
 
 @pytest.mark.asyncio
-async def test_typed_signal_persists_readiness_and_issues_one_frozen_ticket(
+async def test_ingest_persists_signal_and_fact_lineage_without_ticket_terms(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_runtime_authority(issue_engine)
     signal = _signal()
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        ingested = await ingest_signal(
+        result = await ingest_signal(
             uow,
             IngestSignalRequest(
                 signal=signal,
@@ -87,11 +85,29 @@ async def test_typed_signal_persists_readiness_and_issues_one_frozen_ticket(
             ),
         )
 
-    assert ingested.status is IngestSignalStatus.TICKET_READY
-    assert ingested.signal_event_id == signal.signal_event_id
+    assert result.status is IngestSignalStatus.CANDIDATE_READY
+    assert result.signal_event_id == signal.signal_event_id
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        issued = await issue_ready_signal(
+        persisted = await uow.signals.get(signal.signal_event_id)
+        persisted_facts = await uow.signals.get_fact_snapshots(
+            signal.signal_event_id
+        )
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+
+    assert persisted == signal
+    assert persisted_facts == signal.facts
+    assert readiness is not None
+    assert readiness.readiness_state == "candidate_ready"
+    assert readiness.first_blocker is None
+    assert readiness.signal_event_id == signal.signal_event_id
+    assert readiness.fact_summary == {
+        "fact_count": len(signal.facts),
+        "fact_digest": signal.fact_digest,
+    }
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        issuance = await issue_ready_signal(
             uow,
             IssueReadySignalRequest(
                 claim_owner="signal-worker-1",
@@ -101,42 +117,36 @@ async def test_typed_signal_persists_readiness_and_issues_one_frozen_ticket(
             ),
         )
 
-    assert issued.status is IssueTicketStatus.ISSUED
-    assert issued.ticket_id is not None
-
+    assert issuance.status is IssueTicketStatus.CAPACITY_CLAIM_MISSING
+    assert issuance.ticket_id is None
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        ticket = await uow.tickets.get(issued.ticket_id)
-        persisted_signal = await uow.signals.get(signal.signal_event_id)
         readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
-
-    assert persisted_signal == signal
+        assert not await uow.entry_admission.has_ticket_for_signal(
+            signal.signal_event_id
+        )
     assert readiness is not None
-    assert readiness.readiness_state == "ticket_issued"
-    assert readiness.signal_event_id == signal.signal_event_id
-    assert ticket is not None
-    assert ticket.identity.signal_event_id == signal.signal_event_id
-    assert ticket.identity.runtime.strategy_group_id == signal.strategy_group_id
-    assert ticket.identity.runtime.strategy_version_id == signal.strategy_version_id
-    assert ticket.identity.runtime.event_spec_id == signal.event_spec_id
-    assert ticket.identity.netting_domain.position_side == signal.position_side
-    assert ticket.runtime_scope_id == signal.runtime_scope_id
-    assert ticket.runtime_scope_version == signal.runtime_scope_version
-    assert ticket.fact_digest == signal.fact_digest
-    assert ticket.quantity == signal.terms.quantity
-    assert ticket.initial_stop_price == signal.terms.initial_stop_price
+    assert readiness.readiness_state == "candidate_ready"
+    assert readiness.first_blocker is None
 
 
 @pytest.mark.asyncio
-async def test_signal_from_non_independent_position_mode_is_rejected_before_persist(
+async def test_signal_ingest_does_not_consume_action_time_capital_authority(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_runtime_authority(issue_engine)
     async with issue_engine.begin() as connection:
         await connection.execute(
+            sa.update(owner_policy_current).values(
+                enabled=False,
+                real_submit_enabled=False,
+            )
+        )
+        await connection.execute(
             sa.update(runtime_profiles).values(position_mode="one_way")
         )
-    signal = _signal()
+        await connection.execute(sa.delete(instrument_rules_current))
 
+    signal = _signal(signal_event_id="signal-no-capital-authority")
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         result = await ingest_signal(
             uow,
@@ -148,61 +158,13 @@ async def test_signal_from_non_independent_position_mode_is_rejected_before_pers
             ),
         )
 
-    assert result.status.value == "account_mode_invalid"
+    assert result.status is IngestSignalStatus.CANDIDATE_READY
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        assert await uow.signals.get(signal.signal_event_id) is None
-        assert await uow.signals.get_readiness(signal.runtime_scope_id) is None
+        assert await uow.signals.get(signal.signal_event_id) == signal
 
 
 @pytest.mark.asyncio
-async def test_wrong_fact_digest_is_rejected_before_signal_persistence(
-    issue_engine: AsyncEngine,
-) -> None:
-    await _seed_runtime_authority(issue_engine)
-    signal = _signal().model_copy(update={"fact_digest": "sha256:" + "0" * 64})
-
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        result = await ingest_signal(
-            uow,
-            IngestSignalRequest(
-                signal=signal,
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_001,
-            ),
-        )
-
-    assert result.status is IngestSignalStatus.SIGNAL_INVALID_OR_STALE
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        assert await uow.signals.get(signal.signal_event_id) is None
-
-
-@pytest.mark.asyncio
-async def test_missing_or_stale_required_fact_rejects_signal(
-    issue_engine: AsyncEngine,
-) -> None:
-    await _seed_runtime_authority(issue_engine)
-    await _seed_required_fact(issue_engine, valid_until_ms=1_500)
-    signal = _signal()
-
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        result = await ingest_signal(
-            uow,
-            IngestSignalRequest(
-                signal=signal,
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_600,
-            ),
-        )
-
-    assert result.status is IngestSignalStatus.SIGNAL_INVALID_OR_STALE
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        assert await uow.signals.get(signal.signal_event_id) is None
-
-
-@pytest.mark.asyncio
-async def test_duplicate_typed_signal_is_idempotently_rejected(
+async def test_duplicate_strategy_signal_is_exactly_idempotent(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_runtime_authority(issue_engine)
@@ -219,234 +181,25 @@ async def test_duplicate_typed_signal_is_idempotently_rejected(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         duplicate = await ingest_signal(uow, request)
 
-    assert first.status is IngestSignalStatus.TICKET_READY
-    assert duplicate.status.value == "duplicate_signal"
+    assert first.status is IngestSignalStatus.CANDIDATE_READY
+    assert duplicate.status is IngestSignalStatus.DUPLICATE_SIGNAL
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+        facts = await uow.signals.get_fact_snapshots(signal.signal_event_id)
+    async with issue_engine.connect() as connection:
+        fact_row_count = await connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(signal_fact_snapshots)
+            .where(
+                signal_fact_snapshots.c.signal_event_id
+                == signal.signal_event_id
+            )
+        )
+
     assert readiness is not None
     assert readiness.projection_version == 1
-
-
-@pytest.mark.asyncio
-async def test_three_ready_signals_issue_serially_into_three_concurrent_domains(
-    issue_engine: AsyncEngine,
-) -> None:
-    await _seed_runtime_authority(issue_engine)
-    await _seed_additional_scope(
-        issue_engine,
-        runtime_scope_id="scope-sor-btc-short",
-        event_spec_id="event_spec:SOR-001:SOR-SHORT:v2",
-        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
-        position_side="short",
-    )
-    await _seed_additional_scope(
-        issue_engine,
-        runtime_scope_id="scope-sor-eth-long",
-        event_spec_id="event_spec:SOR-001:SOR-LONG:v2",
-        exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
-        position_side="long",
-    )
-    signals = (
-        _signal(signal_event_id="signal-1", occurred_at_ms=1_000),
-        _signal(
-            signal_event_id="signal-2",
-            runtime_scope_id="scope-sor-btc-short",
-            position_side="short",
-            occurred_at_ms=1_001,
-        ),
-        _signal(
-            signal_event_id="signal-3",
-            runtime_scope_id="scope-sor-eth-long",
-            exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
-            occurred_at_ms=1_002,
-        ),
-    )
-    for signal in signals:
-        async with PostgresKernelUnitOfWork(issue_engine) as uow:
-            result = await ingest_signal(
-                uow,
-                IngestSignalRequest(
-                    signal=signal,
-                    runtime_commit="kernel-test-head",
-                    schema_revision="0001_initial",
-                    now_ms=1_003,
-                ),
-            )
-        assert result.status is IngestSignalStatus.TICKET_READY
-
-    ticket_ids: list[str] = []
-    for index in range(3):
-        async with PostgresKernelUnitOfWork(issue_engine) as uow:
-            issued = await issue_ready_signal(
-                uow,
-                IssueReadySignalRequest(
-                    claim_owner=f"signal-worker-{index}",
-                    runtime_commit="kernel-test-head",
-                    schema_revision="0001_initial",
-                    now_ms=1_010 + index,
-                ),
-            )
-        assert issued.status is IssueTicketStatus.ISSUED
-        assert issued.ticket_id is not None
-        ticket_ids.append(issued.ticket_id)
-        if index < 2:
-            if index == 0:
-                async with PostgresKernelUnitOfWork(issue_engine) as uow:
-                    blocked = await issue_ready_signal(
-                        uow,
-                        IssueReadySignalRequest(
-                            claim_owner="signal-worker-blocked",
-                            runtime_commit="kernel-test-head",
-                            schema_revision="0001_initial",
-                            now_ms=1_020,
-                        ),
-                    )
-                assert blocked.status is IssueTicketStatus.ENTRY_LANE_OCCUPIED
-                async with PostgresKernelUnitOfWork(issue_engine) as uow:
-                    pending = await uow.signals.get_readiness(
-                        "scope-sor-btc-short"
-                    )
-                assert pending is not None
-                assert pending.readiness_state == "ticket_ready"
-            async with PostgresKernelUnitOfWork(issue_engine) as uow:
-                await uow.entry_admission.release_global_lane(
-                    ticket_id=issued.ticket_id
-                )
-
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        tickets = [await uow.tickets.get(ticket_id) for ticket_id in ticket_ids]
-        exposure = await uow.entry_admission.get_account_exposure("subaccount-main")
-
-    assert all(ticket is not None for ticket in tickets)
-    assert len({ticket.identity.netting_domain.key() for ticket in tickets if ticket}) == 3
-    assert exposure is not None
-    assert exposure.active_ticket_count == 3
-
-
-@pytest.mark.asyncio
-async def test_budget_is_revalidated_at_issue_and_persisted_as_first_blocker(
-    issue_engine: AsyncEngine,
-) -> None:
-    await _seed_runtime_authority(issue_engine)
-    signal = _signal()
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        ingested = await ingest_signal(
-            uow,
-            IngestSignalRequest(
-                signal=signal,
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_001,
-            ),
-        )
-    assert ingested.status is IngestSignalStatus.TICKET_READY
-    async with issue_engine.begin() as connection:
-        await connection.execute(
-            sa.update(owner_policy_current).values(max_gross_notional=Decimal("50"))
-        )
-
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        result = await issue_ready_signal(
-            uow,
-            IssueReadySignalRequest(
-                claim_owner="signal-worker-1",
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_002,
-            ),
-        )
-
-    assert result.status is IssueTicketStatus.BUDGET_EXHAUSTED
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
-        assert await uow.signals.get(signal.signal_event_id) == signal
-        assert not await uow.entry_admission.has_ticket_for_signal(
-            signal.signal_event_id
-        )
-    assert readiness is not None
-    assert readiness.readiness_state == "blocked"
-    assert readiness.first_blocker == "budget_exhausted"
-
-
-@pytest.mark.asyncio
-async def test_policy_disabled_after_ingest_returns_exact_issue_blocker(
-    issue_engine: AsyncEngine,
-) -> None:
-    await _seed_runtime_authority(issue_engine)
-    signal = _signal()
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        ingested = await ingest_signal(
-            uow,
-            IngestSignalRequest(
-                signal=signal,
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_001,
-            ),
-        )
-    assert ingested.status is IngestSignalStatus.TICKET_READY
-    async with issue_engine.begin() as connection:
-        await connection.execute(
-            sa.update(owner_policy_current).values(
-                enabled=False,
-                real_submit_enabled=False,
-            )
-        )
-
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        result = await issue_ready_signal(
-            uow,
-            IssueReadySignalRequest(
-                claim_owner="signal-worker-1",
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_002,
-            ),
-        )
-
-    assert result.status.value == "scope_or_policy_mismatch"
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
-    assert readiness is not None
-    assert readiness.readiness_state == "blocked"
-    assert readiness.first_blocker == "scope_or_policy_mismatch"
-
-
-@pytest.mark.asyncio
-async def test_expired_queued_signal_is_terminally_blocked_not_left_ticket_ready(
-    issue_engine: AsyncEngine,
-) -> None:
-    await _seed_runtime_authority(issue_engine)
-    signal = _signal()
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        ingested = await ingest_signal(
-            uow,
-            IngestSignalRequest(
-                signal=signal,
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_001,
-            ),
-        )
-    assert ingested.status is IngestSignalStatus.TICKET_READY
-
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        result = await issue_ready_signal(
-            uow,
-            IssueReadySignalRequest(
-                claim_owner="signal-worker-1",
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=signal.expires_at_ms,
-            ),
-        )
-
-    assert result.status.value == "signal_invalid_or_stale"
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
-    assert readiness is not None
-    assert readiness.readiness_state == "blocked"
-    assert readiness.first_blocker == "signal_invalid_or_stale"
+    assert facts == signal.facts
+    assert fact_row_count == len(signal.facts)
 
 
 @pytest.mark.parametrize(
@@ -455,8 +208,10 @@ async def test_expired_queued_signal_is_terminally_blocked_not_left_ticket_ready
         ("stale", IngestSignalStatus.SIGNAL_INVALID_OR_STALE),
         ("scope-version", IngestSignalStatus.SCOPE_OR_POLICY_MISMATCH),
         ("side", IngestSignalStatus.SCOPE_OR_POLICY_MISMATCH),
+        ("scope-disabled", IngestSignalStatus.SCOPE_OR_POLICY_MISMATCH),
         ("commit", IngestSignalStatus.SCHEMA_IDENTITY_MISMATCH),
-        ("precision", IngestSignalStatus.INSTRUMENT_RULES_INVALID),
+        ("fact-value", IngestSignalStatus.SIGNAL_INVALID_OR_STALE),
+        ("fact-stale", IngestSignalStatus.SIGNAL_INVALID_OR_STALE),
     ],
 )
 @pytest.mark.asyncio
@@ -469,22 +224,39 @@ async def test_signal_authority_matrix_fails_before_persistence(
     signal = _signal(signal_event_id=f"signal-{case}")
     runtime_commit = "kernel-test-head"
     now_ms = 1_001
+
     if case == "stale":
         now_ms = signal.expires_at_ms
     elif case == "scope-version":
         signal = signal.model_copy(update={"runtime_scope_version": 99})
     elif case == "side":
-        signal = _signal(signal_event_id="signal-side", position_side="short")
+        signal = _signal(
+            signal_event_id="signal-side",
+            runtime_scope_id="scope-sor-btc-long",
+            position_side="short",
+        )
+    elif case == "scope-disabled":
+        async with issue_engine.begin() as connection:
+            await connection.execute(
+                sa.update(runtime_scopes_current).values(enabled=False)
+            )
     elif case == "commit":
         runtime_commit = "wrong-commit"
-    elif case == "precision":
-        signal = signal.model_copy(
-            update={
-                "terms": signal.terms.model_copy(
-                    update={"quantity": Decimal("0.0105")}
+    elif case == "fact-value":
+        async with issue_engine.begin() as connection:
+            await connection.execute(
+                sa.update(facts_current)
+                .where(
+                    facts_current.c.fact_definition_id
+                    == "fact:breakout_confirmed:v1"
                 )
-            }
-        )
+                .values(value=False, satisfied=False)
+            )
+    elif case == "fact-stale":
+        async with issue_engine.begin() as connection:
+            await connection.execute(
+                sa.update(facts_current).values(valid_until_ms=1_001)
+            )
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         result = await ingest_signal(
@@ -500,10 +272,48 @@ async def test_signal_authority_matrix_fails_before_persistence(
     assert result.status is expected
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         assert await uow.signals.get(signal.signal_event_id) is None
+        assert await uow.signals.get_readiness(signal.runtime_scope_id) is None
 
 
 @pytest.mark.asyncio
-async def test_no_ready_signal_returns_explicit_idle_result(
+async def test_expired_candidate_is_terminally_blocked(
+    issue_engine: AsyncEngine,
+) -> None:
+    await _seed_runtime_authority(issue_engine)
+    signal = _signal()
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        ingested = await ingest_signal(
+            uow,
+            IngestSignalRequest(
+                signal=signal,
+                runtime_commit="kernel-test-head",
+                schema_revision="0001_initial",
+                now_ms=1_001,
+            ),
+        )
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
+
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result = await issue_ready_signal(
+            uow,
+            IssueReadySignalRequest(
+                claim_owner="signal-worker-1",
+                runtime_commit="kernel-test-head",
+                schema_revision="0001_initial",
+                now_ms=signal.expires_at_ms,
+            ),
+        )
+
+    assert result.status is IssueTicketStatus.SIGNAL_INVALID_OR_STALE
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
+    assert readiness is not None
+    assert readiness.readiness_state == "blocked"
+    assert readiness.first_blocker == "signal_invalid_or_stale"
+
+
+@pytest.mark.asyncio
+async def test_no_candidate_returns_explicit_idle_result(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_runtime_authority(issue_engine)
@@ -523,51 +333,6 @@ async def test_no_ready_signal_returns_explicit_idle_result(
     assert result.ticket_id is None
 
 
-@pytest.mark.asyncio
-async def test_two_signal_workers_create_exactly_one_ticket_for_one_ready_signal(
-    issue_engine: AsyncEngine,
-) -> None:
-    await _seed_runtime_authority(issue_engine)
-    signal = _signal()
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        ingested = await ingest_signal(
-            uow,
-            IngestSignalRequest(
-                signal=signal,
-                runtime_commit="kernel-test-head",
-                schema_revision="0001_initial",
-                now_ms=1_001,
-            ),
-        )
-    assert ingested.status is IngestSignalStatus.TICKET_READY
-
-    async def attempt(worker: str):
-        async with PostgresKernelUnitOfWork(issue_engine) as uow:
-            return await issue_ready_signal(
-                uow,
-                IssueReadySignalRequest(
-                    claim_owner=worker,
-                    runtime_commit="kernel-test-head",
-                    schema_revision="0001_initial",
-                    now_ms=1_002,
-                ),
-            )
-
-    results = await asyncio.gather(attempt("worker-a"), attempt("worker-b"))
-
-    assert sorted(result.status.value for result in results) == [
-        "issued",
-        "no_ready_signal",
-    ]
-    issued = next(result for result in results if result.ticket_id is not None)
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        assert issued.ticket_id is not None
-        assert await uow.tickets.get(issued.ticket_id) is not None
-        exposure = await uow.entry_admission.get_account_exposure("subaccount-main")
-    assert exposure is not None
-    assert exposure.active_ticket_count == 1
-
-
 def _signal(
     *,
     signal_event_id: str = "signal-live-1",
@@ -575,14 +340,14 @@ def _signal(
     position_side: str = "long",
     exchange_instrument_id: str = "binance-usdm:BTCUSDT:perpetual",
     occurred_at_ms: int = 1_000,
-) -> ActionableSignal:
+) -> StrategySignal:
     event_spec_id = (
         "event_spec:SOR-001:SOR-LONG:v2"
         if position_side == "long"
         else "event_spec:SOR-001:SOR-SHORT:v2"
     )
     facts = _signal_facts(position_side=position_side)
-    return ActionableSignal(
+    return StrategySignal(
         signal_event_id=signal_event_id,
         runtime_scope_id=runtime_scope_id,
         runtime_scope_version=4,
@@ -594,15 +359,7 @@ def _signal(
         fact_digest=build_signal_fact_digest(facts),
         occurred_at_ms=occurred_at_ms,
         expires_at_ms=10_000,
-        terms=SignalTicketTerms(
-            quantity=Decimal("0.010"),
-            notional=Decimal("100"),
-            leverage=Decimal("5"),
-            risk_at_stop=Decimal("2.5"),
-            entry_order_type=EntryOrderType.MARKET,
-            initial_stop_price=Decimal("9900.0"),
-            take_profit_prices=(Decimal("10500.0"),),
-        ),
+        facts=facts,
     )
 
 
@@ -669,7 +426,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         )
         await connection.execute(
             sa.insert(runtime_capabilities_current).values(
-                capability_key="signal_to_ticket",
+                capability_key="strategy_signal_ingest",
                 enabled=True,
                 certified_commit="kernel-test-head",
                 schema_revision="0001_initial",
@@ -679,99 +436,40 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         )
 
 
-async def _seed_additional_scope(
-    engine: AsyncEngine,
-    *,
-    runtime_scope_id: str,
-    event_spec_id: str,
-    exchange_instrument_id: str,
-    position_side: str,
-) -> None:
-    async with engine.begin() as connection:
-        rules_exist = await connection.scalar(
-            sa.select(sa.func.count())
-            .select_from(instrument_rules_current)
-            .where(
-                instrument_rules_current.c.exchange_instrument_id
-                == exchange_instrument_id
-            )
-        )
-        if not rules_exist:
-            await connection.execute(
-                sa.insert(instrument_rules_current).values(
-                    exchange_instrument_id=exchange_instrument_id,
-                    quantity_step=Decimal("0.001"),
-                    price_tick=Decimal("0.1"),
-                    min_quantity=Decimal("0.001"),
-                    min_notional=Decimal("5"),
-                    session_and_settlement={},
-                    observed_at_ms=1_000,
-                    valid_until_ms=10_000,
-                    projection_version=1,
-                )
-            )
-        await connection.execute(
-            sa.insert(runtime_scopes_current).values(
-                runtime_scope_id=runtime_scope_id,
-                strategy_group_id="SOR-001",
-                strategy_version_id="sgv:SOR-001:v2",
-                event_spec_id=event_spec_id,
-                runtime_profile_id="tiny-live-v1",
-                owner_policy_id="policy-main",
-                exchange_instrument_id=exchange_instrument_id,
-                position_side=position_side,
-                enabled=True,
-                scope_version=4,
-                updated_at_ms=1_000,
-            )
-        )
-        await _insert_scope_facts(
-            connection,
-            runtime_scope_id=runtime_scope_id,
-            position_side=position_side,
-        )
-
-
-async def _seed_required_fact(
-    engine: AsyncEngine,
-    *,
-    valid_until_ms: int,
-) -> None:
-    async with engine.begin() as connection:
-        await connection.execute(
-            sa.update(facts_current)
-            .where(
-                facts_current.c.runtime_scope_id == "scope-sor-btc-long",
-                facts_current.c.fact_definition_id
-                == "fact:opening_range_defined:v1",
-            )
-            .values(valid_until_ms=valid_until_ms)
-        )
-
-
 def _signal_facts(*, position_side: str) -> tuple[SignalFactSnapshot, ...]:
     if position_side == "long":
-        values: tuple[tuple[str, object], ...] = (
-            ("fact:opening_range_defined:v1", True),
-            ("fact:breakout_confirmed:v1", True),
-            ("fact:opening_range_low_reference:v1", "9900.0"),
+        values: tuple[tuple[str, str, object, bool], ...] = (
+            ("fact:opening_range_defined:v1", "condition", True, True),
+            ("fact:breakout_confirmed:v1", "condition", True, True),
+            (
+                "fact:opening_range_low_reference:v1",
+                "protection_reference",
+                "9900.0",
+                True,
+            ),
         )
     else:
         values = (
-            ("fact:opening_range_defined:v1", True),
-            ("fact:breakdown_confirmed:v1", True),
-            ("fact:opening_range_high_reference:v1", "10100.0"),
+            ("fact:opening_range_defined:v1", "condition", True, True),
+            ("fact:breakdown_confirmed:v1", "condition", True, True),
+            (
+                "fact:opening_range_high_reference:v1",
+                "protection_reference",
+                "10100.0",
+                True,
+            ),
         )
     return tuple(
         SignalFactSnapshot(
             fact_definition_id=fact_definition_id,
+            role=role,
             value=value,
-            satisfied=True,
+            satisfied=satisfied,
             observed_at_ms=1_000,
             valid_until_ms=10_000,
             projection_version=1,
         )
-        for fact_definition_id, value in values
+        for fact_definition_id, role, value, satisfied in values
     )
 
 

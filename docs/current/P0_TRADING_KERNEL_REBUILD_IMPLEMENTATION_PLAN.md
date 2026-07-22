@@ -56,7 +56,7 @@ Tickets progress concurrently through one reducer and durable command model.
 - [x] retired execution markers are absent from current authority;
 - [x] focused architecture suite passes.
 
-## Task 14: Typed Signal To Frozen Ticket
+## Task 14: Typed Signal Foundation
 
 **Files:**
 
@@ -70,28 +70,20 @@ Tickets progress concurrently through one reducer and durable command model.
 - Modify: `migrations/trading_kernel/versions/0001_initial.py`
 - Test: `tests/trading_kernel/integration/test_signal_to_ticket.py`
 
-**Interfaces:**
+This task established the first typed persistence and issuance skeleton. Its
+capital-bearing signal semantics were intentionally replaced by Tasks 16-24 and
+are not current authority.
 
-- `ActionableSignal` is the frozen strategy-to-kernel input.
-- `ingest_signal(uow, request) -> IngestSignalResult` persists the immutable
-  signal and readiness result after current authority validation.
-- `issue_ready_signal(uow, request) -> IssueTicketResult` selects one ready
-  unexpired signal, revalidates authority, builds the deterministic Ticket, and
-  uses the existing atomic issuance path.
+The current boundary is:
 
-**TDD sequence:**
-
-- [x] RED: valid typed signal persists readiness and issues one Ticket.
-- [x] RED: wrong scope, version, side, account mode, capability, instrument,
-  fact digest, or expiry fails before Ticket creation.
-- [x] RED: two ready signals persist concurrently but issue Tickets serially.
-- [x] RED: lane release permits the second still-fresh signal to issue.
-- [x] RED: duplicate signal cannot create a second Ticket identity.
-- [x] RED: policy or budget changes are revalidated at issuance.
-- [x] GREEN: implement only the typed models, repository queries, and services
-  required by each failing test.
-- [x] Run focused unit, integration, schema, Ruff, and Mypy checks.
-- [x] Commit with `feat(kernel): connect typed signals to ticket issuance`.
+- `StrategySignal` contains only Event identity, occurrence/expiry, and an exact
+  immutable Fact Bundle;
+- `ingest_signal(uow, request) -> IngestSignalResult` persists the Signal, Fact
+  lineage, and `candidate_ready` state after Registry/Scope/Fact/schema checks;
+- Signal ingestion does not consume Owner capital, account mode, venue rule, or
+  order authority;
+- Ticket issuance requires the action-time `CapacityClaim` introduced by the
+  active six-capability rebuild and cannot derive financial terms from Signal.
 
 ## Task 15: Crash-Safe Destructive Cutover
 

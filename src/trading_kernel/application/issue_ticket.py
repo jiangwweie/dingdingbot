@@ -30,6 +30,7 @@ class IssueTicketStatus(StrEnum):
     POLICY_MISSING_OR_STALE = "policy_missing_or_stale"
     POLICY_DISABLED = "policy_disabled"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    CAPACITY_CLAIM_MISSING = "capacity_claim_missing"
 
 
 class IssueTicketRequest(BaseModel):

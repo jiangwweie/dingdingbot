@@ -128,7 +128,7 @@ def test_runtime_tick_requires_exact_code_and_schema_identity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_worker_issues_ready_signal_and_dispatches_entry_in_one_tick(
+async def test_worker_does_not_issue_candidate_without_capacity_claim(
     runtime_engine: AsyncEngine,
 ) -> None:
     await _seed_runtime_authority(runtime_engine)
@@ -143,12 +143,11 @@ async def test_worker_issues_ready_signal_and_dispatches_entry_in_one_tick(
                 now_ms=1_001,
             ),
         )
-    assert ingested.status is IngestSignalStatus.TICKET_READY
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
 
-    venue = AcceptingVenue()
     result = await run_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_engine),
-        venue,
+        NoCallVenue(),
         RuntimeTickRequest(
             monitor_key="strategy:SOR-001",
             owner_policy_id="policy-main",
@@ -161,17 +160,14 @@ async def test_worker_issues_ready_signal_and_dispatches_entry_in_one_tick(
         ),
     )
 
-    assert result.issued_ticket_id is not None
-    assert result.action_status is RuntimeActionStatus.ACCEPTED
-    assert result.command_id is not None
-    assert venue.calls == 1
+    assert result.issued_ticket_id is None
+    assert result.action_status is RuntimeActionStatus.NO_COMMAND
+    assert result.command_id is None
+    assert result.monitor.owner_status is MonitorOwnerStatus.TEMPORARILY_UNAVAILABLE
     async with PostgresKernelUnitOfWork(runtime_engine) as uow:
-        ticket = await uow.tickets.get(result.issued_ticket_id)
-        aggregate = await uow.aggregates.get(result.issued_ticket_id)
-    assert ticket is not None
-    assert ticket.identity.signal_event_id == signal.signal_event_id
-    assert aggregate is not None
-    assert aggregate.status is AggregateStatus.ENTRY_ACCEPTED
+        assert not await uow.entry_admission.has_ticket_for_signal(
+            signal.signal_event_id
+        )
 
 
 @pytest.mark.asyncio
@@ -190,7 +186,7 @@ async def test_schema_blocked_readiness_projects_and_retains_temporarily_unavail
                 now_ms=1_001,
             ),
         )
-    assert ingested.status is IngestSignalStatus.TICKET_READY
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
     request = RuntimeTickRequest(
         monitor_key="strategy:SOR-001",
         owner_policy_id="policy-main",
@@ -220,7 +216,7 @@ async def test_schema_blocked_readiness_projects_and_retains_temporarily_unavail
 
 
 @pytest.mark.asyncio
-async def test_account_mode_blocked_readiness_requires_intervention(
+async def test_candidate_worker_defers_account_mode_until_capacity_claim(
     runtime_engine: AsyncEngine,
 ) -> None:
     await _seed_runtime_authority(runtime_engine)
@@ -235,7 +231,7 @@ async def test_account_mode_blocked_readiness_requires_intervention(
                 now_ms=1_001,
             ),
         )
-    assert ingested.status is IngestSignalStatus.TICKET_READY
+    assert ingested.status is IngestSignalStatus.CANDIDATE_READY
     async with runtime_engine.begin() as connection:
         await connection.execute(
             sa.update(runtime_profiles).values(position_mode="one_way")
@@ -257,8 +253,8 @@ async def test_account_mode_blocked_readiness_requires_intervention(
     )
 
     assert result.action_status is RuntimeActionStatus.NO_COMMAND
-    assert result.monitor.owner_status is MonitorOwnerStatus.NEEDS_INTERVENTION
-    assert result.monitor.intervention == "需要介入"
+    assert result.monitor.owner_status is MonitorOwnerStatus.TEMPORARILY_UNAVAILABLE
+    assert result.monitor.intervention == "无需操作"
 
 
 @pytest.mark.asyncio

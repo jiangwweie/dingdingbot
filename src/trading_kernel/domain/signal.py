@@ -1,9 +1,8 @@
-"""Typed strategy-to-kernel signal boundary."""
+"""Immutable strategy observation boundary without capital authority."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from decimal import Decimal
 from hashlib import sha256
 import json
 import re
@@ -11,16 +10,16 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
 
-from src.trading_kernel.domain.ticket import EntryOrderType
-
 
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+FactRole = Literal["condition", "protection_reference", "disable"]
 
 
 class SignalFactSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     fact_definition_id: str
+    role: FactRole
     value: JsonValue
     satisfied: bool
     observed_at_ms: int
@@ -60,58 +59,9 @@ def build_signal_fact_digest(facts: Sequence[SignalFactSnapshot]) -> str:
     return f"sha256:{sha256(canonical).hexdigest()}"
 
 
-class SignalTicketTerms(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+class StrategySignal(BaseModel):
+    """One detected strategy Event; never a sizing or order instruction."""
 
-    quantity: Decimal
-    notional: Decimal
-    leverage: Decimal
-    risk_at_stop: Decimal
-    entry_order_type: EntryOrderType
-    entry_limit_price: Decimal | None = None
-    initial_stop_price: Decimal
-    take_profit_prices: tuple[Decimal, ...] = ()
-
-    @field_validator(
-        "quantity",
-        "notional",
-        "leverage",
-        "initial_stop_price",
-    )
-    @classmethod
-    def _require_positive_decimal(cls, value: Decimal) -> Decimal:
-        if value <= 0:
-            raise ValueError("signal financial values must be positive")
-        return value
-
-    @field_validator("risk_at_stop")
-    @classmethod
-    def _require_nonnegative_risk(cls, value: Decimal) -> Decimal:
-        if value < 0:
-            raise ValueError("signal risk_at_stop must be nonnegative")
-        return value
-
-    @field_validator("take_profit_prices")
-    @classmethod
-    def _require_positive_take_profit_prices(
-        cls,
-        values: tuple[Decimal, ...],
-    ) -> tuple[Decimal, ...]:
-        if any(value <= 0 for value in values):
-            raise ValueError("signal take-profit prices must be positive")
-        return values
-
-    @model_validator(mode="after")
-    def _validate_order_shape(self) -> "SignalTicketTerms":
-        if self.entry_order_type is EntryOrderType.LIMIT:
-            if self.entry_limit_price is None or self.entry_limit_price <= 0:
-                raise ValueError("limit signal requires a positive limit price")
-        elif self.entry_limit_price is not None:
-            raise ValueError("market signal forbids a limit price")
-        return self
-
-
-class ActionableSignal(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     signal_event_id: str
@@ -125,7 +75,7 @@ class ActionableSignal(BaseModel):
     fact_digest: str
     occurred_at_ms: int
     expires_at_ms: int
-    terms: SignalTicketTerms
+    facts: tuple[SignalFactSnapshot, ...]
 
     @field_validator(
         "signal_event_id",
@@ -158,8 +108,40 @@ class ActionableSignal(BaseModel):
             raise ValueError("signal runtime scope version must be positive")
         return value
 
+    @field_validator("facts")
+    @classmethod
+    def _normalize_fact_order(
+        cls,
+        values: tuple[SignalFactSnapshot, ...],
+    ) -> tuple[SignalFactSnapshot, ...]:
+        if not values:
+            raise ValueError("strategy signal requires an immutable fact bundle")
+        ordered = tuple(sorted(values, key=lambda item: item.fact_definition_id))
+        identities = [item.fact_definition_id for item in ordered]
+        if len(identities) != len(set(identities)):
+            raise ValueError("strategy signal facts must be unique")
+        references = [item for item in ordered if item.role == "protection_reference"]
+        if len(references) != 1:
+            raise ValueError("strategy signal requires one protection reference fact")
+        if any(item.role == "disable" and item.satisfied for item in ordered):
+            raise ValueError("disable facts must be unsatisfied for an eligible signal")
+        if any(
+            item.role != "disable" and not item.satisfied
+            for item in ordered
+        ):
+            raise ValueError("condition and protection facts must be satisfied")
+        return ordered
+
     @model_validator(mode="after")
-    def _validate_time_window(self) -> "ActionableSignal":
+    def _validate_time_and_facts(self) -> "StrategySignal":
         if self.occurred_at_ms <= 0 or self.expires_at_ms <= self.occurred_at_ms:
             raise ValueError("signal expiry must follow a positive occurrence time")
+        if any(
+            fact.observed_at_ms > self.occurred_at_ms
+            or fact.valid_until_ms < self.expires_at_ms
+            for fact in self.facts
+        ):
+            raise ValueError("signal facts must cover the complete occurrence window")
+        if build_signal_fact_digest(self.facts) != self.fact_digest:
+            raise ValueError("signal fact digest differs from the immutable fact bundle")
         return self

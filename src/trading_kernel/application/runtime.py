@@ -204,6 +204,7 @@ def derive_monitor_state(
         IssueTicketStatus.DUPLICATE_SIGNAL,
         IssueTicketStatus.POLICY_MISSING_OR_STALE,
         IssueTicketStatus.BUDGET_EXHAUSTED,
+        IssueTicketStatus.CAPACITY_CLAIM_MISSING,
     }:
         owner_status = MonitorOwnerStatus.TEMPORARILY_UNAVAILABLE
         summary = "当前交易链路暂不可用，系统已阻断执行"
